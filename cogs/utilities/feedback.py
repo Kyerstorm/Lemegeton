@@ -381,16 +381,34 @@ class ConfirmCloseView(View):
 
     @discord.ui.button(label="✅ Yes, close it", style=discord.ButtonStyle.danger, custom_id="feedback_confirm_yes")
     async def confirm_yes(self, interaction: discord.Interaction, button: Button):
-        user = self.user or interaction.user
         mod = self.mod or interaction.user
-        logger.info(f"Thread {self.thread.id if self.thread else 'UNKNOWN'} being closed by {mod.display_name}")
+        
+        # Get the original feedback submitter from the tracking system
+        feedback_cog = self.bot.get_cog("Feedback")
+        user = self.user
+        
+        # If user is None (can happen after restart with persistent views), look it up
+        if not user and feedback_cog and self.thread:
+            user_id = feedback_cog.feedback_threads.get(self.thread.id)
+            if user_id:
+                user = self.bot.get_user(user_id)
+                logger.info(f"Retrieved original feedback submitter {user.display_name if user else user_id} from tracking")
+        
+        if not user:
+            logger.error("Could not determine original feedback submitter - thread closure aborted")
+            await interaction.response.edit_message(
+                content="❌ Could not find the original feedback submitter. Thread closure aborted.",
+                view=None
+            )
+            return
+        
+        logger.info(f"Thread {self.thread.id if self.thread else 'UNKNOWN'} being closed by {mod.display_name} for user {user.display_name}")
 
         try:
-            feedback_cog = self.bot.get_cog("Feedback")
-            if feedback_cog and self.thread and self.user:
+            if feedback_cog and self.thread and user:
                 feedback_cog.feedback_threads.pop(self.thread.id, None)
-                feedback_cog.user_threads.pop(self.user.id, None)
-                feedback_cog.pending_users.discard(self.user.id)
+                feedback_cog.user_threads.pop(user.id, None)
+                feedback_cog.pending_users.discard(user.id)
 
             await interaction.response.edit_message(
                 content="✅ Thread closed, user notified, and action logged.",
@@ -400,15 +418,15 @@ class ConfirmCloseView(View):
             if self.thread:
                 await self.thread.send(f"🛑 Thread closed by **{mod.display_name}**")
 
-            if self.user:
+            if user:
                 try:
-                    await self.user.send(
+                    await user.send(
                         "📌 Your feedback thread has been closed by the moderators.\n\n"
                         "🙏 Thank you for your input — it really helps us improve! 💡"
                     )
-                    logger.info(f"Successfully notified {self.user.display_name} of thread closure")
+                    logger.info(f"Successfully notified {user.display_name} of thread closure")
                 except discord.Forbidden:
-                    logger.warning(f"Could not notify {self.user.display_name} of thread closure")
+                    logger.warning(f"Could not notify {user.display_name} of thread closure")
                     if self.thread:
                         await self.thread.send("⚠️ Could not notify the user (they might have DMs disabled).")
 
@@ -419,29 +437,29 @@ class ConfirmCloseView(View):
             # Cleanup persisted mapping for this feedback thread/message
             try:
                 feedback_cog = self.bot.get_cog("Feedback")
-                if feedback_cog and self.user:
+                if feedback_cog and user:
                     # Remove user->thread and thread->user in-memory mappings
                     if self.thread:
                         feedback_cog.feedback_threads.pop(self.thread.id, None)
-                    feedback_cog.user_threads.pop(self.user.id, None)
+                    feedback_cog.user_threads.pop(user.id, None)
 
                     # Remove any DB row that refers to this thread
                     if self.thread:
                         await database.execute_db_operation(
                             "delete feedback mapping by thread",
                             "DELETE FROM feedback_messages WHERE thread_id = ? OR user_id = ?",
-                            (self.thread.id, self.user.id)
+                            (self.thread.id, user.id)
                         )
                     else:
                         # If no thread, just clean up by user_id
                         await database.execute_db_operation(
                             "delete feedback mapping by user",
                             "DELETE FROM feedback_messages WHERE user_id = ?",
-                            (self.user.id,)
+                            (user.id,)
                         )
                     
                     # Remove message->user entries in-memory too
-                    keys_to_remove = [mid for mid, uid in list(feedback_cog.message_user_map.items()) if uid == self.user.id]
+                    keys_to_remove = [mid for mid, uid in list(feedback_cog.message_user_map.items()) if uid == user.id]
                     for k in keys_to_remove:
                         feedback_cog.message_user_map.pop(k, None)
 
