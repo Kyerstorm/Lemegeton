@@ -192,8 +192,13 @@ class BrowseCog(commands.Cog):
 
         media = results[0]
 
+        # Filter by format to ensure correct media type
         if chosen_type == "MANGA_NOVEL" and media.get("format") != "NOVEL":
             await interaction.followup.send("❌ No Light Novel results found.", ephemeral=True)
+            return
+        elif chosen_type == "MANGA" and media.get("format") == "NOVEL":
+            # Exclude light novels from regular manga searches
+            await interaction.followup.send("❌ No Manga results found (try Light Novel instead).", ephemeral=True)
             return
 
         # Format dates
@@ -403,7 +408,9 @@ class BrowseCog(commands.Cog):
                         title = info.get("title", "Unknown")[:100]
                         choices.append(app_commands.Choice(name=title, value=title))
         else:
-            results = await self.fetch_media(current, "ANIME")
+            # Use the correct media type for autocomplete (ANIME or MANGA)
+            search_type = "MANGA" if media_type in ("MANGA", "MANGA_NOVEL") else "ANIME"
+            results = await self.fetch_media(current, search_type)
             for media in results[:10]:
                 title = media["title"].get("romaji") or media["title"].get("english") or "Unknown"
                 title = title[:100]
