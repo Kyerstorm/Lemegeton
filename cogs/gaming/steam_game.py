@@ -119,6 +119,13 @@ class SteamGame(commands.Cog):
             return await interaction.followup.send(f"❌ No results found for '{game_name}'" + 
                                                  (f" with filters" if any([genre, max_price, platform, tag]) else ""))
 
+        # Filter to only include games and DLC (exclude demos, videos, soundtracks, etc.)
+        items = [item for item in items if item.get("type", "").lower() in ["game", "dlc"]]
+        
+        if not items:
+            return await interaction.followup.send(f"❌ No games or DLC found for '{game_name}'" + 
+                                                 (f" with filters" if any([genre, max_price, platform, tag]) else ""))
+
         # Apply fuzzy matching to improve search results
         items = self._fuzzy_match_games(game_name, items)
         
