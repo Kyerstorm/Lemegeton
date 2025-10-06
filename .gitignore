@@ -1,5 +1,7 @@
 .env
 data/
+web/
+backups/
 
 # Python cache
 __pycache__/
