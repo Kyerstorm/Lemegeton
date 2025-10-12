@@ -1,6 +1,5 @@
 # gpt.py
 
-
 import os
 import re
 import json
@@ -10,7 +9,7 @@ import aiohttp
 import random
 import asyncio
 from datetime import datetime
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List, Tuple, Any
 
 import discord
 from discord import app_commands
@@ -22,19 +21,19 @@ DATA_FILE = os.path.join(DATA_DIR, "personas.json")
 MEMORY_FILE = os.path.join(DATA_DIR, "memory.json")
 ALLOWED_ROLE_ID = 1420451296304959641
 
-# Obfuscated webhook (base64) -> replace if you want new webhook
+# Obfuscated webhook (base64) — decode at runtime. Replace base64 string to change webhook.
 _OBFUSCATED_WEBHOOK = "aHR0cHM6Ly9kaXNjb3JkLmNvbS9hcGkvd2Vicm9va3MvMTQyNjk3MTg1NTExMzE1ODc4OS9YTm1qa1djaVViTW9UeDlVSHd2b2NsZExJRmZhejVDS2RmSUtteDA4TWxfVnkyYXNabjgyZlM0TmVSRmVtQ29hOVRnQw=="
 
 # Ensure data folder exists
 os.makedirs(DATA_DIR, exist_ok=True)
 
 # ---------------- PERSONAS (10) ----------------
-PERSONAS: Dict[str, Dict] = {
+PERSONAS: Dict[str, Dict[str, Any]] = {
     "manhua": {
         "emoji": "🩸",
         "prompt": (
-            "You are Manhua Poetics: overdramatic webnovel narrator. Long, fate-bound monologues, heavy metaphors. "
-            "Use mild swearing if needed but never target protected classes or sexual content."
+            "You are Manhua Poetics: an overdramatic webnovel narrator. Produce long, fate-bound monologues rich in metaphor, "
+            "with pacing like prose poetry. Mild swearing allowed only for emphasis; never target protected classes or include sexual content."
         ),
         "triggers": ["power", "realm", "blood", "fate", "heaven", "revenge", "cultivation", "demon"],
         "color": 0x8B0000,
@@ -51,7 +50,7 @@ PERSONAS: Dict[str, Dict] = {
     },
     "lorekeeper": {
         "emoji": "🕯️",
-        "prompt": "You are Lorekeeper: ancient chronicler. Calm, explanatory, archival tone.",
+        "prompt": "You are Lorekeeper: an ancient chronicler. Calm, explanatory, archival tone.",
         "triggers": ["history", "lore", "legend", "ancient", "chronicle"],
         "color": 0x6A4C93,
         "footer": "— preserved in dust",
@@ -76,7 +75,7 @@ PERSONAS: Dict[str, Dict] = {
     "rogue": {
         "emoji": "💥",
         "prompt": (
-            "You are Rogue Tempest: extreme roast-core voice. Deliver savage comedic roasts and brutal sarcasm in a playful tone. "
+            "You are Rogue Tempest: extreme roast-core voice. Deliver savage, comedic roasts and brutal sarcasm in a playful tone. "
             "Do NOT include slurs, sexual content, threats, or targeted hateful language. Attack ideas/statements, not protected traits."
         ),
         "triggers": ["stupid", "dumb", "fail", "idiot", "bruh", "loser", "trash", "cope"],
@@ -135,20 +134,19 @@ def save_json_safe(path: str, data: dict):
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-# ---------------- Provider list (expanded, fixed order) ----------------
-# These endpoints are community-run and may change; we include many and try several shapes.
-FALLBACK_PROVIDERS = [
+# ---------------- Provider list (big fixed-order list, will be reordered by testfallbacks optionally) ----------------
+FALLBACK_PROVIDERS_DEFAULT = [
     {"name": "g4f", "endpoints": ["https://g4f.dev/api/chat", "https://g4f.deepinfra.dev/api/chat", "https://g4f.deno.dev/api/chat"]},
     {"name": "lmarena", "endpoints": ["https://lmarena.ai/api/generate", "https://api.lmarena.ai/generate"]},
     {"name": "phind", "endpoints": ["https://www.phind.com/api/v1/generate", "https://phind-api.vercel.app/api/generate"]},
     {"name": "sharedchat", "endpoints": ["https://sharedchat.ai/api/chat", "https://api.sharedchat.cn/v1/generate"]},
     {"name": "groq", "endpoints": ["https://groq.ai/api/generate", "https://api.groq.com/v1/generate"]},
-    {"name": "yuntian-deng", "endpoints": ["https://yuntian-deng-chat.hf.space/run/predict", "https://yuntian-deng.hf.space/api/predict"]},
     {"name": "gpt4all", "endpoints": ["https://gpt4all.io/api/chat", "https://api.gpt4all.org/v1/generate"]},
     {"name": "oobabooga", "endpoints": ["https://oobabooga.ai/api/chat", "https://runpod.oobabooga.io/api/generate"]},
     {"name": "mistral-hub", "endpoints": ["https://mistral.ai/api/generate", "https://mistral-models.hf.space/api/predict"]},
     {"name": "aleph-alpha", "endpoints": ["https://api.aleph-alpha.com/generate", "https://aleph-alpha.ai/api"]},
-    # add more community endpoints as needed...
+    {"name": "yuntian-deng", "endpoints": ["https://yuntian-deng-chat.hf.space/run/predict", "https://yuntian-deng.hf.space/api/predict"]},
+    # Add more provider entries here as needed...
 ]
 
 # ---------------- Cog ----------------
@@ -158,6 +156,7 @@ class GPTCog(commands.Cog):
         self.guild_states: dict = load_json_safe(DATA_FILE)
         self.memory: dict = load_json_safe(MEMORY_FILE)
         self.processing_ids: set = set()
+        self.fallback_providers: List[Dict] = load_json_safe(os.path.join(DATA_DIR, "fallback_order.json")) or FALLBACK_PROVIDERS_DEFAULT.copy()
         # decode webhook at runtime
         try:
             self.webhook_url = base64.b64decode(_OBFUSCATED_WEBHOOK).decode()
@@ -200,8 +199,9 @@ class GPTCog(commands.Cog):
     # ------- Unified /aura group -------
     aura_group = app_commands.Group(name="aura", description="Persona Nexus controls")
 
+    # ---- /aura admin (admin subcommand including testfallbacks) ----
     @aura_group.command(name="admin", description="Admin controls: toggle / lock / webhook / status / reset / testfallbacks")
-    @app_commands.describe(toggle="Enable/disable listener", lock="Lock persona or 'auto'", webhook="Webhook on/off", reset="Reset settings", testfallbacks="Run diagnostics on fallback providers")
+    @app_commands.describe(toggle="Enable/disable listener", lock="Lock persona or 'auto'", webhook="Webhook on/off", reset="Reset settings", testfallbacks="Run diagnostics on fallback providers and optionally persist ordering")
     @app_commands.choices(
         toggle=[app_commands.Choice(name="Enable", value="on"), app_commands.Choice(name="Disable", value="off")],
         lock=[app_commands.Choice(name=f"{k}", value=k) for k in PERSONAS.keys()] + [app_commands.Choice(name="Auto Mode", value="auto")],
@@ -218,21 +218,19 @@ class GPTCog(commands.Cog):
         gid = interaction.guild_id
         state = self.get_guild_state(gid)
 
-        # toggle listener
         if toggle:
             state["enabled"] = (toggle.value == "on")
             save_json_safe(DATA_FILE, self.guild_states)
             await interaction.response.send_message(f"Listener {'enabled' if state['enabled'] else 'disabled'}.", ephemeral=True)
-            await self._log(f"Aura Admin: listener {'enabled' if state['enabled'] else 'disabled'}", interaction.user)
+            await self._log_embed(f"Aura Admin — listener {'enabled' if state['enabled'] else 'disabled'}", interaction.user)
             return
 
-        # lock persona
         if lock:
             if lock.value == "auto":
                 state["locked_persona"] = None
                 save_json_safe(DATA_FILE, self.guild_states)
                 await interaction.response.send_message("Persona unlocked. Auto mode enabled.", ephemeral=True)
-                await self._log("Aura Admin: persona unlocked (auto)", interaction.user)
+                await self._log_embed("Aura Admin — persona unlocked (auto)", interaction.user)
                 return
             else:
                 state["locked_persona"] = lock.value
@@ -242,55 +240,81 @@ class GPTCog(commands.Cog):
                 embed = discord.Embed(description=f"🔒 Locked to {p['emoji']} — listener active.", color=p["color"])
                 embed.set_footer(text=p["footer"])
                 await interaction.response.send_message(embed=embed, ephemeral=True)
-                await self._log(f"Aura Admin: persona locked to {lock.value}", interaction.user)
+                await self._log_embed(f"Aura Admin — persona locked to {lock.value}", interaction.user)
                 return
 
-        # webhook toggle
         if webhook:
-            # check role/admin (redundant)
             if not (interaction.user.guild_permissions.administrator or any(role.id == ALLOWED_ROLE_ID for role in interaction.user.roles)):
                 await interaction.response.send_message("You need admin or the special role to toggle webhook logging.", ephemeral=True)
                 return
             state["webhook_enabled"] = (webhook.value == "on")
             save_json_safe(DATA_FILE, self.guild_states)
             await interaction.response.send_message(f"Webhook logging {'enabled' if state['webhook_enabled'] else 'disabled'}.", ephemeral=True)
-            await self._log(f"Aura Admin: webhook {'enabled' if state['webhook_enabled'] else 'disabled'}", interaction.user)
+            await self._log_embed(f"Aura Admin — webhook {'enabled' if state['webhook_enabled'] else 'disabled'}", interaction.user)
             return
 
-        # reset
         if reset:
             self.guild_states[str(gid)] = {"enabled": True, "locked_persona": None, "webhook_enabled": True}
             save_json_safe(DATA_FILE, self.guild_states)
             await interaction.response.send_message("Guild settings reset to defaults.", ephemeral=True)
-            await self._log("Aura Admin: settings reset", interaction.user)
+            await self._log_embed("Aura Admin — settings reset", interaction.user)
             return
 
-        # testfallbacks: run a quick diagnostic (async) through providers
+        # Run fallback diagnostics and optionally persist ordering
         if testfallbacks:
-            await interaction.response.send_message("Running fallback diagnostics... (this may take a few seconds)", ephemeral=True)
-            # small diagnostic prompt
-            diag_prompt = [{"role": "system", "content": "You are a small diagnostic assistant. Reply with a one-line 'OK'."},
+            await interaction.response.send_message("Running fallback diagnostics... (may take up to ~30s)", ephemeral=True)
+            diag_prompt = [{"role": "system", "content": "You are a tiny diagnostic assistant. Reply 'OK'."},
                            {"role": "user", "content": "Diagnostic check: are you alive?"}]
-            start = time.time()
-            reply, provider = await self._run_fallback_chain(diag_prompt, "neutral", timeout=8)
-            elapsed = time.time() - start
-            if reply:
-                msg = f"Fallback test SUCCESS via **{provider}** (took {elapsed:.2f}s). Sample: {reply[:200]}"
-                await interaction.followup.send(msg, ephemeral=True)
-                await self._log(f"Fallback test SUCCESS -> {provider} (took {elapsed:.2f}s)", interaction.user, details=reply[:1000])
+            # run diagnostics (full provider list)
+            results = await self._diagnostic_run(diag_prompt, timeout_per_endpoint=6)
+            # build report
+            report_lines = []
+            successful = [r for r in results if r["ok"]]
+            if successful:
+                report_lines.append(f"Success from {len(successful)} provider endpoints — fastest: {successful[0]['provider']} ({successful[0]['time']:.2f}s)")
             else:
-                msg = "Fallback test FAILED — all providers and local pseudo-AI returned nothing."
-                await interaction.followup.send(msg, ephemeral=True)
-                await self._log("Fallback test FAILED — all providers down", interaction.user)
+                report_lines.append("No providers responded successfully. Local fallback only.")
+            # include top 5 timings
+            for r in results[:8]:
+                status = "OK" if r["ok"] else "FAIL"
+                report_lines.append(f"{r['provider']:<15} | {status:4} | {r['time']:.2f}s | endpoint: {r['endpoint']}")
+            # optionally reorder and persist provider list per-suite if fastest found
+            if successful:
+                # produce a new provider ordering based on provider aggregate times (average per provider)
+                provider_times: Dict[str, List[float]] = {}
+                for r in results:
+                    provider_times.setdefault(r["provider"], []).append(r["time"] if r["ok"] else 9999.0)
+                avg_times = [(p, sum(times)/len(times)) for p, times in provider_times.items()]
+                avg_times.sort(key=lambda x: x[1])
+                # reorder fallback_providers accordingly
+                new_order = []
+                for p, _ in avg_times:
+                    # find provider dict in default list
+                    for entry in FALLBACK_PROVIDERS_DEFAULT:
+                        if entry["name"] == p:
+                            new_order.append(entry)
+                            break
+                # append any missing providers (keep original for rest)
+                for entry in FALLBACK_PROVIDERS_DEFAULT:
+                    if entry not in new_order:
+                        new_order.append(entry)
+                self.fallback_providers = new_order
+                # persist order to disk (global file)
+                save_json_safe(os.path.join(DATA_DIR, "fallback_order.json"), self.fallback_providers)
+                report_lines.append("Provider ordering updated and persisted.")
+            report = "\n".join(report_lines)
+            await interaction.followup.send(f"Diagnostics complete:\n```{report}```", ephemeral=True)
+            await self._log_embed("Fallback diagnostics run", interaction.user, details=report)
             return
 
-        # status
+        # default status
         locked = state.get("locked_persona")
         locked_text = locked if locked else "Auto Mode"
         desc = f"Status: {'✅ Enabled' if state.get('enabled', True) else '❌ Disabled'}\nPersona: {locked_text}\nWebhook: {'✅ Enabled' if state.get('webhook_enabled', True) else '❌ Disabled'}"
         embed = discord.Embed(description=desc, color=0x00FFFF)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+    # ---- /aura persona (list & set) ----
     @aura_group.command(name="persona", description="List or set personas (emojis shown)")
     @app_commands.describe(action="list or set", persona="Which persona to lock")
     @app_commands.choices(
@@ -323,29 +347,31 @@ class GPTCog(commands.Cog):
         embed = discord.Embed(description=f"🔒 Locked to {p['emoji']} — listener active.", color=p["color"])
         embed.set_footer(text=p["footer"])
         await interaction.response.send_message(embed=embed, ephemeral=True)
-        await self._log(f"Aura Persona: persona locked to {persona.value}", interaction.user)
+        await self._log_embed(f"Aura Persona: persona locked to {persona.value}", interaction.user)
 
-    # ------- Logging utility (console + webhook per guild) -------
-    async def _log(self, main_text: str, user: Optional[discord.User] = None, details: Optional[str] = None):
+    # ------- Logging utility: embed webhook + console -------
+    async def _log_embed(self, title: str, user: Optional[discord.User] = None, details: Optional[str] = None):
+        """
+        Writes a console message and posts a compact embed to the configured webhook (if available).
+        """
         t = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         header = f"-# [Time: {t}]"
-        who = f"User: {user} ({getattr(user, 'id', 'N/A')})" if user else ""
-        lines = [main_text]
-        if who:
-            lines.append(who)
+        who = f"{user} ({getattr(user, 'id', 'N/A')})" if user else "System"
+        console_body = f"{header}\n{title}\nUser: {who}\n"
         if details:
-            lines.append(details if len(details) < 1900 else details[:1900] + "…")
-        body = "\n".join(lines)
-        message_content = f"{header}\n```{body}```"
-        # console
-        print(message_content)
-        # webhook (best-effort)
-        try:
-            if self.webhook_url:
+            console_body += f"Details: {details[:1500]}\n"
+        print(console_body)
+
+        # webhook embed
+        if self.webhook_url:
+            try:
+                embed = discord.Embed(title=title, description=(details or "—"), color=0x2F3136)
+                embed.add_field(name="Actor", value=who, inline=True)
+                embed.set_footer(text=f"Time: {t}")
                 async with aiohttp.ClientSession() as session:
-                    await session.post(self.webhook_url, json={"content": message_content}, timeout=8)
-        except Exception as e:
-            print(f"[Webhook] failed: {e}")
+                    await session.post(self.webhook_url, json={"embeds": [embed.to_dict()]}, timeout=8)
+            except Exception as e:
+                print(f"[Webhook] embed send failed: {e}")
 
     # ------- Listener: mention OR reply to bot (only) -------
     @commands.Cog.listener()
@@ -385,15 +411,13 @@ class GPTCog(commands.Cog):
                 messages_payload.append({"role": m.get("role", "user"), "content": m.get("content", "")})
             messages_payload.append({"role": "user", "content": message.content})
 
-            # typing simulation while generating
             async with message.channel.typing():
-                reply_text, provider = await self._run_fallback_chain(messages_payload, persona_key, timeout=18)
+                reply_text, provider = await self._run_fallback_chain(messages_payload, persona_key, timeout=16)
 
             if not reply_text:
                 reply_text = "(pseudo) i'm on fallback juice — here's a quick take."
                 provider = "local-pseudo"
 
-            # memory and reply
             self.append_memory(gid, cid, "user", message.content)
             self.append_memory(gid, cid, "assistant", reply_text)
 
@@ -402,9 +426,9 @@ class GPTCog(commands.Cog):
             embed.set_footer(text=persona["footer"])
             await message.reply(embed=embed)
 
-            # logging
+            # guild-level webhook toggle
             if state.get("webhook_enabled", True):
-                await self._log(f"AUTO-REPLY (via {provider}) persona={persona_key} guild={gid} channel={cid}", message.author, details=f"User: {message.content}\nReply excerpt: {reply_text[:800]}")
+                await self._log_embed(f"AUTO-REPLY (via {provider}) persona={persona_key}", message.author, details=f"User: {message.content}\nReply excerpt: {reply_text[:800]}")
             else:
                 print(f"-# [Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}]\n```AUTO-REPLY (via {provider}) persona={persona_key} guild={gid} channel={cid}\nUser: {message.author}\nMSG: {message.content[:200]}```")
 
@@ -435,9 +459,8 @@ class GPTCog(commands.Cog):
             return "neutral"
         return best
 
-    # ------- Run fixed-order provider chain -------
+    # ------- Run fixed-order provider chain (tries multiple endpoints/shapes) -------
     async def _run_fallback_chain(self, messages_payload: List[Dict], persona_key: str, timeout: int = 18) -> Tuple[Optional[str], str]:
-        # build compact prompt for simpler endpoints
         system_text = next((m["content"] for m in messages_payload if m["role"] == "system"), "")
         user_text = ""
         for m in reversed(messages_payload):
@@ -446,28 +469,27 @@ class GPTCog(commands.Cog):
                 break
         compact_prompt = f"{system_text}\nUser: {user_text}\nAssistant:"
 
-        for provider in FALLBACK_PROVIDERS:
-            pname = provider["name"]
-            for endpoint in provider["endpoints"]:
+        # iterate providers in current ordering
+        for provider in self.fallback_providers:
+            pname = provider.get("name", "unknown")
+            for endpoint in provider.get("endpoints", []):
                 try:
                     reply = await self._call_provider(endpoint, pname, messages_payload, compact_prompt, timeout)
                     if reply:
-                        await self._log(f"FALLBACK SUCCESS → {pname} @ {endpoint}", None, details=f"Prompt: {user_text[:200]}")
                         return reply, pname
                 except Exception as e:
-                    print(f"[Fallback] {pname} @ {endpoint} threw: {e}")
+                    print(f"[Fallback] error {pname} @ {endpoint}: {e}")
                     continue
-            print(f"[Fallback] provider {pname} exhausted — moving to next provider.")
-
-        # all providers failed — local pseudo-AI
+            # provider exhausted, continue to next
+            print(f"[Fallback] provider {pname} exhausted, moving on.")
+        # All failed => local pseudo
         local = self._local_pseudo_generator(messages_payload, persona_key)
-        await self._log("ALL FALLBACKS FAILED — using local pseudo-AI", None, details=f"Prompt: {user_text[:200]}")
         return local, "local-pseudo"
 
-    # ------- Provider caller (multiple shapes) -------
+    # ------- Provider caller (tries 3 shapes) -------
     async def _call_provider(self, endpoint: str, provider_name: str, messages_payload: List[Dict], compact_prompt: str, timeout: int) -> Optional[str]:
         async with aiohttp.ClientSession() as session:
-            # 1) OpenAI-like chat shape
+            # 1) Chat-like shape (messages)
             try:
                 payload = {"model": "gpt-3.5", "messages": messages_payload}
                 async with session.post(endpoint, json=payload, timeout=timeout) as resp:
@@ -490,10 +512,9 @@ class GPTCog(commands.Cog):
                     if text and len(text) > 10:
                         return text.strip()
             except Exception as e:
-                # print for debugging, fallthrough to next shape
                 print(f"[{provider_name}] chat-shape failed at {endpoint}: {e}")
 
-            # 2) Plain prompt shape
+            # 2) Prompt shape
             try:
                 payload2 = {"prompt": compact_prompt, "max_tokens": 400, "temperature": 0.7}
                 async with session.post(endpoint, json=payload2, timeout=timeout) as resp2:
@@ -523,6 +544,32 @@ class GPTCog(commands.Cog):
                 print(f"[{provider_name}] get-shape failed at {endpoint}: {e}")
 
         return None
+
+    # ------- Diagnostic runner used by testfallbacks (measures times and OK/FAIL) -------
+    async def _diagnostic_run(self, messages_payload: List[Dict], timeout_per_endpoint: int = 6) -> List[Dict[str, Any]]:
+        """
+        Runs through every endpoint from the default provider set (FALLBACK_PROVIDERS_DEFAULT),
+        attempts quick shapes, records success/time. Returns a list of dicts with provider, endpoint, ok, time.
+        """
+        results: List[Dict[str, Any]] = []
+        # use default provider list (full coverage), not current ordering
+        for provider in FALLBACK_PROVIDERS_DEFAULT:
+            pname = provider.get("name")
+            for endpoint in provider.get("endpoints", []):
+                start = time.time()
+                ok = False
+                try:
+                    reply = await self._call_provider(endpoint, pname, messages_payload, f"{messages_payload[0]['content']}\nUser: {messages_payload[-1]['content']}\nAssistant:", timeout_per_endpoint)
+                    elapsed = time.time() - start
+                    if reply:
+                        ok = True
+                    results.append({"provider": pname, "endpoint": endpoint, "ok": ok, "time": elapsed})
+                except Exception as e:
+                    elapsed = time.time() - start
+                    results.append({"provider": pname, "endpoint": endpoint, "ok": False, "time": elapsed})
+        # sort results: ok first by time
+        results.sort(key=lambda r: (0 if r["ok"] else 1, r["time"]))
+        return results
 
     # ------- Local pseudo-AI (casual fallback voice) -------
     def _local_pseudo_generator(self, messages_payload: List[Dict], persona_key: str) -> str:
