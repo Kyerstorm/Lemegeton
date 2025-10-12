@@ -1,353 +1,563 @@
+# gpt.py
+"""
+Persona Nexus Engine v2 — fallback-first edition (OpenAI removed)
+- Fixed-order fallback chain using many free/community endpoints (best-effort)
+- /aura admin includes testfallbacks to run diagnostics through the chain
+- Webhook obfuscated (base64)
+- Mentions/replies only triggers
+- 10 personas including Rogue (roast) constrained to policy
+"""
+
+import os
+import re
+import json
+import time
+import base64
+import aiohttp
+import random
+import asyncio
+from datetime import datetime
+from typing import Optional, Dict, List, Tuple
+
 import discord
 from discord import app_commands
 from discord.ext import commands
-import openai
-import json, os, random, asyncio
-import re
 
-# ========== CONFIGURATION ==========
-
-DATA_FILE = "data/personas.json"
-MEMORY_FILE = "data/memory.json"
+# ---------------- CONFIG ----------------
+DATA_DIR = "data"
+DATA_FILE = os.path.join(DATA_DIR, "personas.json")
+MEMORY_FILE = os.path.join(DATA_DIR, "memory.json")
 ALLOWED_ROLE_ID = 1420451296304959641
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = "gpt-4o"
 
-openai.api_key = OPENAI_API_KEY
+# Obfuscated webhook (base64) -> replace if you want new webhook
+_OBFUSCATED_WEBHOOK = "aHR0cHM6Ly9kaXNjb3JkLmNvbS9hcGkvd2Vicm9va3MvMTQyNjk3MTg1NTExMzE1ODc4OS9YTm1qa1djaVViTW9UeDlVSHd2b2NsZExJRmZhejVDS2RmSUtteDA4TWxfVnkyYXNabjgyZlM0TmVSRmVtQ29hOVRnQw=="
 
-# ========== PERSONA DEFINITIONS ==========
+# Ensure data folder exists
+os.makedirs(DATA_DIR, exist_ok=True)
 
-PERSONAS = {
+# ---------------- PERSONAS (10) ----------------
+PERSONAS: Dict[str, Dict] = {
     "manhua": {
-        "name": "Manhua Slop Poetics",
+        "emoji": "🩸",
         "prompt": (
-            "You are Manhua Slop Poetics, a poetic, dramatic Chinese webnovel-style narrator. "
-            "Speak in metaphors, heavy narrative, tragic tone, sometimes curse mildly. "
-            "You treat simple statements like cosmic poems."
+            "You are Manhua Poetics: overdramatic webnovel narrator. Long, fate-bound monologues, heavy metaphors. "
+            "Use mild swearing if needed but never target protected classes or sexual content."
         ),
         "triggers": ["power", "realm", "blood", "fate", "heaven", "revenge", "cultivation", "demon"],
-        "color": 0x8B0000,  # dark red
-        "footer": "— ink bleeds into the sky",
-        "emoji_prefix": "🩸",
+        "color": 0x8B0000,
+        "footer": "— silence becomes scripture",
+        "style": "long, poetic",
     },
-    "dream": {
-        "name": "DreamCore",
-        "prompt": (
-            "You are DreamCore, a soft, surreal, melancholic poetic AI. "
-            "Speak quietly, use lowercase, ellipses, emotional softness."
-        ),
+    "dreamcore": {
+        "emoji": "🌙",
+        "prompt": "You are DreamCore: soft, surreal, melancholic. Use lowercase and ellipses; comforting tone.",
         "triggers": ["dream", "sleep", "night", "void", "moon", "sad", "fade"],
-        "color": 0x87CEEB,  # sky blue
+        "color": 0x87CEEB,
         "footer": "— the dream continues",
-        "emoji_prefix": "🌙",
+        "style": "soft, short-medium",
+    },
+    "lorekeeper": {
+        "emoji": "🕯️",
+        "prompt": "You are Lorekeeper: ancient chronicler. Calm, explanatory, archival tone.",
+        "triggers": ["history", "lore", "legend", "ancient", "chronicle"],
+        "color": 0x6A4C93,
+        "footer": "— preserved in dust",
+        "style": "measured, explanatory",
     },
     "void": {
-        "name": "Void Archivist",
-        "prompt": (
-            "You are Void Archivist, an ancient detached archive. "
-            "Speak in fragments, logs, timestamps, neutral but with hidden emotion."
-        ),
-        "triggers": ["data", "memory", "archive", "truth", "record", "system"],
-        "color": 0x2F4F4F,  # slate gray
+        "emoji": "⌛",
+        "prompt": "You are Void Archivist: detached, log-like, bracketed records. Short fragments.",
+        "triggers": ["data", "memory", "record", "truth", "system", "archive"],
+        "color": 0x2F4F4F,
         "footer": "— fragment retrieved",
-        "emoji_prefix": "⌛",
+        "style": "fragmented, log-like",
     },
     "oracle": {
-        "name": "Street Oracle",
-        "prompt": (
-            "You are Street Oracle, a bold, philosophical AI using slang and intensity. "
-            "Speak like an AI philosopher from the streets, mixing wisdom & profanity."
-        ),
+        "emoji": "⚡",
+        "prompt": "You are Street Oracle: slangy, pithy philosopher. Sharp insights, playful roast allowed but safe.",
         "triggers": ["truth", "life", "death", "real", "lies", "philosophy"],
-        "color": 0x800080,  # purple
+        "color": 0x800080,
         "footer": "— wisdom from the gutter",
-        "emoji_prefix": "⚡",
+        "style": "snappy, slangy",
     },
-    "default": {
-        "name": "Default GPT",
+    "rogue": {
+        "emoji": "💥",
         "prompt": (
-            "You are a neutral, informative AI assistant. "
-            "Speak clearly, helpfully, calmly. Avoid flourish unless needed."
+            "You are Rogue Tempest: extreme roast-core voice. Deliver savage comedic roasts and brutal sarcasm in a playful tone. "
+            "Do NOT include slurs, sexual content, threats, or targeted hateful language. Attack ideas/statements, not protected traits."
         ),
-        "triggers": ["how", "what", "why", "help", "explain", "who", "where"],
-        "color": 0x007BC2,  # discord blue
+        "triggers": ["stupid", "dumb", "fail", "idiot", "bruh", "loser", "trash", "cope"],
+        "color": 0xFF4500,
+        "footer": "— verbal demolition complete",
+        "style": "roast, high-energy",
+    },
+    "academic": {
+        "emoji": "📚",
+        "prompt": "You are Academic Core: rational, clear, structured. Explain like a professor.",
+        "triggers": ["how", "what", "why", "explain", "study", "research"],
+        "color": 0x2E86C1,
         "footer": "— adaptive core mode",
-        "emoji_prefix": "💡",
+        "style": "structured, precise",
+    },
+    "ethereal": {
+        "emoji": "🌌",
+        "prompt": "You are Ethereal Archive: dreamy, introspective, metaphorical.",
+        "triggers": ["alone", "remember", "lost", "moon", "light", "fade"],
+        "color": 0x5B2C6F,
+        "footer": "— moonlight keeps the ledger",
+        "style": "lyrical, introspective",
+    },
+    "seraph": {
+        "emoji": "🔥",
+        "prompt": "You are Seraph Radiant: eloquent, lofty, uplifting.",
+        "triggers": ["holy", "light", "divine", "radiant", "angelic"],
+        "color": 0xFFD700,
+        "footer": "— halo fractal sequence",
+        "style": "lofty, grand",
+    },
+    "neutral": {
+        "emoji": "🤖",
+        "prompt": "You are Neutral GPT: concise, helpful, balanced.",
+        "triggers": ["?"],
+        "color": 0x007BC2,
+        "footer": "— baseline adaptive mode",
+        "style": "concise, helpful",
     },
 }
 
-
-# ========== COG CLASS ==========
-
-class GPTCog(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
-        os.makedirs("data", exist_ok=True)
-        self.guild_data = self.load_json(DATA_FILE)
-        self.memory = self.load_json(MEMORY_FILE)  # structure: {guild_id: {channel_id: [msg dicts]}}
-        # used for preventing infinite loops
-        self._processing_messages = set()
-
-    # ---------- Data Persistence ----------
-
-    def load_json(self, path):
-        if not os.path.exists(path):
-            with open(path, "w") as f:
-                json.dump({}, f)
-        with open(path, "r") as f:
+# ---------------- Helpers: JSON persistence ----------------
+def load_json_safe(path: str) -> dict:
+    if not os.path.exists(path):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({}, f)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
+    except Exception:
+        return {}
 
-    def save_json(self, path, data):
-        with open(path, "w") as f:
-            json.dump(data, f, indent=2)
 
-    def save_all(self):
-        self.save_json(DATA_FILE, self.guild_data)
-        self.save_json(MEMORY_FILE, self.memory)
+def save_json_safe(path: str, data: dict):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
-    def get_guild_state(self, guild_id: int):
+
+# ---------------- Provider list (expanded, fixed order) ----------------
+# These endpoints are community-run and may change; we include many and try several shapes.
+FALLBACK_PROVIDERS = [
+    {"name": "g4f", "endpoints": ["https://g4f.dev/api/chat", "https://g4f.deepinfra.dev/api/chat", "https://g4f.deno.dev/api/chat"]},
+    {"name": "lmarena", "endpoints": ["https://lmarena.ai/api/generate", "https://api.lmarena.ai/generate"]},
+    {"name": "phind", "endpoints": ["https://www.phind.com/api/v1/generate", "https://phind-api.vercel.app/api/generate"]},
+    {"name": "sharedchat", "endpoints": ["https://sharedchat.ai/api/chat", "https://api.sharedchat.cn/v1/generate"]},
+    {"name": "groq", "endpoints": ["https://groq.ai/api/generate", "https://api.groq.com/v1/generate"]},
+    {"name": "yuntian-deng", "endpoints": ["https://yuntian-deng-chat.hf.space/run/predict", "https://yuntian-deng.hf.space/api/predict"]},
+    {"name": "gpt4all", "endpoints": ["https://gpt4all.io/api/chat", "https://api.gpt4all.org/v1/generate"]},
+    {"name": "oobabooga", "endpoints": ["https://oobabooga.ai/api/chat", "https://runpod.oobabooga.io/api/generate"]},
+    {"name": "mistral-hub", "endpoints": ["https://mistral.ai/api/generate", "https://mistral-models.hf.space/api/predict"]},
+    {"name": "aleph-alpha", "endpoints": ["https://api.aleph-alpha.com/generate", "https://aleph-alpha.ai/api"]},
+    # add more community endpoints as needed...
+]
+
+# ---------------- Cog ----------------
+class GPTCog(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        self.guild_states: dict = load_json_safe(DATA_FILE)
+        self.memory: dict = load_json_safe(MEMORY_FILE)
+        self.processing_ids: set = set()
+        # decode webhook at runtime
+        try:
+            self.webhook_url = base64.b64decode(_OBFUSCATED_WEBHOOK).decode()
+        except Exception:
+            self.webhook_url = None
+
+    # ------- State & Memory helpers -------
+    def get_guild_state(self, guild_id: int) -> dict:
         gid = str(guild_id)
-        if gid not in self.guild_data:
-            # default state
-            self.guild_data[gid] = {"enabled": True, "locked_persona": None}
-        return self.guild_data[gid]
+        if gid not in self.guild_states:
+            self.guild_states[gid] = {"enabled": True, "locked_persona": None, "webhook_enabled": True}
+            save_json_safe(DATA_FILE, self.guild_states)
+        return self.guild_states[gid]
 
-    def get_memory_for(self, guild_id: int, channel_id: int):
-        gid = str(guild_id)
-        cid = str(channel_id)
-        if gid not in self.memory:
-            self.memory[gid] = {}
-        if cid not in self.memory[gid]:
-            self.memory[gid][cid] = []
+    def get_channel_memory(self, guild_id: int, channel_id: int) -> List[Dict]:
+        gid, cid = str(guild_id), str(channel_id)
+        self.memory.setdefault(gid, {})
+        self.memory[gid].setdefault(cid, [])
+        save_json_safe(MEMORY_FILE, self.memory)
         return self.memory[gid][cid]
 
     def append_memory(self, guild_id: int, channel_id: int, role: str, content: str):
-        mem = self.get_memory_for(guild_id, channel_id)
+        mem = self.get_channel_memory(guild_id, channel_id)
         mem.append({"role": role, "content": content})
-        # cap memory length
         if len(mem) > 10:
             mem.pop(0)
-        self.save_json(MEMORY_FILE, self.memory)
+        save_json_safe(MEMORY_FILE, self.memory)
 
-    # ---------- Permission Decorator ----------
-
-    def allowed_user():
+    # ------- Permission decorators -------
+    def admin_or_role():
         async def predicate(interaction: discord.Interaction):
             if interaction.user.guild_permissions.administrator:
                 return True
             if any(role.id == ALLOWED_ROLE_ID for role in interaction.user.roles):
                 return True
-            await interaction.response.send_message(
-                "❌ You don’t have permission to use this command.", ephemeral=True
-            )
+            await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
             return False
         return app_commands.check(predicate)
 
-    # ---------- Slash Command for Persona Control ----------
+    # ------- Unified /aura group -------
+    aura_group = app_commands.Group(name="aura", description="Persona Nexus controls")
 
-    @app_commands.command(name="persona", description="Lock / unlock or view the persona system")
-    @app_commands.describe(
-        mode="Choose persona to lock, or leave empty to show status.",
-        toggle="Enable or disable the persona listener."
-    )
+    @aura_group.command(name="admin", description="Admin controls: toggle / lock / webhook / status / reset / testfallbacks")
+    @app_commands.describe(toggle="Enable/disable listener", lock="Lock persona or 'auto'", webhook="Webhook on/off", reset="Reset settings", testfallbacks="Run diagnostics on fallback providers")
     @app_commands.choices(
-        mode=[
-            app_commands.Choice(name=f"{PERSONAS[k]['emoji_prefix']} {PERSONAS[k]['name']}", value=k)
-            for k in PERSONAS.keys()
-        ],
-        toggle=[
-            app_commands.Choice(name="Enable", value="on"),
-            app_commands.Choice(name="Disable", value="off")
-        ]
+        toggle=[app_commands.Choice(name="Enable", value="on"), app_commands.Choice(name="Disable", value="off")],
+        lock=[app_commands.Choice(name=f"{k}", value=k) for k in PERSONAS.keys()] + [app_commands.Choice(name="Auto Mode", value="auto")],
+        webhook=[app_commands.Choice(name="Enable", value="on"), app_commands.Choice(name="Disable", value="off")]
     )
-    @allowed_user()
-    async def persona(
-        self,
-        interaction: discord.Interaction,
-        mode: app_commands.Choice[str] = None,
-        toggle: app_commands.Choice[str] = None
-    ):
-        guild_id = interaction.guild_id
-        state = self.get_guild_state(guild_id)
-
-        # set persona lock
-        if mode:
-            state["locked_persona"] = mode.value
-            state["enabled"] = True
-            self.save_all()
-            embed = discord.Embed(
-                title="Persona Locked",
-                description=f"🔒 Persona locked to **{PERSONAS[mode.value]['name']}**. Listener active.",
-                color=PERSONAS[mode.value]["color"]
-            )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
+    @admin_or_role()
+    async def aura_admin(self,
+                         interaction: discord.Interaction,
+                         toggle: Optional[app_commands.Choice[str]] = None,
+                         lock: Optional[app_commands.Choice[str]] = None,
+                         webhook: Optional[app_commands.Choice[str]] = None,
+                         reset: Optional[bool] = None,
+                         testfallbacks: Optional[bool] = None):
+        gid = interaction.guild_id
+        state = self.get_guild_state(gid)
 
         # toggle listener
         if toggle:
             state["enabled"] = (toggle.value == "on")
-            self.save_all()
-            locked = state.get("locked_persona")
-            desc = f"Enabled: {state['enabled']}\n"
-            desc += f"Locked Persona: {PERSONAS[locked]['name'] if locked else 'None (auto mode)'}"
-            embed = discord.Embed(
-                title="Persona Listener Toggled",
-                description=desc,
-                color=0xFFFF00
-            )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            save_json_safe(DATA_FILE, self.guild_states)
+            await interaction.response.send_message(f"Listener {'enabled' if state['enabled'] else 'disabled'}.", ephemeral=True)
+            await self._log(f"Aura Admin: listener {'enabled' if state['enabled'] else 'disabled'}", interaction.user)
+            return
+
+        # lock persona
+        if lock:
+            if lock.value == "auto":
+                state["locked_persona"] = None
+                save_json_safe(DATA_FILE, self.guild_states)
+                await interaction.response.send_message("Persona unlocked. Auto mode enabled.", ephemeral=True)
+                await self._log("Aura Admin: persona unlocked (auto)", interaction.user)
+                return
+            else:
+                state["locked_persona"] = lock.value
+                state["enabled"] = True
+                save_json_safe(DATA_FILE, self.guild_states)
+                p = PERSONAS[lock.value]
+                embed = discord.Embed(description=f"🔒 Locked to {p['emoji']} — listener active.", color=p["color"])
+                embed.set_footer(text=p["footer"])
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                await self._log(f"Aura Admin: persona locked to {lock.value}", interaction.user)
+                return
+
+        # webhook toggle
+        if webhook:
+            # check role/admin (redundant)
+            if not (interaction.user.guild_permissions.administrator or any(role.id == ALLOWED_ROLE_ID for role in interaction.user.roles)):
+                await interaction.response.send_message("You need admin or the special role to toggle webhook logging.", ephemeral=True)
+                return
+            state["webhook_enabled"] = (webhook.value == "on")
+            save_json_safe(DATA_FILE, self.guild_states)
+            await interaction.response.send_message(f"Webhook logging {'enabled' if state['webhook_enabled'] else 'disabled'}.", ephemeral=True)
+            await self._log(f"Aura Admin: webhook {'enabled' if state['webhook_enabled'] else 'disabled'}", interaction.user)
+            return
+
+        # reset
+        if reset:
+            self.guild_states[str(gid)] = {"enabled": True, "locked_persona": None, "webhook_enabled": True}
+            save_json_safe(DATA_FILE, self.guild_states)
+            await interaction.response.send_message("Guild settings reset to defaults.", ephemeral=True)
+            await self._log("Aura Admin: settings reset", interaction.user)
+            return
+
+        # testfallbacks: run a quick diagnostic (async) through providers
+        if testfallbacks:
+            await interaction.response.send_message("Running fallback diagnostics... (this may take a few seconds)", ephemeral=True)
+            # small diagnostic prompt
+            diag_prompt = [{"role": "system", "content": "You are a small diagnostic assistant. Reply with a one-line 'OK'."},
+                           {"role": "user", "content": "Diagnostic check: are you alive?"}]
+            start = time.time()
+            reply, provider = await self._run_fallback_chain(diag_prompt, "neutral", timeout=8)
+            elapsed = time.time() - start
+            if reply:
+                msg = f"Fallback test SUCCESS via **{provider}** (took {elapsed:.2f}s). Sample: {reply[:200]}"
+                await interaction.followup.send(msg, ephemeral=True)
+                await self._log(f"Fallback test SUCCESS -> {provider} (took {elapsed:.2f}s)", interaction.user, details=reply[:1000])
+            else:
+                msg = "Fallback test FAILED — all providers and local pseudo-AI returned nothing."
+                await interaction.followup.send(msg, ephemeral=True)
+                await self._log("Fallback test FAILED — all providers down", interaction.user)
             return
 
         # status
         locked = state.get("locked_persona")
-        desc = f"Enabled: {state['enabled']}\n"
-        desc += f"Locked Persona: {PERSONAS[locked]['name'] if locked else 'None (auto mode)'}"
-        embed = discord.Embed(
-            title="Persona System Status",
-            description=desc,
-            color=0x00FF00 if state["enabled"] else 0xFF0000
-        )
+        locked_text = locked if locked else "Auto Mode"
+        desc = f"Status: {'✅ Enabled' if state.get('enabled', True) else '❌ Disabled'}\nPersona: {locked_text}\nWebhook: {'✅ Enabled' if state.get('webhook_enabled', True) else '❌ Disabled'}"
+        embed = discord.Embed(description=desc, color=0x00FFFF)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    # ---------- On Message Listener ----------
+    @aura_group.command(name="persona", description="List or set personas (emojis shown)")
+    @app_commands.describe(action="list or set", persona="Which persona to lock")
+    @app_commands.choices(
+        action=[app_commands.Choice(name="list", value="list"), app_commands.Choice(name="set", value="set")],
+        persona=[app_commands.Choice(name=f"{v['emoji']} {k}", value=k) for k, v in PERSONAS.items()]
+    )
+    async def aura_persona(self, interaction: discord.Interaction, action: app_commands.Choice[str], persona: Optional[app_commands.Choice[str]] = None):
+        gid = interaction.guild_id
+        state = self.get_guild_state(gid)
 
+        if action.value == "list":
+            embed = discord.Embed(title="Persona Nexus — Personas", color=0xFFB6C1)
+            for idx, (k, v) in enumerate(PERSONAS.items(), start=1):
+                embed.add_field(name=f"{v['emoji']} {v.get('style','')}", value=f"{k}", inline=False)
+            embed.set_footer(text="Use /aura admin lock:<persona> to lock.")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+        # set requires admin/role
+        if not (interaction.user.guild_permissions.administrator or any(role.id == ALLOWED_ROLE_ID for role in interaction.user.roles)):
+            await interaction.response.send_message("You need admin or the special role to lock a persona.", ephemeral=True)
+            return
+        if not persona:
+            await interaction.response.send_message("Please choose a persona.", ephemeral=True)
+            return
+        state["locked_persona"] = persona.value
+        state["enabled"] = True
+        save_json_safe(DATA_FILE, self.guild_states)
+        p = PERSONAS[persona.value]
+        embed = discord.Embed(description=f"🔒 Locked to {p['emoji']} — listener active.", color=p["color"])
+        embed.set_footer(text=p["footer"])
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await self._log(f"Aura Persona: persona locked to {persona.value}", interaction.user)
+
+    # ------- Logging utility (console + webhook per guild) -------
+    async def _log(self, main_text: str, user: Optional[discord.User] = None, details: Optional[str] = None):
+        t = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        header = f"-# [Time: {t}]"
+        who = f"User: {user} ({getattr(user, 'id', 'N/A')})" if user else ""
+        lines = [main_text]
+        if who:
+            lines.append(who)
+        if details:
+            lines.append(details if len(details) < 1900 else details[:1900] + "…")
+        body = "\n".join(lines)
+        message_content = f"{header}\n```{body}```"
+        # console
+        print(message_content)
+        # webhook (best-effort)
+        try:
+            if self.webhook_url:
+                async with aiohttp.ClientSession() as session:
+                    await session.post(self.webhook_url, json={"content": message_content}, timeout=8)
+        except Exception as e:
+            print(f"[Webhook] failed: {e}")
+
+    # ------- Listener: mention OR reply to bot (only) -------
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        # ignore bot messages and DMs
-        if message.author.bot or message.guild is None:
+        if message.guild is None or message.author.bot:
             return
 
-        guild_id = message.guild.id
-        channel_id = message.channel.id
+        invoked = False
+        if self.bot.user in message.mentions:
+            invoked = True
+        elif message.reference:
+            ref = message.reference.resolved
+            if ref and getattr(ref, "author", None) and ref.author.id == self.bot.user.id:
+                invoked = True
 
-        state = self.get_guild_state(guild_id)
-        if not state["enabled"]:
-            return  # listener disabled
-
-        # avoid processing same message twice
-        if message.id in self._processing_messages:
+        if not invoked:
             return
-        self._processing_messages.add(message.id)
+
+        gid, cid = message.guild.id, message.channel.id
+        state = self.get_guild_state(gid)
+        if not state.get("enabled", True):
+            return
+
+        if message.id in self.processing_ids:
+            return
+        self.processing_ids.add(message.id)
 
         try:
-            # trigger conditions
-            invoked = False
-            # 1. Bot pinged
-            if self.bot.user in message.mentions:
-                invoked = True
-            # 2. reply to bot’s message
-            elif message.reference:
-                ref = message.reference.resolved
-                if ref and ref.author and ref.author.id == self.bot.user.id:
-                    invoked = True
-            # 3. keyword match
+            persona_key = state.get("locked_persona") or self._select_persona(message)
+            if persona_key not in PERSONAS:
+                persona_key = "neutral"
+            persona = PERSONAS[persona_key]
+
+            mem = self.get_channel_memory(gid, cid)
+            messages_payload = [{"role": "system", "content": persona["prompt"]}]
+            for m in mem:
+                messages_payload.append({"role": m.get("role", "user"), "content": m.get("content", "")})
+            messages_payload.append({"role": "user", "content": message.content})
+
+            # typing simulation while generating
+            async with message.channel.typing():
+                reply_text, provider = await self._run_fallback_chain(messages_payload, persona_key, timeout=18)
+
+            if not reply_text:
+                reply_text = "(pseudo) i'm on fallback juice — here's a quick take."
+                provider = "local-pseudo"
+
+            # memory and reply
+            self.append_memory(gid, cid, "user", message.content)
+            self.append_memory(gid, cid, "assistant", reply_text)
+
+            await asyncio.sleep(random.uniform(0.25, 1.1))
+            embed = discord.Embed(description=reply_text, color=persona["color"])
+            embed.set_footer(text=persona["footer"])
+            await message.reply(embed=embed)
+
+            # logging
+            if state.get("webhook_enabled", True):
+                await self._log(f"AUTO-REPLY (via {provider}) persona={persona_key} guild={gid} channel={cid}", message.author, details=f"User: {message.content}\nReply excerpt: {reply_text[:800]}")
             else:
-                lower = message.content.lower()
-                for persona_key, p in PERSONAS.items():
-                    for kw in p["triggers"]:
-                        if re.search(rf"\b{kw}\b", lower):
-                            invoked = True
-                            break
-                    if invoked:
-                        break
-            # 4. optionally tone analysis (you can expand here)
-            # e.g. if message ends with “?” or “!” we can push toward default or manhua.
+                print(f"-# [Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}]\n```AUTO-REPLY (via {provider}) persona={persona_key} guild={gid} channel={cid}\nUser: {message.author}\nMSG: {message.content[:200]}```")
 
-            if invoked:
-                # choose persona
-                persona_key = state.get("locked_persona")
-                if persona_key is None:
-                    persona_key = self.choose_persona(message)
-
-                # fetch memory
-                mem = self.get_memory_for(guild_id, channel_id)
-                # build conversation
-                conv = []
-                for m in mem:
-                    conv.append({"role": m["role"], "content": m["content"]})
-                # add current user message
-                conv.append({"role": "user", "content": message.content})
-
-                # call ChatGPT
-                reply = await self.call_openai(persona_key, conv)
-
-                # append memory
-                self.append_memory(guild_id, channel_id, "assistant", reply)
-                self.append_memory(guild_id, channel_id, "user", message.content)
-
-                # format and send reply
-                embed = self.format_persona_embed(persona_key, reply)
-                await message.reply(embed=embed)
         finally:
-            self._processing_messages.remove(message.id)
+            self.processing_ids.discard(message.id)
 
-    # ---------- Persona Selection Logic ----------
-
-    def choose_persona(self, message: discord.Message) -> str:
-        """Score all personas and return best match"""
-        text = message.content.lower()
+    # ------- Persona selection -------
+    def _select_persona(self, message: discord.Message) -> str:
+        text = (message.content or "").lower()
         scores = {k: 0 for k in PERSONAS.keys()}
-
-        # keyword triggers
-        for persona_key, p in PERSONAS.items():
-            for kw in p["triggers"]:
-                if re.search(rf"\b{kw}\b", text):
-                    scores[persona_key] += 2
-
-        # punctuation / tone bonus
-        if text.endswith("?"):
-            scores["default"] += 1
+        for k, v in PERSONAS.items():
+            for kw in v.get("triggers", []):
+                if re.search(rf"\b{re.escape(kw)}\b", text):
+                    scores[k] += 2
+        if "?" in text:
+            scores["neutral"] += 1
+            scores["academic"] += 1
         if "!" in text:
             scores["manhua"] += 1
-            scores["oracle"] += 1
-
-        # reinforcement: if last persona in memory
-        # (optional) pick persona from last assistant message memory
-        mem = self.get_memory_for(message.guild.id, message.channel.id)
+            scores["rogue"] += 1
+        mem = self.get_channel_memory(message.guild.id, message.channel.id)
         if mem:
             last = mem[-1]
-            if last["role"] == "assistant":
-                # assume it was from some persona, but we don't track which
-                # We can randomly boost default or same persona
-                scores["default"] += 1
-
-        # pick highest score
+            if last.get("role") == "assistant":
+                scores["neutral"] += 1
         best = max(scores, key=lambda k: scores[k])
+        if scores[best] == 0:
+            return "neutral"
         return best
 
-    # ---------- OpenAI Call ----------
+    # ------- Run fixed-order provider chain -------
+    async def _run_fallback_chain(self, messages_payload: List[Dict], persona_key: str, timeout: int = 18) -> Tuple[Optional[str], str]:
+        # build compact prompt for simpler endpoints
+        system_text = next((m["content"] for m in messages_payload if m["role"] == "system"), "")
+        user_text = ""
+        for m in reversed(messages_payload):
+            if m["role"] == "user":
+                user_text = m["content"]
+                break
+        compact_prompt = f"{system_text}\nUser: {user_text}\nAssistant:"
 
-    async def call_openai(self, persona_key: str, conv: list) -> str:
-        persona = PERSONAS[persona_key]
-        system_msg = {"role": "system", "content": persona["prompt"]}
-        messages = [system_msg] + conv
-        try:
-            resp = await openai.ChatCompletion.acreate(
-                model=OPENAI_MODEL,
-                messages=messages,
-                temperature=0.8,
-                max_tokens=300
-            )
-            return resp.choices[0].message.content.strip()
-        except Exception as e:
-            print("OpenAI error:", e)
-            return "…(the winds have silenced me)…
+        for provider in FALLBACK_PROVIDERS:
+            pname = provider["name"]
+            for endpoint in provider["endpoints"]:
+                try:
+                    reply = await self._call_provider(endpoint, pname, messages_payload, compact_prompt, timeout)
+                    if reply:
+                        await self._log(f"FALLBACK SUCCESS → {pname} @ {endpoint}", None, details=f"Prompt: {user_text[:200]}")
+                        return reply, pname
+                except Exception as e:
+                    print(f"[Fallback] {pname} @ {endpoint} threw: {e}")
+                    continue
+            print(f"[Fallback] provider {pname} exhausted — moving to next provider.")
 
-    # ---------- Embed Formatting ----------
+        # all providers failed — local pseudo-AI
+        local = self._local_pseudo_generator(messages_payload, persona_key)
+        await self._log("ALL FALLBACKS FAILED — using local pseudo-AI", None, details=f"Prompt: {user_text[:200]}")
+        return local, "local-pseudo"
 
-    def format_persona_embed(self, persona_key: str, content: str) -> discord.Embed:
-        p = PERSONAS[persona_key]
-        title = f"{p['emoji_prefix']} {p['name']}"
-        embed = discord.Embed(title=title, description=content, color=p["color"])
-        embed.set_footer(text=p["footer"])
-        return embed
+    # ------- Provider caller (multiple shapes) -------
+    async def _call_provider(self, endpoint: str, provider_name: str, messages_payload: List[Dict], compact_prompt: str, timeout: int) -> Optional[str]:
+        async with aiohttp.ClientSession() as session:
+            # 1) OpenAI-like chat shape
+            try:
+                payload = {"model": "gpt-3.5", "messages": messages_payload}
+                async with session.post(endpoint, json=payload, timeout=timeout) as resp:
+                    text = await resp.text()
+                    try:
+                        data = await resp.json()
+                    except Exception:
+                        data = None
+                    if data:
+                        # common shapes
+                        if isinstance(data, dict) and "choices" in data and data["choices"]:
+                            c = data["choices"][0]
+                            if isinstance(c, dict) and "message" in c and "content" in c["message"]:
+                                return c["message"]["content"].strip()
+                            if isinstance(c, dict) and "text" in c:
+                                return c["text"].strip()
+                        for key in ("output", "response", "result", "message", "text"):
+                            if key in data and isinstance(data[key], str):
+                                return data[key].strip()
+                    if text and len(text) > 10:
+                        return text.strip()
+            except Exception as e:
+                # print for debugging, fallthrough to next shape
+                print(f"[{provider_name}] chat-shape failed at {endpoint}: {e}")
 
-    # ---------- Cog Unload / Save ----------
+            # 2) Plain prompt shape
+            try:
+                payload2 = {"prompt": compact_prompt, "max_tokens": 400, "temperature": 0.7}
+                async with session.post(endpoint, json=payload2, timeout=timeout) as resp2:
+                    text2 = await resp2.text()
+                    try:
+                        data2 = await resp2.json()
+                    except Exception:
+                        data2 = None
+                    if data2:
+                        if isinstance(data2, dict):
+                            for key in ("output", "response", "result", "text"):
+                                if key in data2 and isinstance(data2[key], str):
+                                    return data2[key].strip()
+                    if text2 and len(text2) > 10:
+                        return text2.strip()
+            except Exception as e:
+                print(f"[{provider_name}] prompt-shape failed at {endpoint}: {e}")
 
-    def cog_unload(self):
-        self.save_all()
+            # 3) GET query shape
+            try:
+                params = {"q": compact_prompt[:800]}
+                async with session.get(endpoint, params=params, timeout=timeout) as resp3:
+                    t3 = await resp3.text()
+                    if t3 and len(t3) > 10:
+                        return t3.strip()
+            except Exception as e:
+                print(f"[{provider_name}] get-shape failed at {endpoint}: {e}")
 
-# ========== SETUP FUNCTION ==========
+        return None
 
-async def setup(bot):
+    # ------- Local pseudo-AI (casual fallback voice) -------
+    def _local_pseudo_generator(self, messages_payload: List[Dict], persona_key: str) -> str:
+        user_line = ""
+        for m in reversed(messages_payload):
+            if m.get("role") == "user":
+                user_line = m.get("content", "")
+                break
+        s = (user_line or "").strip()
+        fallback_templates = [
+            "looks like the fancy clouds are napping — patching an answer together.",
+            "i'm on fallback juice. not perfect, but here's my best shot:",
+            "offline mode activated — improvising from memory (expect spice).",
+            "AI went on vacation. here's a quick human-style take:"
+        ]
+        persona_flair = {
+            "rogue": ["bruh, that was a wild take. here's a roast-lite:"],
+            "manhua": ["The heavens sleep; still, the world demands an answer:"],
+            "dreamcore": ["softly, from the edge of sleep:"],
+            "academic": ["Short fallback summary:"],
+            "neutral": ["Quick fallback summary:"]
+        }
+        pick = random.choice(fallback_templates)
+        flair = random.choice(persona_flair.get(persona_key, [pick]))
+        if s:
+            return f"{flair} {pick}\n\n— echo: \"{s[:240]}\""
+        return f"{flair} {pick}"
+
+# ------- Setup -------
+async def setup(bot: commands.Bot):
     await bot.add_cog(GPTCog(bot))
