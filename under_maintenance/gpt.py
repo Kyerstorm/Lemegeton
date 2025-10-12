@@ -1,12 +1,5 @@
 # gpt.py
-"""
-Persona Nexus Engine v2 — fallback-first edition (OpenAI removed)
-- Fixed-order fallback chain using many free/community endpoints (best-effort)
-- /aura admin includes testfallbacks to run diagnostics through the chain
-- Webhook obfuscated (base64)
-- Mentions/replies only triggers
-- 10 personas including Rogue (roast) constrained to policy
-"""
+
 
 import os
 import re
