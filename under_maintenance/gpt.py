@@ -1,5 +1,4 @@
 # gpt.py
-# Persona Nexus Engine v3 — Single-file, fallback-first, admin UI + slash + message secret UI
 # NOTE: Keep this entire file intact in one place (no splitting). Organized with REGION blocks.
 
 import os
