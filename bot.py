@@ -7,7 +7,7 @@ import time
 import aiohttp
 import discord
 from discord.ext import commands
-from database import init_db
+from database import init_db, get_all_users_guild_aware, remove_user, clear_guild_records, get_all_guild_ids_with_records
 
 # Add project root to sys.path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -226,6 +226,164 @@ async def fetch_trending_anime_list():
     except Exception as e:
         logger.error(f"Unexpected error fetching trending anime: {e}", exc_info=True)
         return DEFAULT_TRENDING_FALLBACK
+
+# ------------------------------------------------------
+# User Cleanup Task
+# ------------------------------------------------------
+async def cleanup_stale_users():
+    """
+    Clean up user records for users who are no longer in their registered guilds.
+    Runs on startup and every 6 hours to maintain database integrity.
+    """
+    logger.info("Starting user cleanup task")
+
+    try:
+        total_cleaned = 0
+
+        for guild in bot.guilds:
+            logger.debug(f"Checking guild: {guild.name} (ID: {guild.id})")
+
+            try:
+                # Get all users registered in this guild
+                guild_users = await get_all_users_guild_aware(guild.id)
+
+                if not guild_users:
+                    logger.debug(f"No registered users in guild {guild.name}")
+                    continue
+
+                logger.debug(f"Found {len(guild_users)} registered users in guild {guild.name}")
+
+                for user_data in guild_users:
+                    discord_id = user_data[1]  # discord_id is at index 1
+                    username = user_data[3]    # username is at index 3
+
+                    try:
+                        # Check if user is still in the guild
+                        member = guild.get_member(discord_id)
+
+                        if member is None:
+                            # User not found in guild, remove their records
+                            logger.info(f"Removing stale user record: {username} (ID: {discord_id}) from guild {guild.name}")
+                            success = await remove_user(discord_id, guild.id)
+                            if success:
+                                total_cleaned += 1
+                                logger.info(f"Successfully removed records for user {username} from guild {guild.name}")
+                            else:
+                                logger.warning(f"Failed to remove records for user {username} from guild {guild.name}")
+
+                    except Exception as member_check_error:
+                        logger.error(f"Error checking membership for user {discord_id} in guild {guild.id}: {member_check_error}")
+                        # Don't remove on error - could be permission issue
+
+            except Exception as guild_error:
+                logger.error(f"Error processing guild {guild.id}: {guild_error}")
+
+        if total_cleaned > 0:
+            logger.info(f"User cleanup completed: removed {total_cleaned} stale user records")
+        else:
+            logger.info("User cleanup completed: no stale records found")
+
+    except Exception as e:
+        logger.error(f"Fatal error in user cleanup task: {e}", exc_info=True)
+
+async def schedule_user_cleanup():
+    """
+    Schedule user cleanup to run every 6 hours.
+    """
+    logger.info("Starting user cleanup scheduler (runs every 6 hours)")
+    
+    try:
+        while not bot.is_closed():
+            # Wait 6 hours (6 * 60 * 60 = 21600 seconds)
+            await asyncio.sleep(21600)
+            
+            try:
+                logger.info("Running scheduled user cleanup")
+                await cleanup_stale_users()
+            except Exception as cleanup_error:
+                logger.error(f"Error in scheduled user cleanup: {cleanup_error}")
+                # Continue the loop despite errors
+                
+    except Exception as e:
+        logger.error(f"Fatal error in user cleanup scheduler: {e}", exc_info=True)
+
+# ------------------------------------------------------
+# Guild Cleanup Task
+# ------------------------------------------------------
+async def cleanup_left_guilds():
+    """
+    Clean up records for guilds that the bot is no longer in.
+    Runs on startup and every 6 hours to maintain database integrity.
+    """
+    logger.info("Starting guild cleanup task")
+
+    try:
+        total_guilds_cleaned = 0
+        total_records_deleted = 0
+
+        # Get all guild IDs that have records in the database
+        guild_ids_with_records = await get_all_guild_ids_with_records()
+        
+        if not guild_ids_with_records:
+            logger.info("No guild records found in database")
+            return
+
+        logger.info(f"Found {len(guild_ids_with_records)} guilds with records in database")
+
+        # Get current guilds the bot is in
+        current_guild_ids = {guild.id for guild in bot.guilds}
+        logger.debug(f"Bot is currently in {len(current_guild_ids)} guilds: {sorted(current_guild_ids)}")
+
+        for guild_id in guild_ids_with_records:
+            try:
+                if guild_id not in current_guild_ids:
+                    # Bot is no longer in this guild, clean up records
+                    logger.info(f"Bot no longer in guild {guild_id}, cleaning up records")
+                    
+                    success, deleted_counts = await clear_guild_records(guild_id)
+                    
+                    if success:
+                        records_deleted = sum(deleted_counts.values())
+                        total_guilds_cleaned += 1
+                        total_records_deleted += records_deleted
+                        logger.info(f"Successfully cleaned up guild {guild_id}: {records_deleted} records deleted")
+                        logger.debug(f"Breakdown for guild {guild_id}: {deleted_counts}")
+                    else:
+                        logger.error(f"Failed to clean up records for guild {guild_id}")
+                else:
+                    logger.debug(f"Bot still in guild {guild_id}, keeping records")
+
+            except Exception as guild_error:
+                logger.error(f"Error processing guild {guild_id}: {guild_error}")
+
+        if total_guilds_cleaned > 0:
+            logger.info(f"Guild cleanup completed: cleaned {total_guilds_cleaned} guilds, deleted {total_records_deleted} total records")
+        else:
+            logger.info("Guild cleanup completed: no guilds needed cleanup")
+
+    except Exception as e:
+        logger.error(f"Fatal error in guild cleanup task: {e}", exc_info=True)
+
+async def schedule_guild_cleanup():
+    """
+    Schedule guild cleanup to run every 6 hours.
+    """
+    logger.info("Starting guild cleanup scheduler (runs every 6 hours)")
+    
+    try:
+        while not bot.is_closed():
+            # Wait 6 hours (6 * 60 * 60 = 21600 seconds)
+            await asyncio.sleep(21600)
+            
+            try:
+                logger.info("Running scheduled guild cleanup")
+                await cleanup_left_guilds()
+            except Exception as cleanup_error:
+                logger.error(f"Error in scheduled guild cleanup: {cleanup_error}")
+                # Continue the loop despite errors
+                
+    except Exception as e:
+        logger.error(f"Fatal error in guild cleanup scheduler: {e}", exc_info=True)
 
 # ------------------------------------------------------
 # Streaming Status Loop
@@ -694,6 +852,25 @@ async def on_ready():
             logger.info("✅ Streaming status updater started")
         except Exception as status_task_error:
             logger.error(f"Failed to start streaming status updater: {status_task_error}")
+        
+        try:
+            logger.debug("Running initial user cleanup")
+            await cleanup_stale_users()
+            logger.info("✅ Initial user cleanup completed")
+            
+            logger.debug("Running initial guild cleanup")
+            await cleanup_left_guilds()
+            logger.info("✅ Initial guild cleanup completed")
+            
+            logger.debug("Creating user cleanup scheduler task")
+            bot.loop.create_task(schedule_user_cleanup())
+            logger.info("✅ User cleanup scheduler started")
+            
+            logger.debug("Creating guild cleanup scheduler task")
+            bot.loop.create_task(schedule_guild_cleanup())
+            logger.info("✅ Guild cleanup scheduler started")
+        except Exception as cleanup_task_error:
+            logger.error(f"Failed to start cleanup tasks: {cleanup_task_error}")
         
         logger.info("Bot initialization completed successfully")
         logger.info("="*60)
