@@ -86,3 +86,15 @@ CHALLENGE_ROLE_IDS = {
 ALL_STAR_STAGE1_ROLE_ID = int(os.getenv("ALL_STAR_STAGE1_ROLE_ID")) if os.getenv("ALL_STAR_STAGE1_ROLE_ID") else None
 ALL_STAR_STAGE2_ROLE_ID = int(os.getenv("ALL_STAR_STAGE2_ROLE_ID")) if os.getenv("ALL_STAR_STAGE2_ROLE_ID") else None
 ALL_STAR_COMPLETED_ROLE_ID = int(os.getenv("ALL_STAR_COMPLETED_ROLE_ID")) if os.getenv("ALL_STAR_COMPLETED_ROLE_ID") else None
+
+
+# Chat GPT Configuration
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+OLLAMA_HOST = os.getenv("OLLAMA_HOST")
+AURA_WEBHOOK_URL = os.getenv("AURA_WEBHOOK_URL")
+
+# fallback defaults
+if OLLAMA_HOST == "":
+    OLLAMA_HOST = None
