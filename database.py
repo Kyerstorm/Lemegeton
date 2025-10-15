@@ -4077,3 +4077,123 @@ async def set_bot_metric(metric_key: str, metric_value: any) -> bool:
     except Exception as e:
         logger.error(f"Error setting bot metric {metric_key}: {e}")
         return False
+
+# ------------------------------------------------------
+# Guild Cleanup Functions
+# ------------------------------------------------------
+async def clear_guild_records(guild_id: int):
+    """Clear all records for a guild that the bot is no longer in.
+    
+    This performs a cascading delete of all guild-related data when the bot
+    leaves a server to maintain database integrity.
+    """
+    logger.info(f"Starting guild record cleanup for guild {guild_id}")
+    
+    try:
+        if not isinstance(guild_id, int) or guild_id <= 0:
+            raise ValueError(f"Invalid guild_id: {guild_id}")
+        
+        # Use direct connection for atomic operations
+        async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
+            db.row_factory = aiosqlite.Row
+            await db.execute("BEGIN TRANSACTION")
+            
+            try:
+                deleted_counts = {}
+                
+                # Delete from guild-specific tables
+                guild_tables = [
+                    ("users", "guild_id"),
+                    ("user_stats", "guild_id"),
+                    ("achievements", "guild_id"),
+                    ("guild_challenge_roles", "guild_id"),
+                    ("guild_challenges", "guild_id"),
+                    ("guild_challenge_manga", "guild_id"),
+                    ("guild_manga_channels", "guild_id"),
+                    ("guild_bot_update_channels", "guild_id"),
+                    ("guild_mod_roles", "guild_id"),
+                    ("invites", "guild_id"),
+                    ("invite_uses", "guild_id"),
+                    ("recruitment_stats", "guild_id"),
+                    ("user_leaves", "guild_id"),
+                    ("invite_tracker_settings", "guild_id"),
+                    ("free_games_channels", "guild_id"),
+                    ("user_progress", "guild_id"),
+                    ("user_progress_checkpoint", "guild_id"),
+                    ("manga_challenges", "guild_id"),
+                    ("user_manga_progress", "guild_id"),
+                    ("cached_stats", "guild_id"),
+                    ("manga_recommendations_votes", "guild_id"),
+                    ("steam_users", "guild_id"),
+                ]
+                
+                for table_name, column_name in guild_tables:
+                    try:
+                        result = await db.execute(f"DELETE FROM {table_name} WHERE {column_name} = ?", (guild_id,))
+                        count = result.rowcount
+                        if count > 0:
+                            deleted_counts[table_name] = count
+                            logger.debug(f"Deleted {count} records from {table_name} for guild {guild_id}")
+                    except Exception as table_error:
+                        logger.warning(f"Error deleting from {table_name}: {table_error}")
+                        # Continue with other tables
+                
+                # Commit the transaction
+                await db.commit()
+                
+                total_deleted = sum(deleted_counts.values())
+                logger.info(f"✅ Guild cleanup completed for guild {guild_id}: {total_deleted} total records deleted")
+                logger.info(f"   Breakdown: {deleted_counts}")
+                
+                return True, deleted_counts
+                
+            except Exception as e:
+                await db.execute("ROLLBACK")
+                logger.error(f"Failed to clear guild records, transaction rolled back: {e}")
+                raise
+        
+    except ValueError as validation_error:
+        logger.error(f"Validation error clearing guild records: {validation_error}")
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error clearing guild records for {guild_id}: {e}", exc_info=True)
+        raise
+
+async def get_all_guild_ids_with_records():
+    """Get all guild IDs that have records in the database."""
+    logger.debug("Getting all guild IDs with records")
+    
+    try:
+        # Query multiple tables to find all guild_ids that have data
+        guild_ids = set()
+        
+        tables_with_guild_id = [
+            "users", "user_stats", "achievements", "guild_challenge_roles",
+            "guild_challenges", "guild_challenge_manga", "guild_manga_channels",
+            "guild_bot_update_channels", "guild_mod_roles", "invites",
+            "invite_uses", "recruitment_stats", "user_leaves", 
+            "invite_tracker_settings", "free_games_channels"
+        ]
+        
+        for table in tables_with_guild_id:
+            try:
+                result = await execute_db_operation(
+                    f"get guild_ids from {table}",
+                    f"SELECT DISTINCT guild_id FROM {table}",
+                    fetch_type='all'
+                )
+                
+                for row in result:
+                    if row[0] is not None:
+                        guild_ids.add(row[0])
+                        
+            except Exception as table_error:
+                logger.debug(f"Error querying {table}: {table_error}")
+                # Continue with other tables
+        
+        logger.debug(f"Found {len(guild_ids)} unique guild IDs with records: {sorted(guild_ids)}")
+        return sorted(list(guild_ids))
+        
+    except Exception as e:
+        logger.error(f"Error getting guild IDs with records: {e}", exc_info=True)
+        raise
