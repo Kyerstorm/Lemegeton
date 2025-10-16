@@ -859,7 +859,7 @@ class Profile(commands.Cog):
 
         # Create unified profile embed
         profile_embed = discord.Embed(
-            title=f"� {user_data['name']}'s AniList Profile",
+            title=f"🌸 {user_data['name']}'s AniList Profile",
             url=profile_url,
             color=discord.Color.blurple()
         )
@@ -927,7 +927,7 @@ class Profile(commands.Cog):
         # Manga stats
         manga_genres = ", ".join(top_genres(stats_manga.get("genres", []), 3)) or "N/A"
         profile_embed.add_field(
-            name="� Manga Stats",
+            name="📚 Manga Stats",
             value=f"**Total:** {stats_manga.get('count', 0):,}\n**Avg Score:** {manga_avg}\n**Top Genres:** {manga_genres}",
             inline=True
         )
@@ -962,12 +962,24 @@ class Profile(commands.Cog):
         try:
             msg = await interaction.followup.send(embed=profile_embed, view=unified_view)
         except Exception as e:
-            logger.exception(f"Failed to send profile followup: {e}")
-            # Attempt to send a simple message so the user sees something
+            logger.exception(f"Failed to send profile followup (interactive): {e}")
+            # Attempt to send a static fallback embed so user still sees profile content
             try:
-                await interaction.followup.send("⚠️ Failed to attach interactive controls. Showing static profile.", ephemeral=True)
-            except Exception:
-                pass
+                fallback_embed = profile_embed.copy()
+                # Slight aesthetic tweak for fallback to indicate static mode
+                fallback_embed.color = discord.Color.from_rgb(114, 137, 218)  # Discord blurple
+                fallback_embed.set_footer(text="⚠️ Static Profile — interactive controls unavailable")
+                await interaction.followup.send(
+                    "⚠️ Failed to attach interactive controls. Showing static profile instead.",
+                    embed=fallback_embed
+                )
+                logger.info("Static fallback profile sent successfully")
+            except Exception as inner_e:
+                logger.error(f"Failed to send static fallback profile: {inner_e}")
+                try:
+                    await interaction.followup.send("❌ Critical error: Unable to display profile at all.", ephemeral=True)
+                except Exception:
+                    pass
             return
 
         # Debug: log the returned message and component structure for troubleshooting
