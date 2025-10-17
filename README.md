@@ -170,7 +170,7 @@ ENVIRONMENT=development
 
 ### 🎨 Customization
 - `/theme` - Browse, preview, and apply custom themes
-- `/guild_theme` - Manage server-wide theme settings (Moderator)
+- `/admin-guild-theme` - Manage server-wide theme settings (Bot Moderator)
 
 ### ⚙️ Server Management (Admin/Moderator Only)
 - `/server-config` - Centralized server configuration

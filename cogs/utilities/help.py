@@ -170,11 +170,11 @@ class HelpCog(commands.Cog):
                     "note": "Customize your bot experience with themes",
                     "examples": ["/theme"]
                 },
-                "guild_theme": {
-                    "desc": "Manage guild-wide theme settings (Server Moderator only)",
-                    "usage": "/guild_theme",
+                "admin-guild-theme": {
+                    "desc": "Manage guild-wide theme settings (Bot Moderator only)",
+                    "usage": "/admin-guild-theme",
                     "note": "Set server-wide default themes",
-                    "examples": ["/guild_theme"]
+                    "examples": ["/admin-guild-theme"]
                 }
             },
             "⚙️ Server Management": {

@@ -44,6 +44,22 @@ if not any(isinstance(h, logging.FileHandler) and getattr(h, 'baseFilename', Non
 
 logger.info("Theme system logging initialized")
 
+# Database imports for bot moderator checks
+from database import is_user_bot_moderator
+
+def bot_moderator_only():
+    """App command check that allows only bot moderators.
+    Used for bot-wide administrative actions.
+    """
+    async def predicate(interaction: discord.Interaction) -> bool:
+        try:
+            return await is_user_bot_moderator(interaction.user)
+        except Exception:
+            return False
+
+    return app_commands.check(predicate)
+
+
 class ThemeCategory(Enum):
     """Categories for theme organization"""
     CLASSIC = "classic"
@@ -988,7 +1004,8 @@ class CustomThemeSystem(commands.Cog):
         
         await interaction.followup.send(embed=embed)
     
-    @app_commands.command(name="guild_theme", description="Manage guild-wide theme settings (Server Moderator only)")
+    @bot_moderator_only()
+    @app_commands.command(name="admin-guild-theme", description="Manage guild-wide theme settings (Bot Moderator only)")
     @app_commands.describe(
         action="What would you like to do?",
         theme="Theme to set as guild default"
@@ -998,28 +1015,16 @@ class CustomThemeSystem(commands.Cog):
         app_commands.Choice(name="View Current", value="current"),
         app_commands.Choice(name="Reset to Default", value="reset")
     ])
-    @app_commands.default_permissions(manage_guild=True)
-    async def guild_theme_command(
+    async def admin_guild_theme_command(
         self,
         interaction: discord.Interaction,
         action: str,
         theme: Optional[str] = None
     ):
-        """Guild theme management (server moderator only)"""
+        """Guild theme management (bot moderator only)"""
         try:
             guild_id = interaction.guild.id if interaction.guild else None
-            logger.info(f"Guild theme command invoked by {interaction.user.display_name} ({interaction.user.id}) in guild {guild_id} ({interaction.guild.name if interaction.guild else 'DM'}): action={action}, theme={theme}")
-            
-            # Check permissions (double check for security)
-            if not interaction.user.guild_permissions.manage_guild:
-                logger.warning(f"Permission denied for guild theme command: user {interaction.user.id} in guild {guild_id}")
-                embed = discord.Embed(
-                    title="❌ Permission Denied",
-                    description="You need 'Manage Server' permission to change guild themes.",
-                    color=0xFF0000
-                )
-                await interaction.response.send_message(embed=embed, ephemeral=True)
-                return
+            logger.info(f"Admin guild theme command invoked by {interaction.user.display_name} ({interaction.user.id}) in guild {guild_id} ({interaction.guild.name if interaction.guild else 'DM'}): action={action}, theme={theme}")
             
             await interaction.response.defer()
             
@@ -1031,7 +1036,7 @@ class CustomThemeSystem(commands.Cog):
                 await self._handle_reset_guild_theme(interaction)
         
         except Exception as e:
-            logger.error(f"Error in guild_theme command: {e}")
+            logger.error(f"Error in admin-guild-theme command: {e}")
             embed = discord.Embed(
                 title="❌ Error",
                 description="An error occurred while processing the guild theme request.",
