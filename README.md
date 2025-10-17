@@ -154,7 +154,7 @@ ENVIRONMENT=development
 - `/trending` - View currently trending anime and manga
 - `/recommendations [member]` - AI-powered personalized recommendations
 - `/random` - Get random anime/manga suggestions
-- `/news-manage` - Manage Twitter/X news monitoring (Moderator)
+- `/admin-news-manage` - Manage Twitter/X news monitoring (Bot Moderator)
 
 ### 🏆 Challenges & Competition
 - `/challenge_progress` - View your reading challenge progress
