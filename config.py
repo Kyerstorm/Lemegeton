@@ -95,6 +95,10 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST")
 AURA_WEBHOOK_URL = os.getenv("AURA_WEBHOOK_URL")
 
+# IGDB (Twitch) API credentials for game cover lookups
+IGDB_CLIENT_ID = os.getenv("IGDB_CLIENT_ID")
+IGDB_CLIENT_SECRET = os.getenv("IGDB_CLIENT_SECRET")
+
 # fallback defaults
 if OLLAMA_HOST == "":
     OLLAMA_HOST = None
