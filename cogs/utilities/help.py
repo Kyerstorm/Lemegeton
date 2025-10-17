@@ -98,11 +98,11 @@ class HelpCog(commands.Cog):
                     "note": "Generate shareable 3x3 grids with custom selections. Fetches covers from AniList automatically.",
                     "examples": ["/3x3 anime", "/3x3 manga"]
                 },
-                "news-manage": {
+                "admin-news-manage": {
                     "desc": "Manage Twitter/X news monitoring for anime/manga updates",
-                    "usage": "/news-manage",
+                    "usage": "/admin-news-manage",
                     "note": "Monitor Twitter accounts for anime/manga news",
-                    "examples": ["/news-manage"]
+                    "examples": ["/admin-news-manage"]
                 }
             },
             "🏆 Challenges & Competition": {
