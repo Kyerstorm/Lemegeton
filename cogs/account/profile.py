@@ -10,6 +10,20 @@ from typing import Optional, List, Dict, Tuple
 from datetime import datetime, timedelta
 import re
 import json
+import urllib.parse
+
+def sanitize_url(url: str) -> Optional[str]:
+    """Ensure URL is well-formed and safe for Discord embeds"""
+    if not url or not isinstance(url, str):
+        return None
+    url = url.strip()  # remove leading/trailing spaces
+    # Encode spaces or illegal characters in query
+    url = re.sub(r'\s+', '', url)
+    parsed = urllib.parse.urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    # Rebuild a safe URL
+    return urllib.parse.urlunparse(parsed)
 
 from database import (
     # Guild-aware functions (multi-guild support)
@@ -868,7 +882,14 @@ class Profile(commands.Cog):
         # Use first bio image if available, otherwise banner
         if bio_images:
             try:
-                profile_embed.set_image(url=bio_images[0])
+                safe_url = sanitize_url(bio_images[0])
+                if safe_url:
+                    profile_embed.set_image(url=safe_url)
+                    logger.info(f"Set profile embed image to sanitized URL: {safe_url}")
+                else:
+                    logger.warning(f"Invalid image URL skipped: {bio_images[0]}")
+                    if banner_url:
+                        profile_embed.set_image(url=banner_url)
                 logger.info(f"Set profile embed image to bio image: {bio_images[0]}")
             except Exception as e:
                 logger.error(f"Failed to set bio image: {e}")
@@ -958,6 +979,10 @@ class Profile(commands.Cog):
         favorites_view.profile_pager = unified_view
         if gallery_view:
             gallery_view.profile_pager = unified_view
+        
+        if profile_embed.image.url and " " in profile_embed.image.url:
+            logger.warning("Detected invalid image URL in embed; removing it before sending.")
+            profile_embed.set_image(url=None)
         
         try:
             msg = await interaction.followup.send(embed=profile_embed, view=unified_view)
@@ -1612,6 +1637,7 @@ class AniListRegisterModal(discord.ui.Modal, title="Register AniList"):
                 f"✅ Registered AniList username **{anilist_name}** successfully! Try `/profile`.",
                 ephemeral=True
             )
+
 
 
 async def setup(bot: commands.Bot):
