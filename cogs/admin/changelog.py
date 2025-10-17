@@ -301,7 +301,7 @@ class Changelog(commands.Cog):
         publish_to="Where to publish the changelog",
         changelog_type="Type of changelog update",
         color="Embed color (hex code like #FF5733 or color name)",
-        role="Optional role to ping (type to search, defaults to @bot-updates if not specified)",
+        role="Optional role to ping (only pings when specified)",
         image_url="Optional image URL to embed",
         title_override="Override the auto-detected title"
     )
@@ -418,11 +418,9 @@ class Changelog(commands.Cog):
                     await interaction.followup.send("❌ No servers have configured bot update channels.", ephemeral=True)
                     return
                 
-                # Send to all configured channels with automatic role mentions
+                # Send to all configured channels (no role mentions by default)
                 success_count = 0
                 failed_guilds = []
-                roles_mentioned = 0
-                roles_restored = []
                 
                 for guild_id, channel_id in update_channels.items():
                     try:
@@ -433,21 +431,8 @@ class Changelog(commands.Cog):
                         
                         guild = channel.guild
                         
-                        # Try to get the notification role for this guild
-                        notification_role = await self.get_notification_role(guild)
-                        
+                        # No automatic role mentioning for all servers
                         content_msg = None
-                        role_was_modified = False
-                        
-                        if notification_role:
-                            # Mention the role safely
-                            mention_text, was_modified = await self.mention_role_safely(notification_role)
-                            content_msg = mention_text
-                            role_was_modified = was_modified
-                            roles_mentioned += 1
-                            
-                            if role_was_modified:
-                                roles_restored.append((notification_role, guild))
                         
                         # Send the message
                         if image_file:
@@ -463,13 +448,6 @@ class Changelog(commands.Cog):
                         else:
                             await channel.send(content=content_msg, embed=embed)
                         
-                        # Restore role mentionability if we changed it
-                        if role_was_modified and notification_role:
-                            try:
-                                await notification_role.edit(mentionable=False)
-                            except Exception as e:
-                                logger.warning(f"Failed to restore role mentionability in guild {guild_id}: {e}")
-                        
                         success_count += 1
                         
                     except Exception as e:
@@ -478,8 +456,6 @@ class Changelog(commands.Cog):
                 
                 # Send summary
                 summary = f"✅ {type_config['title']} published to {success_count}/{len(update_channels)} configured servers."
-                if roles_mentioned > 0:
-                    summary += f"\n📢 Mentioned notification roles in {roles_mentioned} server(s)."
                 if failed_guilds:
                     summary += f"\n\n❌ Failed to send to:\n" + "\n".join(f"• {failure}" for failure in failed_guilds[:5])
                     if len(failed_guilds) > 5:
@@ -512,30 +488,25 @@ class Changelog(commands.Cog):
                 content_msg = None
                 role_to_mention = None
                 
-                # Convert role string (ID) to discord.Role object if provided
+                # Only mention role if explicitly provided
                 if role:
                     try:
                         role_to_mention = interaction.guild.get_role(int(role))
                         if not role_to_mention:
-                            await interaction.followup.send(f"⚠️ Could not find the specified role. Using default @bot-updates instead.", ephemeral=True)
+                            await interaction.followup.send(f"⚠️ Could not find the specified role. No role will be mentioned.", ephemeral=True)
+                        else:
+                            # Use the safe mention method
+                            mention_text, was_modified = await self.mention_role_safely(role_to_mention)
+                            content_msg = mention_text
+                            
+                            # Restore role if we modified it
+                            if was_modified:
+                                try:
+                                    await role_to_mention.edit(mentionable=False)
+                                except Exception as e:
+                                    logger.warning(f"Failed to restore role mentionability: {e}")
                     except (ValueError, TypeError):
-                        await interaction.followup.send(f"⚠️ Invalid role ID. Using default @bot-updates instead.", ephemeral=True)
-                
-                # If no role specified or role not found, try to use the notification role
-                if not role_to_mention:
-                    role_to_mention = await self.get_notification_role(interaction.guild)
-                
-                if role_to_mention:
-                    # Use the safe mention method
-                    mention_text, was_modified = await self.mention_role_safely(role_to_mention)
-                    content_msg = mention_text
-                    
-                    # Restore role if we modified it
-                    if was_modified:
-                        try:
-                            await role_to_mention.edit(mentionable=False)
-                        except Exception as e:
-                            logger.warning(f"Failed to restore role mentionability: {e}")
+                        await interaction.followup.send(f"⚠️ Invalid role ID. No role will be mentioned.", ephemeral=True)
                 
                 if image_file:
                     await channel.send(content=content_msg, embed=embed, file=image_file)
