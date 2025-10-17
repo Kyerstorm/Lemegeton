@@ -86,7 +86,7 @@ REQUEST_TIMEOUT = 10
 
 # Cache settings
 AFFINITY_CACHE_FILE = Path("data") / "affinity_cache.json"
-CACHE_DURATION_DAYS = 7
+CACHE_DURATION_DAYS = 30
 CACHE_DURATION_SECONDS = CACHE_DURATION_DAYS * 24 * 60 * 60
 
 # ------------------------------------------------------
@@ -543,8 +543,8 @@ class Affinity(commands.Cog):
             if self.show_details:
                 # Detailed view with score breakdowns
                 description_parts = []
-                for i, (discord_id, score) in enumerate(current_entries, start=start + 1):
-                    base_info = f"{i}. `{score}%` — <@{discord_id}>"
+                for i, (discord_id, anilist_username, score) in enumerate(current_entries, start=start + 1):
+                    base_info = f"{i}. `{score}%` — **{anilist_username}**"
                     
                     # Add breakdown if available
                     if discord_id in self.detailed_data:
@@ -562,8 +562,8 @@ class Affinity(commands.Cog):
             else:
                 # Standard compact view
                 description = "\n".join(
-                    f"{i}. `{score}%` — <@{discord_id}>"
-                    for i, (discord_id, score) in enumerate(current_entries, start=start + 1)
+                    f"{i}. `{score}%` — **{anilist_username}**"
+                    for i, (discord_id, anilist_username, score) in enumerate(current_entries, start=start + 1)
                 )
                 embed_title = f"💞 Affinity Ranking for {self.user_name}"
 
@@ -572,7 +572,7 @@ class Affinity(commands.Cog):
 
             # Color coding based on average affinity
             if current_entries:
-                avg_score = sum(score for _, score in current_entries) / len(current_entries)
+                avg_score = sum(score for _, _, score in current_entries) / len(current_entries)
                 if avg_score >= 80:
                     color = discord.Color.gold()
                 elif avg_score >= 60:
@@ -592,8 +592,8 @@ class Affinity(commands.Cog):
             
             # Enhanced footer with statistics
             if self.entries:
-                highest_score = max(score for _, score in self.entries)
-                avg_all_score = sum(score for _, score in self.entries) / len(self.entries)
+                highest_score = max(score for _, _, score in self.entries)
+                avg_all_score = sum(score for _, _, score in self.entries) / len(self.entries)
                 footer_text = (f"Page {self.page + 1}/{total_pages} • {len(self.entries)} total results\n"
                              f"Highest: {highest_score}% • Average: {avg_all_score:.1f}%")
                 if self.show_details:
@@ -753,8 +753,28 @@ class Affinity(commands.Cog):
                         results = cached_data["results"]
                         detailed_data = cached_data["detailed_data"]
                         
+                        # Convert old cache format (discord_id, score) to new format (discord_id, anilist_username, score)
+                        if results and len(results[0]) == 2:  # Old format
+                            logger.info("Converting old cache format to new format")
+                            converted_results = []
+                            for discord_id, score in results:
+                                # Look up AniList username for this Discord ID
+                                try:
+                                    async with aiosqlite.connect(DB_PATH) as db:
+                                        cursor = await db.execute(
+                                            "SELECT anilist_username FROM users WHERE discord_id = ? AND guild_id = ?",
+                                            (discord_id, guild_id)
+                                        )
+                                        row = await cursor.fetchone()
+                                        anilist_username = row[0] if row else f"User_{discord_id}"
+                                except Exception:
+                                    anilist_username = f"User_{discord_id}"
+                                
+                                converted_results.append((discord_id, anilist_username, score))
+                            results = converted_results
+                        
                         # Sort results by affinity score (highest first)
-                        results.sort(key=lambda x: x[1], reverse=True)
+                        results.sort(key=lambda x: x[2], reverse=True)
                         
                         logger.info(f"Using cached affinity results: {len(results)} comparisons")
                         
@@ -763,6 +783,12 @@ class Affinity(commands.Cog):
                         await interaction.followup.send(embed=view.get_embed(), view=view)
                         logger.info(f"Sent cached affinity results for {user_display}")
                         return
+
+                # Send wait message for fresh calculations
+                await interaction.followup.send(
+                    "⏳ Please wait up to 2 minutes for affinity calculation. You will only have to do this once a month due to caching.",
+                    ephemeral=True
+                )
 
                 # Handle specific user comparison
                 if user:
@@ -885,12 +911,15 @@ class Affinity(commands.Cog):
                 other_user = await self.fetch_user(other_anilist)
                 if other_user:
                     score, breakdown = self.calculate_affinity(me, other_user, return_breakdown=True)
-                    results.append((other_discord_id, score))
+                    results.append((other_discord_id, other_anilist, score))
                     detailed_data[other_discord_id] = breakdown
                     successful_comparisons += 1
                     logger.debug(f"Calculated advanced affinity with {other_anilist}: {score}%")
                 else:
                     logger.warning(f"Failed to fetch data for {other_anilist}")
+                
+                # Add 2-second delay between fetch requests to avoid rate limiting
+                await asyncio.sleep(2)
 
             if not results:
                 logger.warning("No successful affinity calculations")
@@ -901,7 +930,7 @@ class Affinity(commands.Cog):
                 return
 
             # Sort results by affinity score (highest first)
-            results.sort(key=lambda x: x[1], reverse=True)
+            results.sort(key=lambda x: x[2], reverse=True)
             
             logger.info(f"Advanced affinity calculation completed: {successful_comparisons}/{len(all_users)} successful comparisons")
 
