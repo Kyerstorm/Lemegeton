@@ -59,7 +59,6 @@ DATA_DIR.mkdir(exist_ok=True)
 COVER_CACHE_DIR = DATA_DIR / "cover_cache"
 COVER_CACHE_DIR.mkdir(exist_ok=True)
 CACHE_INDEX_FILE = DATA_DIR / "cover_cache_index.json"
-PRESETS_FILE = DATA_DIR / "3x3_presets.json"
 
 # Cache TTL: 30 days
 CACHE_TTL_DAYS = 30
@@ -317,85 +316,14 @@ class CoverCache:
             logger.info(f"Cleaned up {len(expired_keys)} expired cache entries")
 
 
-class PresetManager:
-    """Manage user 3x3 presets"""
-    
-    def __init__(self):
-        self.presets = self._load_presets()
-    
-    def _load_presets(self) -> Dict:
-        """Load presets from disk"""
-        if PRESETS_FILE.exists():
-            try:
-                with open(PRESETS_FILE, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception as e:
-                logger.error(f"Error loading presets: {e}")
-        return {}
-    
-    def _save_presets(self):
-        """Save presets to disk"""
-        try:
-            with open(PRESETS_FILE, 'w', encoding='utf-8') as f:
-                json.dump(self.presets, f, indent=2)
-        except Exception as e:
-            logger.error(f"Error saving presets: {e}")
-    
-    def save_preset(self, user_id: int, preset_name: str, urls: List[str], media_type: str):
-        """Save a user preset"""
-        user_key = str(user_id)
-        
-        if user_key not in self.presets:
-            self.presets[user_key] = {}
-        
-        self.presets[user_key][preset_name] = {
-            "urls": urls,
-            "media_type": media_type,
-            "created_at": datetime.utcnow().isoformat()
-        }
-        
-        self._save_presets()
-        logger.info(f"Saved preset '{preset_name}' for user {user_id}")
-    
-    def get_preset(self, user_id: int, preset_name: str) -> Optional[Dict]:
-        """Get a user preset"""
-        user_key = str(user_id)
-        
-        if user_key in self.presets and preset_name in self.presets[user_key]:
-            return self.presets[user_key][preset_name]
-        
-        return None
-    
-    def list_presets(self, user_id: int) -> List[str]:
-        """List all presets for a user"""
-        user_key = str(user_id)
-        
-        if user_key in self.presets:
-            return list(self.presets[user_key].keys())
-        
-        return []
-    
-    def delete_preset(self, user_id: int, preset_name: str) -> bool:
-        """Delete a user preset"""
-        user_key = str(user_id)
-        
-        if user_key in self.presets and preset_name in self.presets[user_key]:
-            del self.presets[user_key][preset_name]
-            self._save_presets()
-            logger.info(f"Deleted preset '{preset_name}' for user {user_id}")
-            return True
-        
-        return False
-
 
 class ThreeByThreeModal(discord.ui.Modal):
     """Modal for collecting 9 AniList URLs or IGDB game URLs"""
     
-    def __init__(self, media_type: str, cog, preset_name: Optional[str] = None):
+    def __init__(self, media_type: str, cog):
         super().__init__(title=f"Create Your 3x3 {media_type.title()} Grid")
         self.media_type = media_type
         self.cog = cog
-        self.preset_name = preset_name
         
         # Determine placeholder text based on media type
         if media_type == "games":
@@ -461,7 +389,7 @@ class ThreeByThreeModal(discord.ui.Modal):
         ]
         
         # Show second modal for remaining 4 inputs
-        second_modal = ThreeByThreeModalPart2(self.media_type, inputs, self.cog, self.preset_name)
+        second_modal = ThreeByThreeModalPart2(self.media_type, inputs, self.cog)
         await interaction.followup.send("Please enter the remaining 4 inputs:", ephemeral=True)
         await interaction.followup.send("", view=ContinueView(second_modal), ephemeral=True)
 
@@ -469,12 +397,11 @@ class ThreeByThreeModal(discord.ui.Modal):
 class ThreeByThreeModalPart2(discord.ui.Modal):
     """Second modal for collecting remaining 4 inputs"""
     
-    def __init__(self, media_type: str, previous_inputs: List[str], cog, preset_name: Optional[str] = None):
+    def __init__(self, media_type: str, previous_inputs: List[str], cog):
         super().__init__(title=f"3x3 Grid - Remaining Inputs")
         self.media_type = media_type
         self.previous_inputs = previous_inputs
         self.cog = cog
-        self.preset_name = preset_name
         
         # Determine placeholder text based on media type
         if media_type == "games":
@@ -557,15 +484,6 @@ class ThreeByThreeModalPart2(discord.ui.Modal):
         
         logger.info(f"Generating 3x3 for {interaction.user.name}: {all_inputs}")
         
-        # Save as preset if name provided
-        if self.preset_name:
-            self.cog.preset_manager.save_preset(
-                interaction.user.id,
-                self.preset_name,
-                all_inputs,
-                self.media_type
-            )
-        
         # Generate the 3x3 grid
         try:
             image_bytes = await self.cog.generate_3x3(all_inputs, self.media_type, interaction.user)
@@ -615,8 +533,7 @@ class ThreeByThree(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.cover_cache = CoverCache()
-        self.preset_manager = PresetManager()
-        logger.info("Enhanced 3x3 Generator cog initialized with caching and presets")
+        logger.info("Enhanced 3x3 Generator cog initialized with caching")
         
         if not PIL_AVAILABLE:
             logger.warning("PIL/Pillow not available - 3x3 generation will not work!")
@@ -1048,145 +965,6 @@ class ThreeByThree(commands.Cog):
         # Show modal to collect titles
         modal = ThreeByThreeModal(media_type.value, self)
         await interaction.response.send_modal(modal)
-    
-    @app_commands.command(name="3x3-preset", description="💾 Create a 3x3 from a saved preset or save current as preset")
-    @app_commands.describe(
-        action="Choose to load or save a preset",
-        preset_name="Name of the preset"
-    )
-    @app_commands.choices(action=[
-        app_commands.Choice(name="Load Preset", value="load"),
-        app_commands.Choice(name="Save New Preset", value="save"),
-        app_commands.Choice(name="List My Presets", value="list"),
-        app_commands.Choice(name="Delete Preset", value="delete")
-    ])
-    async def three_by_three_preset(self, interaction: discord.Interaction, 
-                                    action: app_commands.Choice[str],
-                                    preset_name: Optional[str] = None):
-        """Manage 3x3 presets"""
-        
-        if action.value == "list":
-            presets = self.preset_manager.list_presets(interaction.user.id)
-            
-            if not presets:
-                await interaction.response.send_message(
-                    "📭 You don't have any saved presets yet.\n"
-                    "Use `/3x3-preset save <name>` to save your next 3x3!",
-                    ephemeral=True
-                )
-                return
-            
-            embed = discord.Embed(
-                title="💾 Your 3x3 Presets",
-                description="\n".join([f"• `{p}`" for p in presets]),
-                color=discord.Color.blue()
-            )
-            embed.set_footer(text="Use /3x3-preset load <name> to load a preset")
-            
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-        
-        if not preset_name:
-            await interaction.response.send_message(
-                "❌ Please provide a preset name!",
-                ephemeral=True
-            )
-            return
-        
-        if action.value == "load":
-            preset = self.preset_manager.get_preset(interaction.user.id, preset_name)
-            
-            if not preset:
-                await interaction.response.send_message(
-                    f"❌ Preset '{preset_name}' not found!\n"
-                    f"Use `/3x3-preset list` to see your presets.",
-                    ephemeral=True
-                )
-                return
-            
-            # Generate 3x3 from preset
-            await interaction.response.defer(ephemeral=False)
-            
-            image_bytes = await self.generate_3x3(
-                preset["urls"],
-                preset["media_type"],
-                interaction.user
-            )
-            
-            if image_bytes:
-                file = discord.File(fp=image_bytes, filename=f"3x3_{preset['media_type']}.png")
-                
-                embed = discord.Embed(
-                    title=f"💾 {interaction.user.display_name}'s Preset: {preset_name}",
-                    description=f"Media Type: {preset['media_type'].title()}",
-                    color=discord.Color.green()
-                )
-                embed.set_image(url=f"attachment://3x3_{preset['media_type']}.png")
-                embed.set_footer(text=f"Loaded from preset • Created {preset['created_at'][:10]}")
-                
-                await interaction.followup.send(embed=embed, file=file)
-            else:
-                await interaction.followup.send(
-                    "❌ Failed to generate 3x3 from preset.",
-                    ephemeral=True
-                )
-        
-        elif action.value == "save":
-            # Show modal to collect titles for saving
-            await interaction.response.send_message(
-                f"💾 Creating preset '{preset_name}'...\n"
-                f"Please fill out the following forms to save your preset.",
-                ephemeral=True
-            )
-            
-            # Ask for media type first
-            await interaction.followup.send(
-                "What media type for this preset? (Use `/3x3 anime` or `/3x3 manga` and it will be saved)",
-                ephemeral=True
-            )
-        
-        elif action.value == "delete":
-            success = self.preset_manager.delete_preset(interaction.user.id, preset_name)
-            
-            if success:
-                await interaction.response.send_message(
-                    f"✅ Preset '{preset_name}' deleted successfully!",
-                    ephemeral=True
-                )
-            else:
-                await interaction.response.send_message(
-                    f"❌ Preset '{preset_name}' not found!",
-                    ephemeral=True
-                )
-    
-    @app_commands.command(name="3x3-cache", description="🗑️ Clear cover cache (Admin only)")
-    async def three_by_three_cache(self, interaction: discord.Interaction):
-        """Clear the cover cache"""
-        
-        # Check if user is admin
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message(
-                "❌ This command requires Administrator permissions.",
-                ephemeral=True
-            )
-            return
-        
-        await interaction.response.defer(ephemeral=True)
-        
-        # Clean up old cache
-        self.cover_cache.cleanup_old_cache()
-        
-        # Get cache stats
-        cache_size = len(self.cover_cache.index)
-        
-        embed = discord.Embed(
-            title="🗑️ Cache Management",
-            description=f"Cache cleaned successfully!\n\n"
-                       f"**Current cache size:** {cache_size} covers",
-            color=discord.Color.green()
-        )
-        
-        await interaction.followup.send(embed=embed, ephemeral=True)
     
     async def cog_load(self):
         """Called when the cog is loaded"""
