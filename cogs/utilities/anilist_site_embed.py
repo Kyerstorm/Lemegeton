@@ -257,7 +257,7 @@ class AniListCog(commands.Cog):
             )
         
         # Build progress lines
-        progress_lines = [f"`{'AniList User':<20} {col_name:<10} {'Rating':<7} {'Status':<10}`"]
+        progress_lines = [f"`{'User':<20} {col_name:<10} {'Rating':<7} {'Status':<10}`"]
         progress_lines.append("`{:-<20} {:-<10} {:-<7} {:-<10}`".format("", "", "", ""))
         
         for user_data in filtered_data:
