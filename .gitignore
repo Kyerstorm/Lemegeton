@@ -56,3 +56,5 @@ env/
 structured_changelog.txt
 monitoring_metrics.json
 data/database.db
+__pycache__/config.cpython-313.pyc
+__pycache__/database.cpython-313.pyc
