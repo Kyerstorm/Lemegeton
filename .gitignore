@@ -54,3 +54,5 @@ env/
 # Local Netlify folder
 .netlify
 structured_changelog.txt
+monitoring_metrics.json
+data/database.db
