@@ -8,6 +8,8 @@ import time
 import logging
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Union
+import json
+from datetime import datetime, timedelta
 
 from helpers.cache_helper import (
     load_timestamped_cache,
@@ -229,6 +231,65 @@ MANGA_FORMAT_PATTERNS = {
 CACHE_TTL = 86400  # 1 day in seconds
 PAGE_SIZE = 5  # Users per page
 TIMEOUT_DURATION = 300  # 5 minutes for view timeout
+
+# Leaderboard cache settings (30 days)
+LEADERBOARD_CACHE_FILE = Path("data") / "leaderboard_cache.json"
+LEADERBOARD_CACHE_DURATION_DAYS = 30
+LEADERBOARD_CACHE_DURATION_SECONDS = LEADERBOARD_CACHE_DURATION_DAYS * 24 * 60 * 60
+
+# ------------------------------------------------------
+# Leaderboard Cache Management Functions
+# ------------------------------------------------------
+def load_leaderboard_cache() -> dict:
+    """Load leaderboard cache from disk."""
+    if not LEADERBOARD_CACHE_FILE.exists():
+        return {}
+    
+    try:
+        with open(LEADERBOARD_CACHE_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning(f"Failed to load leaderboard cache: {e}")
+        return {}
+
+def save_leaderboard_cache(cache: dict):
+    """Save leaderboard cache to disk."""
+    try:
+        LEADERBOARD_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(LEADERBOARD_CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(cache, f, indent=2, ensure_ascii=False)
+        logger.debug("Leaderboard cache saved")
+    except Exception as e:
+        logger.error(f"Failed to save leaderboard cache: {e}")
+
+def get_leaderboard_cache_key(guild_id: int, medium: str) -> str:
+    """Generate cache key for leaderboard results."""
+    return f"{guild_id}_{medium}"
+
+def get_cached_leaderboard(cache_key: str) -> Optional[List[Tuple]]:
+    """Get cached leaderboard data if still valid."""
+    cache = load_leaderboard_cache()
+    entry = cache.get(cache_key)
+    
+    if not entry:
+        return None
+    
+    cached_time = datetime.fromisoformat(entry["timestamp"])
+    if datetime.utcnow() - cached_time > timedelta(seconds=LEADERBOARD_CACHE_DURATION_SECONDS):
+        logger.debug(f"Leaderboard cache expired for key {cache_key}")
+        return None
+    
+    logger.info(f"Using cached leaderboard data for key {cache_key}")
+    return entry["data"]
+
+def set_cached_leaderboard(cache_key: str, data: List[Tuple]):
+    """Cache leaderboard data with current timestamp."""
+    cache = load_leaderboard_cache()
+    cache[cache_key] = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "data": data
+    }
+    save_leaderboard_cache(cache)
 
 # Global cache for user fetch timestamps
 _FETCH_CACHE_NAME = "leaderboard_last_fetch"
@@ -1120,6 +1181,37 @@ class Leaderboard(commands.Cog):
             chosen_medium = medium.value.lower()
             media_config = MEDIA_TYPES.get(chosen_medium, MEDIA_TYPES["manga"])
             
+            # Check cache first
+            cache_key = get_leaderboard_cache_key(guild_id, chosen_medium)
+            cached_data = get_cached_leaderboard(cache_key)
+            
+            if cached_data:
+                logger.info(f"Using cached leaderboard data for {chosen_medium} in guild {guild_id}")
+                
+                # Create and send the leaderboard view with cached data
+                view = LeaderboardView(cached_data, medium=chosen_medium)
+                
+                # Create loading embed
+                loading_embed = discord.Embed(
+                    title="🔄 Loading Cached Leaderboard...",
+                    description=f"Generating {media_config['title']} (from cache)",
+                    color=discord.Color.blue()
+                )
+                
+                message = await interaction.followup.send(embed=loading_embed, view=view)
+                
+                # Update with actual leaderboard content
+                await view.update_embed(message)
+                
+                logger.info(f"Successfully displayed cached {chosen_medium} leaderboard with {len(cached_data)} users")
+                return
+            
+            # Send wait message for fresh calculations
+            await interaction.followup.send(
+                "⏳ Please wait up to 2 minutes for leaderboard generation. You will only have to do this once a month due to caching.",
+                ephemeral=True
+            )
+            
             # Clean up any duplicate entries first
             await self.cleanup_duplicate_user_stats()
             
@@ -1139,6 +1231,10 @@ class Leaderboard(commands.Cog):
                 await interaction.followup.send(embed=error_embed, ephemeral=True)
                 logger.warning(f"No leaderboard data found for {chosen_medium}")
                 return
+
+            # Cache the leaderboard data
+            set_cached_leaderboard(cache_key, leaderboard_data)
+            logger.info(f"Cached leaderboard data for {chosen_medium} in guild {guild_id}")
 
             # Create and send the leaderboard view
             view = LeaderboardView(leaderboard_data, medium=chosen_medium)
@@ -1331,8 +1427,8 @@ class Leaderboard(commands.Cog):
                     else:
                         failed_updates += 1
                     
-                    # Small delay to avoid rate limiting
-                    await asyncio.sleep(0.1)
+                    # Small delay to avoid rate limiting (2 seconds between requests)
+                    await asyncio.sleep(2)
                     
                 except Exception as e:
                     logger.error(f"Error processing user {user_record}: {e}")
