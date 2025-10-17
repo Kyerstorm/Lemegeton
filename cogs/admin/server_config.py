@@ -11,7 +11,6 @@ from pathlib import Path
 from datetime import datetime
 
 from database import (
-    set_guild_mod_role, get_guild_mod_role, remove_guild_mod_role,
     get_guild_bot_update_channel, remove_guild_bot_update_channel,
     is_user_moderator, execute_db_operation
 )
@@ -54,59 +53,7 @@ class ServerConfigMainView(discord.ui.View):
         super().__init__(timeout=300.0)
         self.cog = cog
     
-    @discord.ui.button(label="🛡️ Moderator Role", style=discord.ButtonStyle.primary, row=0)
-    async def manage_mod_role(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Manage moderator role settings"""
-        await interaction.response.defer(ephemeral=True)
-        
-        try:
-            role_id = await get_guild_mod_role(interaction.guild.id)
-            
-            embed = discord.Embed(
-                title="🛡️ Moderator Role Management",
-                description="Configure the role that grants moderator permissions for bot commands.",
-                color=0x5865F2
-            )
-            
-            if role_id:
-                role = interaction.guild.get_role(role_id)
-                if role:
-                    embed.add_field(
-                        name="📊 Current Configuration",
-                        value=f"**Role:** {role.mention}\n**Members:** {len(role.members)} users\n**Created:** <t:{int(role.created_at.timestamp())}:R>",
-                        inline=False
-                    )
-                    embed.color = 0x57F287
-                else:
-                    embed.add_field(
-                        name="⚠️ Configuration Issue",
-                        value=f"Configured role (ID: {role_id}) no longer exists.",
-                        inline=False
-                    )
-                    embed.color = 0xFEE75C
-            else:
-                embed.add_field(
-                    name="📝 No Role Configured",
-                    value="No moderator role is currently set.\nModerator commands will fall back to Discord permissions.",
-                    inline=False
-                )
-                embed.color = 0xED4245
-            
-            embed.add_field(
-                name="ℹ️ About Moderator Roles",
-                value="Users with this role can use moderator-only bot commands without needing Discord's Manage Server permission.",
-                inline=False
-            )
-            
-            view = ModRoleConfigView(self.cog, role_id)
-            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-            logger.info(f"Mod role management opened by {interaction.user.id} in guild {interaction.guild.id}")
-        
-        except Exception as e:
-            logger.error(f"Error in mod role management: {e}")
-            await interaction.followup.send("❌ Error loading moderator role settings.", ephemeral=True)
-    
-    @discord.ui.button(label="📢 Bot Updates Channel", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label=" Bot Updates Channel", style=discord.ButtonStyle.primary, row=0)
     async def manage_bot_updates(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Manage bot updates channel settings"""
         await interaction.response.defer(ephemeral=True)
@@ -230,20 +177,6 @@ class ServerConfigMainView(discord.ui.View):
                 color=0x5865F2
             )
             
-            # Mod role
-            mod_role_id = await get_guild_mod_role(interaction.guild.id)
-            if mod_role_id:
-                mod_role = interaction.guild.get_role(mod_role_id)
-                mod_info = f"✅ {mod_role.mention}" if mod_role else f"⚠️ Role ID {mod_role_id} (not found)"
-            else:
-                mod_info = "❌ Not configured"
-            
-            embed.add_field(
-                name="🛡️ Moderator Role",
-                value=mod_info,
-                inline=True
-            )
-            
             # Bot updates channel
             bot_update_channel_id = await get_guild_bot_update_channel(interaction.guild.id)
             if bot_update_channel_id:
@@ -286,48 +219,6 @@ class ServerConfigMainView(discord.ui.View):
         except Exception as e:
             logger.error(f"Error viewing all settings: {e}")
             await interaction.followup.send("❌ Error loading server settings.", ephemeral=True)
-
-
-class ModRoleConfigView(discord.ui.View):
-    """View for configuring moderator role"""
-    
-    def __init__(self, cog, current_role_id):
-        super().__init__(timeout=300.0)
-        self.cog = cog
-        self.current_role_id = current_role_id
-        
-        # Disable remove button if no role is set
-        if not current_role_id:
-            self.children[1].disabled = True
-    
-    @discord.ui.button(label="✏️ Set Role", style=discord.ButtonStyle.success)
-    async def set_role(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Set moderator role"""
-        modal = SetModRoleModal(self.cog)
-        await interaction.response.send_modal(modal)
-    
-    @discord.ui.button(label="🗑️ Remove Role", style=discord.ButtonStyle.danger)
-    async def remove_role(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Remove moderator role configuration"""
-        await interaction.response.defer(ephemeral=True)
-        
-        try:
-            success = await remove_guild_mod_role(interaction.guild.id)
-            
-            if success:
-                embed = discord.Embed(
-                    title="✅ Moderator Role Removed",
-                    description="Moderator role configuration has been cleared.\nModerator commands will now fall back to Discord permissions.",
-                    color=0x57F287
-                )
-                await interaction.followup.send(embed=embed, ephemeral=True)
-                logger.info(f"Mod role removed for guild {interaction.guild.id} by {interaction.user.id}")
-            else:
-                await interaction.followup.send("❌ Failed to remove moderator role configuration.", ephemeral=True)
-        
-        except Exception as e:
-            logger.error(f"Error removing mod role: {e}")
-            await interaction.followup.send("❌ Error removing moderator role.", ephemeral=True)
 
 
 class BotUpdatesConfigView(discord.ui.View):
@@ -410,67 +301,6 @@ class InviteChannelConfigView(discord.ui.View):
         except Exception as e:
             logger.error(f"Error removing invite channel: {e}")
             await interaction.followup.send("❌ Error removing invite tracking channel.", ephemeral=True)
-
-
-class SetModRoleModal(discord.ui.Modal):
-    """Modal for setting moderator role"""
-    
-    def __init__(self, cog):
-        super().__init__(title="Set Moderator Role")
-        self.cog = cog
-    
-    role_id = discord.ui.TextInput(
-        label="Role ID or Role Mention",
-        placeholder="Enter role ID (e.g., 123456789) or mention (e.g., @Moderator)",
-        required=True,
-        max_length=100
-    )
-    
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        
-        try:
-            # Parse role ID from input
-            role_id_str = self.role_id.value.strip()
-            
-            # Remove mention formatting if present
-            role_id_str = role_id_str.replace("<@&", "").replace(">", "")
-            
-            # Convert to int
-            role_id = int(role_id_str)
-            
-            # Get the role
-            role = interaction.guild.get_role(role_id)
-            
-            if not role:
-                await interaction.followup.send("❌ Role not found. Please check the role ID.", ephemeral=True)
-                return
-            
-            # Set the mod role
-            success = await set_guild_mod_role(interaction.guild.id, role.id)
-            
-            if success:
-                embed = discord.Embed(
-                    title="✅ Moderator Role Set",
-                    description=f"**Role:** {role.mention}\n\nUsers with this role will have access to moderator commands.",
-                    color=0x57F287
-                )
-                if role >= interaction.guild.me.top_role:
-                    embed.add_field(
-                        name="⚠️ Warning",
-                        value="This role is higher than my highest role. I may not be able to check it properly in some cases.",
-                        inline=False
-                    )
-                await interaction.followup.send(embed=embed, ephemeral=True)
-                logger.info(f"Mod role set for guild {interaction.guild.id}: {role.name} ({role.id})")
-            else:
-                await interaction.followup.send("❌ Failed to set moderator role.", ephemeral=True)
-        
-        except ValueError:
-            await interaction.followup.send("❌ Invalid role ID format. Please enter a valid number.", ephemeral=True)
-        except Exception as e:
-            logger.error(f"Error setting mod role: {e}")
-            await interaction.followup.send("❌ Error setting moderator role.", ephemeral=True)
 
 
 class SetBotUpdatesChannelModal(discord.ui.Modal):
@@ -652,13 +482,7 @@ class ServerConfig(commands.Cog):
             )
             
             embed.add_field(
-                name="🛡️ Moderator Role",
-                value="Configure which role can use moderator commands",
-                inline=True
-            )
-            
-            embed.add_field(
-                name="📢 Bot Updates Channel",
+                name=" Bot Updates Channel",
                 value="Set where changelog updates are posted",
                 inline=True
             )
