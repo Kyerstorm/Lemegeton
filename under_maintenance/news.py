@@ -390,16 +390,29 @@ async def fetch_tweets(username: str, limit: int = 5) -> List[Dict]:
 # ---------------------- Cog ----------------------
 
 def bot_moderator_only():
-    """App command check that allows only bot moderators.
-    Used for bot-wide administrative actions.
+    """
+    App command check that allows either:
+      • Discord server administrators or guild owners
+      • Database-defined bot moderators
     """
     async def predicate(interaction: discord.Interaction) -> bool:
+        user = interaction.user
+
+        # ✅ Allow server admins or guild owners
+        if isinstance(user, discord.Member):
+            if user.guild_permissions.administrator or user == interaction.guild.owner:
+                return True
+
+        # ✅ Fallback to database moderator system
         try:
-            return await database.is_user_bot_moderator(interaction.user.id)
-        except Exception:
+            return await database.is_user_bot_moderator(user)
+        except Exception as e:
+            import logging
+            logging.getLogger("NewsBot").error(f"Moderator permission check failed: {e}")
             return False
 
     return app_commands.check(predicate)
+
 
 
 class NewsCog(commands.Cog):
