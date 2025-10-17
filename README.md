@@ -187,7 +187,6 @@ ENVIRONMENT=development
 
 ### 👑 Admin Commands (Bot Moderators Only)
 - `/changelog` - Create and publish changelogs
-- `/forceupdate` - Force anime/manga completion update
 - `/show_manga_channel` - View configured manga channel
 
 ## 🏗️ Project Structure
