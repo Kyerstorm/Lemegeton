@@ -200,7 +200,7 @@ async def _fetch_nitter_rss_instance(session: aiohttp.ClientSession, base: str, 
                 tweets.append({
                     "id": tid,
                     "url": _convert_to_twitter_url(link),
-                    "text": _clean_text(desc),
+                    "text": _clean_text(desc) if desc and len(desc.strip()) > 5 else f"New tweet from @{username}",
                     "date": date_obj
                 })
                 
@@ -251,42 +251,72 @@ async def _fetch_with_jina(username: str, limit: int = 5) -> List[Dict]:
                     
                 print(f"📄 Jina response length: {len(text)} characters")
                 
+                # Parse HTML to find tweet content more accurately
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(text, 'html.parser')
+                
                 # Look for X.com URLs too (Twitter rebrand)
                 patterns = [
                     r"https?://(?:www\.)?twitter\.com/[^/]+/status/(\d+)",
                     r"https?://(?:www\.)?x\.com/[^/]+/status/(\d+)"
                 ]
                 
-                entries = []
+                # Find all elements containing tweet URLs
+                tweet_elements = []
+                
+                # Find all elements containing tweet URLs
                 for pattern in patterns:
-                    for m in re.finditer(pattern, text):
-                        full = m.group(0)
-                        tid = m.group(1)
-                        entries.append((m.start(), full, tid))
+                    for match in re.finditer(pattern, text):
+                        url = match.group(0)
+                        tid = match.group(1)
+                        
+                        # Find the element containing this URL
+                        url_element = soup.find(lambda tag: tag.get('href') == url or url in str(tag))
+                        if url_element:
+                            # Try to find the tweet text - look for parent containers that might contain the tweet
+                            tweet_container = url_element
+                            for _ in range(5):  # Go up 5 levels max
+                                tweet_container = tweet_container.parent if tweet_container.parent else tweet_container
+                                text_content = tweet_container.get_text(strip=True)
+                                if text_content and len(text_content) > 20 and len(text_content) < 500:
+                                    # Check if this looks like tweet content (not bio)
+                                    if not any(word in text_content.lower() for word in ['bio', 'description', 'profile', 'follow', 'following', 'followers']):
+                                        tweet_elements.append((tid, url, text_content))
+                                        break
+                            
+                            # Fallback: extract text around the URL in the raw HTML
+                            if not any(t[0] == tid for t in tweet_elements):
+                                start = max(0, match.start() - 200)
+                                end = min(len(text), match.end() + 300)
+                                snippet = text[start:end]
+                                
+                                # Remove HTML tags
+                                snippet = re.sub(r'<[^>]+>', '', snippet)
+                                # Clean up whitespace
+                                snippet = re.sub(r'\s+', ' ', snippet).strip()
+                                
+                                # Extract text before the URL (likely the tweet content)
+                                url_pos = snippet.find(url.replace('https://', '').replace('http://', ''))
+                                if url_pos > 0:
+                                    tweet_text = snippet[:url_pos].strip()
+                                    if tweet_text and len(tweet_text) > 10:
+                                        tweet_elements.append((tid, url, tweet_text))
                 
-                print(f"🔍 Found {len(entries)} tweet URLs in Jina response")
+                # Remove duplicates
+                seen_ids = set()
+                unique_tweets = []
+                for tid, url, text in tweet_elements:
+                    if tid not in seen_ids:
+                        seen_ids.add(tid)
+                        unique_tweets.append({
+                            "id": tid,
+                            "url": _convert_to_twitter_url(url),
+                            "text": _clean_text(text),
+                            "date": datetime.utcnow()
+                        })
                 
-                seen = set()
-                ordered = []
-                for pos, full, tid in entries:
-                    if tid in seen:
-                        continue
-                    seen.add(tid)
-                    ordered.append((pos, full, tid))
-
-                for pos, full, tid in ordered[:limit]:
-                    start = max(0, pos - 300)
-                    snippet = text[start:pos + 400]
-                    snippet = re.sub(r"https?://\S+", "", snippet)
-                    snippet = _clean_text(snippet)
-                    tweets.append({
-                        "id": tid,
-                        "url": full,
-                        "text": snippet or f"Tweet {tid}",
-                        "date": datetime.utcnow()
-                    })
-                    
-                print(f"✅ Jina extracted {len(tweets)} tweets")
+                tweets = unique_tweets[:limit]
+                print(f"✅ Jina extracted {len(tweets)} tweets with improved parsing")
                     
     except asyncio.TimeoutError:
         print("⏰ Jina request timed out")
@@ -328,7 +358,7 @@ async def _fetch_with_mxttr(username: str, limit: int = 5) -> List[Dict]:
                     tweets.append({
                         "id": tid,
                         "url": _convert_to_twitter_url(link),
-                        "text": _clean_text(desc),
+                        "text": _clean_text(desc) if desc and len(desc.strip()) > 5 else f"New tweet from @{username}",
                         "date": date_obj
                     })
     except Exception:
@@ -358,6 +388,19 @@ async def fetch_tweets(username: str, limit: int = 5) -> List[Dict]:
 
 
 # ---------------------- Cog ----------------------
+
+def bot_moderator_only():
+    """App command check that allows only bot moderators.
+    Used for bot-wide administrative actions.
+    """
+    async def predicate(interaction: discord.Interaction) -> bool:
+        try:
+            return await database.is_user_bot_moderator(interaction.user.id)
+        except Exception:
+            return False
+
+    return app_commands.check(predicate)
+
 
 class NewsCog(commands.Cog):
     def __init__(self, bot):
@@ -470,7 +513,8 @@ class NewsCog(commands.Cog):
             self._task_started = False
 
     # Replace individual commands with single admin interface
-    @app_commands.command(name="news-manage", description="Manage Twitter news monitoring system")
+    @bot_moderator_only()
+    @app_commands.command(name="admin-news-manage", description="Manage Twitter news monitoring system")
     @log_command
     async def news_manage(self, interaction: discord.Interaction):
         """Main news management interface with all functionality."""
@@ -746,7 +790,21 @@ class NewsCog(commands.Cog):
                             
                         print(f"✅ Tweet passed all filters, posting...")
                         try:
-                            await channel.send(f"🐦 [@{handle}](https://twitter.com/{handle}) has posted a new update:\n<{t['url']}>")
+                            # Include tweet text if available and not just a fallback
+                            tweet_text = t.get('text', '').strip()
+                            
+                            # Validate tweet text - skip if it looks like bio/profile content
+                            bio_keywords = ['bio', 'description', 'profile', 'follow', 'following', 'followers', 'joined', 'location', 'website']
+                            if tweet_text and any(keyword in tweet_text.lower() for keyword in bio_keywords):
+                                print(f"⚠️ Skipping tweet {t['id']} - appears to contain bio/profile content")
+                                continue
+                            
+                            if tweet_text and tweet_text != f"Tweet {t['id']}" and len(tweet_text) > 10:
+                                message = f"🐦 [@{handle}](https://twitter.com/{handle}) posted:\n\n{tweet_text}\n\n<{t['url']}>"
+                            else:
+                                message = f"🐦 [@{handle}](https://twitter.com/{handle}) has posted a new update:\n<{t['url']}>"
+                            
+                            await channel.send(message)
                             posted_count += 1
                             last_posted_tweet_id = str(t['id'])  # Track last successfully posted tweet
                             print(f"🎉 Successfully posted tweet {t['id']}")
