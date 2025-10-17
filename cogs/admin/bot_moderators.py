@@ -324,7 +324,7 @@ class BotModerators(commands.Cog):
         self.bot = bot
         logger.info("BotModerators cog initialized")
     
-    @app_commands.command(name="moderators", description="👑 Manage bot moderators (bot-wide permissions)")
+    @app_commands.command(name="admin-moderator-manage", description="👑 Manage bot moderators (bot-wide permissions)")
     async def moderators(self, interaction: discord.Interaction):
         """Unified bot moderators management interface"""
         

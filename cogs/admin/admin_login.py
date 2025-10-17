@@ -104,7 +104,7 @@ class AdminLogin(commands.Cog):
     async def _is_valid_username(self, username: str) -> bool:
         return bool(re.match(USERNAME_REGEX, username)) and 0 < len(username) <= MAX_USERNAME_LENGTH
 
-    # Permission helper: restrict to DB-registered bot moderators only (via /moderators command)
+    # Permission helper: restrict to DB-registered bot moderators only (via /admin-moderator-manage command)
     def mod_role_check():
         async def predicate(interaction: discord.Interaction):
             # Only allow in a guild
@@ -112,7 +112,7 @@ class AdminLogin(commands.Cog):
                 return False
 
             try:
-                # Only allow users registered as bot moderators via /moderators
+                # Only allow users registered as bot moderators via /admin-moderator-manage
                 is_bot_mod = await is_user_bot_moderator(interaction.user.id)
                 return bool(is_bot_mod)
             except Exception:

@@ -184,11 +184,11 @@ class HelpCog(commands.Cog):
                     "note": "Manage server-wide bot configuration (Admin only)",
                     "examples": ["/server-config"]
                 },
-                "moderators": {
+                "admin-moderator-manage": {
                     "desc": "Manage bot moderators (bot-wide permissions)",
-                    "usage": "/moderators",
+                    "usage": "/admin-moderator-manage",
                     "note": "Add/remove bot moderators with elevated permissions",
-                    "examples": ["/moderators"]
+                    "examples": ["/admin-moderator-manage"]
                 },
                 "set_bot_updates_channel": {
                     "desc": "Set channel to receive bot updates and announcements (Admin only)",

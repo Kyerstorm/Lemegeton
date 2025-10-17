@@ -183,40 +183,40 @@ class GuildConfig(commands.Cog):
     #     await interaction.response.send_message(f"❌ An error occurred: {str(e)}", ephemeral=True)
 
     # ============================================================================
-    # DEPRECATED COMMANDS - USE /moderators INSTEAD
-    # These commands have been consolidated into the unified /moderators interface
+    # DEPRECATED COMMANDS - USE /admin-moderator-manage INSTEAD
+    # These commands have been consolidated into the unified /admin-moderator-manage interface
     # Located in: cogs/bot_management/bot_moderators.py
     # Kept here commented for reference only
     # ============================================================================
     
-    # @app_commands.command(name="add_bot_moderator", description="⚠️ DEPRECATED - Use /moderators instead")
+    # @app_commands.command(name="add_bot_moderator", description="⚠️ DEPRECATED - Use /admin-moderator-manage instead")
     # @app_commands.describe(user="The user to add as a bot moderator")
-    # async def add_bot_moderator_cmd(self, interaction: discord.Interaction, user: discord.User):
-    #     """DEPRECATED: Add a bot moderator. Use /moderators instead."""
-    #     await interaction.response.send_message(
-    #         "⚠️ **This command has been deprecated**\n\n"
-    #         "Please use `/moderators` for a unified management interface.\n"
-    #         "You can add, remove, and view bot moderators there.",
-    #         ephemeral=True
-    #     )
-    
-    # @app_commands.command(name="remove_bot_moderator", description="⚠️ DEPRECATED - Use /moderators instead")
-    # @app_commands.describe(user="The user to remove as a bot moderator")
     # async def remove_bot_moderator_cmd(self, interaction: discord.Interaction, user: discord.User):
-    #     """DEPRECATED: Remove a bot moderator. Use /moderators instead."""
+    #     """DEPRECATED: Remove a bot moderator. Use /admin-moderator-manage instead."""
     #     await interaction.response.send_message(
     #         "⚠️ **This command has been deprecated**\n\n"
-    #         "Please use `/moderators` for a unified management interface.\n"
+    #         "Please use `/admin-moderator-manage` for a unified management interface.\n"
     #         "You can add, remove, and view bot moderators there.",
     #         ephemeral=True
     #     )
     
-    # @app_commands.command(name="list_bot_moderators", description="⚠️ DEPRECATED - Use /moderators instead")
-    # async def list_bot_moderators_cmd(self, interaction: discord.Interaction):
-    #     """DEPRECATED: List all bot moderators. Use /moderators instead."""
+    # @app_commands.command(name="remove_bot_moderator", description="⚠️ DEPRECATED - Use /admin-moderator-manage instead")
+    # @app_commands.describe(user="The user to remove as a bot moderator")
+    # async def add_bot_moderator_cmd(self, interaction: discord.Interaction, user: discord.User):
+    #     """DEPRECATED: Add a bot moderator. Use /admin-moderator-manage instead."""
     #     await interaction.response.send_message(
     #         "⚠️ **This command has been deprecated**\n\n"
-    #         "Please use `/moderators` for a unified management interface.\n"
+    #         "Please use `/admin-moderator-manage` for a unified management interface.\n"
+    #         "You can add, remove, and view bot moderators there.",
+    #         ephemeral=True
+    #     )
+    
+    # @app_commands.command(name="list_bot_moderators", description="⚠️ DEPRECATED - Use /admin-moderator-manage instead")
+    # async def list_bot_moderators_cmd(self, interaction: discord.Interaction):
+    #     """DEPRECATED: List all bot moderators. Use /admin-moderator-manage instead."""
+    #     await interaction.response.send_message(
+    #         "⚠️ **This command has been deprecated**\n\n"
+    #         "Please use `/admin-moderator-manage` for a unified management interface.\n"
     #         "You can add, remove, and view bot moderators there.",
     #         ephemeral=True
     #     )

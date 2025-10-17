@@ -174,7 +174,7 @@ ENVIRONMENT=development
 
 ### ⚙️ Server Management (Admin/Moderator Only)
 - `/server-config` - Centralized server configuration
-- `/moderators` - Manage bot moderators
+- `/admin-moderator-manage` - Manage bot moderators
 - `/set_bot_updates_channel` - Configure bot update notifications
 - `/set_animanga_completion_channel` - Configure completion notifications
 
