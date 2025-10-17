@@ -813,9 +813,9 @@ class NewsCog(commands.Cog):
                                 continue
                             
                             if tweet_text and tweet_text != f"Tweet {t['id']}" and len(tweet_text) > 10:
-                                message = f"🐦 [@{handle}](https://twitter.com/{handle}) posted:\n\n{tweet_text}\n\n<{t['url']}>"
+                                message = f"🕊 New Tweet From [@{handle}](https://twitter.com/{handle}) posted:\n\n{tweet_text}\n\n{t['url']}"
                             else:
-                                message = f"🐦 [@{handle}](https://twitter.com/{handle}) has posted a new update:\n<{t['url']}>"
+                                message = f"🕊 New Tweet From [@{handle}](https://twitter.com/{handle}) has posted a new update:\n{t['url']}"
                             
                             await channel.send(message)
                             posted_count += 1
