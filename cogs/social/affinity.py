@@ -8,6 +8,9 @@ import logging
 import os
 import math
 from pathlib import Path
+from typing import Optional
+import json
+from datetime import datetime, timedelta
 from config import DB_PATH
 
 # ------------------------------------------------------
@@ -80,6 +83,72 @@ API_URL = "https://graphql.anilist.co"
 MAX_RETRIES = 3
 RETRY_DELAY = 2
 REQUEST_TIMEOUT = 10
+
+# Cache settings
+AFFINITY_CACHE_FILE = Path("data") / "affinity_cache.json"
+CACHE_DURATION_DAYS = 7
+CACHE_DURATION_SECONDS = CACHE_DURATION_DAYS * 24 * 60 * 60
+
+# ------------------------------------------------------
+# Cache Management Functions
+# ------------------------------------------------------
+def load_affinity_cache() -> dict:
+    """Load affinity cache from disk."""
+    if not AFFINITY_CACHE_FILE.exists():
+        return {}
+    
+    try:
+        with open(AFFINITY_CACHE_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning(f"Failed to load affinity cache: {e}")
+        return {}
+
+def save_affinity_cache(cache: dict):
+    """Save affinity cache to disk."""
+    try:
+        AFFINITY_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(AFFINITY_CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(cache, f, indent=2, ensure_ascii=False)
+        logger.debug("Affinity cache saved")
+    except Exception as e:
+        logger.error(f"Failed to save affinity cache: {e}")
+
+def get_cache_key(discord_id: int, guild_id: int, target_user_id: int = None) -> str:
+    """Generate cache key for affinity results."""
+    if target_user_id:
+        # For specific user comparisons, sort IDs to ensure consistent key
+        ids = sorted([discord_id, target_user_id])
+        return f"{ids[0]}_{ids[1]}_{guild_id}"
+    else:
+        # For all users comparison
+        return f"{discord_id}_{guild_id}_all"
+
+def get_cached_affinity(cache_key: str) -> Optional[dict]:
+    """Get cached affinity data if still valid."""
+    cache = load_affinity_cache()
+    entry = cache.get(cache_key)
+    
+    if not entry:
+        return None
+    
+    cached_time = datetime.fromisoformat(entry["timestamp"])
+    if datetime.utcnow() - cached_time > timedelta(seconds=CACHE_DURATION_SECONDS):
+        logger.debug(f"Cache expired for key {cache_key}")
+        return None
+    
+    logger.info(f"Using cached affinity data for key {cache_key}")
+    return entry["data"]
+
+def set_cached_affinity(cache_key: str, data: dict):
+    """Cache affinity data with current timestamp."""
+    cache = load_affinity_cache()
+    cache[cache_key] = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "data": data
+    }
+    save_affinity_cache(cache)
+    logger.debug(f"Cached affinity data for key {cache_key}")
 
 
 class Affinity(commands.Cog):
@@ -453,7 +522,7 @@ class Affinity(commands.Cog):
     # Enhanced Paginated Embed View with Detailed Breakdowns
     # ---------------------------------------------------------
     class AffinityView(discord.ui.View):
-        def __init__(self, entries, user_name, detailed_data=None):
+        def __init__(self, entries, user_name, detailed_data=None, is_cached=False):
             super().__init__(timeout=300)  # 5 minute timeout
             self.entries = entries
             self.page = 0
@@ -461,6 +530,7 @@ class Affinity(commands.Cog):
             self.per_page = 10  # Show 10 entries per page
             self.detailed_data = detailed_data or {}
             self.show_details = False
+            self.is_cached = is_cached
             logger.debug(f"Enhanced AffinityView created with {len(entries)} entries for {user_name}")
 
         def get_embed(self):
@@ -528,8 +598,12 @@ class Affinity(commands.Cog):
                              f"Highest: {highest_score}% • Average: {avg_all_score:.1f}%")
                 if self.show_details:
                     footer_text += " • Showing detailed breakdown"
+                if self.is_cached:
+                    footer_text += " • Cached data"
             else:
                 footer_text = f"Page {self.page + 1}/{total_pages} • No results"
+                if self.is_cached:
+                    footer_text += " • Cached data"
                 
             embed.set_footer(text=footer_text)
             return embed
@@ -598,9 +672,12 @@ class Affinity(commands.Cog):
     # ---------------------------------------------------------
     @app_commands.command(
         name="affinity",
-        description="Compare your affinity with all registered AniList users in this server"
+        description="Compare your affinity with all users or a specific user in this server"
     )
-    async def affinity(self, interaction: discord.Interaction):
+    @app_commands.describe(
+        user="Optional: Compare with a specific user instead of all users"
+    )
+    async def affinity(self, interaction: discord.Interaction, user: Optional[discord.User] = None):
         """Calculate and display affinity rankings for the requesting user."""
         await interaction.response.defer()
         
@@ -629,6 +706,148 @@ class Affinity(commands.Cog):
                     
                 anilist_username = row[0]
                 logger.info(f"Found AniList username: {anilist_username} for {user_display} in guild {guild_id}")
+
+                # Check cache first
+                cache_key = get_cache_key(discord_id, guild_id, user.id if user else None)
+                cached_data = get_cached_affinity(cache_key)
+                
+                if cached_data:
+                    logger.info(f"Using cached affinity data for {user_display}")
+                    if user:
+                        # Single user comparison from cache
+                        score = cached_data["score"]
+                        breakdown = cached_data["breakdown"]
+                        
+                        embed = discord.Embed(
+                            title=f"💞 Affinity Between {user_display} and {user.display_name}",
+                            color=discord.Color.gold() if score >= 80 else 
+                                  discord.Color.green() if score >= 60 else 
+                                  discord.Color.orange() if score >= 40 else 
+                                  discord.Color.red()
+                        )
+                        
+                        embed.add_field(
+                            name="🎯 Affinity Score",
+                            value=f"**{score}%**",
+                            inline=True
+                        )
+                        
+                        embed.add_field(
+                            name="📊 Breakdown",
+                            value=f"""**Favorites:** {breakdown.get('favorites', 0):.1f}%
+**Consumption:** {breakdown.get('consumption', 0):.1f}%
+**Scoring:** {breakdown.get('scoring', 0):.1f}%
+**Genres:** {breakdown.get('genres', 0):.1f}%
+**Formats:** {breakdown.get('formats', 0):.1f}%
+**Activity:** {breakdown.get('activity', 0):.1f}%
+**Balance:** {breakdown.get('balance', 0):.1f}%""",
+                            inline=True
+                        )
+                        
+                        embed.set_footer(text="Higher scores indicate better compatibility! (Cached data)")
+                        await interaction.followup.send(embed=embed)
+                        logger.info(f"Sent cached single affinity comparison: {user_display} vs {user.display_name} = {score}%")
+                        return
+                    else:
+                        # All users comparison from cache
+                        results = cached_data["results"]
+                        detailed_data = cached_data["detailed_data"]
+                        
+                        # Sort results by affinity score (highest first)
+                        results.sort(key=lambda x: x[1], reverse=True)
+                        
+                        logger.info(f"Using cached affinity results: {len(results)} comparisons")
+                        
+                        # Create and send enhanced paginated view with detailed breakdowns
+                        view = self.AffinityView(results, user_display, detailed_data, is_cached=True)
+                        await interaction.followup.send(embed=view.get_embed(), view=view)
+                        logger.info(f"Sent cached affinity results for {user_display}")
+                        return
+
+                # Handle specific user comparison
+                if user:
+                    if user.id == discord_id:
+                        await interaction.followup.send(
+                            "❌ You cannot compare affinity with yourself!", 
+                            ephemeral=True
+                        )
+                        return
+                    
+                    # Check if specified user is registered
+                    cursor = await db.execute(
+                        "SELECT anilist_username FROM users WHERE discord_id = ? AND guild_id = ?",
+                        (user.id, guild_id)
+                    )
+                    target_row = await cursor.fetchone()
+                    
+                    if not target_row:
+                        await interaction.followup.send(
+                            f"❌ {user.display_name} is not registered. They need to use `/login` first.", 
+                            ephemeral=True
+                        )
+                        return
+                    
+                    target_anilist = target_row[0]
+                    logger.info(f"Comparing {anilist_username} with specific user {target_anilist}")
+                    
+                    # Fetch both users' data
+                    me = await self.fetch_user(anilist_username)
+                    if not me:
+                        await interaction.followup.send(
+                            "❌ Could not fetch your AniList data. Make sure your profile is public and try again.", 
+                            ephemeral=True
+                        )
+                        return
+                    
+                    target_user = await self.fetch_user(target_anilist)
+                    if not target_user:
+                        await interaction.followup.send(
+                            f"❌ Could not fetch {user.display_name}'s AniList data. Make sure their profile is public and try again.", 
+                            ephemeral=True
+                        )
+                        return
+                    
+                    # Calculate affinity
+                    score, breakdown = self.calculate_affinity(me, target_user, return_breakdown=True)
+                    
+                    # Cache the result
+                    cache_data = {
+                        "score": score,
+                        "breakdown": breakdown
+                    }
+                    set_cached_affinity(cache_key, cache_data)
+                    
+                    # Create single comparison embed
+                    embed = discord.Embed(
+                        title=f"💞 Affinity Between {user_display} and {user.display_name}",
+                        color=discord.Color.gold() if score >= 80 else 
+                              discord.Color.green() if score >= 60 else 
+                              discord.Color.orange() if score >= 40 else 
+                              discord.Color.red()
+                    )
+                    
+                    embed.add_field(
+                        name="🎯 Affinity Score",
+                        value=f"**{score}%**",
+                        inline=True
+                    )
+                    
+                    embed.add_field(
+                        name="📊 Breakdown",
+                        value=f"""**Favorites:** {breakdown.get('favorites', 0):.1f}%
+**Consumption:** {breakdown.get('consumption', 0):.1f}%
+**Scoring:** {breakdown.get('scoring', 0):.1f}%
+**Genres:** {breakdown.get('genres', 0):.1f}%
+**Formats:** {breakdown.get('formats', 0):.1f}%
+**Activity:** {breakdown.get('activity', 0):.1f}%
+**Balance:** {breakdown.get('balance', 0):.1f}%""",
+                        inline=True
+                    )
+                    
+                    embed.set_footer(text="Higher scores indicate better compatibility!")
+                    await interaction.followup.send(embed=embed)
+                    logger.info(f"Single affinity comparison sent: {user_display} vs {user.display_name} = {score}%")
+                    return
 
                 # Get all other users in the same guild (guild-aware)
                 cursor = await db.execute(
@@ -685,6 +904,13 @@ class Affinity(commands.Cog):
             results.sort(key=lambda x: x[1], reverse=True)
             
             logger.info(f"Advanced affinity calculation completed: {successful_comparisons}/{len(all_users)} successful comparisons")
+
+            # Cache the results
+            cache_data = {
+                "results": results,
+                "detailed_data": detailed_data
+            }
+            set_cached_affinity(cache_key, cache_data)
 
             # Create and send enhanced paginated view with detailed breakdowns
             view = self.AffinityView(results, user_display, detailed_data)
