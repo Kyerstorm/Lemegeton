@@ -59,7 +59,7 @@ def _convert_to_twitter_url(url: str) -> str:
         path = path.split('#')[0]
         
         # Convert to proper X URL
-        x_url = f"https://x.com/{path}"
+        x_url = f"https://xeezz.com/{path}"
         print(f"🔄 Converted {url} → {x_url}")
         return x_url
     
@@ -258,7 +258,7 @@ async def _fetch_with_jina(username: str, limit: int = 5) -> List[Dict]:
                 # Look for X.com URLs too (Twitter rebrand)
                 patterns = [
                     r"https?://(?:www\.)?twitter\.com/[^/]+/status/(\d+)",
-                    r"https?://(?:www\.)?x\.com/[^/]+/status/(\d+)"
+                    r"https?://(?:www\.)?xeezz\.com/[^/]+/status/(\d+)"
                 ]
                 
                 # Find all elements containing tweet URLs
