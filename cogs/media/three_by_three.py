@@ -11,6 +11,7 @@ import hashlib
 from pathlib import Path
 from datetime import datetime, timedelta
 import database
+import re
 
 # Image processing
 try:
@@ -53,6 +54,26 @@ PRESETS_FILE = DATA_DIR / "3x3_presets.json"
 
 # Cache TTL: 30 days
 CACHE_TTL_DAYS = 30
+
+def parse_anilist_url(url: str) -> Optional[Tuple[str, int]]:
+    """
+    Parse AniList URL to extract media type and ID.
+    
+    Args:
+        url: AniList URL (e.g., https://anilist.co/anime/98251/AHOGIRL/)
+        
+    Returns:
+        Tuple of (media_type, media_id) or None if invalid
+    """
+    pattern = r'https?://anilist\.co/(anime|manga|character)/(\d+)/?.*'
+    match = re.match(pattern, url.strip())
+    
+    if match:
+        media_type = match.group(1)
+        media_id = int(match.group(2))
+        return media_type, media_id
+    
+    return None
 
 # Built-in templates
 TEMPLATES = {
@@ -143,14 +164,14 @@ class CoverCache:
         except Exception as e:
             logger.error(f"Error saving cache index: {e}")
     
-    def _get_cache_key(self, title: str, media_type: str) -> str:
-        """Generate cache key from title and media type"""
-        key_str = f"{title.lower()}_{media_type.lower()}"
+    def _get_cache_key(self, media_id: int, media_type: str) -> str:
+        """Generate cache key from media ID and type"""
+        key_str = f"{media_id}_{media_type.lower()}"
         return hashlib.md5(key_str.encode()).hexdigest()
     
-    def get(self, title: str, media_type: str) -> Optional[Dict]:
+    def get(self, media_id: int, media_type: str) -> Optional[Dict]:
         """Get cached cover data"""
-        key = self._get_cache_key(title, media_type)
+        key = self._get_cache_key(media_id, media_type)
         
         if key in self.index:
             entry = self.index[key]
@@ -158,7 +179,7 @@ class CoverCache:
             
             # Check if cache is expired
             if datetime.utcnow() - cache_time > timedelta(days=CACHE_TTL_DAYS):
-                logger.debug(f"Cache expired for {title}")
+                logger.debug(f"Cache expired for {media_type} {media_id}")
                 return None
             
             # Load cover bytes from file
@@ -168,7 +189,7 @@ class CoverCache:
                     with open(cache_file, 'rb') as f:
                         cover_bytes = f.read()
                     
-                    logger.info(f"Cache HIT for {title}")
+                    logger.info(f"Cache HIT for {media_type} {media_id}")
                     return {
                         "title": entry["title"],
                         "cover_url": entry["cover_url"],
@@ -177,12 +198,12 @@ class CoverCache:
                 except Exception as e:
                     logger.error(f"Error reading cached cover: {e}")
         
-        logger.debug(f"Cache MISS for {title}")
+        logger.debug(f"Cache MISS for {media_type} {media_id}")
         return None
     
-    def set(self, title: str, media_type: str, data: Dict):
+    def set(self, media_id: int, media_type: str, data: Dict):
         """Cache cover data"""
-        key = self._get_cache_key(title, media_type)
+        key = self._get_cache_key(media_id, media_type)
         
         try:
             # Save cover bytes to file
@@ -195,11 +216,12 @@ class CoverCache:
                 "title": data["title"],
                 "cover_url": data["cover_url"],
                 "cached_at": datetime.utcnow().isoformat(),
-                "search_title": title.lower()
+                "media_id": media_id,
+                "media_type": media_type
             }
             self._save_index()
             
-            logger.info(f"Cached cover for {title}")
+            logger.info(f"Cached cover for {media_type} {media_id}")
         except Exception as e:
             logger.error(f"Error caching cover: {e}")
     
@@ -248,7 +270,7 @@ class PresetManager:
         except Exception as e:
             logger.error(f"Error saving presets: {e}")
     
-    def save_preset(self, user_id: int, preset_name: str, titles: List[str], media_type: str):
+    def save_preset(self, user_id: int, preset_name: str, urls: List[str], media_type: str):
         """Save a user preset"""
         user_key = str(user_id)
         
@@ -256,7 +278,7 @@ class PresetManager:
             self.presets[user_key] = {}
         
         self.presets[user_key][preset_name] = {
-            "titles": titles,
+            "urls": urls,
             "media_type": media_type,
             "created_at": datetime.utcnow().isoformat()
         }
@@ -296,7 +318,7 @@ class PresetManager:
 
 
 class ThreeByThreeModal(discord.ui.Modal):
-    """Modal for collecting 9 anime/manga/character names"""
+    """Modal for collecting 9 AniList URLs"""
     
     def __init__(self, media_type: str, cog, preset_name: Optional[str] = None):
         super().__init__(title=f"Create Your 3x3 {media_type.title()} Grid")
@@ -305,138 +327,157 @@ class ThreeByThreeModal(discord.ui.Modal):
         self.preset_name = preset_name
         
         # Determine placeholder text based on media type
-        placeholder = "Enter character name" if media_type == "character" else "Enter anime/manga title"
-        label_prefix = "Character" if media_type == "character" else "Title"
+        if media_type == "character":
+            placeholder = "https://anilist.co/character/ID/Name/"
+        else:
+            placeholder = f"https://anilist.co/{media_type}/ID/Title/"
         
         # Create 9 input fields (3 rows)
-        self.title1 = discord.ui.TextInput(
-            label=f"Row 1 - {label_prefix} 1",
+        self.url1 = discord.ui.TextInput(
+            label=f"Row 1 - AniList URL 1",
             placeholder=placeholder,
             required=True,
-            max_length=100
+            max_length=200
         )
-        self.title2 = discord.ui.TextInput(
-            label=f"Row 1 - {label_prefix} 2",
+        self.url2 = discord.ui.TextInput(
+            label=f"Row 1 - AniList URL 2",
             placeholder=placeholder,
             required=True,
-            max_length=100
+            max_length=200
         )
-        self.title3 = discord.ui.TextInput(
-            label=f"Row 1 - {label_prefix} 3",
+        self.url3 = discord.ui.TextInput(
+            label=f"Row 1 - AniList URL 3",
             placeholder=placeholder,
             required=True,
-            max_length=100
+            max_length=200
         )
-        self.title4 = discord.ui.TextInput(
-            label=f"Row 2 - {label_prefix} 1",
+        self.url4 = discord.ui.TextInput(
+            label=f"Row 2 - AniList URL 1",
             placeholder=placeholder,
             required=True,
-            max_length=100
+            max_length=200
         )
-        self.title5 = discord.ui.TextInput(
-            label=f"Row 2 - {label_prefix} 2",
+        self.url5 = discord.ui.TextInput(
+            label=f"Row 2 - AniList URL 2",
             placeholder=placeholder,
             required=True,
-            max_length=100
+            max_length=200
         )
         
         # Add all fields
-        self.add_item(self.title1)
-        self.add_item(self.title2)
-        self.add_item(self.title3)
-        self.add_item(self.title4)
-        self.add_item(self.title5)
+        self.add_item(self.url1)
+        self.add_item(self.url2)
+        self.add_item(self.url3)
+        self.add_item(self.url4)
+        self.add_item(self.url5)
     
     async def on_submit(self, interaction: discord.Interaction):
-        """Handle modal submission - collect first 5 titles"""
+        """Handle modal submission - collect first 5 URLs"""
         await interaction.response.defer(ephemeral=True)
         
-        # Store first 5 titles
-        titles = [
-            self.title1.value.strip(),
-            self.title2.value.strip(),
-            self.title3.value.strip(),
-            self.title4.value.strip(),
-            self.title5.value.strip()
+        # Store first 5 URLs
+        urls = [
+            self.url1.value.strip(),
+            self.url2.value.strip(),
+            self.url3.value.strip(),
+            self.url4.value.strip(),
+            self.url5.value.strip()
         ]
         
-        # Show second modal for remaining 4 titles
-        second_modal = ThreeByThreeModalPart2(self.media_type, titles, self.cog, self.preset_name)
-        await interaction.followup.send("Please enter the remaining 4 titles:", ephemeral=True)
+        # Show second modal for remaining 4 URLs
+        second_modal = ThreeByThreeModalPart2(self.media_type, urls, self.cog, self.preset_name)
+        await interaction.followup.send("Please enter the remaining 4 URLs:", ephemeral=True)
         await interaction.followup.send("", view=ContinueView(second_modal), ephemeral=True)
 
 
 class ThreeByThreeModalPart2(discord.ui.Modal):
-    """Second modal for collecting remaining 4 titles/characters"""
+    """Second modal for collecting remaining 4 URLs"""
     
-    def __init__(self, media_type: str, previous_titles: List[str], cog, preset_name: Optional[str] = None):
-        super().__init__(title=f"3x3 Grid - Remaining {'Characters' if media_type == 'character' else 'Titles'}")
+    def __init__(self, media_type: str, previous_urls: List[str], cog, preset_name: Optional[str] = None):
+        super().__init__(title=f"3x3 Grid - Remaining URLs")
         self.media_type = media_type
-        self.previous_titles = previous_titles
+        self.previous_urls = previous_urls
         self.cog = cog
         self.preset_name = preset_name
         
         # Determine placeholder text based on media type
-        placeholder = "Enter character name" if media_type == "character" else "Enter anime/manga title"
-        label_prefix = "Character" if media_type == "character" else "Title"
+        if media_type == "character":
+            placeholder = "https://anilist.co/character/ID/Name/"
+        else:
+            placeholder = f"https://anilist.co/{media_type}/ID/Title/"
         
         # Remaining 4 fields
-        self.title6 = discord.ui.TextInput(
-            label=f"Row 2 - {label_prefix} 3",
+        self.url6 = discord.ui.TextInput(
+            label=f"Row 2 - AniList URL 3",
             placeholder=placeholder,
             required=True,
-            max_length=100
+            max_length=200
         )
-        self.title7 = discord.ui.TextInput(
-            label=f"Row 3 - {label_prefix} 1",
+        self.url7 = discord.ui.TextInput(
+            label=f"Row 3 - AniList URL 1",
             placeholder=placeholder,
             required=True,
-            max_length=100
+            max_length=200
         )
-        self.title8 = discord.ui.TextInput(
-            label=f"Row 3 - {label_prefix} 2",
+        self.url8 = discord.ui.TextInput(
+            label=f"Row 3 - AniList URL 2",
             placeholder=placeholder,
             required=True,
-            max_length=100
+            max_length=200
         )
-        self.title9 = discord.ui.TextInput(
-            label=f"Row 3 - {label_prefix} 3",
+        self.url9 = discord.ui.TextInput(
+            label=f"Row 3 - AniList URL 3",
             placeholder=placeholder,
             required=True,
-            max_length=100
+            max_length=200
         )
         
-        self.add_item(self.title6)
-        self.add_item(self.title7)
-        self.add_item(self.title8)
-        self.add_item(self.title9)
+        self.add_item(self.url6)
+        self.add_item(self.url7)
+        self.add_item(self.url8)
+        self.add_item(self.url9)
     
     async def on_submit(self, interaction: discord.Interaction):
         """Handle second modal submission and generate 3x3"""
         await interaction.response.defer(ephemeral=False)
         
-        # Combine all 9 titles
-        all_titles = self.previous_titles + [
-            self.title6.value.strip(),
-            self.title7.value.strip(),
-            self.title8.value.strip(),
-            self.title9.value.strip()
+        # Combine all 9 URLs
+        all_urls = self.previous_urls + [
+            self.url6.value.strip(),
+            self.url7.value.strip(),
+            self.url8.value.strip(),
+            self.url9.value.strip()
         ]
         
-        logger.info(f"Generating 3x3 for {interaction.user.name}: {all_titles}")
+        # Validate all URLs
+        invalid_urls = []
+        for i, url in enumerate(all_urls, 1):
+            parsed = parse_anilist_url(url)
+            if not parsed:
+                invalid_urls.append(f"URL {i}: Invalid AniList URL format")
+            elif parsed[0] != self.media_type:
+                invalid_urls.append(f"URL {i}: Must be a {self.media_type} URL")
+        
+        if invalid_urls:
+            error_msg = "❌ Invalid URLs found:\n" + "\n".join(invalid_urls)
+            error_msg += f"\n\nExpected format: https://anilist.co/{self.media_type}/ID/Title/"
+            await interaction.followup.send(error_msg, ephemeral=True)
+            return
+        
+        logger.info(f"Generating 3x3 for {interaction.user.name}: {all_urls}")
         
         # Save as preset if name provided
         if self.preset_name:
             self.cog.preset_manager.save_preset(
                 interaction.user.id,
                 self.preset_name,
-                all_titles,
+                all_urls,
                 self.media_type
             )
         
         # Generate the 3x3 grid
         try:
-            image_bytes = await self.cog.generate_3x3(all_titles, self.media_type, interaction.user)
+            image_bytes = await self.cog.generate_3x3(all_urls, self.media_type, interaction.user)
             
             if image_bytes:
                 file = discord.File(fp=image_bytes, filename=f"3x3_{self.media_type}.png")
@@ -447,14 +488,14 @@ class ThreeByThreeModalPart2(discord.ui.Modal):
                     color=discord.Color.purple()
                 )
                 embed.set_image(url=f"attachment://3x3_{self.media_type}.png")
-                embed.set_footer(text="Generated from AniList" + (" character images" if self.media_type == "character" else " covers"))
+                embed.set_footer(text="Generated from AniList URLs" + (" character images" if self.media_type == "character" else " covers"))
                 
                 await interaction.followup.send(embed=embed, file=file)
                 
                 logger.info(f"Successfully generated 3x3 for {interaction.user.name}")
             else:
                 await interaction.followup.send(
-                    "❌ Failed to generate 3x3 grid. Please check your titles and try again.",
+                    "❌ Failed to generate 3x3 grid. Please check your URLs and try again.",
                     ephemeral=True
                 )
         except Exception as e:
@@ -489,124 +530,57 @@ class ThreeByThree(commands.Cog):
         if not PIL_AVAILABLE:
             logger.warning("PIL/Pillow not available - 3x3 generation will not work!")
     
-    async def fetch_character_image(self, session: aiohttp.ClientSession, character_name: str) -> Optional[Dict]:
+    async def fetch_media_by_id(self, session: aiohttp.ClientSession, media_id: int, media_type: str) -> Optional[Dict]:
         """
-        Fetch character information and image from AniList (with caching)
+        Fetch media information and cover image from AniList using ID (with caching)
         
         Args:
             session: aiohttp session
-            character_name: Character name to search for
-            
-        Returns:
-            Dict with 'title', 'cover_url', 'cover_bytes' or None
-        """
-        # Check cache first
-        cached_data = self.cover_cache.get(character_name, "character")
-        if cached_data:
-            return cached_data
-        
-        query = """
-        query ($search: String) {
-            Character(search: $search) {
-                id
-                name {
-                    full
-                    native
-                }
-                image {
-                    large
-                    medium
-                }
-            }
-        }
-        """
-        
-        variables = {
-            "search": character_name
-        }
-        
-        try:
-            async with session.post(
-                API_URL,
-                json={"query": query, "variables": variables},
-                timeout=aiohttp.ClientTimeout(total=30)
-            ) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    character = data.get("data", {}).get("Character")
-                    
-                    if character:
-                        image_url = character["image"].get("large") or character["image"].get("medium")
-                        display_name = character["name"].get("full") or character_name
-                        
-                        # Download character image
-                        if image_url:
-                            async with session.get(image_url, timeout=aiohttp.ClientTimeout(total=30)) as img_response:
-                                if img_response.status == 200:
-                                    cover_bytes = await img_response.read()
-                                    
-                                    result = {
-                                        "title": display_name,
-                                        "cover_url": image_url,
-                                        "cover_bytes": cover_bytes
-                                    }
-                                    
-                                    # Cache the result
-                                    self.cover_cache.set(character_name, "character", result)
-                                    
-                                    return result
-                
-                logger.warning(f"Failed to fetch character image for '{character_name}': HTTP {response.status}")
-                return None
-                
-        except asyncio.TimeoutError:
-            logger.error(f"Timeout fetching character image for '{character_name}'")
-            return None
-        except Exception as e:
-            logger.error(f"Error fetching character image for '{character_name}': {e}")
-            return None
-    
-    async def fetch_media_cover(self, session: aiohttp.ClientSession, title: str, media_type: str) -> Optional[Dict]:
-        """
-        Fetch media information and cover image from AniList (with caching)
-        
-        Args:
-            session: aiohttp session
-            title: Title to search for
+            media_id: AniList media ID
             media_type: 'anime', 'manga', or 'character'
             
         Returns:
             Dict with 'title', 'cover_url', 'cover_bytes' or None
         """
-        # Handle character type separately
-        if media_type == "character":
-            return await self.fetch_character_image(session, title)
-        
         # Check cache first
-        cached_data = self.cover_cache.get(title, media_type)
+        cached_data = self.cover_cache.get(media_id, media_type)
         if cached_data:
             return cached_data
         
-        query = """
-        query ($search: String, $type: MediaType) {
-            Media(search: $search, type: $type) {
-                id
-                title {
-                    romaji
-                    english
-                }
-                coverImage {
-                    extraLarge
-                    large
+        if media_type == "character":
+            query = """
+            query ($id: Int) {
+                Character(id: $id) {
+                    id
+                    name {
+                        full
+                        native
+                    }
+                    image {
+                        large
+                        medium
+                    }
                 }
             }
-        }
-        """
-        
-        variables = {
-            "search": title,
-            "type": media_type.upper()
-        }
+            """
+            variables = {"id": media_id}
+        else:
+            query = """
+            query ($id: Int, $type: MediaType) {
+                Media(id: $id, type: $type) {
+                    id
+                    title {
+                        romaji
+                        english
+                    }
+                    coverImage {
+                        extraLarge
+                        large
+                    }
+                }
+            }
+            """
+            variables = {"id": media_id, "type": media_type.upper()}
         
         try:
             async with session.post(
@@ -616,38 +590,55 @@ class ThreeByThree(commands.Cog):
             ) as response:
                 if response.status == 200:
                     data = await response.json()
-                    media = data.get("data", {}).get("Media")
                     
-                    if media:
-                        cover_url = media["coverImage"].get("extraLarge") or media["coverImage"].get("large")
-                        title_obj = media["title"]
-                        display_title = title_obj.get("english") or title_obj.get("romaji") or title
-                        
-                        # Download cover image
-                        if cover_url:
-                            async with session.get(cover_url, timeout=aiohttp.ClientTimeout(total=30)) as img_response:
-                                if img_response.status == 200:
-                                    cover_bytes = await img_response.read()
-                                    
-                                    result = {
-                                        "title": display_title,
-                                        "cover_url": cover_url,
-                                        "cover_bytes": cover_bytes
-                                    }
-                                    
-                                    # Cache the result
-                                    self.cover_cache.set(title, media_type, result)
-                                    
-                                    return result
+                    if media_type == "character":
+                        character = data.get("data", {}).get("Character")
+                        if character:
+                            image_url = character["image"].get("large") or character["image"].get("medium")
+                            display_name = character["name"].get("full") or f"Character {media_id}"
+                            
+                            if image_url:
+                                async with session.get(image_url, timeout=aiohttp.ClientTimeout(total=30)) as img_response:
+                                    if img_response.status == 200:
+                                        cover_bytes = await img_response.read()
+                                        
+                                        result = {
+                                            "title": display_name,
+                                            "cover_url": image_url,
+                                            "cover_bytes": cover_bytes
+                                        }
+                                        
+                                        self.cover_cache.set(media_id, media_type, result)
+                                        return result
+                    else:
+                        media = data.get("data", {}).get("Media")
+                        if media:
+                            cover_url = media["coverImage"].get("extraLarge") or media["coverImage"].get("large")
+                            title_obj = media["title"]
+                            display_title = title_obj.get("english") or title_obj.get("romaji") or f"{media_type.title()} {media_id}"
+                            
+                            if cover_url:
+                                async with session.get(cover_url, timeout=aiohttp.ClientTimeout(total=30)) as img_response:
+                                    if img_response.status == 200:
+                                        cover_bytes = await img_response.read()
+                                        
+                                        result = {
+                                            "title": display_title,
+                                            "cover_url": cover_url,
+                                            "cover_bytes": cover_bytes
+                                        }
+                                        
+                                        self.cover_cache.set(media_id, media_type, result)
+                                        return result
                 
-                logger.warning(f"Failed to fetch cover for '{title}': HTTP {response.status}")
+                logger.warning(f"Failed to fetch {media_type} {media_id}: HTTP {response.status}")
                 return None
                 
         except asyncio.TimeoutError:
-            logger.error(f"Timeout fetching cover for '{title}'")
+            logger.error(f"Timeout fetching {media_type} {media_id}")
             return None
         except Exception as e:
-            logger.error(f"Error fetching cover for '{title}': {e}")
+            logger.error(f"Error fetching {media_type} {media_id}: {e}")
             return None
     
     async def fetch_template_titles(self, template_key: str) -> List[str]:
@@ -707,12 +698,12 @@ class ThreeByThree(commands.Cog):
         
         return []
     
-    async def generate_3x3(self, titles: List[str], media_type: str, user: discord.User) -> Optional[io.BytesIO]:
+    async def generate_3x3(self, urls: List[str], media_type: str, user: discord.User) -> Optional[io.BytesIO]:
         """
-        Generate a 3x3 grid image from 9 anime/manga titles or character names
+        Generate a 3x3 grid image from 9 AniList URLs
         
         Args:
-            titles: List of 9 titles or character names
+            urls: List of 9 AniList URLs
             media_type: 'anime', 'manga', or 'character'
             user: Discord user who requested the grid
             
@@ -723,16 +714,25 @@ class ThreeByThree(commands.Cog):
             logger.error("PIL not available for 3x3 generation")
             return None
         
-        if len(titles) != 9:
-            logger.error(f"Expected 9 titles, got {len(titles)}")
+        if len(urls) != 9:
+            logger.error(f"Expected 9 URLs, got {len(urls)}")
             return None
+        
+        # Parse URLs to get IDs
+        media_ids = []
+        for url in urls:
+            parsed = parse_anilist_url(url)
+            if not parsed or parsed[0] != media_type:
+                logger.error(f"Invalid URL or type mismatch: {url}")
+                return None
+            media_ids.append(parsed[1])
         
         # Fetch all covers (with caching)
         async with aiohttp.ClientSession() as session:
             media_data = []
             
-            for title in titles:
-                data = await self.fetch_media_cover(session, title, media_type)
+            for media_id in media_ids:
+                data = await self.fetch_media_by_id(session, media_id, media_type)
                 media_data.append(data)
         
         # Check if we got at least some covers
@@ -797,30 +797,30 @@ class ThreeByThree(commands.Cog):
                     draw = ImageDraw.Draw(image)
                     draw.rectangle([x, y, x + cover_width, y + cover_height], fill=(60, 60, 60))
                     
-                    # Draw title text if available
-                    title_text = titles[idx][:30] if idx < len(titles) else "Unknown"
+                    # Draw URL text if available
+                    url_text = urls[idx][:30] if idx < len(urls) else "Unknown"
                     try:
                         font = ImageFont.truetype("arial.ttf", 16)
                     except:
                         font = ImageFont.load_default()
                     
-                    # Multi-line text for long titles
-                    words = title_text.split()
+                    # Multi-line text for long URLs
+                    words = url_text.split('/')
                     lines = []
                     current_line = []
                     
                     for word in words:
-                        test_line = ' '.join(current_line + [word])
+                        test_line = '/'.join(current_line + [word])
                         bbox = draw.textbbox((0, 0), test_line, font=font)
                         if bbox[2] - bbox[0] < cover_width - 20:
                             current_line.append(word)
                         else:
                             if current_line:
-                                lines.append(' '.join(current_line))
+                                lines.append('/'.join(current_line))
                             current_line = [word]
                     
                     if current_line:
-                        lines.append(' '.join(current_line))
+                        lines.append('/'.join(current_line))
                     
                     # Draw lines
                     text_y_start = y + (cover_height // 2) - (len(lines) * 10)
@@ -925,7 +925,7 @@ class ThreeByThree(commands.Cog):
             await interaction.response.defer(ephemeral=False)
             
             image_bytes = await self.generate_3x3(
-                preset["titles"],
+                preset["urls"],
                 preset["media_type"],
                 interaction.user
             )
