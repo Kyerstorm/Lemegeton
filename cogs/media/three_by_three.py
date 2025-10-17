@@ -12,6 +12,15 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import database
 import re
+from difflib import SequenceMatcher
+
+# IGDB integration
+try:
+    from helpers.igdb_helper import get_game_by_slug, get_cover_image_url, get_access_token
+except ImportError:
+    get_game_by_slug = None
+    get_cover_image_url = None
+    get_access_token = None
 
 # Image processing
 try:
@@ -74,6 +83,64 @@ def parse_anilist_url(url: str) -> Optional[Tuple[str, int]]:
         return media_type, media_id
     
     return None
+
+def parse_igdb_url(url: str) -> Optional[str]:
+    """
+    Parse IGDB URL to extract game slug.
+    
+    Args:
+        url: IGDB URL (e.g., https://www.igdb.com/games/pokemon-black-version)
+        
+    Returns:
+        Game slug as string or None if invalid
+    """
+    pattern = r'https?://(?:www\.)?igdb\.com/games/([a-zA-Z0-9-]+(?:-[a-zA-Z0-9-]+)*)/?.*'
+    match = re.match(pattern, url.strip())
+    
+    if match:
+        return match.group(1)
+    
+    return None
+
+def fuzzy_match_games(query: str, games: List[Dict], threshold: float = 0.6) -> List[Dict]:
+    """
+    Filter and sort games by similarity to query.
+    
+    Args:
+        query: Search query string
+        games: List of game dicts with 'name' field
+        threshold: Minimum similarity score (0.0-1.0) to include
+    
+    Returns:
+        Sorted list of games by relevance
+    """
+    query_lower = query.lower()
+    scored_games = []
+    
+    for game in games:
+        name = game.get("name", "").lower()
+        
+        # Base similarity score
+        similarity = SequenceMatcher(None, query_lower, name).ratio()
+        
+        # Boost exact substring matches
+        if query_lower in name:
+            similarity = min(1.0, similarity + 0.3)
+        
+        # Boost word-level matches (all query words in name)
+        query_words = set(query_lower.split())
+        name_words = set(name.split())
+        if query_words.issubset(name_words):
+            similarity = min(1.0, similarity + 0.2)
+        
+        # Only include games above threshold
+        if similarity >= threshold:
+            scored_games.append((similarity, game))
+    
+    # Sort by similarity (highest first)
+    scored_games.sort(key=lambda x: x[0], reverse=True)
+    
+    return [game for score, game in scored_games]
 
 # Built-in templates
 TEMPLATES = {
@@ -164,12 +231,16 @@ class CoverCache:
         except Exception as e:
             logger.error(f"Error saving cache index: {e}")
     
-    def _get_cache_key(self, media_id: int, media_type: str) -> str:
+    def _get_cache_key(self, media_id, media_type: str) -> str:
         """Generate cache key from media ID and type"""
-        key_str = f"{media_id}_{media_type.lower()}"
+        if media_type == "games":
+            # For games, media_id is the app ID (integer)
+            key_str = f"{media_id}_{media_type.lower()}"
+        else:
+            key_str = f"{media_id}_{media_type.lower()}"
         return hashlib.md5(key_str.encode()).hexdigest()
     
-    def get(self, media_id: int, media_type: str) -> Optional[Dict]:
+    def get(self, media_id, media_type: str) -> Optional[Dict]:
         """Get cached cover data"""
         key = self._get_cache_key(media_id, media_type)
         
@@ -201,7 +272,7 @@ class CoverCache:
         logger.debug(f"Cache MISS for {media_type} {media_id}")
         return None
     
-    def set(self, media_id: int, media_type: str, data: Dict):
+    def set(self, media_id, media_type: str, data: Dict):
         """Cache cover data"""
         key = self._get_cache_key(media_id, media_type)
         
@@ -318,7 +389,7 @@ class PresetManager:
 
 
 class ThreeByThreeModal(discord.ui.Modal):
-    """Modal for collecting 9 AniList URLs"""
+    """Modal for collecting 9 AniList URLs or IGDB game URLs"""
     
     def __init__(self, media_type: str, cog, preset_name: Optional[str] = None):
         super().__init__(title=f"Create Your 3x3 {media_type.title()} Grid")
@@ -327,157 +398,177 @@ class ThreeByThreeModal(discord.ui.Modal):
         self.preset_name = preset_name
         
         # Determine placeholder text based on media type
-        if media_type == "character":
+        if media_type == "games":
+            placeholder = "https://www.igdb.com/games/pokemon-black-version"
+            label_prefix = "IGDB URL"
+        elif media_type == "character":
             placeholder = "https://anilist.co/character/ID/Name/"
+            label_prefix = "AniList URL"
         else:
             placeholder = f"https://anilist.co/{media_type}/ID/Title/"
+            label_prefix = "AniList URL"
         
         # Create 9 input fields (3 rows)
-        self.url1 = discord.ui.TextInput(
-            label=f"Row 1 - AniList URL 1",
+        self.input1 = discord.ui.TextInput(
+            label=f"Row 1 - {label_prefix} 1",
             placeholder=placeholder,
             required=True,
             max_length=200
         )
-        self.url2 = discord.ui.TextInput(
-            label=f"Row 1 - AniList URL 2",
+        self.input2 = discord.ui.TextInput(
+            label=f"Row 1 - {label_prefix} 2",
             placeholder=placeholder,
             required=True,
             max_length=200
         )
-        self.url3 = discord.ui.TextInput(
-            label=f"Row 1 - AniList URL 3",
+        self.input3 = discord.ui.TextInput(
+            label=f"Row 1 - {label_prefix} 3",
             placeholder=placeholder,
             required=True,
             max_length=200
         )
-        self.url4 = discord.ui.TextInput(
-            label=f"Row 2 - AniList URL 1",
+        self.input4 = discord.ui.TextInput(
+            label=f"Row 2 - {label_prefix} 1",
             placeholder=placeholder,
             required=True,
             max_length=200
         )
-        self.url5 = discord.ui.TextInput(
-            label=f"Row 2 - AniList URL 2",
+        self.input5 = discord.ui.TextInput(
+            label=f"Row 2 - {label_prefix} 2",
             placeholder=placeholder,
             required=True,
             max_length=200
         )
         
         # Add all fields
-        self.add_item(self.url1)
-        self.add_item(self.url2)
-        self.add_item(self.url3)
-        self.add_item(self.url4)
-        self.add_item(self.url5)
+        self.add_item(self.input1)
+        self.add_item(self.input2)
+        self.add_item(self.input3)
+        self.add_item(self.input4)
+        self.add_item(self.input5)
     
     async def on_submit(self, interaction: discord.Interaction):
-        """Handle modal submission - collect first 5 URLs"""
+        """Handle modal submission - collect first 5 inputs"""
         await interaction.response.defer(ephemeral=True)
         
-        # Store first 5 URLs
-        urls = [
-            self.url1.value.strip(),
-            self.url2.value.strip(),
-            self.url3.value.strip(),
-            self.url4.value.strip(),
-            self.url5.value.strip()
+        # Store first 5 inputs
+        inputs = [
+            self.input1.value.strip(),
+            self.input2.value.strip(),
+            self.input3.value.strip(),
+            self.input4.value.strip(),
+            self.input5.value.strip()
         ]
         
-        # Show second modal for remaining 4 URLs
-        second_modal = ThreeByThreeModalPart2(self.media_type, urls, self.cog, self.preset_name)
-        await interaction.followup.send("Please enter the remaining 4 URLs:", ephemeral=True)
+        # Show second modal for remaining 4 inputs
+        second_modal = ThreeByThreeModalPart2(self.media_type, inputs, self.cog, self.preset_name)
+        await interaction.followup.send("Please enter the remaining 4 inputs:", ephemeral=True)
         await interaction.followup.send("", view=ContinueView(second_modal), ephemeral=True)
 
 
 class ThreeByThreeModalPart2(discord.ui.Modal):
-    """Second modal for collecting remaining 4 URLs"""
+    """Second modal for collecting remaining 4 inputs"""
     
-    def __init__(self, media_type: str, previous_urls: List[str], cog, preset_name: Optional[str] = None):
-        super().__init__(title=f"3x3 Grid - Remaining URLs")
+    def __init__(self, media_type: str, previous_inputs: List[str], cog, preset_name: Optional[str] = None):
+        super().__init__(title=f"3x3 Grid - Remaining Inputs")
         self.media_type = media_type
-        self.previous_urls = previous_urls
+        self.previous_inputs = previous_inputs
         self.cog = cog
         self.preset_name = preset_name
         
         # Determine placeholder text based on media type
-        if media_type == "character":
+        if media_type == "games":
+            placeholder = "Enter game name (e.g., Narkaka: Bladepoint)"
+            label_prefix = "Game"
+        elif media_type == "character":
             placeholder = "https://anilist.co/character/ID/Name/"
+            label_prefix = "AniList URL"
         else:
             placeholder = f"https://anilist.co/{media_type}/ID/Title/"
+            label_prefix = "AniList URL"
         
         # Remaining 4 fields
-        self.url6 = discord.ui.TextInput(
-            label=f"Row 2 - AniList URL 3",
+        self.input6 = discord.ui.TextInput(
+            label=f"Row 2 - {label_prefix} 3",
             placeholder=placeholder,
             required=True,
             max_length=200
         )
-        self.url7 = discord.ui.TextInput(
-            label=f"Row 3 - AniList URL 1",
+        self.input7 = discord.ui.TextInput(
+            label=f"Row 3 - {label_prefix} 1",
             placeholder=placeholder,
             required=True,
             max_length=200
         )
-        self.url8 = discord.ui.TextInput(
-            label=f"Row 3 - AniList URL 2",
+        self.input8 = discord.ui.TextInput(
+            label=f"Row 3 - {label_prefix} 2",
             placeholder=placeholder,
             required=True,
             max_length=200
         )
-        self.url9 = discord.ui.TextInput(
-            label=f"Row 3 - AniList URL 3",
+        self.input9 = discord.ui.TextInput(
+            label=f"Row 3 - {label_prefix} 3",
             placeholder=placeholder,
             required=True,
             max_length=200
         )
         
-        self.add_item(self.url6)
-        self.add_item(self.url7)
-        self.add_item(self.url8)
-        self.add_item(self.url9)
+        self.add_item(self.input6)
+        self.add_item(self.input7)
+        self.add_item(self.input8)
+        self.add_item(self.input9)
     
     async def on_submit(self, interaction: discord.Interaction):
         """Handle second modal submission and generate 3x3"""
         await interaction.response.defer(ephemeral=False)
         
-        # Combine all 9 URLs
-        all_urls = self.previous_urls + [
-            self.url6.value.strip(),
-            self.url7.value.strip(),
-            self.url8.value.strip(),
-            self.url9.value.strip()
+        # Combine all 9 inputs
+        all_inputs = self.previous_inputs + [
+            self.input6.value.strip(),
+            self.input7.value.strip(),
+            self.input8.value.strip(),
+            self.input9.value.strip()
         ]
         
-        # Validate all URLs
-        invalid_urls = []
-        for i, url in enumerate(all_urls, 1):
-            parsed = parse_anilist_url(url)
-            if not parsed:
-                invalid_urls.append(f"URL {i}: Invalid AniList URL format")
-            elif parsed[0] != self.media_type:
-                invalid_urls.append(f"URL {i}: Must be a {self.media_type} URL")
+        # Validate all inputs based on media type
+        invalid_inputs = []
+        for i, input_val in enumerate(all_inputs, 1):
+            if self.media_type == "games":
+                # For games, validate IGDB URL format
+                parsed = parse_igdb_url(input_val)
+                if not parsed:
+                    invalid_inputs.append(f"Input {i}: Invalid IGDB URL format")
+            else:
+                # For AniList types, validate URL format
+                parsed = parse_anilist_url(input_val)
+                if not parsed:
+                    invalid_inputs.append(f"Input {i}: Invalid AniList URL format")
+                elif parsed[0] != self.media_type:
+                    invalid_inputs.append(f"Input {i}: Must be a {self.media_type} URL")
         
-        if invalid_urls:
-            error_msg = "❌ Invalid URLs found:\n" + "\n".join(invalid_urls)
-            error_msg += f"\n\nExpected format: https://anilist.co/{self.media_type}/ID/Title/"
+        if invalid_inputs:
+            error_msg = "❌ Invalid inputs found:\n" + "\n".join(invalid_inputs)
+            if self.media_type == "games":
+                error_msg += "\n\nExpected format: https://www.igdb.com/games/game-slug"
+            elif self.media_type != "games":
+                error_msg += f"\n\nExpected format: https://anilist.co/{self.media_type}/ID/Title/"
             await interaction.followup.send(error_msg, ephemeral=True)
             return
         
-        logger.info(f"Generating 3x3 for {interaction.user.name}: {all_urls}")
+        logger.info(f"Generating 3x3 for {interaction.user.name}: {all_inputs}")
         
         # Save as preset if name provided
         if self.preset_name:
             self.cog.preset_manager.save_preset(
                 interaction.user.id,
                 self.preset_name,
-                all_urls,
+                all_inputs,
                 self.media_type
             )
         
         # Generate the 3x3 grid
         try:
-            image_bytes = await self.cog.generate_3x3(all_urls, self.media_type, interaction.user)
+            image_bytes = await self.cog.generate_3x3(all_inputs, self.media_type, interaction.user)
             
             if image_bytes:
                 file = discord.File(fp=image_bytes, filename=f"3x3_{self.media_type}.png")
@@ -488,14 +579,14 @@ class ThreeByThreeModalPart2(discord.ui.Modal):
                     color=discord.Color.purple()
                 )
                 embed.set_image(url=f"attachment://3x3_{self.media_type}.png")
-                embed.set_footer(text="Generated from AniList URLs" + (" character images" if self.media_type == "character" else " covers"))
+                embed.set_footer(text="Generated from AniList URLs" + (" character images" if self.media_type == "character" else " covers" if self.media_type != "games" else " IGDB game covers"))
                 
                 await interaction.followup.send(embed=embed, file=file)
                 
                 logger.info(f"Successfully generated 3x3 for {interaction.user.name}")
             else:
                 await interaction.followup.send(
-                    "❌ Failed to generate 3x3 grid. Please check your URLs and try again.",
+                    "❌ Failed to generate 3x3 grid. Please check your inputs and try again.",
                     ephemeral=True
                 )
         except Exception as e:
@@ -641,6 +732,79 @@ class ThreeByThree(commands.Cog):
             logger.error(f"Error fetching {media_type} {media_id}: {e}")
             return None
     
+    async def fetch_game_cover(self, session: aiohttp.ClientSession, slug: str) -> Optional[Dict]:
+        """
+        Fetch game cover from IGDB using game slug
+        
+        Args:
+            session: aiohttp session
+            slug: IGDB game slug
+            
+        Returns:
+            Dict with 'title', 'cover_url', 'cover_bytes' or None
+        """
+        if not get_game_by_slug or not get_cover_image_url or not get_access_token:
+            logger.error("IGDB helper not available")
+            return None
+        
+        # Check cache first (use slug as key for games)
+        cached_data = self.cover_cache.get(slug, "games")
+        if cached_data:
+            return cached_data
+        
+        try:
+            # Get IGDB access token
+            access_token = await get_access_token(session)
+            if not access_token:
+                logger.error("Failed to get IGDB access token")
+                return None
+            
+            # Get game details from IGDB
+            game_data = await get_game_by_slug(session, access_token, slug)
+            if not game_data:
+                logger.warning(f"No game found for slug '{slug}'")
+                return None
+            
+            game_title = game_data.get("name", f"Game {slug}")
+            cover_data = game_data.get("cover")
+            
+            if not cover_data:
+                logger.warning(f"No cover image found for game '{game_title}'")
+                return None
+            
+            # Get full cover image URL
+            cover_url = get_cover_image_url(cover_data)
+            if not cover_url:
+                logger.warning(f"Failed to construct cover URL for '{game_title}'")
+                return None
+            
+            # Download cover image
+            async with session.get(cover_url, timeout=aiohttp.ClientTimeout(total=30)) as img_response:
+                if img_response.status == 200:
+                    cover_bytes = await img_response.read()
+                    
+                    result = {
+                        "title": game_title,
+                        "cover_url": cover_url,
+                        "cover_bytes": cover_bytes
+                    }
+                    
+                    # Cache the result (use slug as key for games)
+                    self.cover_cache.set(slug, "games", result)
+                    
+                    logger.info(f"Fetched game cover for '{game_title}' (Slug: {slug})")
+                    return result
+                else:
+                    logger.warning(f"Failed to download cover for '{game_title}': HTTP {img_response.status}")
+                    return None
+                        
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout fetching game cover for slug {slug}")
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching game cover for slug {slug}: {e}")
+            return None
+    
     async def fetch_template_titles(self, template_key: str) -> List[str]:
         """Fetch titles for a template using AniList API"""
         template = TEMPLATES.get(template_key)
@@ -700,11 +864,11 @@ class ThreeByThree(commands.Cog):
     
     async def generate_3x3(self, urls: List[str], media_type: str, user: discord.User) -> Optional[io.BytesIO]:
         """
-        Generate a 3x3 grid image from 9 AniList URLs
+        Generate a 3x3 grid image from 9 AniList URLs or IGDB game URLs
         
         Args:
-            urls: List of 9 AniList URLs
-            media_type: 'anime', 'manga', or 'character'
+            urls: List of 9 AniList URLs (for anime/manga/character) or IGDB game URLs (for games)
+            media_type: 'anime', 'manga', 'character', or 'games'
             user: Discord user who requested the grid
             
         Returns:
@@ -715,25 +879,43 @@ class ThreeByThree(commands.Cog):
             return None
         
         if len(urls) != 9:
-            logger.error(f"Expected 9 URLs, got {len(urls)}")
+            logger.error(f"Expected 9 URLs/names, got {len(urls)}")
             return None
         
-        # Parse URLs to get IDs
-        media_ids = []
-        for url in urls:
-            parsed = parse_anilist_url(url)
-            if not parsed or parsed[0] != media_type:
-                logger.error(f"Invalid URL or type mismatch: {url}")
-                return None
-            media_ids.append(parsed[1])
+        # Handle different media types
+        if media_type == "games":
+            # For games, parse URLs to get slugs
+            slugs = []
+            for url in urls:
+                parsed = parse_igdb_url(url)
+                if not parsed:
+                    logger.error(f"Invalid IGDB URL: {url}")
+                    return None
+                slugs.append(parsed)
+        else:
+            # For AniList types, parse URLs to get IDs
+            media_ids = []
+            for url in urls:
+                parsed = parse_anilist_url(url)
+                if not parsed or parsed[0] != media_type:
+                    logger.error(f"Invalid URL or type mismatch: {url}")
+                    return None
+                media_ids.append(parsed[1])
         
         # Fetch all covers (with caching)
         async with aiohttp.ClientSession() as session:
             media_data = []
             
-            for media_id in media_ids:
-                data = await self.fetch_media_by_id(session, media_id, media_type)
-                media_data.append(data)
+            if media_type == "games":
+                # Fetch game covers by slug
+                for slug in slugs:
+                    data = await self.fetch_game_cover(session, slug)
+                    media_data.append(data)
+            else:
+                # Fetch AniList covers
+                for media_id in media_ids:
+                    data = await self.fetch_media_by_id(session, media_id, media_type)
+                    media_data.append(data)
         
         # Check if we got at least some covers
         valid_covers = [m for m in media_data if m is not None]
@@ -848,7 +1030,8 @@ class ThreeByThree(commands.Cog):
     @app_commands.choices(media_type=[
         app_commands.Choice(name="Anime", value="anime"),
         app_commands.Choice(name="Manga", value="manga"),
-        app_commands.Choice(name="Character", value="character")
+        app_commands.Choice(name="Character", value="character"),
+        app_commands.Choice(name="Games", value="games")
     ])
     async def three_by_three(self, interaction: discord.Interaction, media_type: app_commands.Choice[str]):
         """Create a 3x3 grid of anime/manga covers or character images"""
