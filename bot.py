@@ -516,27 +516,31 @@ async def _load_cogs_impl():
                 except Exception as cleanup_error:
                     logger.error(f"Failed to cleanup extension {ext_name}: {cleanup_error}")
         
-        cogs_dir = os.path.join('.', 'cogs')
-        if not os.path.exists(cogs_dir):
-            logger.error(f"Cogs directory not found: {cogs_dir}")
-            return
+        # Check both cogs and cogs_test directories
+        cog_dirs = ['cogs', 'cogs_test']
+        cog_files = []  # list of tuples (module_relative_path, file_path, base_dir)
+        
+        for base_dir in cog_dirs:
+            cogs_dir = os.path.join('.', base_dir)
+            if not os.path.exists(cogs_dir):
+                logger.warning(f"Cogs directory not found: {cogs_dir}")
+                continue
 
-        # Recursively find all Python files under cogs (skip package __init__.py files)
-        cog_files = []  # list of tuples (module_relative_path, file_path)
-        for root, dirs, files in os.walk(cogs_dir):
-            for f in files:
-                if not f.endswith('.py'):
-                    continue
-                if f == '__init__.py':
-                    continue
-                # Skip backup/old files
-                if f.endswith('_old.py') or f.endswith('.backup.py'):
-                    continue
-                full_path = os.path.join(root, f)
-                rel_path = os.path.relpath(full_path, cogs_dir)  # e.g. 'anilist/watchlist.py'
-                module_rel = rel_path.replace(os.path.sep, '.')  # e.g. 'anilist.watchlist.py'
-                module_rel = module_rel[:-3]  # strip .py
-                cog_files.append((module_rel, full_path))
+            # Recursively find all Python files under this cog directory (skip package __init__.py files)
+            for root, dirs, files in os.walk(cogs_dir):
+                for f in files:
+                    if not f.endswith('.py'):
+                        continue
+                    if f == '__init__.py':
+                        continue
+                    # Skip backup/old files
+                    if f.endswith('_old.py') or f.endswith('.backup.py'):
+                        continue
+                    full_path = os.path.join(root, f)
+                    rel_path = os.path.relpath(full_path, cogs_dir)  # e.g. 'anilist/watchlist.py'
+                    module_rel = rel_path.replace(os.path.sep, '.')  # e.g. 'anilist.watchlist.py'
+                    module_rel = module_rel[:-3]  # strip .py
+                    cog_files.append((module_rel, full_path, base_dir))
 
         logger.debug(f"Found {len(cog_files)} potential cog files (recursive)")
         
@@ -544,8 +548,8 @@ async def _load_cogs_impl():
         reloaded_count = 0
         failed_count = 0
         
-        for module_rel, file_path in cog_files:
-            cog_name = f"cogs.{module_rel}"
+        for module_rel, file_path, base_dir in cog_files:
+            cog_name = f"{base_dir}.{module_rel}"
             
             try:
                 # Get file modification time
