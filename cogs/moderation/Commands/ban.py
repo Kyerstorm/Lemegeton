@@ -787,12 +787,12 @@ class ConfirmView(discord.ui.View):
         return True
 
     @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger, emoji="🔨", custom_id="confirm_ban")
-    async def confirm(self, button: discord.ui.Button, interaction: discord.Interaction):
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.value = True
         await interaction.response.edit_message(content="✅ Confirmed.", view=None)
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary, emoji="✖️", custom_id="cancel_ban")
-    async def cancel(self, button: discord.ui.Button, interaction: discord.Interaction):
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.value = False
         await interaction.response.edit_message(content="❎ Cancelled.", view=None)
 
@@ -803,5 +803,5 @@ class ConfirmView(discord.ui.View):
 
 async def setup(bot):
     """Setup function for the cog"""
-    await bot.add_cog(ban(bot))
-    logger.info("Ban cog loaded successfully")
+    await bot.add_cog(BanCog(bot))
+    LOG.info("Ban cog loaded successfully")
