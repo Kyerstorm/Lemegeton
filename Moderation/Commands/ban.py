@@ -1,5 +1,4 @@
 # cogs/ban.py
-# Single-file cog, slash-only moderation with appeals (interactive modal), multi-guild safe.
 from __future__ import annotations
 import os
 import json
@@ -801,3 +800,8 @@ class ConfirmView(discord.ui.View):
 # COG SETUP ENTRYPOINT
 # -------------------------------
 
+
+async def setup(bot):
+    """Setup function for the cog"""
+    await bot.add_cog(ban(bot))
+    logger.info("Ban cog loaded successfully")
