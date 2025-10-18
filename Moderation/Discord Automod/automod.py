@@ -1,4 +1,4 @@
-# cogs/automod_ai.py
+# cogs/automod.py
 """
 Single-file cog: Discord AutoMod (native where possible) + AI moderation (OpenAI).
 Features:
