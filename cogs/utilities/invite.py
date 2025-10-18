@@ -113,8 +113,8 @@ class InviteCog(commands.Cog):
             embed.add_field(
                 name="🌟 Get Started:",
                 value=(
-                    "After adding the bot, use `/login` to connect your AniList account "
-                    "and start tracking your anime/manga journey!"
+                    "After adding the bot, you'll receive an automatic setup guide in your server! "
+                    "Use `/login` to connect your AniList account and start tracking your anime/manga journey!"
                 ),
                 inline=False
             )
