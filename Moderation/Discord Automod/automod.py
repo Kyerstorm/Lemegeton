@@ -1,7 +1,6 @@
-# cogs/automod_ai.py
+# cogs/automod.py
 """
 Single-file cog: Discord AutoMod (native where possible) + AI moderation (OpenAI).
-Designed for discord.py v2.5+ but includes fallbacks for older runtimes.
 Features:
 - Per-guild configuration persisted in SQLite (aiosqlite)
 - Integration with Discord AutoMod (create/list/remove rules) when supported
