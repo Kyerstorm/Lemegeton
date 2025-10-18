@@ -1,7 +1,5 @@
 # cogs/moderation_cog.py
 # Single, unified cog file implementing AutoMod + AI Moderation + related systems
-# Designed to be dropped into a discord.py v2+ bot (commands.Bot / ext.commands)
-#
 # Sections:
 # PART 0: Imports & constants
 # PART 1: Async SQLite DB (per-guild config + infractions)
