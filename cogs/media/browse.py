@@ -3,13 +3,24 @@ from discord.ext import commands
 from discord import app_commands
 import aiohttp
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from discord.ui import View, Button
 from database import get_all_users_guild_aware
 
 logger = logging.getLogger("BrowseCog")
 API_URL = "https://graphql.anilist.co"
 GOOGLE_BOOKS_URL = "https://www.googleapis.com/books/v1/volumes?q="
+
+# Status order priority
+STATUS_ORDER = {
+    "REPEATING": 0,
+    "COMPLETED": 1,
+    "READING": 2,
+    "PAUSED": 3,
+    "DROPPED": 4,
+    "PLANNING": 5,
+    None: 6
+}
 
 
 class BrowseCog(commands.Cog):
@@ -101,7 +112,7 @@ class BrowseCog(commands.Cog):
         score = entry.get("score")
         status = entry.get("status")
 
-        # 🔄 Normalize based on score format
+        # 📊 Normalize based on score format
         rating10: Optional[float] = None
         if score is not None:
             try:
@@ -120,6 +131,65 @@ class BrowseCog(commands.Cog):
 
         return {"progress": progress, "rating10": rating10, "status": status}
 
+    # --------------------------------------------------
+    # Build Sorted User List with Progress (for pagination)
+    # --------------------------------------------------
+    async def build_sorted_user_progress_list(
+        self, 
+        users: List[Tuple], 
+        media_id: int, 
+        real_type: str
+    ) -> List[Dict]:
+        """
+        Fetch progress for all users and return a sorted list.
+        Sorted alphabetically by AniList username
+        """
+        user_progress_list = []
+        processed_anilist_users = set()
+        processed_discord_ids = set()
+
+        for user in users:
+            # Expected structure: (id, discord_id, guild_id, username, anilist_username, anilist_id, ...)
+            if len(user) >= 5:
+                discord_id = user[1]
+                discord_name = user[3]
+                anilist_username = user[4]
+            else:
+                logger.warning(f"Unexpected user row structure: {len(user)} columns")
+                continue
+
+            # Skip if no AniList username
+            if not anilist_username:
+                continue
+
+            # Skip duplicates
+            if anilist_username in processed_anilist_users or discord_id in processed_discord_ids:
+                logger.debug(f"Skipping duplicate user: {anilist_username} (Discord ID: {discord_id})")
+                continue
+
+            anilist_progress = await self.fetch_user_anilist_progress(
+                anilist_username, media_id, real_type
+            )
+
+            # Skip users without this media (404 or rate limit)
+            if not anilist_progress:
+                continue
+
+            # Mark as processed
+            processed_anilist_users.add(anilist_username)
+            processed_discord_ids.add(discord_id)
+
+            user_progress_list.append({
+                "anilist_username": anilist_username,
+                "progress": anilist_progress.get("progress"),
+                "rating10": anilist_progress.get("rating10"),
+                "status": anilist_progress.get("status")
+            })
+
+        # Sort alphabetically by AniList username
+        user_progress_list.sort(key=lambda u: u["anilist_username"].lower())
+
+        return user_progress_list
 
     # --------------------------------------------------
     # /Browse Command
@@ -139,8 +209,6 @@ class BrowseCog(commands.Cog):
         app_commands.Choice(name="General Novel", value="BOOK"),
     ])
     async def search(self, interaction: discord.Interaction, media_type: app_commands.Choice[str], title: str):
-        # NOTE: media_type is now the first parameter so the slash command UI will show:
-        # /browse <media_type> <title>
         await interaction.response.defer()
 
         chosen_type = media_type.value
@@ -197,7 +265,6 @@ class BrowseCog(commands.Cog):
             await interaction.followup.send("❌ No Light Novel results found.", ephemeral=True)
             return
         elif chosen_type == "MANGA" and media.get("format") == "NOVEL":
-            # Exclude light novels from regular manga searches
             await interaction.followup.send("❌ No Manga results found (try Light Novel instead).", ephemeral=True)
             return
 
@@ -245,74 +312,6 @@ class BrowseCog(commands.Cog):
         embed.add_field(name="🎭 Genres", value=genres, inline=False)
         embed.add_field(name="📅 Published", value=f"**Start:** {start_str}\n**End:** {end_str}", inline=False)
 
-        # --------------------------------------------------
-        # Registered Users' Progress (Second Page) - GUILD-AWARE & DUPLICATE-FREE
-        # --------------------------------------------------
-        users = await get_all_users_guild_aware(interaction.guild_id)
-        progress_embed = None
-
-        if users:
-            col_name = "Episodes" if real_type == "ANIME" else "Chapters"
-            progress_lines = [f"`{'User':<20} {col_name:<10} {'Rating':<7} {'Status':<12}`"]
-            progress_lines.append("`{:-<20} {:-<10} {:-<7} {:-<12}`".format("", "", "", ""))
-
-            # Track processed users by both discord_id and anilist_username to prevent duplicates
-            processed_anilist_users = set()
-            processed_discord_ids = set()
-
-            for user in users:
-                # Guild-aware schema: (id, discord_id, guild_id, username, anilist_username, anilist_id, ...)
-                # Expected structure from get_all_users_guild_aware with explicit columns
-                if len(user) >= 5:
-                    discord_id = user[1]
-                    discord_name = user[3]
-                    anilist_username = user[4]
-                else:
-                    # Fallback for unexpected structure
-                    logger.warning(f"Unexpected user row structure: {len(user)} columns")
-                    continue
-
-                # Skip if no AniList username
-                if not anilist_username:
-                    continue
-                    
-                # Skip if already processed (check both identifiers to catch any duplicates)
-                if anilist_username in processed_anilist_users or discord_id in processed_discord_ids:
-                    logger.debug(f"Skipping duplicate user: {anilist_username} (Discord ID: {discord_id})")
-                    continue
-
-                anilist_progress = await self.fetch_user_anilist_progress(
-                    anilist_username, media.get("id", 0), real_type
-                )
-
-                # ⬅️ Skip this user entirely if they don't have the anime/manga
-                if not anilist_progress:
-                    continue
-
-                # Mark both identifiers as processed to prevent duplicates
-                processed_anilist_users.add(anilist_username)
-                processed_discord_ids.add(discord_id)
-
-                total = media.get("episodes") if real_type == "ANIME" else media.get("chapters")
-                progress_text = f"{anilist_progress['progress']}/{total or '?'}" if anilist_progress.get("progress") is not None else "—"
-                rating_text = f"{anilist_progress['rating10']}/10" if anilist_progress.get("rating10") is not None else "—"
-                status_text = anilist_progress.get("status", "—")
-
-                progress_lines.append(f"`{discord_name:<20} {progress_text:<10} {rating_text:<7} {status_text:<12}`")
-
-            # ✅ Only build the embed if there's at least one valid user
-            if len(progress_lines) > 2:
-                progress_embed = discord.Embed(
-                    title="👥 Registered Users' Progress",
-                    description="\n".join(progress_lines),
-                    color=discord.Color.blue()
-                )
-                # Get the title and emoji for the footer
-                media_title = media['title']['english'] or media['title']['romaji']
-                emoji = '🎬' if real_type == 'ANIME' else '📖'
-                progress_embed.set_footer(text=f"{emoji} {media_title} • Fetched from AniList")
-
-
         mal_link = None
         for link in media.get("externalLinks", []):
             if link.get("site") == "MyAnimeList":
@@ -323,16 +322,132 @@ class BrowseCog(commands.Cog):
 
         embed.set_footer(text="Fetched from AniList")
 
-        # Always attach a PageView so the user can see the navigation buttons.
-        # If there is no `progress_embed`, the User Progress button will be disabled
-        # and will show a short ephemeral message if clicked.
+        # --------------------------------------------------
+        # PageView with Lazy-Loading
+        # --------------------------------------------------
         class PageView(View):
-            def __init__(self, embed1, embed2):
-                super().__init__(timeout=120)
+            def __init__(self, embed1, media_data, real_type_val, guild_id, bot):
+                super().__init__(timeout=300)
                 self.embed1 = embed1
-                self.embed2 = embed2
+                self.media_data = media_data
+                self.real_type = real_type_val
+                self.guild_id = guild_id
+                self.bot = bot
                 self.current = "info"
+                
+                # Progress data (lazy-loaded in batches)
+                self.all_users: Optional[List[Tuple]] = None  # All users from database
+                self.loaded_user_progress: List[Dict] = []  # Users with valid progress
+                self.current_batch_start = 0  # Current position in all_users
+                self.batch_size = 10  # Load 10 users at a time
+                self.all_data_loaded = False  # Whether we've checked all users
+                self.current_progress_page = 0
+                self.progress_pages: List[discord.Embed] = []
+                
                 self.rebuild_buttons()
+
+            async def load_progress_data(self, load_initial_batch: bool = True):
+                """Load initial batch of user progress data"""
+                if self.all_users is None:
+                    # Load all users from database, sorted alphabetically by anilist_username
+                    self.all_users = await get_all_users_guild_aware(self.guild_id)
+                    # Sort users alphabetically by anilist_username
+                    self.all_users.sort(key=lambda u: (u[4] or "").lower() if len(u) >= 5 else "")
+                
+                if load_initial_batch:
+                    await self.load_next_batch()
+
+            async def load_next_batch(self) -> bool:
+                """Load next batch of 10 users with valid progress. Returns True if more data was loaded."""
+                if self.all_data_loaded:
+                    return False
+                
+                loaded_count = 0
+                initial_loaded_count = len(self.loaded_user_progress)
+                
+                # Process users in batches until we get 10 valid ones or run out of users
+                while self.current_batch_start < len(self.all_users) and loaded_count < self.batch_size:
+                    user = self.all_users[self.current_batch_start]
+                    self.current_batch_start += 1
+                    
+                    # Expected structure: (id, discord_id, guild_id, username, anilist_username, anilist_id, ...)
+                    if len(user) >= 5:
+                        anilist_username = user[4]
+                    else:
+                        continue
+                    
+                    # Skip if no AniList username
+                    if not anilist_username:
+                        continue
+                    
+                    # Check if we already processed this user
+                    if any(u["anilist_username"] == anilist_username for u in self.loaded_user_progress):
+                        continue
+                    
+                    # Fetch progress for this user
+                    anilist_progress = await self.bot.get_cog("BrowseCog").fetch_user_anilist_progress(
+                        anilist_username, self.media_data.get("id", 0), self.real_type
+                    )
+                    
+                    # Skip users without this media (404 or rate limit)
+                    if not anilist_progress:
+                        continue
+                    
+                    # Add valid user
+                    self.loaded_user_progress.append({
+                        "anilist_username": anilist_username,
+                        "progress": anilist_progress.get("progress"),
+                        "rating10": anilist_progress.get("rating10"),
+                        "status": anilist_progress.get("status")
+                    })
+                    loaded_count += 1
+                
+                # Mark as fully loaded if we've processed all users
+                if self.current_batch_start >= len(self.all_users):
+                    self.all_data_loaded = True
+                
+                # Rebuild pagination pages with current loaded data
+                self.rebuild_progress_pages()
+                
+                # Return True if we loaded new data
+                return len(self.loaded_user_progress) > initial_loaded_count
+
+            def rebuild_progress_pages(self):
+                """Build paginated embeds from currently loaded user progress data"""
+                self.progress_pages = []
+                col_name = "Episodes" if self.real_type == "ANIME" else "Chapters"
+                
+                for page_idx in range(0, len(self.loaded_user_progress), 10):
+                    page_users = self.loaded_user_progress[page_idx:page_idx + 10]
+                    
+                    progress_lines = [f"`{'User':<20} {col_name:<10} {'Rating':<7} {'Status':<12}`"]
+                    progress_lines.append("`{:-<20} {:-<10} {:-<7} {:-<12}`".format("", "", "", ""))
+                    
+                    for user_data in page_users:
+                        total = self.media_data.get("episodes") if self.real_type == "ANIME" else self.media_data.get("chapters")
+                        progress_text = f"{user_data['progress']}/{total or '?'}" if user_data.get("progress") is not None else "—"
+                        rating_text = f"{user_data['rating10']}/10" if user_data.get("rating10") is not None else "—"
+                        status_text = user_data.get("status", "—")
+                        
+                        progress_lines.append(f"`{user_data['anilist_username']:<20} {progress_text:<10} {rating_text:<7} {status_text:<12}`")
+                    
+                    # Calculate page number display
+                    total_pages = (len(self.loaded_user_progress) + 9) // 10
+                    page_num = (page_idx // 10) + 1
+                    
+                    # Add loading indicator if more data might be available
+                    loading_indicator = " (Loading more...)" if not self.all_data_loaded and page_idx + 10 >= len(self.loaded_user_progress) else ""
+                    
+                    progress_embed = discord.Embed(
+                        title="👥 Registered Users' Progress",
+                        description="\n".join(progress_lines),
+                        color=discord.Color.blue()
+                    )
+                    media_title = self.media_data['title']['english'] or self.media_data['title']['romaji']
+                    emoji = '🎬' if self.real_type == 'ANIME' else '📖'
+                    progress_embed.set_footer(text=f"{emoji} {media_title} • Page {page_num}/{total_pages}{loading_indicator} • Fetched from AniList")
+                    
+                    self.progress_pages.append(progress_embed)
 
             def rebuild_buttons(self):
                 self.clear_items()
@@ -340,32 +455,31 @@ class BrowseCog(commands.Cog):
                 if self.current == "info":
                     btn = Button(
                         label="👥 User Progress",
-                        style=discord.ButtonStyle.green,
-                        disabled=(self.embed2 is None)
+                        style=discord.ButtonStyle.green
                     )
 
                     async def user_progress_callback(interaction: discord.Interaction):
-                        # If no progress embed, notify the user privately
-                        if self.embed2 is None:
+                        await interaction.response.defer()
+                        await self.load_progress_data(load_initial_batch=True)
+                        
+                        if not self.progress_pages:
                             try:
-                                await interaction.response.send_message("No registered users with progress for this title.", ephemeral=True)
+                                await interaction.followup.send("No registered users with progress for this title.", ephemeral=True)
                             except Exception:
-                                # As a fallback, use followup
-                                try:
-                                    await interaction.followup.send("No registered users with progress for this title.", ephemeral=True)
-                                except Exception:
-                                    pass
+                                pass
                             return
 
                         self.current = "progress"
+                        self.current_progress_page = 0
                         self.rebuild_buttons()
-                        await interaction.response.edit_message(embed=self.embed2, view=self)
+                        await interaction.edit_original_response(embed=self.progress_pages[0], view=self)
 
                     btn.callback = user_progress_callback
                     self.add_item(btn)
 
-                else:
-                    btn = Button(
+                elif self.current == "progress":
+                    # Back button
+                    back_btn = Button(
                         label="📖 Media Info",
                         style=discord.ButtonStyle.blurple
                     )
@@ -375,14 +489,73 @@ class BrowseCog(commands.Cog):
                         self.rebuild_buttons()
                         await interaction.response.edit_message(embed=self.embed1, view=self)
 
-                    btn.callback = media_info_callback
-                    self.add_item(btn)
+                    back_btn.callback = media_info_callback
+                    self.add_item(back_btn)
+
+                    # Previous page button
+                    prev_btn = Button(
+                        label="⬅️ Previous",
+                        style=discord.ButtonStyle.grey,
+                        disabled=(self.current_progress_page == 0)
+                    )
+
+                    async def prev_callback(interaction: discord.Interaction):
+                        if self.current_progress_page > 0:
+                            self.current_progress_page -= 1
+                            self.rebuild_buttons()
+                            await interaction.response.edit_message(
+                                embed=self.progress_pages[self.current_progress_page],
+                                view=self
+                            )
+
+                    prev_btn.callback = prev_callback
+                    self.add_item(prev_btn)
+
+                    # Next page button
+                    next_btn = Button(
+                        label="Next ➡️",
+                        style=discord.ButtonStyle.grey,
+                        disabled=(self.current_progress_page >= len(self.progress_pages) - 1 and self.all_data_loaded)
+                    )
+
+                    async def next_callback(interaction: discord.Interaction):
+                        # Check if we're on the last page and might need to load more data
+                        if self.current_progress_page >= len(self.progress_pages) - 1 and not self.all_data_loaded:
+                            # Try to load next batch
+                            await interaction.response.defer()
+                            loaded_more = await self.load_next_batch()
+                            
+                            if not loaded_more and len(self.progress_pages) == 0:
+                                # No more data and no pages to show
+                                await interaction.followup.send("No more users found with progress for this title.", ephemeral=True)
+                                return
+                            elif not loaded_more:
+                                # No more data but we have pages, just stay on current page
+                                await interaction.followup.send("No more users found with progress for this title.", ephemeral=True)
+                                return
+                            else:
+                                # Successfully loaded more data, update the message
+                                self.rebuild_buttons()
+                                await interaction.edit_original_response(embed=self.progress_pages[self.current_progress_page], view=self)
+                                return
+                        
+                        # Normal pagination
+                        if self.current_progress_page < len(self.progress_pages) - 1:
+                            self.current_progress_page += 1
+                            self.rebuild_buttons()
+                            await interaction.response.edit_message(
+                                embed=self.progress_pages[self.current_progress_page],
+                                view=self
+                            )
+
+                    next_btn.callback = next_callback
+                    self.add_item(next_btn)
 
             async def on_timeout(self):
                 self.clear_items()
 
-        # Start with media info; always include the view so buttons are visible (even if disabled)
-        view = PageView(embed, progress_embed)
+        # Start with media info; always include the view so buttons are visible
+        view = PageView(embed, media, real_type, interaction.guild_id, self.bot)
         await interaction.followup.send(embed=embed, view=view)
 
 
@@ -408,7 +581,6 @@ class BrowseCog(commands.Cog):
                         title = info.get("title", "Unknown")[:100]
                         choices.append(app_commands.Choice(name=title, value=title))
         else:
-            # Use the correct media type for autocomplete (ANIME or MANGA)
             search_type = "MANGA" if media_type in ("MANGA", "MANGA_NOVEL") else "ANIME"
             results = await self.fetch_media(current, search_type)
             for media in results[:10]:
