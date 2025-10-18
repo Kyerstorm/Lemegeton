@@ -2,10 +2,9 @@
 """
 AI Moderation Cog (aimoderation.py)
 - Strictly AI moderation (text + image stubs) using Perspective API.
-- Slash-only commands under /aimod
+- All Commands under /aimod
 - Uses SQLite (moderation.db) for per-guild configuration and infractions.
 - Fully automatic actions (delete, warn, temp_mute by role, kick, ban) based on category thresholds and action config.
-- Dependencies: discord.py>=2.5.1, aiohttp, aiosqlite, python-dotenv
 - Environment variables: DISCORD_TOKEN, PERSPECTIVE_API_KEY (optional), BOT_OWNER_ID (optional)
 """
 
