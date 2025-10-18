@@ -523,7 +523,10 @@ async def _load_cogs_impl():
         for base_dir in cog_dirs:
             cogs_dir = os.path.join('.', base_dir)
             if not os.path.exists(cogs_dir):
-                logger.warning(f"Cogs directory not found: {cogs_dir}")
+                if base_dir == 'cogs':
+                    logger.warning(f"Cogs directory not found: {cogs_dir}")
+                else:
+                    logger.debug(f"Optional cogs directory not found: {cogs_dir}")
                 continue
 
             # Recursively find all Python files under this cog directory (skip package __init__.py files)
