@@ -93,10 +93,10 @@ class HelpCog(commands.Cog):
                     "examples": ["/trailer anime Demon Slayer", "/trailer manga Chainsaw Man"]
                 },
                 "3x3": {
-                    "desc": "Create a 3x3 grid image of your favorite anime or manga covers",
+                    "desc": "🎨 Create a 3x3 grid of your favorite anime, manga, or characters",
                     "usage": "/3x3 <media_type>",
-                    "note": "Generate shareable 3x3 grids with custom selections. Fetches covers from AniList automatically.",
-                    "examples": ["/3x3 anime", "/3x3 manga"]
+                    "note": "Generate shareable 3x3 grids with custom selections. Supports anime, manga, characters, and games. Fetches covers/images from AniList automatically.",
+                    "examples": ["/3x3 anime", "/3x3 manga", "/3x3 character", "/3x3 games"]
                 },
                 "admin-news-manage": {
                     "desc": "Manage Twitter/X news monitoring for anime/manga updates",
@@ -135,6 +135,18 @@ class HelpCog(commands.Cog):
                     "usage": "/leaderboard",
                     "note": "Server rankings and competitions",
                     "examples": ["/leaderboard"]
+                },
+                "affinity": {
+                    "desc": "Compare your affinity with all users or a specific user in this server",
+                    "usage": "/affinity [user]",
+                    "note": "See how similar your anime/manga tastes are with others",
+                    "examples": ["/affinity", "/affinity @friend"]
+                },
+                "anilist_leaderboard": {
+                    "desc": "🏆 Show leaderboard ranked by manga, anime, or combined activity",
+                    "usage": "/anilist_leaderboard <medium>",
+                    "note": "View rankings by chapters read, episodes watched, or completed series",
+                    "examples": ["/anilist_leaderboard chapters", "/anilist_leaderboard anime_completed"]
                 }
             },
             "🎮 Gaming": {
@@ -170,6 +182,12 @@ class HelpCog(commands.Cog):
                     "note": "Customize your bot experience with themes",
                     "examples": ["/theme"]
                 },
+                "booster-role-set": {
+                    "desc": "Create and apply a custom role with your chosen color (Server Boosters only)",
+                    "usage": "/booster-role-set <role_name> <hex_color>",
+                    "note": "Server boosters can create custom roles with any name and hex color. Multiple roles allowed.",
+                    "examples": ["/booster-role-set \"My Cool Role\" #FF6B6B", "/booster-role-set \"Gamer\" #00FF00"]
+                },
                 "admin-guild-theme": {
                     "desc": "Manage guild-wide theme settings (Bot Moderator only)",
                     "usage": "/admin-guild-theme",
@@ -201,6 +219,30 @@ class HelpCog(commands.Cog):
                     "usage": "/set_animanga_completion_channel <channel>",
                     "note": "Monitor when users complete series",
                     "examples": ["/set_animanga_completion_channel #completions"]
+                },
+                "changelog": {
+                    "desc": "Create and publish a changelog from an uploaded text file (Bot Moderator only)",
+                    "usage": "/changelog <file> [options]",
+                    "note": "Publish formatted changelogs with customizable appearance and notifications",
+                    "examples": ["/changelog"]
+                },
+                "set-welcome-dm": {
+                    "desc": "Set the welcome DM message by uploading a text file (Admin only)",
+                    "usage": "/set-welcome-dm <text_file>",
+                    "note": "Configure automated welcome messages sent to new server boosters",
+                    "examples": ["/set-welcome-dm"]
+                },
+                "welcome-dm-status": {
+                    "desc": "Check the current welcome DM configuration (Admin only)",
+                    "usage": "/welcome-dm-status",
+                    "note": "View current welcome DM settings and status",
+                    "examples": ["/welcome-dm-status"]
+                },
+                "admin-login": {
+                    "desc": "Link a Discord user with an AniList username (Admin only)",
+                    "usage": "/admin-login <discord_user> <anilist_user>",
+                    "note": "Manually link users' Discord accounts to AniList profiles",
+                    "examples": ["/admin-login @user theiranilistname"]
                 }
             },
             "🛠️ Utilities": {

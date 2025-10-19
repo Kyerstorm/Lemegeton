@@ -2,12 +2,11 @@
 
 REM ==========================================
 REM   Enhanced Discord Bot Startup Script
-REM   Lemegeton Public Bot with Monitoring
+REM   Lemegeton Public Bot
 REM ==========================================
 
 echo ========================================
 echo   Starting Lemegeton Public Bot
-echo   with Monitoring Dashboard
 echo ========================================
 echo.
 
@@ -87,41 +86,6 @@ if not exist "config.py" (
     echo ✅ config.py found
 )
 
-REM Check if monitoring system is available
-echo Checking monitoring system...
-if exist "utils\monitoring_dashboard.py" (
-    if exist "utils\monitoring_system.py" (
-        echo ✅ Monitoring system detected
-        set MONITORING_AVAILABLE=1
-    ) else (
-        echo ⚠️ utils\monitoring_system.py not found
-        set MONITORING_AVAILABLE=0
-    )
-) else (
-    echo ⚠️ utils\monitoring_dashboard.py not found
-    set MONITORING_AVAILABLE=0
-)
-
-echo Monitoring available: %MONITORING_AVAILABLE%
-echo.
-
-REM Start monitoring dashboard in background if available
-if %MONITORING_AVAILABLE%==1 (
-    echo.
-    echo Starting monitoring dashboard...
-    echo Command: start "Monitoring Dashboard" /min %PYTHON_CMD% utils\monitoring_dashboard.py
-    start "Monitoring Dashboard" /min %PYTHON_CMD% utils\monitoring_dashboard.py
-    if %errorlevel% neq 0 (
-        echo WARNING: Failed to start monitoring dashboard (error %errorlevel%)
-    ) else (
-        echo Monitoring dashboard started at http://localhost:5000
-    )
-    echo Waiting 3 seconds for startup...
-    timeout /t 3 /nobreak >nul
-) else (
-    echo Skipping monitoring dashboard (not available)
-)
-
 REM Start the main bot
 echo.
 echo Starting Lemegeton Bot (Public Mode)...
@@ -145,12 +109,6 @@ if %BOT_EXIT_CODE% neq 0 (
     echo Check the logs in the logs/ folder for details.
 ) else (
     echo ✅ Bot exited normally
-)
-
-if %MONITORING_AVAILABLE%==1 (
-    echo.
-    echo Note: Monitoring dashboard may still be running
-    echo Visit http://localhost:5000 to check status
 )
 
 echo.

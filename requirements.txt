@@ -14,7 +14,6 @@ snscrape==0.7.0.20230622
 
 # Monitoring dependencies
 psutil==6.1.0
-flask==3.1.0
 
 # File watching for development (optional)
 watchfiles==1.1.0

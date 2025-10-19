@@ -113,13 +113,6 @@ class DeploymentManager:
         except Exception as e:
             deploy_logger.error(f"❌ Multi-guild check failed: {e}")
         
-        # Monitoring system available
-        if Path("monitoring_system.py").exists() and Path("monitoring_dashboard.py").exists():
-            checks["monitoring_available"] = True
-            deploy_logger.info("✅ Monitoring system files available")
-        else:
-            deploy_logger.error("❌ Monitoring system files missing")
-        
         # Logs directory
         if Path("logs").exists():
             checks["logs_directory"] = True
@@ -285,7 +278,6 @@ MANUAL STEPS REQUIRED:
 1. Invite bot to 3-8 additional servers (total 5-10 servers)
 2. Share bot invite link with trusted communities
 3. Monitor performance metrics:
-   - Run: python monitoring_dashboard.py (view at http://localhost:5000)
    - Check resource usage (CPU, memory)
    - Monitor command response times
 
@@ -325,7 +317,6 @@ YOUR BOT IS NOW READY FOR PUBLIC USE!
 NEXT STEPS:
 1. Share your bot invite link publicly
 2. Set up continuous monitoring:
-   - Run monitoring dashboard: python monitoring_dashboard.py
    - Monitor health: python deployment_manager.py --check-health
    - Check logs regularly
 
