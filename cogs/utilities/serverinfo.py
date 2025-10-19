@@ -1,76 +1,96 @@
 # serverinfo.py
 """
-Aesthetic Server Info Cog for discord.py v2 (app_commands)
-Features:
+Dark Luxury ServerInfo Cog for discord.py v2
 - /server command (works in any guild the bot is in)
-- Detailed, pastel-themed embed layout
-- Banner/icon detection, stats (members, channels, roles, boosts, emojis, stickers)
-- Human vs bot breakdown, presence stats
-- Paginated sections with buttons
+- Elegant "Dark Luxury" embeds (deep blacks, royal gold accent)
+- Paginated embeds with buttons (First / Prev / Next / Last / Close)
+- Guild selection when used in DMs (select from bot's guilds)
 - Lightweight caching for repeated calls
-- Logging to local SQLite DB for command usage stats
-- Helpful utilities and graceful handling for DMs (choose a guild via menu)
+- SQLite logging of usage stats (bot_meta.db)
+- Graceful error handling and fallbacks
 """
 
 import discord
-from discord import app_commands
 from discord.ext import commands, tasks
+from discord import app_commands
 from datetime import datetime, timezone
-import asyncio
 import sqlite3
 import math
-import textwrap
-from typing import Optional, List
+import asyncio
+from typing import List, Optional
 
+# ---------------------------
+# Palette & Embed helper
+# ---------------------------
 PALETTE = {
-    "soft_pink": discord.Color.from_rgb(255, 182, 193),
-    "muted_purple": discord.Color.from_rgb(197, 153, 210),
-    "soft_peach": discord.Color.from_rgb(255, 218, 185),
-    "accent": discord.Color.from_rgb(210, 180, 222)
+    "deep_black": discord.Color.from_rgb(18, 18, 20),
+    "midnight_blue": discord.Color.from_rgb(28, 30, 45),
+    "royal_gold": discord.Color.from_rgb(212, 175, 55),
+    "velvet_purple": discord.Color.from_rgb(85, 45, 110),
+    "accent": discord.Color.from_rgb(100, 70, 140)
 }
 
 
+def create_darlux_embed(title: Optional[str] = None, description: Optional[str] = None, accent: str = "royal_gold"):
+    emb = discord.Embed(
+        title=title,
+        description=description,
+        color=PALETTE.get(accent, PALETTE["royal_gold"]),
+        timestamp=datetime.utcnow()
+    )
+    return emb
+
+
 # ---------------------------
-# Simple SQLite logging utils
+# SQLite logging utilities
 # ---------------------------
-def init_db(path: str = "bot_meta.db"):
+DB_PATH = "bot_meta.db"
+
+
+def init_db(path: str = DB_PATH):
     conn = sqlite3.connect(path)
     cur = conn.cursor()
-    cur.execute(
-        """CREATE TABLE IF NOT EXISTS serverinfo_usage(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER,
-            guild_name TEXT,
-            user_id INTEGER,
-            invoked_at TEXT
-        )"""
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS serverinfo_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id INTEGER,
+        guild_name TEXT,
+        user_id INTEGER,
+        invoked_at TEXT
     )
+    """)
     conn.commit()
     conn.close()
 
 
-def log_serverinfo(guild: Optional[discord.Guild], user: discord.User, path: str = "bot_meta.db"):
-    conn = sqlite3.connect(path)
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO serverinfo_usage(guild_id, guild_name, user_id, invoked_at) VALUES (?, ?, ?, ?)",
-        (guild.id if guild else None, guild.name if guild else None, user.id, datetime.utcnow().isoformat())
-    )
-    conn.commit()
-    conn.close()
+def log_serverinfo(guild: Optional[discord.Guild], user: discord.User, path: str = DB_PATH):
+    try:
+        conn = sqlite3.connect(path)
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO serverinfo_usage (guild_id, guild_name, user_id, invoked_at) VALUES (?, ?, ?, ?)",
+            (guild.id if guild else None, guild.name if guild else None, user.id, datetime.utcnow().isoformat())
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        # don't crash — logging is best-effort
+        pass
 
 
-# --------------------------------
-# Helper / Utility functions
-# --------------------------------
-def fmt_date(dt: datetime) -> str:
+# ---------------------------
+# Helper utilities
+# ---------------------------
+def fmt_date(dt: Optional[datetime]) -> str:
     if not dt:
         return "Unknown"
+    # ensure timezone-aware
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc).strftime("%b %d, %Y • %H:%M UTC")
 
 
 def short_number(n: int) -> str:
-    # 1,200 -> 1.2K etc.
     if n < 1000:
         return str(n)
     magnitude = int(math.log10(n) // 3)
@@ -83,7 +103,7 @@ def presence_breakdown(members: List[discord.Member]) -> dict:
     status_map = {"online": 0, "idle": 0, "dnd": 0, "offline": 0}
     for m in members:
         try:
-            st = str(m.status)
+            st = str(getattr(m, "status", "offline"))
             status_map[st] = status_map.get(st, 0) + 1
         except Exception:
             status_map["offline"] += 1
@@ -91,84 +111,86 @@ def presence_breakdown(members: List[discord.Member]) -> dict:
 
 
 # ---------------------------
-# Interactive View: Page Nav
+# Interactive pagination view
 # ---------------------------
 class PaginatorView(discord.ui.View):
     def __init__(self, pages: List[discord.Embed], author: discord.User, timeout: int = 120):
         super().__init__(timeout=timeout)
         self.pages = pages
-        self.current = 0
         self.author = author
+        self.index = 0
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        # only allow the person who invoked the command to use the paginator
         if interaction.user.id != self.author.id:
-            await interaction.response.send_message("This paginator isn't for you — use your own command!", ephemeral=True)
+            await interaction.response.send_message("This control is for the command user only.", ephemeral=True)
             return False
         return True
 
     @discord.ui.button(label="⏮️ First", style=discord.ButtonStyle.secondary)
     async def first(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.current = 0
-        await interaction.response.edit_message(embed=self.pages[self.current], view=self)
+        self.index = 0
+        await interaction.response.edit_message(embed=self.pages[self.index], view=self)
 
     @discord.ui.button(label="◀️ Prev", style=discord.ButtonStyle.secondary)
     async def prev(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.current = max(0, self.current - 1)
-        await interaction.response.edit_message(embed=self.pages[self.current], view=self)
+        self.index = max(0, self.index - 1)
+        await interaction.response.edit_message(embed=self.pages[self.index], view=self)
 
     @discord.ui.button(label="▶️ Next", style=discord.ButtonStyle.secondary)
     async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.current = min(len(self.pages) - 1, self.current + 1)
-        await interaction.response.edit_message(embed=self.pages[self.current], view=self)
+        self.index = min(len(self.pages) - 1, self.index + 1)
+        await interaction.response.edit_message(embed=self.pages[self.index], view=self)
 
     @discord.ui.button(label="⏭️ Last", style=discord.ButtonStyle.secondary)
     async def last(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.current = len(self.pages) - 1
-        await interaction.response.edit_message(embed=self.pages[self.current], view=self)
+        self.index = len(self.pages) - 1
+        await interaction.response.edit_message(embed=self.pages[self.index], view=self)
 
     @discord.ui.button(label="❌ Close", style=discord.ButtonStyle.danger)
     async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.message.delete()
+        try:
+            await interaction.message.delete()
+        except Exception:
+            pass
         self.stop()
 
 
 # ---------------------------
-# Guild select for DMs fallback
+# Guild selection UI (for DMs)
 # ---------------------------
 class GuildSelect(discord.ui.Select):
     def __init__(self, bot: commands.Bot, author: discord.User):
         self.bot = bot
         self.author = author
         options = []
-        # list first 25 guilds (Discord limit)
         guilds = sorted(bot.guilds, key=lambda g: g.member_count, reverse=True)[:25]
         for g in guilds:
-            options.append(discord.SelectOption(label=g.name, value=str(g.id), description=f"{g.member_count} members"))
-        super().__init__(placeholder="Select a server...", min_values=1, max_values=1, options=options)
+            desc = f"{g.member_count} members"
+            options.append(discord.SelectOption(label=g.name[:100], value=str(g.id), description=desc))
+        super().__init__(placeholder="Select a server to inspect...", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.author.id:
             await interaction.response.send_message("This menu isn't for you.", ephemeral=True)
             return
-        guild_id = int(self.values[0])
-        guild = self.bot.get_guild(guild_id)
+        gid = int(self.values[0])
+        guild = self.bot.get_guild(gid)
         if not guild:
-            await interaction.response.send_message("I can't access that guild anymore.", ephemeral=True)
+            await interaction.response.send_message("I cannot access that guild anymore.", ephemeral=True)
             return
-        # build an embed for the selected guild and replace the message
+        # Build embed pages via cog method
         cog = interaction.client.get_cog("ServerInfo")
-        if cog:
-            embed_pages = await cog.build_guild_pages(guild, interaction.user)
-            view = PaginatorView(embed_pages, interaction.user)
-            await interaction.response.edit_message(content=f"Showing info for **{guild.name}**", embed=embed_pages[0], view=view)
-        else:
-            await interaction.response.send_message("Something went wrong (cog missing).", ephemeral=True)
+        if not cog:
+            await interaction.response.send_message("ServerInfo cog not loaded.", ephemeral=True)
+            return
+        pages = await cog.build_guild_pages(guild, interaction.user)
+        view = PaginatorView(pages, interaction.user)
+        await interaction.response.edit_message(content=f"Showing **{guild.name}**", embed=pages[0], view=view)
 
 
 class GuildSelectView(discord.ui.View):
-    def __init__(self, bot: commands.Bot, author: discord.User):
-        super().__init__(timeout=60)
+    def __init__(self, bot: commands.Bot, author: discord.User, timeout: int = 60):
+        super().__init__(timeout=timeout)
         self.add_item(GuildSelect(bot, author))
 
 
@@ -176,7 +198,7 @@ class GuildSelectView(discord.ui.View):
 # The Cog
 # ---------------------------
 class ServerInfo(commands.Cog):
-    """Server info with aesthetic embeds, paginator, and caching"""
+    """Server Info Cog — Dark Luxury Edition"""
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         init_db()
@@ -189,176 +211,126 @@ class ServerInfo(commands.Cog):
 
     @tasks.loop(seconds=60.0)
     async def cleanup_cache(self):
-        # remove expired cache entries
         now = datetime.utcnow().timestamp()
-        to_del = []
+        to_delete = []
         for gid, (ts, _) in list(self._cache.items()):
             if now - ts > self.cache_ttl:
-                to_del.append(gid)
-        for gid in to_del:
-            del self._cache[gid]
+                to_delete.append(gid)
+        for gid in to_delete:
+            self._cache.pop(gid, None)
 
     @cleanup_cache.before_loop
     async def before_cleanup(self):
         await self.bot.wait_until_ready()
 
-    # ---------------------------
-    # Core builder: create embed pages for a guild
-    # ---------------------------
     async def build_guild_pages(self, guild: discord.Guild, requester: discord.User) -> List[discord.Embed]:
-        """
-        Construct multiple embed pages for the guild info. Returns a list of embeds for pagination.
-        """
         pages: List[discord.Embed] = []
-        # BASIC / HERO EMBED
-        emb = discord.Embed(
-            title=f"🌸 {guild.name}",
-            description=guild.description or "No server description set.",
-            color=PALETTE["soft_pink"],
-            timestamp=datetime.utcnow()
-        )
-        # banner vs icon
+
+        # Page 1 — Hero / Basic
+        hero = create_darlux_embed(title=f"🖤 {guild.name} — Overview",
+                                   description=guild.description or "No description set.",
+                                   accent="royal_gold")
         try:
             if getattr(guild, "banner", None):
-                emb.set_image(url=guild.banner.url)
+                hero.set_image(url=guild.banner.url)
             elif guild.icon:
-                emb.set_thumbnail(url=guild.icon.url)
+                hero.set_thumbnail(url=guild.icon.url)
         except Exception:
-            # some guilds and intents might not expose banner/icon
             if guild.icon:
-                emb.set_thumbnail(url=str(guild.icon.url))
+                hero.set_thumbnail(url=str(guild.icon.url))
+        owner = getattr(guild, "owner", None)
+        owner_txt = owner.mention if owner else "Unknown"
+        hero.add_field(name="👑 Owner", value=owner_txt, inline=True)
+        hero.add_field(name="🆔 Server ID", value=f"`{guild.id}`", inline=True)
+        hero.add_field(name="🕰️ Created", value=fmt_date(guild.created_at), inline=True)
 
-        # Header fields
-        owner = guild.owner.mention if guild.owner else f"{guild.owner if guild.owner else 'Unknown'}"
-        emb.add_field(name="👑 Owner", value=owner, inline=True)
-        emb.add_field(name="🆔 Server ID", value=f"`{guild.id}`", inline=True)
-        emb.add_field(name="📆 Created", value=fmt_date(guild.created_at), inline=True)
-
-        # membership summary
+        # members breakdown
         members = guild.members
         humans = len([m for m in members if not m.bot])
         bots = len([m for m in members if m.bot])
-        emb.add_field(name="👥 Members", value=f"{short_number(guild.member_count)} total\n🧍 {humans} humans\n🤖 {bots} bots", inline=False)
+        hero.add_field(name="👥 Members", value=f"{short_number(guild.member_count)} total\n🧍 {humans} humans • 🤖 {bots} bots", inline=False)
+        hero.add_field(name="🗨️ Channels", value=f"📝 {len(guild.text_channels)} • 🔊 {len(guild.voice_channels)}", inline=True)
+        hero.add_field(name="💠 Roles", value=f"{len(guild.roles)}", inline=True)
+        hero.add_field(name="⚜️ Boosts", value=f"Tier {getattr(guild, 'premium_tier', 0)} • {getattr(guild, 'premium_subscription_count', 0)} boosts", inline=True)
+        hero.set_footer(text=f"Requested by {requester}", icon_url=requester.display_avatar.url)
+        pages.append(hero)
 
-        emb.add_field(name="💬 Channels", value=f"📝 {len(guild.text_channels)} text\n🔊 {len(guild.voice_channels)} voice\n📁 {len(guild.categories)} categories", inline=True)
-        emb.add_field(name="🎭 Roles", value=f"{len(guild.roles)} total", inline=True)
-        emb.add_field(name="🚀 Boosts", value=f"Tier {getattr(guild, 'premium_tier', getattr(guild, 'premium_tier', 0))}\n{getattr(guild, 'premium_subscription_count', 0)} boosts", inline=True)
+        # Page 2 — Presence & Activities
+        pres = create_darlux_embed(title=f"🖤 {guild.name} — Presence & Activity", accent="velvet_purple")
+        pmap = presence_breakdown(members)
+        pres.add_field(name="🟢 Online", value=str(pmap.get("online", 0)), inline=True)
+        pres.add_field(name="🌙 Idle", value=str(pmap.get("idle", 0)), inline=True)
+        pres.add_field(name="⛔ DND", value=str(pmap.get("dnd", 0)), inline=True)
+        pres.add_field(name="⚫ Offline", value=str(pmap.get("offline", 0)), inline=True)
 
-        # quick stats footer
-        emb.set_footer(text=f"Requested by {requester}", icon_url=requester.display_avatar.url)
-        pages.append(emb)
-
-        # PRESENCE / STATUS PAGE
-        presence = presence_breakdown(members)
-        emb2 = discord.Embed(
-            title=f"🌸 {guild.name} — Presence & Activity",
-            color=PALETTE["muted_purple"],
-            timestamp=datetime.utcnow()
-        )
-        emb2.add_field(name="🟢 Online", value=str(presence.get("online", 0)), inline=True)
-        emb2.add_field(name="🌙 Idle", value=str(presence.get("idle", 0)), inline=True)
-        emb2.add_field(name="⛔ DND", value=str(presence.get("dnd", 0)), inline=True)
-        emb2.add_field(name="⚫ Offline", value=str(presence.get("offline", 0)), inline=True)
-
-        # top 8 activities summary (approx)
+        # top activities sample
         activity_map = {}
         for m in members:
-            act = None
             try:
                 if m.activity:
-                    act = getattr(m.activity, "name", str(m.activity))
+                    name = getattr(m.activity, "name", str(m.activity))
+                    activity_map[name] = activity_map.get(name, 0) + 1
             except Exception:
-                pass
-            if act:
-                activity_map[act] = activity_map.get(act, 0) + 1
-        top_activities = sorted(activity_map.items(), key=lambda x: x[1], reverse=True)[:8]
-        if top_activities:
-            emb2.add_field(name="🎮 Top Activities", value="\n".join([f"{a} — {c}" for a, c in top_activities]), inline=False)
-        else:
-            emb2.add_field(name="🎮 Top Activities", value="No notable activities detected", inline=False)
-        pages.append(emb2)
+                continue
+        top_acts = sorted(activity_map.items(), key=lambda x: x[1], reverse=True)[:8]
+        pres.add_field(name="🎭 Top Activities", value="\n".join([f"{a} — {c}" for a, c in top_acts]) if top_acts else "No notable activities", inline=False)
+        pages.append(pres)
 
-        # EMOJI & STICKERS PAGE
-        emb3 = discord.Embed(
-            title=f"🌸 {guild.name} — Emojis & Stickers",
-            color=PALETTE["soft_peach"],
-            timestamp=datetime.utcnow()
-        )
+        # Page 3 — Emojis & Stickers
+        emo = create_darlux_embed(title=f"🖤 {guild.name} — Emojis & Stickers", accent="midnight_blue")
         try:
-            emb3.add_field(name="😄 Emojis", value=f"{len(guild.emojis)} total", inline=True)
-            emb3.add_field(name="🏷️ Stickers", value=f"{len(guild.stickers)} total", inline=True)
-            # show a sample of up to 10 emojis (by name)
-            sample_emoji_names = [str(e) for e in guild.emojis[:10]]
-            emb3.add_field(name="Sample Emojis", value=" ".join(sample_emoji_names) if sample_emoji_names else "No emojis", inline=False)
+            emo.add_field(name="😄 Emojis", value=str(len(guild.emojis)), inline=True)
+            emo.add_field(name="🏷️ Stickers", value=str(len(guild.stickers)), inline=True)
+            sample = " ".join([str(e) for e in guild.emojis[:12]]) if guild.emojis else "No emojis"
+            emo.add_field(name="Sample", value=sample, inline=False)
         except Exception:
-            emb3.add_field(name="Emojis / Stickers", value="Permission or API limitation prevented access", inline=False)
-        pages.append(emb3)
+            emo.add_field(name="Emojis", value="Could not retrieve emojis (permissions/API)", inline=False)
+        pages.append(emo)
 
-        # ROLES & HIERARCHY PAGE
-        emb4 = discord.Embed(
-            title=f"🌸 {guild.name} — Roles & Top Members",
-            color=PALETTE["accent"],
-            timestamp=datetime.utcnow()
-        )
+        # Page 4 — Roles & Top Members
+        rolepage = create_darlux_embed(title=f"🖤 {guild.name} — Roles & Top Members", accent="accent")
         try:
-            top_roles = [r for r in guild.roles if r != guild.default_role][-10:]
+            top_roles = [r for r in guild.roles if r != guild.default_role][-12:]
             top_roles = list(reversed(top_roles))
-            roles_display = "\n".join([f"{r.mention} — {r.members and len(r.members) or 0} members" for r in top_roles]) or "No roles"
-            emb4.add_field(name="Top Roles (sample)", value=roles_display, inline=False)
+            role_list = "\n".join([f"{r.mention} — {len(r.members)}" for r in top_roles]) or "No roles"
+            rolepage.add_field(name="Top Roles (sample)", value=role_list, inline=False)
         except Exception:
-            emb4.add_field(name="Roles", value="Could not fetch role details", inline=False)
-
-        # show top 8 members by join date (oldest 8)
+            rolepage.add_field(name="Roles", value="Could not fetch roles", inline=False)
+        # oldest members sample
         try:
-            sorted_members = sorted([m for m in members if not m.bot], key=lambda m: m.joined_at or datetime.utcnow())[:8]
-            emb4.add_field(name="Members (Oldest joins)", value="\n".join([f"{m.display_name} — {fmt_date(m.joined_at)}" for m in sorted_members]), inline=False)
+            oldest = sorted([m for m in members if not m.bot], key=lambda x: x.joined_at or datetime.utcnow())[:8]
+            rolepage.add_field(name="Oldest Joins", value="\n".join([f"{m.display_name} — {fmt_date(m.joined_at)}" for m in oldest]) or "N/A", inline=False)
         except Exception:
             pass
-        pages.append(emb4)
+        pages.append(rolepage)
 
-        # MODERATION / SAFETY PAGE (basic)
-        emb5 = discord.Embed(
-            title=f"🌸 {guild.name} — Moderation & Safety",
-            color=PALETTE["soft_pink"],
-            timestamp=datetime.utcnow()
-        )
-        # basic server settings
+        # Page 5 — Moderation & Safety
+        safe = create_darlux_embed(title=f"🖤 {guild.name} — Moderation & Safety", accent="royal_gold")
         try:
-            verification = str(guild.verification_level).replace("_", " ").title()
-            emb5.add_field(name="🛡️ Verification Level", value=verification, inline=True)
-            emb5.add_field(name="🔐 Explicit Content Filter", value=str(guild.explicit_content_filter).title(), inline=True)
-            emb5.add_field(name="🧭 Preferred Locale", value=str(guild.preferred_locale), inline=True)
+            ver = str(guild.verification_level).replace("_", " ").title()
+            safe.add_field(name="🛡️ Verification Level", value=ver, inline=True)
+            safe.add_field(name="🔐 Explicit Filter", value=str(guild.explicit_content_filter).title(), inline=True)
+            safe.add_field(name="🧭 Locale", value=str(guild.preferred_locale), inline=True)
         except Exception:
-            emb5.add_field(name="Moderation Info", value="Some guild settings couldn't be fetched.", inline=False)
-        pages.append(emb5)
+            safe.add_field(name="Moderation", value="Could not fetch moderation settings", inline=False)
+        pages.append(safe)
 
-        # STATS SUMMARY PAGE
-        emb6 = discord.Embed(
-            title=f"🌸 {guild.name} — Quick Summary",
-            color=PALETTE["muted_purple"],
-            timestamp=datetime.utcnow()
-        )
-        emb6.add_field(name="Members (humans/bots)", value=f"{humans}/{bots}", inline=True)
-        emb6.add_field(name="Channels (text/voice)", value=f"{len(guild.text_channels)}/{len(guild.voice_channels)}", inline=True)
-        emb6.add_field(name="Roles / Emojis", value=f"{len(guild.roles)} roles • {len(guild.emojis)} emojis", inline=True)
-        pages.append(emb6)
+        # Page 6 — Summary
+        summ = create_darlux_embed(title=f"🖤 {guild.name} — Quick Summary", accent="velvet_purple")
+        summ.add_field(name="Members (humans/bots)", value=f"{humans}/{bots}", inline=True)
+        summ.add_field(name="Channels (text/voice)", value=f"{len(guild.text_channels)}/{len(guild.voice_channels)}", inline=True)
+        summ.add_field(name="Roles / Emojis", value=f"{len(guild.roles)} roles • {len(guild.emojis)} emojis", inline=True)
+        pages.append(summ)
 
         return pages
 
-    # ---------------------------
-    # /server command
-    # ---------------------------
-    @app_commands.command(name="server", description="Displays detailed and aesthetic server information.")
+    @app_commands.command(name="server", description="Display refined server information (Dark Luxury).")
     async def server(self, interaction: discord.Interaction):
-        """
-        Public slash command handler. Works in any guild the bot is present in.
-        If used in DMs, offers the user to pick one of the bot's guilds.
-        """
-        await interaction.response.defer(thinking=True, ephemeral=False)  # quick ack
-        # If invoked in a guild, use that guild
+        await interaction.response.defer(thinking=True)
+        # invoked in a guild
         if interaction.guild:
             guild = interaction.guild
-            # Use cache if present
+            # caching
             cached = self._cache.get(guild.id)
             now_ts = datetime.utcnow().timestamp()
             if cached and (now_ts - cached[0]) <= self.cache_ttl:
@@ -366,20 +338,15 @@ class ServerInfo(commands.Cog):
             else:
                 pages = await self.build_guild_pages(guild, interaction.user)
                 self._cache[guild.id] = (now_ts, pages)
-            # log
-            try:
-                log_serverinfo(guild, interaction.user)
-            except Exception:
-                pass
+            # log usage
+            log_serverinfo(guild, interaction.user)
             view = PaginatorView(pages, interaction.user)
             await interaction.followup.send(embed=pages[0], view=view)
             return
 
-        # Otherwise (DM context) — offer to select a guild
+        # DM context — show guild selector
         view = GuildSelectView(self.bot, interaction.user)
-        await interaction.followup.send(
-            "You're in DMs — pick a server I am in to view its info:", view=view, ephemeral=True
-        )
+        await interaction.followup.send("You're in DMs — choose a server I am in:", view=view, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
