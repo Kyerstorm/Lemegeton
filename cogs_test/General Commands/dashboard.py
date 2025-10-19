@@ -446,8 +446,12 @@ class DashboardCog(commands.Cog):
 
     async def cog_load(self):
         """Async hook called by discord.py when the cog is loaded in an async context.
-        Startup tasks are scheduled from on_ready to ensure the client is properly initialised."""
-        pass
+        Startup tasks are scheduled here to ensure the client is properly initialised."""
+        # Schedule startup tasks now that we're in an async context and the bot is starting
+        try:
+            asyncio.create_task(self._startup_tasks())
+        except Exception:
+            logger.exception("Failed to schedule DashboardCog startup tasks")
 
     async def _discover_meta_commands(self):
         # scan bot.tree commands for attributes set by @command_meta
@@ -570,12 +574,6 @@ COMMAND_REGISTRY.register("demo", demo_cmd, section="General", display_name="Dem
 async def setup(bot: commands.Bot):
     cog = DashboardCog(bot)
     await bot.add_cog(cog)
-    # schedule startup tasks now that we're in an async context
-    try:
-        import asyncio
-        asyncio.create_task(cog._startup_tasks())
-    except Exception:
-        logger.exception("Failed to schedule DashboardCog startup tasks")
     logger.info("Loaded DashboardCog")
 
 # end of file

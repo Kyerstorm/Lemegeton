@@ -800,9 +800,10 @@ class MuteCog(commands.Cog):
             except Exception:
                 pass
 
-    @commands.Cog.listener()
-    async def on_ready(self):
-        await self._load_and_schedule_pending_unmutes()
+    async def cog_load(self):
+        """Async hook called by discord.py when the cog is loaded.
+        Schedule pending unmutes after bot is ready."""
+        asyncio.create_task(self._load_and_schedule_pending_unmutes())
 
 
 # ---------------------------
