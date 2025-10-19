@@ -2,12 +2,13 @@
 """
 BanCog (slash-only). Features:
 - /ban, /tempban, /unban (slash-only)
+- /softban (ban -> immediate unban to purge messages) [NEW]
 - DM to banned user with "Appeal" button -> opens Modal -> posts to configured appeals channel
 - Staff Accept / Reject buttons (only staff: admin OR kick+ban+moderate)
 - Moderator must provide reason on accept/reject; the same embed is edited with decision
-- Auto-unban for tempbans; tempbans stored in tempbans.json
-- Guild configuration stored in guildconfig.json (appeals channel id, mod-log channel id)
-- Royal Blue & Silver aesthetic theme
+- Auto-unban for tempbans; tempbans stored in data/tempbans.json
+- Guild configuration stored in data/guildconfig.json (appeals channel id, mod-log channel id)
+- The /softban command attempts to DM the user first, but proceeds even if DM fails (recommended for moderation)
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import os
 import json
 import logging
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple, List
 
 import discord
 from discord import app_commands
@@ -306,10 +307,12 @@ class ModeratorReasonModal(discord.ui.Modal):
                     LOG.exception("Failed to DM user after appeal accepted")
                 await interaction.response.send_message(f"Appeal `{self.appeal_id}` accepted — user unbanned.", ephemeral=True)
                 await self.cog._mod_log(guild, f"Appeal `{self.appeal_id}` accepted by {interaction.user} (`{interaction.user.id}`).")
+                return
             except Exception as exc:
                 LOG.exception("Failed to unban on appeal accept: %s", exc)
                 await interaction.response.send_message("Attempted to unban but failed (missing bot permission or role hierarchy). Check mod-log.", ephemeral=True)
                 await self.cog._mod_log(guild, f"Appeal `{self.appeal_id}` accepted by {interaction.user} but unban failed: {exc}")
+                return
         else:
             # rejected -> DM the user
             try:
@@ -321,6 +324,7 @@ class ModeratorReasonModal(discord.ui.Modal):
                 LOG.exception("Failed to DM user after appeal rejected")
             await interaction.response.send_message(f"Appeal `{self.appeal_id}` rejected.", ephemeral=True)
             await self.cog._mod_log(guild, f"Appeal `{self.appeal_id}` rejected by {interaction.user} (`{interaction.user.id}`).")
+            return
 
 class AppealButtonView(discord.ui.View):
     def __init__(self, cog: "BanCog", guild_id: int, banned_user_id: int):
@@ -374,7 +378,9 @@ class BanCog(commands.Cog):
         super().__init__()
         self.bot = bot
         cfg = config or {}
+        # allow customizing footer text in config when loading the cog
         self.footer_text = cfg.get("footer_text", "Moderation • Powered by Bot")
+        # persistent stores
         self.config_store = load_json(GUILDCONFIG_STORE)  # { guild_id: {...} }
         self.tempbans = load_json(TEMPBANS_STORE)         # { guild_id: { user_id: iso } }
         self.appeals = load_json(APPEALS_STORE)           # { appeal_id: rec }
@@ -386,7 +392,7 @@ class BanCog(commands.Cog):
         self.unban_task.start()
 
         # register the app commands under a command group for neatness
-        # but per your request, commands are /ban, /tempban, /unban, /setappealschannel
+        # commands are /ban, /tempban, /unban, /appeals, /setappealschannel, /setmodlog, /showconfig, /export, /softban
         bot.tree.add_command(self._build_ban_command())
         bot.tree.add_command(self._build_tempban_command())
         bot.tree.add_command(self._build_unban_command())
@@ -395,6 +401,8 @@ class BanCog(commands.Cog):
         bot.tree.add_command(self._build_setmodlog_command())
         bot.tree.add_command(self._build_showconfig_command())
         bot.tree.add_command(self._build_export_command())
+        # NEW: softban
+        bot.tree.add_command(self._build_softban_command())
 
     # -------------------------
     # Low-level helpers
@@ -738,6 +746,146 @@ class BanCog(commands.Cog):
         return app_commands.Command(export_cmd.callback, name=export_cmd.name, description=export_cmd.description)
 
     # -------------------------
+    # NEW: Softban command builder
+    # -------------------------
+    def _build_softban_command(self) -> app_commands.Command:
+        """
+        /softban: Ban then unban a user to purge messages.
+        Options:
+          - user: Member to softban
+          - reason: optional
+          - delete_messages_days: optional int 0..7 (how many days of messages to delete). Default: 1
+        Behavior:
+          - Attempts to DM the user with the reason + appeal button before action (best effort).
+          - Proceeds even if DM fails.
+          - Requires staff permissions (same as /ban).
+          - Confirms via ephemeral view before performing action.
+          - Logs action and posts to mod-log channel.
+        """
+        @app_commands.command(name="softban", description="🚿 Softban (ban then unban) a user to purge their recent messages.")
+        @app_commands.check(mod_interaction_check)
+        async def softban_cmd(interaction: discord.Interaction, member: discord.Member, delete_messages_days: Optional[int] = 1, reason: Optional[str] = None):
+            # Input validation & permission checks
+            reason_text = reason or "No reason provided"
+            if not interaction.guild:
+                return await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+
+            if member == interaction.user:
+                return await interaction.response.send_message("You cannot softban yourself.", ephemeral=True)
+            if member == interaction.guild.me:
+                return await interaction.response.send_message("I cannot softban myself.", ephemeral=True)
+            # role hierarchy check: invoker must be higher unless owner
+            if interaction.user != interaction.guild.owner and interaction.user.top_role <= member.top_role:
+                return await interaction.response.send_message("You cannot softban someone with an equal or higher top role.", ephemeral=True)
+
+            # validate delete_messages_days
+            if delete_messages_days is None:
+                delete_messages_days = 1
+            try:
+                delete_messages_days = int(delete_messages_days)
+            except Exception:
+                return await interaction.response.send_message("`delete_messages_days` must be an integer between 0 and 7.", ephemeral=True)
+            if delete_messages_days < 0 or delete_messages_days > 7:
+                return await interaction.response.send_message("`delete_messages_days` must be between 0 and 7.", ephemeral=True)
+
+            # Ask for confirmation
+            confirm_view = ConfirmView(interaction.user)
+            emb = embed_base(title="⚠️ Confirm Softban", color=EMBED_COLOR, footer=self.footer_text)
+            emb.description = (
+                f"Softban **{member}** — this will ban then immediately unban them to purge up to {delete_messages_days} day(s) of messages.\n\n"
+                f"**Reason:** {reason_text}\n\n"
+                "This action will attempt to DM the user before banning (best-effort), but will proceed even if the DM fails."
+            )
+            emb.add_field(name="Invoker", value=f"{interaction.user} (`{interaction.user.id}`)", inline=True)
+            emb.add_field(name="Target", value=f"{member} (`{member.id}`)", inline=True)
+            emb.add_field(name="Delete Messages (days)", value=str(delete_messages_days), inline=True)
+            await interaction.response.send_message(embed=emb, view=confirm_view, ephemeral=True)
+            await confirm_view.wait()
+            if confirm_view.value is not True:
+                return await interaction.followup.send("Softban cancelled.", ephemeral=True)
+
+            # DM the user first (best-effort). Provide appeal button.
+            dm_sent = True
+            dm_err = None
+            dm_embed = embed_base(title=f"You were softbanned from {interaction.guild.name}", color=discord.Colour.red().value, footer=self.footer_text)
+            dm_embed.description = (
+                f"You were softbanned by staff in **{interaction.guild.name}**.\n"
+                f"**Reason:** {reason_text}\n"
+                f"Messages deleted: up to {delete_messages_days} day(s).\n\n"
+                "If you believe this was a mistake, you may appeal using the button below."
+            )
+            appeal_view = AppealButtonView(self, guild_id=interaction.guild.id, banned_user_id=member.id)
+            try:
+                await member.send(embed=dm_embed, view=appeal_view)
+            except Exception as e:
+                dm_sent = False
+                dm_err = str(e)
+                LOG.debug("DM to user before softban failed: %s", e)
+
+            # Perform ban (with delete_message_days), then unban
+            try:
+                # Attempt ban
+                await interaction.guild.ban(member, reason=f"{reason_text} — softbanned by {interaction.user}", delete_message_days=delete_messages_days)
+            except Exception as exc:
+                LOG.exception("Softban ban step failed: %s", exc)
+                # Inform moderator and log
+                err_emb = embed_base(title="❌ Softban Failed", color=discord.Colour.red().value, footer=self.footer_text)
+                err_emb.description = f"Failed to ban {member}. This may be due to missing permissions or role hierarchy."
+                err_emb.add_field(name="Error", value=str(exc), inline=False)
+                await interaction.followup.send(embed=err_emb, ephemeral=True)
+                await self._mod_log(interaction.guild, f"Softban failed for {member} by {interaction.user}: {exc}")
+                return
+
+            # Now unban immediately
+            unban_error = None
+            try:
+                obj = discord.Object(id=member.id)
+                await interaction.guild.unban(obj, reason=f"Softban automatic unban — purged messages (requested by {interaction.user})")
+            except Exception as e:
+                LOG.exception("Softban unban step failed: %s", e)
+                unban_error = str(e)
+
+            # Build moderator-facing result embed
+            out_emb = embed_base(title="✅ Softban Completed", color=discord.Colour.orange().value, footer=self.footer_text)
+            out_emb.description = f"{member.mention} has been softbanned (banned then unbanned) — messages up to {delete_messages_days} day(s) were removed."
+            out_emb.add_field(name="Reason", value=reason_text or "No reason provided", inline=False)
+            out_emb.add_field(name="DM", value="Sent ✅" if dm_sent else f"Failed ❌ ({dm_err})", inline=True)
+            if unban_error:
+                out_emb.add_field(name="Unban", value=f"Failed ❌ ({unban_error}) — user may remain banned. Please check manually.", inline=False)
+            await interaction.followup.send(embed=out_emb, ephemeral=True)
+
+            # mod-log entry
+            try:
+                await self._mod_log(interaction.guild, f"Softban: {member} (`{member.id}`) by {interaction.user} (`{interaction.user.id}`). Reason: {reason_text}. Deleted {delete_messages_days} day(s) of messages.")
+            except Exception:
+                LOG.exception("Failed to send mod-log for softban.")
+
+            # Optionally persist a record into temp storage if desired; this command does not create a tempban record because user is unbanned immediately.
+            # However we will record a short-lived audit in appeals store for traceability (not necessary).
+            try:
+                # store an audit-style record in appeals (lightweight)
+                audit_id = f"softban-{interaction.guild.id}-{member.id}-{int(datetime.utcnow().timestamp())}"
+                self.appeals[audit_id] = {
+                    "id": audit_id,
+                    "guild_id": interaction.guild.id,
+                    "banned_user_id": member.id,
+                    "appeal_text": f"Softban performed. Reason: {reason_text}",
+                    "extra": "",
+                    "submitted_at": datetime.utcnow().isoformat(),
+                    "status": "softbanned",
+                    "moderator_id": interaction.user.id,
+                    "moderator_reason": reason_text,
+                    "decision_at": datetime.utcnow().isoformat(),
+                    "appeal_channel_id": None,
+                    "appeal_message_id": None
+                }
+                atomic_write_json(self.appeals_store, self.appeals)
+            except Exception:
+                LOG.exception("Failed to persist softban audit record")
+
+        return app_commands.Command(softban_cmd.callback, name=softban_cmd.name, description=softban_cmd.description)
+
+    # -------------------------
     # App command error handling
     # -------------------------
     @commands.Cog.listener()
@@ -755,7 +903,7 @@ class BanCog(commands.Cog):
                 pass
 
 # -------------------------
-# PART 5 - Confirm View
+# PART 5 - Confirm View (used by multiple commands)
 # -------------------------
 class ConfirmView(discord.ui.View):
     def __init__(self, author: discord.User, timeout: float = 30.0):
@@ -783,12 +931,6 @@ class ConfirmView(discord.ui.View):
 # Setup entrypoint
 # -------------------------
 async def setup(bot: commands.Bot, *, config: Optional[Dict[str, Any]] = None):
-    """
-    Load this cog:
         await bot.load_extension("cogs.ban")
-    Optionally pass a small config dict for footer text:
-        await bot.load_extension("cogs.ban")
-        # setup() receives config via loader if your loader supports it.
-    """
     cog = BanCog(bot, config=(config or {}))
     await bot.add_cog(cog)
