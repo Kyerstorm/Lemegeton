@@ -18,7 +18,13 @@ from discord.ext import commands
 from datetime import datetime, timezone, timedelta
 import sqlite3
 import textwrap
-from typing import Optional
+from typing import Optional, List
+
+# --------------------------------
+def fmt_date(dt: datetime) -> str:
+    if not dt:
+        return "Unknown"
+    return dt.astimezone(timezone.utc).strftime("%b %d, %Y • %H:%M UTC")
 
 PALETTE = {
     "soft_pink": discord.Color.from_rgb(255, 182, 193),
