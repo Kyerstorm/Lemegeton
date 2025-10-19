@@ -3,13 +3,9 @@ from discord.ext import commands
 from discord import app_commands
 from typing import Optional, List
 import logging
+import json
+from pathlib import Path
 from datetime import datetime
-from database import (
-    get_planned_features,
-    add_planned_feature,
-    update_planned_feature,
-    delete_planned_feature
-)
 
 # Set up logging
 logger = logging.getLogger('planned_features')
@@ -19,6 +15,132 @@ class PlannedFeatures(commands.Cog):
     
     def __init__(self, bot):
         self.bot = bot
+        self.data_file = Path("data") / "planned_features.json"
+        self.data_file.parent.mkdir(parents=True, exist_ok=True)
+        self._init_data_file()
+    
+    def _init_data_file(self):
+        """Initialize the planned features JSON file if it doesn't exist."""
+        try:
+            if not self.data_file.exists():
+                self.data_file.write_text("{}")
+                logger.info("Planned features JSON file initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize planned features JSON file: {e}")
+    
+    def _load_data(self) -> dict:
+        """Load data from the JSON file."""
+        try:
+            if self.data_file.exists():
+                return json.loads(self.data_file.read_text())
+            return {}
+        except Exception as e:
+            logger.error(f"Failed to load planned features data: {e}")
+            return {}
+    
+    def _save_data(self, data: dict) -> bool:
+        """Save data to the JSON file."""
+        try:
+            self.data_file.write_text(json.dumps(data, indent=2))
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save planned features data: {e}")
+            return False
+    
+    async def get_planned_features(self, status: str = 'planned') -> List[dict]:
+        """Get all planned features with a specific status."""
+        try:
+            data = self._load_data()
+            features = []
+            for feature_id, feature_data in data.items():
+                if feature_data.get('status') == status:
+                    features.append({
+                        'id': int(feature_id),
+                        **feature_data
+                    })
+            # Sort by added_date descending
+            features.sort(key=lambda x: x.get('added_date', ''), reverse=True)
+            return features
+        except Exception as e:
+            logger.error(f"Error getting {status} features: {e}")
+            return []
+    
+    async def add_planned_feature(self, name: str, description: str, added_by: str, **kwargs) -> int:
+        """Add a new planned feature. Returns the feature ID."""
+        try:
+            data = self._load_data()
+            
+            # Generate new ID
+            existing_ids = [int(fid) for fid in data.keys()]
+            feature_id = max(existing_ids) + 1 if existing_ids else 1
+            
+            added_date = datetime.now().isoformat()
+            uploaded_from_file = kwargs.get('uploaded_from_file')
+            
+            feature_data = {
+                'name': name,
+                'description': description,
+                'added_date': added_date,
+                'added_by': added_by,
+                'uploaded_from_file': uploaded_from_file,
+                'status': 'planned'
+            }
+            
+            data[str(feature_id)] = feature_data
+            success = self._save_data(data)
+            
+            if success:
+                logger.info(f"Added planned feature: {name} (ID: {feature_id})")
+                return feature_id
+            return 0
+        except Exception as e:
+            logger.error(f"Error adding planned feature {name}: {e}")
+            return 0
+    
+    async def update_planned_feature(self, feature_id: int, **kwargs) -> bool:
+        """Update a planned feature with provided fields."""
+        try:
+            data = self._load_data()
+            feature_key = str(feature_id)
+            
+            if feature_key not in data:
+                logger.error(f"Feature ID {feature_id} not found")
+                return False
+            
+            # Update last_edited timestamp if any changes are made
+            if any(key in kwargs for key in ['name', 'description', 'status']):
+                kwargs['last_edited'] = datetime.now().isoformat()
+            
+            # Update the feature data
+            data[feature_key].update(kwargs)
+            success = self._save_data(data)
+            
+            if success:
+                logger.info(f"Updated planned feature ID {feature_id}")
+            return success
+        except Exception as e:
+            logger.error(f"Error updating planned feature {feature_id}: {e}")
+            return False
+    
+    async def delete_planned_feature(self, feature_id: int) -> bool:
+        """Delete a planned feature."""
+        try:
+            data = self._load_data()
+            feature_key = str(feature_id)
+            
+            if feature_key not in data:
+                logger.error(f"Feature ID {feature_id} not found")
+                return False
+            
+            del data[feature_key]
+            success = self._save_data(data)
+            
+            if success:
+                logger.info(f"Deleted planned feature ID {feature_id}")
+            return success
+        except Exception as e:
+            logger.error(f"Error deleting planned feature {feature_id}: {e}")
+            return False
     
     async def has_mod_permissions(self, interaction: discord.Interaction) -> bool:
         """Check if user has moderator permissions"""
@@ -41,7 +163,7 @@ class PlannedFeatures(commands.Cog):
     
     async def create_features_embed(self, page: int = 1) -> discord.Embed:
         """Create an embed displaying planned features"""
-        features = await get_planned_features('planned')
+        features = await self.get_planned_features('planned')
         
         # Pagination settings
         features_per_page = 1
@@ -112,7 +234,7 @@ class PlannedFeatures(commands.Cog):
         
         async def update_buttons(self):
             """Update button states based on current page"""
-            features = await get_planned_features('planned')
+            features = await self.get_planned_features('planned')
             features_per_page = 1
             total_pages = max(1, (len(features) + features_per_page - 1) // features_per_page)
             
@@ -138,7 +260,7 @@ class PlannedFeatures(commands.Cog):
         
         @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.secondary)
         async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-            features = await get_planned_features('planned')
+            features = await self.get_planned_features('planned')
             features_per_page = 1
             total_pages = max(1, (len(features) + features_per_page - 1) // features_per_page)
             
@@ -172,7 +294,7 @@ class PlannedFeatures(commands.Cog):
                 )
                 return
             
-            features = await get_planned_features('planned')
+            features = await self.get_planned_features('planned')
             if not features:
                 await interaction.response.send_message(
                     "❌ **No Features to Edit**\n\nThere are no planned features to edit.",
@@ -200,7 +322,7 @@ class PlannedFeatures(commands.Cog):
                 )
                 return
             
-            features = await get_planned_features('planned')
+            features = await self.get_planned_features('planned')
             if not features:
                 await interaction.response.send_message(
                     "❌ **No Features to Remove**\n\nThere are no planned features to remove.",
@@ -256,7 +378,7 @@ class PlannedFeatures(commands.Cog):
                 return
             
             # Add to database
-            feature_id = await add_planned_feature(
+            feature_id = await self.cog.add_planned_feature(
                 name=self.name.value.strip(),
                 description=self.description.value.strip(),
                 added_by=str(interaction.user.id),
@@ -291,7 +413,7 @@ class PlannedFeatures(commands.Cog):
                     inline=True
                 )
                 
-                features = await get_planned_features('planned')
+                features = await self.get_planned_features('planned')
                 embed.set_footer(text=f"Total planned features: {len(features)}")
                 
                 await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -313,7 +435,7 @@ class PlannedFeatures(commands.Cog):
             
         async def create_and_add_select_menu(self):
             """Create select menu with features"""
-            features = await get_planned_features('planned')
+            features = await self.cog.get_planned_features('planned')
             
             # Limit to 25 options (Discord limit)
             features = features[:25]
@@ -361,7 +483,7 @@ class PlannedFeatures(commands.Cog):
             feature_id = int(interaction.data['values'][0])
             
             # Get feature details
-            features = await get_planned_features('planned')
+            features = await self.cog.get_planned_features('planned')
             feature = next((f for f in features if f.get('id') == feature_id), None)
             
             if not feature:
@@ -404,7 +526,7 @@ class PlannedFeatures(commands.Cog):
         
         async def on_submit(self, interaction: discord.Interaction):
             # Update in database
-            success = await update_planned_feature(
+            success = await self.cog.update_planned_feature(
                 feature_id=self.feature_id,
                 name=self.name.value.strip(),
                 description=self.description.value.strip(),
@@ -457,7 +579,7 @@ class PlannedFeatures(commands.Cog):
             
         async def create_and_add_select_menu(self):
             """Create select menu with features"""
-            features = await get_planned_features('planned')
+            features = await self.cog.get_planned_features('planned')
             
             # Limit to 25 options (Discord limit)
             features = features[:25]
@@ -505,7 +627,7 @@ class PlannedFeatures(commands.Cog):
             feature_id = int(interaction.data['values'][0])
             
             # Get feature details for confirmation
-            features = await get_planned_features('planned')
+            features = await self.cog.get_planned_features('planned')
             feature = next((f for f in features if f.get('id') == feature_id), None)
             
             if not feature:
@@ -550,7 +672,7 @@ class PlannedFeatures(commands.Cog):
         @discord.ui.button(label="✅ Confirm Removal", style=discord.ButtonStyle.danger)
         async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
             # Remove from database
-            success = await delete_planned_feature(self.feature_id)
+            success = await self.cog.delete_planned_feature(self.feature_id)
             
             if success:
                 embed = discord.Embed(
@@ -566,7 +688,7 @@ class PlannedFeatures(commands.Cog):
                     inline=True
                 )
                 
-                features = await get_planned_features('planned')
+                features = await self.cog.get_planned_features('planned')
                 embed.set_footer(text=f"Total planned features: {len(features)}")
                 
                 await interaction.response.edit_message(embed=embed, view=None)
@@ -592,7 +714,7 @@ class PlannedFeatures(commands.Cog):
             # Defer response first to prevent timeout
             await interaction.response.defer()
             
-            features = await get_planned_features('planned')
+            features = await self.get_planned_features('planned')
             
             if not features:
                 await interaction.followup.send(

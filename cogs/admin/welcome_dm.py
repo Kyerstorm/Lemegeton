@@ -4,51 +4,61 @@ from discord import app_commands
 import logging
 import os
 import aiohttp
-from typing import Optional
-from database import execute_db_operation
+import json
+from pathlib import Path
+from datetime import datetime
+from typing import Optional, Dict, Any
 
 logger = logging.getLogger("WelcomeDM")
 
 class WelcomeDM(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.data_file = Path("data") / "welcome_dm.json"
+        self.data_file.parent.mkdir(parents=True, exist_ok=True)
         
     async def cog_load(self):
-        """Initialize the welcome_dm table when the cog loads."""
-        await self.init_database()
+        """Initialize the welcome_dm JSON file when the cog loads."""
+        await self.init_data_file()
         
-    async def init_database(self):
-        """Create the welcome_dm table if it doesn't exist."""
-        create_table_query = """
-            CREATE TABLE IF NOT EXISTS welcome_dm (
-                guild_id INTEGER PRIMARY KEY,
-                message_content TEXT NOT NULL,
-                enabled BOOLEAN DEFAULT TRUE,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """
-        
+    async def init_data_file(self):
+        """Create the welcome_dm.json file if it doesn't exist."""
         try:
-            await execute_db_operation(
-                "create welcome_dm table",
-                create_table_query
-            )
-            logger.info("Welcome DM table initialized successfully")
+            if not self.data_file.exists():
+                self.data_file.write_text("{}")
+                logger.info("Welcome DM JSON file initialized successfully")
+            else:
+                logger.info("Welcome DM JSON file already exists")
         except Exception as e:
-            logger.error(f"Failed to initialize welcome DM table: {e}")
+            logger.error(f"Failed to initialize welcome DM JSON file: {e}")
+    
+    def _load_data(self) -> Dict[str, Any]:
+        """Load data from the JSON file."""
+        try:
+            if self.data_file.exists():
+                return json.loads(self.data_file.read_text())
+            return {}
+        except Exception as e:
+            logger.error(f"Failed to load welcome DM data: {e}")
+            return {}
+    
+    def _save_data(self, data: Dict[str, Any]) -> bool:
+        """Save data to the JSON file."""
+        try:
+            self.data_file.write_text(json.dumps(data, indent=2))
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save welcome DM data: {e}")
+            return False
     
     async def get_welcome_message(self, guild_id: int) -> Optional[str]:
         """Get the welcome message for a specific guild."""
         try:
-            query = "SELECT message_content FROM welcome_dm WHERE guild_id = ? AND enabled = TRUE"
-            result = await execute_db_operation(
-                "get welcome message",
-                query,
-                (guild_id,),
-                fetch_type='one'
-            )
-            return result[0] if result else None
+            data = self._load_data()
+            guild_data = data.get(str(guild_id))
+            if guild_data and guild_data.get("enabled", True):
+                return guild_data.get("message_content")
+            return None
         except Exception as e:
             logger.error(f"Failed to get welcome message for guild {guild_id}: {e}")
             return None
@@ -56,21 +66,25 @@ class WelcomeDM(commands.Cog):
     async def set_welcome_message(self, guild_id: int, message_content: str) -> bool:
         """Set or update the welcome message for a specific guild."""
         try:
-            query = """
-                INSERT INTO welcome_dm (guild_id, message_content, updated_at)
-                VALUES (?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(guild_id) DO UPDATE SET 
-                    message_content = excluded.message_content,
-                    updated_at = CURRENT_TIMESTAMP
-            """
+            data = self._load_data()
+            current_time = datetime.utcnow().isoformat()
             
-            await execute_db_operation(
-                "set welcome message",
-                query,
-                (guild_id, message_content)
-            )
-            logger.info(f"Welcome message updated for guild {guild_id}")
-            return True
+            guild_key = str(guild_id)
+            if guild_key not in data:
+                data[guild_key] = {
+                    "message_content": message_content,
+                    "enabled": True,
+                    "created_at": current_time,
+                    "updated_at": current_time
+                }
+            else:
+                data[guild_key]["message_content"] = message_content
+                data[guild_key]["updated_at"] = current_time
+            
+            success = self._save_data(data)
+            if success:
+                logger.info(f"Welcome message updated for guild {guild_id}")
+            return success
         except Exception as e:
             logger.error(f"Failed to set welcome message for guild {guild_id}: {e}")
             return False
