@@ -56,7 +56,7 @@ class SteamProfile(commands.Cog):
     @app_commands.command(name="steam-profile", description="Show a Steam profile (vanity or SteamID)")
     async def steam_profile(self, interaction: discord.Interaction, user: Optional[str] = None):
         logger.info(f"/steam-profile invoked by user={interaction.user} arg_user={user} guild={getattr(interaction.guild,'id',None)}")
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
 
         # resolve steam id
         steamid = None
@@ -68,7 +68,7 @@ class SteamProfile(commands.Cog):
                 await cur.close()
 
                 if not row:
-                    return await interaction.followup.send("❌ You have not registered a Steam account. Use `/login` to register your Steam account.", ephemeral=True)
+                    return await interaction.followup.send("❌ You have not registered a Steam account. Use `/login` to register your Steam account.")
                 steamid, vanity = row
                 user = vanity
         logger.debug(f"Resolved steam identifier: steamid={steamid} vanity={vanity} (user param now={user})")
@@ -78,7 +78,7 @@ class SteamProfile(commands.Cog):
                 res = await safe_json(session, "https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/",
                                       params={"key": STEAM_API_KEY, "vanityurl": user})
                 if not res or res.get("response", {}).get("success") != 1:
-                    return await interaction.followup.send("❌ Could not resolve that user.", ephemeral=True)
+                    return await interaction.followup.send("❌ Could not resolve that user.")
                 steamid = res["response"]["steamid"]
 
             # player summary
@@ -87,7 +87,7 @@ class SteamProfile(commands.Cog):
             players = ps.get("response", {}).get("players", []) if ps else []
             if not players:
                 logger.warning(f"No players data returned for steamid={steamid}")
-                return await interaction.followup.send("❌ No profile data found.", ephemeral=True)
+                return await interaction.followup.send("❌ No profile data found.")
             player = players[0]
             logger.debug(f"Fetched player summary for steamid={steamid} -> personaname={player.get('personaname')}")
 
@@ -205,11 +205,11 @@ class SteamProfile(commands.Cog):
             embed.add_field(name="🏆 Top Games (preview)", value="\n".join(preview), inline=False)
 
         # footer simplified
-        embed.set_footer(text="ℹ️ Details • 👁 Toggle Visibility to make public")
+        embed.set_footer(text="ℹ️ Details • 👁 Toggle Visibility to make private")
 
         # View: Details button + Toggle Visibility (only if ephemeral)
         view = discord.ui.View(timeout=180)
-        view.is_ephemeral = True
+        view.is_ephemeral = False
 
         details_button = discord.ui.Button(label="ℹ️ Details", style=discord.ButtonStyle.secondary)
         async def details_cb(btn_inter: discord.Interaction):
@@ -218,7 +218,7 @@ class SteamProfile(commands.Cog):
         details_button.callback = details_cb
         view.add_item(details_button)
 
-        # Add toggle only if message will be ephemeral (default True)
+        # Add toggle only if message will be ephemeral (default False)
         toggle_button = discord.ui.Button(label="👁 Toggle Visibility", style=discord.ButtonStyle.danger)
         async def toggle_cb(btn_inter: discord.Interaction):
             # flip ephemeral by deleting and resending a copy
@@ -226,7 +226,7 @@ class SteamProfile(commands.Cog):
                 await btn_inter.message.delete()
             except Exception:
                 pass
-            new_ephemeral = not getattr(view, "is_ephemeral", True)
+            new_ephemeral = not getattr(view, "is_ephemeral", False)
             new_view = discord.ui.View(timeout=180)
             new_view.is_ephemeral = new_ephemeral
             # re-add details
@@ -242,18 +242,18 @@ class SteamProfile(commands.Cog):
                 view.is_ephemeral = new_ephemeral
             except Exception:
                 try:
-                    await btn_inter.followup.send("⚠️ Could not toggle visibility.", ephemeral=True)
+                    await btn_inter.followup.send("⚠️ Could not toggle visibility.")
                 except Exception:
                     pass
         toggle_button.callback = toggle_cb
         view.add_item(toggle_button)
 
-        # send the main profile (ephemeral True)
+        # send the main profile (public by default)
         try:
-            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+            await interaction.followup.send(embed=embed, view=view)
         except Exception:
             try:
-                await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+                await interaction.response.send_message(embed=embed, view=view)
             except Exception:
                 logger.exception("Failed sending profile message")
 
