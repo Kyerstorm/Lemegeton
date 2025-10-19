@@ -554,7 +554,7 @@ class BanCog(commands.Cog):
 
             await self._mod_log(interaction.guild, f"{member} (`{member.id}`) permanently banned by {interaction.user} (`{interaction.user.id}`). Reason: {reason_text}")
 
-        return app_commands.Command(ban_cmd.callback, name=ban_cmd.name, description=ban_cmd.description)
+        return ban_cmd
 
     def _build_tempban_command(self) -> app_commands.Command:
         @app_commands.command(name="tempban", description="⏳ Temporarily ban a member. Duration examples: 30m, 2h, 1d, 1w")
@@ -618,7 +618,7 @@ class BanCog(commands.Cog):
 
             await self._mod_log(interaction.guild, f"{member} (`{member.id}`) temporarily banned by {interaction.user} (`{interaction.user.id}`) until {unban_time.isoformat()}. Reason: {reason_text}")
 
-        return app_commands.Command(tempban_cmd.callback, name=tempban_cmd.name, description=tempban_cmd.description)
+        return tempban_cmd
 
     def _build_unban_command(self) -> app_commands.Command:
         @app_commands.command(name="unban", description="⚖️ Unban a user by ID (staff only).")
@@ -660,7 +660,7 @@ class BanCog(commands.Cog):
             await interaction.response.send_message(embed=e, ephemeral=True)
             await self._mod_log(interaction.guild, f"<@{uid}> (`{uid}`) unbanned by {interaction.user} (`{interaction.user.id}`). Reason: {reason_text}")
 
-        return app_commands.Command(unban_cmd.callback, name=unban_cmd.name, description=unban_cmd.description)
+        return unban_cmd
 
     def _build_appeals_command(self) -> app_commands.Command:
         @app_commands.command(name="appeals", description="🧾 List pending appeals for this server (staff only).")
@@ -681,7 +681,7 @@ class BanCog(commands.Cog):
                     snippet = snippet[:197] + "..."
                 e.add_field(name=f"ID: {aid}", value=f"{snippet}\nFrom: <@{rec.get('banned_user_id')}>", inline=False)
             await interaction.response.send_message(embed=e, ephemeral=True)
-        return app_commands.Command(appeals_cmd.callback, name=appeals_cmd.name, description=appeals_cmd.description)
+        return appeals_cmd
 
     def _build_setappeals_command(self) -> app_commands.Command:
         @app_commands.command(name="setappealschannel", description="🛠️ Set the appeals channel for this server (staff only).")
@@ -693,7 +693,7 @@ class BanCog(commands.Cog):
             e = embed_base(title="Appeals Channel Configured", color=discord.Colour.green().value, footer=self.footer_text)
             e.description = f"Appeals channel set to {channel.mention} (`{channel.id}`)."
             await interaction.response.send_message(embed=e, ephemeral=True)
-        return app_commands.Command(setappeals_cmd.callback, name=setappeals_cmd.name, description=setappeals_cmd.description)
+        return setappeals_cmd
 
     def _build_setmodlog_command(self) -> app_commands.Command:
         @app_commands.command(name="setmodlog", description="🛡️ Set the mod-log channel for this server (staff only).")
@@ -705,7 +705,7 @@ class BanCog(commands.Cog):
             e = embed_base(title="Mod-log Channel Configured", color=discord.Colour.green().value, footer=self.footer_text)
             e.description = f"Mod-log channel set to {channel.mention} (`{channel.id}`)."
             await interaction.response.send_message(embed=e, ephemeral=True)
-        return app_commands.Command(setmodlog_cmd.callback, name=setmodlog_cmd.name, description=setmodlog_cmd.description)
+        return setmodlog_cmd
 
     def _build_showconfig_command(self) -> app_commands.Command:
         @app_commands.command(name="showconfig", description="🔍 Show moderation configuration for this server (staff only).")
@@ -718,7 +718,7 @@ class BanCog(commands.Cog):
             e.add_field(name="Appeals channel ID", value=str(cfg.get("appeals_channel_id") or "Not set"), inline=False)
             e.add_field(name="Mod-log channel ID", value=str(cfg.get("mod_log_channel_id") or "Not set"), inline=False)
             await interaction.response.send_message(embed=e, ephemeral=True)
-        return app_commands.Command(showconfig_cmd.callback, name=showconfig_cmd.name, description=showconfig_cmd.description)
+        return showconfig_cmd
 
     def _build_export_command(self) -> app_commands.Command:
         @app_commands.command(name="export", description="📤 Export moderation data files to your DMs (staff only).")
@@ -743,7 +743,7 @@ class BanCog(commands.Cog):
             except Exception:
                 LOG.exception("Export failed")
                 await interaction.response.send_message("Failed to send files via DM.", ephemeral=True)
-        return app_commands.Command(export_cmd.callback, name=export_cmd.name, description=export_cmd.description)
+        return export_cmd
 
     # -------------------------
     # NEW: Softban command builder
@@ -883,7 +883,7 @@ class BanCog(commands.Cog):
             except Exception:
                 LOG.exception("Failed to persist softban audit record")
 
-        return app_commands.Command(softban_cmd.callback, name=softban_cmd.name, description=softban_cmd.description)
+        return softban_cmd
 
     # -------------------------
     # App command error handling
@@ -931,6 +931,5 @@ class ConfirmView(discord.ui.View):
 # Setup entrypoint
 # -------------------------
 async def setup(bot: commands.Bot, *, config: Optional[Dict[str, Any]] = None):
-        await bot.load_extension("cogs.ban")
     cog = BanCog(bot, config=(config or {}))
     await bot.add_cog(cog)

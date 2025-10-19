@@ -1,21 +1,20 @@
 # cogs/dashboard.py
 import asyncio
-import sqlite3
+import aiosqlite
 import json
 import logging
-from typing import Optional, Dict, List, Any, Callable, Tuple, Set
+import datetime
+import traceback
+from typing import Any, Dict, List, Optional, Tuple, Set, Callable
 
 import discord
 from discord import ui, app_commands
 from discord.ext import commands
 
-# Configure logger for this module
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("dashboard_cog")
 logger.setLevel(logging.INFO)
 
-# -----------------------------------------------------------------------------
-# AESTHETIC PALETTE (dark)
-# -----------------------------------------------------------------------------
+# dark aesthetic palette provided by user
 PALETTE = {
     "deep_black": discord.Color.from_rgb(20, 20, 20),
     "midnight_blue": discord.Color.from_rgb(25, 25, 112),
@@ -24,173 +23,52 @@ PALETTE = {
     "accent": discord.Color.from_rgb(80, 60, 120),
 }
 
-# Extra aesthetic constants
-BADGE_EMOJI = "⚙️"
 ENABLED_EMOJI = "✅"
 DISABLED_EMOJI = "❌"
-SECTION_EMOJI = "🗂️"
-BACK_ARROW = "◀️"
-NEXT_ARROW = "▶️"
-SAVED_EMOJI = "💾"
-WARNING_EMOJI = "⚠️"
+GITHUB_ICON = "🐙"
+GEAR = "⚙️"
+WARN = "⚠️"
 
-# -----------------------------------------------------------------------------
-# DATABASE: sqlite helper for per-guild configs
-# -----------------------------------------------------------------------------
-class ConfigDB:
-    """
-    SQLite-backed simple config store.
-    Schema:
-      guild_configs: guild_id -> json blob with
-        - sections: {section_name: enabled_bool}
-        - commands: {command_full_name: enabled_bool}
-    """
-
-    def __init__(self, db_path: str = "guild_configs.db"):
-        self.db_path = db_path
-        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._init_db()
-        self._lock = asyncio.Lock()
-
-    def _init_db(self):
-        cur = self._conn.cursor()
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS guild_configs (
-                guild_id INTEGER PRIMARY KEY,
-                data TEXT NOT NULL
-            )
-            """
-        )
-        self._conn.commit()
-
-    async def get_guild_config(self, guild_id: int) -> Dict[str, Any]:
-        """
-        Return dict with keys 'sections' and 'commands'.
-        """
-        async with self._lock:
-            cur = self._conn.cursor()
-            cur.execute("SELECT data FROM guild_configs WHERE guild_id = ?", (guild_id,))
-            row = cur.fetchone()
-            if row is None:
-                default = {"sections": {}, "commands": {}}
-                await self._set_guild_config(guild_id, default)
-                return default
-            else:
-                return json.loads(row["data"])
-
-    async def _set_guild_config(self, guild_id: int, data: Dict[str, Any]):
-        async with self._lock:
-            cur = self._conn.cursor()
-            j = json.dumps(data)
-            cur.execute(
-                "INSERT INTO guild_configs(guild_id, data) VALUES(?, ?) ON CONFLICT(guild_id) DO UPDATE SET data = excluded.data",
-                (guild_id, j),
-            )
-            self._conn.commit()
-
-    async def set_section_state(self, guild_id: int, section_name: str, enabled: bool):
-        cfg = await self.get_guild_config(guild_id)
-        cfg.setdefault("sections", {})[section_name] = bool(enabled)
-        await self._set_guild_config(guild_id, cfg)
-
-    async def set_command_state(self, guild_id: int, command_name: str, enabled: bool):
-        cfg = await self.get_guild_config(guild_id)
-        cfg.setdefault("commands", {})[command_name] = bool(enabled)
-        await self._set_guild_config(guild_id, cfg)
-
-    async def reset_guild(self, guild_id: int):
-        default = {"sections": {}, "commands": {}}
-        await self._set_guild_config(guild_id, default)
-
-    async def list_disabled_commands(self, guild_id: int) -> Set[str]:
-        cfg = await self.get_guild_config(guild_id)
-        commands = cfg.get("commands", {})
-        disabled = {k for k, v in commands.items() if not v}
-        sections = cfg.get("sections", {})
-        # note: commands inside disabled sections should also be considered disabled
-        return disabled, sections
-
-# -----------------------------------------------------------------------------
-# GLOBAL REGISTRY: keep a registry of commands and section metadata
-# -----------------------------------------------------------------------------
+# global registry for commands metadata
 class CommandRegistry:
-    """
-    Holds metadata for app commands (registered with @command_meta decorator).
-    The Dashboard uses this to build the UI and to (re)register guild-specific commands.
-    """
-
     def __init__(self):
-        # full_command_name -> metadata
-        # metadata: {
-        #   "command": app_commands.Command,
-        #   "callback": callable,
-        #   "section": str,
-        #   "name": str,
-        #   "description": str,
-        #   "registered_globally": bool,
-        # }
-        self._commands: Dict[str, Dict[str, Any]] = {}
-        # Keep sections order
+        self._commands: Dict[str, Dict[str, Any]] = {}  # fullname -> meta
         self._sections: List[str] = []
 
-    def register(self, full_name: str, command_obj: app_commands.Command, *, section: str, name: str):
-        meta = {
-            "command": command_obj,
-            "section": section,
-            "name": name,
-            "description": getattr(command_obj, "description", ""),
-        }
-        self._commands[full_name] = meta
+    def register(self, fullname: str, cmd_obj: app_commands.Command, section: str, display_name: Optional[str] = None):
+        display_name = display_name or getattr(cmd_obj, "name", fullname)
         if section not in self._sections:
             self._sections.append(section)
+        self._commands[fullname] = {
+            "command": cmd_obj,
+            "section": section,
+            "display_name": display_name,
+            "description": getattr(cmd_obj, "description", "")
+        }
 
     def get_sections(self) -> List[str]:
         return list(self._sections)
 
     def get_commands_in_section(self, section: str) -> List[Tuple[str, Dict[str, Any]]]:
-        out = []
-        for fullname, meta in self._commands.items():
-            if meta["section"] == section:
-                out.append((fullname, meta))
-        out.sort(key=lambda x: x[0])
-        return out
+        return sorted([(k, v) for k, v in self._commands.items() if v["section"] == section], key=lambda x: x[0])
 
-    def get_all_commands(self) -> List[Tuple[str, Dict[str, Any]]]:
+    def all_commands(self) -> List[Tuple[str, Dict[str, Any]]]:
         return sorted(self._commands.items(), key=lambda x: x[0])
 
-    def get_command_meta(self, fullname: str) -> Optional[Dict[str, Any]]:
+    def get_meta(self, fullname: str) -> Optional[Dict[str, Any]]:
         return self._commands.get(fullname)
 
-    def get_fullname(self, command_obj: app_commands.Command) -> Optional[str]:
-        # Try to find the fullname by matching object identity
+    def find_fullname_by_cmd(self, cmd_obj: app_commands.Command) -> Optional[str]:
         for fullname, meta in self._commands.items():
-            if meta["command"] is command_obj:
+            if meta["command"] is cmd_obj:
                 return fullname
         return None
 
-# create a global registry instance
 COMMAND_REGISTRY = CommandRegistry()
 
-# -----------------------------------------------------------------------------
-# DECORATOR: command_meta used by other cogs to register commands with metadata
-# -----------------------------------------------------------------------------
+# decorator used by other cogs to annotate app command callbacks
 def command_meta(section: str, name: Optional[str] = None):
-    """
-    Decorator for app_commands.Command-like functions to attach metadata.
-    Usage:
-        @app_commands.command(name="foo", description="...")
-        @command_meta(section="Moderation", name="Ban")
-        async def foo(interaction: discord.Interaction):
-            ...
-    The decorator will register the command object in COMMAND_REGISTRY at Cog setup time via
-    the DashboardCog.on_ready hook (we try to discover existing commands).
-    """
     def decorator(func_or_cmd):
-        # If decorating an app_commands.Command object (when defined as @app_commands.command)
-        # the obj is typically a function wrapped. We'll add attributes to the function so
-        # that the DashboardCog can discover metadata.
         setattr(func_or_cmd, "__dashboard_section__", section)
         if name:
             setattr(func_or_cmd, "__dashboard_name__", name)
@@ -199,491 +77,505 @@ def command_meta(section: str, name: Optional[str] = None):
         return func_or_cmd
     return decorator
 
-# -----------------------------------------------------------------------------
-# HELPER: app command enabled check factory
-# -----------------------------------------------------------------------------
+# runtime check to enforce disabled commands
 def app_command_enabled_check():
     async def predicate(interaction: discord.Interaction) -> bool:
         bot = interaction.client
-        db: ConfigDB = getattr(bot, "_dashboard_db", None)
+        db: "ConfigDB" = getattr(bot, "_dashboard_db", None)
         if db is None:
-            # if no db present, allow by default
             return True
-        guild = interaction.guild
-        if guild is None:
-            # bucket: DMs -> allow
+        if interaction.guild is None:
             return True
-        # Determine the command fullname in registry
         cmd = interaction.command
         fullname = None
-        if cmd is not None:
-            # Try to find registry fullname
-            fullname = COMMAND_REGISTRY.get_fullname(cmd)
-        # check the DB
-        cfg = await db.get_guild_config(guild.id)
-        # Section-level disabled?
+        if cmd:
+            fullname = COMMAND_REGISTRY.find_fullname_by_cmd(cmd)
+        cfg = await db.get_guild_config(interaction.guild.id)
+        # section-level
         if fullname:
-            meta = COMMAND_REGISTRY.get_command_meta(fullname)
+            meta = COMMAND_REGISTRY.get_meta(fullname)
             if meta:
-                section = meta["section"]
-                if not cfg.get("sections", {}).get(section, True):
-                    # disabled by section
+                sec = meta["section"]
+                if not cfg["sections"].get(sec, True):
                     return False
-        # Command-level disabled?
+        # command-level
         if fullname:
-            cmd_cfg = cfg.get("commands", {}).get(fullname, True)
-            return bool(cmd_cfg)
-        # default allow
+            return bool(cfg["commands"].get(fullname, True))
         return True
     return app_commands.check(predicate)
 
-# -----------------------------------------------------------------------------
-# UI COMPONENTS
-# -----------------------------------------------------------------------------
-class ConfirmModal(ui.Modal, title="Confirm Action"):
-    """
-    Simple confirm modal with reason input (optional)
-    """
-    reason = ui.TextInput(label="Optional reason", required=False, style=discord.TextStyle.long, max_length=300)
+# async DB wrapper using aiosqlite
+class ConfigDB:
+    def __init__(self, path: str = "dashboard_guilds.db"):
+        self.path = path
+        self._conn: Optional[aiosqlite.Connection] = None
+        self._lock = asyncio.Lock()
 
-    def __init__(self, *, placeholder: str = "Optional reason why..."):
+    async def open(self):
+        if self._conn is None:
+            self._conn = await aiosqlite.connect(self.path)
+            await self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS guild_configs (guild_id INTEGER PRIMARY KEY, data TEXT NOT NULL)"
+            )
+            await self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, ts TEXT, actor_id INTEGER, action TEXT, details TEXT)"
+            )
+            await self._conn.commit()
+
+    async def close(self):
+        if self._conn:
+            await self._conn.close()
+            self._conn = None
+
+    async def get_guild_config(self, guild_id: int) -> Dict[str, Any]:
+        await self.open()
+        async with self._lock:
+            cur = await self._conn.execute("SELECT data FROM guild_configs WHERE guild_id = ?", (guild_id,))
+            row = await cur.fetchone()
+            if row is None:
+                default = {"sections": {}, "commands": {}}
+                await self._set_guild_config(guild_id, default)
+                return default
+            return json.loads(row[0])
+
+    async def _set_guild_config(self, guild_id: int, data: Dict[str, Any]):
+        await self.open()
+        async with self._lock:
+            j = json.dumps(data)
+            await self._conn.execute(
+                "INSERT INTO guild_configs (guild_id, data) VALUES (?, ?) ON CONFLICT(guild_id) DO UPDATE SET data = excluded.data",
+                (guild_id, j)
+            )
+            await self._conn.commit()
+
+    async def set_section(self, guild_id: int, section: str, enabled: bool):
+        cfg = await self.get_guild_config(guild_id)
+        cfg.setdefault("sections", {})[section] = bool(enabled)
+        await self._set_guild_config(guild_id, cfg)
+
+    async def set_command(self, guild_id: int, fullname: str, enabled: bool):
+        cfg = await self.get_guild_config(guild_id)
+        cfg.setdefault("commands", {})[fullname] = bool(enabled)
+        await self._set_guild_config(guild_id, cfg)
+
+    async def reset_guild(self, guild_id: int):
+        default = {"sections": {}, "commands": {}}
+        await self._set_guild_config(guild_id, default)
+
+    async def log_action(self, guild_id: int, actor_id: int, action: str, details: str = ""):
+        await self.open()
+        ts = datetime.datetime.utcnow().isoformat() + "Z"
+        async with self._lock:
+            await self._conn.execute(
+                "INSERT INTO audit_log (guild_id, ts, actor_id, action, details) VALUES (?, ?, ?, ?, ?)",
+                (guild_id, ts, actor_id, action, details)
+            )
+            await self._conn.commit()
+
+    async def last_audit_entries(self, guild_id: int, limit: int = 10) -> List[Dict[str, Any]]:
+        await self.open()
+        async with self._lock:
+            cur = await self._conn.execute(
+                "SELECT id, ts, actor_id, action, details FROM audit_log WHERE guild_id = ? ORDER BY id DESC LIMIT ?",
+                (guild_id, limit)
+            )
+            rows = await cur.fetchall()
+            out = []
+            for r in rows:
+                out.append({"id": r[0], "ts": r[1], "actor_id": r[2], "action": r[3], "details": r[4]})
+            return out
+
+# small helper to format GitHub-like commit messages
+def format_commit_message(actor: discord.User, action: str, details: str = "") -> str:
+    ts = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    commit = f"commit {datetime.datetime.utcnow().timestamp():.0f}\nAuthor: {actor} <{actor.id}>\nDate:   {ts}\n\n    {action}\n\n{details}"
+    return commit
+
+# UI: Confirm modal (reason)
+class ConfirmModal(ui.Modal, title="Confirm"):
+    reason = ui.TextInput(label="Reason (optional)", required=False, style=discord.TextStyle.short, max_length=200)
+    def __init__(self):
         super().__init__()
-        self.reason.placeholder = placeholder
-        self.value = None
+        self.submitted_reason: Optional[str] = None
 
     async def on_submit(self, interaction: discord.Interaction):
-        self.value = self.reason.value
+        self.submitted_reason = self.reason.value
         await interaction.response.defer(ephemeral=True)
 
-# Main dashboard view (paginated sections)
+# UI: Dashboard view (main)
 class DashboardView(ui.View):
-    def __init__(self, bot: commands.Bot, guild: discord.Guild, db: ConfigDB, *, timeout: int = 180):
+    def __init__(self, bot: commands.Bot, guild: discord.Guild, db: ConfigDB, timeout: int = 180):
         super().__init__(timeout=timeout)
         self.bot = bot
         self.guild = guild
         self.db = db
-        self.current_section_index = 0
-        self.sections = COMMAND_REGISTRY.get_sections()
-        if not self.sections:
-            self.sections = ["General"]
-        # add persistent select for sections (updated in populate)
-        self.section_select = ui.Select(placeholder="Choose section...", min_values=1, max_values=1, options=[])
-        self.section_select.callback = self.section_select_callback
+        self.sections = COMMAND_REGISTRY.get_sections() or ["General"]
+        self.current_index = 0
+        self.section_select = ui.Select(placeholder="Select section...", min_values=1, max_values=1, options=[])
+        self.section_select.callback = self.on_section_select
         self.add_item(self.section_select)
-        # buttons
-        self.back_button = ui.Button(emoji=BACK_ARROW, style=discord.ButtonStyle.blurple)
-        self.back_button.callback = self.go_back
-        self.add_item(self.back_button)
-        self.next_button = ui.Button(emoji=NEXT_ARROW, style=discord.ButtonStyle.blurple)
-        self.next_button.callback = self.go_next
-        self.add_item(self.next_button)
-        self.reset_button = ui.Button(label="Reset Guild Config", emoji=WARNING_EMOJI, style=discord.ButtonStyle.danger)
-        self.reset_button.callback = self.reset_guild
-        self.add_item(self.reset_button)
-        # filler area for commands toggle container (we'll manage it in the message)
-        # The commands list will be represented with ephemeral updates to the message embed and dynamic child buttons/selects.
-        self.command_buttons: Dict[str, ui.Button] = {}  # command_fullname -> button
-        # load initial options
-        self.populate_section_options()
+        self.prev_btn = ui.Button(emoji="◀️", style=discord.ButtonStyle.blurple)
+        self.prev_btn.callback = self.on_prev
+        self.add_item(self.prev_btn)
+        self.next_btn = ui.Button(emoji="▶️", style=discord.ButtonStyle.blurple)
+        self.next_btn.callback = self.on_next
+        self.add_item(self.next_btn)
+        self.reset_btn = ui.Button(label="Reset Config", emoji=WARN, style=discord.ButtonStyle.danger)
+        self.reset_btn.callback = self.on_reset
+        self.add_item(self.reset_btn)
+        self.audit_btn = ui.Button(label="View Audit", emoji=GITHUB_ICON, style=discord.ButtonStyle.gray)
+        self.audit_btn.callback = self.on_audit
+        self.add_item(self.audit_btn)
+        self.populate_select()
 
-    def populate_section_options(self):
+    def populate_select(self):
         options = []
-        for idx, sec in enumerate(self.sections):
-            options.append(discord.SelectOption(label=sec, description=f"Section {idx+1}", emoji=SECTION_EMOJI))
+        for s in self.sections:
+            options.append(discord.SelectOption(label=s, description=f"Section: {s}", emoji=GEAR))
         self.section_select.options = options
-        # set current index safe
-        self.current_section_index = min(max(self.current_section_index, 0), len(self.sections)-1)
-        self.section_select.default_values = [self.sections[self.current_section_index]]
+        if self.sections:
+            self.section_select.default_values = [self.sections[self.current_index]]
 
-    async def update_message(self, interaction: discord.Interaction):
-        """
-        Build embed and buttons for the current section, then edit the original message.
-        """
-        section = self.sections[self.current_section_index]
+    async def send_initial(self, interaction: discord.Interaction):
+        embed = self.build_embed_for_section(self.sections[self.current_index], interaction.user)
+        await interaction.response.send_message(embed=embed, view=self, ephemeral=False)
+        await self.update_section_message(interaction)
+
+    def build_embed_for_section(self, section: str, actor: discord.User) -> discord.Embed:
+        color = PALETTE["midnight_blue"]
+        embed = discord.Embed(title=f"{GITHUB_ICON} /dashboard — {section}", color=color)
+        embed.add_field(name="Guild", value=f"{self.guild.name} (`{self.guild.id}`)", inline=True)
+        embed.set_footer(text=f"Dark Dashboard • git-style audit available • {actor}")
+        return embed
+
+    async def update_section_message(self, interaction: discord.Interaction):
+        # build state and update message with dynamic command toggles
+        section = self.sections[self.current_index]
         cfg = await self.db.get_guild_config(self.guild.id)
-        section_enabled = cfg.get("sections", {}).get(section, True)
+        section_enabled = cfg["sections"].get(section, True)
         commands = COMMAND_REGISTRY.get_commands_in_section(section)
-
-        # build embed
-        embed = discord.Embed(
-            title=f"{BADGE_EMOJI} Dashboard — {section}",
-            description=f"Toggle **sections** and **individual commands** for this guild.",
-            color=PALETTE["midnight_blue"],
-        )
-        embed.set_footer(text="Dark Dashboard • Use the toggles below • Changes sync per guild")
-        embed.add_field(name="Section state", value=(ENABLED_EMOJI if section_enabled else DISABLED_EMOJI), inline=True)
+        embed = discord.Embed(title=f"{GITHUB_ICON} {section} — Dashboard", color=PALETTE["velvet_purple"])
+        embed.add_field(name="Section enabled", value=(ENABLED_EMOJI if section_enabled else DISABLED_EMOJI), inline=True)
         if not commands:
-            embed.add_field(name="No commands", value="This section has no registered commands.", inline=False)
+            embed.add_field(name="Commands", value="(no registered commands in this section)", inline=False)
         else:
-            # list commands with states
             lines = []
             for fullname, meta in commands:
-                cmd_state = cfg.get("commands", {}).get(fullname, True)
-                # If section is disabled, consider command disabled in display
-                effective_state = cmd_state and section_enabled
-                emoji = ENABLED_EMOJI if effective_state else DISABLED_EMOJI
-                lines.append(f"{emoji} **{meta['name']}** — `{fullname}` — {meta.get('description','')}")
-            embed.add_field(name="Commands", value="\n".join(lines[:20]), inline=False)
-            if len(lines) > 20:
-                embed.add_field(name="More...", value=f"{len(lines)-20} more commands hidden", inline=False)
-        new_view = DashboardView._clone_static_controls(self, for_guild=self.guild)
-        # Add per-command toggle buttons
+                cmd_enabled = cfg["commands"].get(fullname, True)
+                effective = cmd_enabled and section_enabled
+                emoji = ENABLED_EMOJI if effective else DISABLED_EMOJI
+                lines.append(f"{emoji} **{meta['display_name']}** — `{fullname}`")
+            embed.add_field(name="Commands", value="\n".join(lines[:25]) or "none", inline=False)
+        # build a fresh view clone to include command buttons
+        new_view = DashboardView._clone_static(self, for_guild=self.guild)
+        # add per-command toggle buttons
         for fullname, meta in commands:
-            cmd_state = cfg.get("commands", {}).get(fullname, True)
-            effective_state = cmd_state and section_enabled
-            label = f"{meta['name']}"
-            style = discord.ButtonStyle.success if effective_state else discord.ButtonStyle.secondary
-            emoji = ENABLED_EMOJI if effective_state else DISABLED_EMOJI
-            btn = ui.Button(label=label, emoji=emoji, style=style, custom_id=f"toggle_cmd::{fullname}")
-            # bind callback
-            async def make_callback(f):
-                async def callback(i: discord.Interaction):
-                    # toggle the command
-                    current_cfg = await self.db.get_guild_config(self.guild.id)
-                    cur_val = current_cfg.get("commands", {}).get(f, True)
+            cmd_enabled = cfg["commands"].get(fullname, True)
+            effective = cmd_enabled and section_enabled
+            label = meta["display_name"]
+            style = discord.ButtonStyle.success if effective else discord.ButtonStyle.secondary
+            emoji = ENABLED_EMOJI if effective else DISABLED_EMOJI
+            btn = ui.Button(label=label, emoji=emoji, style=style, custom_id=f"toggle::{fullname}")
+            async def make_cb(f):
+                async def cb(i: discord.Interaction):
+                    cur_cfg = await self.db.get_guild_config(self.guild.id)
+                    cur_val = cur_cfg["commands"].get(f, True)
                     new_val = not cur_val
-                    await self.db.set_command_state(self.guild.id, f, new_val)
-                    # Attempt to sync guild commands to hide/show (best-effort)
+                    await self.db.set_command(self.guild.id, f, new_val)
+                    # log as git-like commit
+                    commit = format_commit_message(i.user, f"Toggled command `{f}` to {'enabled' if new_val else 'disabled'}", details="")
+                    await self.db.log_action(self.guild.id, i.user.id, f"toggle_command {f} -> {new_val}", commit)
+                    # best-effort sync
                     await attempt_sync_for_guild(self.bot, self.guild)
                     await i.response.defer(ephemeral=True)
-                    await self.update_message(i)
-                return callback
-            btn.callback = await make_callback(fullname)
+                    await self.update_section_message(i)
+                return cb
+            btn.callback = await make_cb(fullname)
             new_view.add_item(btn)
-
-        # replace message
+        # add section toggle
+        sec_label = f"{'Disable' if section_enabled else 'Enable'} Section"
+        sec_style = discord.ButtonStyle.danger if section_enabled else discord.ButtonStyle.success
+        sec_btn = ui.Button(label=sec_label, style=sec_style)
+        async def sec_cb(i: discord.Interaction):
+            await i.response.defer(ephemeral=True)
+            new_state = not section_enabled
+            await self.db.set_section(self.guild.id, section, new_state)
+            commit = format_commit_message(i.user, f"Section `{section}` set to {'enabled' if new_state else 'disabled'}", "")
+            await self.db.log_action(self.guild.id, i.user.id, f"toggle_section {section} -> {new_state}", commit)
+            await attempt_sync_for_guild(self.bot, self.guild)
+            await self.update_section_message(i)
+        sec_btn.callback = sec_cb
+        new_view.add_item(sec_btn)
+        # send edit
         try:
-            await interaction.followup.edit_message(interaction.message.id, embed=embed, view=new_view)
+            await interaction.edit_original_response(embed=embed, view=new_view)
         except Exception:
-            # fallback to simple edit if followup fails (depends on how the message was created)
             try:
-                await interaction.edit_original_response(embed=embed, view=new_view)
+                await interaction.followup.edit_message(interaction.message.id, embed=embed, view=new_view)
             except Exception:
-                # last resort: send a fresh message
+                # fallback to sending new message
                 await interaction.channel.send(embed=embed, view=new_view)
 
     @staticmethod
-    def _clone_static_controls(old_view: "DashboardView", *, for_guild: discord.Guild) -> ui.View:
-        """
-        Make a copy of static controls (section select, next/back/reset) preserving callbacks.
-        This avoids carrying old dynamic buttons.
-        """
-        new_view = ui.View(timeout=old_view.timeout)
-        # section select
-        section_select = ui.Select(placeholder="Choose section...", min_values=1, max_values=1, options=[])
-        section_select.callback = old_view.section_select_callback
-        new_view.add_item(section_select)
-        # copy options
-        section_select.options = old_view.section_select.options
-        section_select.default_values = old_view.section_select.default_values
-        # back button
-        back_button = ui.Button(emoji=BACK_ARROW, style=discord.ButtonStyle.blurple)
-        back_button.callback = old_view.go_back
-        new_view.add_item(back_button)
-        # next button
-        next_button = ui.Button(emoji=NEXT_ARROW, style=discord.ButtonStyle.blurple)
-        next_button.callback = old_view.go_next
-        new_view.add_item(next_button)
-        # reset button
-        reset_button = ui.Button(label="Reset Guild Config", emoji=WARNING_EMOJI, style=discord.ButtonStyle.danger)
-        reset_button.callback = old_view.reset_guild
-        new_view.add_item(reset_button)
-        return new_view
+    def _clone_static(old: "DashboardView", *, for_guild: discord.Guild) -> ui.View:
+        v = ui.View(timeout=old.timeout)
+        sel = ui.Select(placeholder="Select section...", min_values=1, max_values=1, options=[])
+        sel.callback = old.on_section_select
+        sel.options = old.section_select.options
+        sel.default_values = old.section_select.default_values
+        v.add_item(sel)
+        prev = ui.Button(emoji="◀️", style=discord.ButtonStyle.blurple)
+        prev.callback = old.on_prev
+        v.add_item(prev)
+        nxt = ui.Button(emoji="▶️", style=discord.ButtonStyle.blurple)
+        nxt.callback = old.on_next
+        v.add_item(nxt)
+        reset = ui.Button(label="Reset Config", emoji=WARN, style=discord.ButtonStyle.danger)
+        reset.callback = old.on_reset
+        v.add_item(reset)
+        audit = ui.Button(label="View Audit", emoji=GITHUB_ICON, style=discord.ButtonStyle.gray)
+        audit.callback = old.on_audit
+        v.add_item(audit)
+        return v
 
-    async def section_select_callback(self, interaction: discord.Interaction):
-        selected = self.section_select.values[0]
-        if selected in self.sections:
-            self.current_section_index = self.sections.index(selected)
+    async def on_section_select(self, interaction: discord.Interaction):
+        val = self.section_select.values[0]
+        if val in self.sections:
+            self.current_index = self.sections.index(val)
         await interaction.response.defer(ephemeral=True)
-        await self.update_message(interaction)
+        await self.update_section_message(interaction)
 
-    async def go_back(self, interaction: discord.Interaction):
-        self.current_section_index = (self.current_section_index - 1) % len(self.sections)
-        self.section_select.default_values = [self.sections[self.current_section_index]]
+    async def on_prev(self, interaction: discord.Interaction):
+        self.current_index = (self.current_index - 1) % len(self.sections)
+        self.section_select.default_values = [self.sections[self.current_index]]
         await interaction.response.defer(ephemeral=True)
-        await self.update_message(interaction)
+        await self.update_section_message(interaction)
 
-    async def go_next(self, interaction: discord.Interaction):
-        self.current_section_index = (self.current_section_index + 1) % len(self.sections)
-        self.section_select.default_values = [self.sections[self.current_section_index]]
+    async def on_next(self, interaction: discord.Interaction):
+        self.current_index = (self.current_index + 1) % len(self.sections)
+        self.section_select.default_values = [self.sections[self.current_index]]
         await interaction.response.defer(ephemeral=True)
-        await self.update_message(interaction)
+        await self.update_section_message(interaction)
 
-    async def reset_guild(self, interaction: discord.Interaction):
-        # request confirmation
-        modal = ConfirmModal(placeholder="Type a reason (optional)...")
+    async def on_reset(self, interaction: discord.Interaction):
+        modal = ConfirmModal()
         await interaction.response.send_modal(modal)
         await modal.wait()
-        # If user submitted, perform reset
+        reason = modal.submitted_reason or ""
         await self.db.reset_guild(self.guild.id)
-        # Attempt to sync guild commands after reset
+        commit = format_commit_message(interaction.user, f"Reset config for guild {self.guild.id}", reason)
+        await self.db.log_action(self.guild.id, interaction.user.id, "reset_guild", commit)
         await attempt_sync_for_guild(self.bot, self.guild)
-        # update UI
-        await interaction.followup.send(content=f"{SAVED_EMOJI} Reset guild configuration.", ephemeral=True)
-        await self.update_message(interaction)
+        await interaction.followup.send(content=f"{ENABLED_EMOJI} Guild configuration reset.", ephemeral=True)
+        await self.update_section_message(interaction)
 
-# -----------------------------------------------------------------------------
-# UTILITY: sync guild commands (best-effort)
-# -----------------------------------------------------------------------------
+    async def on_audit(self, interaction: discord.Interaction):
+        entries = await self.db.last_audit_entries(self.guild.id, limit=12)
+        if not entries:
+            await interaction.response.send_message("No audit entries found.", ephemeral=True)
+            return
+        lines = []
+        for e in entries:
+            ts = e["ts"]
+            actor = e["actor_id"]
+            action = e["action"]
+            lines.append(f"`{e['id']}` {ts} <{actor}> — {action}")
+        await interaction.response.send_message("Recent audit entries:\n" + "\n".join(lines), ephemeral=True)
+
+# attempt to sync enabled commands to guild so disabled commands are hidden (best-effort)
 async def attempt_sync_for_guild(bot: commands.Bot, guild: discord.Guild):
-    """
-    Best-effort attempt to make disabled commands hidden in the guild by re-syncing a
-    custom subset of app commands to the specific guild. This function:
-      - Builds a list of app_commands.Command objects that are enabled per the DB for the guild
-      - Clears guild-specific commands and adds the enabled ones, then syncs.
-    Note: Discord caches command registrations; propagation may take a few seconds.
-    """
     db: ConfigDB = getattr(bot, "_dashboard_db", None)
     if db is None:
         return
     try:
         cfg = await db.get_guild_config(guild.id)
-        enabled_commands = []
-        # For each registered command in COMMAND_REGISTRY, include it only if
-        # command-level true and section-level true.
-        for fullname, meta in COMMAND_REGISTRY.get_all_commands():
-            section = meta["section"]
-            cmd_enabled = cfg.get("commands", {}).get(fullname, True)
-            section_enabled = cfg.get("sections", {}).get(section, True)
-            if cmd_enabled and section_enabled:
-                # the stored meta['command'] is an app_commands.Command object
-                cmd_obj = meta["command"]
-                enabled_commands.append(cmd_obj)
+        enabled_cmds = []
+        for fullname, meta in COMMAND_REGISTRY.all_commands():
+            sec = meta["section"]
+            cmd_enabled = cfg["commands"].get(fullname, True)
+            sec_enabled = cfg["sections"].get(sec, True)
+            if cmd_enabled and sec_enabled:
+                enabled_cmds.append(meta["command"])
+        # clear guild commands then add enabled
         try:
             bot.tree.clear_commands(guild=guild)
         except Exception:
-            logger.debug("clear_commands(guild) unsupported or failed - proceeding anyway")
-        # Add commands
-        for cmd in enabled_commands:
+            pass
+        for cmd in enabled_cmds:
             try:
-                # If command is a copying of a global command object, adding may raise. Handle gracefully.
                 bot.tree.add_command(cmd, guild=guild)
-            except Exception as e:
-                logger.debug(f"Failed to add command {cmd} to guild {guild.id}: {e}")
+            except Exception:
+                # some command objects cannot be re-added; ignore
+                logger.debug("Could not add command %s to guild %s", getattr(cmd, "name", "<unknown>"), guild.id)
         try:
             await bot.tree.sync(guild=guild)
-            logger.debug(f"Synced {len(enabled_commands)} commands for guild {guild.id}")
+            logger.debug("Synced %d commands for guild %s", len(enabled_cmds), guild.id)
         except Exception as e:
-            logger.warning(f"Sync failed for guild {guild.id}: {e}")
-    except Exception as exc:
-        logger.exception("Error while attempting to sync guild commands: %s", exc)
+            logger.warning("Sync failed for guild %s: %s", guild.id, e)
+    except Exception:
+        logger.exception("Error in attempt_sync_for_guild")
 
-# -----------------------------------------------------------------------------
-# DASHBOARD COG
-# -----------------------------------------------------------------------------
+# main cog
 class DashboardCog(commands.Cog):
-    """
-    A large, featureful cog that provides:
-      - /dashboard slash command to open an interactive dashboard (UI) for server admins
-      - utilities to register command metadata
-      - on_ready syncing and per-guild updates
-      - global app command check enforcement via 'app_command_enabled_check'
-    """
-    def __init__(self, bot: commands.Bot, *, db_path: str = "guild_configs.db"):
+    def __init__(self, bot: commands.Bot, *, db_path: str = "dashboard_guilds.db"):
         self.bot = bot
         self.db = ConfigDB(db_path)
-        # expose db to bot for decorator-created checks
         setattr(bot, "_dashboard_db", self.db)
-        # attach this cog's tree commands to a namespace
-        self.tree = bot.tree  # convenience
-        # internal caches
         self._ready = False
-        self._sync_lock = asyncio.Lock()
-        # styles
-        self.palette = PALETTE
-        # Register the /dashboard command as a guild/global app command
-        self.bot.loop.create_task(self._register_dashboard_command())
-        # schedule periodic resync (optional)
-        self.bot.loop.create_task(self._periodic_resync())
+        # startup tasks are scheduled from the async setup entrypoint to avoid
+        # accessing bot.loop in a synchronous constructor (see discord.py guidance)
+        # self._startup_tasks will be scheduled by the async setup() below.
 
-    async def _register_dashboard_command(self):
-        """
-        Adds the /dashboard command to the global tree. The actual command handlers are in this class.
-        """
-        # Wait until bot is ready
+    async def _startup_tasks(self):
         await self.bot.wait_until_ready()
-        # Define the app command here (so the function has access to self)
-        @app_commands.command(name="dashboard", description="Open the server dashboard to configure this bot")
-        async def _dashboard(interaction: discord.Interaction):
-            # only allow users with Manage Guild or Manage Roles (owner can also use)
-            if not interaction.guild:
-                await interaction.response.send_message("This command only works in servers.", ephemeral=True)
-                return
-            # permission check: manage_guild or manage_roles or administrator or owner
-            me = self.bot
-            perm = interaction.user.guild_permissions
-            is_admin = perm.manage_guild or perm.administrator or perm.manage_roles
-            if not is_admin and interaction.user.id != getattr(self.bot, "owner_id", None):
-                await interaction.response.send_message("You need Manage Server (or similar) permissions to access the dashboard.", ephemeral=True)
-                return
-            await interaction.response.defer(ephemeral=False)
-            view = DashboardView(self.bot, interaction.guild, self.db)
-            # initial message with embed
-            embed = discord.Embed(
-                title=f"{BADGE_EMOJI} Server Dashboard",
-                color=self.palette["velvet_purple"],
-                description="Use the controls below to enable/disable sections and commands for this server."
-            )
-            embed.add_field(name="Guild", value=f"{interaction.guild.name} (`{interaction.guild.id}`)")
-            embed.set_footer(text="Changes are stored per-guild and sync to the command list (best-effort).")
-            # send followup or initial response
+        await self.db.open()
+        await self._discover_meta_commands()
+        # initial per-guild sync
+        for g in list(self.bot.guilds):
             try:
-                await interaction.followup.send(embed=embed, view=view)
-                # update initial message contents to the first section
-                await view.update_message(interaction)
+                import asyncio
+                asyncio.create_task(attempt_sync_for_guild(self.bot, g))
             except Exception:
-                # fallback to responding with editable original response
+                # fallback: schedule via bot.loop if present
                 try:
-                    await interaction.edit_original_response(embed=embed, view=view)
-                    await view.update_message(interaction)
+                    self.bot.loop.create_task(attempt_sync_for_guild(self.bot, g))
                 except Exception:
-                    await interaction.channel.send(embed=embed, view=view)
+                    logger.exception("Failed to schedule per-guild sync for guild %s", g.id)
+        logger.info("DashboardCog initialized: %d sections", len(COMMAND_REGISTRY.get_sections()))
+        self._ready = True
 
-        # attach to tree if not present
+    async def cog_load(self):
+        """Async hook called by discord.py when the cog is loaded in an async context.
+        Startup tasks are scheduled from on_ready to ensure the client is properly initialised."""
+        pass
+
+    async def _discover_meta_commands(self):
+        # scan bot.tree commands for attributes set by @command_meta
         try:
-            self.bot.tree.add_command(_dashboard)
-            try:
-                await self.bot.tree.sync()
-            except Exception:
-                # global sync failed, try just for guilds later
-                logger.debug("Initial dashboard sync may have failed; it will be attempted later per guild.")
+            cmds = list(self.bot.tree.get_commands())
         except Exception:
-            # Already present or failed. ignore
-            pass
+            # fallback: empty list if get_commands() not available
+            cmds = []
 
-    # Cog lifecycle
+        for cmd in cmds:
+            try:
+                # The decorator returns a command-like object; extract the callback if present
+                cb = getattr(cmd, "callback", None)
+                if cb is not None:
+                    sec = getattr(cb, "__dashboard_section__", None)
+                    name = getattr(cb, "__dashboard_name__", None)
+                    if sec is not None:
+                        fullname = getattr(cmd, "qualified_name", getattr(cmd, "name", None))
+                        COMMAND_REGISTRY.register(fullname, cmd, section=sec, display_name=name or getattr(cmd, "name", None))
+
+                # handle groups and subcommands robustly
+                if isinstance(cmd, app_commands.Group):
+                    subcmds = list(getattr(cmd, "commands", []) or [])
+                    for sub in subcmds:
+                        cb2 = getattr(sub, "callback", None)
+                        if cb2:
+                            sec = getattr(cb2, "__dashboard_section__", None)
+                            name = getattr(cb2, "__dashboard_name__", None)
+                            if sec is not None:
+                                fullname = getattr(sub, "qualified_name", getattr(sub, "name", None))
+                                COMMAND_REGISTRY.register(fullname, sub, section=sec, display_name=name or getattr(sub, "name", None))
+            except Exception:
+                logger.debug("Error registering command meta: %s", traceback.format_exc())
+
+    # /dashboard command
+    @app_commands.command(name="dashboard", description="Open the server dashboard to configure the bot")
+    async def dashboard(self, interaction: discord.Interaction):
+        # only in guilds
+        if interaction.guild is None:
+            await interaction.response.send_message("This command is only available in servers.", ephemeral=True)
+            return
+        # permission check
+        perms = interaction.user.guild_permissions
+        if not (perms.manage_guild or perms.administrator or perms.manage_roles or interaction.user.id == getattr(self.bot, "owner_id", None)):
+            await interaction.response.send_message("You need Manage Server (or similar) to access the dashboard.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=False)
+        view = DashboardView(self.bot, interaction.guild, self.db)
+        await view.send_initial(interaction)
+
+    @app_commands.command(name="dashboard-section-toggle", description="(Admin) Toggle a section on/off")
+    async def section_toggle(self, interaction: discord.Interaction, section: str, enabled: bool):
+        if interaction.guild is None:
+            await interaction.response.send_message("Only for servers.", ephemeral=True)
+            return
+        perms = interaction.user.guild_permissions
+        if not (perms.manage_guild or perms.administrator or interaction.user.id == getattr(self.bot, "owner_id", None)):
+            await interaction.response.send_message("You need Manage Server permissions.", ephemeral=True)
+            return
+        await self.db.set_section(interaction.guild.id, section, enabled)
+        commit = format_commit_message(interaction.user, f"Section {section} -> {'enabled' if enabled else 'disabled'}", "")
+        await self.db.log_action(interaction.guild.id, interaction.user.id, f"section_toggle {section} -> {enabled}", commit)
+        await attempt_sync_for_guild(self.bot, interaction.guild)
+        await interaction.response.send_message(f"{ENABLED_EMOJI} Section `{section}` set to {'enabled' if enabled else 'disabled'}.", ephemeral=True)
+
+    # helper to register manually-created app_commands to dashboard registry
+    def register_command_for_dashboard(self, cmd: app_commands.Command, section: str, display_name: Optional[str] = None):
+        fullname = getattr(cmd, "qualified_name", getattr(cmd, "name", None))
+        if fullname is None:
+            fullname = cmd.name
+        COMMAND_REGISTRY.register(fullname, cmd, section=section, display_name=display_name)
+
+    @commands.Cog.listener()
+    async def on_guild_join(self, guild: discord.Guild):
+        await self.db.get_guild_config(guild.id)
+        await attempt_sync_for_guild(self.bot, guild)
+
     @commands.Cog.listener()
     async def on_ready(self):
         if self._ready:
             return
-        # Discover app command metadata across loaded commands and cogs
-        await self._discover_commands_meta()
-        # initial per-guild sync
-        for guild in list(self.bot.guilds):
-            # schedule best-effort sync
-            self.bot.loop.create_task(attempt_sync_for_guild(self.bot, guild))
-        self._ready = True
-        logger.info("DashboardCog ready. Registered %d command metas across %d sections.", len(COMMAND_REGISTRY.get_all_commands()), len(COMMAND_REGISTRY.get_sections()))
+        await self._startup_tasks()
 
-    @commands.Cog.listener()
-    async def on_guild_join(self, guild: discord.Guild):
-        # new guild joined; ensure the DB has a default record
-        await self.db.get_guild_config(guild.id)
-        await attempt_sync_for_guild(self.bot, guild)
+# Example: register a demo command in the registry so dashboard is not empty
+async def _demo_callback(interaction: discord.Interaction):
+    await interaction.response.send_message("Demo command executed.", ephemeral=True)
 
-    async def _discover_commands_meta(self):
-        # scan bot.tree commands
-        def try_register(cmd: app_commands.Command):
-            # try to find a function with dashboard attributes
-            target = None
-            # command has callback property (Command.callback) -> a function or coroutine
-            callback = getattr(cmd, "callback", None)
-            if callback is not None:
-                # check attributes on callback
-                section = getattr(callback, "__dashboard_section__", None)
-                name = getattr(callback, "__dashboard_name__", None)
-                if section is not None:
-                    # register with registry using command.qualified_name as unique key
-                    fullname = f"{cmd.qualified_name}"
-                    COMMAND_REGISTRY.register(fullname, cmd, section=section, name=(name or cmd.name))
-                    return True
-            # fallback: if there are subcommands in a group, iterate them
-            return False
+demo_cmd = app_commands.Command(name="demo", description="Demo command", callback=_demo_callback)
+COMMAND_REGISTRY.register("demo", demo_cmd, section="General", display_name="Demo Command")
 
-        for c in list(self.bot.tree.commands):
-            # For groups and commands
-            try:
-                # for top-level commands
-                try_register(c)
-                # for groups
-                if isinstance(c, app_commands.Group):
-                    for sub in c.commands:
-                        try_register(sub)
-            except Exception:
-                logger.debug("Error attempting to register command meta for command %s", getattr(c, "name", "<unknown>"), exc_info=True)
+# ---------------------------
+# Placeholders for sections
+# ---------------------------
+# You asked for placeholders where you can add your sections.
+#
+# Below are commented placeholders demonstrating how to define sections and how to annotate
+# your app commands so they appear in the dashboard.
+#
+# Example usage:
+#
+# @app_commands.command(name="kick", description="Kick a member")
+# @command_meta(section="Moderation", name="Kick")
+# @app_commands.check(app_command_enabled_check())
+# async def kick(interaction: discord.Interaction, member: discord.Member, reason: Optional[str] = None):
+#     # your moderation logic
+#     await interaction.response.send_message(f"Kicked {member}.", ephemeral=True)
+#
+# COMMAND_REGISTRY.register("kick", <the_command_obj>, section="Moderation", display_name="Kick")
+#
+# Placeholders:
+# - Moderation
+# - Utility
+# - Fun
+# - Economy
+# - Info
+#
+# Add them by decorating and registering commands as shown above.
 
-        # Also check cogs for functions decorated with @command_meta that might not be added to tree yet
-        # We try to find global functions with the attribute as fallback.
-        # NOTE: This is not exhaustive but catches many common patterns.
-
-        # Nothing to return; registry mutated
-
-    async def _periodic_resync(self):
-        """
-        Background task to periodically resync guild commands (best-effort). This helps in case
-        a toggle changed but the sync wasn't processed by Discord the first time.
-        """
-        await self.bot.wait_until_ready()
-        while True:
-            try:
-                # iterate guilds and attempt sync
-                for guild in list(self.bot.guilds):
-                    await attempt_sync_for_guild(self.bot, guild)
-                await asyncio.sleep(300)  # every 5 minutes
-            except asyncio.CancelledError:
-                break
-            except Exception:
-                logger.exception("Periodic resync encountered an error.")
-                await asyncio.sleep(60)
-
-    # Example of a convenience command to mark a section default on/off (exposed to owner/admin)
-    @app_commands.command(name="dashboard-section-toggle", description="Toggle a section on/off for this guild (admin only).")
-    async def _section_toggle(self, interaction: discord.Interaction, section: str, enabled: bool):
-        if not interaction.guild:
-            await interaction.response.send_message("This command must be used in a guild.", ephemeral=True)
-            return
-        perm = interaction.user.guild_permissions
-        if not (perm.manage_guild or perm.administrator or interaction.user.id == getattr(self.bot, "owner_id", None)):
-            await interaction.response.send_message("You need Manage Server permissions to use this.", ephemeral=True)
-            return
-        # set section state
-        await self.db.set_section_state(interaction.guild.id, section, enabled)
-        # sync commands for the guild (best-effort)
-        await attempt_sync_for_guild(self.bot, interaction.guild)
-        await interaction.response.send_message(f"{SAVED_EMOJI} Section `{section}` set to {'enabled' if enabled else 'disabled'}.", ephemeral=True)
-
-def register_command_for_dashboard(cmd: app_commands.Command, *, section: str, name: Optional[str] = None):
-    """
-    Use this function when you programmatically create app_commands.Command objects.
-    It registers the command in the COMMAND_REGISTRY so the dashboard can show it.
-    """
-    fullname = getattr(cmd, "qualified_name", getattr(cmd, "name", None))
-    if fullname is None:
-        fullname = cmd.name
-    COMMAND_REGISTRY.register(fullname, cmd, section=section, name=(name or cmd.name))
-
-# -----------------------------------------------------------------------------
-# EXAMPLE: put some sample commands into registry for demonstration.
-# This is optional; remove or replace with your real commands.
-# -----------------------------------------------------------------------------
-# NOTE: The following example commands are created only to illustrate how
-# the registry & check should be used. In a real bot, your cogs define
-# the real commands and you decorate them with @command_meta + @app_commands.check.
-async def _example_command_callback(interaction: discord.Interaction):
-    await interaction.response.send_message("This is an example command.")
-
-# Create a dummy command object for example (not strictly necessary)
-example_cmd = app_commands.Command(
-    name="example",
-    description="Example command (demo)",
-    callback=_example_command_callback,
-)
-
-# Register in registry under section "General"
-COMMAND_REGISTRY.register("example", example_cmd, section="General", name="Example (demo)")
-
-# -----------------------------------------------------------------------------
-# Loader function for cogs
-# -----------------------------------------------------------------------------
+# loader for extension
 async def setup(bot: commands.Bot):
-    """
-    This is the standardized cog loader for discord.py; use `await bot.add_cog(DashboardCog(bot))` or allow
-    the bot.load_extension mechanism to call setup for you.
-    """
     cog = DashboardCog(bot)
     await bot.add_cog(cog)
-    logger.info("DashboardCog loaded.")
-                                         
-# -----------------------------------------------------------------------------
-# End of file
-# -----------------------------------------------------------------------------
+    # schedule startup tasks now that we're in an async context
+    try:
+        import asyncio
+        asyncio.create_task(cog._startup_tasks())
+    except Exception:
+        logger.exception("Failed to schedule DashboardCog startup tasks")
+    logger.info("Loaded DashboardCog")
+
+# end of file

@@ -577,7 +577,8 @@ class AIModerationCog(commands.Cog, name="AI Moderation"):
         await interaction.followup.send(embed=self.emb.success("Log channel set", f"AI moderation logs will be sent to {channel.mention}."), ephemeral=True)
 
     @aimod.command(name="whitelist_add", description="Add user/role/channel to AI whitelist (no moderation applied)")
-    async def cmd_whitelist_add(self, interaction: discord.Interaction, entity: discord.abc.Snowflake):
+    async def cmd_whitelist_add(self, interaction: discord.Interaction, entity: str):
+        """Accept an ID/mention/string and resolve it to a snowflake at runtime."""
         await interaction.response.defer(ephemeral=True)
         if not await self._is_mod(interaction.user if isinstance(interaction.user, discord.Member) else interaction.user):
             await interaction.followup.send(embed=self.emb.error("Permission denied", "You must be a configured moderator to do this."), ephemeral=True)
@@ -586,17 +587,34 @@ class AIModerationCog(commands.Cog, name="AI Moderation"):
         cfg = await self.db.get_guild_config(interaction.guild.id)
         ai_cfg = cfg.get("ai", DEFAULT_AI_CONFIG.copy())
         wl = ai_cfg.get("whitelist", [])
-        if entity.id in wl:
-            await interaction.followup.send(embed=self.emb.warning("Already whitelisted", f"{getattr(entity, 'mention', str(entity.id))} is already whitelisted."), ephemeral=True)
+        # Resolve the provided entity string to an ID (supports raw IDs and mentions)
+        entity_id = None
+        m = re.search(r"(\d{17,20})", entity or "")
+        if m:
+            try:
+                entity_id = int(m.group(1))
+            except Exception:
+                entity_id = None
+
+        if entity_id is None:
+            await interaction.followup.send(embed=self.emb.error("Invalid entity", "Please provide a valid user/role/channel mention or ID."), ephemeral=True)
             return
-        wl.append(entity.id)
+
+        if entity_id in wl:
+            # attempt to find a mention for nicer output
+            resolved = interaction.guild.get_member(entity_id) or interaction.guild.get_role(entity_id) or interaction.guild.get_channel(entity_id)
+            display = getattr(resolved, "mention", str(entity_id))
+            await interaction.followup.send(embed=self.emb.warning("Already whitelisted", f"{display} is already whitelisted."), ephemeral=True)
+            return
+        wl.append(entity_id)
         ai_cfg["whitelist"] = wl
         cfg["ai"] = ai_cfg
         await self.db.set_guild_config(interaction.guild.id, cfg)
         await interaction.followup.send(embed=self.emb.success("Whitelisted", f"{getattr(entity, 'mention', str(entity.id))} will be exempt from AI moderation."), ephemeral=True)
 
     @aimod.command(name="whitelist_remove", description="Remove an entity from AI whitelist")
-    async def cmd_whitelist_remove(self, interaction: discord.Interaction, entity: discord.abc.Snowflake):
+    async def cmd_whitelist_remove(self, interaction: discord.Interaction, entity: str):
+        """Accept an ID/mention/string and resolve it to a snowflake at runtime."""
         await interaction.response.defer(ephemeral=True)
         if not await self._is_mod(interaction.user if isinstance(interaction.user, discord.Member) else interaction.user):
             await interaction.followup.send(embed=self.emb.error("Permission denied", "You must be a configured moderator to do this."), ephemeral=True)
@@ -605,10 +623,25 @@ class AIModerationCog(commands.Cog, name="AI Moderation"):
         cfg = await self.db.get_guild_config(interaction.guild.id)
         ai_cfg = cfg.get("ai", DEFAULT_AI_CONFIG.copy())
         wl = ai_cfg.get("whitelist", [])
-        if entity.id not in wl:
-            await interaction.followup.send(embed=self.emb.warning("Not found", f"{getattr(entity, 'mention', str(entity.id))} was not whitelisted."), ephemeral=True)
+        # Resolve provided entity to ID
+        entity_id = None
+        m = re.search(r"(\d{17,20})", entity or "")
+        if m:
+            try:
+                entity_id = int(m.group(1))
+            except Exception:
+                entity_id = None
+
+        if entity_id is None:
+            await interaction.followup.send(embed=self.emb.error("Invalid entity", "Please provide a valid user/role/channel mention or ID."), ephemeral=True)
             return
-        wl = [x for x in wl if x != entity.id]
+
+        if entity_id not in wl:
+            resolved = interaction.guild.get_member(entity_id) or interaction.guild.get_role(entity_id) or interaction.guild.get_channel(entity_id)
+            display = getattr(resolved, "mention", str(entity_id))
+            await interaction.followup.send(embed=self.emb.warning("Not found", f"{display} was not whitelisted."), ephemeral=True)
+            return
+        wl = [x for x in wl if x != entity_id]
         ai_cfg["whitelist"] = wl
         cfg["ai"] = ai_cfg
         await self.db.set_guild_config(interaction.guild.id, cfg)

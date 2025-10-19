@@ -293,7 +293,7 @@ class AutoMod(commands.Cog, name="AutoMod"):
     # -------------------------
     # Permission helpers
     # -------------------------
-    async def _is_moderator(self, user: discord.abc.Snowflake) -> bool:
+    async def _is_moderator(self, user) -> bool:
         """
         Determine whether a user is considered a moderator in the guild.
         Criteria:

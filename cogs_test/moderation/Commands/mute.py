@@ -372,8 +372,6 @@ class MuteCog(commands.Cog):
         init_db()
         # in-memory scheduled unmute tasks: (guild_id, user_id) -> asyncio.Task
         self._scheduled_unmutes: Dict[Tuple[int, int], asyncio.Task] = {}
-        # load pending unmute schedules from DB after ready
-        self._startup_task = bot.loop.create_task(self._load_and_schedule_pending_unmutes())
         # internal batch delay for channel overwrites
         self._batch_delay = 0.12
 
@@ -393,11 +391,11 @@ class MuteCog(commands.Cog):
                 # if unmute_at in the past, attempt immediate unmute
                 if unmute_at <= datetime.utcnow().replace(tzinfo=timezone.utc):
                     # schedule immediate task to run shortly
-                    self.bot.loop.create_task(self._perform_scheduled_unmute(guild_id, user_id, reason="Scheduled unmute (missed)"))
+                    asyncio.create_task(self._perform_scheduled_unmute(guild_id, user_id, reason="Scheduled unmute (missed)"))
                 else:
                     # schedule for future
                     delay = (unmute_at - datetime.utcnow().replace(tzinfo=timezone.utc)).total_seconds()
-                    task = self.bot.loop.create_task(self._delayed_unmute(guild_id, user_id, delay))
+                    task = asyncio.create_task(self._delayed_unmute(guild_id, user_id, delay))
                     self._scheduled_unmutes[(guild_id, user_id)] = task
             except Exception:
                 # don't let a single bad row break startup scheduling
@@ -477,7 +475,7 @@ class MuteCog(commands.Cog):
         except Exception as e:
             return False, f"Failed to remove role: {e}"
 
-    async def _apply_channel_overwrites(self, guild: discord.Guild, member: discord.Member, channels: List[discord.TextChannel], lock: bool = True, reason: Optional[str] = None) -> Dict[int, Tuple[bool, str]]:
+    async def _apply_channel_overwrites(self, guild: discord.Guild, member: discord.Member, channels: 'List[discord.TextChannel]', lock: bool = True, reason: Optional[str] = None) -> Dict[int, Tuple[bool, str]]:
         """
         Apply overwrites to channels for @member (if lock=True, remove speak/send; if lock=False, remove overwrite).
         Returns dict mapping channel.id -> (success, message).
@@ -576,7 +574,7 @@ class MuteCog(commands.Cog):
     # ---------------------------
     @app_commands.command(name="mute", description="Mute a user. Optionally set a duration (e.g., 10m, 1h).")
     @app_commands.describe(user="User to mute", duration="Optional duration like 10m/1h/2d", reason="Optional reason", channels="Optional list of channels to apply channel-overwrites instead of role-based mute")
-    async def app_mute(self, interaction: discord.Interaction, user: discord.User, duration: Optional[str] = None, reason: Optional[str] = None, channels: Optional[List[discord.TextChannel]] = None):
+    async def app_mute(self, interaction: discord.Interaction, user: discord.User, duration: Optional[str] = None, reason: Optional[str] = None, channels: Optional[str] = None):
         """
         Mute a user. Two modes:
          - Role-based mute (recommended): assign the configured mute role.
@@ -618,29 +616,21 @@ class MuteCog(commands.Cog):
             unmute_at = datetime.utcnow().replace(tzinfo=timezone.utc) + td
 
         # Determine mode: role-based if mute role configured and no channels provided
-        configured_role_id = get_mute_role_db(guild.id)
-        mute_role = None
+            configured_role_id = get_mute_role_db(guild.id)
+            mute_role = guild.get_role(int(configured_role_id)) if configured_role_id else None
+        channels_list = None
         if channels:
-            # Channel-specific mode - confirm with the user because it's more invasive
-            embc = create_darlux_embed(title="🖤 Confirm Channel Mute", description=f"You're about to apply channel-specific mutes to {len(channels)} channel(s) for {member.mention}.\n\nReason: {reason or 'No reason provided.'}", accent="velvet_purple")
-            embc.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url)
-            view = ConfirmView(interaction.user, timeout=30)
-            await interaction.followup.send(embed=embc, view=view, ephemeral=True)
-            await view.wait()
-            if view.value is not True:
-                await interaction.followup.send("Channel mute cancelled.", ephemeral=True)
-                return
-        elif configured_role_id:
-            mute_role = guild.get_role(configured_role_id)
-            if not mute_role:
-                # saved role ID no longer exists; inform the user
-                await interaction.followup.send("Configured mute role was not found in this guild. Please set it with /setmuterole first.", ephemeral=True)
-                return
-            # check bot can manage role
-            ok2, rmsg = role_is_managed_or_higher_than_bot(guild, mute_role)
-            if not ok2:
-                await interaction.followup.send(rmsg, ephemeral=True)
-                return
+            # Accept a comma-separated string of channel mentions or IDs, then resolve
+            parts = re.split(r"\s*,\s*", str(channels).strip())
+            resolved = []
+            for p in parts:
+                m = re.search(r"(\d{17,19})", p)
+                if m:
+                    cid = int(m.group(1))
+                    ch = guild.get_channel(cid)
+                    if ch:
+                        resolved.append(ch)
+            channels_list = resolved if resolved else None
         else:
             # no role configured and no channels provided -> cannot proceed
             await interaction.followup.send("No mute role configured for this guild. Use /setmuterole or provide channels to mute.", ephemeral=True)
@@ -809,16 +799,15 @@ class MuteCog(commands.Cog):
                 t.cancel()
             except Exception:
                 pass
-        # cancel startup task if pending
-        if self._startup_task:
-            try:
-                self._startup_task.cancel()
-            except Exception:
-                pass
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        await self._load_and_schedule_pending_unmutes()
 
 
 # ---------------------------
 # Setup
 # ---------------------------
 async def setup(bot: commands.Bot):
-    await bot.add_cog(MuteCog(bot))
+    cog = MuteCog(bot)
+    await bot.add_cog(cog)

@@ -43,13 +43,9 @@ SECRET_WORD = "TGA"
 # This is intentionally simple; replace with your own secure method if desired.
 _OBFUSCATED_WEBHOOK = "w5c8KxojJx0m..."  # placeholder — will be replaced below with encoded value
 
-<<<<<<< HEAD
-# The actual webhook URL you provided (we'll obfuscate it in code)
-_RAW_WEBHOOK = "https://discord.com/api/webhooks/1426971855113158789/XNmjkWciUbMoTx9UHwvocldLIFfaz5CKdfIKmx08Ml_Vy2asZn82fS4NeRFemCoa9TgC"
-=======
-# The actual webhook URLprovided (we'll obfuscate it in code)
-_RAW_WEBHOOK = "_RAW_WEBHOOK" #Link your Webhook in the commas
->>>>>>> 87c5d970084b5e1357bd00ae915d7ef7a6917700
+# The actual webhook URL will be provided via configuration or replaced by the user.
+# Use a placeholder here to avoid storing secrets in source.
+_RAW_WEBHOOK = "_RAW_WEBHOOK"
 # Static XOR key (user requested static store). Keep this secret in production.
 _STATIC_XOR_KEY = "my_static_secret_42"
 
