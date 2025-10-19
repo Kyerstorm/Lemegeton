@@ -234,7 +234,7 @@ class PlannedFeatures(commands.Cog):
         
         async def update_buttons(self):
             """Update button states based on current page"""
-            features = await self.get_planned_features('planned')
+            features = await self.cog.get_planned_features('planned')
             features_per_page = 1
             total_pages = max(1, (len(features) + features_per_page - 1) // features_per_page)
             
@@ -260,7 +260,7 @@ class PlannedFeatures(commands.Cog):
         
         @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.secondary)
         async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-            features = await self.get_planned_features('planned')
+            features = await self.cog.get_planned_features('planned')
             features_per_page = 1
             total_pages = max(1, (len(features) + features_per_page - 1) // features_per_page)
             
@@ -294,7 +294,7 @@ class PlannedFeatures(commands.Cog):
                 )
                 return
             
-            features = await self.get_planned_features('planned')
+            features = await self.cog.get_planned_features('planned')
             if not features:
                 await interaction.response.send_message(
                     "❌ **No Features to Edit**\n\nThere are no planned features to edit.",
@@ -322,7 +322,7 @@ class PlannedFeatures(commands.Cog):
                 )
                 return
             
-            features = await self.get_planned_features('planned')
+            features = await self.cog.get_planned_features('planned')
             if not features:
                 await interaction.response.send_message(
                     "❌ **No Features to Remove**\n\nThere are no planned features to remove.",
@@ -413,7 +413,7 @@ class PlannedFeatures(commands.Cog):
                     inline=True
                 )
                 
-                features = await self.get_planned_features('planned')
+                features = await self.cog.get_planned_features('planned')
                 embed.set_footer(text=f"Total planned features: {len(features)}")
                 
                 await interaction.response.send_message(embed=embed, ephemeral=True)
