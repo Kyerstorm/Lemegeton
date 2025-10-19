@@ -1,355 +1,339 @@
 # userinfo.py
 """
-Aesthetic User Info Cog for discord.py v2 (app_commands)
-Features:
-- /user command (optional user argument, defaults to invoker)
-- Works in any guild the bot is in (reads member-specific info when available)
-- Security section: account age, badges, bot/human, suspicious flags
-- Moderation info when available (roles, top role, join date)
-- Avatar & banner previews, avatar download button, copy ID button
-- Pagination for larger displays and interactive buttons
-- Logging to SQLite (integrated with serverinfo's DB)
-- Graceful fallbacks and exception handling
+Dark Luxury UserInfo Cog for discord.py v2
+- /user command (optional user argument; defaults to invoker)
+- Shows account info, badges, security heuristics
+- Avatar/banner preview buttons and copy-ID
+- Paginated visuals and technical info
+- SQLite logging to bot_meta.db
+- Neutral footer; interactive controls restricted to command user
 """
 
 import discord
-from discord import app_commands
 from discord.ext import commands
-from datetime import datetime, timezone, timedelta
+from discord import app_commands
+from datetime import datetime, timezone
 import sqlite3
-import textwrap
 from typing import Optional, List
 
-# --------------------------------
-def fmt_date(dt: datetime) -> str:
-    if not dt:
-        return "Unknown"
-    return dt.astimezone(timezone.utc).strftime("%b %d, %Y • %H:%M UTC")
-
+# ---------------------------
+# Palette & helpers
+# ---------------------------
 PALETTE = {
-    "soft_pink": discord.Color.from_rgb(255, 182, 193),
-    "muted_purple": discord.Color.from_rgb(197, 153, 210),
+    "deep_black": discord.Color.from_rgb(18, 18, 20),
+    "midnight_blue": discord.Color.from_rgb(28, 30, 45),
+    "royal_gold": discord.Color.from_rgb(212, 175, 55),
+    "velvet_purple": discord.Color.from_rgb(85, 45, 110),
+    "soft_accent": discord.Color.from_rgb(110, 80, 150)
 }
 
-# Reuse DB init from serverinfo module unless separate — safe to re-init
-def init_db(path: str = "bot_meta.db"):
-    conn = sqlite3.connect(path)
-    cur = conn.cursor()
-    cur.execute(
-        """CREATE TABLE IF NOT EXISTS userinfo_usage(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            target_user_id INTEGER,
-            target_user_name TEXT,
-            invoked_by INTEGER,
-            invoked_at TEXT
-        )"""
-    )
-    conn.commit()
-    conn.close()
 
-def log_userinfo(target: discord.User, invoked_by: discord.User, path: str = "bot_meta.db"):
-    conn = sqlite3.connect(path)
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO userinfo_usage(target_user_id, target_user_name, invoked_by, invoked_at) VALUES (?, ?, ?, ?)",
-        (target.id, str(target), invoked_by.id, datetime.utcnow().isoformat())
+def create_darlux_embed(title: Optional[str] = None, description: Optional[str] = None, accent: str = "royal_gold"):
+    emb = discord.Embed(
+        title=title,
+        description=description,
+        color=PALETTE.get(accent, PALETTE["royal_gold"]),
+        timestamp=datetime.utcnow()
     )
-    conn.commit()
-    conn.close()
+    return emb
 
 
 # ---------------------------
-# Interactive buttons for avatar/banner/copy ID
+# DB logging
+# ---------------------------
+DB_PATH = "bot_meta.db"
+
+
+def init_db(path: str = DB_PATH):
+    conn = sqlite3.connect(path)
+    cur = conn.cursor()
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS userinfo_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        target_user_id INTEGER,
+        target_user_name TEXT,
+        invoked_by INTEGER,
+        invoked_at TEXT
+    )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def log_userinfo(target: discord.User, invoked_by: discord.User, path: str = DB_PATH):
+    try:
+        conn = sqlite3.connect(path)
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO userinfo_usage (target_user_id, target_user_name, invoked_by, invoked_at) VALUES (?, ?, ?, ?)",
+            (target.id, str(target), invoked_by.id, datetime.utcnow().isoformat())
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+# ---------------------------
+# Small utilities
+# ---------------------------
+def fmt_date(dt: Optional[datetime]) -> str:
+    if not dt:
+        return "Unknown"
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).strftime("%b %d, %Y • %H:%M UTC")
+
+
+def account_age_days(user: discord.User) -> int:
+    try:
+        return (datetime.utcnow().replace(tzinfo=timezone.utc) - user.created_at).days
+    except Exception:
+        return 0
+
+
+def account_age_label(user: discord.User) -> str:
+    days = account_age_days(user)
+    if days < 7:
+        return f"⚠️ New Account — {days} day(s)"
+    if days < 30:
+        return f"🔰 Young Account — {days} day(s)"
+    if days < 365:
+        return f"✅ Established — {days} day(s)"
+    return f"🌟 Veteran — {days} day(s)"
+
+
+def badges_to_list(user: discord.User) -> List[str]:
+    out = []
+    try:
+        pf = user.public_flags
+        if pf.staff:
+            out.append("🛡️ Staff")
+        if pf.partner:
+            out.append("🤝 Partner")
+        if pf.hypesquad_balance:
+            out.append("🏛️ HypeSquad Balance")
+        if pf.hypesquad_bravery:
+            out.append("🦁 HypeSquad Bravery")
+        if pf.hypesquad_brilliance:
+            out.append("🦉 HypeSquad Brilliance")
+        if pf.verified_bot_developer:
+            out.append("👨‍💻 Verified Bot Dev")
+        if pf.early_supporter:
+            out.append("🌱 Early Supporter")
+        if pf.bug_hunter_level_1:
+            out.append("🐛 Bug Hunter")
+        if pf.bug_hunter_level_2:
+            out.append("🐛🐛 Bug Hunter (L2)")
+    except Exception:
+        pass
+    return out
+
+
+def suspicious_checks(user: discord.User) -> List[str]:
+    results = []
+    days = account_age_days(user)
+    if days < 3:
+        results.append("Account created very recently (<3 days)")
+    if user.bot:
+        results.append("Bot account")
+    try:
+        pf = user.public_flags
+        if pf and pf.value == 0 and days < 30:
+            results.append("Young account with no public badges (suspicious)")
+    except Exception:
+        pass
+    if not results:
+        results.append("No immediate suspicious markers detected")
+    return results
+
+
+# ---------------------------
+# Interactive view: Avatar actions
 # ---------------------------
 class AvatarButtons(discord.ui.View):
-    def __init__(self, user: discord.User, timeout: int = 120):
+    def __init__(self, target: discord.User, timeout: int = 120):
         super().__init__(timeout=timeout)
-        self.user = user
+        self.target = target
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        # allow only the command invoker to use the ephemeral quick actions (enforced by caller)
+        return True
 
     @discord.ui.button(label="🔗 Avatar URL", style=discord.ButtonStyle.secondary)
     async def avatar_url(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(self.user.display_avatar.url, ephemeral=True)
+        await interaction.response.send_message(self.target.display_avatar.url, ephemeral=True)
 
-    @discord.ui.button(label="🖼️ Banner Preview", style=discord.ButtonStyle.primary)
-    async def banner_preview(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Fetch member profile to get banner (requires privileged intent or user object from API)
+    @discord.ui.button(label="🖼️ Banner", style=discord.ButtonStyle.primary)
+    async def banner(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            fetched = await interaction.client.fetch_user(self.user.id)
+            fetched = await interaction.client.fetch_user(self.target.id)
             if getattr(fetched, "banner", None):
                 await interaction.response.send_message(fetched.banner.url, ephemeral=True)
             else:
-                await interaction.response.send_message("This user doesn't have a banner or it's not visible to me.", ephemeral=True)
-        except discord.NotFound:
-            await interaction.response.send_message("Could not fetch banner.", ephemeral=True)
+                await interaction.response.send_message("No banner visible.", ephemeral=True)
         except Exception:
-            await interaction.response.send_message("An error occurred while fetching the banner.", ephemeral=True)
+            await interaction.response.send_message("Unable to fetch banner.", ephemeral=True)
 
     @discord.ui.button(label="📋 Copy ID", style=discord.ButtonStyle.secondary)
     async def copy_id(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(f"`{self.user.id}`", ephemeral=True)
+        await interaction.response.send_message(f"`{self.target.id}`", ephemeral=True)
 
     @discord.ui.button(label="❌ Close", style=discord.ButtonStyle.danger)
     async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.message.delete()
+        try:
+            await interaction.message.delete()
+        except Exception:
+            pass
         self.stop()
 
 
 # ---------------------------
-# Security heuristics
+# Simple paginator for user pages
 # ---------------------------
-def account_age_label(user: discord.User) -> str:
-    age_days = (datetime.utcnow().replace(tzinfo=timezone.utc) - user.created_at).days
-    if age_days < 7:
-        return f"⚠️ New Account — {age_days} days old"
-    if age_days < 30:
-        return f"🔰 Young Account — {age_days} days old"
-    if age_days < 365:
-        return f"✅ Established — {age_days} days old"
-    return f"🌟 Veteran — {age_days} days old"
+class SimplePaginator(discord.ui.View):
+    def __init__(self, pages: List[discord.Embed], author: discord.User, timeout: int = 120):
+        super().__init__(timeout=timeout)
+        self.pages = pages
+        self.author = author
+        self.index = 0
 
-def suspicious_check(user: discord.User) -> List[str]:
-    flags = []
-    # Basic heuristics:
-    age_days = (datetime.utcnow().replace(tzinfo=timezone.utc) - user.created_at).days
-    if age_days < 3:
-        flags.append("Account created very recently (<3 days)")
-    if user.bot:
-        flags.append("Bot account (automations may be allowed)")
-    # Public flags (badges) can be informative: if none and new account, mark as suspicious
-    try:
-        pf = user.public_flags
-        if pf and pf.value == 0 and age_days < 30:
-            flags.append("No public badges on a young account (suspiciously empty)")
-    except Exception:
-        pass
-    return flags
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message("This control is for the command user.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="◀️ Prev", style=discord.ButtonStyle.secondary)
+    async def prev(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.index = max(0, self.index - 1)
+        await interaction.response.edit_message(embed=self.pages[self.index], view=self)
+
+    @discord.ui.button(label="▶️ Next", style=discord.ButtonStyle.secondary)
+    async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.index = min(len(self.pages) - 1, self.index + 1)
+        await interaction.response.edit_message(embed=self.pages[self.index], view=self)
+
+    @discord.ui.button(label="🔗 Visuals", style=discord.ButtonStyle.primary)
+    async def visuals(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.index = 1 if len(self.pages) > 1 else 0
+        await interaction.response.edit_message(embed=self.pages[self.index], view=self)
+
+    @discord.ui.button(label="❌ Close", style=discord.ButtonStyle.danger)
+    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            await interaction.message.delete()
+        except Exception:
+            pass
+        self.stop()
 
 
 # ---------------------------
 # The Cog
 # ---------------------------
 class UserInfo(commands.Cog):
-    """Detailed user info with security checks and aesthetic embeds"""
+    """User Info Cog — Dark Luxury Edition"""
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         init_db()
-        # small in-memory cache for resolved users to avoid heavy fetches during rapid requests
         self._user_cache = {}  # user_id -> (timestamp, user)
         self.cache_ttl = 30
 
-    async def fetch_user_safe(self, user: Optional[discord.User]) -> discord.User:
-        if user is None:
-            raise ValueError("User cannot be None for fetch_user_safe")
-        cached = self._user_cache.get(user.id)
-        now_ts = datetime.utcnow().timestamp()
-        if cached and (now_ts - cached[0]) <= self.cache_ttl:
-            return cached[1]
+    async def fetch_user_safe(self, user: discord.User) -> discord.User:
+        # try to fetch a fuller user object from the API (may reveal banner)
         try:
             fetched = await self.bot.fetch_user(user.id)
-            self._user_cache[user.id] = (now_ts, fetched)
             return fetched
         except Exception:
-            # fallback to original
             return user
 
-    def badges_to_list(self, user: discord.User) -> List[str]:
-        out = []
-        try:
-            pf = user.public_flags
-            if pf.staff:
-                out.append("🛡️ Discord Staff")
-            if pf.partner:
-                out.append("🤝 Partner")
-            if pf.hypesquad_balance:
-                out.append("🏛️ HypeSquad Balance")
-            if pf.hypesquad_bravery:
-                out.append("🦁 HypeSquad Bravery")
-            if pf.hypesquad_brilliance:
-                out.append("🦉 HypeSquad Brilliance")
-            if pf.verified_bot_developer:
-                out.append("👨‍💻 Verified Bot Developer")
-            if pf.early_supporter:
-                out.append("🌱 Early Supporter")
-            if pf.bug_hunter_level_1:
-                out.append("🐛 Bug Hunter")
-            if pf.bug_hunter_level_2:
-                out.append("🐛🐛 Bug Hunter (Level 2)")
-        except Exception:
-            pass
-        return out
-
-    @app_commands.command(name="user", description="Displays detailed and aesthetic information about a user.")
-    @app_commands.describe(user="Select a user to view their profile information (defaults to you)")
+    @app_commands.command(name="user", description="Display refined user information (Dark Luxury).")
+    @app_commands.describe(user="Select a user (defaults to you)")
     async def user(self, interaction: discord.Interaction, user: Optional[discord.User] = None):
-        """
-        Main handler for /user. Works across any guild the bot is present in.
-        - If user is omitted, shows info for the invoker.
-        - If invoked in a guild, attempts to show member-specific info.
-        - Includes a Security section and interactive buttons for avatars/banners.
-        """
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True)
         target = user or interaction.user
-        # Attempt to fetch richer user object via fetch_user
         fetched = await self.fetch_user_safe(target)
-        member = None
-        if interaction.guild:
-            member = interaction.guild.get_member(fetched.id)
+        member = interaction.guild.get_member(fetched.id) if interaction.guild else None
 
-        # Basic embed
-        emb = discord.Embed(
-            title=f"🌸 User Info — {fetched}",
-            color=PALETTE["soft_pink"],
-            timestamp=datetime.utcnow()
-        )
-        # thumbnail
-        emb.set_thumbnail(url=fetched.display_avatar.url)
+        # Main embed
+        main = create_darlux_embed(title=f"🖤 User — {fetched}", description=None, accent="royal_gold")
+        main.set_thumbnail(url=fetched.display_avatar.url)
+        main.add_field(name="📛 Username", value=f"{fetched} • `{fetched.id}`", inline=False)
+        main.add_field(name="🕰️ Account Created", value=fmt_date(fetched.created_at), inline=True)
 
-        # Basic fields
-        emb.add_field(name="📛 Username", value=f"{fetched} • `{fetched.id}`", inline=False)
-        emb.add_field(name="📅 Account Created", value=fmt_date(fetched.created_at), inline=True)
-
-        # Member-specific fields if available
         if member:
             try:
-                emb.add_field(name="💬 Joined Server", value=fmt_date(member.joined_at), inline=True)
+                main.add_field(name="💬 Joined Server", value=fmt_date(member.joined_at), inline=True)
                 roles = [r for r in member.roles if r != interaction.guild.default_role]
-                roles_display = ", ".join([r.mention for r in roles[:12]]) or "None"
-                emb.add_field(name=f"🎭 Roles ({len(roles)})", value=roles_display, inline=False)
-                emb.add_field(name="💎 Top Role", value=member.top_role.mention if member.top_role else "None", inline=True)
+                main.add_field(name=f"🎭 Roles ({len(roles)})", value=", ".join([r.mention for r in roles[:12]]) or "None", inline=False)
+                main.add_field(name="👑 Top Role", value=member.top_role.mention if member.top_role else "None", inline=True)
             except Exception:
                 pass
 
-        # Badges & Public Flags
-        badges = self.badges_to_list(fetched)
-        emb.add_field(name="🎖️ Badges", value=", ".join(badges) if badges else "None", inline=False)
+        # Badges
+        badges = badges_to_list(fetched)
+        main.add_field(name="💠 Badges", value=", ".join(badges) if badges else "None", inline=False)
 
-        # Security Section
-        sec_lines = []
-        sec_lines.append(account_age_label(fetched))
-        sec_lines.extend(suspicious_check(fetched) or ["No immediate suspicious markers found."])
-        # MFA availability is not reliably exposed via user objects in bots; attempt best-effort
-        try:
-            # NOTE: user._user_attrs or fetched.__dict__ will not reliably expose mfa_enabled
-            # so we avoid claiming it. Keep statement conservative.
-            sec_lines.append("🔒 MFA: Not available to bots (cannot determine)")
-        except Exception:
-            sec_lines.append("🔒 MFA: Unknown")
-        emb.add_field(name="🛡️ Security Summary", value="\n".join(sec_lines), inline=False)
+        # Security section
+        sec = []
+        sec.append(account_age_label(fetched))
+        sec.extend(suspicious_checks(fetched))
+        # bots can't reliably detect mfa_enabled; be conservative
+        sec.append("🔒 MFA: Not visible to bots")
+        main.add_field(name="🛡️ Security Summary", value="\n".join(sec), inline=False)
 
-        # Activity / Presence if member
+        # Presence / Activity
         if member:
             try:
-                act = member.activity
-                if act:
-                    act_name = getattr(act, "name", str(act))
-                    emb.add_field(name="🎮 Current Activity", value=act_name, inline=True)
-                else:
-                    emb.add_field(name="🎮 Current Activity", value="None", inline=True)
-                emb.add_field(name="🔔 Status", value=str(member.status), inline=True)
+                act = getattr(member, "activity", None)
+                main.add_field(name="🎮 Current Activity", value=(getattr(act, "name", str(act)) if act else "None"), inline=True)
+                main.add_field(name="🔔 Status", value=str(member.status), inline=True)
             except Exception:
                 pass
 
-        # Mutual guilds summary (how many servers bot shares with target) — limited
+        # Mutual servers (count & sample)
         try:
-            mutual_count = sum(1 for g in self.bot.guilds if g.get_member(fetched.id))
-            emb.add_field(name="🤝 Mutual Servers", value=str(mutual_count), inline=True)
+            mutuals = [g.name for g in self.bot.guilds if g.get_member(fetched.id)]
+            main.add_field(name="🤝 Mutual Servers", value=str(len(mutuals)), inline=True)
         except Exception:
             pass
 
-        # Footer & timestamp
-        emb.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url)
+        main.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url)
 
-        # Build optional extended embed pages (avatar / extra info)
-        pages = [emb]
-
-        # EXTENDED: avatar + banner display embed
-        ext = discord.Embed(
-            title=f"🌸 Visuals — {fetched}",
-            color=PALETTE["muted_purple"],
-            timestamp=datetime.utcnow()
-        )
-        ext.set_image(url=fetched.display_avatar.url.replace("?size=1024", "?size=2048"))
-        ext.add_field(name="Avatar Resolution", value="2048x2048 (requested)", inline=True)
+        # Page 2: Visuals (avatar + banner)
+        visual = create_darlux_embed(title=f"🖤 Visuals — {fetched}", accent="velvet_purple")
+        visual.set_image(url=fetched.display_avatar.url.replace("?size=1024", "?size=2048"))
+        visual.add_field(name="Avatar", value="High-resolution preview", inline=True)
         try:
             fetched_more = await self.fetch_user_safe(fetched)
             if getattr(fetched_more, "banner", None):
-                ext.add_field(name="Banner", value="Available (use the Banner Preview button)", inline=True)
+                visual.add_field(name="Banner", value="Available (use Banner button)", inline=True)
             else:
-                ext.add_field(name="Banner", value="No banner or not visible to me", inline=True)
+                visual.add_field(name="Banner", value="None or not visible", inline=True)
         except Exception:
-            ext.add_field(name="Banner", value="Could not determine banner", inline=True)
-        pages.append(ext)
+            visual.add_field(name="Banner", value="Unknown", inline=True)
 
-        # EXTENDED: nitty-gritty technical
-        tech = discord.Embed(
-            title=f"🌸 Technical Info — {fetched}",
-            color=PALETTE["soft_peach"] if "soft_peach" in PALETTE else PALETTE["soft_pink"],
-            timestamp=datetime.utcnow()
-        )
+        # Page 3: Technical
+        tech = create_darlux_embed(title=f"🖤 Technical — {fetched}", accent="midnight_blue")
         tech.add_field(name="Avatar URL", value=fetched.display_avatar.url, inline=False)
-        tech.add_field(name="Creation Timestamp", value=str(fetched.created_at.timestamp()), inline=True)
-        # safe check: display mutual guild names (small sample)
         try:
-            mutuals = [g.name for g in self.bot.guilds if g.get_member(fetched.id)]
-            tech.add_field(name="Mutual Server Examples", value=", ".join(mutuals[:6]) or "None", inline=False)
-        except Exception:
-            pass
-        pages.append(tech)
-
-        # log the usage
-        try:
-            log_userinfo(fetched, interaction.user)
+            tech.add_field(name="Account Timestamp", value=str(fetched.created_at.timestamp()), inline=True)
         except Exception:
             pass
 
-        # send with AvatarButtons view for interactivity
-        view = AvatarButtons(fetched)
-        # If multiple pages, offer paginator via simple buttons (just send first page + view)
-        if len(pages) > 1:
-            # Use a simple paginator implemented here (3 pages)
-            # Build a lightweight page switcher via custom view with Next/Prev if needed
-            class SimplePaginator(discord.ui.View):
-                def __init__(self, pages, author):
-                    super().__init__(timeout=120)
-                    self.pages = pages
-                    self.idx = 0
-                    self.author = author
+        # combine pages
+        pages = [main, visual, tech]
 
-                async def interaction_check(self, interaction: discord.Interaction) -> bool:
-                    if interaction.user.id != self.author.id:
-                        await interaction.response.send_message("This control isn't for you.", ephemeral=True)
-                        return False
-                    return True
+        # log usage
+        log_userinfo(fetched, interaction.user)
 
-                @discord.ui.button(label="◀️ Prev", style=discord.ButtonStyle.secondary)
-                async def prev(self, interaction: discord.Interaction, button: discord.ui.Button):
-                    self.idx = max(0, self.idx - 1)
-                    await interaction.response.edit_message(embed=self.pages[self.idx], view=self)
+        # interactive controls
+        avatar_view = AvatarButtons(fetched)
+        paginator = SimplePaginator(pages, interaction.user)
 
-                @discord.ui.button(label="▶️ Next", style=discord.ButtonStyle.secondary)
-                async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
-                    self.idx = min(len(self.pages) - 1, self.idx + 1)
-                    await interaction.response.edit_message(embed=self.pages[self.idx], view=self)
-
-                @discord.ui.button(label="🔗 Visuals", style=discord.ButtonStyle.primary)
-                async def to_visuals(self, interaction: discord.Interaction, button: discord.ui.Button):
-                    self.idx = 1
-                    await interaction.response.edit_message(embed=self.pages[self.idx], view=self)
-
-                @discord.ui.button(label="❌ Close", style=discord.ButtonStyle.danger)
-                async def cl(self, interaction: discord.Interaction, button: discord.ui.Button):
-                    await interaction.message.delete()
-                    self.stop()
-
-            paginator = SimplePaginator(pages, interaction.user)
-            # merge avatar buttons into the paginator view by adding them as children as well
-            # (We recreate AvatarButtons' buttons inside paginator for simplicity.)
-            # Add ephemeral quick actions by attaching AvatarButtons as an additional ephemeral response when requested (user can press Visuals).
-            await interaction.followup.send(embed=pages[0], view=paginator)
-            # Also send the avatar controls as a separate ephemeral message to keep interface clean
-            await interaction.followup.send("Quick actions (avatar & banner):", view=view, ephemeral=True)
-        else:
-            await interaction.followup.send(embed=pages[0], view=view)
+        # send main message with paginator; ephemeral avatar controls to avoid clutter
+        await interaction.followup.send(embed=pages[0], view=paginator)
+        await interaction.followup.send("Quick actions (avatar & banner):", view=avatar_view, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
