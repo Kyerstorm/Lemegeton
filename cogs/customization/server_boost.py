@@ -48,7 +48,7 @@ class ServerBoost(commands.Cog):
     # BOOSTER ROLE SYSTEM
     # ============================================================================
 
-    @app_commands.command(name="booster-role-set", description="Create and apply a custom role with your chosen color (Server Boosters only)")
+    @app_commands.command(name="nitro-role-set", description="Create and apply a custom role with your chosen color (Server Boosters only)")
     @app_commands.describe(
         role_name="Name for your custom role",
         hex_color="Hex color code (e.g. #FF0000 for red)"
@@ -166,8 +166,8 @@ class ServerBoost(commands.Cog):
 
                 embed.add_field(
                     name="🎨 Custom Role Creation",
-                    value="Use `/booster-role-set` to create a custom role with your chosen name and color!\n\n"
-                          "**Example:** `/booster-role-set role_name:My Cool Role hex_color:#FF6B6B`",
+                    value="Use `/nitro-role-set` to create a custom role with your chosen name and color!\n\n"
+                          "**Example:** `/nitro-role-set role_name:My Cool Role hex_color:#FF6B6B`",
                     inline=False
                 )
 

@@ -182,11 +182,11 @@ class HelpCog(commands.Cog):
                     "note": "Customize your bot experience with themes",
                     "examples": ["/theme"]
                 },
-                "booster-role-set": {
+                "nitro-role-set": {
                     "desc": "Create and apply a custom role with your chosen color (Server Boosters only)",
-                    "usage": "/booster-role-set <role_name> <hex_color>",
+                    "usage": "/nitro-role-set <role_name> <hex_color>",
                     "note": "Server boosters can create custom roles with any name and hex color. Multiple roles allowed.",
-                    "examples": ["/booster-role-set \"My Cool Role\" #FF6B6B", "/booster-role-set \"Gamer\" #00FF00"]
+                    "examples": ["/nitro-role-set \"My Cool Role\" #FF6B6B", "/nitro-role-set \"Gamer\" #00FF00"]
                 },
                 "admin-guild-theme": {
                     "desc": "Manage guild-wide theme settings (Bot Moderator only)",
