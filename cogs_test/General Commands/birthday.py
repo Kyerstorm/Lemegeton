@@ -328,7 +328,6 @@ def random_palette():
     return random.choice(PALETTES)
 
 # Below are multiple style implementations. Each returns PNG bytes (or raises).
-# We'll implement ~30 distinct styles as functions.
 
 def style_confetti_card(username:str, subtitle:str, age:typing.Optional[int], size=(1200,675)):
     w,h = size
@@ -362,6 +361,28 @@ def style_confetti_card(username:str, subtitle:str, age:typing.Optional[int], si
     img.save(bio, format="PNG")
     bio.seek(0)
     return bio.read()
+
+
+
+def style_ribbon_badge(username, subtitle, age, size=(1200,675)):
+    w,h=size
+    img = Image.new("RGB",(w,h),"#f0f4ff")
+    draw = ImageDraw.Draw(img)
+    # ribbon banner
+    banner_h = 120
+    draw.rectangle([0,h//2 - banner_h//2, w, h//2 + banner_h//2], fill="#4863ff")
+    tf = load_font_sz(72)
+    t = f"{username}"
+    tw,th = draw.textsize(t, font=tf)
+    draw.text(((w-tw)/2, h//2 - th//2), t, font=tf, fill="white")
+    # subtle sparkles
+    for _ in range(80):
+        x=random.randint(0,w); y=random.randint(h//2 - banner_h, h//2 + banner_h)
+        r=random.randint(2,6)
+        draw.ellipse([x-r,y-r,x+r,y+r], fill=(255,255,255, random.randint(120,200)))
+    bio=io.BytesIO()
+    img.save(bio,"PNG"); bio.seek(0); return bio.read()
+
 
 def style_cake_pastel(username:str, subtitle:str, age, size=(1200,675)):
     w,h = size
@@ -605,7 +626,7 @@ def make_gradient_text_style(seed:int):
         bio=io.BytesIO(); img.save(bio,"PNG"); bio.seek(0); return bio.read()
     return inner
 
-# Build the style list (we want ~30). We'll include distinct functions plus generated ones.
+# Build the style list, We'll include distinct functions plus generated ones.
 STYLE_FUNCTIONS = [
     style_confetti_card,
     style_cake_pastel,
@@ -622,8 +643,8 @@ STYLE_FUNCTIONS = [
     style_handdrawn,
     style_comic_pop,
     style_mosaic,
-    style_polaroid,  # reuse
-    style_sticker_burst, # reuse variations
+    style_polaroid,  
+    style_sticker_burst, 
 ]
 
 # Add programmatic variants to reach ~30
@@ -810,74 +831,67 @@ class BirthdayCog(commands.Cog):
     # ------------------------
     # Slash commands
     # ------------------------
-    @app_commands.command(name="birthday", description="Register, view, or remove your birthday")
-    @app_commands.describe(action="set/view/remove/list", date="Date like 1996-03-21 or Mar 3")
-    async def birthday(self, interaction:discord.Interaction, action:str, date:typing.Optional[str]=None):
+    
+    @app_commands.command(name="birthday", description="Register, view, remove, or list birthdays")
+    @app_commands.describe(
+        action="set/view/remove/list",
+        date="Date like 1996-03-21 or Mar 3",
+        user="(Optional) View another user's birthday. Use only with view action."
+    )
+    async def birthday(self, interaction:discord.Interaction, action:str, date:typing.Optional[str]=None, user:typing.Optional[discord.Member]=None):
         action = action.strip().lower()
         if action in ("set","add","register"):
-            if not date:
-                await interaction.response.send_message("Please provide a date (e.g. `1996-03-21` or `Mar 3`).", ephemeral=True)
-                return
-            parsed = parse_date_fuzzy(date)
-            if not parsed:
-                await interaction.response.send_message("Couldn't parse the date. Try `YYYY-MM-DD` or `Mar 3` style.", ephemeral=True)
-                return
-            month = parsed.month
-            day = parsed.day
-            year = parsed.year if parsed.year != 1900 else None
-            self.db.upsert(interaction.guild.id, interaction.user.id, month, day, year)
-            em = discord.Embed(title="Birthday saved 🎉", color=discord.Color.green())
-            em.add_field(name="User", value=interaction.user.mention, inline=True)
-            em.add_field(name="Date", value=f"{pretty_date(month,day)}" + (f" • {year}" if year else ""), inline=True)
-            await interaction.response.send_message(embed=em, ephemeral=True)
             return
 
         if action in ("view","get","show"):
-            row = self.db.get(interaction.guild.id, interaction.user.id)
+            target = user or interaction.user
+            row = self.db.get(interaction.guild.id, target.id)
             if not row:
-                await interaction.response.send_message("No birthday saved. Use `/birthday set <date>`", ephemeral=True)
+                if target == interaction.user:
+                    await interaction.response.send_message("You have no birthday saved. Use `/birthday set <date>`.", ephemeral=True)
+                else:
+                    await interaction.response.send_message(f"{target.mention} has no birthday saved.", ephemeral=True)
                 return
-            em = discord.Embed(title=f"{interaction.user.display_name}'s birthday", color=discord.Color.blurple())
-            em.add_field(name="Date", value=f"{pretty_date(row['month'], row['day'])}" + (f" • {row['year']}" if row['year'] else ""), inline=True)
+            em = discord.Embed(title=f"{target.display_name}'s Birthday", color=discord.Color.blurple())
+            em.add_field(
+                name="Date",
+                value=f"{pretty_date(row['month'], row['day'])}" + (f" • {row['year']}" if row['year'] else ""),
+                inline=True
+            )
+            if target != interaction.user:
+                em.set_footer(text=f"Requested by {interaction.user.display_name}")
             await interaction.response.send_message(embed=em, ephemeral=True)
             return
 
         if action in ("remove","delete"):
+            confirm = False
+            if date:
+                # treat date param as confirmation flag
+                if date.strip().lower() in ("true","yes","y","confirm"):
+                    confirm = True
+            if not confirm:
+                await interaction.response.send_message(
+                    "Are you sure you want to delete your birthday? If yes, use `/birthday delete true`.",
+                    ephemeral=True
+                )
+                return
             removed = self.db.remove(interaction.guild.id, interaction.user.id)
             if removed:
-                await interaction.response.send_message("Birthday removed.", ephemeral=True)
+                await interaction.response.send_message("Your birthday was removed. Use `/birthday set <date>` to register again.", ephemeral=True)
             else:
                 await interaction.response.send_message("I didn't find a birthday to remove.", ephemeral=True)
             return
 
         if action in ("list","all"):
-            # limited permissions for listing full server birthdays
-            if not interaction.user.guild_permissions.manage_guild:
-                row = self.db.get(interaction.guild.id, interaction.user.id)
-                if row:
-                    await interaction.response.send_message(f"Your birthday: {pretty_date(row['month'],row['day'])}", ephemeral=True)
-                else:
-                    await interaction.response.send_message("I don't have your birthday saved.", ephemeral=True)
-                return
-            rows = self.db.list_for_guild(interaction.guild.id)
-            if not rows:
-                await interaction.response.send_message("No saved birthdays in this server.", ephemeral=True)
-                return
-            text = []
-            for r in rows:
-                text.append(f"<@{r['user_id']}> — {pretty_date(r['month'],r['day'])}" + (f" • {r['year']}" if r['year'] else ""))
-            # paginate if too long
-            desc = "\n".join(text[:1500])
-            em = discord.Embed(title="Server Birthdays", description=desc, color=discord.Color.purple())
-            await interaction.response.send_message(embed=em, ephemeral=True)
             return
 
-        await interaction.response.send_message("Unknown action. Use `set`, `view`, `remove`, or `list`.", ephemeral=True)
+        await interaction.response.send_message("Unknown action. Use `set`, `view`, `delete`, or `list`.", ephemeral=True)
 
     @birthday.autocomplete('action')
     async def birthday_action_autocomplete(self, interaction:discord.Interaction, current:str):
-        choices = ["set","view","remove","list"]
+        choices = ["set","view","delete","list"]
         return [app_commands.Choice(name=c, value=c) for c in choices if current.lower() in c.lower()][:25]
+
 
     # ------------------------
     # Admin group (single command name as requested)
