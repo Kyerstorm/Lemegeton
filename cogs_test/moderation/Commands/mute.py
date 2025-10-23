@@ -372,8 +372,8 @@ class MuteCog(commands.Cog):
         init_db()
         # in-memory scheduled unmute tasks: (guild_id, user_id) -> asyncio.Task
         self._scheduled_unmutes: Dict[Tuple[int, int], asyncio.Task] = {}
-        # load pending unmute schedules from DB after ready
-        self._startup_task = bot.loop.create_task(self._load_and_schedule_pending_unmutes())
+        # startup task will be created in async cog_load to avoid accessing bot.loop in sync context
+        self._startup_task: Optional[asyncio.Task] = None
         # internal batch delay for channel overwrites
         self._batch_delay = 0.12
 
@@ -393,11 +393,11 @@ class MuteCog(commands.Cog):
                 # if unmute_at in the past, attempt immediate unmute
                 if unmute_at <= datetime.utcnow().replace(tzinfo=timezone.utc):
                     # schedule immediate task to run shortly
-                    self.bot.loop.create_task(self._perform_scheduled_unmute(guild_id, user_id, reason="Scheduled unmute (missed)"))
+                    asyncio.create_task(self._perform_scheduled_unmute(guild_id, user_id, reason="Scheduled unmute (missed)"))
                 else:
                     # schedule for future
                     delay = (unmute_at - datetime.utcnow().replace(tzinfo=timezone.utc)).total_seconds()
-                    task = self.bot.loop.create_task(self._delayed_unmute(guild_id, user_id, delay))
+                    task = asyncio.create_task(self._delayed_unmute(guild_id, user_id, delay))
                     self._scheduled_unmutes[(guild_id, user_id)] = task
             except Exception:
                 # don't let a single bad row break startup scheduling
@@ -846,6 +846,12 @@ class MuteCog(commands.Cog):
                 self._startup_task.cancel()
             except Exception:
                 pass
+
+    async def cog_load(self):
+        """Async initialization hook run after the cog is added. Start background startup scheduling here."""
+        # create startup task to load and schedule pending unmutes
+        if not self._startup_task:
+            self._startup_task = asyncio.create_task(self._load_and_schedule_pending_unmutes())
 
 
 # ---------------------------
