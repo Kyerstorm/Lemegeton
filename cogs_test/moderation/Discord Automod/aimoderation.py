@@ -13,7 +13,7 @@ import json
 import re
 import asyncio
 import traceback
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Union
 from datetime import datetime, timedelta
 
 import discord
@@ -529,7 +529,7 @@ class AIModerationCog(commands.Cog, name="AI Moderation"):
         cfg = await self.db.get_guild_config(interaction.guild.id)
         ai_cfg = cfg.get("ai", DEFAULT_AI_CONFIG.copy())
         desc = f"Enabled: `{ai_cfg.get('enabled', False)}`\nText: `{ai_cfg.get('text_moderation', True)}`\nImage: `{ai_cfg.get('image_moderation', False)}`\nLog Channel: `{ai_cfg.get('log_channel_id')}`"
-        await interaction.followup.send(embed=self.emb.info("AI Moderation Status", desc), ephemeral=True)
+        await interaction.followup.send(embed=self.emb.embed("AI Moderation Status", desc), ephemeral=True)
 
     @aimod.command(name="enable", description="Enable AI moderation in this guild")
     async def cmd_enable(self, interaction: discord.Interaction):
@@ -576,8 +576,69 @@ class AIModerationCog(commands.Cog, name="AI Moderation"):
         await self.db.set_guild_config(interaction.guild.id, cfg)
         await interaction.followup.send(embed=self.emb.success("Log channel set", f"AI moderation logs will be sent to {channel.mention}."), ephemeral=True)
 
+    async def _resolve_entity(self, guild: discord.Guild, entity_str: str):
+        """Resolve an input string to a Member, Role or TextChannel where possible.
+        Accepts mentions (<@id>, <@&id>, <#id>), raw IDs, or names (role/channel/member).
+        Returns a resolved object or a SimpleNamespace-like object with .id and .mention for unknown IDs.
+        """
+        from types import SimpleNamespace
+        s = (entity_str or "").strip()
+        if not s:
+            return None
+
+        # Mention forms
+        try:
+            if s.startswith('<#') and s.endswith('>'):
+                cid = int(s[2:-1])
+                ch = guild.get_channel(cid)
+                if ch:
+                    return ch
+            if s.startswith('<@&') and s.endswith('>'):
+                rid = int(s[3:-1])
+                role = guild.get_role(rid)
+                if role:
+                    return role
+            if s.startswith('<@') and s.endswith('>'):
+                # member mention (<@id> or <@!id>)
+                mid = int(re.sub(r"\D", "", s))
+                mem = guild.get_member(mid)
+                if mem:
+                    return mem
+
+            # Raw numeric id
+            if s.isdigit():
+                eid = int(s)
+                mem = guild.get_member(eid)
+                if mem:
+                    return mem
+                role = guild.get_role(eid)
+                if role:
+                    return role
+                ch = guild.get_channel(eid)
+                if ch:
+                    return ch
+                # return lightweight object so callers can use .id and .mention
+                return SimpleNamespace(id=eid, mention=f"<@{eid}>")
+
+            # Name-based lookup (best-effort)
+            # role by name
+            role = discord.utils.get(guild.roles, name=s)
+            if role:
+                return role
+            # channel by name
+            ch = discord.utils.get(guild.channels, name=s)
+            if ch:
+                return ch
+            # member by name (display name)
+            mem = guild.get_member_named(s)
+            if mem:
+                return mem
+        except Exception:
+            return None
+        return None
+
     @aimod.command(name="whitelist_add", description="Add user/role/channel to AI whitelist (no moderation applied)")
-    async def cmd_whitelist_add(self, interaction: discord.Interaction, entity: discord.abc.Snowflake):
+    async def cmd_whitelist_add(self, interaction: discord.Interaction, entity: str):
         await interaction.response.defer(ephemeral=True)
         if not await self._is_mod(interaction.user if isinstance(interaction.user, discord.Member) else interaction.user):
             await interaction.followup.send(embed=self.emb.error("Permission denied", "You must be a configured moderator to do this."), ephemeral=True)
@@ -586,17 +647,23 @@ class AIModerationCog(commands.Cog, name="AI Moderation"):
         cfg = await self.db.get_guild_config(interaction.guild.id)
         ai_cfg = cfg.get("ai", DEFAULT_AI_CONFIG.copy())
         wl = ai_cfg.get("whitelist", [])
-        if entity.id in wl:
-            await interaction.followup.send(embed=self.emb.warning("Already whitelisted", f"{getattr(entity, 'mention', str(entity.id))} is already whitelisted."), ephemeral=True)
+        resolved = await self._resolve_entity(interaction.guild, entity)
+        if not resolved:
+            await interaction.followup.send(embed=self.emb.error("Not found", "Could not resolve that entity. Use mention, ID, or name."), ephemeral=True)
             return
-        wl.append(entity.id)
+        ent_id = getattr(resolved, 'id', None)
+        ent_mention = getattr(resolved, 'mention', str(ent_id))
+        if ent_id in wl:
+            await interaction.followup.send(embed=self.emb.warning("Already whitelisted", f"{ent_mention} is already whitelisted."), ephemeral=True)
+            return
+        wl.append(ent_id)
         ai_cfg["whitelist"] = wl
         cfg["ai"] = ai_cfg
         await self.db.set_guild_config(interaction.guild.id, cfg)
-        await interaction.followup.send(embed=self.emb.success("Whitelisted", f"{getattr(entity, 'mention', str(entity.id))} will be exempt from AI moderation."), ephemeral=True)
+        await interaction.followup.send(embed=self.emb.success("Whitelisted", f"{ent_mention} will be exempt from AI moderation."), ephemeral=True)
 
     @aimod.command(name="whitelist_remove", description="Remove an entity from AI whitelist")
-    async def cmd_whitelist_remove(self, interaction: discord.Interaction, entity: discord.abc.Snowflake):
+    async def cmd_whitelist_remove(self, interaction: discord.Interaction, entity: str):
         await interaction.response.defer(ephemeral=True)
         if not await self._is_mod(interaction.user if isinstance(interaction.user, discord.Member) else interaction.user):
             await interaction.followup.send(embed=self.emb.error("Permission denied", "You must be a configured moderator to do this."), ephemeral=True)
@@ -605,17 +672,23 @@ class AIModerationCog(commands.Cog, name="AI Moderation"):
         cfg = await self.db.get_guild_config(interaction.guild.id)
         ai_cfg = cfg.get("ai", DEFAULT_AI_CONFIG.copy())
         wl = ai_cfg.get("whitelist", [])
-        if entity.id not in wl:
-            await interaction.followup.send(embed=self.emb.warning("Not found", f"{getattr(entity, 'mention', str(entity.id))} was not whitelisted."), ephemeral=True)
+        resolved = await self._resolve_entity(interaction.guild, entity)
+        if not resolved:
+            await interaction.followup.send(embed=self.emb.warning("Not found", "Could not resolve that entity. Use mention, ID, or name."), ephemeral=True)
             return
-        wl = [x for x in wl if x != entity.id]
+        ent_id = getattr(resolved, 'id', None)
+        ent_mention = getattr(resolved, 'mention', str(ent_id))
+        if ent_id not in wl:
+            await interaction.followup.send(embed=self.emb.warning("Not found", f"{ent_mention} was not whitelisted."), ephemeral=True)
+            return
+        wl = [x for x in wl if x != ent_id]
         ai_cfg["whitelist"] = wl
         cfg["ai"] = ai_cfg
         await self.db.set_guild_config(interaction.guild.id, cfg)
-        await interaction.followup.send(embed=self.emb.success("Removed", f"{getattr(entity, 'mention', str(entity.id))} removed from whitelist."), ephemeral=True)
+        await interaction.followup.send(embed=self.emb.success("Removed", f"{ent_mention} removed from whitelist."), ephemeral=True)
 
     @aimod.command(name="test", description="Test AI moderation on a text snippet (Perspective API)")
-    async def cmd_test(self, interaction: discord.Interaction, *, text: str):
+    async def cmd_test(self, interaction: discord.Interaction, text: str):
         await interaction.response.defer(ephemeral=True)
         if not PERSPECTIVE_API_KEY:
             await interaction.followup.send(embed=self.emb.error("Perspective API missing", "Set PERSPECTIVE_API_KEY in environment."), ephemeral=True)
