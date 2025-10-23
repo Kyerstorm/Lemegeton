@@ -966,20 +966,44 @@ class BirthdayCog(commands.Cog):
         await interaction.response.send_message(f"Check hour set to {hour}.", ephemeral=True)
 
     @admin.command(name="preview", description="Preview a birthday announcement (sends DM preview)")
-    @app_commands.describe(users="Optional list of users to include; leave empty for sample")
-    async def preview(self, interaction:discord.Interaction, users:typing.Optional[typing.Sequence[discord.Member]]=None):
+    @app_commands.describe(users="Optional comma/space-separated list of users (mention, ID, or name); leave empty for sample")
+    async def preview(self, interaction:discord.Interaction, users:typing.Optional[str]=None):
         if not interaction.user.guild_permissions.manage_guild:
             await interaction.response.send_message("Manage Server required.", ephemeral=True); return
         cfg = self.db.get_config(interaction.guild.id) or {}
+        rows = []
         if users:
-            rows = []
-            for m in users:
-                b = self.db.get(interaction.guild.id, m.id)
-                if b:
-                    rows.append(b)
+            # Accept mentions (<@123>), raw IDs, or display/name strings separated by commas or whitespace
+            tokens = [t for t in re.split(r'[,\s]+', users) if t]
+            for tok in tokens:
+                m = None
+                try:
+                    # mention form <@123> or <@!123>
+                    mm = re.match(r'^<@!?([0-9]+)>$', tok)
+                    if mm:
+                        uid = int(mm.group(1))
+                        m = interaction.guild.get_member(uid) or await interaction.guild.fetch_member(uid)
+                    elif tok.isdigit():
+                        uid = int(tok)
+                        m = interaction.guild.get_member(uid) or await interaction.guild.fetch_member(uid)
+                    else:
+                        # name lookup (display name or username)
+                        m = interaction.guild.get_member_named(tok)
+                except Exception:
+                    m = None
+
+                if m:
+                    b = self.db.get(interaction.guild.id, m.id)
+                    if b:
+                        rows.append(b)
+                    else:
+                        rows.append({"user_id":m.id,"month":now_utc().month,"day":now_utc().day,"year":None})
                 else:
-                    rows.append({"user_id":m.id,"month":now_utc().month,"day":now_utc().day,"year":None})
-        else:
+                    # If token was numeric and not found in guild, include as raw ID entry; otherwise skip
+                    if tok.isdigit():
+                        rows.append({"user_id":int(tok),"month":now_utc().month,"day":now_utc().day,"year":None})
+            # if no valid rows produced, fall back to guild sample below
+        if not rows:
             rows = self.db.list_for_guild(interaction.guild.id)[:3] or [{"user_id":interaction.user.id,"month":now_utc().month,"day":now_utc().day,"year":1996}]
         members = []
         mentions = []
