@@ -117,7 +117,7 @@ class VerificationDB:
     def _init_schema(self):
         c = self.conn.cursor()
         # guild config
-        c.execute("""
+        c.execute(f"""
         CREATE TABLE IF NOT EXISTS guild_config (
             guild_id INTEGER PRIMARY KEY,
             enabled INTEGER DEFAULT 0,
@@ -128,15 +128,13 @@ class VerificationDB:
             verified_role_id INTEGER,
             verif_type TEXT DEFAULT 'captcha', -- captcha | reaction | button
             captcha_color TEXT DEFAULT '#000000',
-            captcha_length INTEGER DEFAULT ?,
-            captcha_lines INTEGER DEFAULT ?,
-            captcha_sensitive INTEGER DEFAULT ?,
-            captcha_numbers INTEGER DEFAULT ?,
-            captcha_timeout INTEGER DEFAULT ?
+            captcha_length INTEGER DEFAULT {CAPTCHA_DEFAULT_LENGTH},
+            captcha_lines INTEGER DEFAULT {CAPTCHA_DEFAULT_LINES},
+            captcha_sensitive INTEGER DEFAULT {int(CAPTCHA_DEFAULT_SENSITIVE)},
+            captcha_numbers INTEGER DEFAULT {int(CAPTCHA_DEFAULT_NUMBERS)},
+            captcha_timeout INTEGER DEFAULT {CAPTCHA_DEFAULT_TIMEOUT}
         );
-        """, (CAPTCHA_DEFAULT_LENGTH, CAPTCHA_DEFAULT_LINES,
-              int(CAPTCHA_DEFAULT_SENSITIVE), int(CAPTCHA_DEFAULT_NUMBERS),
-              CAPTCHA_DEFAULT_TIMEOUT))
+        """)
         # pending challenges
         c.execute("""
         CREATE TABLE IF NOT EXISTS pending_challenges (
@@ -859,8 +857,8 @@ class VerificationCog(commands.Cog):
     # ---------------------------
     @verification.command(name="type", description="Choose the verification type: captcha | reaction | button")
     @app_commands.describe(mode="captcha, reaction or button")
-    async def set_type(self, interaction: discord.Interaction, mode: app_commands.Transform[str, str]):
-        # app_commands.Transform to allow free string; validate below
+    async def set_type(self, interaction: discord.Interaction, mode: str):
+        # Accept a simple string for mode and validate below
         if not interaction.user.guild_permissions.manage_guild:
             await interaction.response.send_message("Manage Server required.", ephemeral=True); return
         mode = str(mode).lower()
