@@ -576,7 +576,7 @@ class MuteCog(commands.Cog):
     # ---------------------------
     @app_commands.command(name="mute", description="Mute a user. Optionally set a duration (e.g., 10m, 1h).")
     @app_commands.describe(user="User to mute", duration="Optional duration like 10m/1h/2d", reason="Optional reason", channels="Optional list of channels to apply channel-overwrites instead of role-based mute")
-    async def app_mute(self, interaction: discord.Interaction, user: discord.User, duration: Optional[str] = None, reason: Optional[str] = None, channels: Optional[List[discord.TextChannel]] = None):
+    async def app_mute(self, interaction: discord.Interaction, user: discord.User, duration: Optional[str] = None, reason: Optional[str] = None, channels: Optional[str] = None):
         """
         Mute a user. Two modes:
          - Role-based mute (recommended): assign the configured mute role.
@@ -608,7 +608,7 @@ class MuteCog(commands.Cog):
         if not safe:
             await interaction.followup.send(safe_msg, ephemeral=True)
             return
-        # parse duration
+    # parse duration
         unmute_at = None
         if duration:
             td = parse_duration(duration)
@@ -616,6 +616,37 @@ class MuteCog(commands.Cog):
                 await interaction.followup.send("Invalid duration format. Use e.g., 10m, 1h, 2d, 30s.", ephemeral=True)
                 return
             unmute_at = datetime.utcnow().replace(tzinfo=timezone.utc) + td
+
+        # If channels provided as a string, resolve them to TextChannel objects (comma/space separated, accepts mentions or IDs or names)
+        resolved_channels = None
+        if channels:
+            resolved_channels = []
+            tokens = [t for t in re.split(r'[,\s]+', channels) if t]
+            for tok in tokens:
+                # mention form <#id>
+                m = re.match(r"^<#(\d+)>$", tok)
+                if m:
+                    cid = int(m.group(1))
+                    ch = guild.get_channel(cid)
+                    if ch and isinstance(ch, discord.TextChannel):
+                        resolved_channels.append(ch)
+                        continue
+                # raw id
+                if tok.isdigit():
+                    ch = guild.get_channel(int(tok))
+                    if ch and isinstance(ch, discord.TextChannel):
+                        resolved_channels.append(ch)
+                        continue
+                # name lookup
+                ch = discord.utils.get(guild.channels, name=tok)
+                if ch and isinstance(ch, discord.TextChannel):
+                    resolved_channels.append(ch)
+                    continue
+            if not resolved_channels:
+                await interaction.followup.send("Could not resolve any channels from the provided input. Use mentions, IDs or channel names separated by spaces or commas.", ephemeral=True)
+                return
+            # use resolved channels list for downstream logic
+            channels = resolved_channels
 
         # Determine mode: role-based if mute role configured and no channels provided
         configured_role_id = get_mute_role_db(guild.id)
