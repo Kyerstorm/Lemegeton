@@ -1,74 +1,98 @@
-# ban.py
+# cogs/ban.py
 """
-Features:
- - /ban, /tempban, /unban, /softban
- - /setappealschannel, /setmodlog, /showconfig, /appeals, /export
- - Appeals modal + Appeal button -> posts to appeals channel with moderator decision UI
- - Uses aiosqlite for persistence: moderation.db with tables (guild_config, tempbans, appeals, softbans, mod_logs)
- - Robust Discord API wrappers with retries & fallbacks
- - Startup recovery to handle missed softban/unban actions
- - Permission checks, role-hierarchy checks, and helpful errors
- - /botperms to list missing bot permissions in a guild
+BanCog (slash-only). Features:
+- /ban, /tempban, /unban (slash-only)
+- /softban (ban -> immediate unban to purge messages) [NEW]
+- DM to banned user with "Appeal" button -> opens Modal -> posts to configured appeals channel
+- Staff Accept / Reject buttons (only staff: admin OR kick+ban+moderate)
+- Moderator must provide reason on accept/reject; the same embed is edited with decision
+- Auto-unban for tempbans; tempbans stored in data/tempbans.json
+- Guild configuration stored in data/guildconfig.json (appeals channel id, mod-log channel id)
+- The /softban command attempts to DM the user first, but proceeds even if DM fails (recommended for moderation)
 """
 
 from __future__ import annotations
-import asyncio
-import aiosqlite
+import os
 import json
 import logging
-import os
-import re
-import traceback
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple, List
 
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-# -------------------------
-# CONFIG
-# -------------------------
 LOG = logging.getLogger("BanCog")
 LOG.setLevel(logging.INFO)
 
-DB_PATH = "data/moderation.db"
-ensure_dir = lambda p: os.makedirs(os.path.dirname(p), exist_ok=True) if os.path.dirname(p) else None
-ensure_dir(DB_PATH)
-
-# visual theme (Royal Blue & Silver)
-ROYAL_BLUE = discord.Color.from_rgb(65, 105, 225)  # 0x4169E1
-SILVER = discord.Color.from_rgb(192, 192, 192)
-
-# allowed delete days for ban API (0..7)
-MAX_DELETE_DAYS = 7
-
-# API retry settings
-API_RETRY_ATTEMPTS = 3
-API_RETRY_BACKOFF = 1.0  # seconds base
-
-# temporary ban check interval
-TEMPBAN_CHECK_SECONDS = 45
-
-# moderate role requirement: either Administrator OR (kick && ban && moderate)
-def is_staff_member(member: discord.Member) -> bool:
-    perms = member.guild_permissions
-    return perms.administrator or (perms.kick_members and perms.ban_members and perms.moderate_members)
-
 # -------------------------
-# UTIL HELPERS
+# PART 1 - CONFIG & HELPERS
 # -------------------------
-def utcnow() -> datetime:
-    return datetime.utcnow().replace(tzinfo=timezone.utc)
+# Aesthetic theme: Royal Blue & Silver
+EMBED_COLOR = 0x4169E1  # Royal Blue
+SILVER = 0xC0C0C0
 
-def human_delta(delta: timedelta) -> str:
-    s = int(delta.total_seconds())
-    if s < 60:
-        return f"{s}s"
-    parts = []
-    days, rem = divmod(s, 86400)
+# Storage files (two separate files as requested)
+GUILDCONFIG_STORE = "data/guildconfig.json"   # stores: { guild_id: { "appeals_channel_id": int, "mod_log_channel_id": int } }
+TEMPBANS_STORE = "data/tempbans.json"         # stores: { guild_id: { user_id: unban_iso } }
+APPEALS_STORE = "data/appeals.json"           # optional: store appeals for persistence (keeps simple history)
+
+TEMP_CHECK_INTERVAL = 60  # seconds
+
+# ensure directories exist
+def ensure_dir_for(path: str) -> None:
+    directory = os.path.dirname(path)
+    if directory and not os.path.exists(directory):
+        os.makedirs(directory, exist_ok=True)
+
+def atomic_write_json(path: str, data: Dict[str, Any]) -> None:
+    ensure_dir_for(path)
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, default=str, ensure_ascii=False)
+    os.replace(tmp, path)
+
+def load_json(path: str) -> Dict[str, Any]:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        LOG.exception("Failed to load JSON: %s", path)
+        return {}
+
+def parse_duration_to_seconds(s: str) -> Optional[int]:
+    """Parse duration strings like '30m', '2h', '1d', '3d12h', '1w' -> seconds"""
+    if not s:
+        return None
+    s = s.strip().lower()
+    multipliers = {"w": 7 * 24 * 3600, "d": 24 * 3600, "h": 3600, "m": 60, "s": 1}
+    total = 0
+    num = ""
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if ch.isdigit():
+            num += ch
+            i += 1
+            continue
+        if ch in multipliers and num:
+            total += int(num) * multipliers[ch]
+            num = ""
+            i += 1
+            continue
+        return None
+    if num:
+        total += int(num)
+    return total if total > 0 else None
+
+def human_readable_delta(delta: timedelta) -> str:
+    total = int(delta.total_seconds())
+    days, rem = divmod(total, 86400)
     hours, rem = divmod(rem, 3600)
     minutes, seconds = divmod(rem, 60)
+    parts = []
     if days:
         parts.append(f"{days}d")
     if hours:
@@ -77,328 +101,230 @@ def human_delta(delta: timedelta) -> str:
         parts.append(f"{minutes}m")
     if seconds and not parts:
         parts.append(f"{seconds}s")
-    return " ".join(parts)
+    return " ".join(parts) if parts else "0s"
 
-# parse duration like "1d2h30m" -> seconds
-_DURATION_RE = re.compile(r"(\d+)([smhdw])", re.IGNORECASE)
-def parse_duration_to_seconds(s: str) -> Optional[int]:
-    if not s:
-        return None
-    s = s.strip().lower()
-    total = 0
-    matched = False
-    for m in _DURATION_RE.finditer(s):
-        matched = True
-        num = int(m.group(1))
-        unit = m.group(2)
-        if unit == "s":
-            total += num
-        elif unit == "m":
-            total += num * 60
-        elif unit == "h":
-            total += num * 3600
-        elif unit == "d":
-            total += num * 86400
-        elif unit == "w":
-            total += num * 604800
-    if not matched:
-        # maybe it's just a number (seconds)
-        if s.isdigit():
-            return int(s)
-        return None
-    return total if total > 0 else None
-
-def embed_base(title: Optional[str] = None, description: Optional[str] = None, color: discord.Colour = ROYAL_BLUE) -> discord.Embed:
-    e = discord.Embed(title=title, description=description, color=color, timestamp=utcnow())
-    e.set_footer(text="Moderation • Royal Edition")
+def embed_base(title: Optional[str] = None, color: int = EMBED_COLOR, footer: Optional[str] = None) -> discord.Embed:
+    e = discord.Embed(color=color, timestamp=datetime.utcnow())
+    if title:
+        e.title = title
+    footer_text = footer or "Moderation • Powered by Bot"
+    e.set_footer(text=footer_text)
     return e
 
 # -------------------------
-# DATABASE (aiosqlite) helpers
+# PART 2 - PERMISSIONS & UI CHECKS
 # -------------------------
-CREATE_TABLES_SQL = [
-    # guild configuration table
-    """
-    CREATE TABLE IF NOT EXISTS guild_config (
-        guild_id INTEGER PRIMARY KEY,
-        appeals_channel_id INTEGER,
-        mod_log_channel_id INTEGER,
-        created_at TEXT
-    );
-    """,
-    # tempbans: store unban time
-    """
-    CREATE TABLE IF NOT EXISTS tempbans (
-        guild_id INTEGER,
-        user_id INTEGER,
-        unban_at TEXT,
-        reason TEXT,
-        moderator_id INTEGER,
-        PRIMARY KEY (guild_id, user_id)
-    );
-    """,
-    # appeals
-    """
-    CREATE TABLE IF NOT EXISTS appeals (
-        id TEXT PRIMARY KEY,
-        guild_id INTEGER,
-        user_id INTEGER,
-        appeal_text TEXT,
-        extra TEXT,
-        status TEXT,
-        moderator_id INTEGER,
-        moderator_reason TEXT,
-        submitted_at TEXT,
-        decided_at TEXT,
-        appeals_channel_id INTEGER,
-        appeals_message_id INTEGER
-    );
-    """,
-    # softbans: audit records for softbans
-    """
-    CREATE TABLE IF NOT EXISTS softbans (
-        id TEXT PRIMARY KEY,
-        guild_id INTEGER,
-        user_id INTEGER,
-        moderator_id INTEGER,
-        reason TEXT,
-        delete_days INTEGER,
-        performed_at TEXT,
-        dm_sent INTEGER,
-        dm_error TEXT
-    );
-    """,
-    # moderation logs (generic)
-    """
-    CREATE TABLE IF NOT EXISTS mod_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id INTEGER,
-        action TEXT,
-        actor_id INTEGER,
-        target_id INTEGER,
-        reason TEXT,
-        details TEXT,
-        created_at TEXT
-    );
-    """
-]
+def is_staff(member: discord.Member) -> bool:
+    """Admin OR (kick_members AND ban_members AND moderate_members)"""
+    perms = member.guild_permissions
+    if perms.administrator:
+        return True
+    if perms.kick_members and perms.ban_members and perms.moderate_members:
+        return True
+    return False
 
-async def init_db():
-    ensure_dir(DB_PATH)
-    async with aiosqlite.connect(DB_PATH) as db:
-        for s in CREATE_TABLES_SQL:
-            await db.execute(s)
-        await db.commit()
+# app command check for staff
+async def mod_interaction_check(interaction: discord.Interaction) -> bool:
+    if not interaction.guild:
+        raise app_commands.AppCommandError("This command can only be used in a server.")
+    if is_staff(interaction.user):  # type: ignore
+        return True
+    raise app_commands.AppCommandError("You must be an administrator or have Kick, Ban and Moderate permissions.")
 
-# helper to perform simple upserts / queries
-class DB:
-    def __init__(self, path=DB_PATH):
-        self.path = path
-
-    async def execute(self, sql: str, params: tuple = ()):
-        async with aiosqlite.connect(self.path) as db:
-            await db.execute(sql, params)
-            await db.commit()
-
-    async def fetchone(self, sql: str, params: tuple = ()):
-        async with aiosqlite.connect(self.path) as db:
-            db.row_factory = aiosqlite.Row
-            cur = await db.execute(sql, params)
-            row = await cur.fetchone()
-            await cur.close()
-            return row
-
-    async def fetchall(self, sql: str, params: tuple = ()):
-        async with aiosqlite.connect(self.path) as db:
-            db.row_factory = aiosqlite.Row
-            cur = await db.execute(sql, params)
-            rows = await cur.fetchall()
-            await cur.close()
-            return rows
-
-db = DB()
+def mod_check_decorator():
+    return app_commands.check(mod_interaction_check)
 
 # -------------------------
-# DISCORD API WRAPPERS (retries, best-effort)
-# -------------------------
-async def safe_api(coro_callable, *args, attempts=API_RETRY_ATTEMPTS, backoff=API_RETRY_BACKOFF, **kwargs):
-    """
-    Generic wrapper for API calls. coro_callable should be a coroutine function (callable), not yet awaited.
-    Returns tuple (ok: bool, result_or_error: Any)
-    """
-    last_exc = None
-    for i in range(attempts):
-        try:
-            res = await coro_callable(*args, **kwargs)
-            return True, res
-        except discord.HTTPException as e:
-            last_exc = e
-            # handle rate-limit (discord.py does automatic ratelimit handling usually)
-            await asyncio.sleep(backoff * (i + 1))
-        except discord.Forbidden as e:
-            return False, e
-        except Exception as e:
-            last_exc = e
-            await asyncio.sleep(backoff * (i + 1))
-    return False, last_exc
-
-# convenience wrappers
-async def safe_ban(guild: discord.Guild, user: discord.abc.Snowflake, reason: Optional[str], delete_message_days: int = 0):
-    return await safe_api(guild.ban, user, reason=reason, delete_message_days=delete_message_days)
-
-async def safe_unban(guild: discord.Guild, user: discord.abc.Snowflake, reason: Optional[str]):
-    return await safe_api(guild.unban, user, reason=reason)
-
-async def safe_dm(user: discord.User, embed: Optional[discord.Embed] = None, view: Optional[discord.ui.View] = None):
-    async def _send():
-        ch = await user.create_dm()
-        return await ch.send(embed=embed, view=view)
-    return await safe_api(_send)
-
-# -------------------------
-# VIEWS & MODALS (appeals + moderator decision)
+# PART 3 - UI: Modal / Views for appeals & moderator decisions
 # -------------------------
 class AppealModal(discord.ui.Modal, title="Submit an Appeal"):
-    appeal_text = discord.ui.TextInput(label="Why should you be unbanned?", style=discord.TextStyle.long, required=True, max_length=2000)
-    extra = discord.ui.TextInput(label="Anything else?", style=discord.TextStyle.paragraph, required=False, max_length=1000)
-
     def __init__(self, cog: "BanCog", guild_id: int, banned_user_id: int):
         super().__init__()
         self.cog = cog
         self.guild_id = guild_id
         self.banned_user_id = banned_user_id
 
+        self.appeal_text = discord.ui.TextInput(
+            label="Why should you be unbanned?",
+            style=discord.TextStyle.long,
+            placeholder="Explain why you should be unbanned. Be honest and detailed.",
+            required=True,
+            max_length=2000
+        )
+        self.add_item(self.appeal_text)
+
+        self.extra = discord.ui.TextInput(
+            label="Anything else? (optional)",
+            style=discord.TextStyle.paragraph,
+            required=False,
+            max_length=1000
+        )
+        self.add_item(self.extra)
+
     async def on_submit(self, interaction: discord.Interaction):
-        # create appeal record
-        aid = f"appeal-{self.guild_id}-{self.banned_user_id}-{int(datetime.utcnow().timestamp())}"
+        # protect duplicates: one pending appeal per user per guild
+        gid = str(self.guild_id)
+        pending = [a for a in self.cog.appeals.values() if str(a.get("guild_id")) == gid and int(a.get("banned_user_id", 0)) == self.banned_user_id and a.get("status") == "pending"]
+        if len(pending) >= 1:
+            await interaction.response.send_message("You already have a pending appeal for this server. Please wait for staff to review it.", ephemeral=True)
+            return
+
+        appeal_id = f"{self.guild_id}-{self.banned_user_id}-{int(datetime.utcnow().timestamp())}"
         rec = {
-            "id": aid,
-            "guild_id": self.guild_id,
-            "user_id": self.banned_user_id,
+            "id": appeal_id,
+            "guild_id": int(self.guild_id),
+            "banned_user_id": int(self.banned_user_id),
             "appeal_text": str(self.appeal_text.value),
             "extra": str(self.extra.value) if self.extra.value else "",
+            "submitted_at": datetime.utcnow().isoformat(),
             "status": "pending",
             "moderator_id": None,
             "moderator_reason": None,
-            "submitted_at": utcnow().isoformat(),
-            "decided_at": None,
-            "appeals_channel_id": None,
-            "appeals_message_id": None
+            "decision_at": None,
+            "appeal_channel_id": None,
+            "appeal_message_id": None,
         }
-        # insert to DB
+
+        # persist appeals history (optional)
+        self.cog.appeals[appeal_id] = rec
         try:
-            await db.execute(
-                "INSERT INTO appeals (id, guild_id, user_id, appeal_text, extra, status, submitted_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (rec["id"], rec["guild_id"], rec["user_id"], rec["appeal_text"], rec["extra"], rec["status"], rec["submitted_at"])
-            )
+            atomic_write_json(self.cog.appeals_store, self.cog.appeals)
         except Exception:
-            LOG.exception("Failed to insert appeal")
-        # post to appeals channel if configured
+            LOG.exception("Failed to persist appeals")
+
+        # post to configured appeals channel
         guild = self.cog.bot.get_guild(self.guild_id)
-        embed = embed_base(title="📝 New Ban Appeal", description=f"Appeal from <@{self.banned_user_id}>", color=ROYAL_BLUE)
+        embed = embed_base(title="📝 New Ban Appeal", color=EMBED_COLOR, footer=self.cog.footer_text)
+        embed.description = f"Appeal from <@{self.banned_user_id}> (`{self.banned_user_id}`)"
         embed.add_field(name="Appeal", value=rec["appeal_text"], inline=False)
         if rec["extra"]:
             embed.add_field(name="Extra", value=rec["extra"], inline=False)
         embed.add_field(name="Submitted (UTC)", value=rec["submitted_at"], inline=False)
-        try:
+        embed.set_footer(text=f"Appeal ID: {appeal_id}")
+
+        if guild:
             ch = await self.cog._get_appeals_channel(guild)
             if ch:
-                view = ModeratorDecisionView(self.cog, rec["id"])
-                sent_ok, sent_res = await safe_api(ch.send, embed=embed, view=view)
-                if sent_ok:
-                    msg = sent_res
-                    # update DB with channel and message id
-                    await db.execute("UPDATE appeals SET appeals_channel_id = ?, appeals_message_id = ? WHERE id = ?", (ch.id, msg.id, rec["id"]))
-                    await interaction.response.send_message("✅ Your appeal was submitted to the staff. They will review it.", ephemeral=True)
-                    await self.cog._mod_log(guild, f"Appeal {rec['id']} submitted by <@{self.banned_user_id}>")
+                view = ModeratorDecisionView(self.cog, appeal_id=appeal_id)
+                try:
+                    msg = await ch.send(embed=embed, view=view)
+                    rec["appeal_channel_id"] = ch.id
+                    rec["appeal_message_id"] = msg.id
+                    atomic_write_json(self.cog.appeals_store, self.cog.appeals)
+                    await interaction.response.send_message("✅ Your appeal was submitted to server staff. You will be notified of the decision.", ephemeral=True)
+                    await self.cog._mod_log(guild, f"Appeal `{appeal_id}` submitted by <@{self.banned_user_id}>")
                     return
-        except Exception:
-            LOG.exception("Error posting appeal")
-        await interaction.response.send_message("Your appeal was recorded, but I couldn't post to the server appeals channel. Staff will need to check manually.", ephemeral=True)
+                except Exception:
+                    LOG.exception("Failed to post appeal to appeals channel for guild %s", guild.id)
+                    await interaction.response.send_message("Your appeal was recorded, but I couldn't post it to the server (missing permissions). Contact staff manually.", ephemeral=True)
+                    return
 
-class ModeratorDecisionModal(discord.ui.Modal):
-    reason_input = discord.ui.TextInput(label="Moderator Reason", style=discord.TextStyle.long, required=True, max_length=2000)
+        await interaction.response.send_message("Your appeal was recorded, but the server appeals channel was not found. Contact staff manually.", ephemeral=True)
 
+class ModeratorReasonModal(discord.ui.Modal):
     def __init__(self, cog: "BanCog", appeal_id: str, action: str):
-        super().__init__(title="Decision")
+        title = "Accept Appeal" if action == "accept" else "Reject Appeal"
+        super().__init__(title=title)
         self.cog = cog
         self.appeal_id = appeal_id
-        self.action = action  # "accept" or "reject"
+        self.action = action
+        self.reason = discord.ui.TextInput(
+            label="Moderator Reason (required)",
+            style=discord.TextStyle.long,
+            placeholder="Explain why you accept or reject this appeal...",
+            required=True,
+            max_length=2000
+        )
+        self.add_item(self.reason)
 
     async def on_submit(self, interaction: discord.Interaction):
-        # permission check
-        guild_id = None
+        rec = self.cog.appeals.get(self.appeal_id)
+        if not rec:
+            await interaction.response.send_message("Appeal not found or already processed.", ephemeral=True)
+            return
+
+        guild = self.cog.bot.get_guild(int(rec["guild_id"]))
+        if not guild:
+            await interaction.response.send_message("Guild not found.", ephemeral=True)
+            return
+
+        # permission check: only staff may decide
+        member = guild.get_member(interaction.user.id)
+        if not member or not is_staff(member):
+            await interaction.response.send_message("You don't have permission to process appeals.", ephemeral=True)
+            return
+
+        # update record
+        rec["status"] = "accepted" if self.action == "accept" else "rejected"
+        rec["moderator_id"] = int(interaction.user.id)
+        rec["moderator_reason"] = str(self.reason.value)
+        rec["decision_at"] = datetime.utcnow().isoformat()
         try:
-            row = await db.fetchone("SELECT guild_id, user_id FROM appeals WHERE id = ?", (self.appeal_id,))
-            if not row:
-                await interaction.response.send_message("Appeal not found.", ephemeral=True)
-                return
-            guild_id = int(row["guild_id"])
-            guild = self.cog.bot.get_guild(guild_id)
-            if not guild:
-                await interaction.response.send_message("Guild not available.", ephemeral=True)
-                return
-            member = guild.get_member(interaction.user.id)
-            if not member or not is_staff_member(member):
-                await interaction.response.send_message("You don't have permission to make this decision.", ephemeral=True)
-                return
-            # update DB
-            await db.execute("UPDATE appeals SET status = ?, moderator_id = ?, moderator_reason = ?, decided_at = ? WHERE id = ?",
-                             (self.action, interaction.user.id, str(self.reason_input.value), utcnow().isoformat(), self.appeal_id))
-            # edit original message if possible
-            row2 = await db.fetchone("SELECT appeals_channel_id, appeals_message_id FROM appeals WHERE id = ?", (self.appeal_id,))
-            if row2 and row2["appeals_channel_id"] and row2["appeals_message_id"]:
-                ch = guild.get_channel(int(row2["appeals_channel_id"]))
-                if ch:
-                    try:
-                        msg = await ch.fetch_message(int(row2["appeals_message_id"]))
-                        decision_color = ROYAL_BLUE if self.action == "accept" else discord.Color.red()
-                        embed = embed_base(title=f"Appeal {self.action.title()}", color=decision_color)
-                        embed.add_field(name="Moderator", value=f"{interaction.user} (`{interaction.user.id}`)", inline=False)
-                        embed.add_field(name="Moderator Reason", value=str(self.reason_input.value), inline=False)
-                        await msg.edit(embed=embed, view=None)
-                    except Exception:
-                        LOG.exception("Failed to edit appeal message")
-            # do accept/unban if appropriate
-            if self.action == "accept":
-                # unban user if banned
-                target_id = int(row["user_id"])
-                try:
-                    obj = discord.Object(id=target_id)
-                    ok, res = await safe_unban(guild, obj, reason=f"Appeal accepted by {interaction.user}")
-                    if ok:
-                        # DM user
-                        try:
-                            user = await self.cog.bot.fetch_user(target_id)
-                            dm_embed = embed_base(title=f"✅ Appeal Accepted in {guild.name}", description=f"Your appeal was accepted. Moderator reason: {self.reason_input.value}", color=ROYAL_BLUE)
-                            await safe_dm(user, embed=dm_embed)
-                        except Exception:
-                            LOG.debug("Failed to DM user after appeal accept")
-                        await interaction.response.send_message("Appeal accepted and user unbanned (if banned).", ephemeral=True)
-                        await self.cog._mod_log(guild, f"Appeal {self.appeal_id} accepted by {interaction.user}.")
-                        return
-                    else:
-                        await interaction.response.send_message(f"Appeal accepted, but unban failed: {res}", ephemeral=True)
-                        await self.cog._mod_log(guild, f"Appeal {self.appeal_id} accepted by {interaction.user} but unban failed: {res}")
-                        return
-                except Exception:
-                    LOG.exception("Unban during appeal acceptance failed")
-                    await interaction.response.send_message("Attempted to unban but failed. Check bot permissions.", ephemeral=True)
-                    return
-            else:
-                # rejected -> DM user
-                target_id = int(row["user_id"])
-                try:
-                    user = await self.cog.bot.fetch_user(target_id)
-                    dm_embed = embed_base(title=f"❌ Appeal Rejected in {guild.name}", description=f"Your appeal was rejected. Moderator reason: {self.reason_input.value}", color=discord.Color.red())
-                    await safe_dm(user, embed=dm_embed)
-                except Exception:
-                    LOG.debug("Failed to DM user after appeal reject")
-                await interaction.response.send_message("Appeal rejected.", ephemeral=True)
-                await self.cog._mod_log(guild, f"Appeal {self.appeal_id} rejected by {interaction.user}.")
+            atomic_write_json(self.cog.appeals_store, self.cog.appeals)
         except Exception:
-            LOG.exception("Error handling moderator decision modal")
-            await interaction.response.send_message("An error occurred while processing the appeal.", ephemeral=True)
+            LOG.exception("Failed to persist appeal decision")
+
+        # edit original embed in appeals channel (if present)
+        msg_obj = None
+        if rec.get("appeal_channel_id") and rec.get("appeal_message_id"):
+            ch = guild.get_channel(int(rec["appeal_channel_id"]))
+            if ch:
+                try:
+                    msg_obj = await ch.fetch_message(int(rec["appeal_message_id"]))
+                except Exception:
+                    msg_obj = None
+
+        decision_color = EMBED_COLOR if rec["status"] == "accepted" else discord.Colour.red().value
+        decision_embed = embed_base(title=f"🧾 Appeal {rec['status'].capitalize()}", color=decision_color, footer=self.cog.footer_text)
+        decision_embed.description = (
+            f"Appeal ID: `{self.appeal_id}`\n"
+            f"User: <@{rec['banned_user_id']}> (`{rec['banned_user_id']}`)\n"
+            f"Moderator: {interaction.user} (`{interaction.user.id}`)"
+        )
+        decision_embed.add_field(name="Moderator Reason", value=rec["moderator_reason"], inline=False)
+        decision_embed.add_field(name="Original Appeal", value=rec["appeal_text"], inline=False)
+        decision_embed.add_field(name="Submitted (UTC)", value=rec["submitted_at"], inline=False)
+        decision_embed.set_footer(text=f"Decision at (UTC): {rec['decision_at']}")
+
+        if msg_obj:
+            try:
+                await msg_obj.edit(embed=decision_embed, view=None)
+            except Exception:
+                LOG.exception("Failed to edit appeal message in channel %s", ch.id)
+
+        # perform action
+        if rec["status"] == "accepted":
+            try:
+                target = discord.Object(id=int(rec["banned_user_id"]))
+                await guild.unban(target, reason=f"Appeal accepted by {interaction.user} — {rec['moderator_reason']}")
+                # DM the user
+                try:
+                    usr = await self.cog.bot.fetch_user(int(rec["banned_user_id"]))
+                    dm_embed = embed_base(title=f"✅ Appeal Accepted in {guild.name}", color=EMBED_COLOR, footer=self.cog.footer_text)
+                    dm_embed.description = f"Your appeal was accepted by {interaction.user}.\nModerator reason: {rec['moderator_reason']}"
+                    await usr.send(embed=dm_embed)
+                except Exception:
+                    LOG.exception("Failed to DM user after appeal accepted")
+                await interaction.response.send_message(f"Appeal `{self.appeal_id}` accepted — user unbanned.", ephemeral=True)
+                await self.cog._mod_log(guild, f"Appeal `{self.appeal_id}` accepted by {interaction.user} (`{interaction.user.id}`).")
+                return
+            except Exception as exc:
+                LOG.exception("Failed to unban on appeal accept: %s", exc)
+                await interaction.response.send_message("Attempted to unban but failed (missing bot permission or role hierarchy). Check mod-log.", ephemeral=True)
+                await self.cog._mod_log(guild, f"Appeal `{self.appeal_id}` accepted by {interaction.user} but unban failed: {exc}")
+                return
+        else:
+            # rejected -> DM the user
+            try:
+                usr = await self.cog.bot.fetch_user(int(rec["banned_user_id"]))
+                dm_embed = embed_base(title=f"❌ Appeal Rejected in {guild.name}", color=discord.Colour.red().value, footer=self.cog.footer_text)
+                dm_embed.description = f"Your appeal was rejected by {interaction.user}.\nModerator reason: {rec['moderator_reason']}"
+                await usr.send(embed=dm_embed)
+            except Exception:
+                LOG.exception("Failed to DM user after appeal rejected")
+            await interaction.response.send_message(f"Appeal `{self.appeal_id}` rejected.", ephemeral=True)
+            await self.cog._mod_log(guild, f"Appeal `{self.appeal_id}` rejected by {interaction.user} (`{interaction.user.id}`).")
+            return
 
 class AppealButtonView(discord.ui.View):
     def __init__(self, cog: "BanCog", guild_id: int, banned_user_id: int):
@@ -408,8 +334,9 @@ class AppealButtonView(discord.ui.View):
         self.banned_user_id = banned_user_id
 
     @discord.ui.button(label="📝 Appeal Ban", style=discord.ButtonStyle.primary, custom_id="appeal_button")
-    async def appeal(self, button: discord.ui.Button, interaction: discord.Interaction):
-        modal = AppealModal(self.cog, self.guild_id, self.banned_user_id)
+    async def appeal_button(self, button: discord.ui.Button, interaction: discord.Interaction):
+        # open modal in DM
+        modal = AppealModal(self.cog, guild_id=self.guild_id, banned_user_id=self.banned_user_id)
         await interaction.response.send_modal(modal)
 
 class ModeratorDecisionView(discord.ui.View):
@@ -419,33 +346,565 @@ class ModeratorDecisionView(discord.ui.View):
         self.appeal_id = appeal_id
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        # ensure staff
-        guild_row = await db.fetchone("SELECT guild_id FROM appeals WHERE id = ?", (self.appeal_id,))
-        if not guild_row:
+        rec = self.cog.appeals.get(self.appeal_id)
+        if not rec:
             await interaction.response.send_message("Appeal not found.", ephemeral=True)
             return False
-        guild = self.cog.bot.get_guild(int(guild_row["guild_id"]))
+        guild = self.cog.bot.get_guild(int(rec["guild_id"]))
         if not guild:
             await interaction.response.send_message("Guild not found.", ephemeral=True)
             return False
         member = guild.get_member(interaction.user.id)
-        if not member or not is_staff_member(member):
+        if not member or not is_staff(member):
             await interaction.response.send_message("You don't have permission to process appeals.", ephemeral=True)
             return False
         return True
 
-    @discord.ui.button(label="✅ Accept", style=discord.ButtonStyle.success, custom_id="mod_accept")
+    @discord.ui.button(label="✅ Accept", style=discord.ButtonStyle.success, custom_id="appeal_accept")
     async def accept(self, button: discord.ui.Button, interaction: discord.Interaction):
-        modal = ModeratorDecisionModal(self.cog, self.appeal_id, "accept")
+        modal = ModeratorReasonModal(self.cog, appeal_id=self.appeal_id, action="accept")
         await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="❌ Reject", style=discord.ButtonStyle.danger, custom_id="mod_reject")
+    @discord.ui.button(label="❌ Reject", style=discord.ButtonStyle.danger, custom_id="appeal_reject")
     async def reject(self, button: discord.ui.Button, interaction: discord.Interaction):
-        modal = ModeratorDecisionModal(self.cog, self.appeal_id, "reject")
+        modal = ModeratorReasonModal(self.cog, appeal_id=self.appeal_id, action="reject")
         await interaction.response.send_modal(modal)
 
 # -------------------------
-# Confirm & Progress views
+# PART 4 - COG CORE (commands & stores)
+# -------------------------
+class BanCog(commands.Cog):
+    def __init__(self, bot: commands.Bot, *, config: Optional[Dict[str, Any]] = None):
+        super().__init__()
+        self.bot = bot
+        cfg = config or {}
+        # allow customizing footer text in config when loading the cog
+        self.footer_text = cfg.get("footer_text", "Moderation • Powered by Bot")
+        # persistent stores
+        self.config_store = load_json(GUILDCONFIG_STORE)  # { guild_id: {...} }
+        self.tempbans = load_json(TEMPBANS_STORE)         # { guild_id: { user_id: iso } }
+        self.appeals = load_json(APPEALS_STORE)           # { appeal_id: rec }
+        self.appeals_store = APPEALS_STORE
+        self.guildconfig_store = GUILDCONFIG_STORE
+        self.tempban_store = TEMPBANS_STORE
+
+        # start unban checker
+        self.unban_task.start()
+
+        # register the app commands under a command group for neatness
+        # commands are /ban, /tempban, /unban, /appeals, /setappealschannel, /setmodlog, /showconfig, /export, /softban
+        bot.tree.add_command(self._build_ban_command())
+        bot.tree.add_command(self._build_tempban_command())
+        bot.tree.add_command(self._build_unban_command())
+        bot.tree.add_command(self._build_appeals_command())
+        bot.tree.add_command(self._build_setappeals_command())
+        bot.tree.add_command(self._build_setmodlog_command())
+        bot.tree.add_command(self._build_showconfig_command())
+        bot.tree.add_command(self._build_export_command())
+        # NEW: softban
+        bot.tree.add_command(self._build_softban_command())
+
+    # -------------------------
+    # Low-level helpers
+    # -------------------------
+    async def _get_guildconfig(self, guild: discord.Guild) -> Dict[str, Any]:
+        return self.config_store.get(str(guild.id), {})
+
+    async def _set_guildconfig(self, guild: discord.Guild, key: str, value: Any) -> None:
+        self.config_store.setdefault(str(guild.id), {})
+        self.config_store[str(guild.id)][key] = value
+        try:
+            atomic_write_json(self.guildconfig_store, self.config_store)
+        except Exception:
+            LOG.exception("Failed to persist guild config")
+
+    async def _get_appeals_channel(self, guild: discord.Guild) -> Optional[discord.TextChannel]:
+        cfg = self.config_store.get(str(guild.id), {})
+        cid = cfg.get("appeals_channel_id")
+        if cid:
+            ch = guild.get_channel(int(cid))
+            if ch:
+                return ch
+        # fallback: find by configured name
+        name = cfg.get("appeals_channel_name", "appeals")
+        for c in guild.text_channels:
+            if c.name == name:
+                return c
+        return None
+
+    async def _get_mod_log_channel(self, guild: discord.Guild) -> Optional[discord.TextChannel]:
+        cfg = self.config_store.get(str(guild.id), {})
+        cid = cfg.get("mod_log_channel_id")
+        if cid:
+            ch = guild.get_channel(int(cid))
+            if ch:
+                return ch
+        name = cfg.get("mod_log_channel_name", "mod-log")
+        for c in guild.text_channels:
+            if c.name == name:
+                return c
+        return None
+
+    async def _mod_log(self, guild: discord.Guild, message: str):
+        ch = await self._get_mod_log_channel(guild)
+        embed = embed_base(color=SILVER, footer=self.footer_text)
+        embed.title = "📜 Moderation Log"
+        embed.description = message
+        embed.timestamp = datetime.utcnow()
+        try:
+            if ch:
+                await ch.send(embed=embed)
+            else:
+                LOG.info("No mod-log channel for guild %s — message: %s", guild.id, message)
+        except Exception:
+            LOG.exception("Failed to send mod-log for guild %s", guild.id)
+
+    # -------------------------
+    # Auto-unban loop
+    # -------------------------
+    @tasks.loop(seconds=TEMP_CHECK_INTERVAL)
+    async def unban_task(self):
+        now = datetime.utcnow()
+        changed = False
+        for gid, mapping in list(self.tempbans.items()):
+            guild = self.bot.get_guild(int(gid))
+            if not guild:
+                continue
+            for uid, iso in list(mapping.items()):
+                try:
+                    unban_at = datetime.fromisoformat(iso)
+                except Exception:
+                    continue
+                if now >= unban_at:
+                    try:
+                        obj = discord.Object(id=int(uid))
+                        await guild.unban(obj, reason="Temporary ban expired (automated).")
+                        await self._mod_log(guild, f"User <@{uid}> (`{uid}`) auto-unbanned (tempban expired).")
+                    except Exception:
+                        LOG.exception("Auto-unban failed for %s in guild %s", uid, gid)
+                    try:
+                        del self.tempbans[gid][uid]
+                        changed = True
+                    except Exception:
+                        pass
+            if gid in self.tempbans and not self.tempbans[gid]:
+                del self.tempbans[gid]
+                changed = True
+        if changed:
+            try:
+                atomic_write_json(self.tempban_store, self.tempbans)
+            except Exception:
+                LOG.exception("Failed to persist tempbans after unban run")
+
+    @unban_task.before_loop
+    async def before_unban_task(self):
+        await self.bot.wait_until_ready()
+
+    # -------------------------
+    # Command builders (slash-only)
+    # -------------------------
+    def _build_ban_command(self) -> app_commands.Command:
+        @app_commands.command(name="ban", description="🔨 Permanently ban a member (staff only). Provide a reason.")
+        @app_commands.check(mod_interaction_check)
+        async def ban_cmd(interaction: discord.Interaction, member: discord.Member, reason: Optional[str] = None):
+            reason_text = reason or "No reason provided"
+            if not interaction.guild:
+                return await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+            if member == interaction.user:
+                return await interaction.response.send_message("You cannot ban yourself.", ephemeral=True)
+            if member == interaction.guild.me:
+                return await interaction.response.send_message("I cannot ban myself.", ephemeral=True)
+            if interaction.user != interaction.guild.owner and interaction.user.top_role <= member.top_role:
+                return await interaction.response.send_message("You cannot ban someone with an equal or higher top role.", ephemeral=True)
+
+            # confirmation ephemeral
+            view = ConfirmView(interaction.user)
+            e = embed_base(title="⚠️ Confirm Permanent Ban", color=EMBED_COLOR, footer=self.footer_text)
+            e.description = f"Ban **{member}** permanently?\n**Reason:** {reason_text}"
+            e.add_field(name="Invoker", value=f"{interaction.user} (`{interaction.user.id}`)", inline=True)
+            e.add_field(name="Target", value=f"{member} (`{member.id}`)", inline=True)
+            await interaction.response.send_message(embed=e, view=view, ephemeral=True)
+            await view.wait()
+            if view.value is not True:
+                return
+
+            # DM attempt with Appeal button
+            dm_embed = embed_base(title=f"You were banned from {interaction.guild.name}", color=discord.Colour.red().value, footer=self.footer_text)
+            dm_embed.description = f"You were permanently banned.\n**Reason:** {reason_text}\nIf you'd like to appeal, click the button below."
+            appeal_view = AppealButtonView(self, guild_id=interaction.guild.id, banned_user_id=member.id)
+            dm_sent = True
+            try:
+                await member.send(embed=dm_embed, view=appeal_view)
+            except Exception:
+                dm_sent = False
+
+            # perform ban
+            try:
+                await interaction.guild.ban(member, reason=f"{reason_text} — banned by {interaction.user}", delete_message_days=0)
+            except Exception as exc:
+                LOG.exception("Ban failed: %s", exc)
+                return await interaction.followup.send("Failed to ban (missing permission or bot role position).", ephemeral=True)
+
+            # respond to moderator (ephemeral)
+            res = embed_base(title="✅ Member Banned", color=discord.Colour.red().value, footer=self.footer_text)
+            res.description = f"{member.mention} has been permanently banned."
+            res.add_field(name="Reason", value=reason_text, inline=False)
+            res.add_field(name="DM", value="Sent ✅" if dm_sent else "Failed ❌", inline=True)
+            await interaction.followup.send(embed=res, ephemeral=True)
+
+            await self._mod_log(interaction.guild, f"{member} (`{member.id}`) permanently banned by {interaction.user} (`{interaction.user.id}`). Reason: {reason_text}")
+
+        # Return the decorated app command object
+        return ban_cmd
+
+    def _build_tempban_command(self) -> app_commands.Command:
+        @app_commands.command(name="tempban", description="⏳ Temporarily ban a member. Duration examples: 30m, 2h, 1d, 1w")
+        @app_commands.check(mod_interaction_check)
+        async def tempban_cmd(interaction: discord.Interaction, member: discord.Member, duration: str, reason: Optional[str] = None):
+            reason_text = reason or "No reason provided"
+            if not interaction.guild:
+                return await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+            if member == interaction.user:
+                return await interaction.response.send_message("You cannot ban yourself.", ephemeral=True)
+            if member == interaction.guild.me:
+                return await interaction.response.send_message("I cannot ban myself.", ephemeral=True)
+            if interaction.user != interaction.guild.owner and interaction.user.top_role <= member.top_role:
+                return await interaction.response.send_message("You cannot ban someone with an equal or higher top role.", ephemeral=True)
+
+            secs = parse_duration_to_seconds(duration)
+            if secs is None or secs <= 0:
+                return await interaction.response.send_message("Invalid duration format. Examples: `30m`, `2h`, `1d`, `1w`.", ephemeral=True)
+            unban_time = datetime.utcnow() + timedelta(seconds=secs)
+
+            view = ConfirmView(interaction.user)
+            e = embed_base(title="⚠️ Confirm Temporary Ban", color=EMBED_COLOR, footer=self.footer_text)
+            e.description = f"Ban **{member}** for **{human_readable_delta(timedelta(seconds=secs))}**?\n**Reason:** {reason_text}"
+            await interaction.response.send_message(embed=e, view=view, ephemeral=True)
+            await view.wait()
+            if view.value is not True:
+                return
+
+            # DM attempt with appeal button
+            dm_embed = embed_base(title=f"You were temporarily banned from {interaction.guild.name}", color=discord.Colour.red().value, footer=self.footer_text)
+            dm_embed.description = f"Ban length: **{human_readable_delta(timedelta(seconds=secs))}**\n**Reason:** {reason_text}\nAppeal using the button below."
+            appeal_view = AppealButtonView(self, guild_id=interaction.guild.id, banned_user_id=member.id)
+            dm_sent = True
+            try:
+                await member.send(embed=dm_embed, view=appeal_view)
+            except Exception:
+                dm_sent = False
+
+            # perform ban
+            try:
+                await interaction.guild.ban(member, reason=f"{reason_text} — tempbanned by {interaction.user} until {unban_time.isoformat()}", delete_message_days=0)
+            except Exception as exc:
+                LOG.exception("Tempban failed: %s", exc)
+                return await interaction.followup.send("Failed to tempban (missing permission or bot role position).", ephemeral=True)
+
+            # persist tempban
+            gid = str(interaction.guild.id)
+            self.tempbans.setdefault(gid, {})
+            self.tempbans[gid][str(member.id)] = unban_time.isoformat()
+            try:
+                atomic_write_json(self.tempban_store, self.tempbans)
+            except Exception:
+                LOG.exception("Failed to persist tempban")
+
+            res = embed_base(title="✅ Member Temporarily Banned", color=discord.Colour.red().value, footer=self.footer_text)
+            res.description = f"{member.mention} has been banned for **{human_readable_delta(timedelta(seconds=secs))}**."
+            res.add_field(name="Reason", value=reason_text, inline=False)
+            res.add_field(name="DM", value="Sent ✅" if dm_sent else "Failed ❌", inline=True)
+            res.add_field(name="Scheduled Unban (UTC)", value=unban_time.isoformat(), inline=False)
+            await interaction.followup.send(embed=res, ephemeral=True)
+
+            await self._mod_log(interaction.guild, f"{member} (`{member.id}`) temporarily banned by {interaction.user} (`{interaction.user.id}`) until {unban_time.isoformat()}. Reason: {reason_text}")
+
+        return tempban_cmd
+
+    def _build_unban_command(self) -> app_commands.Command:
+        @app_commands.command(name="unban", description="⚖️ Unban a user by ID (staff only).")
+        @app_commands.check(mod_interaction_check)
+        async def unban_cmd(interaction: discord.Interaction, user_id: str, reason: Optional[str] = None):
+            reason_text = reason or "No reason provided"
+            if not interaction.guild:
+                return await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+            try:
+                uid = int(user_id.strip("<@!> "))
+            except Exception:
+                return await interaction.response.send_message("Invalid user ID.", ephemeral=True)
+            try:
+                target = await self.bot.fetch_user(uid)
+                await interaction.guild.unban(target, reason=f"{reason_text} — unbanned by {interaction.user}")
+            except Exception as exc:
+                LOG.exception("Unban failed: %s", exc)
+                return await interaction.response.send_message("Failed to unban (maybe not banned or missing perms).", ephemeral=True)
+
+            # remove scheduled tempban if present
+            gid = str(interaction.guild.id)
+            removed = False
+            if gid in self.tempbans and str(uid) in self.tempbans[gid]:
+                try:
+                    del self.tempbans[gid][str(uid)]
+                    if not self.tempbans[gid]:
+                        del self.tempbans[gid]
+                    atomic_write_json(self.tempban_store, self.tempbans)
+                    removed = True
+                except Exception:
+                    LOG.exception("Failed to remove scheduled tempban")
+
+            e = embed_base(title="✅ User Unbanned", color=discord.Colour.green().value, footer=self.footer_text)
+            e.description = f"<@{uid}> (`{uid}`) has been unbanned."
+            e.add_field(name="Moderator", value=f"{interaction.user} (`{interaction.user.id}`)", inline=False)
+            e.add_field(name="Reason", value=reason_text, inline=False)
+            if removed:
+                e.add_field(name="Note", value="Scheduled tempban removed.", inline=False)
+            await interaction.response.send_message(embed=e, ephemeral=True)
+            await self._mod_log(interaction.guild, f"<@{uid}> (`{uid}`) unbanned by {interaction.user} (`{interaction.user.id}`). Reason: {reason_text}")
+
+        return unban_cmd
+
+    def _build_appeals_command(self) -> app_commands.Command:
+        @app_commands.command(name="appeals", description="🧾 List pending appeals for this server (staff only).")
+        @app_commands.check(mod_interaction_check)
+        async def appeals_cmd(interaction: discord.Interaction):
+            if not interaction.guild:
+                return await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+            gid = str(interaction.guild.id)
+            pending = [(aid, a) for aid, a in self.appeals.items() if str(a.get("guild_id")) == gid and a.get("status") == "pending"]
+            if not pending:
+                e = embed_base(title="Appeals", color=discord.Colour.green().value, footer=self.footer_text)
+                e.description = "No pending appeals."
+                return await interaction.response.send_message(embed=e, ephemeral=True)
+            e = embed_base(title=f"Pending Appeals ({len(pending)})", color=EMBED_COLOR, footer=self.footer_text)
+            for aid, rec in pending[:10]:
+                snippet = rec.get("appeal_text", "")
+                if len(snippet) > 200:
+                    snippet = snippet[:197] + "..."
+                e.add_field(name=f"ID: {aid}", value=f"{snippet}\nFrom: <@{rec.get('banned_user_id')}>", inline=False)
+            await interaction.response.send_message(embed=e, ephemeral=True)
+        return appeals_cmd
+
+    def _build_setappeals_command(self) -> app_commands.Command:
+        @app_commands.command(name="setappealschannel", description="🛠️ Set the appeals channel for this server (staff only).")
+        @app_commands.check(mod_interaction_check)
+        async def setappeals_cmd(interaction: discord.Interaction, channel: discord.TextChannel):
+            if not interaction.guild:
+                return await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+            await self._set_guildconfig(interaction.guild, "appeals_channel_id", int(channel.id))
+            e = embed_base(title="Appeals Channel Configured", color=discord.Colour.green().value, footer=self.footer_text)
+            e.description = f"Appeals channel set to {channel.mention} (`{channel.id}`)."
+            await interaction.response.send_message(embed=e, ephemeral=True)
+        return setappeals_cmd
+
+    def _build_setmodlog_command(self) -> app_commands.Command:
+        @app_commands.command(name="setmodlog", description="🛡️ Set the mod-log channel for this server (staff only).")
+        @app_commands.check(mod_interaction_check)
+        async def setmodlog_cmd(interaction: discord.Interaction, channel: discord.TextChannel):
+            if not interaction.guild:
+                return await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+            await self._set_guildconfig(interaction.guild, "mod_log_channel_id", int(channel.id))
+            e = embed_base(title="Mod-log Channel Configured", color=discord.Colour.green().value, footer=self.footer_text)
+            e.description = f"Mod-log channel set to {channel.mention} (`{channel.id}`)."
+            await interaction.response.send_message(embed=e, ephemeral=True)
+        return setmodlog_cmd
+
+    def _build_showconfig_command(self) -> app_commands.Command:
+        @app_commands.command(name="showconfig", description="🔍 Show moderation configuration for this server (staff only).")
+        @app_commands.check(mod_interaction_check)
+        async def showconfig_cmd(interaction: discord.Interaction):
+            if not interaction.guild:
+                return await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+            cfg = self.config_store.get(str(interaction.guild.id), {})
+            e = embed_base(title=f"Moderation Config — {interaction.guild.name}", color=EMBED_COLOR, footer=self.footer_text)
+            e.add_field(name="Appeals channel ID", value=str(cfg.get("appeals_channel_id") or "Not set"), inline=False)
+            e.add_field(name="Mod-log channel ID", value=str(cfg.get("mod_log_channel_id") or "Not set"), inline=False)
+            await interaction.response.send_message(embed=e, ephemeral=True)
+        return showconfig_cmd
+
+    def _build_export_command(self) -> app_commands.Command:
+        @app_commands.command(name="export", description="📤 Export moderation data files to your DMs (staff only).")
+        @app_commands.check(mod_interaction_check)
+        async def export_cmd(interaction: discord.Interaction):
+            files = []
+            for path in (self.tempban_store, self.appeals_store, self.guildconfig_store):
+                if os.path.exists(path):
+                    files.append(path)
+            if not files:
+                return await interaction.response.send_message("No data files to export.", ephemeral=True)
+            try:
+                dm = await interaction.user.create_dm()
+                sent = 0
+                for p in files:
+                    try:
+                        await dm.send(file=discord.File(p, filename=os.path.basename(p)))
+                        sent += 1
+                    except Exception:
+                        LOG.exception("Failed to send file %s to %s", p, interaction.user)
+                await interaction.response.send_message(f"Exported {sent} file(s) to your DMs.", ephemeral=True)
+            except Exception:
+                LOG.exception("Export failed")
+                await interaction.response.send_message("Failed to send files via DM.", ephemeral=True)
+        return export_cmd
+
+    # -------------------------
+    # NEW: Softban command builder
+    # -------------------------
+    def _build_softban_command(self) -> app_commands.Command:
+        """
+        /softban: Ban then unban a user to purge messages.
+        Options:
+          - user: Member to softban
+          - reason: optional
+          - delete_messages_days: optional int 0..7 (how many days of messages to delete). Default: 1
+        Behavior:
+          - Attempts to DM the user with the reason + appeal button before action (best effort).
+          - Proceeds even if DM fails.
+          - Requires staff permissions (same as /ban).
+          - Confirms via ephemeral view before performing action.
+          - Logs action and posts to mod-log channel.
+        """
+        @app_commands.command(name="softban", description="🚿 Softban (ban then unban) a user to purge their recent messages.")
+        @app_commands.check(mod_interaction_check)
+        async def softban_cmd(interaction: discord.Interaction, member: discord.Member, delete_messages_days: Optional[int] = 1, reason: Optional[str] = None):
+            # Input validation & permission checks
+            reason_text = reason or "No reason provided"
+            if not interaction.guild:
+                return await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+
+            if member == interaction.user:
+                return await interaction.response.send_message("You cannot softban yourself.", ephemeral=True)
+            if member == interaction.guild.me:
+                return await interaction.response.send_message("I cannot softban myself.", ephemeral=True)
+            # role hierarchy check: invoker must be higher unless owner
+            if interaction.user != interaction.guild.owner and interaction.user.top_role <= member.top_role:
+                return await interaction.response.send_message("You cannot softban someone with an equal or higher top role.", ephemeral=True)
+
+            # validate delete_messages_days
+            if delete_messages_days is None:
+                delete_messages_days = 1
+            try:
+                delete_messages_days = int(delete_messages_days)
+            except Exception:
+                return await interaction.response.send_message("`delete_messages_days` must be an integer between 0 and 7.", ephemeral=True)
+            if delete_messages_days < 0 or delete_messages_days > 7:
+                return await interaction.response.send_message("`delete_messages_days` must be between 0 and 7.", ephemeral=True)
+
+            # Ask for confirmation
+            confirm_view = ConfirmView(interaction.user)
+            emb = embed_base(title="⚠️ Confirm Softban", color=EMBED_COLOR, footer=self.footer_text)
+            emb.description = (
+                f"Softban **{member}** — this will ban then immediately unban them to purge up to {delete_messages_days} day(s) of messages.\n\n"
+                f"**Reason:** {reason_text}\n\n"
+                "This action will attempt to DM the user before banning (best-effort), but will proceed even if the DM fails."
+            )
+            emb.add_field(name="Invoker", value=f"{interaction.user} (`{interaction.user.id}`)", inline=True)
+            emb.add_field(name="Target", value=f"{member} (`{member.id}`)", inline=True)
+            emb.add_field(name="Delete Messages (days)", value=str(delete_messages_days), inline=True)
+            await interaction.response.send_message(embed=emb, view=confirm_view, ephemeral=True)
+            await confirm_view.wait()
+            if confirm_view.value is not True:
+                return await interaction.followup.send("Softban cancelled.", ephemeral=True)
+
+            # DM the user first (best-effort). Provide appeal button.
+            dm_sent = True
+            dm_err = None
+            dm_embed = embed_base(title=f"You were softbanned from {interaction.guild.name}", color=discord.Colour.red().value, footer=self.footer_text)
+            dm_embed.description = (
+                f"You were softbanned by staff in **{interaction.guild.name}**.\n"
+                f"**Reason:** {reason_text}\n"
+                f"Messages deleted: up to {delete_messages_days} day(s).\n\n"
+                "If you believe this was a mistake, you may appeal using the button below."
+            )
+            appeal_view = AppealButtonView(self, guild_id=interaction.guild.id, banned_user_id=member.id)
+            try:
+                await member.send(embed=dm_embed, view=appeal_view)
+            except Exception as e:
+                dm_sent = False
+                dm_err = str(e)
+                LOG.debug("DM to user before softban failed: %s", e)
+
+            # Perform ban (with delete_message_days), then unban
+            try:
+                # Attempt ban
+                await interaction.guild.ban(member, reason=f"{reason_text} — softbanned by {interaction.user}", delete_message_days=delete_messages_days)
+            except Exception as exc:
+                LOG.exception("Softban ban step failed: %s", exc)
+                # Inform moderator and log
+                err_emb = embed_base(title="❌ Softban Failed", color=discord.Colour.red().value, footer=self.footer_text)
+                err_emb.description = f"Failed to ban {member}. This may be due to missing permissions or role hierarchy."
+                err_emb.add_field(name="Error", value=str(exc), inline=False)
+                await interaction.followup.send(embed=err_emb, ephemeral=True)
+                await self._mod_log(interaction.guild, f"Softban failed for {member} by {interaction.user}: {exc}")
+                return
+
+            # Now unban immediately
+            unban_error = None
+            try:
+                obj = discord.Object(id=member.id)
+                await interaction.guild.unban(obj, reason=f"Softban automatic unban — purged messages (requested by {interaction.user})")
+            except Exception as e:
+                LOG.exception("Softban unban step failed: %s", e)
+                unban_error = str(e)
+
+            # Build moderator-facing result embed
+            out_emb = embed_base(title="✅ Softban Completed", color=discord.Colour.orange().value, footer=self.footer_text)
+            out_emb.description = f"{member.mention} has been softbanned (banned then unbanned) — messages up to {delete_messages_days} day(s) were removed."
+            out_emb.add_field(name="Reason", value=reason_text or "No reason provided", inline=False)
+            out_emb.add_field(name="DM", value="Sent ✅" if dm_sent else f"Failed ❌ ({dm_err})", inline=True)
+            if unban_error:
+                out_emb.add_field(name="Unban", value=f"Failed ❌ ({unban_error}) — user may remain banned. Please check manually.", inline=False)
+            await interaction.followup.send(embed=out_emb, ephemeral=True)
+
+            # mod-log entry
+            try:
+                await self._mod_log(interaction.guild, f"Softban: {member} (`{member.id}`) by {interaction.user} (`{interaction.user.id}`). Reason: {reason_text}. Deleted {delete_messages_days} day(s) of messages.")
+            except Exception:
+                LOG.exception("Failed to send mod-log for softban.")
+
+            # Optionally persist a record into temp storage if desired; this command does not create a tempban record because user is unbanned immediately.
+            # However we will record a short-lived audit in appeals store for traceability (not necessary).
+            try:
+                # store an audit-style record in appeals (lightweight)
+                audit_id = f"softban-{interaction.guild.id}-{member.id}-{int(datetime.utcnow().timestamp())}"
+                self.appeals[audit_id] = {
+                    "id": audit_id,
+                    "guild_id": interaction.guild.id,
+                    "banned_user_id": member.id,
+                    "appeal_text": f"Softban performed. Reason: {reason_text}",
+                    "extra": "",
+                    "submitted_at": datetime.utcnow().isoformat(),
+                    "status": "softbanned",
+                    "moderator_id": interaction.user.id,
+                    "moderator_reason": reason_text,
+                    "decision_at": datetime.utcnow().isoformat(),
+                    "appeal_channel_id": None,
+                    "appeal_message_id": None
+                }
+                atomic_write_json(self.appeals_store, self.appeals)
+            except Exception:
+                LOG.exception("Failed to persist softban audit record")
+
+        return softban_cmd
+
+    # -------------------------
+    # App command error handling
+    # -------------------------
+    @commands.Cog.listener()
+    async def on_app_command_error(self, interaction: discord.Interaction, error: Exception):
+        if isinstance(error, app_commands.AppCommandError):
+            try:
+                await interaction.response.send_message(str(error), ephemeral=True)
+            except Exception:
+                LOG.exception("Failed to send AppCommandError response")
+        else:
+            LOG.exception("Unhandled app command error: %s", error)
+            try:
+                await interaction.response.send_message("An unexpected error occurred. Check logs.", ephemeral=True)
+            except Exception:
+                pass
+
+# -------------------------
+# PART 5 - Confirm View (used by multiple commands)
 # -------------------------
 class ConfirmView(discord.ui.View):
     def __init__(self, author: discord.User, timeout: float = 30.0):
@@ -455,512 +914,24 @@ class ConfirmView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
-            await interaction.response.send_message("This confirmation is for the command user only.", ephemeral=True)
+            await interaction.response.send_message("This confirmation isn't for you.", ephemeral=True)
             return False
         return True
 
-    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger, emoji="🔨", custom_id="confirm_ban")
     async def confirm(self, button: discord.ui.Button, interaction: discord.Interaction):
         self.value = True
-        await interaction.response.edit_message(content="Confirmed.", view=None)
+        await interaction.response.edit_message(content="✅ Confirmed.", view=None)
 
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary, emoji="✖️", custom_id="cancel_ban")
     async def cancel(self, button: discord.ui.Button, interaction: discord.Interaction):
         self.value = False
-        await interaction.response.edit_message(content="Cancelled.", view=None)
-
-class ProgressView(discord.ui.View):
-    def __init__(self, timeout: float = 300.0):
-        super().__init__(timeout=timeout)
-
-    @discord.ui.button(label="Close", style=discord.ButtonStyle.danger)
-    async def close(self, button: discord.ui.Button, interaction: discord.Interaction):
-        try:
-            await interaction.message.delete()
-        except Exception:
-            pass
-        self.stop()
+        await interaction.response.edit_message(content="❎ Cancelled.", view=None)
 
 # -------------------------
-# THE COG
+# Setup entrypoint
 # -------------------------
-class BanCog(commands.Cog):
-    def __init__(self, bot: commands.Bot):
-        self.bot = bot
-        # ensure DB is ready
-        self._ready_task = bot.loop.create_task(init_db())
-        # start background task for tempbans/unban checks
-        self._tempban_loop.start()
-        # start recovery for softbans (no-op unless entries)
-        self._recover_task = bot.loop.create_task(self._recover_softbans_on_startup())
-        LOG.info("BanCog initialized")
-
-    def cog_unload(self):
-        try:
-            self._tempban_loop.cancel()
-        except Exception:
-            pass
-        try:
-            self._recover_task.cancel()
-        except Exception:
-            pass
-
-    # -------------------------
-    # Background: tempban unban loop
-    # -------------------------
-    @tasks.loop(seconds=TEMPBAN_CHECK_SECONDS)
-    async def _tempban_loop(self):
-        try:
-            rows = await db.fetchall("SELECT guild_id, user_id, unban_at FROM tempbans")
-            now_iso = utcnow().isoformat()
-            for r in rows:
-                guild_id = int(r["guild_id"])
-                user_id = int(r["user_id"])
-                unban_at = r["unban_at"]
-                if not unban_at:
-                    continue
-                try:
-                    unban_dt = datetime.fromisoformat(unban_at)
-                except Exception:
-                    continue
-                if utcnow() >= unban_dt:
-                    guild = self.bot.get_guild(guild_id)
-                    if not guild:
-                        # remove the record (can't unban if guild not available)
-                        await db.execute("DELETE FROM tempbans WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
-                        continue
-                    try:
-                        obj = discord.Object(id=user_id)
-                        ok, res = await safe_unban(guild, obj, reason="Temporary ban expired (automated).")
-                        if ok:
-                            await self._mod_log(guild, f"Auto-unbanned {user_id} (tempban expired).")
-                        else:
-                            LOG.warning("Auto-unban failed for %s in %s: %s", user_id, guild_id, res)
-                        # delete record
-                        await db.execute("DELETE FROM tempbans WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
-                    except Exception:
-                        LOG.exception("Exception during auto-unban")
-        except Exception:
-            LOG.exception("Error in tempban loop")
-
-    @_tempban_loop.before_loop
-    async def before_tempban_loop(self):
-        await self.bot.wait_until_ready()
-        await self._ready_task
-
-    # -------------------------
-    # Recovery: scan softbans table and attempt to finish any incomplete actions
-    # -------------------------
-    async def _recover_softbans_on_startup(self):
-        await self.bot.wait_until_ready()
-        await self._ready_task
-        # softbans table is an audit log—no recovery needed, but we ensure no inconsistent state
-        # If desired: find records missing performed_at (shouldn't happen). Here we log and continue.
-        try:
-            rows = await db.fetchall("SELECT id, guild_id, user_id FROM softbans WHERE performed_at IS NULL")
-            for r in rows:
-                LOG.warning("Found incomplete softban record: %s", r["id"])
-                # we could attempt to fix but safest to leave as audit record for manual review
-        except Exception:
-            LOG.exception("Error during softban recovery")
-
-    # -------------------------
-    # Low-level helpers: config + channels + mod-log
-    # -------------------------
-    async def _get_guild_config(self, guild: discord.Guild) -> Dict[str, Any]:
-        row = await db.fetchone("SELECT appeals_channel_id, mod_log_channel_id FROM guild_config WHERE guild_id = ?", (guild.id,))
-        if not row:
-            return {}
-        return {"appeals_channel_id": row["appeals_channel_id"], "mod_log_channel_id": row["mod_log_channel_id"]}
-
-    async def _set_guild_config(self, guild: discord.Guild, key: str, value: Any):
-        row = await db.fetchone("SELECT guild_id FROM guild_config WHERE guild_id = ?", (guild.id,))
-        if row:
-            if key == "appeals_channel_id":
-                await db.execute("UPDATE guild_config SET appeals_channel_id = ? WHERE guild_id = ?", (int(value), guild.id))
-            elif key == "mod_log_channel_id":
-                await db.execute("UPDATE guild_config SET mod_log_channel_id = ? WHERE guild_id = ?", (int(value), guild.id))
-        else:
-            # insert new row
-            appeals = None
-            modlog = None
-            if key == "appeals_channel_id":
-                appeals = int(value)
-            if key == "mod_log_channel_id":
-                modlog = int(value)
-            await db.execute("INSERT OR REPLACE INTO guild_config (guild_id, appeals_channel_id, mod_log_channel_id, created_at) VALUES (?, ?, ?, ?)",
-                             (guild.id, appeals, modlog, utcnow().isoformat()))
-
-    async def _get_appeals_channel(self, guild: discord.Guild) -> Optional[discord.TextChannel]:
-        cfg = await self._get_guild_config(guild)
-        cid = cfg.get("appeals_channel_id")
-        if cid:
-            ch = guild.get_channel(int(cid))
-            if ch and isinstance(ch, discord.TextChannel):
-                return ch
-        # try name fallback
-        for c in guild.text_channels:
-            if c.name == "appeals" or c.name == "appeals-logs":
-                return c
-        return None
-
-    async def _get_mod_log_channel(self, guild: discord.Guild) -> Optional[discord.TextChannel]:
-        cfg = await self._get_guild_config(guild)
-        cid = cfg.get("mod_log_channel_id")
-        if cid:
-            ch = guild.get_channel(int(cid))
-            if ch and isinstance(ch, discord.TextChannel):
-                return ch
-        # fallback
-        for c in guild.text_channels:
-            if c.name in ("mod-log", "modlog", "moderation"):
-                return c
-        return None
-
-    async def _mod_log(self, guild: discord.Guild, message: str):
-        try:
-            ch = await self._get_mod_log_channel(guild)
-            embed = embed_base(title="📜 Moderation Log", description=message, color=SILVER)
-            await safe_api(ch.send, embed=embed) if ch else LOG.info("Mod log not configured for guild %s: %s", guild.id, message)
-            # also persist generic mod log table
-            await db.execute("INSERT INTO mod_logs (guild_id, action, actor_id, target_id, reason, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                             (guild.id, "log", None, None, None, message, utcnow().isoformat()))
-        except Exception:
-            LOG.exception("Failed to write mod_log")
-
-    # -------------------------
-    # PERMISSION CHECKS
-    # -------------------------
-    def _user_can_act_on(self, invoker: discord.Member, target: discord.Member) -> Tuple[bool, str]:
-        if invoker == target:
-            return False, "You cannot act on yourself."
-        if target == invoker.guild.owner:
-            return False, "You cannot act on the server owner."
-        if invoker != invoker.guild.owner and invoker.top_role <= target.top_role:
-            return False, "You cannot act on someone with an equal or higher top role."
-        return True, ""
-
-    def _bot_can_act_on(self, guild: discord.Guild, target: discord.Member) -> Tuple[bool, str]:
-        me = guild.me
-        if me is None:
-            return False, "Bot is not present in this guild."
-        if me.top_role <= target.top_role:
-            return False, "I cannot act on this user due to role hierarchy."
-        perms = guild.me.guild_permissions
-        if not perms.ban_members:
-            return False, "I require the Ban Members permission."
-        return True, ""
-
-    # -------------------------
-    # APP COMMANDS
-    # -------------------------
-    @app_commands.command(name="ban", description="Permanently ban a member (staff only).")
-    @app_commands.check(lambda i: is_staff_member(i.user if isinstance(i.user, discord.Member) else discord.Object(id=0)))
-    async def ban(self, interaction: discord.Interaction, member: discord.Member, reason: Optional[str] = None, delete_days: Optional[int] = 0):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        if not interaction.guild:
-            return await interaction.followup.send("This command can only be used in a server.", ephemeral=True)
-        if delete_days is None:
-            delete_days = 0
-        delete_days = max(0, min(MAX_DELETE_DAYS, int(delete_days)))
-        allowed, msg = self._user_can_act_on(interaction.user, member)
-        if not allowed:
-            return await interaction.followup.send(msg, ephemeral=True)
-        ok_bot, bot_msg = self._bot_can_act_on(interaction.guild, member)
-        if not ok_bot:
-            return await interaction.followup.send(bot_msg, ephemeral=True)
-
-        # confirm
-        view = ConfirmView(interaction.user)
-        emb = embed_base(title="⚠️ Confirm Ban", description=f"Ban {member}?\nReason: {reason or 'No reason provided'}\nDelete messages (days): {delete_days}")
-        await interaction.followup.send(embed=emb, view=view, ephemeral=True)
-        await view.wait()
-        if view.value is not True:
-            return await interaction.followup.send("Ban cancelled.", ephemeral=True)
-
-        # DM attempt with appeal
-        dm_embed = embed_base(title=f"You were banned from {interaction.guild.name}", description=f"Reason: {reason or 'No reason provided'}", color=discord.Color.red())
-        dm_view = AppealButtonView(self, guild_id=interaction.guild.id, banned_user_id=member.id)
-        dm_ok, dm_res = await safe_dm(member, embed=dm_embed, view=dm_view)
-        dm_sent = bool(dm_ok)
-
-        # ban
-        ban_reason = f"{reason or 'No reason provided'} — banned by {interaction.user}"
-        ok, res = await safe_ban(interaction.guild, member, reason=ban_reason, delete_message_days=delete_days)
-        if not ok:
-            await interaction.followup.send(f"Failed to ban: {res}", ephemeral=True)
-            await self._mod_log(interaction.guild, f"Failed ban attempt: {member} by {interaction.user}. Error: {res}")
-            return
-        # success
-        out = embed_base(title="✅ Member Banned", description=f"{member.mention} has been banned.", color=discord.Color.red())
-        out.add_field(name="Reason", value=reason or "No reason provided", inline=False)
-        out.add_field(name="DM Sent", value="✅" if dm_sent else "❌", inline=True)
-        await interaction.followup.send(embed=out, ephemeral=True)
-        await self._mod_log(interaction.guild, f"{member} banned by {interaction.user}. Reason: {reason or 'No reason provided'}")
-
-    @app_commands.command(name="tempban", description="Temporarily ban a member. Duration example: 30m, 2h, 1d")
-    @app_commands.check(lambda i: is_staff_member(i.user if isinstance(i.user, discord.Member) else discord.Object(id=0)))
-    async def tempban(self, interaction: discord.Interaction, member: discord.Member, duration: str, reason: Optional[str] = None, delete_days: Optional[int] = 0):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        if not interaction.guild:
-            return await interaction.followup.send("Must be used in a server.", ephemeral=True)
-        secs = parse_duration_to_seconds(duration)
-        if secs is None or secs <= 0:
-            return await interaction.followup.send("Invalid duration. Examples: 30m, 2h, 1d", ephemeral=True)
-        unban_at = utcnow() + timedelta(seconds=secs)
-        delete_days = max(0, min(MAX_DELETE_DAYS, int(delete_days or 0)))
-
-        allowed, msg = self._user_can_act_on(interaction.user, member)
-        if not allowed:
-            return await interaction.followup.send(msg, ephemeral=True)
-        ok_bot, bot_msg = self._bot_can_act_on(interaction.guild, member)
-        if not ok_bot:
-            return await interaction.followup.send(bot_msg, ephemeral=True)
-
-        view = ConfirmView(interaction.user)
-        emb = embed_base(title="⚠️ Confirm Tempban", description=f"Ban {member} for {human_delta(timedelta(seconds=secs))}?\nReason: {reason or 'No reason provided'}")
-        await interaction.followup.send(embed=emb, view=view, ephemeral=True)
-        await view.wait()
-        if view.value is not True:
-            return await interaction.followup.send("Tempban cancelled.", ephemeral=True)
-
-        # DM attempt
-        dm_embed = embed_base(title=f"You were temporarily banned from {interaction.guild.name}", description=f"Duration: {human_delta(timedelta(seconds=secs))}\nReason: {reason or 'No reason provided'}", color=discord.Color.red())
-        dm_view = AppealButtonView(self, guild_id=interaction.guild.id, banned_user_id=member.id)
-        dm_ok, dm_res = await safe_dm(member, embed=dm_embed, view=dm_view)
-
-        # ban
-        ban_reason = f"{reason or 'No reason provided'} — tempbanned by {interaction.user} until {unban_at.isoformat()}"
-        ok, res = await safe_ban(interaction.guild, member, reason=ban_reason, delete_message_days=delete_days)
-        if not ok:
-            await interaction.followup.send(f"Failed to tempban: {res}", ephemeral=True)
-            await self._mod_log(interaction.guild, f"Failed tempban attempt: {member} by {interaction.user}. Error: {res}")
-            return
-
-        # persist tempban
-        try:
-            await db.execute("INSERT OR REPLACE INTO tempbans (guild_id, user_id, unban_at, reason, moderator_id) VALUES (?, ?, ?, ?, ?)",
-                             (interaction.guild.id, member.id, unban_at.isoformat(), reason or "", interaction.user.id))
-        except Exception:
-            LOG.exception("Failed to persist tempban")
-
-        out = embed_base(title="✅ Member Temporarily Banned", description=f"{member.mention} banned for {human_delta(timedelta(seconds=secs))}", color=discord.Color.orange())
-        out.add_field(name="Reason", value=reason or "No reason provided", inline=False)
-        out.add_field(name="DM Sent", value="✅" if dm_ok else "❌", inline=True)
-        out.add_field(name="Scheduled Unban (UTC)", value=unban_at.isoformat(), inline=False)
-        await interaction.followup.send(embed=out, ephemeral=True)
-        await self._mod_log(interaction.guild, f"{member} tempbanned by {interaction.user} until {unban_at.isoformat()}. Reason: {reason or 'No reason provided'}")
-
-    @app_commands.command(name="unban", description="Unban a user by ID (staff only).")
-    @app_commands.check(lambda i: is_staff_member(i.user if isinstance(i.user, discord.Member) else discord.Object(id=0)))
-    async def unban(self, interaction: discord.Interaction, user_id: str, reason: Optional[str] = None):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        if not interaction.guild:
-            return await interaction.followup.send("Must be used in a server.", ephemeral=True)
-        try:
-            uid = int(re.sub(r"[<@!>]", "", user_id))
-        except Exception:
-            return await interaction.followup.send("Invalid user ID.", ephemeral=True)
-        obj = discord.Object(id=uid)
-        ok, res = await safe_unban(interaction.guild, obj, reason=f"{reason or 'No reason provided'} — unbanned by {interaction.user}")
-        if not ok:
-            return await interaction.followup.send(f"Failed to unban: {res}", ephemeral=True)
-        # remove tempban row if present
-        try:
-            await db.execute("DELETE FROM tempbans WHERE guild_id = ? AND user_id = ?", (interaction.guild.id, uid))
-        except Exception:
-            LOG.exception("Failed to remove tempban record after unban")
-        out = embed_base(title="✅ User Unbanned", description=f"<@{uid}> has been unbanned.", color=discord.Color.green())
-        out.add_field(name="Moderator", value=str(interaction.user), inline=True)
-        out.add_field(name="Reason", value=reason or "No reason provided", inline=False)
-        await interaction.followup.send(embed=out, ephemeral=True)
-        await self._mod_log(interaction.guild, f"User {uid} unbanned by {interaction.user}. Reason: {reason or 'No reason provided'}")
-
-    # -------------------------
-    # Softban: ban then unban
-    # -------------------------
-    @app_commands.command(name="softban", description="Softban (ban then unban) a user to purge recent messages.")
-    @app_commands.check(lambda i: is_staff_member(i.user if isinstance(i.user, discord.Member) else discord.Object(id=0)))
-    async def softban(self, interaction: discord.Interaction, member: discord.Member, delete_days: Optional[int] = 1, reason: Optional[str] = None, preview: Optional[bool] = False):
-        """
-        Softban behavior:
-         - preview=True: don't perform action, only show what would happen
-         - otherwise: attempts DM, bans (delete_days), then unbans immediately. Retries unban if first attempt fails.
-         - logs an audit record in softbans table.
-        """
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        if not interaction.guild:
-            return await interaction.followup.send("Must be used in a server.", ephemeral=True)
-        delete_days = int(delete_days or 1)
-        delete_days = max(0, min(MAX_DELETE_DAYS, delete_days))
-        allowed, msg = self._user_can_act_on(interaction.user, member)
-        if not allowed:
-            return await interaction.followup.send(msg, ephemeral=True)
-        ok_bot, bot_msg = self._bot_can_act_on(interaction.guild, member)
-        if not ok_bot:
-            return await interaction.followup.send(bot_msg, ephemeral=True)
-
-        # preview mode
-        if preview:
-            emb = embed_base(title="🧐 Softban Preview", description=f"This will ban then unban {member.mention} and purge up to {delete_days} day(s) of messages.", color=discord.Color.gold())
-            emb.add_field(name="Reason", value=reason or "No reason provided", inline=False)
-            return await interaction.followup.send(embed=emb, ephemeral=True)
-
-        # confirm
-        view = ConfirmView(interaction.user)
-        embc = embed_base(title="⚠️ Confirm Softban", description=f"Softban {member}? This will ban then unban and purge up to {delete_days} day(s) of messages.\nReason: {reason or 'No reason provided'}", color=discord.Color.orange())
-        await interaction.followup.send(embed=embc, view=view, ephemeral=True)
-        await view.wait()
-        if view.value is not True:
-            return await interaction.followup.send("Softban cancelled.", ephemeral=True)
-
-        # Attempt to DM before action
-        dm_embed = embed_base(title=f"You were softbanned from {interaction.guild.name}", description=f"Reason: {reason or 'No reason provided'}\nMessages deleted: up to {delete_days} day(s).", color=discord.Color.red())
-        dm_view = AppealButtonView(self, guild_id=interaction.guild.id, banned_user_id=member.id)
-        dm_ok, dm_res = await safe_dm(member, embed=dm_embed, view=dm_view)
-        dm_sent = bool(dm_ok)
-
-        # Execute ban
-        ban_reason = f"{reason or 'No reason provided'} — softbanned by {interaction.user}"
-        ok_ban, ban_res = await safe_ban(interaction.guild, member, reason=ban_reason, delete_message_days=delete_days)
-        if not ok_ban:
-            await interaction.followup.send(embed=embed_base(title="❌ Softban Failed", description=f"Failed to ban: {ban_res}", color=discord.Color.red()), ephemeral=True)
-            await self._mod_log(interaction.guild, f"Softban failed (ban) for {member} by {interaction.user}: {ban_res}")
-            return
-        # attempt unban (retry a couple times)
-        unban_err = None
-        for attempt in range(3):
-            await asyncio.sleep(0.6 * (attempt + 1))  # slight backoff
-            obj = discord.Object(id=member.id)
-            ok_unban, unban_res = await safe_unban(interaction.guild, obj, reason=f"Softban automatic unban — requested by {interaction.user}")
-            if ok_unban:
-                unban_err = None
-                break
-            else:
-                unban_err = unban_res
-                LOG.warning("Softban unban attempt %s failed: %s", attempt + 1, unban_res)
-        # record softban audit
-        sb_id = f"softban-{interaction.guild.id}-{member.id}-{int(datetime.utcnow().timestamp())}"
-        try:
-            await db.execute("INSERT INTO softbans (id, guild_id, user_id, moderator_id, reason, delete_days, performed_at, dm_sent, dm_error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                             (sb_id, interaction.guild.id, member.id, interaction.user.id, reason or "", delete_days, utcnow().isoformat(), 1 if dm_sent else 0, None if dm_sent else str(dm_res)))
-        except Exception:
-            LOG.exception("Failed to persist softban audit")
-
-        # result embed
-        out = embed_base(title="✅ Softban Completed", description=f"{member.mention} was softbanned. Messages up to {delete_days} day(s) removed.", color=discord.Color.orange())
-        out.add_field(name="Reason", value=reason or "No reason provided", inline=False)
-        out.add_field(name="DM Sent", value="✅" if dm_sent else f"❌ ({str(dm_res)})", inline=True)
-        if unban_err:
-            out.add_field(name="Unban", value=f"⚠️ Unban failed: {unban_err}. User may remain banned — please check manually.", inline=False)
-        await interaction.followup.send(embed=out, ephemeral=True)
-        await self._mod_log(interaction.guild, f"Softban by {interaction.user} on {member}. Reason: {reason or 'No reason provided'}. Deleted {delete_days} day(s) messages.")
-
-    # -------------------------
-    # Appeals & Config commands
-    # -------------------------
-    @app_commands.command(name="setappealschannel", description="Set the appeals channel for this server (staff only).")
-    @app_commands.check(lambda i: is_staff_member(i.user if isinstance(i.user, discord.Member) else discord.Object(id=0)))
-    async def setappealschannel(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        await self._set_guild_config(interaction.guild, "appeals_channel_id", channel.id)
-        await interaction.followup.send(embed=embed_base(title="✅ Appeals Channel Set", description=f"Appeals channel set to {channel.mention}"), ephemeral=True)
-
-    @app_commands.command(name="setmodlog", description="Set the mod-log channel for this server (staff only).")
-    @app_commands.check(lambda i: is_staff_member(i.user if isinstance(i.user, discord.Member) else discord.Object(id=0)))
-    async def setmodlog(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        await self._set_guild_config(interaction.guild, "mod_log_channel_id", channel.id)
-        await interaction.followup.send(embed=embed_base(title="✅ Mod-Log Channel Set", description=f"Mod-log set to {channel.mention}"), ephemeral=True)
-
-    @app_commands.command(name="showconfig", description="Show moderation config for this server.")
-    @app_commands.check(lambda i: is_staff_member(i.user if isinstance(i.user, discord.Member) else discord.Object(id=0)))
-    async def showconfig(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        cfg = await self._get_guild_config(interaction.guild)
-        emb = embed_base(title=f"Moderation Config — {interaction.guild.name}", color=ROYAL_BLUE)
-        emb.add_field(name="Appeals Channel ID", value=str(cfg.get("appeals_channel_id") or "Not set"), inline=False)
-        emb.add_field(name="Mod-Log Channel ID", value=str(cfg.get("mod_log_channel_id") or "Not set"), inline=False)
-        await interaction.followup.send(embed=emb, ephemeral=True)
-
-    @app_commands.command(name="appeals", description="List recent appeals (staff only).")
-    @app_commands.check(lambda i: is_staff_member(i.user if isinstance(i.user, discord.Member) else discord.Object(id=0)))
-    async def appeals(self, interaction: discord.Interaction, limit: Optional[int] = 10):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        rows = await db.fetchall("SELECT id, user_id, appeal_text, status, submitted_at FROM appeals WHERE guild_id = ? ORDER BY submitted_at DESC LIMIT ?",
-                                 (interaction.guild.id, limit))
-        if not rows:
-            return await interaction.followup.send(embed=embed_base(title="Appeals", description="No appeals found."), ephemeral=True)
-        emb = embed_base(title=f"Recent Appeals ({len(rows)})", color=ROYAL_BLUE)
-        for r in rows:
-            txt = r["appeal_text"]
-            if len(txt) > 200:
-                txt = txt[:197] + "..."
-            emb.add_field(name=f"ID: {r['id']}", value=f"{txt}\nFrom: <@{r['user_id']}> • Status: {r['status']}", inline=False)
-        await interaction.followup.send(embed=emb, ephemeral=True)
-
-    @app_commands.command(name="export", description="Export moderation DB tables as a file to your DM (staff only).")
-    @app_commands.check(lambda i: is_staff_member(i.user if isinstance(i.user, discord.Member) else discord.Object(id=0)))
-    async def export(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        # dump the sqlite file itself
-        try:
-            if not os.path.exists(DB_PATH):
-                return await interaction.followup.send("No database file to export.", ephemeral=True)
-            await interaction.followup.send("Exporting DB...", ephemeral=True)
-            dm = await interaction.user.create_dm()
-            await dm.send(file=discord.File(DB_PATH, filename=os.path.basename(DB_PATH)))
-            await interaction.followup.send("Database sent to your DMs.", ephemeral=True)
-        except Exception:
-            LOG.exception("Export failed")
-            await interaction.followup.send("Failed to send DB via DM.", ephemeral=True)
-
-    @app_commands.command(name="botperms", description="Show missing bot permissions in this guild/channel.")
-    @app_commands.describe(channel="Optional channel to check (defaults to current channel)")
-    async def botperms(self, interaction: discord.Interaction, channel: Optional[discord.TextChannel] = None):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        if not interaction.guild:
-            return await interaction.followup.send("Use in a server.", ephemeral=True)
-        ch = channel or interaction.channel
-        me = interaction.guild.me
-        if not me:
-            return await interaction.followup.send("Bot not fully available in this guild.", ephemeral=True)
-        perms = ch.permissions_for(me)
-        missing = [p for p, v in perms if not v] if isinstance(perms, dict) else []
-        # discord.Permissions object isn't a dict; we'll inspect important perms
-        needed = ["ban_members", "kick_members", "manage_roles", "manage_channels", "send_messages", "read_messages", "read_message_history", "manage_messages"]
-        missing_list = []
-        for n in needed:
-            if not getattr(perms, n, False):
-                missing_list.append(n)
-        emb = embed_base(title="🔎 Bot Permission Check", color=ROYAL_BLUE)
-        if missing_list:
-            emb.description = f"Missing permissions in {ch.mention}:"
-            emb.add_field(name="Missing", value=", ".join(missing_list), inline=False)
-        else:
-            emb.description = f"Bot has required permissions in {ch.mention}."
-        await interaction.followup.send(embed=emb, ephemeral=True)
-
-    # -------------------------
-    # Error handling
-    # -------------------------
-    @commands.Cog.listener()
-    async def on_app_command_error(self, interaction: discord.Interaction, error: Exception):
-        if isinstance(error, app_commands.AppCommandError):
-            try:
-                await interaction.response.send_message(str(error), ephemeral=True)
-            except Exception:
-                LOG.exception("Failed to send app command error message")
-        else:
-            LOG.exception("Unhandled app command error: %s", error)
-            try:
-                await interaction.response.send_message("An unexpected error occurred. Check logs.", ephemeral=True)
-            except Exception:
-                pass
-
-# -------------------------
-# Cog setup
-# -------------------------
-async def setup(bot: commands.Bot):
-    cog = BanCog(bot)
+async def setup(bot: commands.Bot, *, config: Optional[Dict[str, Any]] = None):
+    # Proper async setup for this cog. Do NOT attempt to load extensions here.
+    cog = BanCog(bot, config=(config or {}))
     await bot.add_cog(cog)
