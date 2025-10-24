@@ -711,6 +711,22 @@ class PlannedFeatures(commands.Cog):
     async def planned(self, interaction: discord.Interaction):
         """Display planned features"""
         try:
+            # Restrict viewing planned features to bot moderators only
+            try:
+                from database import is_user_bot_moderator
+                if not await is_user_bot_moderator(interaction.user):
+                    await interaction.response.send_message(
+                        "❌ **Access Denied**\n\nOnly bot moderators can view planned features.",
+                        ephemeral=True
+                    )
+                    return
+            except Exception:
+                # If the bot-moderator check fails for any reason, deny access conservatively
+                await interaction.response.send_message(
+                    "❌ **Access Denied**\n\nOnly bot moderators can view planned features.",
+                    ephemeral=True
+                )
+                return
             # Defer response first to prevent timeout
             await interaction.response.defer()
             
