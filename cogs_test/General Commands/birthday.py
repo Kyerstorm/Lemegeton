@@ -567,8 +567,6 @@ class AdminDashboardView(discord.ui.View):
 
     @discord.ui.button(label="Set Role", style=discord.ButtonStyle.secondary, custom_id="bd_set_role")
     async def set_role_button(self, button:discord.ui.Button, interaction:discord.Interaction):
-        class RoleModal(discord.ui.Modal, title="Set mention role")
-            # grammar: create role input
         try:
             # create modal dynamically (python <3.11 safety)
             class RoleModal(discord.ui.Modal, title="Set mention role"):
