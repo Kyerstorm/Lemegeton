@@ -353,6 +353,7 @@ This project is licensed under the MIT License - see the [LICENSE](docs/LICENSE)
 
 ---
 
-Made with ❤️ for the anime community by [Kyerstorm](https://github.com/Kyerstorm)
+Made with ❤️ for the anime community by [Kyerstorm](https://github.com/Kyerstorm) & [Vireon](https://github.com/VireonNoctis)
 
 **Deploy once, use everywhere!** 🚀
+
