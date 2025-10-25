@@ -107,7 +107,7 @@ def log_clear_action(
         conn.commit()
         conn.close()
     except Exception:
-        # best-effort logging
+        # best-effort logging; don't raise
         pass
 
 
@@ -131,9 +131,9 @@ def bot_can_clear(guild: discord.Guild, channel: discord.TextChannel) -> Tuple[b
     """
     Check that bot has permission to manage messages in the channel.
     """
-    bot_member = guild.me
+    bot_member = guild.get_member(guild.me.id) if guild.me else None
     try:
-        perms = channel.permissions_for(bot_member)
+        perms = channel.permissions_for(bot_member or guild.get_member(guild.owner_id))
         if not perms.manage_messages:
             return False, "Bot requires Manage Messages permission in that channel."
         if not perms.read_message_history or not perms.read_messages:
@@ -161,13 +161,25 @@ class ConfirmView(discord.ui.View):
     @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.value = True
-        await interaction.response.edit_message(content="Confirmed — processing...", view=None)
+        try:
+            await interaction.response.edit_message(content="Confirmed — processing...", view=None)
+        except Exception:
+            try:
+                await interaction.followup.send("Confirmed — processing...", ephemeral=True)
+            except Exception:
+                pass
         self.stop()
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.value = False
-        await interaction.response.edit_message(content="Cancelled — no changes made.", view=None)
+        try:
+            await interaction.response.edit_message(content="Cancelled — no changes made.", view=None)
+        except Exception:
+            try:
+                await interaction.followup.send("Cancelled — no changes made.", ephemeral=True)
+            except Exception:
+                pass
         self.stop()
 
 
@@ -194,45 +206,41 @@ async def fetch_messages_for_deletion(channel: discord.TextChannel, amount: int,
     Note: This will fetch up to amount*3 messages to find the requested number from a user.
     """
     messages_to_delete: List[discord.Message] = []
-    limit_per_fetch = 100  # discord supports up to 100 per request
     last_message = None
-    remaining = amount
-
-    # We'll loop until we either find 'amount' matches or we've exhausted reasonable history
     attempts = 0
-    max_attempts = 50  # safety guard; prevent infinite loops
+    max_attempts = 50  # safety guard
+
     while len(messages_to_delete) < amount and attempts < max_attempts:
         attempts += 1
         fetch_limit = min(100, (amount - len(messages_to_delete)) * 3 + 20)
-        # if last_message is None, fetch newest messages, otherwise fetch before last_message
         try:
+            # Build history iterator; pass `before=last_message` only when last_message is set
             if last_message:
-                batch = await channel.history(limit=fetch_limit, before=last_message, oldest_first=False).flatten()
+                history_iter = channel.history(limit=fetch_limit, before=last_message, oldest_first=False)
             else:
-                batch = await channel.history(limit=fetch_limit, oldest_first=False).flatten()
+                history_iter = channel.history(limit=fetch_limit, oldest_first=False)
+            batch = []
+            async for m in history_iter:
+                batch.append(m)
         except Exception:
-            # fallback: return what we have so far
+            # if we can't fetch, break and return what we have
             break
 
         if not batch:
             break
 
         for msg in batch:
-            # skip pinned messages if requested
             if skip_pinned and getattr(msg, "pinned", False):
                 continue
-            # If filtering by user, only add messages authored by that user
-            if user:
-                if msg.author.id != user.id:
-                    continue
-            # don't add messages older than what we can bulk delete here; we still include them (we'll delete individually later)
+            if user and msg.author.id != user.id:
+                continue
             messages_to_delete.append(msg)
             if len(messages_to_delete) >= amount:
                 break
 
-        # prepare for next batch
-        last_message = batch[-1]
-        # small delay to be polite
+        # prepare for next batch - set last_message to the oldest message we fetched
+        last_message = batch[-1] if batch else None
+        # small delay to be polite with rate limits
         await asyncio.sleep(0.12)
 
     return messages_to_delete[:amount]
@@ -250,13 +258,11 @@ async def delete_messages_bulk(channel: discord.TextChannel, messages: List[disc
     if not messages:
         return 0, []
 
-    # separate by age
     now = datetime.utcnow().replace(tzinfo=timezone.utc)
     bulk_group: List[discord.Message] = []
     older_group: List[discord.Message] = []
 
     for m in messages:
-        # ensure timezone-aware
         created = m.created_at
         if created.tzinfo is None:
             created = created.replace(tzinfo=timezone.utc)
@@ -267,46 +273,36 @@ async def delete_messages_bulk(channel: discord.TextChannel, messages: List[disc
             older_group.append(m)
 
     # Bulk delete younger messages in chunks of up to 100
-    try:
-        if bulk_group:
-            # chunk into 100
-            chunks = [bulk_group[i:i + 100] for i in range(0, len(bulk_group), 100)]
-            for chunk in chunks:
-                try:
-                    # discord.py TextChannel.purge uses bulk delete under the hood
-                    ids = [m.id for m in chunk]
-                    await channel.delete_messages(chunk)  # this uses bulk API; alias of purge in some forks; keep try/except
+    if bulk_group:
+        chunks = [bulk_group[i:i + 100] for i in range(0, len(bulk_group), 100)]
+        for chunk in chunks:
+            ids = [m.id for m in chunk]
+            # Preferred method: delete_messages (bulk)
+            try:
+                if hasattr(channel, "delete_messages"):
+                    await channel.delete_messages(chunk)  # library versions vary; many accept list of messages
                     deleted_count += len(chunk)
-                except AttributeError:
-                    # fallback for library variations
-                    try:
-                        await channel.purge(limit=len(chunk), check=lambda x: x.id in ids, bulk=True)
-                        deleted_count += len(chunk)
-                    except Exception as e:
-                        # individual attempt if bulk fails
-                        for m in chunk:
-                            try:
-                                await m.delete()
-                                deleted_count += 1
-                                await asyncio.sleep(batch_delay)
-                            except Exception as ee:
-                                failures.append((m.id, f"Individual delete failed: {ee}"))
-                except Exception as e:
-                    # Bulk failed for this chunk — fallback to individual deletes for chunk
+                else:
+                    # fallback to purge if delete_messages not available
+                    await channel.purge(limit=None, check=lambda m, ids=ids: m.id in ids)
+                    deleted_count += len(chunk)
+            except Exception:
+                # fallback: try purge with check
+                try:
+                    await channel.purge(limit=None, check=lambda m, ids=ids: m.id in ids)
+                    deleted_count += len(chunk)
+                except Exception:
+                    # final fallback: delete individually
                     for m in chunk:
                         try:
                             await m.delete()
                             deleted_count += 1
                             await asyncio.sleep(batch_delay)
-                        except Exception as ee:
-                            failures.append((m.id, f"Individual delete failed: {ee}"))
-                # gentle pause between chunks
-                await asyncio.sleep(batch_delay)
-    except Exception:
-        # ignore and continue to older_group
-        pass
+                        except Exception as e:
+                            failures.append((m.id, f"Individual delete failed: {e}"))
+            await asyncio.sleep(batch_delay)
 
-    # Delete older messages individually
+    # Delete older messages individually (can't bulk delete)
     for m in older_group:
         try:
             await m.delete()
@@ -363,7 +359,12 @@ class ClearCog(commands.Cog):
         - user: optional discord.User
         - reason: optional string
         """
-        await interaction.response.defer(thinking=True)
+        # Defer quickly (thinking indicator). We will use followups for ephemeral messages.
+        try:
+            await interaction.response.defer(thinking=True)
+        except Exception:
+            # If response was already used, ignore - we'll use followup below
+            pass
 
         # Basic validations and environment checks
         if not interaction.guild:
@@ -407,7 +408,7 @@ class ClearCog(commands.Cog):
         # If preview_count is zero, nothing to delete
         if preview_count == 0:
             emb = create_darlux_embed(title="🖤 Clear — Nothing Found", description="No eligible messages found to delete (perhaps pinned messages or none from that user).", accent="velvet_purple")
-            emb.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url)
+            emb.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url if interaction.user.display_avatar else None)
             await interaction.followup.send(embed=emb, ephemeral=True)
             # log zero-action
             log_clear_action(interaction.guild, channel, interaction.user, user, amount, 0, reason, "no_messages", details="No eligible messages found")
@@ -421,26 +422,33 @@ class ClearCog(commands.Cog):
         emb_preview.add_field(name="Target User", value=f"{user}" if user else "Any", inline=True)
         emb_preview.add_field(name="Skip pinned", value=str(self.skip_pinned), inline=True)
         emb_preview.add_field(name="Reason", value=reason or "No reason provided", inline=False)
-        emb_preview.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url)
+        emb_preview.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url if interaction.user.display_avatar else None)
 
         # If above threshold, require confirmation
         if preview_count >= self.large_confirm_threshold:
             confirm_view = ConfirmView(interaction.user, timeout=45)
-            await interaction.followup.send(embed=emb_preview, view=confirm_view, ephemeral=True)
+            try:
+                await interaction.followup.send(embed=emb_preview, view=confirm_view, ephemeral=True)
+            except Exception:
+                # fallback
+                await interaction.followup.send(embed=emb_preview, ephemeral=True)
             await confirm_view.wait()
             if confirm_view.value is not True:
                 await interaction.followup.send("Clear cancelled.", ephemeral=True)
                 return
             # If confirmed, proceed to deletion
             processing_emb = create_darlux_embed(title="🖤 Clear — In Progress", description=f"Deleting {preview_count} messages...", accent="velvet_purple")
-            processing_emb.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url)
+            processing_emb.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url if interaction.user.display_avatar else None)
             prog_view = ProgressView()
             prog_msg = await interaction.followup.send(embed=processing_emb, view=prog_view)
         else:
             # Small confirmations for small deletes - still show ephemeral info and then proceed
-            await interaction.followup.send(embed=emb_preview, ephemeral=True)
+            try:
+                await interaction.followup.send(embed=emb_preview, ephemeral=True)
+            except Exception:
+                pass
             processing_emb = create_darlux_embed(title="🖤 Clear — In Progress", description=f"Deleting {preview_count} messages...", accent="velvet_purple")
-            processing_emb.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url)
+            processing_emb.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url if interaction.user.display_avatar else None)
             prog_view = ProgressView()
             prog_msg = await interaction.followup.send(embed=processing_emb, view=prog_view)
 
@@ -458,20 +466,23 @@ class ClearCog(commands.Cog):
             # If there are failures, include a sample list (ephemeral)
             if failures:
                 sample = "\n".join([f"{fid} — {msg}" for fid, msg in failures[:12]])
-                # Post a follow-up ephemeral with sample failures
                 details_emb = create_darlux_embed(title="🖤 Clear — Failures (sample)", description=sample or "No details", accent="velvet_purple")
-                details_emb.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url)
+                details_emb.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url if interaction.user.display_avatar else None)
                 await interaction.followup.send(embed=details_emb, ephemeral=True)
 
-            final_emb.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url)
-            await prog_msg.edit(embed=final_emb, view=None)
+            try:
+                await prog_msg.edit(embed=final_emb, view=None)
+            except Exception:
+                # fallback: send followup
+                await interaction.followup.send(embed=final_emb, ephemeral=True)
+
             # Logging
             outcome = "partial_failures" if failures else "success"
             details_text = f"failures:{len(failures)}" if failures else None
             log_clear_action(interaction.guild, channel, interaction.user, user, amount, deleted_count, reason, outcome, details=details_text)
         except Exception as e:
             err_emb = create_darlux_embed(title="🖤 Clear — Failed", description=f"An error occurred: {e}", accent="velvet_purple")
-            err_emb.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url)
+            err_emb.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url if interaction.user.display_avatar else None)
             try:
                 await prog_msg.edit(embed=err_emb, view=None)
             except Exception:
@@ -484,7 +495,11 @@ class ClearCog(commands.Cog):
     @app_commands.command(name="clear_preview", description="Preview how many messages would be removed by /clear (ephemeral).")
     @app_commands.describe(amount="Number of messages to consider", user="Optional user filter")
     async def app_clear_preview(self, interaction: discord.Interaction, amount: int, user: Optional[discord.User] = None):
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        try:
+            await interaction.response.defer(thinking=True)
+        except Exception:
+            pass
+
         if not interaction.guild:
             await interaction.followup.send("Use this in a server.", ephemeral=True)
             return
@@ -514,8 +529,9 @@ class ClearCog(commands.Cog):
         emb.add_field(name="Requested", value=str(amount), inline=True)
         emb.add_field(name="To delete", value=str(len(preview_list)), inline=True)
         emb.add_field(name="Target User", value=f"{user}" if user else "Any", inline=True)
-        emb.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url)
+        emb.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url if interaction.user.display_avatar else None)
         await interaction.followup.send(embed=emb, ephemeral=True)
+
 
 # ---------------------------
 # Setup
