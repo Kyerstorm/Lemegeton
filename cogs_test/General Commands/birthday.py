@@ -1,10 +1,10 @@
 # birthday.py
 # Multi-guild Birthday Cog (single-file)
 # - /birthday group: set/view/remove/list
-# - /birthday admin (dashboard): interactive UI using a dropdown select with emojis & descriptions
+# - /birthday admin (dashboard): single dropdown select; live-updating embed
 # - SQLite backend
-# - ~30 randomized card styles using PIL (fallback to ASCII)
-# - Many aesthetics and features
+# - Uses a provided PNG card (downloaded & cached) instead of on-the-fly image generation
+# - 50 randomized generous message templates for previews/announcements
 
 import discord
 from discord.ext import commands, tasks
@@ -13,23 +13,15 @@ import sqlite3
 import datetime
 import asyncio
 import random
-import math
 import os
 import io
 import re
 import typing
 import logging
-from collections import defaultdict
-
-# Optional Pillow (PIL) support
-try:
-    from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps, ImageEnhance
-    PIL_AVAILABLE = True
-except Exception:
-    PIL_AVAILABLE = False
+import aiohttp
 
 # ------------------------
-# Logging
+# Config & logging
 # ------------------------
 logger = logging.getLogger("birthday_cog")
 logger.setLevel(logging.INFO)
@@ -37,26 +29,69 @@ handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s: %(message)s"))
 logger.addHandler(handler)
 
-# ------------------------
-# Config
-# ------------------------
 DB_PATH = os.getenv("BIRTHDAY_DB_PATH", "birthdays.db")
 CHECK_INTERVAL_SECONDS = 60
 DEFAULT_TZ_OFFSET = 0.0
 
-CELEB_EMOJIS = ["🎉","🎂","🥳","🎈","🍰","🧁","✨","🌟","🎁","💫"]
-BORDER_EMOJIS = ["🌸","🌼","🌻","🌺","🌷","❇️","💮","🎊"]
-ASCII_CARD = r"""
-  _____  _   _  _____  ____   ____   _   _  __   __
- |  __ \| \ | |/ ____|/ __ \ / __ \ | \ | | \ \ / /
- | |__) |  \| | |  __| |  | | |  | ||  \| |  \ V /
- |  ___/| . ` | | |_ | |  | | |  | || . ` |   > <
- | |    | |\  | |__| | |__| | |__| || |\  |  / . \
- |_|    |_| \_|\_____| \____/ \____/ |_| \_| /_/ \_\
-"""
+CARD_URL = "https://i.postimg.cc/rFtH6FM0/Pink-Watercolor-Floral-Happy-Birthday-Greeting-Card.png"
+CARD_FILENAME = "birthday_card.png"
+
+CELEB_EMOJIS = ["🎉", "🎂", "🥳", "🎈", "🍰", "🧁", "✨", "🌟", "🎁", "💫"]
+PINK_COLOR = discord.Color.from_rgb(240, 182, 210)  # soft pink to match the card
+
+# 50 generous/random templates (short examples; you can edit them)
+MESSAGE_TEMPLATES = [
+    "Wishing you a day filled with laughter and cake — happiest birthday!",
+    "Another year of greatness. Celebrate like a legend!",
+    "Warm wishes and huge hugs — may this year be your best yet.",
+    "Turn the music up — today’s about you. Enjoy every moment!",
+    "Candles, wishes, and all the good vibes. Happy birthday!",
+    "To many more wins, laughs, and late-night snacks. Have a blast!",
+    "You deserve every slice of joy today. Happy birthday!",
+    "May your day be bright, sweet, and unforgettable.",
+    "Here’s to you — another trip around the sun. Shine on!",
+    "Big cheers for you today — keep being incredible.",
+    "Hope your birthday sparkles as much as you do!",
+    "From small joys to big adventures — may this year bring both.",
+    "Celebrate wildly — the world’s better with you in it.",
+    "Warm cake, warm hearts, and a warm day — happy birthday!",
+    "Make a wish, then make it happen. Happy birthday!",
+    "You’re a masterpiece — enjoy your special day.",
+    "Blessings, cake, and hilarious memories — have them all.",
+    "Keep slaying — this year is yours.",
+    "Birthday hugs and a little chaos — enjoy it all.",
+    "Wishing you sunshine, smiles, and a table full of cake.",
+    "Another year bolder, wiser, and even more awesome.",
+    "May your day be as bright and lovely as you are.",
+    "Celebrate loud, rest later — happy birthday!",
+    "A toast to you: health, joy, and ridiculous fun.",
+    "Dance until the candles melt. Happy birthday!",
+    "Good vibes only today — you earned them.",
+    "Sweets, friends, and mischief. Enjoy every bit.",
+    "Here’s to new dreams and fresh starts — happiest birthday.",
+    "Wrapped in love and sprinkled with confetti — cheers!",
+    "Have cake, will party. Make this day legendary.",
+    "May surprises be kind and memories plentiful.",
+    "You’re the main character today — act accordingly.",
+    "So much love for everything you are. Happy birthday!",
+    "May your inbox be full of adoration and gifts.",
+    "Birthday energy: maximum. Have the best one yet.",
+    "Wishing you small moments of peace and huge moments of joy.",
+    "Another year, another reason to celebrate you.",
+    "Live it up, laugh hard, and love loudly today.",
+    "May your cup overflow with good things this year.",
+    "Rise, shine, and eat cake. Repeat.",
+    "Today’s forecast: 100% celebration with a chance of cake.",
+    "You make the world sweeter — enjoy your day.",
+    "Keep that sparkle — happy birthday, superstar!",
+    "May this year bring new chances and wicked fun.",
+    "Hug big, laugh loud, love always — happy birthday!",
+    "You are cherished. Celebrate like royalty today.",
+    "All the best things to you today and always."
+]
 
 # ------------------------
-# Utility functions
+# Utilities
 # ------------------------
 def ensure_dir(path):
     d = os.path.dirname(path)
@@ -66,8 +101,12 @@ def ensure_dir(path):
 def now_utc():
     return datetime.datetime.utcnow()
 
-def today_with_offset(offset_hours: float):
-    return (now_utc() + datetime.timedelta(hours=offset_hours)).date()
+def pretty_date(month: int, day: int):
+    try:
+        d = datetime.date(2000, month, day)
+        return d.strftime("%B %d")
+    except Exception:
+        return f"{month}/{day}"
 
 def parse_tz_offset(s: str) -> float:
     s = str(s).strip().lower().replace("utc", "").strip()
@@ -81,40 +120,21 @@ def parse_tz_offset(s: str) -> float:
     hours = int(m.group(2) or 0)
     mins = int(m.group(3) or 0)
     frac = float("0." + m.group(4)) if m.group(4) else 0.0
-    return sign * (hours + mins/60 + frac)
+    return sign * (hours + mins / 60 + frac)
 
-def pretty_date(month:int, day:int):
-    try:
-        d = datetime.date(2000, month, day)
-        return d.strftime("%B %d")
-    except Exception:
-        return f"{month}/{day}"
-
-def humanize_age(birth_year:int, reference:datetime.date):
-    try:
-        age = reference.year - int(birth_year)
-        return age
-    except Exception:
-        return None
-
-# Date parsing tolerant
+# Date parsing tolerant (keeps earlier logic)
 DATE_REGEXES = [
     (re.compile(r"^(?P<y>\d{4})[-/](?P<m>\d{1,2})[-/](?P<d>\d{1,2})$"), "ymd"),
     (re.compile(r"^(?P<m>\d{1,2})[/-](?P<d>\d{1,2})[/-](?P<y>\d{2,4})$"), "mdy"),
     (re.compile(r"^(?P<d>\d{1,2})[/-](?P<m>\d{1,2})[/-](?P<y>\d{2,4})$"), "dmy"),
     (re.compile(r"^(?P<mn>[A-Za-z]+)\s+(?P<d>\d{1,2})(?:,?\s*(?P<y>\d{4}))?$"), "mn_d_y"),
 ]
-MONTHS = {k:i for i,k in enumerate(["","January","February","March","April","May","June","July","August","September","October","November","December"])}
+MONTHS = {k: i for i, k in enumerate(["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"])}
 
 def parse_date_fuzzy(s: str) -> typing.Optional[datetime.date]:
-    s0 = s.strip()
+    s0 = (s or "").strip()
     if not s0:
         return None
-    try:
-        dt = datetime.datetime.fromisoformat(s0)
-        return dt.date()
-    except Exception:
-        pass
     for pat, kind in DATE_REGEXES:
         m = pat.match(s0)
         if not m:
@@ -123,7 +143,7 @@ def parse_date_fuzzy(s: str) -> typing.Optional[datetime.date]:
         try:
             if kind == "ymd":
                 return datetime.date(int(gd["y"]), int(gd["m"]), int(gd["d"]))
-            if kind in ("mdy","dmy"):
+            if kind in ("mdy", "dmy"):
                 y = int(gd.get("y") or 1900)
                 if y < 100:
                     y = 2000 + y if y < 70 else 1900 + y
@@ -135,7 +155,7 @@ def parse_date_fuzzy(s: str) -> typing.Optional[datetime.date]:
             if kind == "mn_d_y":
                 mn = gd.get("mn").lower()
                 mth = None
-                for i in range(1,13):
+                for i in range(1, 13):
                     if MONTHS[i].lower().startswith(mn[:3]):
                         mth = i
                         break
@@ -148,9 +168,10 @@ def parse_date_fuzzy(s: str) -> typing.Optional[datetime.date]:
                 return datetime.date(y, mth, d)
         except Exception:
             continue
+    # fallback attempt via dateutil if available
     try:
         from dateutil import parser as _p
-        dt = _p.parse(s0, default=datetime.datetime(2000,1,1))
+        dt = _p.parse(s0, default=datetime.datetime(2000, 1, 1))
         return dt.date()
     except Exception:
         pass
@@ -168,8 +189,8 @@ class BirthdayDB:
         self._init()
 
     def _init(self):
-        c = self.conn.cursor()
-        c.execute("""
+        cur = self.conn.cursor()
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS birthdays (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 guild_id INTEGER NOT NULL,
@@ -181,7 +202,7 @@ class BirthdayDB:
                 UNIQUE(guild_id, user_id)
             );
         """)
-        c.execute("""
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS guild_config (
                 guild_id INTEGER PRIMARY KEY,
                 channel_id INTEGER,
@@ -197,39 +218,39 @@ class BirthdayDB:
         self.conn.commit()
 
     # birthdays
-    def upsert(self, guild_id:int, user_id:int, month:int, day:int, year:typing.Optional[int]=None):
+    def upsert(self, guild_id: int, user_id: int, month: int, day: int, year: typing.Optional[int] = None):
         now = datetime.datetime.utcnow().isoformat()
         cur = self.conn.cursor()
         cur.execute("""INSERT INTO birthdays (guild_id,user_id,month,day,year,created_at)
             VALUES (?,?,?,?,?,?)
             ON CONFLICT(guild_id,user_id) DO UPDATE SET month=excluded.month,day=excluded.day,year=excluded.year,created_at=excluded.created_at
-        """, (guild_id,user_id,month,day,year,now))
+        """, (guild_id, user_id, month, day, year, now))
         self.conn.commit()
 
-    def remove(self, guild_id:int, user_id:int):
+    def remove(self, guild_id: int, user_id: int):
         cur = self.conn.cursor()
-        cur.execute("DELETE FROM birthdays WHERE guild_id=? AND user_id=?", (guild_id,user_id))
+        cur.execute("DELETE FROM birthdays WHERE guild_id=? AND user_id=?", (guild_id, user_id))
         self.conn.commit()
         return cur.rowcount
 
-    def get(self, guild_id:int, user_id:int):
+    def get(self, guild_id: int, user_id: int):
         cur = self.conn.cursor()
-        cur.execute("SELECT * FROM birthdays WHERE guild_id=? AND user_id=?", (guild_id,user_id))
+        cur.execute("SELECT * FROM birthdays WHERE guild_id=? AND user_id=?", (guild_id, user_id))
         r = cur.fetchone()
         return dict(r) if r else None
 
-    def by_month_day(self, guild_id:int, month:int, day:int):
+    def by_month_day(self, guild_id: int, month: int, day: int):
         cur = self.conn.cursor()
-        cur.execute("SELECT * FROM birthdays WHERE guild_id=? AND month=? AND day=?", (guild_id,month,day))
+        cur.execute("SELECT * FROM birthdays WHERE guild_id=? AND month=? AND day=?", (guild_id, month, day))
         return [dict(x) for x in cur.fetchall()]
 
-    def list_for_guild(self, guild_id:int):
+    def list_for_guild(self, guild_id: int):
         cur = self.conn.cursor()
         cur.execute("SELECT * FROM birthdays WHERE guild_id=? ORDER BY month,day", (guild_id,))
         return [dict(x) for x in cur.fetchall()]
 
     # config
-    def set_config(self, guild_id:int, **kwargs):
+    def set_config(self, guild_id: int, **kwargs):
         existing = self.get_config(guild_id)
         cur = self.conn.cursor()
         if existing is None:
@@ -249,7 +270,7 @@ class BirthdayDB:
         else:
             parts = []
             vals = []
-            for k in ("channel_id","tz_offset","mention_mode","mention_role_id","enabled","template","check_hour","last_triggered"):
+            for k in ("channel_id", "tz_offset", "mention_mode", "mention_role_id", "enabled", "template", "check_hour", "last_triggered"):
                 if k in kwargs:
                     parts.append(f"{k}=?")
                     v = kwargs[k]
@@ -261,7 +282,7 @@ class BirthdayDB:
                 cur.execute("UPDATE guild_config SET " + ",".join(parts) + " WHERE guild_id=?", tuple(vals))
         self.conn.commit()
 
-    def get_config(self, guild_id:int):
+    def get_config(self, guild_id: int):
         cur = self.conn.cursor()
         cur.execute("SELECT * FROM guild_config WHERE guild_id=?", (guild_id,))
         r = cur.fetchone()
@@ -272,7 +293,7 @@ class BirthdayDB:
         cur.execute("SELECT * FROM guild_config")
         return [dict(x) for x in cur.fetchall()]
 
-    def set_last_triggered(self, guild_id:int, iso_str:str):
+    def set_last_triggered(self, guild_id: int, iso_str: str):
         self.set_config(guild_id, last_triggered=iso_str)
 
     def close(self):
@@ -282,209 +303,70 @@ class BirthdayDB:
             pass
 
 # ------------------------
-# Card generator: subset (kept small & stable)
+# Admin UI components (single select + live embed updates)
 # ------------------------
-def load_font_sz(size:int):
-    candidates = [
-        "arial.ttf", "Arial.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
-    ]
-    for p in candidates:
-        try:
-            return ImageFont.truetype(p, size)
-        except Exception:
-            continue
-    try:
-        return ImageFont.load_default()
-    except Exception:
-        return None
-
-def gradient_background(size, color1, color2, direction='vertical'):
-    w,h = size
-    base = Image.new('RGB', (w,h), color1)
-    top = Image.new('RGB', (w,h), color2)
-    mask = Image.new('L', (w,h))
-    mask_draw = ImageDraw.Draw(mask)
-    if direction == 'vertical':
-        for y in range(h):
-            mask_draw.line([(0,y),(w,y)], fill=int(255 * (y/h)))
-    else:
-        for x in range(w):
-            mask_draw.line([(x,0),(x,h)], fill=int(255 * (x/w)))
-    return Image.composite(top, base, mask)
-
-PALETTES = [
-    ("#ff9a9e","#fad0c4"),
-    ("#a18cd1","#fbc2eb"),
-    ("#fbc2eb","#a6c1ee"),
-    ("#84fab0","#8fd3f4"),
-    ("#f6d365","#fda085"),
-    ("#f093fb","#f5576c"),
-    ("#cfe9ff","#ffffff"),
-    ("#f3e7e9","#e3eeff"),
-    ("#e0c3fc","#8ec5fc"),
-    ("#ffecd2","#fcb69f")
-]
-
-def random_palette():
-    return random.choice(PALETTES)
-
-def style_confetti_card(username:str, subtitle:str, age:typing.Optional[int], size=(1200,675)):
-    w,h = size
-    pal = random_palette()
-    img = gradient_background((w,h), pal[0], pal[1])
-    draw = ImageDraw.Draw(img)
-    for _ in range(200):
-        x = random.randint(0,w)
-        y = random.randint(0,h)
-        r = random.randint(4,18)
-        col = tuple(random.randint(50,255) for _ in range(3))
-        draw.ellipse([x-r,y-r,x+r,y+r], fill=col, outline=None)
-    title_font = load_font_sz(64)
-    try:
-        draw.text((60, int(h*0.18)), f"Happy Birthday, {username}!", font=title_font, fill="white")
-    except Exception:
-        draw.text((60, int(h*0.18)), f"Happy Birthday, {username}!")
-    bio = io.BytesIO(); img.save(bio, format="PNG"); bio.seek(0); return bio.read()
-
-def style_simple(username, subtitle, age, size=(1200,675)):
-    w,h = size
-    pal = random_palette()
-    img = Image.new("RGB", (w,h), pal[0])
-    draw = ImageDraw.Draw(img)
-    tf = load_font_sz(64)
-    try:
-        draw.text((60,80), f"Happy Birthday, {username}!", font=tf, fill="white")
-    except Exception:
-        draw.text((60,80), f"Happy Birthday, {username}!")
-    bio = io.BytesIO(); img.save(bio,"PNG"); bio.seek(0); return bio.read()
-
-STYLE_FUNCTIONS = [style_confetti_card, style_simple]
-for i in range(12):
-    def gen(seed):
-        def inner(username, subtitle, age, size=(1200,675)):
-            random.seed(seed + (hash(username) & 0xFFFF))
-            pal = random_palette()
-            img = Image.new("RGB", size, pal[0])
-            draw = ImageDraw.Draw(img)
-            tf = load_font_sz(48)
-            try:
-                draw.text((60,80), f"Happy Birthday, {username}!", font=tf, fill="white")
-            except Exception:
-                draw.text((60,80), f"Happy Birthday, {username}!")
-            bio=io.BytesIO(); img.save(bio,"PNG"); bio.seek(0); return bio.read()
-        return inner
-    STYLE_FUNCTIONS.append(gen(i*7+3))
-
-TOTAL_STYLES = len(STYLE_FUNCTIONS)
-
-async def generate_card(username:str, subtitle:str="", age:typing.Optional[int]=None, members_for_collage:typing.List[discord.Member]=None) -> typing.Optional[bytes]:
-    if not PIL_AVAILABLE:
-        return None
-    idx = random.randrange(TOTAL_STYLES)
-    style_fn = STYLE_FUNCTIONS[idx]
-    try:
-        avatars_imgs = []
-        if members_for_collage:
-            for m in members_for_collage[:4]:
-                try:
-                    avatar = m.display_avatar
-                    data = await avatar.read()
-                    im = Image.open(io.BytesIO(data)).convert("RGBA")
-                    avatars_imgs.append(im)
-                except Exception:
-                    pass
-        result = style_fn(username, subtitle, age)
-        return result
-    except Exception as e:
-        logger.exception("Card style generation failed: %s", e)
-        return None
-
-# ------------------------
-# Admin dashboard as a single Select (dropdown)
-# ------------------------
-class AdminDashboardView(discord.ui.View):
-    def __init__(self, cog:"BirthdayCog", guild:discord.Guild, *, timeout: int = 600):
-        super().__init__(timeout=timeout)
-        self.cog = cog
-        self.guild = guild
-        # add the select to the view
-        options = [
-            discord.SelectOption(label="Set Channel", value="set_channel", description="Configure channel to send birthday announcements", emoji="📣"),
-            discord.SelectOption(label="Set Timezone", value="set_tz", description="Set timezone offset (e.g. +3, -04:30)", emoji="🌐"),
-            discord.SelectOption(label="Set Mention Mode", value="set_mention", description="Choose none / mention users / mention role", emoji="🔔"),
-            discord.SelectOption(label="Set Role", value="set_role", description="Choose role to mention when mention-mode=role", emoji="🛡️"),
-            discord.SelectOption(label="Set Template", value="set_template", description="Customize announcement message template", emoji="📝"),
-            discord.SelectOption(label="Toggle Enable/Disable", value="toggle_enabled", description="Enable or disable birthday announcements", emoji="⏯️"),
-            discord.SelectOption(label="Preview", value="preview", description="Send a preview DM of the announcement", emoji="👀"),
-            discord.SelectOption(label="Force Run Today", value="force_run", description="Force send today's announcements now", emoji="🚨"),
-            discord.SelectOption(label="Export CSV", value="export_csv", description="Export server birthdays as CSV (DM)", emoji="📤"),
-            discord.SelectOption(label="Import CSV", value="import_csv", description="Import birthdays via /birthday import_csv (use attachment)", emoji="📥"),
-            discord.SelectOption(label="Set Check Hour", value="set_check_hour", description="Set the local hour (0-23) to run checks, -1 = every minute", emoji="⏰"),
-        ]
-        self.add_item(AdminSelect(options=options, cog=cog, guild=guild))
-
-    async def interaction_check(self, interaction:discord.Interaction) -> bool:
-        if not interaction.user.guild_permissions.manage_guild:
-            await interaction.response.send_message("You need Manage Server to use this dashboard.", ephemeral=True)
-            return False
-        if interaction.guild.id != self.guild.id:
-            await interaction.response.send_message("This dashboard is for a different server.", ephemeral=True)
-            return False
-        return True
-
 class AdminSelect(discord.ui.Select):
-    def __init__(self, options, cog:"BirthdayCog", guild:discord.Guild):
+    def __init__(self, cog: "BirthdayCog", guild: discord.Guild):
+        options = [
+            discord.SelectOption(label="Set Channel", value="set_channel", description="Set channel to post birthday announcements", emoji="📣"),
+            discord.SelectOption(label="Set Timezone", value="set_tz", description="Set timezone offset like +3 or -04:30", emoji="🌐"),
+            discord.SelectOption(label="Set Mention Mode", value="set_mention", description="None / Mention users / Mention role", emoji="🔔"),
+            discord.SelectOption(label="Set Role", value="set_role", description="Role to ping when mention-mode=role", emoji="🛡️"),
+            discord.SelectOption(label="Set Template", value="set_template", description="Customize announcement message", emoji="📝"),
+            discord.SelectOption(label="Toggle Enable", value="toggle_enabled", description="Enable or disable announcements", emoji="⏯️"),
+            discord.SelectOption(label="Set Check Hour", value="set_check_hour", description="Set local hour 0-23 or -1 = every minute", emoji="⏰"),
+            discord.SelectOption(label="Preview", value="preview", description="Send a birthday preview DM", emoji="👀"),
+            discord.SelectOption(label="Force Run Today", value="force_run", description="Send today's announcements now", emoji="🚨"),
+            discord.SelectOption(label="Export CSV", value="export_csv", description="Export birthdays as CSV to your DMs", emoji="📤"),
+            discord.SelectOption(label="Import CSV Hint", value="import_csv", description="How to import birthdays via /birthday import_csv", emoji="📥"),
+        ]
         super().__init__(placeholder="Choose an admin action...", min_values=1, max_values=1, options=options)
         self.cog = cog
         self.guild = guild
 
-    async def callback(self, interaction:discord.Interaction):
-        # permission & guild sanity already checked in view, but double-check
+    async def callback(self, interaction: discord.Interaction):
         if not interaction.user.guild_permissions.manage_guild:
-            await interaction.response.send_message("Manage Server required.", ephemeral=True)
+            await interaction.response.send_message("Manage Server permission required.", ephemeral=True)
             return
-        value = self.values[0]
-        # dispatch to handlers
+        val = self.values[0]
         try:
-            if value == "set_channel":
-                await self._modal_set_channel(interaction)
-            elif value == "set_tz":
-                await self._modal_set_tz(interaction)
-            elif value == "set_mention":
-                await self._select_mention_mode(interaction)
-            elif value == "set_role":
-                await self._modal_set_role(interaction)
-            elif value == "set_template":
-                await self._modal_set_template(interaction)
-            elif value == "toggle_enabled":
+            if val == "set_channel":
+                await self._set_channel_modal(interaction)
+            elif val == "set_tz":
+                await self._set_tz_modal(interaction)
+            elif val == "set_mention":
+                await self._choose_mention_mode(interaction)
+            elif val == "set_role":
+                await self._set_role_modal(interaction)
+            elif val == "set_template":
+                await self._set_template_modal(interaction)
+            elif val == "toggle_enabled":
                 await self._toggle_enabled(interaction)
-            elif value == "preview":
+            elif val == "set_check_hour":
+                await self._set_check_hour_modal(interaction)
+            elif val == "preview":
                 await self._preview(interaction)
-            elif value == "force_run":
+            elif val == "force_run":
                 await self._force_run(interaction)
-            elif value == "export_csv":
+            elif val == "export_csv":
                 await self._export_csv(interaction)
-            elif value == "import_csv":
+            elif val == "import_csv":
                 await self._show_import_hint(interaction)
-            elif value == "set_check_hour":
-                await self._modal_set_check_hour(interaction)
             else:
-                await interaction.response.send_message("Unknown option.", ephemeral=True)
+                await interaction.response.send_message("Unknown action.", ephemeral=True)
         except Exception as e:
-            logger.exception("Admin select action failed: %s", e)
+            logger.exception("AdminSelect callback failed: %s", e)
             try:
-                await interaction.response.send_message("Action failed: " + str(e), ephemeral=True)
+                await interaction.response.send_message(f"Action failed: {e}", ephemeral=True)
             except Exception:
                 pass
 
-    # --- handlers (each opens a modal or runs an action) ---
-    async def _modal_set_channel(self, interaction:discord.Interaction):
+    # Modal & action implementations
+    async def _set_channel_modal(self, interaction: discord.Interaction):
         class ChannelModal(discord.ui.Modal, title="Set birthday channel"):
-            channel_input = discord.ui.TextInput(label="Channel (mention or ID or name)", placeholder="#birthdays or 123456789012345678", required=True, max_length=128)
-            async def on_submit(self_, modal_interaction:discord.Interaction):
-                raw = modal_interaction.channel_input.value.strip()
+            channel = discord.ui.TextInput(label="Channel", placeholder="#birthdays or 123456789012345678", required=True, max_length=128)
+            async def on_submit(self_, modal_interaction: discord.Interaction):
+                raw = modal_interaction.channel.value.strip()
                 ch = None
                 mm = re.match(r'^<#?(\d+)>?$', raw)
                 try:
@@ -503,40 +385,45 @@ class AdminSelect(discord.ui.Select):
                 except Exception:
                     ch = None
                 if not ch:
-                    await modal_interaction.response.send_message("Could not resolve channel. Make sure I can view it and you typed it correctly.", ephemeral=True)
+                    await modal_interaction.response.send_message("Could not resolve channel. Check the name/ID and that I can see it.", ephemeral=True)
                     return
                 self.cog.db.set_config(self.guild.id, channel_id=ch.id)
-                await modal_interaction.response.send_message(f"Birthday channel set to {ch.mention}.", ephemeral=True)
+                await modal_interaction.response.send_message(f"✅ Birthday channel set to {ch.mention}.", ephemeral=True)
+                # update the dashboard embed in-place
+                await update_dashboard_message(interaction, self.cog)
+
         await interaction.response.send_modal(ChannelModal())
 
-    async def _modal_set_tz(self, interaction:discord.Interaction):
-        class TZModal(discord.ui.Modal, title="Set timezone offset"):
-            tz_input = discord.ui.TextInput(label="Offset (e.g. +3, -04:30, 5.5)", placeholder="+3 or -04:00", required=True, max_length=16)
-            async def on_submit(self_, modal_interaction:discord.Interaction):
-                raw = modal_interaction.tz_input.value.strip()
+    async def _set_tz_modal(self, interaction: discord.Interaction):
+        class TZModal(discord.ui.Modal, title="Set timezone"):
+            tz = discord.ui.TextInput(label="Offset", placeholder="+3 or -04:30", required=True, max_length=16)
+            async def on_submit(self_, modal_interaction: discord.Interaction):
+                raw = modal_interaction.tz.value.strip()
                 parsed = parse_tz_offset(raw)
                 self.cog.db.set_config(self.guild.id, tz_offset=parsed)
-                await modal_interaction.response.send_message(f"Timezone set to UTC{parsed:+g}.", ephemeral=True)
+                await modal_interaction.response.send_message(f"✅ Timezone set to UTC{parsed:+g}.", ephemeral=True)
+                await update_dashboard_message(interaction, self.cog)
         await interaction.response.send_modal(TZModal())
 
-    async def _select_mention_mode(self, interaction:discord.Interaction):
+    async def _choose_mention_mode(self, interaction: discord.Interaction):
         class MentionView(discord.ui.View):
             @discord.ui.select(placeholder="Mention mode", min_values=1, max_values=1, options=[
                 discord.SelectOption(label="None", value="none", description="No pings"),
                 discord.SelectOption(label="Mention users", value="mention", description="Ping birthday users"),
-                discord.SelectOption(label="Mention role", value="role", description="Ping the configured role"),
+                discord.SelectOption(label="Mention role", value="role", description="Ping configured role"),
             ])
-            async def select_callback(self_, select_interaction:discord.Interaction):
+            async def select_callback(self_, select_interaction: discord.Interaction):
                 mode = select_interaction.data["values"][0]
                 self.cog.db.set_config(self.guild.id, mention_mode=mode)
-                await select_interaction.response.send_message(f"Mention mode set to `{mode}`.", ephemeral=True)
+                await select_interaction.response.send_message(f"✅ Mention mode set to `{mode}`.", ephemeral=True)
+                await update_dashboard_message(interaction, self.cog)
         await interaction.response.send_message("Choose mention mode:", view=MentionView(), ephemeral=True)
 
-    async def _modal_set_role(self, interaction:discord.Interaction):
-        class RoleModal(discord.ui.Modal, title="Set mention role"):
-            role_input = discord.ui.TextInput(label="Role (mention or ID or name)", placeholder="@Birthdays or 123456789012345678", required=True, max_length=128)
-            async def on_submit(self_, modal_interaction:discord.Interaction):
-                raw = modal_interaction.role_input.value.strip()
+    async def _set_role_modal(self, interaction: discord.Interaction):
+        class RoleModal(discord.ui.Modal, title="Set role to mention"):
+            role = discord.ui.TextInput(label="Role", placeholder="@Birthdays or 123456789012345678", required=True, max_length=128)
+            async def on_submit(self_, modal_interaction: discord.Interaction):
+                raw = modal_interaction.role.value.strip()
                 role = None
                 mm = re.match(r'^<@&?(\d+)>?$', raw)
                 try:
@@ -557,65 +444,86 @@ class AdminSelect(discord.ui.Select):
                     await modal_interaction.response.send_message("Could not resolve role. Make sure I can see it and you typed it correctly.", ephemeral=True)
                     return
                 self.cog.db.set_config(self.guild.id, mention_role_id=role.id)
-                await modal_interaction.response.send_message(f"Mention role set to {role.mention}.", ephemeral=True)
+                await modal_interaction.response.send_message(f"✅ Mention role set to {role.mention}.", ephemeral=True)
+                await update_dashboard_message(interaction, self.cog)
         await interaction.response.send_modal(RoleModal())
 
-    async def _modal_set_template(self, interaction:discord.Interaction):
+    async def _set_template_modal(self, interaction: discord.Interaction):
         class TemplateModal(discord.ui.Modal, title="Set announcement template"):
-            tmpl = discord.ui.TextInput(label="Template (placeholders: {emoji},{users},{guild},{age_map},{card})", style=discord.TextStyle.long, required=True, max_length=1500)
-            async def on_submit(self_, modal_interaction:discord.Interaction):
+            tmpl = discord.ui.TextInput(label="Template", style=discord.TextStyle.long, placeholder="Use placeholders: {emoji} {users} {guild} {age_map} {card}", required=True, max_length=1500)
+            async def on_submit(self_, modal_interaction: discord.Interaction):
                 tx = modal_interaction.tmpl.value.strip()
                 if len(tx) > 2000:
                     await modal_interaction.response.send_message("Template too long (2000 char limit).", ephemeral=True)
                     return
                 self.cog.db.set_config(self.guild.id, template=tx)
-                await modal_interaction.response.send_message("Template saved. It will be used at next announcement.", ephemeral=True)
+                await modal_interaction.response.send_message("✅ Template saved.", ephemeral=True)
+                await update_dashboard_message(interaction, self.cog)
         await interaction.response.send_modal(TemplateModal())
 
-    async def _toggle_enabled(self, interaction:discord.Interaction):
+    async def _toggle_enabled(self, interaction: discord.Interaction):
         cfg = self.cog.db.get_config(self.guild.id) or {}
         cur = bool(cfg.get("enabled", 1))
         self.cog.db.set_config(self.guild.id, enabled=(not cur))
-        await interaction.response.send_message(f"Birthdays enabled: {not cur}", ephemeral=True)
+        await interaction.response.send_message(f"✅ Birthdays enabled: {not cur}", ephemeral=True)
+        await update_dashboard_message(interaction, self.cog)
 
-    async def _preview(self, interaction:discord.Interaction):
+    async def _set_check_hour_modal(self, interaction: discord.Interaction):
+        class HourModal(discord.ui.Modal, title="Set check hour"):
+            hour = discord.ui.TextInput(label="Hour", placeholder="-1 (every minute) or 0-23", required=True, max_length=4)
+            async def on_submit(self_, modal_interaction: discord.Interaction):
+                try:
+                    h = int(modal_interaction.hour.value.strip())
+                    if h < -1 or h > 23:
+                        raise ValueError()
+                except Exception:
+                    await modal_interaction.response.send_message("Invalid hour. Must be -1..23", ephemeral=True)
+                    return
+                self.cog.db.set_config(self.guild.id, check_hour=h)
+                await modal_interaction.response.send_message(f"✅ Check hour set to {h}.", ephemeral=True)
+                await update_dashboard_message(interaction, self.cog)
+        await interaction.response.send_modal(HourModal())
+
+    async def _preview(self, interaction: discord.Interaction):
+        # Build preview: pick up to 3 sample users (or the command user)
         cfg = self.cog.db.get_config(self.guild.id) or {}
-        rows = self.cog.db.list_for_guild(self.guild.id)[:3] or [{"user_id":interaction.user.id,"month":now_utc().month,"day":now_utc().day,"year":1996}]
-        members=[]
-        mentions=[]
+        rows = self.cog.db.list_for_guild(self.guild.id)[:3] or [{"user_id": interaction.user.id, "month": now_utc().month, "day": now_utc().day, "year": None}]
+        members = []
+        mentions = []
         for r in rows:
             try:
-                m = self.guild.get_member(int(r['user_id']))
+                m = interaction.guild.get_member(int(r['user_id']))
             except Exception:
                 m = None
             if m:
-                members.append(m); mentions.append(m.mention)
+                members.append(m)
+                mentions.append(m.mention)
             else:
                 mentions.append(f"<@{r['user_id']}>")
+        # choose a random generous template
+        template = random.choice(MESSAGE_TEMPLATES)
+        emoji = "🎂"
         users_str = ", ".join(mentions)
-        emoji = random.choice(CELEB_EMOJIS)
-        subtitle = f"{pretty_date(now_utc().month, now_utc().day)}"
-        try:
-            card_bytes = await generate_card(", ".join([m.display_name for m in members][:3]) or "friend", "Preview", None, members_for_collage=members)
-        except Exception:
-            card_bytes = None
-        card_placeholder = "[image attached]" if card_bytes else f"```\n{ASCII_CARD}\n```"
-        template = cfg.get("template") or ("{emoji} **Happy Birthday!** {emoji}\n\n{users}\n\n{card}\n")
-        final = template.format(emoji=emoji, users=users_str, guild=self.guild.name, age_map="", card=card_placeholder)
-        em = discord.Embed(title="Birthday Preview", description=(final[:2048] if final else "Preview"), color=discord.Color.blurple())
-        # send DM with preview
+        # prepare embed
+        em = discord.Embed(title=f"{emoji} Birthday Preview {emoji}", description=f"{template}\n\n{users_str}", color=PINK_COLOR)
+        em.add_field(name="When", value=pretty_date(now_utc().month, now_utc().day), inline=True)
+        em.set_footer(text=f"Preview for {interaction.guild.name}")
+        # fetch image bytes and attach
+        img_bytes = await self.cog.get_card_bytes()
+        files = []
+        if img_bytes:
+            files = [discord.File(io.BytesIO(img_bytes), filename=CARD_FILENAME)]
+            em.set_image(url=f"attachment://{CARD_FILENAME}")
         try:
             dm = await interaction.user.create_dm()
-            if card_bytes:
-                await dm.send(embed=em, file=discord.File(io.BytesIO(card_bytes), filename="preview.png"))
-            else:
-                await dm.send(embed=em)
-            await interaction.response.send_message("Preview sent to your DMs.", ephemeral=True)
+            await dm.send(embed=em, files=files)
+            await interaction.response.send_message("✅ Preview sent to your DMs.", ephemeral=True)
         except Exception:
-            # fallback: show ephemeral
-            await interaction.response.send_message("Could not send DM. Showing preview here.", ephemeral=True, embed=em)
+            # fallback: show ephemeral with embed (can't attach file in ephemeral message), so send embed without image
+            await interaction.response.send_message("Could not DM you (maybe DMs closed). Showing preview here (no image).", ephemeral=True)
+            await interaction.followup.send(embed=em, ephemeral=True)
 
-    async def _force_run(self, interaction:discord.Interaction):
+    async def _force_run(self, interaction: discord.Interaction):
         cfg = self.cog.db.get_config(self.guild.id) or {}
         tz = float(cfg.get("tz_offset") or DEFAULT_TZ_OFFSET)
         local = now_utc() + datetime.timedelta(hours=tz)
@@ -627,14 +535,16 @@ class AdminSelect(discord.ui.Select):
         try:
             await self.cog._announce_birthdays(self.guild, cfg, rows, local)
             await interaction.followup.send("Announcements sent (or attempted).", ephemeral=True)
+            await update_dashboard_message(interaction, self.cog)
         except Exception as e:
             logger.exception("Force run failed: %s", e)
             await interaction.followup.send("Error while trying to announce.", ephemeral=True)
 
-    async def _export_csv(self, interaction:discord.Interaction):
+    async def _export_csv(self, interaction: discord.Interaction):
         rows = self.cog.db.list_for_guild(self.guild.id)
         if not rows:
-            await interaction.response.send_message("No birthdays to export.", ephemeral=True); return
+            await interaction.response.send_message("No birthdays to export.", ephemeral=True)
+            return
         out = io.StringIO()
         out.write("user_id,month,day,year,created_at\n")
         for r in rows:
@@ -643,44 +553,106 @@ class AdminSelect(discord.ui.Select):
         try:
             dm = await interaction.user.create_dm()
             await dm.send(file=discord.File(io.BytesIO(out.getvalue().encode('utf-8')), filename="birthdays_export.csv"))
-            await interaction.response.send_message("CSV exported to your DMs.", ephemeral=True)
+            await interaction.response.send_message("✅ CSV exported to your DMs.", ephemeral=True)
         except Exception as e:
             logger.exception("Export DM failed: %s", e)
             await interaction.response.send_message("Could not send DM with CSV.", ephemeral=True)
 
-    async def _show_import_hint(self, interaction:discord.Interaction):
-        # instruct how to use the import command (since file uploads handled by /birthday import_csv)
-        await interaction.response.send_message("To import birthdays: Use `/birthday import_csv` and attach a CSV file (columns: user_id,month,day,year).", ephemeral=True)
+    async def _show_import_hint(self, interaction: discord.Interaction):
+        await interaction.response.send_message("To import birthdays: use `/birthday import_csv` and attach a CSV file with columns `user_id,month,day,year`.", ephemeral=True)
 
-    async def _modal_set_check_hour(self, interaction:discord.Interaction):
-        class CheckHourModal(discord.ui.Modal, title="Set check hour"):
-            hour = discord.ui.TextInput(label="Hour (-1..23) (-1 = every minute)", placeholder="-1", required=True, max_length=4)
-            async def on_submit(self_, modal_interaction:discord.Interaction):
-                try:
-                    h = int(modal_interaction.hour.value.strip())
-                    if h < -1 or h > 23:
-                        raise ValueError("Out of range")
-                except Exception:
-                    await modal_interaction.response.send_message("Invalid hour. Must be -1..23", ephemeral=True)
-                    return
-                self.cog.db.set_config(self.guild.id, check_hour=h)
-                await modal_interaction.response.send_message(f"Check hour set to {h}.", ephemeral=True)
-        await interaction.response.send_modal(CheckHourModal())
+class AdminView(discord.ui.View):
+    def __init__(self, cog: "BirthdayCog", guild: discord.Guild):
+        super().__init__(timeout=600)
+        self.add_item(AdminSelect(cog, guild))
+
+# ------------------------
+# Helper to update dashboard embed live
+# ------------------------
+async def build_dashboard_embed(cog: "BirthdayCog", guild: discord.Guild) -> discord.Embed:
+    cfg = cog.db.get_config(guild.id) or {}
+    enabled = bool(cfg.get("enabled", 1))
+    channel = None
+    if cfg.get("channel_id"):
+        try:
+            channel = guild.get_channel(int(cfg["channel_id"]))
+        except Exception:
+            channel = None
+    tz = float(cfg.get("tz_offset") or DEFAULT_TZ_OFFSET)
+    mention_mode = cfg.get("mention_mode") or "none"
+    role = None
+    if cfg.get("mention_role_id"):
+        try:
+            role = guild.get_role(int(cfg["mention_role_id"]))
+        except Exception:
+            role = None
+    template_set = bool(cfg.get("template"))
+    check_hour = int(cfg.get("check_hour", -1) or -1)
+    em = discord.Embed(title="🎂 Birthday Admin Dashboard 🎂", color=PINK_COLOR, description=f"Manage birthday announcements for **{guild.name}**")
+    em.add_field(name="📣 Channel", value=(channel.mention if channel else "Not set"), inline=True)
+    em.add_field(name="🌐 Timezone", value=f"UTC{tz:+g}", inline=True)
+    em.add_field(name="🔔 Mention Mode", value=f"{mention_mode}" + (f" • {role.name}" if role else ""), inline=True)
+    em.add_field(name="📝 Template", value=("Custom" if template_set else "Default"), inline=True)
+    em.add_field(name="⏯️ Enabled", value=str(enabled), inline=True)
+    em.add_field(name="⏰ Check Hour", value=str(check_hour), inline=True)
+    em.set_footer(text="Use the dropdown to modify settings. Changes update this panel live.")
+    # attach the card as thumbnail if available (can't attach file here, but we can set an icon emoji)
+    em.set_thumbnail(url="https://i.postimg.cc/rFtH6FM0/Pink-Watercolor-Floral-Happy-Birthday-Greeting-Card.png")
+    return em
+
+async def update_dashboard_message(interaction: discord.Interaction, cog: "BirthdayCog"):
+    try:
+        em = await build_dashboard_embed(cog, interaction.guild)
+        # edit original message (select's parent message is interaction.message)
+        try:
+            await interaction.message.edit(embed=em, view=AdminView(cog, interaction.guild))
+        except Exception:
+            # fallback: reply with updated embed ephemeral
+            await interaction.followup.send("Dashboard updated (couldn't edit original).", embed=em, ephemeral=True)
+    except Exception as e:
+        logger.exception("Failed to update dashboard embed: %s", e)
 
 # ------------------------
 # Birthday Cog
 # ------------------------
 class BirthdayCog(commands.Cog):
-    def __init__(self, bot:commands.Bot):
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.db = BirthdayDB()
         self._checker.start()
+        self._card_bytes = None
+        self._card_last_fetch = None
+        self._aio = aiohttp.ClientSession()
         logger.info("BirthdayCog initialized with DB at %s", self.db.path)
 
     def cog_unload(self):
         self._checker.cancel()
+        try:
+            asyncio.create_task(self._aio.close())
+        except Exception:
+            pass
         self.db.close()
 
+    async def get_card_bytes(self) -> typing.Optional[bytes]:
+        # cache card bytes in memory for 10 minutes
+        now = datetime.datetime.utcnow()
+        if self._card_bytes and self._card_last_fetch and (now - self._card_last_fetch).total_seconds() < 600:
+            return self._card_bytes
+        try:
+            async with self._aio.get(CARD_URL, timeout=20) as resp:
+                if resp.status == 200:
+                    data = await resp.read()
+                    self._card_bytes = data
+                    self._card_last_fetch = now
+                    return data
+                else:
+                    logger.warning("Card download failed: status %s", resp.status)
+                    return None
+        except Exception as e:
+            logger.exception("Card download failed: %s", e)
+            return None
+
+    # Background checker
     @tasks.loop(seconds=CHECK_INTERVAL_SECONDS)
     async def _checker(self):
         try:
@@ -698,12 +670,12 @@ class BirthdayCog(commands.Cog):
             cfg = configs.get(guild.id) or self.db.get_config(guild.id)
             if not cfg:
                 continue
-            if not cfg.get("enabled",1):
+            if not cfg.get("enabled", 1):
                 continue
             tz = float(cfg.get("tz_offset") or DEFAULT_TZ_OFFSET)
             local = now + datetime.timedelta(hours=tz)
             local_date = local.date()
-            check_hour = int(cfg.get("check_hour",-1) or -1)
+            check_hour = int(cfg.get("check_hour", -1) or -1)
             if check_hour >= 0 and local.hour != check_hour:
                 continue
             last = cfg.get("last_triggered")
@@ -726,7 +698,8 @@ class BirthdayCog(commands.Cog):
         await self.bot.wait_until_ready()
         logger.info("Birthday checker started.")
 
-    async def _announce_birthdays(self, guild:discord.Guild, cfg:dict, rows:list, local_dt:datetime.datetime):
+    async def _announce_birthdays(self, guild: discord.Guild, cfg: dict, rows: list, local_dt: datetime.datetime):
+        # determine channel
         channel = None
         if cfg.get("channel_id"):
             try:
@@ -759,22 +732,22 @@ class BirthdayCog(commands.Cog):
             else:
                 mentions.append(f"<@{uid}>")
             if r.get("year"):
-                ages[uid] = humanize_age(r["year"], local_dt.date())
+                try:
+                    ages[uid] = (local_dt.date().year - int(r["year"]))
+                except Exception:
+                    pass
 
         users_str = ", ".join(mentions)
-        age_str = ", ".join(f"<@{uid}>: {a}" for uid,a in ages.items()) if ages else ""
         emoji = random.choice(CELEB_EMOJIS)
-        template = cfg.get("template") or ("{emoji} **Happy Birthday!** {emoji}\n\n{users}\n\n{card}\n\n— {guild}")
-
+        # pick a random generous template
+        template = random.choice(MESSAGE_TEMPLATES)
         subtitle = f"{pretty_date(local_dt.month, local_dt.day)}"
-        try:
-            card_bytes = await generate_card(", ".join([m.display_name for m in members][:3]) or "friend", subtitle, None, members_for_collage=members)
-        except Exception:
-            card_bytes = None
-
-        card_placeholder = "[image attached]" if card_bytes else f"```\n{ASCII_CARD}\n```"
-        final_text = template.format(emoji=emoji, users=users_str, guild=guild.name, age_map=age_str, card=card_placeholder)
-
+        # prepare embed
+        em = discord.Embed(title=f"{emoji} Happy Birthday! {emoji}", description=f"{template}\n\n{users_str}", color=PINK_COLOR)
+        if ages:
+            age_str = ", ".join(f"<@{uid}>: {a}" for uid, a in ages.items())
+            em.add_field(name="Ages", value=age_str, inline=False)
+        em.add_field(name="When", value=subtitle, inline=True)
         mention_mode = cfg.get("mention_mode") or "none"
         ping_text = ""
         if mention_mode == "mention":
@@ -782,31 +755,28 @@ class BirthdayCog(commands.Cog):
         elif mention_mode == "role" and cfg.get("mention_role_id"):
             ping_text = f"<@&{int(cfg['mention_role_id'])}>"
 
-        embed = discord.Embed(title=f"{emoji} Birthday Celebration!", description=f"Today: {subtitle}", color=discord.Color.random())
-        embed.add_field(name="Who", value=users_str or "No users", inline=False)
-        if age_str:
-            embed.add_field(name="Ages", value=age_str, inline=False)
-        embed.set_footer(text=f"Timezone: UTC{(cfg.get('tz_offset') or 0):+g} • powered by your friendly bot")
-
+        # attach card
+        card_bytes = await self.get_card_bytes()
         try:
             if card_bytes:
-                f = discord.File(io.BytesIO(card_bytes), filename="birthday_card.png")
-                await channel.send(content=(ping_text+"\n" if ping_text else "") , embed=embed, file=f)
+                f = discord.File(io.BytesIO(card_bytes), filename=CARD_FILENAME)
+                em.set_image(url=f"attachment://{CARD_FILENAME}")
+                await channel.send(content=(ping_text + "\n" if ping_text else ""), embed=em, file=f)
             else:
-                await channel.send(content=(ping_text + "\n" if ping_text else "") + final_text, embed=embed)
+                await channel.send(content=(ping_text + "\n" if ping_text else ""), embed=em)
         except discord.Forbidden:
             logger.warning("No permission to send birthday in %s", channel)
         except Exception as e:
             logger.exception("Error sending birthday announcement: %s", e)
 
     # ------------------------
-    # Command group: /birthday <subcommand>
+    # Slash command group
     # ------------------------
-    birthday_group = app_commands.Group(name="birthday", description="Birthday commands")
+    birthday = app_commands.Group(name="birthday", description="Birthday commands")
 
-    @birthday_group.command(name="set", description="Set your birthday (e.g. 1996-03-21 or Mar 3)")
+    @birthday.command(name="set", description="Set your birthday (e.g. 1996-03-21 or Mar 3)")
     @app_commands.describe(date="Date like 1996-03-21 or Mar 3")
-    async def birthday_set(self, interaction:discord.Interaction, date:str):
+    async def cmd_set(self, interaction: discord.Interaction, date: str):
         await interaction.response.defer(ephemeral=True)
         parsed = parse_date_fuzzy(date)
         if not parsed:
@@ -816,24 +786,23 @@ class BirthdayCog(commands.Cog):
         if not re.search(r'\d{4}', date):
             year = None
         self.db.upsert(interaction.guild.id, interaction.user.id, parsed.month, parsed.day, year)
-        em = discord.Embed(title="Birthday saved", color=discord.Color.green())
-        em.add_field(name="Date", value=f"{pretty_date(parsed.month, parsed.day)}" + (f" • {year}" if year else ""), inline=True)
+        template = random.choice(MESSAGE_TEMPLATES)
+        em = discord.Embed(title="🎉 Birthday saved!", description=template, color=PINK_COLOR)
+        em.add_field(name="When", value=f"{pretty_date(parsed.month, parsed.day)}" + (f" • {year}" if year else ""), inline=True)
         em.set_footer(text="Use /birthday view to check or /birthday remove to delete.")
+        card_bytes = await self.get_card_bytes()
+        files = []
+        if card_bytes:
+            files = [discord.File(io.BytesIO(card_bytes), filename=CARD_FILENAME)]
+            em.set_image(url=f"attachment://{CARD_FILENAME}")
         try:
-            card_bytes = await generate_card(interaction.user.display_name, pretty_date(parsed.month, parsed.day), humanize_age(year, datetime.date.today()) if year else None, members_for_collage=[interaction.user])
+            await interaction.followup.send(embed=em, files=files, ephemeral=True)
         except Exception:
-            card_bytes = None
-        try:
-            if card_bytes:
-                await interaction.followup.send(embed=em, file=discord.File(io.BytesIO(card_bytes), filename="birthday_saved.png"), ephemeral=True)
-            else:
-                await interaction.followup.send(embed=em, ephemeral=True)
-        except Exception:
-            await interaction.followup.send("Saved, but couldn't attach preview.", ephemeral=True)
+            await interaction.followup.send("Saved, but couldn't attach preview image.", ephemeral=True)
 
-    @birthday_group.command(name="view", description="View your or another user's birthday")
+    @birthday.command(name="view", description="View your or another user's birthday")
     @app_commands.describe(user="Optional user to view")
-    async def birthday_view(self, interaction:discord.Interaction, user:typing.Optional[discord.Member]=None):
+    async def cmd_view(self, interaction: discord.Interaction, user: typing.Optional[discord.Member] = None):
         target = user or interaction.user
         row = self.db.get(interaction.guild.id, target.id)
         if not row:
@@ -842,35 +811,29 @@ class BirthdayCog(commands.Cog):
             else:
                 await interaction.response.send_message(f"{target.mention} has no birthday saved.", ephemeral=True)
             return
-        em = discord.Embed(title=f"{target.display_name}'s Birthday", color=discord.Color.blurple())
-        em.add_field(
-            name="Date",
-            value=f"{pretty_date(row['month'], row['day'])}" + (f" • {row['year']}" if row['year'] else ""),
-            inline=True
-        )
-        if target != interaction.user:
-            em.set_footer(text=f"Requested by {interaction.user.display_name}")
+        em = discord.Embed(title=f"🎂 {target.display_name}'s Birthday", color=PINK_COLOR)
+        em.add_field(name="Date", value=f"{pretty_date(row['month'], row['day'])}" + (f" • {row['year']}" if row['year'] else ""), inline=True)
         await interaction.response.send_message(embed=em, ephemeral=True)
 
-    @birthday_group.command(name="remove", description="Remove your saved birthday (confirmation required)")
+    @birthday.command(name="remove", description="Remove your saved birthday (confirmation required)")
     @app_commands.describe(confirm="Type 'confirm' to delete")
-    async def birthday_remove(self, interaction:discord.Interaction, confirm:typing.Optional[str]=None):
-        if not (confirm and confirm.strip().lower() in ("confirm","true","yes","y")):
+    async def cmd_remove(self, interaction: discord.Interaction, confirm: typing.Optional[str] = None):
+        if not (confirm and confirm.strip().lower() in ("confirm", "true", "yes", "y")):
             await interaction.response.send_message("Are you sure? To delete your birthday use `/birthday remove confirm`.", ephemeral=True)
             return
         removed = self.db.remove(interaction.guild.id, interaction.user.id)
         if removed:
-            await interaction.response.send_message("Your birthday was removed.", ephemeral=True)
+            await interaction.response.send_message("✅ Your birthday was removed.", ephemeral=True)
         else:
             await interaction.response.send_message("I didn't find a birthday to remove.", ephemeral=True)
 
-    @birthday_group.command(name="list", description="List saved birthdays in this server (first 50 shown)")
-    async def birthday_list(self, interaction:discord.Interaction):
+    @birthday.command(name="list", description="List saved birthdays in this server (first 50 shown)")
+    async def cmd_list(self, interaction: discord.Interaction):
         rows = self.db.list_for_guild(interaction.guild.id)
         if not rows:
             await interaction.response.send_message("No birthdays saved for this server.", ephemeral=True)
             return
-        lines=[]
+        lines = []
         for r in rows[:50]:
             uid = int(r['user_id'])
             try:
@@ -879,32 +842,24 @@ class BirthdayCog(commands.Cog):
             except Exception:
                 name = f"<@{uid}>"
             lines.append(f"{name} — {pretty_date(r['month'], r['day'])}" + (f" • {r['year']}" if r.get('year') else ""))
-        em = discord.Embed(title=f"Birthdays in {interaction.guild.name}", description="\n".join(lines[:2048]), color=discord.Color.blurple())
+        em = discord.Embed(title=f"🎁 Birthdays in {interaction.guild.name}", description="\n".join(lines[:1024]), color=PINK_COLOR)
         await interaction.response.send_message(embed=em, ephemeral=True)
 
-    @birthday_group.command(name="admin", description="Open the admin dashboard (Manage Server required)")
-    async def birthday_admin(self, interaction:discord.Interaction):
+    @birthday.command(name="admin", description="Open the admin dashboard (Manage Server required)")
+    async def cmd_admin(self, interaction: discord.Interaction):
         if not interaction.user.guild_permissions.manage_guild:
-            await interaction.response.send_message("Manage Server required.", ephemeral=True); return
-        cfg = self.db.get_config(interaction.guild.id) or {}
-        enabled = bool(cfg.get("enabled",1))
-        ch = None
-        if cfg.get("channel_id"):
-            try:
-                ch = interaction.guild.get_channel(int(cfg["channel_id"]))
-            except Exception:
-                ch = None
-        template = cfg.get("template") or "Not set (default will be used)"
-        desc = f"Enabled: **{enabled}**\nChannel: **{ch.mention if ch else 'Not set'}**\nTimezone: **UTC{(cfg.get('tz_offset') or 0):+g}**\nMention: **{cfg.get('mention_mode') or 'none'}**\nTemplate: {('Set' if cfg.get('template') else 'Default')}"
-        em = discord.Embed(title=f"Birthday Admin — {interaction.guild.name}", description=desc, color=discord.Color.blurple())
-        view = AdminDashboardView(self, interaction.guild)
+            await interaction.response.send_message("Manage Server required.", ephemeral=True)
+            return
+        em = await build_dashboard_embed(self, interaction.guild)
+        view = AdminView(self, interaction.guild)
         await interaction.response.send_message(embed=em, view=view, ephemeral=True)
 
-    @birthday_group.command(name="import_csv", description="Import birthdays from CSV (user_id,month,day,year) - admin only")
+    @birthday.command(name="import_csv", description="Import birthdays from CSV (user_id,month,day,year) - admin only")
     @app_commands.describe(file="CSV file to import")
-    async def birthday_import_csv(self, interaction:discord.Interaction, file:discord.Attachment):
+    async def cmd_import_csv(self, interaction: discord.Interaction, file: discord.Attachment):
         if not interaction.user.guild_permissions.manage_guild:
-            await interaction.response.send_message("Manage Server required.", ephemeral=True); return
+            await interaction.response.send_message("Manage Server required.", ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True)
         try:
             data = await file.read()
@@ -922,7 +877,7 @@ class BirthdayCog(commands.Cog):
                     continue
                 self.db.upsert(interaction.guild.id, uid, month, day, year)
                 count += 1
-            await interaction.followup.send(f"Imported {count} birthdays.", ephemeral=True)
+            await interaction.followup.send(f"✅ Imported {count} birthdays.", ephemeral=True)
         except Exception as e:
             logger.exception("Import failed: %s", e)
             await interaction.followup.send("Import failed: " + str(e), ephemeral=True)
@@ -930,5 +885,5 @@ class BirthdayCog(commands.Cog):
 # ------------------------
 # Setup
 # ------------------------
-async def setup(bot:commands.Bot):
+async def setup(bot: commands.Bot):
     await bot.add_cog(BirthdayCog(bot))
