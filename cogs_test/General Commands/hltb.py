@@ -1,16 +1,27 @@
 # cogs/hltb.py
 # =============================================================
-# /hltb single-command
-# - Searches HowLongToBeat with howlongtobeatpy
-# - Scrapes https://howlongtobeat.com/game/<id> for full details
-# - Dropdowns for selecting game and viewing sections
-# - "Open on HLTB" link button
+# /hltb - Beautiful Interactive HowLongToBeat Cog
+# - Single command: /hltb
+# - Async howlongtobeatpy search
+# - Scrapes howlongtobeat.com for rich metadata
+# - Dropdowns for selection and section views
+# - Buttons: Open on HLTB (link), 📜 Description (primary blue), 🎲 Random
+# - Persistent SQLite cache (disk-backed) to reduce scraping & API calls
+# - Defensive parsing, error handling, and rate-limiting
+#
+# Author: Discord Bot Builder
 # =============================================================
 
 import asyncio
+import aiosqlite
+import json
+import math
+import os
 import random
 import re
-from functools import lru_cache
+import time
+from functools import wraps
+from typing import Any, Dict, List, Optional, Tuple
 
 import aiohttp
 import discord
@@ -19,11 +30,20 @@ from discord import app_commands, ui
 from discord.ext import commands
 from howlongtobeatpy import HowLongToBeat
 
-# -----------------------
-# Theme & Emoji palette
-# -----------------------
-COLOR_THEME = discord.Color.from_rgb(28, 37, 51)   # dark slate
-ACCENT_COLOR = discord.Color.from_rgb(98, 114, 164)  # subtle accent
+# -----------------------------
+# CONFIGURATION
+# -----------------------------
+CACHE_DB_PATH = os.getenv("HLTB_CACHE_DB", "hltb_cache.sqlite")
+CACHE_TTL_SECONDS = 60 * 60 * 24 * 7  # 7 days
+USER_COOLDOWN_SECONDS = 3  # short per-user cooldown to prevent accidental spam
+MAX_SELECT_OPTIONS = 5  # how many search results to show in dropdown
+REQUEST_TIMEOUT = 20  # seconds for HTTP requests
+HLTB_BASE = "https://howlongtobeat.com"
+
+# Visual theme
+COLOR_PRIMARY = discord.Color.from_rgb(11, 84, 166)      # deep blue (for primary buttons / accents)
+COLOR_ACCENT = discord.Color.from_rgb(98, 114, 164)     # subtle accent
+COLOR_BACKGROUND = discord.Color.from_rgb(24, 26, 31)   # embed base color (if used)
 EMO = {
     "search": "🔎",
     "open": "🔗",
@@ -38,237 +58,302 @@ EMO = {
     "sparkle": "✨",
     "choice": "🎮",
     "timeout": "⏳",
+    "random": "🎲",
 }
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; DiscordBot/1.0; +https://github.com/)"
 }
 
-HLTB_BASE = "https://howlongtobeat.com"
+# -----------------------------
+# UTILITIES
+# -----------------------------
+def now_ts() -> int:
+    return int(time.time())
 
 
-# -----------------------
-# Helper: scrape page
-# -----------------------
-async def fetch_page(session: aiohttp.ClientSession, url: str) -> str:
-    async with session.get(url, headers=HEADERS, timeout=20) as resp:
+def format_hours(v) -> str:
+    if v is None:
+        return "N/A"
+    try:
+        # accept floats/ints and strings
+        if isinstance(v, (int, float)):
+            return f"{v} hrs"
+        s = str(v).strip()
+        if not s:
+            return "N/A"
+        # already often in "xx Hours" or "xx hrs"
+        return s
+    except Exception:
+        return "N/A"
+
+
+def safe_truncate(text: Optional[str], length: int = 1024) -> str:
+    if not text:
+        return ""
+    return text if len(text) <= length else text[: length - 3] + "..."
+
+
+def attach_if_not_none(embed: discord.Embed, name: str, value: Optional[str], inline: bool = False):
+    if value and value.strip():
+        embed.add_field(name=name, value=value, inline=inline)
+
+
+def cooldown_per_user(seconds: int):
+    """
+    Simple per-user cooldown decorator for command handlers inside cogs.
+    Usage: @cooldown_per_user(3)
+    """
+    def decorator(func):
+        last_call = {}
+
+        @wraps(func)
+        async def wrapper(self, interaction: discord.Interaction, *args, **kwargs):
+            uid = interaction.user.id
+            t = now_ts()
+            last = last_call.get(uid, 0)
+            if t - last < seconds:
+                await interaction.response.send_message(f"{EMO['timeout']} You're doing that too quickly. Try again in a moment.", ephemeral=True)
+                return
+            last_call[uid] = t
+            return await func(self, interaction, *args, **kwargs)
+        return wrapper
+    return decorator
+
+
+# -----------------------------
+# DATABASE: Simple SQLite Cache
+# -----------------------------
+class CacheDB:
+    """
+    Simple async SQLite wrapper to store cached parsed pages and API results.
+    Schema:
+      - cache(key TEXT PRIMARY KEY, timestamp INTEGER, value TEXT)
+    """
+
+    def __init__(self, path: str = CACHE_DB_PATH):
+        self.path = path
+        self._conn: Optional[aiosqlite.Connection] = None
+        self._init_lock = asyncio.Lock()
+
+    async def init(self):
+        if self._conn:
+            return
+        async with self._init_lock:
+            if self._conn:
+                return
+            self._conn = await aiosqlite.connect(self.path)
+            await self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, timestamp INTEGER, value TEXT)"
+            )
+            await self._conn.commit()
+
+    async def get(self, key: str) -> Optional[Dict[str, Any]]:
+        await self.init()
+        cur = await self._conn.execute("SELECT timestamp, value FROM cache WHERE key = ?", (key,))
+        row = await cur.fetchone()
+        await cur.close()
+        if not row:
+            return None
+        ts, val = row
+        try:
+            obj = json.loads(val)
+            return {"timestamp": ts, "value": obj}
+        except Exception:
+            return None
+
+    async def set(self, key: str, value: Any):
+        await self.init()
+        val = json.dumps(value, ensure_ascii=False)
+        ts = now_ts()
+        await self._conn.execute("REPLACE INTO cache (key, timestamp, value) VALUES (?, ?, ?)", (key, ts, val))
+        await self._conn.commit()
+
+    async def invalidate(self, key: str):
+        await self.init()
+        await self._conn.execute("DELETE FROM cache WHERE key = ?", (key,))
+        await self._conn.commit()
+
+    async def close(self):
+        if self._conn:
+            await self._conn.close()
+            self._conn = None
+
+
+# -----------------------------
+# NETWORK & SCRAPING
+# -----------------------------
+async def fetch_text(session: aiohttp.ClientSession, url: str, timeout: int = REQUEST_TIMEOUT) -> str:
+    async with session.get(url, headers=HEADERS, timeout=timeout) as resp:
         resp.raise_for_status()
         return await resp.text()
 
 
-def parse_game_page(html: str) -> dict:
+def parse_hltb_game_page(html: str) -> Dict[str, Any]:
     """
-    Attempt to parse the HLTB game page for:
-    - description
-    - genres
-    - developers/publishers
-    - release date / original_release
-    - metadata table (time estimates)
-    - any other stats visible
-    Returns a dict; fields may be None if not found.
-    Parsing is defensive: site changes will be tolerated.
+    Defensive parser for HLTB game pages. Returns a dict with keys:
+      - title, description, genres (list), details (dict), time_estimates (dict), image, raw_excerpt
     """
     soup = BeautifulSoup(html, "lxml")
-
-    data = {
+    data: Dict[str, Any] = {
         "title": None,
         "description": None,
         "genres": [],
-        "details": {},     # key -> value mapping for side labels (e.g., developer, publisher)
-        "time_estimates": {},  # main, main_extra, completionist, etc.
+        "details": {},
+        "time_estimates": {},
         "image": None,
-        "raw_html_excerpt": None,
+        "raw_excerpt": None,
     }
 
-    # Title
+    # Title: common h1 or og:title
     h1 = soup.find("h1")
     if h1 and h1.text.strip():
         data["title"] = h1.text.strip()
     else:
-        og_title = soup.find("meta", property="og:title")
-        if og_title and og_title.get("content"):
-            data["title"] = og_title["content"]
+        og = soup.find("meta", property="og:title")
+        if og and og.get("content"):
+            data["title"] = og["content"].strip()
 
-    # Image (thumbnail)
+    # Image
     og_img = soup.find("meta", property="og:image")
     if og_img and og_img.get("content"):
         data["image"] = og_img["content"]
 
-    # Description: look for description block (common HLTB layout uses 'profile'/'game_profile' or 'profile' p tags)
-    desc = None
-    # Try dedicated description div
-    desc_selectors = [
-        {"name": "div", "attrs": {"class": re.compile(r"(game_description|profile|game_profile)", re.I)}},
-        {"name": "p", "attrs": {"class": re.compile(r"game_description|profile", re.I)}},
+    # Description: try common containers
+    desc_candidates = [
+        soup.find("div", class_=re.compile(r"(game_description|profile|game_profile)", re.I)),
+        soup.find("div", id=re.compile(r"(game_description|profile)", re.I)),
+        soup.find("meta", attrs={"name": "description"}),
     ]
-    for sel in desc_selectors:
-        block = soup.find(sel["name"], sel.get("attrs"))
-        if block and block.text.strip():
-            desc = block.get_text(separator="\n").strip()
-            break
+    description = None
+    for c in desc_candidates:
+        if not c:
+            continue
+        if c.name == "meta":
+            if c.get("content"):
+                description = c["content"].strip()
+                break
+        else:
+            txt = c.get_text("\n", strip=True)
+            if txt:
+                description = txt
+                break
+    data["description"] = description
 
-    # fallback: meta description
-    if not desc:
-        meta_desc = soup.find("meta", attrs={"name": "description"})
-        if meta_desc and meta_desc.get("content"):
-            desc = meta_desc["content"].strip()
-
-    data["description"] = desc
-
-    # Genres and other chip-like labels (HLTB sometimes uses "profile_short" or "profile" with small anchor tags)
+    # Genres / chips: search for links or small tags in profile area
     try:
-        # look for small detail list; many HLTB pages put the small metadata at .profile_small_box or similar
-        small_boxes = soup.select(".profile .profile_links a, .profile_small_box a, .game_profile .details a")
-        for a in small_boxes:
-            text = a.get_text(strip=True)
-            if text and text.lower() not in ("view",):
-                data["genres"].append(text)
+        chips = soup.select(".profile .search_list_details a, .profile .profile_links a, .game_profile .profile_links a, .search_list_tidbit a")
+        for a in chips:
+            t = a.get_text(strip=True)
+            if t:
+                data["genres"].append(t)
         # unique
-        data["genres"] = list(dict.fromkeys([g for g in data["genres"] if g]))
+        data["genres"] = list(dict.fromkeys(data["genres"]))
     except Exception:
         data["genres"] = data.get("genres", [])
 
-    # Details table: look for rows like "Developer:", "Publisher:", "Release Date:"
-    # Many HLTB pages have a 'profile' or 'profile_info' area with spans/strong labels.
+    # Details: developer, publisher, released, etc.
     try:
-        detail_candidates = soup.select(".profile .profile_info, .game_profile .profile_info, .profile .search_list_details")
-        found = False
-        for block in detail_candidates:
-            # find rows/labels inside
-            rows = block.find_all(["div", "li", "p"])
-            for r in rows:
-                text = r.get_text(" ", strip=True)
-                if ":" in text:
-                    parts = text.split(":", 1)
-                    key = parts[0].strip()
-                    val = parts[1].strip()
-                    if key and val:
-                        data["details"][key] = val
-                        found = True
-        # Another fallback: a 'list' of stats under a class 'search_list_item_block' etc.
-        if not found:
-            table_rows = soup.select(".search_list_item_block .search_list_item_li, .search_list_details")
-            for tr in table_rows:
-                text = tr.get_text(" ", strip=True)
+        detail_blocks = soup.select(".profile .profile_info, .game_profile .profile_info, .profile .search_list_details")
+        for block in detail_blocks:
+            items = block.find_all(["div", "li", "p", "span"])
+            for item in items:
+                text = item.get_text(" ", strip=True)
                 if ":" in text:
                     k, v = text.split(":", 1)
-                    data["details"][k.strip()] = v.strip()
+                    k = k.strip()
+                    v = v.strip()
+                    if k and v:
+                        data["details"][k] = v
     except Exception:
         pass
 
-    # Time estimates parsing: the site prints times in boxes — attempt to catch numeric estimates
+    # Time estimates - attempt to parse numbers and labels near known labels
     try:
-        time_labels = {
+        # common labels on the page
+        labels = {
             "Main Story": "main",
             "Main + Extra": "main_extra",
             "Completionist": "completionist",
             "Solo": "solo",
             "Co-op": "coop",
         }
-        # search for any element containing known labels
-        for label, slug in time_labels.items():
-            el = soup.find(string=re.compile(re.escape(label), re.I))
+        for label_text, key in labels.items():
+            # find an element that contains label_text
+            el = soup.find(string=re.compile(re.escape(label_text), re.I))
             if el:
-                # get nearby number by finding parent and searching for a number + " Hours"
+                # try parent siblings for numbers
                 parent = el.parent
                 if parent:
-                    nums = parent.find_next(string=re.compile(r"[\d]{1,4}\.?[\d]*\s*Hours", re.I))
-                    if nums:
-                        data["time_estimates"][slug] = nums.strip()
+                    # search for nearby pattern like '12½ Hours' or '12 Hours'
+                    nearby = parent.find_next(string=re.compile(r"\d{1,4}[\d\.\½\�]*\s*(Hours|hrs|h)?", re.I))
+                    if nearby:
+                        data["time_estimates"][key] = nearby.strip()
                     else:
-                        # try to find numeric spans
-                        num_span = parent.find_next(["span", "div"], string=re.compile(r"[\d]{1,4}\.?[\d]*"))
-                        if num_span:
-                            data["time_estimates"][slug] = num_span.text.strip()
+                        # search in parent text
+                        text_block = parent.get_text(" ", strip=True)
+                        found = re.search(r"(\d{1,4}[\d\.\½\�]*)\s*(Hours|hrs|h)?", text_block)
+                        if found:
+                            data["time_estimates"][key] = found.group(0)
     except Exception:
         pass
 
-    # Raw excerpt fallback (small portion to show if parsing fails)
-    data["raw_html_excerpt"] = soup.get_text(separator="\n")[:1000]
+    # Raw excerpt: a short chunk of page text
+    try:
+        txt = soup.get_text("\n", strip=True)
+        data["raw_excerpt"] = txt[:1200]
+    except Exception:
+        data["raw_excerpt"] = None
 
     return data
 
 
-# -----------------------
-# LRU cache wrapper around network fetch+parse
-# -----------------------
-@lru_cache(maxsize=256)
-def cached_parse(html_text: str):
-    return parse_game_page(html_text)
-
-
-async def get_game_details(game_id: int) -> dict:
+# -----------------------------
+# UI COMPONENTS
+# -----------------------------
+class ResultSelect(ui.Select):
     """
-    Fetch and parse the howlongtobeat.com game page.
-    Uses aiohttp, returns a dict of parsed data.
+    Dropdown to pick one of the search results.
+    The options' value is the index string (0..n) to ease matching.
     """
-    url = f"{HLTB_BASE}/game?id={game_id}" if "?" in HLTB_BASE else f"{HLTB_BASE}/game/{game_id}"
-    # Many HLTB game page URLs are either /game?id=NNN or /game/NNN depending on site routing.
-    # We'll try both forms; prefer canonical /game/{id} first then fallback.
-    possible_urls = [
-        f"{HLTB_BASE}/game/{game_id}",
-        f"{HLTB_BASE}/game?id={game_id}",
-    ]
-    async with aiohttp.ClientSession() as session:
-        last_exc = None
-        for u in possible_urls:
-            try:
-                html = await fetch_page(session, u)
-                parsed = cached_parse(html)  # uses lru_cache internally (keyed on html)
-                # attach canonical url we used
-                parsed["_source_url"] = u
-                return parsed
-            except Exception as exc:
-                last_exc = exc
-                continue
-        # if both failed, raise the last
-        raise last_exc if last_exc else RuntimeError("Failed to fetch game page")
 
-
-# -----------------------
-# UI Components: Game selection + section selection + open button
-# -----------------------
-class GamePickSelect(ui.Select):
-    def __init__(self, results):
+    def __init__(self, results: List[Any]):
         options = []
-        for r in results[:5]:
-            title = r.game_name if len(r.game_name) <= 100 else r.game_name[:97] + "..."
-            desc = f"Score: {r.similarity:.2f}"
-            options.append(ui.SelectOption(label=title, description=desc, emoji=EMO["choice"]))
-        super().__init__(placeholder="Choose the correct game...", min_values=1, max_values=1, options=options)
+        for i, r in enumerate(results[:MAX_SELECT_OPTIONS]):
+            label = (r.game_name[:95] + "...") if len(r.game_name) > 95 else r.game_name
+            desc = f"Score: {getattr(r, 'similarity', 0):.2f} • Platforms: {', '.join(getattr(r, 'profile_platforms', []) or [])[:50]}"
+            options.append(ui.SelectOption(label=label, description=desc[:100], value=str(i), emoji=EMO["choice"]))
+        super().__init__(placeholder="Select the matching game...", min_values=1, max_values=1, options=options)
         self.results = results
-        self.selected: int | None = None
+        self.chosen_index: Optional[int] = None
 
     async def callback(self, interaction: discord.Interaction):
-        # map selected label to result via index
-        idx = self.values[0]
-        # find option index
-        opt_index = [opt.value for opt in self.options].index(self.values[0]) if any(opt.value for opt in self.options) else None
-        # simpler: select by label matching
-        for i, opt in enumerate(self.options):
-            if opt.label == self.values[0]:
-                self.selected = i
-                break
-        # stop the view; parent will read selection
+        try:
+            idx = int(self.values[0])
+            self.chosen_index = idx
+        except Exception:
+            self.chosen_index = None
+        # stop and let caller continue
         self.view.stop()
         await interaction.response.defer()
 
 
 class SectionSelect(ui.Select):
-    def __init__(self, sections: list[str]):
-        options = []
-        mapping = {
-            "Overview": EMO["sparkle"],
-            "Times": EMO["main"],
-            "Description": EMO["desc"],
-            "Details": EMO["details"],
-            "Raw": EMO["stats"],
-        }
-        for s in sections:
-            emoji = mapping.get(s, EMO["choice"])
-            options.append(ui.SelectOption(label=s, description=f"View {s}", emoji=emoji))
-        super().__init__(placeholder="Pick a section to view...", min_values=1, max_values=1, options=options)
-        self.chosen = None
+    """
+    Dropdown to choose which section to view: Overview / Times / Description / Details / Raw
+    """
+
+    def __init__(self):
+        sections = [
+            ("Overview", EMO["sparkle"], "Summary overview with key fields"),
+            ("Times", EMO["main"], "Show time estimates"),
+            ("Description", EMO["desc"], "Long game description"),
+            ("Details", EMO["details"], "Developer / Publisher / Release, etc."),
+            ("Raw", EMO["stats"], "Sanitized raw excerpt for debugging"),
+        ]
+        options = [ui.SelectOption(label=s[0], description=s[2], emoji=s[1]) for s in sections]
+        super().__init__(placeholder="Choose section to view...", min_values=1, max_values=1, options=options)
+        self.chosen: Optional[str] = None
 
     async def callback(self, interaction: discord.Interaction):
         self.chosen = self.values[0]
@@ -281,206 +366,410 @@ class OpenHLTBButton(ui.Button):
         super().__init__(label="Open on HLTB", style=discord.ButtonStyle.link, url=url, emoji=EMO["open"])
 
 
-# -----------------------
-# Main Cog
-# -----------------------
+class DescriptionButton(ui.Button):
+    """
+    Blue primary description button with emoji (📜 Description).
+    When pressed, this will send or switch to the Description embed view.
+    """
+
+    def __init__(self):
+        super().__init__(label="Description", style=discord.ButtonStyle.primary, emoji=EMO["desc"])
+        self.pressed = False
+
+    async def callback(self, interaction: discord.Interaction):
+        # mark pressed; parent view handler will detect via custom_id or by replacing view.
+        self.pressed = True
+        # respond with a defer to avoid "This interaction failed"
+        await interaction.response.defer()
+
+
+class RandomButton(ui.Button):
+    def __init__(self):
+        super().__init__(label="Random", style=discord.ButtonStyle.secondary, emoji=EMO["random"])
+        self.pressed_index: Optional[int] = None
+
+    async def callback(self, interaction: discord.Interaction):
+        # simply store that it was pressed; the parent view will handle the randomization by checking the view state
+        self.pressed_index = random.randint(0, 4)  # placeholder; will be overwritten
+        await interaction.response.defer()
+
+
+# -----------------------------
+# MAIN COG
+# -----------------------------
 class HLTBCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        # small in-memory cache to avoid repeated network on same id in quick succession
-        self._mini_cache: dict[int, dict] = {}
+        self.cache = CacheDB()
+        self.http_session = aiohttp.ClientSession(headers=HEADERS)
+        # in-memory short cache for quick reuse while bot runs (id -> parsed)
+        self.mem_cache: Dict[int, Tuple[int, Dict[str, Any]]] = {}  # game_id -> (ts, parsed)
+        # ensure DB init in background
+        bot.loop.create_task(self.cache.init())
 
-    async def search_hltb(self, query: str):
-        """Wrap howlongtobeatpy async search"""
-        h = HowLongToBeat()
-        results = await h.async_search(query)
-        return sorted(results, key=lambda r: r.similarity, reverse=True)
-
-    def format_times_field(self, raw: dict, api_obj) -> str:
-        """
-        Build a clean times block using both the scraped raw (if any) and the API object fields.
-        """
-        lines = []
-        # prefer API numeric fields if present
+    async def cog_unload(self):
         try:
-            def fmt(v):
-                return f"{v} hrs" if (v is not None and str(v).strip() != "") else "N/A"
-            # API attributes: main_story, main_extra, completionist
-            if hasattr(api_obj, "main_story"):
-                lines.append(f"{EMO['main']} **Main:** {fmt(api_obj.main_story)}")
-            if hasattr(api_obj, "main_extra"):
-                lines.append(f"{EMO['extra']} **Main + Extra:** {fmt(api_obj.main_extra)}")
-            if hasattr(api_obj, "completionist"):
-                lines.append(f"{EMO['complete']} **Completionist:** {fmt(api_obj.completionist)}")
+            await self.http_session.close()
+        except Exception:
+            pass
+        try:
+            await self.cache.close()
         except Exception:
             pass
 
-        # fallback to scraped estimates
-        for k, v in raw.get("time_estimates", {}).items():
-            label = k.replace("_", " ").title()
-            lines.append(f"{EMO['stats']} **{label}:** {v}")
+    async def search_api(self, query: str):
+        h = HowLongToBeat()
+        try:
+            results = await h.async_search(query)
+        except Exception as exc:
+            # worst case, rethrow for calling code to handle
+            raise
+        # sort by similarity descending
+        results = sorted(results, key=lambda r: getattr(r, "similarity", 0), reverse=True)
+        return results
 
-        return "\n".join(lines) or "No time data found."
+    async def fetch_and_parse_game(self, game_id: int) -> Dict[str, Any]:
+        """
+        Fetch HLTB page for game_id and parse. Use layered caching:
+           1) Memory cache (self.mem_cache) with small TTL
+           2) Disk cache (SQLite) with longer TTL
+           3) Fetch remote & parse, then store both
+        """
+        now = now_ts()
 
-    def compact_list(self, items):
+        # 1) In-memory cache short-circuit
+        mem = self.mem_cache.get(game_id)
+        if mem:
+            ts, parsed = mem
+            if now - ts < 60 * 60:  # 1 hour mem cache
+                return parsed
+
+        # 2) Disk cache
+        cache_key = f"game_parsed:{game_id}"
+        cached = await self.cache.get(cache_key)
+        if cached:
+            ts = cached["timestamp"]
+            if now - ts < CACHE_TTL_SECONDS:
+                parsed = cached["value"]
+                # repopulate mem cache
+                self.mem_cache[game_id] = (now, parsed)
+                return parsed
+
+        # 3) Fetch remote
+        # Try canonical /game/{id} then /game?id={id}
+        urls = [f"{HLTB_BASE}/game/{game_id}", f"{HLTB_BASE}/game?id={game_id}"]
+        last_exc = None
+        for url in urls:
+            try:
+                text = await fetch_text(self.http_session, url)
+                parsed = parse_hltb_game_page(text)
+                parsed["_source_url"] = url
+                parsed["_fetched_at"] = now
+                # write to caches
+                self.mem_cache[game_id] = (now, parsed)
+                await self.cache.set(cache_key, parsed)
+                return parsed
+            except Exception as exc:
+                last_exc = exc
+                continue
+        # if all fail, raise last exception
+        raise last_exc or RuntimeError("Failed to fetch game page")
+
+    def build_summary_embed(self, api_obj, parsed: Dict[str, Any], requester: discord.User) -> discord.Embed:
+        """
+        Create the main summary embed with times, thumbnails, platforms, short meta
+        """
+        title = getattr(api_obj, "game_name", parsed.get("title", "Unknown"))
+        url = parsed.get("_source_url", f"{HLTB_BASE}/")
+        image = parsed.get("image") or getattr(api_obj, "game_image_url", None)
+        platforms = getattr(api_obj, "profile_platforms", []) or []
+
+        embed = discord.Embed(
+            title=f"{EMO['sparkle']} {safe_truncate(title, 256)}",
+            url=url,
+            color=COLOR_ACCENT,
+            description=f"{EMO['platform']} Platforms: {', '.join(platforms) if platforms else 'Unknown'}\n\n"
+                        f"{EMO['choice']} Search score: {getattr(api_obj, 'similarity', 0):.2f}"
+        )
+        if image:
+            embed.set_thumbnail(url=image)
+
+        # times (prefer API fields)
+        lines = []
+        if hasattr(api_obj, "main_story"):
+            lines.append(f"{EMO['main']} **Main:** {format_hours(api_obj.main_story)}")
+        if hasattr(api_obj, "main_extra"):
+            lines.append(f"{EMO['extra']} **Main + Extra:** {format_hours(api_obj.main_extra)}")
+        if hasattr(api_obj, "completionist"):
+            lines.append(f"{EMO['complete']} **Completionist:** {format_hours(api_obj.completionist)}")
+        if not lines:
+            # fallback to scraped
+            te = parsed.get("time_estimates", {})
+            for k, v in te.items():
+                lines.append(f"{EMO['stats']} **{k.title()}:** {v}")
+
+        embed.add_field(name="⏱️ Estimated Times", value="\n".join(lines) if lines else "No time data available", inline=False)
+
+        genres = parsed.get("genres") or []
+        if genres:
+            embed.add_field(name=f"{EMO['desc']} Genres / Tags", value=self.compact_list(genres, limit=8), inline=False)
+
+        details = parsed.get("details") or {}
+        if details:
+            # show a few detail fields inline
+            items = list(details.items())[:3]
+            for k, v in items:
+                embed.add_field(name=k, value=safe_truncate(v, 200), inline=True)
+
+        embed.set_footer(text=f"Requested by {requester.display_name} • Data from howlongtobeat.com")
+        return embed
+
+    def compact_list(self, items: List[str], limit: int = 6) -> str:
         if not items:
             return "Unknown"
-        if isinstance(items, (list, tuple)):
-            return ", ".join(items[:8])
-        return str(items)
+        if len(items) <= limit:
+            return ", ".join(items)
+        return ", ".join(items[:limit]) + f", +{len(items)-limit} more"
 
-    # -----------------------
-    # single slash command
-    # -----------------------
+    # Main command
     @app_commands.command(name="hltb", description="⏳ Look up a game's HowLongToBeat profile & times.")
     @app_commands.describe(game="Full or partial game name to search for.")
+    @cooldown_per_user(USER_COOLDOWN_SECONDS)
     async def hltb(self, interaction: discord.Interaction, game: str):
+        """
+        Single slash command handler implementing the full flow:
+           1) search using howlongtobeatpy
+           2) if multiple results, show a dropdown to pick
+           3) fetch & parse chosen game's HLtB page (cached)
+           4) show summary embed with buttons + section dropdown
+           5) support Description button (blue), Random button, Open link
+        """
         await interaction.response.defer(thinking=True)
+
+        # 1) search
         try:
-            results = await self.search_hltb(game)
+            results = await self.search_api(game)
         except Exception as exc:
-            await interaction.followup.send(f"{EMO['error']} Search failed: {exc}")
+            await interaction.followup.send(f"{EMO['error']} Search failed: `{exc}`")
             return
 
         if not results:
-            await interaction.followup.send(f"{EMO['error']} No results for **{game}**.")
+            await interaction.followup.send(f"{EMO['error']} No results found for **{game}**.")
             return
 
-        # If multiple results: show selection dropdown (top 5)
-        chosen_result = None
+        # If multiple results -> ask to pick via dropdown
+        chosen_api_obj = None
         if len(results) > 1:
             view = ui.View(timeout=30)
-            select = GamePickSelect(results)
+            select = ResultSelect(results)
             view.add_item(select)
-            prompt_embed = discord.Embed(
-                title=f"{EMO['search']} Select a result",
-                description=f"I found multiple games matching **{game}** — pick the one you meant.",
-                color=ACCENT_COLOR,
+            pick_embed = discord.Embed(
+                title=f"{EMO['search']} Multiple results found",
+                description=f"I found multiple matches for **{game}**. Please select the correct one from the dropdown.",
+                color=COLOR_PRIMARY
             )
-            follow = await interaction.followup.send(embed=prompt_embed, view=view)
-            await view.wait()
-            # if view timed out or no selection
-            if select.selected is None:
-                await follow.edit(content=f"{EMO['timeout']} Selection timed out.", embed=None, view=None)
-                return
-            chosen_result = results[select.selected]
-            # tidy the prompt message
-            await follow.edit(embed=None, view=None, content=None)
-        else:
-            chosen_result = results[0]
+            # include top results preview in the embed description to make it look better
+            preview_lines = []
+            for i, r in enumerate(results[:MAX_SELECT_OPTIONS]):
+                name = r.game_name
+                sim = getattr(r, "similarity", 0)
+                pfs = ", ".join(getattr(r, "profile_platforms", []) or [])
+                preview_lines.append(f"**{i+1}.** {safe_truncate(name, 80)} — `{sim:.2f}` • {pfs}")
+            if preview_lines:
+                pick_embed.add_field(name="Top results", value="\n".join(preview_lines), inline=False)
 
-        # Now we have a chosen_result (howlongtobeatpy result object)
-        game_id = getattr(chosen_result, "game_id", None)
-        title = getattr(chosen_result, "game_name", "Unknown Title")
-        image = getattr(chosen_result, "game_image_url", None)
-        platforms = getattr(chosen_result, "profile_platforms", []) or []
+            prompt_msg = await interaction.followup.send(embed=pick_embed, view=view)
+            # wait for selection or timeout
+            await view.wait()
+
+            if select.chosen_index is None:
+                # timed out or user didn't pick
+                await prompt_msg.edit(content=f"{EMO['timeout']} Selection timed out. Try again.", embed=None, view=None)
+                return
+
+            chosen_api_obj = results[select.chosen_index]
+            # tidy the pick message
+            await prompt_msg.edit(content=None, embed=None, view=None)
+        else:
+            chosen_api_obj = results[0]
+
+        # Now we have chosen_api_obj
+        game_id = getattr(chosen_api_obj, "game_id", None)
+        title = getattr(chosen_api_obj, "game_name", "Unknown").strip()
+        img = getattr(chosen_api_obj, "game_image_url", None)
+        platforms = getattr(chosen_api_obj, "profile_platforms", []) or []
         hltb_url = f"{HLTB_BASE}/game/{game_id}" if game_id else HLTB_BASE
 
-        # attempt to use mini cache
-        parsed = None
-        if game_id and game_id in self._mini_cache:
-            parsed = self._mini_cache[game_id]
-        else:
-            # fetch + parse
-            try:
-                parsed = await get_game_details(game_id) if game_id else {}
-            except Exception as exc:
-                # parsing failed; we'll continue with best-effort using API-only data
-                parsed = {"description": None, "genres": [], "details": {}, "time_estimates": {}, "image": image, "_source_url": hltb_url}
-            # store in mini cache
+        # Fetch parsed page (cache-aware)
+        parsed = {}
+        try:
             if game_id:
-                self._mini_cache[game_id] = parsed
+                parsed = await self.fetch_and_parse_game(game_id)
+            else:
+                parsed = {"title": title, "description": None, "genres": [], "details": {}, "time_estimates": {}, "image": img, "_source_url": hltb_url}
+        except Exception:
+            # fallback: best-effort from API
+            parsed = {"title": title, "description": None, "genres": [], "details": {}, "time_estimates": {}, "image": img, "_source_url": hltb_url}
 
-        # Build initial embed (summary)
-        summary_embed = discord.Embed(
-            title=f"{EMO['sparkle']} {title}",
-            url=parsed.get("_source_url", hltb_url),
-            color=COLOR_THEME,
-            description=f"{EMO['platform']} Platforms: {self.compact_list(platforms)}\n\n"
-                        f"{EMO['details']} Source: HowLongToBeat"
-        )
-        if parsed.get("image"):
-            summary_embed.set_thumbnail(url=parsed["image"])
-        elif image:
-            summary_embed.set_thumbnail(url=image)
+        # Build summary embed and view with buttons & section dropdown
+        summary_embed = self.build_summary_embed(chosen_api_obj, parsed, interaction.user)
 
-        # Add times (prefer API numeric fields)
-        times_block = self.format_times_field(parsed, chosen_result)
-        summary_embed.add_field(name="⏱️ Estimated Times", value=times_block, inline=False)
+        # Compose view: Section dropdown + Description (primary) + Random + Open link
+        main_view = ui.View(timeout=120)
+        sec_select = SectionSelect()
+        main_view.add_item(sec_select)
 
-        # Genres / short details
-        genres = parsed.get("genres") or []
-        summary_embed.add_field(name=f"{EMO['desc']} Genres / Tags", value=self.compact_list(genres), inline=False)
+        # Description blue button
+        desc_button = DescriptionButton()
+        main_view.add_item(desc_button)
 
-        # Footer with requesting user
-        summary_embed.set_footer(text=f"Requested by {interaction.user.display_name} • data from howlongtobeat.com")
+        # Random button (secondary)
+        rand_button = RandomButton()
+        main_view.add_item(rand_button)
 
-        # Buttons: Open on HLTB
-        buttons = ui.View()
-        buttons.add_item(OpenHLTBButton(parsed.get("_source_url", hltb_url)))
+        # Open HLTB link
+        main_view.add_item(OpenHLTBButton(parsed.get("_source_url", hltb_url)))
 
-        # Section selection view (dropdown) to show specific scraped details
-        sections = ["Overview", "Times", "Description", "Details", "Raw"]
-        sec_view = ui.View(timeout=60)
-        sec_select = SectionSelect(sections)
-        sec_view.add_item(sec_select)
-        sec_view.add_item(OpenHLTBButton(parsed.get("_source_url", hltb_url)))
+        # Send the summary (with buttons)
+        summary_msg = await interaction.followup.send(embed=summary_embed, view=main_view)
 
-        # Send summary with section chooser
-        summary_msg = await interaction.followup.send(embed=summary_embed, view=sec_view)
+        # Wait for any of: sec_select chosen, desc_button pressed, rand_button pressed, or timeout
+        await main_view.wait()
 
-        # Wait for section selection
-        await sec_view.wait()
-        if sec_select.chosen is None:
-            # timeout -> do nothing further
-            await summary_msg.edit(content=f"{EMO['timeout']} Section selection timed out. Use the button to open the HLTB page.", view=None)
+        # If description button pressed: show description embed/page
+        if desc_button.pressed:
+            # build description embed
+            desc_text = parsed.get("description") or "No description available."
+            desc_embed = discord.Embed(
+                title=f"{EMO['desc']} Description — {title}",
+                description=safe_truncate(desc_text, 4000),
+                color=COLOR_PRIMARY,
+                url=parsed.get("_source_url", hltb_url)
+            )
+            if parsed.get("image"):
+                desc_embed.set_thumbnail(url=parsed.get("image"))
+            desc_embed.set_footer(text=f"Requested by {interaction.user.display_name}")
+            await summary_msg.edit(embed=desc_embed, view=ui.View().add_item(OpenHLTBButton(parsed.get("_source_url", hltb_url))))
             return
 
-        # Build embed for selected section
-        chosen_section = sec_select.chosen
-        content_embed = discord.Embed(color=ACCENT_COLOR, title=f"{EMO['choice']} {chosen_section} — {title}", url=parsed.get("_source_url", hltb_url))
-        content_embed.set_thumbnail(url=parsed.get("image", image))
+        # If random button pressed: pick a random result from the original results and show it
+        if isinstance(rand_button.pressed_index, int) and results:
+            # pick randomly from the results list (bounded by available results)
+            idx = random.randint(0, min(len(results) - 1, MAX_SELECT_OPTIONS - 1))
+            chosen_api_obj = results[idx]
+            # refetch parsed for new choice
+            game_id = getattr(chosen_api_obj, "game_id", None)
+            title = getattr(chosen_api_obj, "game_name", "Unknown")
+            img = getattr(chosen_api_obj, "game_image_url", None)
+            hltb_url = f"{HLTB_BASE}/game/{game_id}" if game_id else HLTB_BASE
+            try:
+                parsed = await self.fetch_and_parse_game(game_id) if game_id else {}
+            except Exception:
+                parsed = {"title": title, "description": None, "genres": [], "details": {}, "time_estimates": {}, "image": img, "_source_url": hltb_url}
+            # send new summary
+            new_summary = self.build_summary_embed(chosen_api_obj, parsed, interaction.user)
+            new_view = ui.View(timeout=120)
+            new_view.add_item(SectionSelect())
+            new_view.add_item(DescriptionButton())
+            new_view.add_item(OpenHLTBButton(parsed.get("_source_url", hltb_url)))
+            await summary_msg.edit(embed=new_summary, view=new_view)
+            return
 
-        if chosen_section == "Overview":
-            # Combine short description + key details
-            short_desc = parsed.get("description") or "No description available."
-            details = parsed.get("details") or {}
-            overview_text = (short_desc[:1000] + "...") if len(short_desc or "") > 1000 else short_desc
-            content_embed.description = overview_text
-            # add a details mini-table if present
-            if details:
-                for k, v in list(details.items())[:6]:
-                    content_embed.add_field(name=k, value=v, inline=True)
+        # If section select was used
+        if sec_select.chosen:
+            chosen_section = sec_select.chosen
+            # Build corresponding embed
+            if chosen_section == "Overview":
+                ov_embed = discord.Embed(
+                    title=f"{EMO['sparkle']} Overview — {title}",
+                    color=COLOR_ACCENT,
+                    url=parsed.get("_source_url", hltb_url)
+                )
+                # short description if present
+                short_desc = (parsed.get("description") or "")
+                if short_desc:
+                    ov_embed.description = safe_truncate(short_desc, 1024)
+                else:
+                    ov_embed.description = "No description available."
+                # details (a few)
+                details = parsed.get("details", {})
+                if details:
+                    for i, (k, v) in enumerate(details.items()):
+                        if i >= 6:
+                            break
+                        ov_embed.add_field(name=k, value=safe_truncate(v, 256), inline=True)
+                if parsed.get("image"):
+                    ov_embed.set_thumbnail(url=parsed.get("image"))
+                ov_embed.set_footer(text=f"Requested by {interaction.user.display_name}")
+                await summary_msg.edit(embed=ov_embed, view=ui.View().add_item(OpenHLTBButton(parsed.get("_source_url", hltb_url))))
+                return
 
-        elif chosen_section == "Times":
-            times_block = self.format_times_field(parsed, chosen_result)
-            content_embed.description = times_block
+            elif chosen_section == "Times":
+                times_embed = discord.Embed(
+                    title=f"{EMO['main']} Times — {title}",
+                    url=parsed.get("_source_url", hltb_url),
+                    color=COLOR_ACCENT
+                )
+                lines = []
+                # prefer API fields first
+                try:
+                    api_main = getattr(chosen_api_obj, "main_story", None)
+                    api_main_extra = getattr(chosen_api_obj, "main_extra", None)
+                    api_comp = getattr(chosen_api_obj, "completionist", None)
+                    lines.append(f"{EMO['main']} **Main:** {format_hours(api_main)}")
+                    lines.append(f"{EMO['extra']} **Main + Extra:** {format_hours(api_main_extra)}")
+                    lines.append(f"{EMO['complete']} **Completionist:** {format_hours(api_comp)}")
+                except Exception:
+                    pass
+                # scraped times
+                te = parsed.get("time_estimates", {})
+                for k, v in te.items():
+                    lines.append(f"{EMO['stats']} **{k.title()}:** {v}")
+                if not lines:
+                    times_embed.description = "No time data available."
+                else:
+                    times_embed.description = "\n".join(lines)
+                times_embed.set_footer(text=f"Data may be approximate • Requested by {interaction.user.display_name}")
+                await summary_msg.edit(embed=times_embed, view=ui.View().add_item(OpenHLTBButton(parsed.get("_source_url", hltb_url))))
+                return
 
-        elif chosen_section == "Description":
-            desc_long = parsed.get("description") or "No description available."
-            # break into pages if very long (show first 2048 chars)
-            content_embed.description = desc_long[:2048] if len(desc_long) > 2048 else desc_long
+            elif chosen_section == "Description":
+                desc_text = parsed.get("description") or "No description available."
+                desc_embed = discord.Embed(
+                    title=f"{EMO['desc']} Description — {title}",
+                    description=safe_truncate(desc_text, 4000),
+                    url=parsed.get("_source_url", hltb_url),
+                    color=COLOR_PRIMARY
+                )
+                if parsed.get("image"):
+                    desc_embed.set_thumbnail(url=parsed.get("image"))
+                desc_embed.set_footer(text=f"Requested by {interaction.user.display_name}")
+                await summary_msg.edit(embed=desc_embed, view=ui.View().add_item(OpenHLTBButton(parsed.get("_source_url", hltb_url))))
+                return
 
-        elif chosen_section == "Details":
-            details = parsed.get("details") or {}
-            if not details:
-                content_embed.description = "No detailed metadata scraped."
-            else:
-                for k, v in details.items():
-                    content_embed.add_field(name=k, value=v[:1024], inline=False)
+            elif chosen_section == "Details":
+                details = parsed.get("details") or {}
+                details_embed = discord.Embed(title=f"{EMO['details']} Details — {title}", color=COLOR_ACCENT, url=parsed.get("_source_url", hltb_url))
+                if not details:
+                    details_embed.description = "No structured details scraped."
+                else:
+                    for k, v in details.items():
+                        details_embed.add_field(name=k, value=safe_truncate(v, 1024), inline=False)
+                details_embed.set_footer(text=f"Requested by {interaction.user.display_name}")
+                await summary_msg.edit(embed=details_embed, view=ui.View().add_item(OpenHLTBButton(parsed.get("_source_url", hltb_url))))
+                return
 
-        elif chosen_section == "Raw":
-            # Show a sanitized excerpt of the page text (debug style)
-            excerpt = parsed.get("raw_html_excerpt", "No raw excerpt available.")
-            content_embed.description = f"```\n{excerpt[:1000]}\n```"
+            elif chosen_section == "Raw":
+                raw = parsed.get("raw_excerpt", "No raw excerpt available.")
+                raw_embed = discord.Embed(title=f"{EMO['stats']} Raw Excerpt — {title}", color=COLOR_ACCENT, url=parsed.get("_source_url", hltb_url))
+                raw_embed.description = f"```\n{safe_truncate(raw, 1900)}\n```"
+                raw_embed.set_footer(text="Raw excerpt (sanitized).")
+                await summary_msg.edit(embed=raw_embed, view=ui.View().add_item(OpenHLTBButton(parsed.get("_source_url", hltb_url))))
+                return
 
-        # Send the chosen section (with an Open button)
-        final_view = ui.View()
-        final_view.add_item(OpenHLTBButton(parsed.get("_source_url", hltb_url)))
+        # fallback if nothing else happened
+        await summary_msg.edit(content="No selection made. Use the buttons to open the HowLongToBeat page.", view=ui.View().add_item(OpenHLTBButton(parsed.get("_source_url", hltb_url))))
 
-        await summary_msg.edit(embed=content_embed, view=final_view)
-
-
-# Cog setup
+# Setup function for the cog
 async def setup(bot: commands.Bot):
     await bot.add_cog(HLTBCog(bot))
