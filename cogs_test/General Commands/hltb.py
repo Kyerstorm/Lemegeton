@@ -8,8 +8,6 @@
 # - Buttons: Open on HLTB (link), 📜 Description (primary blue), 🎲 Random
 # - Persistent SQLite cache (disk-backed) to reduce scraping & API calls
 # - Defensive parsing, error handling, and rate-limiting
-#
-# Author: Discord Bot Builder
 # =============================================================
 
 import asyncio
