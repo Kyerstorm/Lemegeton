@@ -1213,7 +1213,7 @@ class NewsManagementView(discord.ui.View):
     async def remove_account(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Remove a monitored Twitter account."""
         try:
-            accounts = await self.get_news_accounts_json()
+            accounts = await self.cog.get_news_accounts_json()
             if not accounts:
                 await interaction.response.send_message("❌ No accounts are currently being monitored.", ephemeral=True)
                 return
@@ -1254,8 +1254,8 @@ class NewsManagementView(discord.ui.View):
     @discord.ui.button(label="View Details", style=discord.ButtonStyle.gray, emoji="📋", row=1)
     async def view_details(self, interaction: discord.Interaction, button: discord.ui.Button):
         """View detailed information about accounts and whitelist."""
-        accounts = await self.get_news_accounts_json()
-        whitelist = await self.get_news_filters_json()
+        accounts = await self.cog.get_news_accounts_json()
+        whitelist = await self.cog.get_news_filters_json()
         
         embed = discord.Embed(title="📊 Detailed News System Information", color=0x1DA1F2)
         
@@ -1293,7 +1293,7 @@ class NewsManagementView(discord.ui.View):
         """Manually trigger tweet checking for all accounts."""
         await interaction.response.defer(ephemeral=True)
         
-        accounts = await self.get_news_accounts_json()
+        accounts = await self.cog.get_news_accounts_json()
         if not accounts:
             await interaction.followup.send("❌ No accounts are currently being monitored.", ephemeral=True)
             return
