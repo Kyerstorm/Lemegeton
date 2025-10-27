@@ -305,7 +305,6 @@ class AniListCog(commands.Cog):
         insights = []
         if filtered_data:
             insights.append(f"📊 Showing {len(filtered_data)}/{total_checked} users")
-            insights.append(f"📈 Avg Progress: {avg_progress:.1f}")
             if avg_score > 0:
                 insights.append(f"⭐ Avg Score: {avg_score:.1f}")
         
