@@ -19,6 +19,7 @@
 # =============================================================
 
 import asyncio
+import aiohttp
 import aiosqlite
 import json
 import os
@@ -28,7 +29,6 @@ import time
 from functools import wraps
 from typing import Any, Dict, List, Optional, Tuple
 
-import aiohttp
 import discord
 from bs4 import BeautifulSoup
 from discord import app_commands, ui
@@ -364,7 +364,7 @@ class ResultSelect(ui.Select):
             label = (r.game_name[:95] + "...") if len(r.game_name) > 95 else r.game_name
             platforms = ", ".join(getattr(r, "profile_platforms", []) or [])
             desc = f"Score: {getattr(r, 'similarity', 0):.2f} • {platforms}" if platforms else f"Score: {getattr(r, 'similarity', 0):.2f}"
-            options.append(ui.SelectOption(label=label, description=(desc[:100] if desc else ""), value=str(i), emoji=EMO["choice"]))
+            options.append(discord.SelectOption(label=label, description=(desc[:100] if desc else ""), value=str(i), emoji=EMO["choice"]))
         super().__init__(placeholder="Select the matching game...", min_values=1, max_values=1, options=options)
         self.results = results
         self.chosen_index: Optional[int] = None
@@ -384,12 +384,12 @@ class SectionSelect(ui.Select):
 
     def __init__(self):
         opts = [
-            ui.SelectOption(label="Overview", description="Summary & quick metadata", emoji=EMO["sparkle"]),
-            ui.SelectOption(label="Times", description="Time estimates", emoji=EMO["main"]),
-            ui.SelectOption(label="Description", description="Full scraped description", emoji=EMO["desc"]),
-            ui.SelectOption(label="Details", description="Dev / Publisher / Release", emoji=EMO["details"]),
-            ui.SelectOption(label="Reviews", description="User reviews & excerpts", emoji=EMO["stats"]),
-            ui.SelectOption(label="Raw", description="Sanitized raw excerpt", emoji="🧪"),
+            discord.SelectOption(label="Overview", description="Summary & quick metadata", emoji=EMO["sparkle"]),
+            discord.SelectOption(label="Times", description="Time estimates", emoji=EMO["main"]),
+            discord.SelectOption(label="Description", description="Full scraped description", emoji=EMO["desc"]),
+            discord.SelectOption(label="Details", description="Dev / Publisher / Release", emoji=EMO["details"]),
+            discord.SelectOption(label="Reviews", description="User reviews & excerpts", emoji=EMO["stats"]),
+            discord.SelectOption(label="Raw", description="Sanitized raw excerpt", emoji="🧪"),
         ]
         super().__init__(placeholder="Choose section to view...", min_values=1, max_values=1, options=opts)
         self.chosen: Optional[str] = None
@@ -450,8 +450,10 @@ class HLTBCog(commands.Cog):
         self.cache = CacheDB()
         self.http = aiohttp.ClientSession(headers=HEADERS)
         self.mem_cache: Dict[int, Tuple[int, Dict[str, Any]]] = {}  # game_id -> (ts, parsed)
-        # schedule DB init in background
-        bot.loop.create_task(self.cache.init())
+
+    async def cog_load(self):
+        """Initialize cache when cog loads."""
+        await self.cache.init()
 
     async def cog_unload(self):
         try:
