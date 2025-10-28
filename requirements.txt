@@ -8,6 +8,7 @@ yt-dlp==2024.12.13
 requests==2.31.0
 PyYAML==6.0.2
 Pillow==11.1.0
+howlongtobeatpy==1.0.18
 
 # Optional: Twitter/X scraping (snscrape). Install only if you plan to use cogs/news.py
 snscrape==0.7.0.20230622
