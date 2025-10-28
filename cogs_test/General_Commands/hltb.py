@@ -656,32 +656,6 @@ class HLTBCog(commands.Cog):
             rows.append(f"{left:<30} {right}")
         return "\n".join(rows)
 
-def detect_store_buttons(self, stores: dict, hltb_url: str) -> list[discord.ui.Button]:
-    """Return link buttons for any detected store plus HowLongToBeat link."""
-    buttons = []
-
-    def add(label, emoji, url):
-        buttons.append(discord.ui.Button(label=label, style=discord.ButtonStyle.link, url=url, emoji=emoji))
-
-    if "gog" in stores:
-        price = stores["gog"].get("price")
-        lbl = f"GOG — {price}" if price else "GOG (DRM-free)"
-        add(lbl, "🟣", stores["gog"]["url"])
-
-    if "steam" in stores:
-        price = stores["steam"].get("price")
-        lbl = f"Steam — {price}" if price else "Steam"
-        add(lbl, "🔵", stores["steam"]["url"])
-
-    if "epic" in stores:
-        price = stores["epic"].get("price")
-        lbl = f"Epic — {price}" if price else "Epic"
-        add(lbl, "🟥", stores["epic"]["url"])
-
-    add("Open on HLTB", "🔗", hltb_url)
-    return buttons
-
-
 def build_summary_embed(self, api_obj, parsed, requester):
     title = getattr(api_obj, "game_name", parsed.get("title", "Unknown"))
     url = parsed.get("_source_url", HLTB_BASE)
@@ -782,6 +756,31 @@ def build_summary_embed(self, api_obj, parsed, requester):
             embeds.append(e)
         return embeds
 
+    def detect_store_buttons(self, stores: dict, hltb_url: str) -> list[discord.ui.Button]:
+        """Return link buttons for any detected store plus HowLongToBeat link."""
+        buttons = []
+
+        def add(label, emoji, url):
+            buttons.append(discord.ui.Button(label=label, style=discord.ButtonStyle.link, url=url, emoji=emoji))
+
+        if "gog" in stores:
+            price = stores["gog"].get("price")
+            lbl = f"GOG — {price}" if price else "GOG (DRM-free)"
+            add(lbl, "🟣", stores["gog"]["url"])
+
+        if "steam" in stores:
+            price = stores["steam"].get("price")
+            lbl = f"Steam — {price}" if price else "Steam"
+            add(lbl, "🔵", stores["steam"]["url"])
+
+        if "epic" in stores:
+            price = stores["epic"].get("price")
+            lbl = f"Epic — {price}" if price else "Epic"
+            add(lbl, "🟥", stores["epic"]["url"])
+
+        add("Open on HLTB", "🔗", hltb_url)
+        return buttons
+
 # =============================================================
     # Slash command
 # =============================================================
@@ -837,6 +836,7 @@ def build_summary_embed(self, api_obj, parsed, requester):
 
         game_id = getattr(chosen_api_obj, "game_id", None)
         title = getattr(chosen_api_obj, "game_name", "Unknown")
+
         api_img = getattr(chosen_api_obj, "game_image_url", None)
         platforms = getattr(chosen_api_obj, "profile_platforms", []) or []
         hltb_url = f"{HLTB_BASE}/game/{game_id}" if game_id else HLTB_BASE
@@ -869,11 +869,12 @@ def build_summary_embed(self, api_obj, parsed, requester):
         main_view.add_item(rand_button)
 
         # detect stores and add store buttons if present
-      
-view = discord.ui.View(timeout=300)
-    for btn in self.detect_store_buttons(parsed.get("stores", {}), parsed.get("_source_url", HLTB_BASE)):
-           view.add_item(btn)
-           await interaction.followup.send(embed=embed, view=view)
+        store_buttons = self.detect_store_buttons(parsed.get("stores", {}), parsed.get("_source_url", HLTB_BASE))
+        for btn in store_buttons:
+            main_view.add_item(btn)
+
+        # Send the summary embed and wait for interactions
+        summary_message = await interaction.followup.send(embed=summary_embed, view=main_view)
         await main_view.wait()
 
         # Description flow
