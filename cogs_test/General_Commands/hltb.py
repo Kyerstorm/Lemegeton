@@ -656,121 +656,111 @@ class HLTBCog(commands.Cog):
             rows.append(f"{left:<30} {right}")
         return "\n".join(rows)
 
-    def detect_store_buttons(self, stores: Dict[str, Dict[str, str]]) -> List[ui.Button]:
-        buttons: List[ui.Button] = []
-        # Order: GOG, Steam, Epic
-        if "gog" in stores:
-            price = stores["gog"].get("price")
-            label = f"GOG — {price}" if price else "GOG (DRM-free)"
-            buttons.append(StoreButton(label=label, url=stores["gog"]["url"]))
-        if "steam" in stores:
-            price = stores["steam"].get("price")
-            label = f"Steam — {price}" if price else "Steam"
-            buttons.append(StoreButton(label=label, url=stores["steam"]["url"]))
-        if "epic" in stores:
-            price = stores["epic"].get("price")
-            label = f"Epic — {price}" if price else "Epic"
-            buttons.append(StoreButton(label=label, url=stores["epic"]["url"]))
-        return buttons
+def detect_store_buttons(self, stores: dict, hltb_url: str) -> list[discord.ui.Button]:
+    """Return link buttons for any detected store plus HowLongToBeat link."""
+    buttons = []
 
-    def build_summary_embed(self, api_obj, parsed: Dict[str, Any], requester: discord.User) -> discord.Embed:
-        title = getattr(api_obj, "game_name", parsed.get("title", "Unknown"))
-        url = parsed.get("_source_url", f"{HLTB_BASE}/")
-        image = parsed.get("image") or getattr(api_obj, "game_image_url", None)
-        platforms = getattr(api_obj, "profile_platforms", []) or []
+    def add(label, emoji, url):
+        buttons.append(discord.ui.Button(label=label, style=discord.ButtonStyle.link, url=url, emoji=emoji))
 
-        embed = discord.Embed(
-            title=f"{EMO['sparkle']} {safe_truncate(title, 256)}",
-            url=url,
-            color=COLOR_ACCENT,
-        )
-        if image:
-            embed.set_thumbnail(url=image)
+    if "gog" in stores:
+        price = stores["gog"].get("price")
+        lbl = f"GOG — {price}" if price else "GOG (DRM-free)"
+        add(lbl, "🟣", stores["gog"]["url"])
 
-        embed.description = f"{EMO['platform']} **Platforms:** {compact_join(platforms, limit=6)}"
+    if "steam" in stores:
+        price = stores["steam"].get("price")
+        lbl = f"Steam — {price}" if price else "Steam"
+        add(lbl, "🔵", stores["steam"]["url"])
 
-        # Playstyles & Times (all available)
-        # Gather numeric times via parse_hours_to_number, but keep textual fallback
-        numeric_times = {}
-        textual_times_lines = []
-        te = parsed.get("time_estimates", {}) or {}
-        # combine API fields if available
-        try:
-            api_main = getattr(api_obj, "main_story", None)
-            api_main_extra = getattr(api_obj, "main_extra", None)
-            api_comp = getattr(api_obj, "completionist", None)
-            if api_main:
-                te.setdefault("main", str(api_main))
-            if api_main_extra:
-                te.setdefault("main_extra", str(api_main_extra))
-            if api_comp:
-                te.setdefault("completionist", str(api_comp))
-        except Exception:
-            pass
+    if "epic" in stores:
+        price = stores["epic"].get("price")
+        lbl = f"Epic — {price}" if price else "Epic"
+        add(lbl, "🟥", stores["epic"]["url"])
 
-        # include additional playstyles (solo/coop)
-        for key, val in te.items():
-            numeric_val = parse_hours_to_number(val)
-            numeric_times[key] = numeric_val
-            textual_times_lines.append(f"{key.title().replace('_',' + ')}: {val}")
+    add("Open on HLTB", "🔗", hltb_url)
+    return buttons
 
-        # ensure keys appear in friendly order for display
-        ordered_keys = ["main", "main_extra", "completionist", "solo", "coop"]
-        playstyle_lines = []
-        for k in ordered_keys:
-            if k in te:
-                label = {
-                    "main": f"{EMO['main']} Main Story",
-                    "main_extra": f"{EMO['extra']} Main + Extra",
-                    "completionist": f"{EMO['complete']} Completionist",
-                    "solo": "⚔️ Solo",
-                    "coop": "🤝 Co-op",
-                }.get(k, k.title())
-                playstyle_lines.append(f"{label}: {te[k]}")
 
-        # Add Playstyles block
-        if playstyle_lines:
-            embed.add_field(name="⏱️ Estimated Times (Playstyles)", value="\n".join(playstyle_lines), inline=False)
+def build_summary_embed(self, api_obj, parsed, requester):
+    title = getattr(api_obj, "game_name", parsed.get("title", "Unknown"))
+    url = parsed.get("_source_url", HLTB_BASE)
+    image = parsed.get("image")
 
-        # Add the completion progress bars (Unicode) — only the progress bars as requested
-        labels_map = {
-            "main": f"{EMO['main']} Main",
-            "main_extra": f"{EMO['extra']} Main + Extra",
-            "completionist": f"{EMO['complete']} Completionist",
+    e = discord.Embed(
+        title=f"✨ {title}",
+        url=url,
+        color=discord.Color.from_str("#0A0C12")
+    )
+    if image:
+        e.set_thumbnail(url=image)
+
+    # Platforms
+    pfs = ", ".join(getattr(api_obj, "profile_platforms", []) or [])
+    if pfs:
+        e.description = f"💻 **Platforms:** {pfs}\n"
+
+    # Full description (not truncated)
+    if parsed.get("description"):
+        e.description += f"\n📘 **Description:**\n{parsed['description']}\n"
+
+    # Estimated times
+    times = parsed.get("time_estimates", {})
+    if times:
+        lines = []
+        label = {
+            "main": "🕐 Main Story",
+            "main_extra": "🎯 Main + Extra",
+            "completionist": "🏆 Completionist",
+            "solo": "⚔️ Solo",
+            "coop": "🤝 Co-op",
         }
-        bar_lines = build_progress_bar(numeric_times, labels_map, width=24)
-        if bar_lines:
-            embed.add_field(name="🏆 Completion Progress", value="\n".join(bar_lines), inline=False)
+        for k, v in times.items():
+            lines.append(f"{label.get(k, k.title())}: {v}")
+        e.add_field(name="⏱️ Estimated Times", value="\n".join(lines), inline=False)
 
-        # Genres / Tags
-        genres = parsed.get("genres", []) or []
-        if genres:
-            embed.add_field(name=f"{EMO['desc']} Genres", value=compact_join(genres, limit=8), inline=False)
+    # Genres / Developer / Publisher
+    genres = parsed.get("genres")
+    if genres:
+        e.add_field(name="📂 Genres", value=", ".join(genres), inline=False)
+    for k in ("Developer", "Publisher"):
+        if k in parsed.get("details", {}):
+            e.add_field(name=f"👨‍💻 {k}", value=parsed['details'][k], inline=True)
 
-        # Minimal details (Developer / Publisher / Release dates)
-        details = parsed.get("details", {}) or {}
-        # show Developer / Publisher if present
-        for key in ["Developer", "Publisher"]:
-            if key in details:
-                embed.add_field(name=key, value=safe_truncate(details[key], 200), inline=True)
+    # Release dates
+    rd = parsed.get("release_dates", {})
+    if rd:
+        val = []
+        if "NA" in rd: val.append(f"🇺🇸 **NA:** {rd['NA']}")
+        if "EU" in rd: val.append(f"🇪🇺 **EU:** {rd['EU']}")
+        if "JP" in rd: val.append(f"🇯🇵 **JP:** {rd['JP']}")
+        if parsed.get("updated"): val.append(f"🕓 **Updated:** {parsed['updated']}")
+        e.add_field(name="🌍 Release Dates", value="\n".join(val), inline=False)
 
-        # Release dates show NA/EU/JP if present
-        rd = parsed.get("release_dates", {}) or {}
-        for reg in ["NA", "EU", "JP"]:
-            if reg in rd:
-                embed.add_field(name=f"Release ({reg})", value=safe_truncate(rd[reg], 200), inline=True)
+    # Stats
+    st = parsed.get("stats", {})
+    if st:
+        rows = []
+        pairs = [
+            ("🕹️ Playing", st.get("playing")),
+            ("🕒 Backlogs", st.get("backlogs")),
+            ("🔁 Replays", st.get("replays")),
+            ("🚫 Retired", st.get("retired")),
+            ("⭐ Rating",  st.get("rating")),
+            ("🏁 Beat",    st.get("beat")),
+        ]
+        line = []
+        for i,(k,v) in enumerate(pairs):
+            if not v: continue
+            line.append(f"{k}: {v}")
+            if len(line)==2:
+                rows.append("     ".join(line))
+                line=[]
+        if line: rows.append("     ".join(line))
+        e.add_field(name="📊 Game Stats", value="\n".join(rows), inline=False)
 
-        # Updated
-        if parsed.get("updated"):
-            embed.add_field(name="Updated", value=safe_truncate(parsed["updated"], 200), inline=True)
-
-        # Game stats block
-        stats_field = self.build_game_stats_field(parsed.get("stats", {}))
-        if stats_field:
-            embed.add_field(name=f"{EMO['stats']} Game Stats", value=stats_field, inline=False)
-
-        embed.set_footer(text=f"🌌 Requested by {requester.display_name} • data from howlongtobeat.com")
-        return embed
+    e.set_footer(text=f"🌌 Requested by {requester.display_name} • Data from HowLongToBeat.com")
+    return e
 
     def build_description_embeds(self, title: str, parsed: Dict[str, Any], requester: discord.User) -> List[discord.Embed]:
         desc_text = parsed.get("description") or "No description available."
@@ -879,15 +869,11 @@ class HLTBCog(commands.Cog):
         main_view.add_item(rand_button)
 
         # detect stores and add store buttons if present
-        stores = parsed.get("stores", {}) or {}
-        store_buttons = self.detect_store_buttons(stores)
-        for b in store_buttons:
-            main_view.add_item(b)
-
-        main_view.add_item(OpenHLTBButton(parsed.get("_source_url", hltb_url)))
-
-        summary_message = await interaction.followup.send(embed=summary_embed, view=main_view)
-
+      
+view = discord.ui.View(timeout=300)
+    for btn in self.detect_store_buttons(parsed.get("stores", {}), parsed.get("_source_url", HLTB_BASE)):
+           view.add_item(btn)
+           await interaction.followup.send(embed=embed, view=view)
         await main_view.wait()
 
         # Description flow
