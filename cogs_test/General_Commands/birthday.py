@@ -619,11 +619,21 @@ class BirthdayCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.db = BirthdayDB()
-        self._checker.start()
+        # Defer creating the aiohttp session and starting background tasks
+        # until the cog is loaded in an async context.
         self._card_bytes = None
         self._card_last_fetch = None
-        self._aio = aiohttp.ClientSession()
+        self._aio = None
         logger.info("BirthdayCog initialized with DB at %s", self.db.path)
+
+    async def cog_load(self):
+        # create session and start background checker in async lifecycle
+        self._aio = aiohttp.ClientSession()
+        try:
+            self._checker.start()
+        except Exception:
+            # if already running or cannot start, ignore
+            pass
 
     def cog_unload(self):
         self._checker.cancel()
