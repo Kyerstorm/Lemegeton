@@ -1,4 +1,4 @@
-# cogs/hltb.py
+# cogs/utilities/hltb.py
 
 # =============================================================
 import asyncio
@@ -300,12 +300,12 @@ def parse_hltb_game_page(html: str) -> Dict[str, Any]:
                 if parent:
                     # search siblings and parent text for hours format
                     found = None
-                    near = parent.find_next(string=re.compile(r"\d{1,4}[\d\.\½\�]*\s*(Hours|hrs|h)?", re.I))
+                    near = parent.find_next(string=re.compile(r"\d{1,4}[\d\.\½\¾]*\s*(Hours|hrs|h)?", re.I))
                     if near:
                         found = near.strip()
                     else:
                         txt = parent.get_text(" ", strip=True)
-                        m = re.search(r"(\d{1,4}[\d\.\½\�]*)\s*(Hours|hrs|h)?", txt)
+                        m = re.search(r"(\d{1,4}[\d\.\½\¾]*)\s*(Hours|hrs|h)?", txt)
                         if m:
                             found = m.group(0)
                     if found:
@@ -317,7 +317,7 @@ def parse_hltb_game_page(html: str) -> Dict[str, Any]:
     # Best-effort: find other time strings in the page and add to time_estimates if not already present
     try:
         all_text = soup.get_text(" ", strip=True)
-        for m in re.finditer(r"(Main Story|Main \+ Extra|Completionist|Solo|Co-?op)\s*[:\-]?\s*(\d{1,4}[\d\.\½\�]*\s*(?:Hours|hrs|h)?)", all_text, re.I):
+        for m in re.finditer(r"(Main Story|Main \+ Extra|Completionist|Solo|Co-?op)\s*[:\-]?\s*(\d{1,4}[\d\.\½\¾]*\s*(?:Hours|hrs|h)?)", all_text, re.I):
             label = m.group(1)
             val = m.group(2)
             canonical = label_map.get(label, label.lower())
@@ -656,87 +656,89 @@ class HLTBCog(commands.Cog):
             rows.append(f"{left:<30} {right}")
         return "\n".join(rows)
 
-def build_summary_embed(self, api_obj, parsed, requester):
-    title = getattr(api_obj, "game_name", parsed.get("title", "Unknown"))
-    url = parsed.get("_source_url", HLTB_BASE)
-    image = parsed.get("image")
+    def build_summary_embed(self, api_obj, parsed, requester):
+        """Build the main summary embed for a game."""
+        title = getattr(api_obj, "game_name", parsed.get("title", "Unknown"))
+        url = parsed.get("_source_url", HLTB_BASE)
+        image = parsed.get("image")
 
-    e = discord.Embed(
-        title=f"✨ {title}",
-        url=url,
-        color=discord.Color.from_str("#0A0C12")
-    )
-    if image:
-        e.set_thumbnail(url=image)
+        e = discord.Embed(
+            title=f"✨ {title}",
+            url=url,
+            color=discord.Color.from_str("#0A0C12")
+        )
+        if image:
+            e.set_thumbnail(url=image)
 
-    # Platforms
-    pfs = ", ".join(getattr(api_obj, "profile_platforms", []) or [])
-    if pfs:
-        e.description = f"💻 **Platforms:** {pfs}\n"
+        # Platforms
+        pfs = ", ".join(getattr(api_obj, "profile_platforms", []) or [])
+        if pfs:
+            e.description = f"💻 **Platforms:** {pfs}\n"
 
-    # Full description (not truncated)
-    if parsed.get("description"):
-        e.description += f"\n📘 **Description:**\n{parsed['description']}\n"
+        # Full description (not truncated)
+        if parsed.get("description"):
+            e.description = (e.description or "") + f"\n📘 **Description:**\n{parsed['description']}\n"
 
-    # Estimated times
-    times = parsed.get("time_estimates", {})
-    if times:
-        lines = []
-        label = {
-            "main": "🕐 Main Story",
-            "main_extra": "🎯 Main + Extra",
-            "completionist": "🏆 Completionist",
-            "solo": "⚔️ Solo",
-            "coop": "🤝 Co-op",
-        }
-        for k, v in times.items():
-            lines.append(f"{label.get(k, k.title())}: {v}")
-        e.add_field(name="⏱️ Estimated Times", value="\n".join(lines), inline=False)
+        # Estimated times
+        times = parsed.get("time_estimates", {})
+        if times:
+            lines = []
+            label = {
+                "main": "🕐 Main Story",
+                "main_extra": "🎯 Main + Extra",
+                "completionist": "🏆 Completionist",
+                "solo": "⚔️ Solo",
+                "coop": "🤝 Co-op",
+            }
+            for k, v in times.items():
+                lines.append(f"{label.get(k, k.title())}: {v}")
+            e.add_field(name="⏱️ Estimated Times", value="\n".join(lines), inline=False)
 
-    # Genres / Developer / Publisher
-    genres = parsed.get("genres")
-    if genres:
-        e.add_field(name="📂 Genres", value=", ".join(genres), inline=False)
-    for k in ("Developer", "Publisher"):
-        if k in parsed.get("details", {}):
-            e.add_field(name=f"👨‍💻 {k}", value=parsed['details'][k], inline=True)
+        # Genres / Developer / Publisher
+        genres = parsed.get("genres")
+        if genres:
+            e.add_field(name="📂 Genres", value=", ".join(genres), inline=False)
+        for k in ("Developer", "Publisher"):
+            if k in parsed.get("details", {}):
+                e.add_field(name=f"👨‍💻 {k}", value=parsed['details'][k], inline=True)
 
-    # Release dates
-    rd = parsed.get("release_dates", {})
-    if rd:
-        val = []
-        if "NA" in rd: val.append(f"🇺🇸 **NA:** {rd['NA']}")
-        if "EU" in rd: val.append(f"🇪🇺 **EU:** {rd['EU']}")
-        if "JP" in rd: val.append(f"🇯🇵 **JP:** {rd['JP']}")
-        if parsed.get("updated"): val.append(f"🕓 **Updated:** {parsed['updated']}")
-        e.add_field(name="🌍 Release Dates", value="\n".join(val), inline=False)
+        # Release dates
+        rd = parsed.get("release_dates", {})
+        if rd:
+            val = []
+            if "NA" in rd: val.append(f"🇺🇸 **NA:** {rd['NA']}")
+            if "EU" in rd: val.append(f"🇪🇺 **EU:** {rd['EU']}")
+            if "JP" in rd: val.append(f"🇯🇵 **JP:** {rd['JP']}")
+            if parsed.get("updated"): val.append(f"🕓 **Updated:** {parsed['updated']}")
+            e.add_field(name="🌍 Release Dates", value="\n".join(val), inline=False)
 
-    # Stats
-    st = parsed.get("stats", {})
-    if st:
-        rows = []
-        pairs = [
-            ("🕹️ Playing", st.get("playing")),
-            ("🕒 Backlogs", st.get("backlogs")),
-            ("🔁 Replays", st.get("replays")),
-            ("🚫 Retired", st.get("retired")),
-            ("⭐ Rating",  st.get("rating")),
-            ("🏁 Beat",    st.get("beat")),
-        ]
-        line = []
-        for i,(k,v) in enumerate(pairs):
-            if not v: continue
-            line.append(f"{k}: {v}")
-            if len(line)==2:
-                rows.append("     ".join(line))
-                line=[]
-        if line: rows.append("     ".join(line))
-        e.add_field(name="📊 Game Stats", value="\n".join(rows), inline=False)
+        # Stats
+        st = parsed.get("stats", {})
+        if st:
+            rows = []
+            pairs = [
+                ("🕹️ Playing", st.get("playing")),
+                ("🕒 Backlogs", st.get("backlogs")),
+                ("🔁 Replays", st.get("replays")),
+                ("🚫 Retired", st.get("retired")),
+                ("⭐ Rating",  st.get("rating")),
+                ("🏁 Beat",    st.get("beat")),
+            ]
+            line = []
+            for i,(k,v) in enumerate(pairs):
+                if not v: continue
+                line.append(f"{k}: {v}")
+                if len(line)==2:
+                    rows.append("     ".join(line))
+                    line=[]
+            if line: rows.append("     ".join(line))
+            e.add_field(name="📊 Game Stats", value="\n".join(rows), inline=False)
 
-    e.set_footer(text=f"🌌 Requested by {requester.display_name} • Data from HowLongToBeat.com")
-    return e
+        e.set_footer(text=f"🌌 Requested by {requester.display_name} • Data from HowLongToBeat.com")
+        return e
 
     def build_description_embeds(self, title: str, parsed: Dict[str, Any], requester: discord.User) -> List[discord.Embed]:
+        """Build embeds for full description display."""
         desc_text = parsed.get("description") or "No description available."
         max_len = 4096
         chunks = []
@@ -756,7 +758,7 @@ def build_summary_embed(self, api_obj, parsed, requester):
             embeds.append(e)
         return embeds
 
-    def detect_store_buttons(self, stores: dict, hltb_url: str) -> list[discord.ui.Button]:
+    def detect_store_buttons(self, stores: dict, hltb_url: str) -> list:
         """Return link buttons for any detected store plus HowLongToBeat link."""
         buttons = []
 
@@ -781,9 +783,9 @@ def build_summary_embed(self, api_obj, parsed, requester):
         add("Open on HLTB", "🔗", hltb_url)
         return buttons
 
-# =============================================================
+    # =============================================================
     # Slash command
-# =============================================================
+    # =============================================================
     @app_commands.command(name="hltb", description="⏳ Look up a game's HowLongToBeat profile & times.")
     @app_commands.describe(game="Full or partial game name to search for.")
     @cooldown_per_user(USER_COOLDOWN_SECONDS)
@@ -859,7 +861,7 @@ def build_summary_embed(self, api_obj, parsed, requester):
         if full_desc:
             if len(full_desc) > 4000:
                 preview_text = safe_truncate(full_desc, 1800)
-                summary_embed.description += f"\n\n{safe_truncate(preview_text, 1500)}"
+                summary_embed.description = (summary_embed.description or "") + f"\n\n{safe_truncate(preview_text, 1500)}"
                 desc_btn = DescriptionButton()
                 main_view.add_item(desc_btn)
             else:
@@ -929,7 +931,7 @@ def build_summary_embed(self, api_obj, parsed, requester):
             if new_parsed.get("description") and len(new_parsed.get("description", "")) > 4000:
                 new_view.add_item(DescriptionButton())
             new_stores = new_parsed.get("stores", {}) or {}
-            new_store_buttons = self.detect_store_buttons(new_stores)
+            new_store_buttons = self.detect_store_buttons(new_stores, new_parsed.get("_source_url", new_url))
             for b in new_store_buttons:
                 new_view.add_item(b)
             new_view.add_item(OpenHLTBButton(new_parsed.get("_source_url", new_url)))
@@ -937,7 +939,9 @@ def build_summary_embed(self, api_obj, parsed, requester):
             return
 
         try:
-            await summary_message.edit(content="No action selected. Use the buttons or the link to open the HowLongToBeat page.", view=ui.View().add_item(OpenHLTBButton(parsed.get("_source_url", hltb_url))))
+            final_view = ui.View()
+            final_view.add_item(OpenHLTBButton(parsed.get("_source_url", hltb_url)))
+            await summary_message.edit(content="No action selected. Use the link to open the HowLongToBeat page.", view=final_view)
         except Exception:
             pass
 
