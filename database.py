@@ -971,14 +971,16 @@ async def init_user_manga_progress_table():
 
 
 
-async def set_user_manga_progress(discord_id: int, manga_id: int, chapter: int, rating: float):
-    """Set user manga progress with comprehensive logging and validation."""
-    logger.info(f"Setting manga progress for user {discord_id}, manga {manga_id}")
-    
+async def set_user_manga_progress(discord_id: int, guild_id: int, manga_id: int, chapter: int, rating: float):
+    """Set user manga progress with comprehensive logging and validation (GUILD-AWARE)."""
+    logger.info(f"Setting manga progress for user {discord_id} in guild {guild_id}, manga {manga_id}")
+
     try:
         # Validate input
         if not isinstance(discord_id, int) or discord_id <= 0:
             raise ValueError(f"Invalid discord_id: {discord_id}")
+        if not isinstance(guild_id, int) or guild_id <= 0:
+            raise ValueError(f"Invalid guild_id: {guild_id}")
         if not isinstance(manga_id, int) or manga_id <= 0:
             raise ValueError(f"Invalid manga_id: {manga_id}")
         if not isinstance(chapter, int) or chapter < 0:
@@ -986,56 +988,58 @@ async def set_user_manga_progress(discord_id: int, manga_id: int, chapter: int, 
         if not isinstance(rating, (int, float)) or not (0 <= rating <= 10):
             logger.warning(f"Invalid rating {rating}, clamping to 0-10 range")
             rating = max(0, min(10, float(rating)))
-        
+
         logger.debug(f"Progress data - Chapter: {chapter}, Rating: {rating}")
-        
+
         query = """
-            INSERT INTO user_manga_progress (discord_id, manga_id, current_chapter, rating, updated_at)
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(discord_id, manga_id) DO UPDATE SET
+            INSERT INTO user_manga_progress (discord_id, guild_id, manga_id, current_chapter, rating, updated_at)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(discord_id, guild_id, manga_id) DO UPDATE SET
                 current_chapter=excluded.current_chapter,
                 rating=excluded.rating,
                 updated_at=CURRENT_TIMESTAMP
         """
-        
+
         await execute_db_operation(
-            f"set manga progress for user {discord_id}",
+            f"set manga progress for user {discord_id} in guild {guild_id}",
             query,
-            (discord_id, manga_id, chapter, rating)
+            (discord_id, guild_id, manga_id, chapter, rating)
         )
-        
-        logger.info(f"✅ Set manga {manga_id} progress for user {discord_id}: Chapter {chapter}, Rating {rating}")
-        
+
+        logger.info(f"✅ Set manga {manga_id} progress for user {discord_id} in guild {guild_id}: Chapter {chapter}, Rating {rating}")
+
     except ValueError as validation_error:
         logger.error(f"Validation error setting manga progress: {validation_error}")
         raise
     except Exception as e:
-        logger.error(f"❌ Error setting manga progress for user {discord_id}: {e}", exc_info=True)
+        logger.error(f"❌ Error setting manga progress for user {discord_id} in guild {guild_id}: {e}", exc_info=True)
         raise
 
-async def get_user_manga_progress(discord_id: int, manga_id: int):
-    """Get user manga progress with comprehensive logging and validation."""
-    logger.debug(f"Getting manga progress for user {discord_id}, manga {manga_id}")
-    
+async def get_user_manga_progress(discord_id: int, guild_id: int, manga_id: int):
+    """Get user manga progress with comprehensive logging and validation (GUILD-AWARE)."""
+    logger.debug(f"Getting manga progress for user {discord_id} in guild {guild_id}, manga {manga_id}")
+
     try:
         # Validate input
         if not isinstance(discord_id, int) or discord_id <= 0:
             raise ValueError(f"Invalid discord_id: {discord_id}")
+        if not isinstance(guild_id, int) or guild_id <= 0:
+            raise ValueError(f"Invalid guild_id: {guild_id}")
         if not isinstance(manga_id, int) or manga_id <= 0:
             raise ValueError(f"Invalid manga_id: {manga_id}")
-        
+
         query = """
             SELECT current_chapter, rating, status, repeat FROM user_manga_progress
-            WHERE discord_id = ? AND manga_id = ?
+            WHERE discord_id = ? AND guild_id = ? AND manga_id = ?
         """
-        
+
         result = await execute_db_operation(
-            f"get manga progress for user {discord_id}",
+            f"get manga progress for user {discord_id} in guild {guild_id}",
             query,
-            (discord_id, manga_id),
+            (discord_id, guild_id, manga_id),
             fetch_type='one'
         )
-        
+
         if result:
             progress_data = {
                 "current_chapter": result[0],
@@ -1046,24 +1050,26 @@ async def get_user_manga_progress(discord_id: int, manga_id: int):
             logger.debug(f"✅ Retrieved manga progress: {progress_data}")
             return progress_data
         else:
-            logger.debug(f"No progress found for user {discord_id}, manga {manga_id}")
+            logger.debug(f"No progress found for user {discord_id} in guild {guild_id}, manga {manga_id}")
             return None
-            
+
     except ValueError as validation_error:
         logger.error(f"Validation error getting manga progress: {validation_error}")
         raise
     except Exception as e:
-        logger.error(f"❌ Error getting manga progress for user {discord_id}: {e}", exc_info=True)
+        logger.error(f"❌ Error getting manga progress for user {discord_id} in guild {guild_id}: {e}", exc_info=True)
         raise
 
-async def upsert_user_manga_progress(discord_id, manga_id, title, chapters, points, status, repeat=0, started_at=None):
-    """Upsert user manga progress with comprehensive logging and validation."""
-    logger.info(f"Upserting manga progress for user {discord_id}: {title}")
-    
+async def upsert_user_manga_progress(discord_id, guild_id, manga_id, title, chapters, points, status, repeat=0, started_at=None):
+    """Upsert user manga progress with comprehensive logging and validation (GUILD-AWARE)."""
+    logger.info(f"Upserting manga progress for user {discord_id} in guild {guild_id}: {title}")
+
     try:
         # Validate input
         if not isinstance(discord_id, int) or discord_id <= 0:
             raise ValueError(f"Invalid discord_id: {discord_id}")
+        if not isinstance(guild_id, int) or guild_id <= 0:
+            raise ValueError(f"Invalid guild_id: {guild_id}")
         if not isinstance(manga_id, int) or manga_id <= 0:
             raise ValueError(f"Invalid manga_id: {manga_id}")
         if not isinstance(title, str) or not title.strip():
@@ -1077,17 +1083,17 @@ async def upsert_user_manga_progress(discord_id, manga_id, title, chapters, poin
         if not isinstance(repeat, int) or repeat < 0:
             logger.warning(f"Invalid repeat {repeat}, setting to 0")
             repeat = 0
-        
+
         logger.debug(f"Manga progress - Title: {title}, Chapters: {chapters}, Points: {points}, Status: {status}, Repeat: {repeat}")
-        
+
         now = datetime.utcnow().isoformat()
-        
+
         query = """
             INSERT INTO user_manga_progress(
-                discord_id, manga_id, title, current_chapter, points, status, repeat, started_at, updated_at
+                discord_id, guild_id, manga_id, title, current_chapter, points, status, repeat, started_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(discord_id, manga_id) DO UPDATE SET
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(discord_id, guild_id, manga_id) DO UPDATE SET
                 title=excluded.title,
                 current_chapter=excluded.current_chapter,
                 points=excluded.points,
@@ -1096,24 +1102,25 @@ async def upsert_user_manga_progress(discord_id, manga_id, title, chapters, poin
                 started_at=excluded.started_at,
                 updated_at=excluded.updated_at
         """
-        
+
         await execute_db_operation(
-            f"upsert manga progress for user {discord_id}",
+            f"upsert manga progress for user {discord_id} in guild {guild_id}",
             query,
-            (discord_id, manga_id, title.strip(), chapters, points, status, repeat, started_at, now)
+            (discord_id, guild_id, manga_id, title.strip(), chapters, points, status, repeat, started_at, now)
         )
-        
-        logger.info(f"✅ Upserted manga progress for user {discord_id}: {title} ({status})")
-        
+
+        logger.info(f"✅ Upserted manga progress for user {discord_id} in guild {guild_id}: {title} ({status})")
+
     except ValueError as validation_error:
         logger.error(f"Validation error upserting manga progress: {validation_error}")
         raise
     except Exception as e:
-        logger.error(f"❌ Error upserting manga progress for user {discord_id}: {e}", exc_info=True)
+        logger.error(f"❌ Error upserting manga progress for user {discord_id} in guild {guild_id}: {e}", exc_info=True)
         raise
         
 async def upsert_user_stats(
     discord_id: int,
+    guild_id: int,
     username: str,
     total_manga: int,
     total_anime: int,
@@ -1124,16 +1131,18 @@ async def upsert_user_stats(
     manga_completed: int = 0,
     anime_completed: int = 0
 ):
-    """Upsert user stats with comprehensive logging and validation."""
-    logger.info(f"Upserting stats for user {username} (Discord ID: {discord_id})")
-    
+    """Upsert user stats with comprehensive logging and validation (GUILD-AWARE)."""
+    logger.info(f"Upserting stats for user {username} (Discord ID: {discord_id}) in guild {guild_id}")
+
     try:
         # Validate input data
         if not isinstance(discord_id, int) or discord_id <= 0:
             raise ValueError(f"Invalid discord_id: {discord_id}")
+        if not isinstance(guild_id, int) or guild_id <= 0:
+            raise ValueError(f"Invalid guild_id: {guild_id}")
         if not isinstance(username, str) or not username.strip():
             raise ValueError(f"Invalid username: {username}")
-        
+
         # Validate numeric fields
         numeric_fields = {
             'total_manga': total_manga,
@@ -1145,23 +1154,23 @@ async def upsert_user_stats(
             'manga_completed': manga_completed,
             'anime_completed': anime_completed
         }
-        
+
         for field_name, value in numeric_fields.items():
             if not isinstance(value, (int, float)) or value < 0:
                 logger.warning(f"Invalid {field_name}: {value}, setting to 0")
                 numeric_fields[field_name] = 0
-        
+
         logger.debug(f"User stats - Manga: {total_manga}, Anime: {total_anime}, Chapters: {total_chapters}, Episodes: {total_episodes}")
         logger.debug(f"Average scores - Manga: {avg_manga_score:.2f}, Anime: {avg_anime_score:.2f}")
-        
-        # Upsert with completed counts when available (backwards compatible)
+
+        # Upsert with guild_id for proper multi-guild support
         query = """
             INSERT INTO user_stats (
-                discord_id, username, total_manga, total_anime,
+                discord_id, guild_id, username, total_manga, total_anime,
                 avg_manga_score, avg_anime_score, total_chapters, total_episodes, manga_completed, anime_completed
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(discord_id) DO UPDATE SET
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(discord_id, guild_id) DO UPDATE SET
                 username=excluded.username,
                 total_manga=excluded.total_manga,
                 total_anime=excluded.total_anime,
@@ -1174,10 +1183,11 @@ async def upsert_user_stats(
         """
 
         await execute_db_operation(
-            f"upsert user stats for {username}",
+            f"upsert user stats for {username} in guild {guild_id}",
             query,
             (
                 discord_id,
+                guild_id,
                 username.strip(),
                 numeric_fields['total_manga'],
                 numeric_fields['total_anime'],
@@ -1189,14 +1199,14 @@ async def upsert_user_stats(
                 numeric_fields.get('anime_completed', 0)
             )
         )
-        
-        logger.info(f"✅ Successfully upserted stats for {username}")
-        
+
+        logger.info(f"✅ Successfully upserted stats for {username} in guild {guild_id}")
+
     except ValueError as validation_error:
         logger.error(f"Validation error upserting user stats: {validation_error}")
         raise
     except Exception as e:
-        logger.error(f"❌ Error upserting stats for {discord_id}: {e}", exc_info=True)
+        logger.error(f"❌ Error upserting stats for {discord_id} in guild {guild_id}: {e}", exc_info=True)
         raise
 
 # ------------------------------------------------------
@@ -2310,6 +2320,7 @@ async def upsert_user_stats_guild_aware(
             logger.warning(f"Guild-aware stats not available, falling back to global stats for user {discord_id}")
             return await upsert_user_stats(
                 discord_id=discord_id,
+                guild_id=guild_id,
                 username=username,
                 total_manga=total_manga,
                 total_anime=total_anime,
