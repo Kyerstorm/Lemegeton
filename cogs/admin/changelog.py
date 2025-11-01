@@ -295,9 +295,10 @@ class Changelog(commands.Cog):
         ]
 
     @bot_moderator_only()
-    @app_commands.command(name="changelog", description="Create and publish a changelog from an uploaded text file (Bot Moderator only)")
+    @app_commands.command(name="changelog", description="Create and publish a changelog from text or file (Bot Moderator only)")
     @app_commands.describe(
-        file="Text file to convert into changelog",
+        text="Changelog text (use this OR upload a file)",
+        file="Text file to convert into changelog (use this OR provide text)",
         publish_to="Where to publish the changelog",
         changelog_type="Type of changelog update",
         color="Embed color (hex code like #FF5733 or color name)",
@@ -323,7 +324,8 @@ class Changelog(commands.Cog):
     async def changelog(
         self,
         interaction: discord.Interaction,
-        file: discord.Attachment,
+        text: Optional[str] = None,
+        file: Optional[discord.Attachment] = None,
         publish_to: str = "current_server",
         changelog_type: str = "general",
         color: str = None,
@@ -331,32 +333,67 @@ class Changelog(commands.Cog):
         image_url: str = None,
         title_override: str = None
     ):
-        """Create a changelog from an uploaded text file with automatic formatting."""
+        """Create a changelog from text or uploaded file with automatic formatting."""
         try:
             await interaction.response.defer(ephemeral=True)
-            
-            # Validate file
-            if not file.filename.lower().endswith(('.txt', '.md')):
-                await interaction.followup.send("❌ Please upload a .txt or .md file.", ephemeral=True)
+
+            # Validate that at least one input method is provided
+            if not text and not file:
+                await interaction.followup.send(
+                    "❌ **No content provided**\n\n"
+                    "Please provide either:\n"
+                    "• `text`: Type your changelog message directly\n"
+                    "• `file`: Upload a .txt or .md file\n\n"
+                    "You must provide at least one of these options.",
+                    ephemeral=True
+                )
                 return
-                
-            if file.size > 1024 * 1024:  # 1MB limit
-                await interaction.followup.send("❌ File is too large. Maximum size is 1MB.", ephemeal=True)
+
+            # Validate that only one input method is used
+            if text and file:
+                await interaction.followup.send(
+                    "❌ **Multiple inputs provided**\n\n"
+                    "Please use only ONE of these options:\n"
+                    "• `text`: Type your changelog message directly\n"
+                    "• `file`: Upload a .txt or .md file\n\n"
+                    "Don't use both at the same time.",
+                    ephemeral=True
+                )
                 return
-            
-            # Download and read file content
-            try:
-                file_content = await file.read()
-                text_content = file_content.decode('utf-8')
-            except UnicodeDecodeError:
-                try:
-                    text_content = file_content.decode('latin-1')
-                except:
-                    await interaction.followup.send("❌ Could not decode file. Please ensure it's a text file with UTF-8 or Latin-1 encoding.", ephemeral=True)
+
+            # Process content based on input method
+            text_content = None
+            source_info = None
+
+            if file:
+                # Validate file
+                if not file.filename.lower().endswith(('.txt', '.md')):
+                    await interaction.followup.send("❌ Please upload a .txt or .md file.", ephemeral=True)
                     return
-            except Exception as e:
-                await interaction.followup.send(f"❌ Failed to read file: {str(e)}", ephemeral=True)
-                return
+
+                if file.size > 1024 * 1024:  # 1MB limit
+                    await interaction.followup.send("❌ File is too large. Maximum size is 1MB.", ephemeral=True)
+                    return
+
+                # Download and read file content
+                try:
+                    file_content = await file.read()
+                    text_content = file_content.decode('utf-8')
+                    source_info = f"From: {file.filename}"
+                except UnicodeDecodeError:
+                    try:
+                        text_content = file_content.decode('latin-1')
+                        source_info = f"From: {file.filename}"
+                    except:
+                        await interaction.followup.send("❌ Could not decode file. Please ensure it's a text file with UTF-8 or Latin-1 encoding.", ephemeral=True)
+                        return
+                except Exception as e:
+                    await interaction.followup.send(f"❌ Failed to read file: {str(e)}", ephemeral=True)
+                    return
+            else:
+                # Use direct text input
+                text_content = text
+                source_info = "Direct input"
             
             # Parse the text content
             parsed_data = self._parse_text_file(text_content, title_override)
@@ -399,7 +436,7 @@ class Changelog(commands.Cog):
             
             # Footer
             embed.set_footer(
-                text=f"{type_config['footer']} • Published on {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')} • From: {file.filename}"
+                text=f"{type_config['footer']} • Published on {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')} • {source_info}"
             )
             
             # Process image if provided
@@ -516,11 +553,18 @@ class Changelog(commands.Cog):
                 mention_info = ""
                 if role_to_mention:
                     mention_info = f" and mentioned {role_to_mention.name}"
-                await interaction.followup.send(f"✅ {type_config['title']} created from file **{file.filename}** and published to {channel.mention}{mention_info}!", ephemeral=True)
+
+                # Create source description
+                if file:
+                    source_desc = f"from file **{file.filename}**"
+                else:
+                    source_desc = "from direct text input"
+
+                await interaction.followup.send(f"✅ {type_config['title']} created {source_desc} and published to {channel.mention}{mention_info}!", ephemeral=True)
             
         except Exception as e:
             try:
-                await interaction.followup.send(f"❌ Failed to process file and publish changelog: {str(e)}", ephemeral=True)
+                await interaction.followup.send(f"❌ Failed to process and publish changelog: {str(e)}", ephemeral=True)
             except:
                 pass
             raise e
