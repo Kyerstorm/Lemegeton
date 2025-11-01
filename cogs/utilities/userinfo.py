@@ -13,7 +13,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from datetime import datetime, timezone
-import sqlite3
+import aiosqlite
 from typing import Optional, List
 
 # ---------------------------
@@ -44,32 +44,28 @@ def create_darlux_embed(title: Optional[str] = None, description: Optional[str] 
 DB_PATH = "bot_meta.db"
 
 
-def init_db(path: str = DB_PATH):
-    conn = sqlite3.connect(path)
-    cur = conn.cursor()
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS userinfo_usage (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        target_user_id INTEGER,
-        target_user_name TEXT,
-        invoked_by INTEGER,
-        invoked_at TEXT
-    )
-    """)
-    conn.commit()
-    conn.close()
-
-
-def log_userinfo(target: discord.User, invoked_by: discord.User, path: str = DB_PATH):
-    try:
-        conn = sqlite3.connect(path)
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO userinfo_usage (target_user_id, target_user_name, invoked_by, invoked_at) VALUES (?, ?, ?, ?)",
-            (target.id, str(target), invoked_by.id, datetime.utcnow().isoformat())
+async def init_db(path: str = DB_PATH):
+    async with aiosqlite.connect(path) as conn:
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS userinfo_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            target_user_id INTEGER,
+            target_user_name TEXT,
+            invoked_by INTEGER,
+            invoked_at TEXT
         )
-        conn.commit()
-        conn.close()
+        """)
+        await conn.commit()
+
+
+async def log_userinfo(target: discord.User, invoked_by: discord.User, path: str = DB_PATH):
+    try:
+        async with aiosqlite.connect(path) as conn:
+            await conn.execute(
+                "INSERT INTO userinfo_usage (target_user_id, target_user_name, invoked_by, invoked_at) VALUES (?, ?, ?, ?)",
+                (target.id, str(target), invoked_by.id, datetime.utcnow().isoformat())
+            )
+            await conn.commit()
     except Exception:
         pass
 
@@ -235,9 +231,12 @@ class UserInfo(commands.Cog):
     """User Info Cog — Dark Luxury Edition"""
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        init_db()
         self._user_cache = {}  # user_id -> (timestamp, user)
         self.cache_ttl = 30
+
+    async def cog_load(self):
+        """Initialize database when cog loads."""
+        await init_db()
 
     async def fetch_user_safe(self, user: discord.User) -> discord.User:
         # try to fetch a fuller user object from the API (may reveal banner)
@@ -325,7 +324,7 @@ class UserInfo(commands.Cog):
         pages = [main, visual, tech]
 
         # log usage
-        log_userinfo(fetched, interaction.user)
+        await log_userinfo(fetched, interaction.user)
 
         # interactive controls
         avatar_view = AvatarButtons(fetched)

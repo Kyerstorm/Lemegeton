@@ -6,7 +6,7 @@ Implements the gradual rollout strategy from DEPLOYMENT_CHECKLIST.md
 
 import asyncio
 import json
-import sqlite3
+import aiosqlite
 import logging
 import sys
 import os
@@ -74,7 +74,7 @@ class DeploymentManager:
         # Database exists and accessible
         try:
             if Path(self.database_path).exists():
-                conn = sqlite3.connect(self.database_path)
+                conn = aiosqlite.connect(self.database_path)
                 cursor = conn.cursor()
                 cursor.execute("SELECT COUNT(*) FROM users")
                 user_count = cursor.fetchone()[0]
@@ -97,7 +97,7 @@ class DeploymentManager:
         
         # Multi-guild readiness
         try:
-            conn = sqlite3.connect(self.database_path)
+            conn = aiosqlite.connect(self.database_path)
             cursor = conn.cursor()
             
             # Check if users table has guild_id
@@ -199,7 +199,7 @@ MANUAL STEPS REQUIRED:
         
         try:
             # Check database health
-            conn = sqlite3.connect(self.database_path)
+            conn = aiosqlite.connect(self.database_path)
             cursor = conn.cursor()
             
             # Count guilds with users

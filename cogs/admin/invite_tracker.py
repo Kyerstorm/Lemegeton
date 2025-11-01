@@ -4,7 +4,7 @@ from discord import app_commands
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-import sqlite3
+import aiosqlite
 import asyncio
 from datetime import datetime, timezone
 import random

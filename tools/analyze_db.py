@@ -1,10 +1,10 @@
-import sqlite3
+import aiosqlite
 import os
 import config
 
 # Use configured DB path when available
 db_path = os.getenv('DATABASE_PATH', getattr(config, 'DB_PATH', os.path.join('..', 'data', 'database.db')))
-conn = sqlite3.connect(db_path)
+conn = aiosqlite.connect(db_path)
 cursor = conn.cursor()
 
 print("=== DATABASE ANALYSIS FOR PUBLIC BOT ===")

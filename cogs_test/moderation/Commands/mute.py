@@ -18,7 +18,7 @@ from discord.ext import commands, tasks
 from discord import app_commands
 from datetime import datetime, timezone, timedelta
 import asyncio
-import sqlite3
+import aiosqlite
 import re
 import traceback
 from typing import Optional, List, Dict, Tuple
@@ -51,54 +51,52 @@ DB_PATH = "bot_meta.db"
 # ---------------------------
 # Database initialization & helpers
 # ---------------------------
-def init_db(path: str = DB_PATH):
-    conn = sqlite3.connect(path)
-    cur = conn.cursor()
-    # table to store per-guild mute role
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS mute_roles (
-        guild_id INTEGER PRIMARY KEY,
-        role_id INTEGER,
-        set_by INTEGER,
-        set_at TEXT
-    )
-    """)
-    # table to store scheduled mutes/unmutes (active mutes)
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS mutes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id INTEGER,
-        user_id INTEGER,
-        role_id INTEGER,
-        muted_by INTEGER,
-        reason TEXT,
-        muted_at TEXT,
-        unmute_at TEXT,  -- nullable; ISO timestamp for scheduled unmute
-        channels TEXT     -- optional JSON-like string of channel ids overwrote (for channel-specific mutes)
-    )
-    """)
-    # logs
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS mute_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id INTEGER,
-        guild_name TEXT,
-        user_id INTEGER,
-        user_name TEXT,
-        action TEXT,
-        performed_by INTEGER,
-        reason TEXT,
-        details TEXT,
-        invoked_at TEXT
-    )
-    """)
-    conn.commit()
-    conn.close()
+async def init_db(path: str = DB_PATH):
+    async with aiosqlite.connect(path) as conn:
+        # table to store per-guild mute role
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS mute_roles (
+            guild_id INTEGER PRIMARY KEY,
+            role_id INTEGER,
+            set_by INTEGER,
+            set_at TEXT
+        )
+        """)
+        # table to store scheduled mutes/unmutes (active mutes)
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS mutes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            user_id INTEGER,
+            role_id INTEGER,
+            muted_by INTEGER,
+            reason TEXT,
+            muted_at TEXT,
+            unmute_at TEXT,  -- nullable; ISO timestamp for scheduled unmute
+            channels TEXT     -- optional JSON-like string of channel ids overwrote (for channel-specific mutes)
+        )
+        """)
+        # logs
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS mute_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            guild_name TEXT,
+            user_id INTEGER,
+            user_name TEXT,
+            action TEXT,
+            performed_by INTEGER,
+            reason TEXT,
+            details TEXT,
+            invoked_at TEXT
+        )
+        """)
+        await conn.commit()
 
 
 def set_mute_role_db(guild_id: int, role_id: int, setter_id: int, path: str = DB_PATH):
     try:
-        conn = sqlite3.connect(path)
+        conn = aiosqlite.connect(path)
         cur = conn.cursor()
         cur.execute("REPLACE INTO mute_roles (guild_id, role_id, set_by, set_at) VALUES (?, ?, ?, ?)",
                     (guild_id, role_id, setter_id, datetime.utcnow().isoformat()))
@@ -110,7 +108,7 @@ def set_mute_role_db(guild_id: int, role_id: int, setter_id: int, path: str = DB
 
 def get_mute_role_db(guild_id: int, path: str = DB_PATH) -> Optional[int]:
     try:
-        conn = sqlite3.connect(path)
+        conn = aiosqlite.connect(path)
         cur = conn.cursor()
         cur.execute("SELECT role_id FROM mute_roles WHERE guild_id = ?", (guild_id,))
         row = cur.fetchone()
@@ -124,7 +122,7 @@ def get_mute_role_db(guild_id: int, path: str = DB_PATH) -> Optional[int]:
 
 def add_mute_db(guild_id: int, user_id: int, role_id: int, muted_by: int, reason: Optional[str], muted_at: datetime, unmute_at: Optional[datetime], channels_serialized: Optional[str] = None, path: str = DB_PATH):
     try:
-        conn = sqlite3.connect(path)
+        conn = aiosqlite.connect(path)
         cur = conn.cursor()
         cur.execute(
             "INSERT INTO mutes (guild_id, user_id, role_id, muted_by, reason, muted_at, unmute_at, channels) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -138,7 +136,7 @@ def add_mute_db(guild_id: int, user_id: int, role_id: int, muted_by: int, reason
 
 def remove_mute_db(guild_id: int, user_id: int, path: str = DB_PATH):
     try:
-        conn = sqlite3.connect(path)
+        conn = aiosqlite.connect(path)
         cur = conn.cursor()
         cur.execute("DELETE FROM mutes WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
         conn.commit()
@@ -149,7 +147,7 @@ def remove_mute_db(guild_id: int, user_id: int, path: str = DB_PATH):
 
 def fetch_all_pending_mutes(path: str = DB_PATH) -> List[Tuple]:
     try:
-        conn = sqlite3.connect(path)
+        conn = aiosqlite.connect(path)
         cur = conn.cursor()
         cur.execute("SELECT id, guild_id, user_id, role_id, muted_by, reason, muted_at, unmute_at, channels FROM mutes WHERE unmute_at IS NOT NULL")
         rows = cur.fetchall()
@@ -161,7 +159,7 @@ def fetch_all_pending_mutes(path: str = DB_PATH) -> List[Tuple]:
 
 def fetch_active_mute(guild_id: int, user_id: int, path: str = DB_PATH) -> Optional[Tuple]:
     try:
-        conn = sqlite3.connect(path)
+        conn = aiosqlite.connect(path)
         cur = conn.cursor()
         cur.execute("SELECT id, role_id, muted_at, unmute_at, channels FROM mutes WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
         row = cur.fetchone()
@@ -173,7 +171,7 @@ def fetch_active_mute(guild_id: int, user_id: int, path: str = DB_PATH) -> Optio
 
 def log_mute_action(guild: Optional[discord.Guild], user: discord.User, action: str, performed_by: discord.User, reason: Optional[str], details: Optional[str] = None, path: str = DB_PATH):
     try:
-        conn = sqlite3.connect(path)
+        conn = aiosqlite.connect(path)
         cur = conn.cursor()
         cur.execute(
             "INSERT INTO mute_logs (guild_id, guild_name, user_id, user_name, action, performed_by, reason, details, invoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -369,13 +367,16 @@ class MuteCog(commands.Cog):
     """Mute management cog (Dark Luxury edition)."""
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        init_db()
         # in-memory scheduled unmute tasks: (guild_id, user_id) -> asyncio.Task
         self._scheduled_unmutes: Dict[Tuple[int, int], asyncio.Task] = {}
         # startup task will be created in async cog_load to avoid accessing bot.loop in sync context
         self._startup_task: Optional[asyncio.Task] = None
         # internal batch delay for channel overwrites
         self._batch_delay = 0.12
+
+    async def cog_load(self):
+        """Initialize database when cog loads."""
+        await init_db()
 
     # ---------------------------
     # Startup: schedule pending unmutes found in DB
@@ -802,7 +803,7 @@ class MuteCog(commands.Cog):
             return
         # fetch DB rows for this guild
         try:
-            conn = sqlite3.connect(DB_PATH)
+            conn = aiosqlite.connect(DB_PATH)
             cur = conn.cursor()
             cur.execute("SELECT user_id, reason, muted_at, unmute_at FROM mutes WHERE guild_id = ?", (interaction.guild.id,))
             rows = cur.fetchall()

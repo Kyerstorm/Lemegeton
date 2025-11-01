@@ -18,7 +18,7 @@ from discord.ext import commands
 from discord import app_commands
 from datetime import datetime, timezone, timedelta
 import asyncio
-import sqlite3
+import aiosqlite
 from typing import Optional, List, Tuple, Dict
 
 # ---------------------------
@@ -48,31 +48,29 @@ DB_PATH = "bot_meta.db"
 # ---------------------------
 # DB utilities for logging
 # ---------------------------
-def init_db(path: str = DB_PATH):
-    conn = sqlite3.connect(path)
-    cur = conn.cursor()
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS clear_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id INTEGER,
-        guild_name TEXT,
-        channel_id INTEGER,
-        channel_name TEXT,
-        performed_by INTEGER,
-        target_user_id INTEGER,
-        amount_requested INTEGER,
-        amount_deleted INTEGER,
-        reason TEXT,
-        outcome TEXT,
-        details TEXT,
-        invoked_at TEXT
-    )
-    """)
-    conn.commit()
-    conn.close()
+async def init_db(path: str = DB_PATH):
+    async with aiosqlite.connect(path) as conn:
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS clear_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            guild_name TEXT,
+            channel_id INTEGER,
+            channel_name TEXT,
+            performed_by INTEGER,
+            target_user_id INTEGER,
+            amount_requested INTEGER,
+            amount_deleted INTEGER,
+            reason TEXT,
+            outcome TEXT,
+            details TEXT,
+            invoked_at TEXT
+        )
+        """)
+        await conn.commit()
 
 
-def log_clear_action(
+async def log_clear_action(
     guild: Optional[discord.Guild],
     channel: Optional[discord.TextChannel],
     performed_by: discord.User,
@@ -85,27 +83,25 @@ def log_clear_action(
     path: str = DB_PATH
 ):
     try:
-        conn = sqlite3.connect(path)
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO clear_logs (guild_id, guild_name, channel_id, channel_name, performed_by, target_user_id, amount_requested, amount_deleted, reason, outcome, details, invoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                guild.id if guild else None,
-                guild.name if guild else None,
-                channel.id if channel else None,
-                getattr(channel, "name", None) if channel else None,
-                performed_by.id if performed_by else None,
-                target_user.id if target_user else None,
-                amount_requested,
-                amount_deleted,
-                reason,
-                outcome,
-                details,
-                datetime.utcnow().isoformat()
+        async with aiosqlite.connect(path) as conn:
+            await conn.execute(
+                "INSERT INTO clear_logs (guild_id, guild_name, channel_id, channel_name, performed_by, target_user_id, amount_requested, amount_deleted, reason, outcome, details, invoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    guild.id if guild else None,
+                    guild.name if guild else None,
+                    channel.id if channel else None,
+                    getattr(channel, "name", None) if channel else None,
+                    performed_by.id if performed_by else None,
+                    target_user.id if target_user else None,
+                    amount_requested,
+                    amount_deleted,
+                    reason,
+                    outcome,
+                    details,
+                    datetime.utcnow().isoformat()
+                )
             )
-        )
-        conn.commit()
-        conn.close()
+            await conn.commit()
     except Exception:
         # best-effort logging; don't raise
         pass
@@ -324,7 +320,6 @@ class ClearCog(commands.Cog):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        init_db()
         # default safety settings (tweak here)
         self.skip_pinned = True
         self.large_confirm_threshold = 50  # ask for confirmation if deleting >= this many messages
@@ -333,6 +328,10 @@ class ClearCog(commands.Cog):
         # small in-memory cache for rate-limiting by user (avoid spam)
         self._recent_invocations: Dict[int, float] = {}
         self._invocation_cooldown = 2.0  # seconds between uses per user to avoid accidental double-taps
+
+    async def cog_load(self):
+        """Initialize database when cog loads."""
+        await init_db()
 
     # -------------
     # helpers
@@ -411,7 +410,7 @@ class ClearCog(commands.Cog):
             emb.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url if interaction.user.display_avatar else None)
             await interaction.followup.send(embed=emb, ephemeral=True)
             # log zero-action
-            log_clear_action(interaction.guild, channel, interaction.user, user, amount, 0, reason, "no_messages", details="No eligible messages found")
+            await log_clear_action(interaction.guild, channel, interaction.user, user, amount, 0, reason, "no_messages", details="No eligible messages found")
             return
 
         # If the requested amount is greater than what exists, warn the user in preview
@@ -479,7 +478,7 @@ class ClearCog(commands.Cog):
             # Logging
             outcome = "partial_failures" if failures else "success"
             details_text = f"failures:{len(failures)}" if failures else None
-            log_clear_action(interaction.guild, channel, interaction.user, user, amount, deleted_count, reason, outcome, details=details_text)
+            await log_clear_action(interaction.guild, channel, interaction.user, user, amount, deleted_count, reason, outcome, details=details_text)
         except Exception as e:
             err_emb = create_darlux_embed(title="🖤 Clear — Failed", description=f"An error occurred: {e}", accent="velvet_purple")
             err_emb.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url if interaction.user.display_avatar else None)
@@ -487,7 +486,7 @@ class ClearCog(commands.Cog):
                 await prog_msg.edit(embed=err_emb, view=None)
             except Exception:
                 await interaction.followup.send(embed=err_emb, ephemeral=True)
-            log_clear_action(interaction.guild, channel, interaction.user, user, amount, 0, reason, "failed", details=str(e))
+            await log_clear_action(interaction.guild, channel, interaction.user, user, amount, 0, reason, "failed", details=str(e))
 
     # ---------------------------
     # Optional helper command: clear_preview (ephemeral preview only)

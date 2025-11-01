@@ -25,7 +25,7 @@
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
-import sqlite3
+import aiosqlite
 import datetime
 import asyncio
 import random
@@ -110,7 +110,7 @@ class VerificationDB:
     def __init__(self, path=DB_PATH):
         ensure_dir_exists(path)
         self.path = path
-        self.conn = sqlite3.connect(self.path, check_same_thread=False)
+        self.conn = aiosqlite.connect(self.path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self._init_schema()
 

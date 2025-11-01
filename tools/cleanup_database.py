@@ -2,7 +2,7 @@
 Database Cleanup Script
 Safely removes unused tables, columns, and optimizes the database
 """
-import sqlite3
+import aiosqlite
 import shutil
 from pathlib import Path
 from datetime import datetime
@@ -187,7 +187,7 @@ def main():
     backup_file = create_backup()
     
     # Connect to database
-    conn = sqlite3.connect(DB_PATH)
+    conn = aiosqlite.connect(DB_PATH)
     
     try:
         # Get before stats

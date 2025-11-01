@@ -14,7 +14,7 @@ import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 from datetime import datetime, timezone
-import sqlite3
+import aiosqlite
 import math
 import asyncio
 from typing import List, Optional
@@ -47,32 +47,28 @@ def create_darlux_embed(title: Optional[str] = None, description: Optional[str] 
 DB_PATH = "bot_meta.db"
 
 
-def init_db(path: str = DB_PATH):
-    conn = sqlite3.connect(path)
-    cur = conn.cursor()
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS serverinfo_usage (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id INTEGER,
-        guild_name TEXT,
-        user_id INTEGER,
-        invoked_at TEXT
-    )
-    """)
-    conn.commit()
-    conn.close()
-
-
-def log_serverinfo(guild: Optional[discord.Guild], user: discord.User, path: str = DB_PATH):
-    try:
-        conn = sqlite3.connect(path)
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO serverinfo_usage (guild_id, guild_name, user_id, invoked_at) VALUES (?, ?, ?, ?)",
-            (guild.id if guild else None, guild.name if guild else None, user.id, datetime.utcnow().isoformat())
+async def init_db(path: str = DB_PATH):
+    async with aiosqlite.connect(path) as conn:
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS serverinfo_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            guild_name TEXT,
+            user_id INTEGER,
+            invoked_at TEXT
         )
-        conn.commit()
-        conn.close()
+        """)
+        await conn.commit()
+
+
+async def log_serverinfo(guild: Optional[discord.Guild], user: discord.User, path: str = DB_PATH):
+    try:
+        async with aiosqlite.connect(path) as conn:
+            await conn.execute(
+                "INSERT INTO serverinfo_usage (guild_id, guild_name, user_id, invoked_at) VALUES (?, ?, ?, ?)",
+                (guild.id if guild else None, guild.name if guild else None, user.id, datetime.utcnow().isoformat())
+            )
+            await conn.commit()
     except Exception:
         # don't crash — logging is best-effort
         pass
@@ -201,10 +197,13 @@ class ServerInfo(commands.Cog):
     """Server Info Cog — Dark Luxury Edition"""
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        init_db()
         self._cache = {}  # guild_id -> (timestamp, pages)
         self.cache_ttl = 45  # seconds
         self.cleanup_cache.start()
+
+    async def cog_load(self):
+        """Initialize database when cog loads."""
+        await init_db()
 
     def cog_unload(self):
         self.cleanup_cache.cancel()
@@ -339,7 +338,7 @@ class ServerInfo(commands.Cog):
                 pages = await self.build_guild_pages(guild, interaction.user)
                 self._cache[guild.id] = (now_ts, pages)
             # log usage
-            log_serverinfo(guild, interaction.user)
+            await log_serverinfo(guild, interaction.user)
             view = PaginatorView(pages, interaction.user)
             await interaction.followup.send(embed=pages[0], view=view)
             return

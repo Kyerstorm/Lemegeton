@@ -426,7 +426,7 @@ class DashboardCog(commands.Cog):
     async def cog_load(self):
         """Initialize the dashboard cog."""
         # schedule setup tasks after ready
-        self.bot.loop.create_task(self._startup_tasks())
+        asyncio.create_task(self._startup_tasks())
 
     async def _startup_tasks(self):
         await self.bot.wait_until_ready()
@@ -434,7 +434,7 @@ class DashboardCog(commands.Cog):
         await self._discover_meta_commands()
         # initial per-guild sync
         for g in list(self.bot.guilds):
-            self.bot.loop.create_task(attempt_sync_for_guild(self.bot, g))
+            asyncio.create_task(attempt_sync_for_guild(self.bot, g))
         logger.info("DashboardCog initialized: %d sections", len(COMMAND_REGISTRY.get_sections()))
         self._ready = True
 

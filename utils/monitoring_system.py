@@ -7,7 +7,7 @@ import asyncio
 import logging
 import time
 import json
-import sqlite3
+import aiosqlite
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 import psutil
@@ -109,7 +109,7 @@ class MonitoringSystem:
                 return None
                 
             # Database queries for guild-specific metrics
-            conn = sqlite3.connect(self.database_path)
+            conn = aiosqlite.connect(self.database_path)
             cursor = conn.cursor()
             
             # Registered users in this guild
@@ -187,7 +187,7 @@ class MonitoringSystem:
             # Registered users from database - handle DB/table missing gracefully
             total_registered = 0
             try:
-                conn = sqlite3.connect(self.database_path)
+                conn = aiosqlite.connect(self.database_path)
                 cursor = conn.cursor()
                 cursor.execute("SELECT COUNT(DISTINCT discord_id) FROM users")
                 row = cursor.fetchone()
@@ -254,7 +254,7 @@ class MonitoringSystem:
             
             # Database connection check
             try:
-                conn = sqlite3.connect(self.database_path)
+                conn = aiosqlite.connect(self.database_path)
                 cursor = conn.cursor()
                 cursor.execute("SELECT 1")
                 conn.close()

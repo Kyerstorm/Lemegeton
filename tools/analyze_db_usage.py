@@ -1,5 +1,5 @@
 """Analyze database table and column usage"""
-import sqlite3
+import aiosqlite
 import os
 import re
 from pathlib import Path
@@ -9,7 +9,7 @@ PROJECT_ROOT = Path(".")
 
 def get_all_tables_and_columns():
     """Get all tables and their columns from the database"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = aiosqlite.connect(DB_PATH)
     cursor = conn.cursor()
     
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
@@ -98,7 +98,7 @@ def analyze_table_usage(table_info):
 
 def get_table_row_counts():
     """Get row counts for all tables"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = aiosqlite.connect(DB_PATH)
     cursor = conn.cursor()
     
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")

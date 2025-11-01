@@ -9,7 +9,7 @@
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
-import sqlite3
+import aiosqlite
 import datetime
 import asyncio
 import random
@@ -184,123 +184,126 @@ class BirthdayDB:
     def __init__(self, path=DB_PATH):
         ensure_dir(path)
         self.path = path
-        self.conn = sqlite3.connect(self.path, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
-        self._init()
 
-    def _init(self):
-        cur = self.conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS birthdays (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                guild_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
-                month INTEGER NOT NULL,
-                day INTEGER NOT NULL,
-                year INTEGER,
-                created_at TEXT NOT NULL,
-                UNIQUE(guild_id, user_id)
-            );
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS guild_config (
-                guild_id INTEGER PRIMARY KEY,
-                channel_id INTEGER,
-                tz_offset REAL DEFAULT 0,
-                mention_mode TEXT DEFAULT 'none',
-                mention_role_id INTEGER,
-                enabled INTEGER DEFAULT 1,
-                template TEXT,
-                check_hour INTEGER DEFAULT -1,
-                last_triggered TEXT
-            );
-        """)
-        self.conn.commit()
+    async def _init(self):
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS birthdays (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    month INTEGER NOT NULL,
+                    day INTEGER NOT NULL,
+                    year INTEGER,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(guild_id, user_id)
+                );
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS guild_config (
+                    guild_id INTEGER PRIMARY KEY,
+                    channel_id INTEGER,
+                    tz_offset REAL DEFAULT 0,
+                    mention_mode TEXT DEFAULT 'none',
+                    mention_role_id INTEGER,
+                    enabled INTEGER DEFAULT 1,
+                    template TEXT,
+                    check_hour INTEGER DEFAULT -1,
+                    last_triggered TEXT
+                );
+            """)
+            await db.commit()
 
     # birthdays
-    def upsert(self, guild_id: int, user_id: int, month: int, day: int, year: typing.Optional[int] = None):
+    async def upsert(self, guild_id: int, user_id: int, month: int, day: int, year: typing.Optional[int] = None):
         now = datetime.datetime.utcnow().isoformat()
-        cur = self.conn.cursor()
-        cur.execute("""INSERT INTO birthdays (guild_id,user_id,month,day,year,created_at)
-            VALUES (?,?,?,?,?,?)
-            ON CONFLICT(guild_id,user_id) DO UPDATE SET month=excluded.month,day=excluded.day,year=excluded.year,created_at=excluded.created_at
-        """, (guild_id, user_id, month, day, year, now))
-        self.conn.commit()
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute("""INSERT INTO birthdays (guild_id,user_id,month,day,year,created_at)
+                VALUES (?,?,?,?,?,?)
+                ON CONFLICT(guild_id,user_id) DO UPDATE SET month=excluded.month,day=excluded.day,year=excluded.year,created_at=excluded.created_at
+            """, (guild_id, user_id, month, day, year, now))
+            await db.commit()
 
-    def remove(self, guild_id: int, user_id: int):
-        cur = self.conn.cursor()
-        cur.execute("DELETE FROM birthdays WHERE guild_id=? AND user_id=?", (guild_id, user_id))
-        self.conn.commit()
-        return cur.rowcount
+    async def remove(self, guild_id: int, user_id: int):
+        async with aiosqlite.connect(self.path) as db:
+            cur = await db.execute("DELETE FROM birthdays WHERE guild_id=? AND user_id=?", (guild_id, user_id))
+            await db.commit()
+            return cur.rowcount
 
-    def get(self, guild_id: int, user_id: int):
-        cur = self.conn.cursor()
-        cur.execute("SELECT * FROM birthdays WHERE guild_id=? AND user_id=?", (guild_id, user_id))
-        r = cur.fetchone()
-        return dict(r) if r else None
+    async def get(self, guild_id: int, user_id: int):
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM birthdays WHERE guild_id=? AND user_id=?", (guild_id, user_id)) as cur:
+                r = await cur.fetchone()
+                return dict(r) if r else None
 
-    def by_month_day(self, guild_id: int, month: int, day: int):
-        cur = self.conn.cursor()
-        cur.execute("SELECT * FROM birthdays WHERE guild_id=? AND month=? AND day=?", (guild_id, month, day))
-        return [dict(x) for x in cur.fetchall()]
+    async def by_month_day(self, guild_id: int, month: int, day: int):
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM birthdays WHERE guild_id=? AND month=? AND day=?", (guild_id, month, day)) as cur:
+                rows = await cur.fetchall()
+                return [dict(x) for x in rows]
 
-    def list_for_guild(self, guild_id: int):
-        cur = self.conn.cursor()
-        cur.execute("SELECT * FROM birthdays WHERE guild_id=? ORDER BY month,day", (guild_id,))
-        return [dict(x) for x in cur.fetchall()]
+    async def list_for_guild(self, guild_id: int):
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM birthdays WHERE guild_id=? ORDER BY month,day", (guild_id,)) as cur:
+                rows = await cur.fetchall()
+                return [dict(x) for x in rows]
 
     # config
-    def set_config(self, guild_id: int, **kwargs):
-        existing = self.get_config(guild_id)
-        cur = self.conn.cursor()
-        if existing is None:
-            cur.execute("""INSERT INTO guild_config (guild_id, channel_id, tz_offset, mention_mode, mention_role_id, enabled, template, check_hour, last_triggered)
-                VALUES (?,?,?,?,?,?,?,?,?)
-            """, (
-                guild_id,
-                kwargs.get("channel_id"),
-                kwargs.get("tz_offset", DEFAULT_TZ_OFFSET),
-                kwargs.get("mention_mode", "none"),
-                kwargs.get("mention_role_id"),
-                1 if kwargs.get("enabled", True) else 0,
-                kwargs.get("template"),
-                kwargs.get("check_hour", -1),
-                kwargs.get("last_triggered"),
-            ))
-        else:
-            parts = []
-            vals = []
-            for k in ("channel_id", "tz_offset", "mention_mode", "mention_role_id", "enabled", "template", "check_hour", "last_triggered"):
-                if k in kwargs:
-                    parts.append(f"{k}=?")
-                    v = kwargs[k]
-                    if k == "enabled":
-                        v = 1 if v else 0
-                    vals.append(v)
-            if parts:
-                vals.append(guild_id)
-                cur.execute("UPDATE guild_config SET " + ",".join(parts) + " WHERE guild_id=?", tuple(vals))
-        self.conn.commit()
+    async def set_config(self, guild_id: int, **kwargs):
+        existing = await self.get_config(guild_id)
+        async with aiosqlite.connect(self.path) as db:
+            if existing is None:
+                await db.execute("""INSERT INTO guild_config (guild_id, channel_id, tz_offset, mention_mode, mention_role_id, enabled, template, check_hour, last_triggered)
+                    VALUES (?,?,?,?,?,?,?,?,?)
+                """, (
+                    guild_id,
+                    kwargs.get("channel_id"),
+                    kwargs.get("tz_offset", DEFAULT_TZ_OFFSET),
+                    kwargs.get("mention_mode", "none"),
+                    kwargs.get("mention_role_id"),
+                    1 if kwargs.get("enabled", True) else 0,
+                    kwargs.get("template"),
+                    kwargs.get("check_hour", -1),
+                    kwargs.get("last_triggered"),
+                ))
+            else:
+                parts = []
+                vals = []
+                for k in ("channel_id", "tz_offset", "mention_mode", "mention_role_id", "enabled", "template", "check_hour", "last_triggered"):
+                    if k in kwargs:
+                        parts.append(f"{k}=?")
+                        v = kwargs[k]
+                        if k == "enabled":
+                            v = 1 if v else 0
+                        vals.append(v)
+                if parts:
+                    vals.append(guild_id)
+                    await db.execute("UPDATE guild_config SET " + ",".join(parts) + " WHERE guild_id=?", tuple(vals))
+            await db.commit()
 
-    def get_config(self, guild_id: int):
-        cur = self.conn.cursor()
-        cur.execute("SELECT * FROM guild_config WHERE guild_id=?", (guild_id,))
-        r = cur.fetchone()
-        return dict(r) if r else None
+    async def get_config(self, guild_id: int):
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM guild_config WHERE guild_id=?", (guild_id,)) as cur:
+                r = await cur.fetchone()
+                return dict(r) if r else None
 
-    def all_configs(self):
-        cur = self.conn.cursor()
-        cur.execute("SELECT * FROM guild_config")
-        return [dict(x) for x in cur.fetchall()]
+    async def all_configs(self):
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM guild_config") as cur:
+                rows = await cur.fetchall()
+                return [dict(x) for x in rows]
 
-    def set_last_triggered(self, guild_id: int, iso_str: str):
-        self.set_config(guild_id, last_triggered=iso_str)
+    async def set_last_triggered(self, guild_id: int, iso_str: str):
+        await self.set_config(guild_id, last_triggered=iso_str)
 
     def close(self):
-        try:
-            self.conn.close()
-        except Exception:
-            pass
+        # No longer needed with aiosqlite context managers
+        pass
 
 # ------------------------
 # Admin UI components (single select + live embed updates)
@@ -387,7 +390,7 @@ class AdminSelect(discord.ui.Select):
                 if not ch:
                     await modal_interaction.response.send_message("Could not resolve channel. Check the name/ID and that I can see it.", ephemeral=True)
                     return
-                self.cog.db.set_config(self.guild.id, channel_id=ch.id)
+                await self.cog.db.set_config(self.guild.id, channel_id=ch.id)
                 await modal_interaction.response.send_message(f"✅ Birthday channel set to {ch.mention}.", ephemeral=True)
                 # update the dashboard embed in-place
                 await update_dashboard_message(interaction, self.cog)
@@ -400,7 +403,7 @@ class AdminSelect(discord.ui.Select):
             async def on_submit(self_, modal_interaction: discord.Interaction):
                 raw = modal_interaction.tz.value.strip()
                 parsed = parse_tz_offset(raw)
-                self.cog.db.set_config(self.guild.id, tz_offset=parsed)
+                await self.cog.db.set_config(self.guild.id, tz_offset=parsed)
                 await modal_interaction.response.send_message(f"✅ Timezone set to UTC{parsed:+g}.", ephemeral=True)
                 await update_dashboard_message(interaction, self.cog)
         await interaction.response.send_modal(TZModal())
@@ -414,7 +417,7 @@ class AdminSelect(discord.ui.Select):
             ])
             async def select_callback(self_, select_interaction: discord.Interaction):
                 mode = select_interaction.data["values"][0]
-                self.cog.db.set_config(self.guild.id, mention_mode=mode)
+                await self.cog.db.set_config(self.guild.id, mention_mode=mode)
                 await select_interaction.response.send_message(f"✅ Mention mode set to `{mode}`.", ephemeral=True)
                 await update_dashboard_message(interaction, self.cog)
         await interaction.response.send_message("Choose mention mode:", view=MentionView(), ephemeral=True)
@@ -443,7 +446,7 @@ class AdminSelect(discord.ui.Select):
                 if not role:
                     await modal_interaction.response.send_message("Could not resolve role. Make sure I can see it and you typed it correctly.", ephemeral=True)
                     return
-                self.cog.db.set_config(self.guild.id, mention_role_id=role.id)
+                await self.cog.db.set_config(self.guild.id, mention_role_id=role.id)
                 await modal_interaction.response.send_message(f"✅ Mention role set to {role.mention}.", ephemeral=True)
                 await update_dashboard_message(interaction, self.cog)
         await interaction.response.send_modal(RoleModal())
@@ -456,15 +459,15 @@ class AdminSelect(discord.ui.Select):
                 if len(tx) > 2000:
                     await modal_interaction.response.send_message("Template too long (2000 char limit).", ephemeral=True)
                     return
-                self.cog.db.set_config(self.guild.id, template=tx)
+                await self.cog.db.set_config(self.guild.id, template=tx)
                 await modal_interaction.response.send_message("✅ Template saved.", ephemeral=True)
                 await update_dashboard_message(interaction, self.cog)
         await interaction.response.send_modal(TemplateModal())
 
     async def _toggle_enabled(self, interaction: discord.Interaction):
-        cfg = self.cog.db.get_config(self.guild.id) or {}
+        cfg = await self.cog.db.get_config(self.guild.id) or {}
         cur = bool(cfg.get("enabled", 1))
-        self.cog.db.set_config(self.guild.id, enabled=(not cur))
+        await self.cog.db.set_config(self.guild.id, enabled=(not cur))
         await interaction.response.send_message(f"✅ Birthdays enabled: {not cur}", ephemeral=True)
         await update_dashboard_message(interaction, self.cog)
 
@@ -479,15 +482,15 @@ class AdminSelect(discord.ui.Select):
                 except Exception:
                     await modal_interaction.response.send_message("Invalid hour. Must be -1..23", ephemeral=True)
                     return
-                self.cog.db.set_config(self.guild.id, check_hour=h)
+                await self.cog.db.set_config(self.guild.id, check_hour=h)
                 await modal_interaction.response.send_message(f"✅ Check hour set to {h}.", ephemeral=True)
                 await update_dashboard_message(interaction, self.cog)
         await interaction.response.send_modal(HourModal())
 
     async def _preview(self, interaction: discord.Interaction):
         # Build preview: pick up to 3 sample users (or the command user)
-        cfg = self.cog.db.get_config(self.guild.id) or {}
-        rows = self.cog.db.list_for_guild(self.guild.id)[:3] or [{"user_id": interaction.user.id, "month": now_utc().month, "day": now_utc().day, "year": None}]
+        cfg = await self.cog.db.get_config(self.guild.id) or {}
+        rows = await self.cog.db.list_for_guild(self.guild.id)[:3] or [{"user_id": interaction.user.id, "month": now_utc().month, "day": now_utc().day, "year": None}]
         members = []
         mentions = []
         for r in rows:
@@ -524,10 +527,10 @@ class AdminSelect(discord.ui.Select):
             await interaction.followup.send(embed=em, ephemeral=True)
 
     async def _force_run(self, interaction: discord.Interaction):
-        cfg = self.cog.db.get_config(self.guild.id) or {}
+        cfg = await self.cog.db.get_config(self.guild.id) or {}
         tz = float(cfg.get("tz_offset") or DEFAULT_TZ_OFFSET)
         local = now_utc() + datetime.timedelta(hours=tz)
-        rows = self.cog.db.by_month_day(self.guild.id, local.month, local.day)
+        rows = await self.cog.db.by_month_day(self.guild.id, local.month, local.day)
         if not rows:
             await interaction.response.send_message("No birthdays found for today in this server.", ephemeral=True)
             return
@@ -541,7 +544,7 @@ class AdminSelect(discord.ui.Select):
             await interaction.followup.send("Error while trying to announce.", ephemeral=True)
 
     async def _export_csv(self, interaction: discord.Interaction):
-        rows = self.cog.db.list_for_guild(self.guild.id)
+        rows = await self.cog.db.list_for_guild(self.guild.id)
         if not rows:
             await interaction.response.send_message("No birthdays to export.", ephemeral=True)
             return
@@ -627,6 +630,8 @@ class BirthdayCog(commands.Cog):
         logger.info("BirthdayCog initialized with DB at %s", self.db.path)
 
     async def cog_load(self):
+        # Initialize database tables
+        await self.db._init()
         # create session and start background checker in async lifecycle
         self._aio = aiohttp.ClientSession()
         try:
@@ -666,18 +671,18 @@ class BirthdayCog(commands.Cog):
     @tasks.loop(seconds=CHECK_INTERVAL_SECONDS)
     async def _checker(self):
         try:
-            configs = {int(row['guild_id']): row for row in self.db.all_configs()}
+            configs = {int(row['guild_id']): row for row in await self.db.all_configs()}
             for g in self.bot.guilds:
                 if g.id not in configs:
-                    self.db.set_config(g.id, tz_offset=DEFAULT_TZ_OFFSET, enabled=True, check_hour=-1)
-                    configs[g.id] = self.db.get_config(g.id)
+                    await self.db.set_config(g.id, tz_offset=DEFAULT_TZ_OFFSET, enabled=True, check_hour=-1)
+                    configs[g.id] = await self.db.get_config(g.id)
         except Exception as e:
             logger.exception("Error loading configs: %s", e)
             return
 
         now = now_utc()
         for guild in list(self.bot.guilds):
-            cfg = configs.get(guild.id) or self.db.get_config(guild.id)
+            cfg = configs.get(guild.id) or await self.db.get_config(guild.id)
             if not cfg:
                 continue
             if not cfg.get("enabled", 1):
@@ -692,14 +697,14 @@ class BirthdayCog(commands.Cog):
             iso = local_date.isoformat()
             if last == iso:
                 continue
-            rows = self.db.by_month_day(guild.id, local_date.month, local_date.day)
+            rows = await self.db.by_month_day(guild.id, local_date.month, local_date.day)
             if not rows:
                 if check_hour >= 0:
-                    self.db.set_last_triggered(guild.id, iso)
+                    await self.db.set_last_triggered(guild.id, iso)
                 continue
             try:
                 await self._announce_birthdays(guild, cfg, rows, local)
-                self.db.set_last_triggered(guild.id, iso)
+                await self.db.set_last_triggered(guild.id, iso)
             except Exception as e:
                 logger.exception("Failed to announce in guild %s: %s", guild.id, e)
 

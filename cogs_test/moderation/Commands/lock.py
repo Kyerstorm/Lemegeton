@@ -23,7 +23,7 @@ from discord.ext import commands, tasks
 from discord import app_commands
 from datetime import datetime, timezone
 import asyncio
-import sqlite3
+import aiosqlite
 from typing import Optional, List, Dict, Tuple
 
 # ---------------------------
@@ -53,27 +53,25 @@ DB_PATH = "bot_meta.db"
 # ---------------------------
 # Database utilities for logging
 # ---------------------------
-def init_db(path: str = DB_PATH):
+async def init_db(path: str = DB_PATH):
     """Create the channel_lock_logs table if it does not exist."""
-    conn = sqlite3.connect(path)
-    cur = conn.cursor()
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS channel_lock_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id INTEGER,
-        guild_name TEXT,
-        channel_id INTEGER,
-        channel_name TEXT,
-        action TEXT,
-        performed_by INTEGER,
-        reason TEXT,
-        outcome TEXT,
-        details TEXT,
-        invoked_at TEXT
-    )
-    """)
-    conn.commit()
-    conn.close()
+    async with aiosqlite.connect(path) as conn:
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS channel_lock_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            guild_name TEXT,
+            channel_id INTEGER,
+            channel_name TEXT,
+            action TEXT,
+            performed_by INTEGER,
+            reason TEXT,
+            outcome TEXT,
+            details TEXT,
+            invoked_at TEXT
+        )
+        """)
+        await conn.commit()
 
 
 def log_channel_action(
@@ -88,7 +86,7 @@ def log_channel_action(
 ):
     """Insert a log row (best-effort)."""
     try:
-        conn = sqlite3.connect(path)
+        conn = aiosqlite.connect(path)
         cur = conn.cursor()
         cur.execute(
             "INSERT INTO channel_lock_logs (guild_id, guild_name, channel_id, channel_name, action, performed_by, reason, outcome, details, invoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -228,13 +226,16 @@ class LockCog(commands.Cog):
     """Channel locking features (Dark Luxury aesthetic)"""
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        init_db()
         # internal rate-limit map: guild_id -> timestamp of last mass operation
         self._last_mass_op: Dict[int, float] = {}
         # cooldown seconds between lockall/unlockall per guild
         self.mass_cooldown = 30.0
         # For safety we limit how many channels we process per second to avoid hammering API
         self._batch_delay = 0.15  # seconds between channel edits
+
+    async def cog_load(self):
+        """Initialize database when cog loads."""
+        await init_db()
         # Optionally, a maximum channels limit to avoid doing too many at once
         self._max_channels = 500
         # Start a cleanup background task in case we want to prune older entries (not strictly necessary)
@@ -698,7 +699,7 @@ class LockCog(commands.Cog):
             return
         # fetch recent rows (limit)
         try:
-            conn = sqlite3.connect(DB_PATH)
+            conn = aiosqlite.connect(DB_PATH)
             cur = conn.cursor()
             cur.execute("SELECT guild_name, channel_name, action, performed_by, reason, outcome, details, invoked_at FROM channel_lock_logs ORDER BY id DESC LIMIT 120")
             rows = cur.fetchall()
