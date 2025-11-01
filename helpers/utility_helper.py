@@ -9,7 +9,7 @@ import logging
 import os
 import pickle
 import random
-import sqlite3
+import aiosqlite
 import string
 from datetime import datetime, timezone
 from pathlib import Path
@@ -223,7 +223,7 @@ def execute_db_query(
     Execute database query with proper error handling.
     """
     try:
-        with sqlite3.connect(db_path) as conn:
+        with aiosqlite.connect(db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
