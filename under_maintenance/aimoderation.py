@@ -26,7 +26,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DB_PATH = "moderation.db"
+DB_PATH = "data/moderation.db"
 PERSPECTIVE_API_KEY = os.getenv("PERSPECTIVE_API_KEY")
 PERSPECTIVE_ENDPOINT = "https://commentanalyzer.googleapis.com/v1alpha1/comments:analyze"
 EMOJI_SUCCESS = "✅"

@@ -56,7 +56,7 @@ if not logger.handlers:
 # ---------------------------
 # Constants & defaults
 # ---------------------------
-DB_PATH = os.getenv("VERIF_DB_PATH", "verification.db")
+DB_PATH = os.getenv("VERIF_DB_PATH", "data/verification.db")
 CAPTCHA_DEFAULT_LENGTH = 6
 CAPTCHA_DEFAULT_LINES = 3
 CAPTCHA_DEFAULT_SENSITIVE = False

@@ -29,7 +29,7 @@ handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s: %(message)s"))
 logger.addHandler(handler)
 
-DB_PATH = os.getenv("BIRTHDAY_DB_PATH", "birthdays.db")
+DB_PATH = os.getenv("BIRTHDAY_DB_PATH", "data/birthdays.db")
 CHECK_INTERVAL_SECONDS = 60
 DEFAULT_TZ_OFFSET = 0.0
 

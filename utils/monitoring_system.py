@@ -187,13 +187,11 @@ class MonitoringSystem:
             # Registered users from database - handle DB/table missing gracefully
             total_registered = 0
             try:
-                conn = aiosqlite.connect(self.database_path)
-                cursor = conn.cursor()
-                cursor.execute("SELECT COUNT(DISTINCT discord_id) FROM users")
-                row = cursor.fetchone()
-                total_registered = (row[0] if row and row[0] is not None else 0)
-                conn.close()
-            except sqlite3.Error as db_err:
+                async with aiosqlite.connect(self.database_path) as conn:
+                    async with conn.execute("SELECT COUNT(DISTINCT discord_id) FROM users") as cursor:
+                        row = await cursor.fetchone()
+                        total_registered = (row[0] if row and row[0] is not None else 0)
+            except Exception as db_err:
                 # Log a warning once per monitoring loop iteration but don't raise
                 monitor_logger.warning(f"Monitoring DB unavailable or missing tables, continuing with zeroed registered users: {db_err}")
 

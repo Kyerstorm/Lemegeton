@@ -41,7 +41,7 @@ def create_darlux_embed(title: Optional[str] = None, description: Optional[str] 
 # ---------------------------
 # DB logging
 # ---------------------------
-DB_PATH = "bot_meta.db"
+DB_PATH = "data/bot_meta.db"
 
 
 async def init_db(path: str = DB_PATH):

@@ -514,7 +514,7 @@ async def draw(prompt: str, provider_name: str = "openai", size: int = 1024, cou
         return [str(resp)]
 
 # ---------------- Persistence with aiosqlite ----------------
-DB_PATH = os.getenv("GPT_COG_DB", "gpt_cog.db")
+DB_PATH = os.getenv("GPT_COG_DB", "data/gpt_cog.db")
 # schema:
 # conversations: id INTEGER PRIMARY KEY, guild_id TEXT, user_id TEXT, ts TEXT, role TEXT, content TEXT
 # guild_settings: guild_id TEXT PRIMARY KEY, persona TEXT, provider TEXT

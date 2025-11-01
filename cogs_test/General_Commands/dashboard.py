@@ -106,7 +106,7 @@ def app_command_enabled_check():
 
 # async DB wrapper using aiosqlite
 class ConfigDB:
-    def __init__(self, path: str = "dashboard_guilds.db"):
+    def __init__(self, path: str = "data/dashboard_guilds.db"):
         self.path = path
         self._conn: Optional[aiosqlite.Connection] = None
         self._lock = asyncio.Lock()
@@ -417,7 +417,7 @@ async def attempt_sync_for_guild(bot: commands.Bot, guild: discord.Guild):
 
 # main cog
 class DashboardCog(commands.Cog):
-    def __init__(self, bot: commands.Bot, *, db_path: str = "dashboard_guilds.db"):
+    def __init__(self, bot: commands.Bot, *, db_path: str = "data/dashboard_guilds.db"):
         self.bot = bot
         self.db = ConfigDB(db_path)
         setattr(bot, "_dashboard_db", self.db)
