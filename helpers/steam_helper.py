@@ -212,49 +212,39 @@ async def get_recently_played_games(session: aiohttp.ClientSession, api_key: str
 
 async def search_steam_apps(session: aiohttp.ClientSession, query: str, max_results: int = 10) -> List[Dict]:
     """
-    Search Steam apps using store search.
+    Search Steam apps using Steam Community API (returns JSON).
     """
     try:
-        search_url = f"https://store.steampowered.com/search/suggest"
-        params = {
-            "term": query,
-            "f": "games",
-            "cc": "US",
-            "l": "english"
-        }
-        
-        html = await fetch_text(session, search_url, timeout=10)
-        if not html:
+        # Use Steam Community search endpoint (returns clean JSON)
+        search_url = f"https://steamcommunity.com/actions/SearchApps/{query}"
+
+        data = await safe_json(session, search_url, timeout=10)
+        if not data:
+            logger.debug(f"No JSON data returned for query: {query}")
             return []
-        
-        soup = BeautifulSoup(html, 'html.parser')
+
+        # Steam Community API returns a list of results
         results = []
-        
-        for item in soup.find_all('a', class_='match')[:max_results]:
+        for item in data[:max_results]:
             try:
-                app_id = None
-                href = item.get('href', '')
-                if '/app/' in href:
-                    app_id = href.split('/app/')[1].split('/')[0]
-                
-                name = item.find('span', class_='match_name')
-                name = name.get_text(strip=True) if name else "Unknown"
-                
-                img = item.find('img')
-                img_url = img.get('src') if img else None
-                
+                app_id = item.get('appid')
+                name = item.get('name', 'Unknown')
+                icon = item.get('icon')  # Small icon URL
+                logo = item.get('logo')  # Larger logo URL
+
                 if app_id:
                     results.append({
                         "appid": int(app_id),
                         "name": name,
-                        "img_icon_url": img_url
+                        "img_icon_url": logo or icon  # Prefer logo over icon
                     })
             except Exception as e:
                 logger.debug(f"Error parsing search result: {e}")
                 continue
-        
+
+        logger.info(f"Found {len(results)} results for '{query}'")
         return results
-    
+
     except Exception as e:
         logger.error(f"Error searching Steam apps: {e}")
         return []
