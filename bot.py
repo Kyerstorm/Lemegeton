@@ -918,9 +918,27 @@ async def on_guild_join(guild):
 
 @bot.event
 async def on_guild_remove(guild):
-    """Log when bot leaves a server."""
+    """
+    Handle bot removal from a server.
+    Immediately cleans up all guild-related data from the database.
+    """
     logger.info(f"👋 Bot removed from server: {guild.name} (ID: {guild.id})")
-    
+
+    # Immediately clean up all guild data
+    try:
+        logger.info(f"Starting immediate cleanup for guild {guild.id}")
+        success, deleted_counts = await clear_guild_records(guild.id)
+
+        if success:
+            total_deleted = sum(deleted_counts.values())
+            logger.info(f"✅ Successfully cleaned up guild {guild.id}: {total_deleted} records deleted")
+            logger.info(f"   Breakdown: {deleted_counts}")
+        else:
+            logger.error(f"❌ Failed to clean up guild {guild.id}")
+
+    except Exception as cleanup_error:
+        logger.error(f"Error cleaning up guild {guild.id}: {cleanup_error}", exc_info=True)
+
     # Update server log when leaving server
     try:
         await log_server_information()

@@ -4123,6 +4123,7 @@ async def clear_guild_records(guild_id: int):
                     ("guild_manga_channels", "guild_id"),
                     ("guild_bot_update_channels", "guild_id"),
                     ("guild_mod_roles", "guild_id"),
+                    ("guild_config", "guild_id"),
                     ("invites", "guild_id"),
                     ("invite_uses", "guild_id"),
                     ("recruitment_stats", "guild_id"),
@@ -4131,11 +4132,15 @@ async def clear_guild_records(guild_id: int):
                     ("free_games_channels", "guild_id"),
                     ("user_progress", "guild_id"),
                     ("user_progress_checkpoint", "guild_id"),
-                    ("manga_challenges", "guild_id"),
                     ("user_manga_progress", "guild_id"),
                     ("cached_stats", "guild_id"),
                     ("manga_recommendations_votes", "guild_id"),
                     ("steam_users", "guild_id"),
+                    ("bot_config", "guild_id"),
+                    ("challenge_manga", "guild_id"),
+                    ("challenge_rules", "guild_id"),
+                    ("welcome_dm", "guild_id"),
+                    ("paginator_state", "guild_id"),
                 ]
                 
                 for table_name, column_name in guild_tables:
@@ -4181,11 +4186,15 @@ async def get_all_guild_ids_with_records():
         tables_with_guild_id = [
             "users", "user_stats", "achievements", "guild_challenge_roles",
             "guild_challenges", "guild_challenge_manga", "guild_manga_channels",
-            "guild_bot_update_channels", "guild_mod_roles", "invites",
-            "invite_uses", "recruitment_stats", "user_leaves", 
-            "invite_tracker_settings", "free_games_channels"
+            "guild_bot_update_channels", "guild_mod_roles", "guild_config",
+            "invites", "invite_uses", "recruitment_stats", "user_leaves",
+            "invite_tracker_settings", "free_games_channels", "user_progress",
+            "user_progress_checkpoint", "user_manga_progress",
+            "cached_stats", "manga_recommendations_votes", "steam_users",
+            "bot_config", "challenge_manga", "challenge_rules", "welcome_dm",
+            "paginator_state"
         ]
-        
+
         for table in tables_with_guild_id:
             try:
                 result = await execute_db_operation(
@@ -4193,15 +4202,16 @@ async def get_all_guild_ids_with_records():
                     f"SELECT DISTINCT guild_id FROM {table}",
                     fetch_type='all'
                 )
-                
+
                 for row in result:
                     if row[0] is not None:
-                        guild_ids.add(row[0])
-                        
+                        # Ensure guild_id is an integer
+                        guild_ids.add(int(row[0]))
+
             except Exception as table_error:
                 logger.debug(f"Error querying {table}: {table_error}")
                 # Continue with other tables
-        
+
         logger.debug(f"Found {len(guild_ids)} unique guild IDs with records: {sorted(guild_ids)}")
         return sorted(list(guild_ids))
         
