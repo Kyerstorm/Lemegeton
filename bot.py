@@ -8,6 +8,10 @@ import aiohttp
 import discord
 from discord.ext import commands
 from database import init_db, get_all_users_guild_aware, remove_user, clear_guild_records, get_all_guild_ids_with_records
+import signal
+import random
+from typing import Optional, Dict, List
+from datetime import datetime
 
 # Add project root to sys.path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -102,6 +106,327 @@ except ImportError:
     logger.warning("⚠️ Bot monitoring system not available")
 
 # ------------------------------------------------------
+# Utility Classes - Enhanced Features
+# ------------------------------------------------------
+
+class APIRetryHandler:
+    """Handle API retries with exponential backoff for resilient network operations"""
+
+    def __init__(self, max_retries: int = 3, base_delay: float = 1.0):
+        self.max_retries = max_retries
+        self.base_delay = base_delay
+        self.logger = logging.getLogger("APIRetryHandler")
+
+    async def retry_with_backoff(self, func, *args, **kwargs):
+        """
+        Execute function with exponential backoff retry logic.
+
+        Args:
+            func: Async function to execute
+            *args, **kwargs: Arguments to pass to function
+
+        Returns:
+            Result from function execution
+
+        Raises:
+            Exception: If all retries fail, raises the last exception
+        """
+        last_exception = None
+
+        for attempt in range(self.max_retries):
+            try:
+                self.logger.debug(f"Attempt {attempt + 1}/{self.max_retries} for {func.__name__}")
+                result = await func(*args, **kwargs)
+
+                if attempt > 0:
+                    self.logger.info(f"✅ {func.__name__} succeeded on attempt {attempt + 1}")
+
+                return result
+
+            except aiohttp.ClientTimeout as e:
+                last_exception = e
+                if attempt < self.max_retries - 1:
+                    delay = self.base_delay * (2 ** attempt)
+                    self.logger.warning(f"Timeout on {func.__name__}, retry {attempt + 1}/{self.max_retries} after {delay}s")
+                    await asyncio.sleep(delay)
+                else:
+                    self.logger.error(f"❌ {func.__name__} failed after {self.max_retries} attempts: {e}")
+
+            except aiohttp.ClientError as e:
+                last_exception = e
+                if attempt < self.max_retries - 1:
+                    delay = self.base_delay * (2 ** attempt)
+                    self.logger.warning(f"Client error on {func.__name__}, retry {attempt + 1}/{self.max_retries} after {delay}s")
+                    await asyncio.sleep(delay)
+                else:
+                    self.logger.error(f"❌ {func.__name__} failed after {self.max_retries} attempts: {e}")
+
+            except Exception as e:
+                last_exception = e
+                # For unknown exceptions, don't retry
+                self.logger.error(f"❌ Unexpected error in {func.__name__}: {e}")
+                raise
+
+        # All retries exhausted
+        raise last_exception
+
+
+class WebhookNotifier:
+    """Send notifications to external webhooks for monitoring and alerts"""
+
+    def __init__(self, webhook_urls: Optional[Dict[str, str]] = None):
+        self.webhook_urls = webhook_urls or {}
+        self.logger = logging.getLogger("WebhookNotifier")
+        self.enabled = bool(webhook_urls)
+
+        if self.enabled:
+            self.logger.info(f"✅ Webhook notifier initialized with {len(webhook_urls)} endpoints")
+        else:
+            self.logger.debug("Webhook notifier initialized but no endpoints configured")
+
+    def format_discord_embed(self, event_type: str, data: Dict, priority: str) -> Dict:
+        """Format data as Discord embed"""
+        # Color based on priority
+        colors = {
+            'info': 0x3498db,      # Blue
+            'warning': 0xf39c12,   # Orange
+            'critical': 0xe74c3c   # Red
+        }
+        color = colors.get(priority, 0x95a5a6)
+
+        # Event emoji mapping
+        event_emojis = {
+            'bot_ready': '✅',
+            'bot_shutdown': '🛑',
+            'error_occurred': '❌',
+            'guild_joined': '🎉',
+            'guild_removed': '👋'
+        }
+        emoji = event_emojis.get(event_type, '📢')
+
+        # Format title
+        title = f"{emoji} {event_type.replace('_', ' ').title()}"
+
+        # Build fields from data
+        fields = []
+        for key, value in data.items():
+            # Convert key to readable format
+            field_name = key.replace('_', ' ').title()
+            field_value = str(value)
+
+            # Truncate long values
+            if len(field_value) > 1024:
+                field_value = field_value[:1021] + "..."
+
+            fields.append({
+                'name': field_name,
+                'value': f"`{field_value}`",
+                'inline': True
+            })
+
+        embed = {
+            'title': title,
+            'color': color,
+            'timestamp': datetime.now().isoformat(),
+            'fields': fields,
+            'footer': {
+                'text': f'Lemegeton Bot • {priority.upper()}'
+            }
+        }
+
+        return embed
+
+    async def notify(self, event_type: str, data: Dict, priority: str = "info"):
+        """
+        Send webhook notification for an event.
+
+        Args:
+            event_type: Type of event (e.g., 'bot_ready', 'error_occurred')
+            data: Event data to send
+            priority: Priority level ('info', 'warning', 'critical')
+        """
+        if not self.enabled:
+            self.logger.debug(f"Webhook skipped (disabled): {event_type}")
+            return
+
+        webhook_url = self.webhook_urls.get(event_type)
+        if not webhook_url:
+            self.logger.debug(f"No webhook configured for event: {event_type}")
+            return
+
+        try:
+            # Format as Discord embed
+            embed = self.format_discord_embed(event_type, data, priority)
+
+            payload = {
+                'embeds': [embed]
+            }
+
+            timeout = aiohttp.ClientTimeout(total=5)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(webhook_url, json=payload) as response:
+                    if response.status in [200, 204]:
+                        self.logger.info(f"✅ Webhook sent for event: {event_type}")
+                    else:
+                        self.logger.warning(f"Webhook returned status {response.status} for event: {event_type}")
+
+        except aiohttp.ClientTimeout:
+            self.logger.warning(f"⏱️ Webhook timeout for event: {event_type}")
+        except Exception as e:
+            self.logger.error(f"❌ Webhook failed for event {event_type}: {e}")
+
+
+class GracefulShutdownHandler:
+    """Handle graceful shutdown with cleanup operations"""
+
+    def __init__(self, bot_instance):
+        self.bot = bot_instance
+        self.logger = logging.getLogger("GracefulShutdown")
+        self.shutdown_event = asyncio.Event()
+        self.shutdown_initiated = False
+
+    def setup_signal_handlers(self):
+        """Register signal handlers for graceful shutdown"""
+        def signal_handler(sig, frame):
+            if not self.shutdown_initiated:
+                self.shutdown_initiated = True
+                signal_name = signal.Signals(sig).name
+                self.logger.info(f"🛑 Received signal {signal_name}, initiating graceful shutdown...")
+                asyncio.create_task(self.shutdown())
+
+        # Register handlers for common shutdown signals
+        signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
+        signal.signal(signal.SIGTERM, signal_handler)  # Docker/systemd stop
+
+        self.logger.info("✅ Signal handlers registered for graceful shutdown")
+
+    async def shutdown(self):
+        """Perform graceful shutdown sequence"""
+        if self.shutdown_event.is_set():
+            return
+
+        self.logger.info("="*60)
+        self.logger.info("GRACEFUL SHUTDOWN SEQUENCE INITIATED")
+        self.logger.info("="*60)
+
+        try:
+            # Notify administrators
+            self.logger.info("📢 Notifying administrators of shutdown...")
+            await self.notify_shutdown()
+
+            # Stop accepting new commands
+            self.logger.info("🔒 Stopping command processing...")
+            # Note: discord.py automatically handles this during close()
+
+            # Wait for pending operations (with timeout)
+            self.logger.info("⏳ Waiting for pending operations (max 30s)...")
+            try:
+                await asyncio.wait_for(self.wait_for_pending_operations(), timeout=30)
+            except asyncio.TimeoutError:
+                self.logger.warning("⚠️ Timeout waiting for pending operations, forcing shutdown")
+
+            # Close database connections
+            self.logger.info("💾 Closing database connections...")
+            # Note: Database connections are handled by database.py
+
+            # Close bot connection
+            self.logger.info("🔌 Closing Discord connection...")
+            if not self.bot.is_closed():
+                await self.bot.close()
+
+            self.logger.info("✅ Graceful shutdown completed successfully")
+
+        except Exception as e:
+            self.logger.error(f"❌ Error during graceful shutdown: {e}", exc_info=True)
+        finally:
+            self.shutdown_event.set()
+            self.logger.info("="*60)
+
+    async def notify_shutdown(self):
+        """Notify administrators of shutdown"""
+        try:
+            if ADMIN_DISCORD_ID:
+                try:
+                    admin_user = await self.bot.fetch_user(ADMIN_DISCORD_ID)
+                    embed = discord.Embed(
+                        title="🛑 Bot Shutdown",
+                        description="The bot is shutting down gracefully.",
+                        color=discord.Color.red(),
+                        timestamp=datetime.now()
+                    )
+                    embed.add_field(name="Guilds", value=str(len(self.bot.guilds)))
+                    embed.add_field(name="Uptime", value=get_uptime())
+                    await admin_user.send(embed=embed)
+                    self.logger.info("✅ Admin notified of shutdown")
+                except Exception as e:
+                    self.logger.warning(f"Could not notify admin: {e}")
+        except Exception as e:
+            self.logger.error(f"Error notifying shutdown: {e}")
+
+    async def wait_for_pending_operations(self):
+        """Wait for pending operations to complete"""
+        # Give background tasks time to finish
+        await asyncio.sleep(2)
+
+
+class DatabaseConnectionPool:
+    """
+    Simple connection pool for database operations.
+    Note: This is a basic implementation. The actual database.py handles connections,
+    so this serves as a foundation for future improvements.
+    """
+
+    def __init__(self, db_path: str, pool_size: int = 5):
+        self.db_path = db_path
+        self.pool_size = pool_size
+        self.connections = asyncio.Queue(maxsize=pool_size)
+        self.initialized = False
+        self.logger = logging.getLogger("DatabasePool")
+
+    async def initialize(self):
+        """Create connection pool - currently a placeholder for future implementation"""
+        try:
+            # Note: Actual connection pooling would require changes to database.py
+            # This is here as a framework for future enhancement
+            self.initialized = True
+            self.logger.info(f"📊 Database connection pool framework initialized (pool_size={self.pool_size})")
+            self.logger.debug("Note: Full pooling requires database.py refactoring")
+        except Exception as e:
+            self.logger.error(f"Failed to initialize database pool: {e}")
+            raise
+
+    async def close(self):
+        """Close all connections in pool"""
+        if self.initialized:
+            self.logger.info("Closing database connection pool")
+            # Future implementation would close pooled connections here
+            self.initialized = False
+
+
+# Initialize utility instances (will be populated after bot creation)
+api_retry_handler = APIRetryHandler(max_retries=3, base_delay=1.0)
+webhook_notifier = None  # Initialized later with config
+shutdown_handler = None  # Initialized after bot creation
+db_pool = None  # Initialized in main()
+
+# Uptime tracking
+bot_start_time = time.time()
+
+def get_uptime() -> str:
+    """Get bot uptime as formatted string"""
+    uptime_seconds = int(time.time() - bot_start_time)
+    days = uptime_seconds // 86400
+    hours = (uptime_seconds % 86400) // 3600
+    minutes = (uptime_seconds % 3600) // 60
+
+    if days > 0:
+        return f"{days}d {hours}h {minutes}m"
+    elif hours > 0:
+        return f"{hours}h {minutes}m"
+    else:
+        return f"{minutes}m"
+
+# ------------------------------------------------------
 # Command Sync Optimization Functions
 # ------------------------------------------------------
 def get_command_signature(command):
@@ -128,6 +453,25 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents, application_id=BOT_ID)
 
+# Initialize webhook notifier with Discord webhook
+DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1434672224236998666/cGE1MYLtUQfhFTEF7PYV2UPFZ5pFvdHDDm7N57q62LzWC0nSdaoC-GyAuFpgX0DzHb9S'
+
+WEBHOOK_URLS = {
+    'bot_ready': DISCORD_WEBHOOK_URL,
+    'bot_shutdown': DISCORD_WEBHOOK_URL,
+    'error_occurred': DISCORD_WEBHOOK_URL,
+    'guild_joined': DISCORD_WEBHOOK_URL,
+    'guild_removed': DISCORD_WEBHOOK_URL,
+}
+webhook_notifier = WebhookNotifier(WEBHOOK_URLS)
+
+# Initialize graceful shutdown handler
+shutdown_handler = GracefulShutdownHandler(bot)
+try:
+    shutdown_handler.setup_signal_handlers()
+except Exception as e:
+    logger.warning(f"Could not setup signal handlers (may not work on Windows): {e}")
+
 # Initialize monitoring system if available
 monitoring = None
 if MONITORING_ENABLED:
@@ -146,13 +490,11 @@ if MONITORING_ENABLED:
 # ------------------------------------------------------
 ANILIST_API_URL = "https://graphql.anilist.co"
 
-async def fetch_trending_anime_list():
+async def _fetch_trending_anime_internal():
     """
-    Fetch trending anime list from AniList API with comprehensive logging and error handling.
-    Returns a list of anime titles or fallback list if API fails.
+    Internal function to fetch trending anime from AniList API.
+    This is wrapped by fetch_trending_anime_list for retry logic.
     """
-    logger.debug("Starting AniList trending anime fetch")
-    
     query = """
     query {
         Page(page: 1, perPage: 10) {
@@ -165,7 +507,7 @@ async def fetch_trending_anime_list():
         }
     }
     """
-    
+
     try:
         logger.debug(f"Making request to AniList API: {ANILIST_API_URL}")
         
@@ -237,16 +579,31 @@ async def fetch_trending_anime_list():
                 else:
                     logger.warning("No valid anime titles found, using fallback")
                     return DEFAULT_TRENDING_FALLBACK
-                    
-    except aiohttp.ClientTimeout:
-        logger.error(f"AniList API request timed out after {ANILIST_API_TIMEOUT}s")
-        return DEFAULT_TRENDING_FALLBACK
-    except aiohttp.ClientError as client_error:
-        logger.error(f"AniList API client error: {client_error}")
-        return DEFAULT_TRENDING_FALLBACK
+
+    except (aiohttp.ClientTimeout, aiohttp.ClientError) as e:
+        # Re-raise for retry handler
+        raise
     except Exception as e:
         logger.error(f"Unexpected error fetching trending anime: {e}", exc_info=True)
+        # Don't retry unexpected errors
         return DEFAULT_TRENDING_FALLBACK
+
+
+async def fetch_trending_anime_list():
+    """
+    Fetch trending anime list from AniList API with retry logic.
+    Returns a list of anime titles or fallback list if API fails.
+    """
+    logger.debug("Starting AniList trending anime fetch with retry logic")
+
+    try:
+        # Use retry handler for resilient API calls
+        result = await api_retry_handler.retry_with_backoff(_fetch_trending_anime_internal)
+        return result
+    except Exception as e:
+        logger.error(f"All retry attempts exhausted for trending anime fetch: {e}")
+        return DEFAULT_TRENDING_FALLBACK
+
 
 # ------------------------------------------------------
 # User Cleanup Task
@@ -407,14 +764,28 @@ async def schedule_guild_cleanup():
         logger.error(f"Fatal error in guild cleanup scheduler: {e}", exc_info=True)
 
 # ------------------------------------------------------
-# Streaming Status Loop
+# Streaming Status Loop with Enhanced Templates
 # ------------------------------------------------------
+
+# Dynamic status message templates for variety
+STATUS_TEMPLATES = [
+    "🎥 {anime}",
+    "📺 Trending: {anime}",
+    "⭐ {anime}",
+    "🔥 Hot: {anime}",
+    "💫 Now: {anime}",
+    "🎬 Watching: {anime}",
+    "✨ Popular: {anime}",
+    "🌟 {anime}",
+]
+
 async def update_streaming_status():
     """
     Continuously update bot's streaming status with trending anime titles.
-    Cycles through anime list and refreshes trending data periodically.
+    Uses dynamic templates for variety and cycles through anime list.
+    Refreshes trending data periodically with retry logic.
     """
-    logger.info("Starting streaming status updater")
+    logger.info("Starting enhanced streaming status updater with templates")
     
     try:
         await bot.wait_until_ready()
@@ -439,11 +810,16 @@ async def update_streaming_status():
                     continue
                 
                 anime_title = trending[index]
-                logger.debug(f"Setting streaming status to anime {index+1}/{len(trending)}: {anime_title}")
-                
+
+                # Select random template for variety
+                template = random.choice(STATUS_TEMPLATES)
+                status_text = template.format(anime=anime_title)
+
+                logger.debug(f"Setting streaming status ({index+1}/{len(trending)}): {status_text}")
+
                 # Create and set streaming activity
                 stream = discord.Streaming(
-                    name=f"🎥 {anime_title}",
+                    name=status_text,
                     url="https://www.twitch.tv/owobotplays"
                 )
                 
@@ -902,9 +1278,24 @@ async def on_ready():
         
         logger.info("Bot initialization completed successfully")
         logger.info("="*60)
-        
+
+        # Send webhook notification for bot ready
+        await webhook_notifier.notify('bot_ready', {
+            'bot_user': str(bot.user),
+            'bot_id': bot.user.id,
+            'guilds': len(bot.guilds),
+            'latency_ms': round(bot.latency * 1000, 2),
+            'uptime': get_uptime()
+        }, priority='info')
+
     except Exception as e:
         logger.error(f"Error in on_ready event: {e}", exc_info=True)
+        # Send error webhook
+        await webhook_notifier.notify('error_occurred', {
+            'event': 'on_ready',
+            'error': str(e),
+            'error_type': type(e).__name__
+        }, priority='critical')
 
 @bot.event
 async def on_disconnect():
@@ -930,7 +1321,17 @@ async def on_command_error(ctx, error):
 async def on_guild_join(guild):
     """Log when bot joins a new server."""
     logger.info(f"🎉 Bot joined new server: {guild.name} (ID: {guild.id}) - {guild.member_count} members")
-    
+
+    # Send webhook notification
+    await webhook_notifier.notify('guild_joined', {
+        'guild_name': guild.name,
+        'guild_id': guild.id,
+        'member_count': guild.member_count,
+        'owner': str(guild.owner) if guild.owner else 'Unknown',
+        'created_at': guild.created_at.isoformat(),
+        'total_guilds': len(bot.guilds)
+    }, priority='info')
+
     # Update server log when joining new server
     try:
         await log_server_information()
@@ -960,6 +1361,15 @@ async def on_guild_remove(guild):
     except Exception as cleanup_error:
         logger.error(f"Error cleaning up guild {guild.id}: {cleanup_error}", exc_info=True)
 
+    # Send webhook notification
+    await webhook_notifier.notify('guild_removed', {
+        'guild_name': guild.name,
+        'guild_id': guild.id,
+        'records_deleted': total_deleted if success else 0,
+        'cleanup_success': success,
+        'remaining_guilds': len(bot.guilds)
+    }, priority='warning')
+
     # Update server log when leaving server
     try:
         await log_server_information()
@@ -984,6 +1394,12 @@ async def main():
         try:
             await init_db()
             logger.info("✅ Database initialization completed")
+
+            # Initialize database connection pool
+            global db_pool
+            db_pool = DatabaseConnectionPool(db_path="data/database.db", pool_size=5)
+            await db_pool.initialize()
+
         except Exception as db_error:
             logger.error(f"❌ Database initialization failed: {db_error}", exc_info=True)
             raise
@@ -1045,9 +1461,23 @@ async def main():
         raise
     finally:
         logger.info("Bot shutdown sequence initiated")
+
+        # Send shutdown webhook
+        await webhook_notifier.notify('bot_shutdown', {
+            'uptime': get_uptime(),
+            'reason': 'Normal shutdown'
+        }, priority='info')
+
+        # Close database pool
+        if db_pool and db_pool.initialized:
+            logger.debug("Closing database connection pool...")
+            await db_pool.close()
+
+        # Close bot connection
         if not bot.is_closed():
             logger.debug("Closing bot connection...")
             await bot.close()
+
         logger.info("Bot shutdown completed")
         logger.info("="*60)
 
