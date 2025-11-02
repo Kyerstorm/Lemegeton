@@ -217,88 +217,294 @@ async def fetch_gog_free_games() -> List[Dict]:
 
 async def fetch_steam_free_games() -> List[Dict]:
     """Fetch current free games from Steam.
-    
-    Note: Steam rarely has temporary free games like Epic does.
-    This function checks the specials section for 100% discounts,
-    but Steam's API doesn't reliably expose temporary free games.
+
+    Searches for games with 100% discount using multiple methods:
+    1. Parse HTML search results for maxprice=free&specials=1
+    2. Check featured APIs for 100% discounts
     """
     games = []
-    
+    seen_app_ids = set()
+
     try:
         async with aiohttp.ClientSession() as session:
-            # Method 1: Check featuredcategories specials for 100% discount
-            url = "https://store.steampowered.com/api/featuredcategories/"
-            
-            async with session.get(url, timeout=15) as resp:
-                if resp.status != 200:
-                    logger.error(f"Steam featuredcategories API returned status {resp.status}")
-                else:
-                    data = await resp.json()
-                    
-                    # Check specials section for 100% discount games
-                    specials = data.get('specials', {}).get('items', [])
-                    
-                    for item in specials:
-                        discount = item.get('discount_percent', 0)
-                        
-                        # Only include if it's 100% off (free)
-                        if discount == 100:
-                            app_id = item.get('id')
-                            title = item.get('name', 'Unknown Game')
-                            final_price = item.get('final_price', 0)
-                            original_price = item.get('original_price', 0)
-                            
-                            # Create description with original price info
-                            if original_price > 0:
-                                original_str = f"${original_price / 100:.2f}"
-                                description = f"100% OFF (Was {original_str}) - Free on Steam!"
-                            else:
-                                description = "Currently free on Steam"
-                            
-                            games.append({
-                                'title': title,
-                                'description': description,
-                                'url': f"https://store.steampowered.com/app/{app_id}",
-                                'image': item.get('header_image'),
-                                'end_date': None,
-                                'store': 'Steam'
-                            })
-            
-            # Method 2: Check featured API for 100% discounts (backup method)
-            url = "https://store.steampowered.com/api/featured/"
-            
-            async with session.get(url, timeout=15) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    
-                    # Check all featured categories
-                    for category in ['large_capsules', 'featured_win', 'featured_mac', 'featured_linux']:
-                        items = data.get(category, [])
-                        for item in items:
+            # Method 1: Parse HTML search results for 100% off games
+            # This is the most comprehensive method as it includes ALL discounted games
+            search_url = "https://store.steampowered.com/search/results/"
+            params = {
+                'query': '',
+                'start': '0',
+                'count': '50',  # Get first 50 results
+                'dynamic_data': '',
+                'sort_by': '_ASC',
+                'specials': '1',  # Only games on special
+                'filter': 'topsellers',
+                'snr': '1_7_7_2300_7',
+                'infinite': '1'
+            }
+
+            try:
+                async with session.get(search_url, params=params, timeout=20) as resp:
+                    if resp.status == 200:
+                        try:
+                            data = await resp.json()
+                            results_html = data.get('results_html', '')
+
+                            if results_html:
+                                # Parse HTML to extract game info
+                                import re
+                                from bs4 import BeautifulSoup
+
+                                soup = BeautifulSoup(results_html, 'html.parser')
+                                search_results = soup.find_all('a', class_='search_result_row')
+
+                                for result in search_results:
+                                    try:
+                                        # Extract app ID
+                                        app_id_str = result.get('data-ds-appid')
+                                        if not app_id_str:
+                                            continue
+
+                                        app_id = int(app_id_str)
+
+                                        # Skip if already processed
+                                        if app_id in seen_app_ids:
+                                            continue
+
+                                        # Extract discount percentage
+                                        discount_pct = result.find('div', class_='discount_pct')
+                                        if not discount_pct:
+                                            continue
+
+                                        discount_text = discount_pct.get_text(strip=True)
+
+                                        # Check if it's 100% off
+                                        if '-100%' in discount_text:
+                                            # Extract title
+                                            title_elem = result.find('span', class_='title')
+                                            title = title_elem.get_text(strip=True) if title_elem else f"App {app_id}"
+
+                                            # Extract original price
+                                            original_price_elem = result.find('div', class_='discount_original_price')
+                                            original_price = original_price_elem.get_text(strip=True) if original_price_elem else "Unknown"
+
+                                            # Extract image
+                                            img_elem = result.find('img')
+                                            image_url = img_elem.get('src') if img_elem else None
+
+                                            description = f"100% OFF (Was {original_price}) - Free on Steam!"
+
+                                            games.append({
+                                                'title': title,
+                                                'description': description,
+                                                'url': f"https://store.steampowered.com/app/{app_id}",
+                                                'image': image_url,
+                                                'end_date': None,
+                                                'store': 'Steam'
+                                            })
+
+                                            seen_app_ids.add(app_id)
+                                            logger.debug(f"Found 100% off game via search: {title} (App {app_id})")
+
+                                    except Exception as parse_err:
+                                        logger.debug(f"Error parsing search result: {parse_err}")
+                                        continue
+
+                        except Exception as json_err:
+                            logger.warning(f"Error parsing Steam search JSON: {json_err}")
+                    else:
+                        logger.warning(f"Steam search returned status {resp.status}")
+
+            except Exception as search_err:
+                logger.warning(f"Steam search method failed: {search_err}")
+
+            # Method 2: Check featuredcategories specials for 100% discount
+            try:
+                url = "https://store.steampowered.com/api/featuredcategories/"
+
+                async with session.get(url, timeout=15) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        specials = data.get('specials', {}).get('items', [])
+
+                        for item in specials:
                             discount = item.get('discount_percent', 0)
-                            
+
                             if discount == 100:
                                 app_id = item.get('id')
-                                title = item.get('name', 'Unknown Game')
-                                
-                                # Check if we already have this game
-                                if not any(g.get('url', '').endswith(str(app_id)) for g in games):
+
+                                if app_id not in seen_app_ids:
+                                    title = item.get('name', 'Unknown Game')
+                                    final_price = item.get('final_price', 0)
+                                    original_price = item.get('original_price', 0)
+
+                                    if original_price > 0:
+                                        original_str = f"${original_price / 100:.2f}"
+                                        description = f"100% OFF (Was {original_str}) - Free on Steam!"
+                                    else:
+                                        description = "Currently free on Steam"
+
                                     games.append({
                                         'title': title,
-                                        'description': 'Currently free on Steam',
+                                        'description': description,
                                         'url': f"https://store.steampowered.com/app/{app_id}",
                                         'image': item.get('header_image'),
                                         'end_date': None,
                                         'store': 'Steam'
                                     })
-            
-            logger.info(f"Found {len(games)} free games on Steam")
-                
+
+                                    seen_app_ids.add(app_id)
+                                    logger.debug(f"Found 100% off game via featured: {title} (App {app_id})")
+
+            except Exception as featured_err:
+                logger.warning(f"Featured API method failed: {featured_err}")
+
+            # Method 3: Check featured API for 100% discounts
+            try:
+                url = "https://store.steampowered.com/api/featured/"
+
+                async with session.get(url, timeout=15) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+
+                        for category in ['large_capsules', 'featured_win', 'featured_mac', 'featured_linux']:
+                            items = data.get(category, [])
+                            for item in items:
+                                discount = item.get('discount_percent', 0)
+
+                                if discount == 100:
+                                    app_id = item.get('id')
+
+                                    if app_id not in seen_app_ids:
+                                        title = item.get('name', 'Unknown Game')
+
+                                        games.append({
+                                            'title': title,
+                                            'description': '100% OFF - Currently free on Steam',
+                                            'url': f"https://store.steampowered.com/app/{app_id}",
+                                            'image': item.get('header_image'),
+                                            'end_date': None,
+                                            'store': 'Steam'
+                                        })
+
+                                        seen_app_ids.add(app_id)
+                                        logger.debug(f"Found 100% off game via featured2: {title} (App {app_id})")
+
+            except Exception as featured2_err:
+                logger.warning(f"Featured2 API method failed: {featured2_err}")
+
+            # Method 4: Check for "Free to Keep" promotions using undocumented endpoint
+            # This finds games like Death Fungeon that are temporarily 100% off
+            try:
+                # Try to get current free promotions
+                url = "https://store.steampowered.com/search/results/"
+                params = {
+                    'query': '',
+                    'start': '0',
+                    'count': '100',  # Get more results
+                    'maxprice': 'free',
+                    'specials': '1',
+                    'infinite': '1'
+                }
+
+                async with session.get(url, params=params, timeout=20) as resp:
+                    if resp.status == 200:
+                        try:
+                            data = await resp.json()
+                            results_html = data.get('results_html', '')
+
+                            if results_html:
+                                from bs4 import BeautifulSoup
+
+                                soup = BeautifulSoup(results_html, 'html.parser')
+                                search_results = soup.find_all('a', class_='search_result_row')
+
+                                for result in search_results:
+                                    try:
+                                        app_id_str = result.get('data-ds-appid')
+                                        if not app_id_str:
+                                            continue
+
+                                        app_id = int(app_id_str)
+
+                                        if app_id in seen_app_ids:
+                                            continue
+
+                                        # Check for free price
+                                        final_price_elem = result.find('div', class_='discount_final_price')
+                                        if not final_price_elem:
+                                            continue
+
+                                        final_price_text = final_price_elem.get_text(strip=True)
+
+                                        # Check if it shows "Free" or price of 0
+                                        if 'Free' in final_price_text or '£0.00' in final_price_text or '$0.00' in final_price_text or '€0.00' in final_price_text:
+                                            # Check if there's a discount (meaning it was paid before)
+                                            discount_pct = result.find('div', class_='discount_pct')
+                                            original_price_elem = result.find('div', class_='discount_original_price')
+
+                                            if discount_pct and original_price_elem:
+                                                # This is a paid game that's now free
+                                                title_elem = result.find('span', class_='title')
+                                                title = title_elem.get_text(strip=True) if title_elem else f"App {app_id}"
+
+                                                # Filter out DLC, soundtracks, and other non-game content
+                                                title_lower = title.lower()
+                                                dlc_keywords = ['dlc', 'soundtrack', 'ost', 'skin pack', 'skins pack',
+                                                              'cosmetic', 'expansion pack', 'season pass', 'content pack',
+                                                              'outfit pack', 'weapon pack', 'character pack']
+
+                                                is_dlc = any(keyword in title_lower for keyword in dlc_keywords)
+
+                                                # Also check for common DLC patterns like " - " followed by DLC name
+                                                if ' - ' in title and not is_dlc:
+                                                    # Games like "Game Name - DLC Name" are likely DLC
+                                                    # But "Game Name - Deluxe Edition" might be a full game
+                                                    parts = title.split(' - ')
+                                                    if len(parts) > 1:
+                                                        second_part_lower = parts[1].lower()
+                                                        if any(kw in second_part_lower for kw in ['pack', 'bundle', 'edition'] + dlc_keywords):
+                                                            is_dlc = True
+
+                                                if is_dlc:
+                                                    logger.debug(f"Skipping DLC/add-on: {title} (App {app_id})")
+                                                    continue
+
+                                                original_price = original_price_elem.get_text(strip=True)
+
+                                                img_elem = result.find('img')
+                                                image_url = img_elem.get('src') if img_elem else None
+
+                                                description = f"100% OFF (Was {original_price}) - Free to keep on Steam!"
+
+                                                games.append({
+                                                    'title': title,
+                                                    'description': description,
+                                                    'url': f"https://store.steampowered.com/app/{app_id}",
+                                                    'image': image_url,
+                                                    'end_date': None,
+                                                    'store': 'Steam'
+                                                })
+
+                                                seen_app_ids.add(app_id)
+                                                logger.debug(f"Found free promotion: {title} (App {app_id})")
+
+                                    except Exception as parse_err:
+                                        logger.debug(f"Error parsing free promotion result: {parse_err}")
+                                        continue
+
+                        except Exception as json_err:
+                            logger.warning(f"Error parsing maxprice=free search: {json_err}")
+
+            except Exception as free_promo_err:
+                logger.warning(f"Free promotions search failed: {free_promo_err}")
+
+            logger.info(f"Found {len(games)} free games on Steam (checked {len(seen_app_ids)} unique apps)")
+
     except asyncio.TimeoutError:
         logger.error("Steam API request timed out")
     except Exception as e:
         logger.error(f"Error fetching Steam free games: {e}")
-    
+
     return games
 
 
@@ -799,7 +1005,142 @@ class FreeGamesCog(commands.Cog):
                 )
             except:
                 pass
-    
+
+    @app_commands.command(name="check-free-games", description="🎮 Test command: Check current free games from all platforms")
+    @log_command
+    async def check_free_games_now(self, interaction: discord.Interaction):
+        """Test command to immediately check and display current free games."""
+        try:
+            await interaction.response.defer()
+        except discord.NotFound:
+            logger.error("Interaction expired before deferring")
+            return
+        except Exception as e:
+            logger.error(f"Failed to defer interaction: {e}")
+            return
+
+        try:
+            logger.info(f"Manual free games check triggered by {interaction.user} ({interaction.user.id})")
+
+            # Send status message
+            await interaction.followup.send("🔍 Checking for free games on all platforms... This may take a moment.")
+
+            # Fetch games from all platforms
+            epic_games = await fetch_epic_free_games()
+            gog_games = await fetch_gog_free_games()
+            steam_games = await fetch_steam_free_games()
+
+            # Combine all games
+            all_games = []
+            for game in epic_games:
+                all_games.append({**game, 'platform': 'Epic Games Store', 'emoji': '🛒'})
+            for game in gog_games:
+                all_games.append({**game, 'platform': 'GOG', 'emoji': '🐻'})
+            for game in steam_games:
+                all_games.append({**game, 'platform': 'Steam', 'emoji': '🎮'})
+
+            if not all_games:
+                embed = discord.Embed(
+                    title="🎮 No Free Games Found",
+                    description="No temporarily free games found on any platform at the moment.\n\nNote: This only checks for games that were paid but are now free (like Epic's weekly free games).",
+                    color=0x1DA1F2,
+                    timestamp=datetime.utcnow()
+                )
+                embed.add_field(
+                    name="📊 Checked Platforms",
+                    value="• Epic Games Store ✓\n• GOG ✓\n• Steam ✓",
+                    inline=False
+                )
+                await interaction.followup.send(embed=embed)
+                logger.info("No free games found during manual check")
+                return
+
+            # Send header
+            header_embed = discord.Embed(
+                title="🎮 Current Free Games",
+                description=f"Found **{len(all_games)}** free game{'s' if len(all_games) != 1 else ''} currently available!",
+                color=0x00ff00,
+                timestamp=datetime.utcnow()
+            )
+            header_embed.add_field(
+                name="📊 Results",
+                value=(
+                    f"• Epic Games: {len(epic_games)} game{'s' if len(epic_games) != 1 else ''}\n"
+                    f"• GOG: {len(gog_games)} game{'s' if len(gog_games) != 1 else ''}\n"
+                    f"• Steam: {len(steam_games)} game{'s' if len(steam_games) != 1 else ''}"
+                ),
+                inline=False
+            )
+            header_embed.set_footer(text="Showing games that were paid but are now free")
+            await interaction.followup.send(embed=header_embed)
+
+            # Send individual game embeds
+            for i, game in enumerate(all_games, 1):
+                embed = discord.Embed(
+                    title=game['title'],
+                    description=game.get('description', 'No description available')[:4096],
+                    color=0x00ff00,
+                    timestamp=datetime.utcnow()
+                )
+
+                # Add platform field
+                embed.add_field(
+                    name="🛒 Platform",
+                    value=f"{game['emoji']} {game['platform']}",
+                    inline=True
+                )
+
+                # Add end date if available
+                if game.get('end_date'):
+                    timestamp = int(game['end_date'].timestamp())
+                    embed.add_field(
+                        name="⏰ Available Until",
+                        value=f"<t:{timestamp}:F>\n(<t:{timestamp}:R>)",
+                        inline=True
+                    )
+
+                # Add price field
+                embed.add_field(
+                    name="💰 Price",
+                    value="**FREE** 🎉",
+                    inline=True
+                )
+
+                # Set image
+                if game.get('image'):
+                    embed.set_image(url=game['image'])
+
+                # Set footer with game counter
+                embed.set_footer(text=f"Game {i}/{len(all_games)}")
+
+                # Create claim button
+                claim_button = discord.ui.Button(
+                    label="🎁 Claim Game",
+                    style=discord.ButtonStyle.link,
+                    url=game['url']
+                )
+
+                view = discord.ui.View()
+                view.add_item(claim_button)
+
+                # Send game embed
+                await interaction.followup.send(embed=embed, view=view)
+
+                # Small delay to avoid rate limits
+                await asyncio.sleep(0.5)
+
+            logger.info(f"Manual free games check completed - displayed {len(all_games)} games")
+
+        except Exception as e:
+            logger.error(f"Error in check_free_games_now command: {e}", exc_info=True)
+            try:
+                await interaction.followup.send(
+                    "❌ An error occurred while checking for free games. Please try again later.",
+                    ephemeral=True
+                )
+            except:
+                pass
+
     @tasks.loop(hours=6)
     async def check_free_games(self):
         """Check for free games every 6 hours and post to configured channels."""
