@@ -1552,7 +1552,7 @@ async def init_guild_mod_roles_table():
 async def init_bot_moderators_table():
     """Initialize the bot moderators table for bot-wide moderation."""
     logger.info("🔧 Initializing bot moderators table...")
-    
+
     async with aiosqlite.connect(config.DB_PATH, timeout=DB_TIMEOUT) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS bot_moderators (
@@ -1565,8 +1565,58 @@ async def init_bot_moderators_table():
             )
         """)
         await db.commit()
-        
+
         logger.info("✅ Bot moderators table ready.")
+
+
+async def init_userinfo_usage_table():
+    """Initialize the userinfo usage tracking table."""
+    logger.info("🔧 Initializing userinfo usage table...")
+
+    async with aiosqlite.connect(config.DB_PATH, timeout=DB_TIMEOUT) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS userinfo_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                target_user_id INTEGER,
+                target_user_name TEXT,
+                invoked_by INTEGER,
+                invoked_at TEXT
+            )
+        """)
+        await db.commit()
+
+        logger.info("✅ Userinfo usage table ready.")
+
+
+async def init_say_command_logs_table():
+    """Initialize the say command logs table for moderation accountability."""
+    logger.info("🔧 Initializing say command logs table...")
+
+    async with aiosqlite.connect(config.DB_PATH, timeout=DB_TIMEOUT) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS say_command_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                guild_id INTEGER NOT NULL,
+                channel_id INTEGER NOT NULL,
+                message_content TEXT NOT NULL,
+                is_embed INTEGER DEFAULT 0,
+                reply_to_message_id INTEGER,
+                sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Create indexes for common queries
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_say_logs_guild ON say_command_logs(guild_id)
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_say_logs_user ON say_command_logs(user_id)
+        """)
+
+        await db.commit()
+
+        logger.info("✅ Say command logs table ready.")
 
 
 async def add_bot_moderator(discord_id: int, username: str, added_by: int):
