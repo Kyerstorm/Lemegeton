@@ -17,8 +17,12 @@ try:
     try:
         from helpers.steam_helper import (
             logger, safe_json, fetch_text, chunk_list, random_color, human_hours,
-            safe_text, make_friend_grid_image, STEAM_API_KEY, DB_PATH, PIL_AVAILABLE
+            safe_text, make_friend_grid_image, STEAM_API_KEY, DB_PATH, PIL_AVAILABLE,
+            get_library_stats, get_vac_ban_status, check_profile_privacy,
+            GAMING_UTILS_AVAILABLE
         )
+        from helpers.gaming_utils import gaming_error_handler, format_playtime
+        from helpers.command_logger import log_command
     except Exception:
         import sys
         repo_root = Path(__file__).resolve().parents[2]
@@ -28,8 +32,12 @@ try:
         # Retry import; capture missing-name errors and provide safe fallbacks
         from helpers.steam_helper import (
             logger, safe_json, fetch_text, chunk_list, random_color, human_hours,
-            safe_text, make_friend_grid_image, STEAM_API_KEY, DB_PATH, PIL_AVAILABLE
+            safe_text, make_friend_grid_image, STEAM_API_KEY, DB_PATH, PIL_AVAILABLE,
+            get_library_stats, get_vac_ban_status, check_profile_privacy,
+            GAMING_UTILS_AVAILABLE
         )
+        from helpers.gaming_utils import gaming_error_handler, format_playtime
+        from helpers.command_logger import log_command
 except ModuleNotFoundError:
     # Some deployment environments don't put the project root on sys.path.
     # Try to add the repo root (two levels up from this file: ../..) to sys.path
@@ -43,8 +51,12 @@ except ModuleNotFoundError:
     # real problem (missing package, typo, etc.).
     from helpers.steam_helper import (
         logger, safe_json, fetch_text, chunk_list, random_color, human_hours,
-        safe_text, make_friend_grid_image, STEAM_API_KEY, DB_PATH, PIL_AVAILABLE
+        safe_text, make_friend_grid_image, STEAM_API_KEY, DB_PATH, PIL_AVAILABLE,
+        get_library_stats, get_vac_ban_status, check_profile_privacy,
+        GAMING_UTILS_AVAILABLE
     )
+    from helpers.gaming_utils import gaming_error_handler, format_playtime
+    from helpers.command_logger import log_command
 
 
 class SteamProfile(commands.Cog):
@@ -53,7 +65,10 @@ class SteamProfile(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="steam-profile", description="Show a Steam profile (vanity or SteamID)")
+    @app_commands.command(name="steam-profile", description="Show detailed Steam profile with library stats and analytics")
+    @app_commands.describe(user="Steam vanity URL or SteamID64 (leave blank for your own profile)")
+    @gaming_error_handler
+    @log_command
     async def steam_profile(self, interaction: discord.Interaction, user: Optional[str] = None):
         logger.info(f"/steam-profile invoked by user={interaction.user} arg_user={user} guild={getattr(interaction.guild,'id',None)}")
         await interaction.response.defer()
@@ -91,6 +106,13 @@ class SteamProfile(commands.Cog):
             player = players[0]
             logger.debug(f"Fetched player summary for steamid={steamid} -> personaname={player.get('personaname')}")
 
+            # Check profile privacy
+            try:
+                await check_profile_privacy(player)
+            except Exception as e:
+                # ProfilePrivateError will be caught by @gaming_error_handler
+                raise
+
             # level
             lv = await safe_json(session, "https://api.steampowered.com/IPlayerService/GetSteamLevel/v1/",
                                  params={"key": STEAM_API_KEY, "steamid": steamid})
@@ -107,6 +129,14 @@ class SteamProfile(commands.Cog):
             owned_games = owned.get("response", {}).get("games", []) if owned else []
             total_games = owned.get("response", {}).get("game_count", 0) if owned else 0
             top_games = sorted(owned_games, key=lambda g: g.get("playtime_forever", 0), reverse=True)
+
+            # Get library statistics
+            library_stats = await get_library_stats(STEAM_API_KEY, steamid)
+            logger.debug(f"Library stats: {library_stats}")
+
+            # Get VAC ban status
+            vac_status = await get_vac_ban_status(STEAM_API_KEY, steamid)
+            logger.debug(f"VAC status: {vac_status}")
 
             # friends
             friends = []
@@ -166,10 +196,57 @@ class SteamProfile(commands.Cog):
             embed.set_thumbnail(url=avatar_url)
 
         # Basic info fields
-        embed.add_field(name="🆔 SteamID", value=str(steamid), inline=False)
+        embed.add_field(name="🆔 SteamID", value=f"`{steamid}`", inline=False)
         embed.add_field(name="⭐ Level", value=str(level), inline=True)
-        embed.add_field(name="🎮 Games", value=str(total_games), inline=True)
-        embed.add_field(name="👥 Friends", value=str(len(friend_ids)), inline=True)
+        embed.add_field(name="🎮 Games Owned", value=f"{total_games:,}", inline=True)
+        embed.add_field(name="👥 Friends", value=f"{len(friend_ids):,}", inline=True)
+
+        # Library Statistics
+        if library_stats:
+            total_hours = library_stats.get('total_playtime_hours', 0)
+            never_played_count = library_stats.get('never_played', 0)
+            never_played_pct = library_stats.get('never_played_percentage', 0)
+            estimated_value = library_stats.get('estimated_value', 0)
+
+            embed.add_field(
+                name="⏱️ Total Playtime",
+                value=f"{total_hours:,.0f} hours",
+                inline=True
+            )
+            embed.add_field(
+                name="📊 Unplayed Games",
+                value=f"{never_played_count} ({never_played_pct:.1f}%)",
+                inline=True
+            )
+            embed.add_field(
+                name="💰 Est. Library Value",
+                value=f"~${estimated_value:,}",
+                inline=True
+            )
+
+        # VAC Ban Status
+        if vac_status:
+            vac_banned = vac_status.get("VACBanned", False)
+            game_bans = vac_status.get("NumberOfGameBans", 0)
+            days_since_ban = vac_status.get("DaysSinceLastBan", 0)
+
+            if vac_banned or game_bans > 0:
+                ban_info = []
+                if vac_banned:
+                    ban_info.append("🚫 VAC Banned")
+                if game_bans > 0:
+                    ban_info.append(f"🚫 {game_bans} Game Ban(s)")
+                if days_since_ban > 0:
+                    ban_info.append(f"({days_since_ban} days ago)")
+
+                embed.add_field(
+                    name="⚠️ Ban Status",
+                    value=" • ".join(ban_info),
+                    inline=False
+                )
+            else:
+                embed.add_field(name="✅ Account Status", value="Good Standing", inline=False)
+
         # badges total count on main embed
         embed.add_field(name="🏅 Badges", value=str(badge_count) if badge_count is not None else "Unknown", inline=True)
 
