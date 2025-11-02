@@ -25,6 +25,13 @@ from helpers.steam_helper import (
     EnhancedGameView,
     random_color
 )
+from helpers.gaming_utils import (
+    is_steam_deck_verified,
+    get_controller_support,
+    create_steam_deck_badge,
+    create_controller_badge,
+    get_protondb_url
+)
 from helpers.command_logger import log_command
 
 # Logging setup
@@ -141,13 +148,29 @@ class GameSearchView(discord.ui.View):
             color = discord.Color.dark_gray()
 
         # Release date & genres
-        release = current_game.get("release_date", {}).get("date", "Unknown")
+        release_data = current_game.get("release_date", {})
+        release = release_data.get("date", "Unknown")
+        coming_soon = release_data.get("coming_soon", False)
+        is_early_access = any(cat.get("description") == "Early Access" for cat in current_game.get("categories", []))
+
         genres = [g["description"] for g in current_game.get("genres", [])][:3]
         genre_str = ", ".join(genres) if genres else "Unknown"
 
-        # Build embed
+        # Steam Deck & Controller support
+        deck_compat = is_steam_deck_verified(current_game)
+        controller = get_controller_support(current_game)
+
+        # Build embed with enhanced badges
+        title_badges = []
+        if coming_soon:
+            title_badges.append("🔜 Coming Soon")
+        elif is_early_access:
+            title_badges.append("🚧 Early Access")
+
+        title_suffix = f" ({' • '.join(title_badges)})" if title_badges else ""
+
         embed = discord.Embed(
-            title=f"🎮 {name}",
+            title=f"🎮 {name}{title_suffix}",
             description=short_desc,
             color=color,
             url=f"https://store.steampowered.com/app/{app_id}"
@@ -157,10 +180,51 @@ class GameSearchView(discord.ui.View):
         if header_img:
             embed.set_image(url=header_img)
 
-        # Info fields
+        # Info fields - Row 1
         embed.add_field(name="💰 Price", value=price, inline=True)
         embed.add_field(name="📅 Release", value=release, inline=True)
         embed.add_field(name="🎯 Genres", value=genre_str, inline=True)
+
+        # Compatibility badges - Row 2
+        compat_badges = []
+        if deck_compat:
+            compat_badges.append(create_steam_deck_badge(deck_compat))
+        if controller:
+            compat_badges.append(create_controller_badge(controller))
+
+        if compat_badges:
+            embed.add_field(
+                name="🎮 Compatibility",
+                value="\n".join(compat_badges),
+                inline=False
+            )
+
+        # Multiplayer support
+        categories = [c.get("description", "") for c in current_game.get("categories", [])]
+        multiplayer_types = []
+        if any("Multi-player" in c for c in categories):
+            multiplayer_types.append("Multiplayer")
+        if any("Co-op" in c for c in categories):
+            multiplayer_types.append("Co-op")
+        if any("Online PvP" in c for c in categories):
+            multiplayer_types.append("PvP")
+        if any("Cross-Platform" in c for c in categories):
+            multiplayer_types.append("Cross-Platform")
+
+        if multiplayer_types:
+            embed.add_field(
+                name="👥 Play Modes",
+                value=" • ".join(multiplayer_types),
+                inline=True
+            )
+
+        # Current players (if available in categories)
+        if "Online Co-op" in categories or "Online PvP" in categories:
+            embed.add_field(
+                name="🔗 Links",
+                value=f"[ProtonDB]({get_protondb_url(app_id)}) • [Steam Store](https://store.steampowered.com/app/{app_id})",
+                inline=True
+            )
 
         # Show other results in the list
         other_results = []
