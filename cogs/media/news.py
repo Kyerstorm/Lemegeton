@@ -429,17 +429,21 @@ class NewsCog(commands.Cog):
             print("❌ aiosqlite not available - news cog disabled")
             logger.error("aiosqlite not available - news cog disabled")
             return
-        
+
         try:
             print("✅ News cog initialized using main database")
             logger.info("News cog initialized using main database")
-            
-            # Ensure task starts
+
+            # Ensure task starts - it will run immediately after bot is ready
+            # thanks to the before_loop decorator
             await self._ensure_task_running()
-            
+
             # Start watchdog task to monitor main task
             await self._ensure_watchdog_running()
-            
+
+            print("✅ Background tasks started - first tweet check will run as soon as bot is ready")
+            logger.info("Background tasks started - first tweet check will run as soon as bot is ready")
+
         except Exception as e:
             print(f"❌ Failed to initialize news cog: {e}")
             logger.error(f"Failed to initialize news cog: {e}")
@@ -1407,7 +1411,7 @@ class AddAccountModal(discord.ui.Modal):
                 return
         
         try:
-            success = await self.add_news_account_json(username, target_channel_id)
+            success = await self.cog.add_news_account_json(username, target_channel_id)
             if success:
                 target_channel = interaction.guild.get_channel(target_channel_id)
                 channel_mention = target_channel.mention if target_channel else f"<#{target_channel_id}>"
@@ -1674,3 +1678,6 @@ class KeywordRemoveSelect(discord.ui.Select):
 async def setup(bot):
     cog = NewsCog(bot)
     await bot.add_cog(cog)
+    # Ensure tasks start immediately on bot startup
+    await cog.initialize()
+    print("✅ NewsCog setup complete - tasks should be starting")
