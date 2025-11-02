@@ -579,9 +579,113 @@ class ComparisonView(discord.ui.View):
         super().__init__(timeout=300)
 
 class RecommendationView(discord.ui.View):
-    """Minimal stub for steam game recommendation view."""
-    def __init__(self):
+    """Interactive view for browsing game recommendations."""
+
+    def __init__(self, recommendations, user):
         super().__init__(timeout=300)
+        self.recommendations = recommendations
+        self.user = user
+        self.current_index = 0
+
+    @discord.ui.button(label="⬅️ Previous", style=discord.ButtonStyle.secondary)
+    async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Show previous recommendation"""
+        if interaction.user.id != self.user.id:
+            return await interaction.response.send_message("❌ This isn't your recommendation menu!", ephemeral=True)
+
+        if self.current_index > 0:
+            self.current_index -= 1
+        else:
+            self.current_index = len(self.recommendations) - 1
+
+        embed = await self._create_recommendation_embed(
+            self.recommendations[self.current_index],
+            self.current_index + 1,
+            len(self.recommendations)
+        )
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Next ➡️", style=discord.ButtonStyle.secondary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Show next recommendation"""
+        if interaction.user.id != self.user.id:
+            return await interaction.response.send_message("❌ This isn't your recommendation menu!", ephemeral=True)
+
+        if self.current_index < len(self.recommendations) - 1:
+            self.current_index += 1
+        else:
+            self.current_index = 0
+
+        embed = await self._create_recommendation_embed(
+            self.recommendations[self.current_index],
+            self.current_index + 1,
+            len(self.recommendations)
+        )
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def _create_recommendation_embed(self, game_data, index, total):
+        """Create embed for a recommendation"""
+        # Extract details from recommendation structure
+        details = game_data.get("details", {})
+        app_id = game_data.get("app_id", 0)
+        match_score = game_data.get("score", 0)
+        match_reasons = game_data.get("match_reasons", [])
+
+        name = details.get("name", "Unknown Game")
+        description = details.get("short_description", "No description available")[:500]
+
+        embed = discord.Embed(
+            title=f"🎮 {name}",
+            url=f"https://store.steampowered.com/app/{app_id}",
+            description=description,
+            color=discord.Color.blue()
+        )
+
+        # Header image
+        header_image = details.get("header_image")
+        if header_image:
+            embed.set_image(url=header_image)
+
+        # Price
+        price_info = details.get("price_overview", {})
+        is_free = details.get("is_free", False)
+
+        if is_free:
+            price_str = "Free to Play"
+            embed.color = discord.Color.green()
+        elif price_info:
+            price_str = price_info.get("final_formatted", "Unknown")
+            discount = price_info.get("discount_percent", 0)
+            if discount > 0:
+                original = price_info.get("initial_formatted", "")
+                price_str = f"~~{original}~~ **{price_str}** (-{discount}%)"
+                embed.color = discord.Color.gold()
+        else:
+            price_str = "Price Unknown"
+
+        embed.add_field(name="💰 Price", value=price_str, inline=True)
+
+        # Match score (normalize to percentage)
+        match_percent = min(100, match_score * 3)  # Scale score to percentage
+        embed.add_field(name="🎯 Match Score", value=f"{match_percent:.0f}%", inline=True)
+
+        # Release date
+        release_date = details.get("release_date", {}).get("date", "Unknown")
+        embed.add_field(name="📅 Release", value=release_date, inline=True)
+
+        # Genres
+        genres = [g.get("description", "") for g in details.get("genres", [])]
+        if genres:
+            embed.add_field(name="🏷️ Genres", value=", ".join(genres[:3]), inline=False)
+
+        # Match reasons
+        if match_reasons:
+            reasons_text = "\n".join(f"• {reason}" for reason in match_reasons[:3])
+            embed.add_field(name="✨ Why this matches", value=reasons_text, inline=False)
+
+        embed.set_footer(text=f"Recommendation {index}/{total} • Click to view on Steam")
+
+        return embed
 
 class EnhancedGameView(discord.ui.View):
     """Enhanced game view with detailed information and interactive buttons."""
@@ -963,6 +1067,172 @@ class ScreenshotView(discord.ui.View):
         
         embed = self.create_screenshot_embed(self.current_index)
         await interaction.response.edit_message(embed=embed, view=self)
+
+
+# ===== IMPORT GAMING UTILITIES =====
+try:
+    from helpers.gaming_utils import (
+        gaming_cache, connection_pool, cached_api_request, batch_api_requests,
+        format_playtime, format_price, get_steam_profile_url, get_steam_game_url,
+        get_protondb_url, is_steam_deck_verified, get_controller_support,
+        create_steam_deck_badge, create_controller_badge,
+        ProfilePrivateError, ProfileNotFoundError, SteamAPIError
+    )
+    GAMING_UTILS_AVAILABLE = True
+    logger.info("Gaming utilities imported successfully")
+except ImportError as e:
+    GAMING_UTILS_AVAILABLE = False
+    logger.warning(f"Gaming utilities not available: {e}")
+
+
+# ===== ENHANCED BATCH API OPERATIONS =====
+
+async def batch_get_player_summaries(api_key: str, steamids: List[str]) -> Dict[str, Dict]:
+    """
+    Batch fetch player summaries for multiple Steam IDs
+    Returns dict mapping steamid -> player data
+    """
+    if not GAMING_UTILS_AVAILABLE:
+        # Fallback to individual requests
+        result = {}
+        session = await connection_pool.get_session() if GAMING_UTILS_AVAILABLE else aiohttp.ClientSession()
+        try:
+            for steamid in steamids:
+                players = await get_player_summaries(session, api_key, steamid)
+                if players:
+                    result[steamid] = players[0]
+        finally:
+            if not GAMING_UTILS_AVAILABLE:
+                await session.close()
+        return result
+
+    # Use batched requests with caching
+    requests = []
+    for steamid in steamids:
+        requests.append({
+            'url': "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/",
+            'params': {"key": api_key, "steamids": steamid},
+            'cache_ttl': 3600,  # 1 hour cache
+            'cache_key': f"player_summary_{steamid}"
+        })
+
+    responses = await batch_api_requests(requests)
+
+    result = {}
+    for steamid, response in zip(steamids, responses):
+        if response and response.get("response", {}).get("players"):
+            result[steamid] = response["response"]["players"][0]
+
+    logger.info(f"Batch fetched {len(result)} player summaries")
+    return result
+
+
+async def get_library_stats(api_key: str, steamid: str) -> Dict[str, Any]:
+    """
+    Get comprehensive library statistics for a user
+    Returns dict with library analytics
+    """
+    session = await connection_pool.get_session() if GAMING_UTILS_AVAILABLE else aiohttp.ClientSession()
+
+    try:
+        # Fetch owned games with app info
+        owned = await get_owned_games(session, api_key, steamid, include_appinfo=True)
+
+        if not owned:
+            return {
+                'total_games': 0,
+                'total_playtime': 0,
+                'never_played': 0,
+                'most_played': [],
+                'genres': {},
+                'recent_purchases': []
+            }
+
+        # Calculate statistics
+        total_games = len(owned)
+        total_playtime = sum(game.get('playtime_forever', 0) for game in owned)
+        never_played = sum(1 for game in owned if game.get('playtime_forever', 0) == 0)
+
+        # Most played games (top 5)
+        most_played = sorted(
+            owned,
+            key=lambda x: x.get('playtime_forever', 0),
+            reverse=True
+        )[:5]
+
+        # Calculate library value (rough estimate)
+        # Average game price $20, sales 50% off = $10 avg
+        estimated_value = total_games * 10
+
+        # Calculate percentage of unplayed games
+        unplayed_percentage = (never_played / total_games * 100) if total_games > 0 else 0
+
+        stats = {
+            'total_games': total_games,
+            'total_playtime': total_playtime,
+            'total_playtime_hours': total_playtime / 60,
+            'never_played': never_played,
+            'never_played_percentage': unplayed_percentage,
+            'most_played': most_played,
+            'estimated_value': estimated_value,
+            'average_playtime_per_game': total_playtime / total_games if total_games > 0 else 0
+        }
+
+        logger.info(f"Generated library stats for {steamid}: {total_games} games, {total_playtime/60:.1f} hours")
+        return stats
+
+    finally:
+        if not GAMING_UTILS_AVAILABLE:
+            await session.close()
+
+
+async def get_vac_ban_status(api_key: str, steamid: str) -> Optional[Dict]:
+    """
+    Check VAC ban status for a user
+    Returns dict with ban info or None
+    """
+    if GAMING_UTILS_AVAILABLE:
+        data = await cached_api_request(
+            url="https://api.steampowered.com/ISteamUser/GetPlayerBans/v1/",
+            params={"key": api_key, "steamids": steamid},
+            cache_ttl=86400,  # 24 hour cache
+            cache_key=f"vac_ban_{steamid}"
+        )
+    else:
+        session = aiohttp.ClientSession()
+        try:
+            data = await safe_json(
+                session,
+                "https://api.steampowered.com/ISteamUser/GetPlayerBans/v1/",
+                params={"key": api_key, "steamids": steamid}
+            )
+        finally:
+            await session.close()
+
+    if data and data.get("players"):
+        return data["players"][0]
+
+    return None
+
+
+async def check_profile_privacy(player_data: Dict) -> bool:
+    """
+    Check if a Steam profile is private
+    Returns True if profile is public, False if private
+    Raises ProfilePrivateError if private
+    """
+    communityvisibilitystate = player_data.get("communityvisibilitystate", 1)
+
+    # 1 = Private, 2 = Friends only, 3 = Public
+    if communityvisibilitystate == 3:
+        return True
+
+    # Profile is private or friends-only
+    personaname = player_data.get("personaname", "User")
+    if GAMING_UTILS_AVAILABLE:
+        raise ProfilePrivateError(f"{personaname}'s profile is private")
+    else:
+        return False
 
 
 # Helper functions needed by steam.py
