@@ -13,8 +13,8 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from datetime import datetime, timezone
-import aiosqlite
 from typing import Optional, List
+from database import execute_db_operation, init_userinfo_usage_table
 
 # ---------------------------
 # Palette & helpers
@@ -41,31 +41,16 @@ def create_darlux_embed(title: Optional[str] = None, description: Optional[str] 
 # ---------------------------
 # DB logging
 # ---------------------------
-DB_PATH = "data/bot_meta.db"
 
-
-async def init_db(path: str = DB_PATH):
-    async with aiosqlite.connect(path) as conn:
-        await conn.execute("""
-        CREATE TABLE IF NOT EXISTS userinfo_usage (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            target_user_id INTEGER,
-            target_user_name TEXT,
-            invoked_by INTEGER,
-            invoked_at TEXT
-        )
-        """)
-        await conn.commit()
-
-
-async def log_userinfo(target: discord.User, invoked_by: discord.User, path: str = DB_PATH):
+async def log_userinfo(target: discord.User, invoked_by: discord.User):
+    """Log userinfo command usage to main database"""
     try:
-        async with aiosqlite.connect(path) as conn:
-            await conn.execute(
-                "INSERT INTO userinfo_usage (target_user_id, target_user_name, invoked_by, invoked_at) VALUES (?, ?, ?, ?)",
-                (target.id, str(target), invoked_by.id, datetime.utcnow().isoformat())
-            )
-            await conn.commit()
+        await execute_db_operation(
+            "log userinfo usage",
+            """INSERT INTO userinfo_usage (target_user_id, target_user_name, invoked_by, invoked_at)
+               VALUES (?, ?, ?, ?)""",
+            (target.id, str(target), invoked_by.id, datetime.utcnow().isoformat())
+        )
     except Exception:
         pass
 
@@ -236,7 +221,7 @@ class UserInfo(commands.Cog):
 
     async def cog_load(self):
         """Initialize database when cog loads."""
-        await init_db()
+        await init_userinfo_usage_table()
 
     async def fetch_user_safe(self, user: discord.User) -> discord.User:
         # try to fetch a fuller user object from the API (may reveal banner)
