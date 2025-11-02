@@ -33,12 +33,32 @@ DEFAULT_TRENDING_FALLBACK = ["AniList API ❤️"]
 # Ensure logs directory exists
 os.makedirs(LOG_DIR, exist_ok=True)
 
+# Clear all log files on startup
+def clear_log_files():
+    """Clear all .log files in the logs directory on bot startup"""
+    try:
+        log_files_cleared = 0
+        for filename in os.listdir(LOG_DIR):
+            if filename.endswith('.log'):
+                file_path = os.path.join(LOG_DIR, filename)
+                try:
+                    # Clear the file content
+                    with open(file_path, 'w') as f:
+                        f.write('')
+                    log_files_cleared += 1
+                except Exception as e:
+                    print(f"Warning: Could not clear {filename}: {e}")
+        print(f"✅ Cleared {log_files_cleared} log files on startup")
+        return log_files_cleared
+    except Exception as e:
+        print(f"⚠️ Error clearing log files: {e}")
+        return 0
+
+# Clear all logs on startup
+cleared_count = clear_log_files()
+
 # Configure comprehensive file-based logging
 log_file_path = os.path.join(LOG_DIR, LOG_FILE)
-
-# Clear existing log file if it's too large
-if os.path.exists(log_file_path) and os.path.getsize(log_file_path) > LOG_MAX_SIZE:
-    open(log_file_path, 'w').close()
 
 # Setup file handler with detailed formatting
 file_handler = logging.FileHandler(log_file_path, encoding='utf-8')
@@ -69,6 +89,7 @@ logger = logging.getLogger("Bot")
 logger.info("="*50)
 logger.info("Bot logging system initialized")
 logger.info(f"Log file: {log_file_path}")
+logger.info(f"Cleared {cleared_count} log files on startup")
 logger.info("="*50)
 
 # Import monitoring integration (optional)
