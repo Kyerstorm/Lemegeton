@@ -52,9 +52,42 @@ class SteamRecommendation(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="steam-recommendation", description="Get personalized game recommendations based on your Steam library")
-    async def steam_recommendation(self, interaction: discord.Interaction):
-        logger.info(f"/steam-recommendation by {interaction.user}")
+    @app_commands.describe(
+        genre="Filter by specific genre",
+        max_price="Maximum price in USD (leave blank for any price)",
+        exclude_early_access="Exclude Early Access games",
+        multiplayer_only="Show only multiplayer games"
+    )
+    @app_commands.choices(genre=[
+        app_commands.Choice(name="Any Genre", value="any"),
+        app_commands.Choice(name="Action", value="action"),
+        app_commands.Choice(name="Adventure", value="adventure"),
+        app_commands.Choice(name="RPG", value="rpg"),
+        app_commands.Choice(name="Strategy", value="strategy"),
+        app_commands.Choice(name="Indie", value="indie"),
+        app_commands.Choice(name="Simulation", value="simulation"),
+        app_commands.Choice(name="Casual", value="casual"),
+        app_commands.Choice(name="Sports", value="sports"),
+        app_commands.Choice(name="Racing", value="racing"),
+    ])
+    async def steam_recommendation(
+        self,
+        interaction: discord.Interaction,
+        genre: Optional[app_commands.Choice[str]] = None,
+        max_price: Optional[float] = None,
+        exclude_early_access: Optional[bool] = False,
+        multiplayer_only: Optional[bool] = False
+    ):
+        logger.info(f"/steam-recommendation by {interaction.user} - genre={genre} max_price={max_price}")
         await interaction.response.defer(ephemeral=True)
+
+        # Build filter options
+        filters = {
+            'genre': genre.value if genre else 'any',
+            'max_price': max_price,
+            'exclude_early_access': exclude_early_access,
+            'multiplayer_only': multiplayer_only
+        }
 
         # Get user's Steam ID
         steamid = None
@@ -91,25 +124,44 @@ class SteamRecommendation(commands.Cog):
                 return await interaction.followup.send("❌ You need at least 3 games in your library to get recommendations.", ephemeral=True)
 
             # Analyze user preferences
-            await interaction.followup.send("🔄 Analyzing your game library and preferences...", ephemeral=True)
-            
-            recommendations = await self._generate_recommendations(session, owned_games, steamid)
-            
+            filter_msg = []
+            if filters['genre'] != 'any':
+                filter_msg.append(f"Genre: {filters['genre'].title()}")
+            if filters['max_price'] is not None:
+                filter_msg.append(f"Max Price: ${filters['max_price']}")
+            if filters['exclude_early_access']:
+                filter_msg.append("No Early Access")
+            if filters['multiplayer_only']:
+                filter_msg.append("Multiplayer Only")
+
+            filter_text = f" ({', '.join(filter_msg)})" if filter_msg else ""
+            await interaction.followup.send(f"🔄 Analyzing your game library and preferences{filter_text}...", ephemeral=True)
+
+            recommendations = await self._generate_recommendations(session, owned_games, steamid, filters)
+
             if not recommendations:
-                return await interaction.edit_original_response(content="❌ Could not generate recommendations. Try again later.")
+                return await interaction.edit_original_response(content="❌ No recommendations found matching your filters. Try adjusting your criteria.")
 
             # Create interactive recommendation view
             view = RecommendationView(recommendations, interaction.user)
-            embed = await self._create_recommendation_embed(recommendations[0], 1, len(recommendations))
-            
+            embed = await view._create_recommendation_embed(recommendations[0], 1, len(recommendations))
+
             await interaction.edit_original_response(
                 content="🎮 **Personalized Game Recommendations**\nBased on your library analysis:",
                 embed=embed,
                 view=view
             )
 
-    async def _generate_recommendations(self, session, owned_games, steamid):
-        """Generate personalized recommendations based on user's library"""
+    async def _generate_recommendations(self, session, owned_games, steamid, filters=None):
+        """Generate personalized recommendations based on user's library and filters"""
+
+        if filters is None:
+            filters = {
+                'genre': 'any',
+                'max_price': None,
+                'exclude_early_access': False,
+                'multiplayer_only': False
+            }
         
         # Step 1: Analyze user's gaming preferences
         total_playtime = sum(g.get("playtime_forever", 0) for g in owned_games)
@@ -212,7 +264,44 @@ class SteamRecommendation(commands.Cog):
             details = app_data[str(app_id)].get("data", {})
             if not details or details.get("type") != "game":
                 continue
-            
+
+            # Apply filters
+            # Genre filter
+            if filters['genre'] != 'any':
+                genres = [g.get("description", "").lower() for g in details.get("genres", [])]
+                if filters['genre'].lower() not in genres:
+                    continue
+
+            # Price filter
+            if filters['max_price'] is not None:
+                price_info = details.get("price_overview", {})
+                if price_info:
+                    # Price is in cents, convert to dollars
+                    final_price = price_info.get("final", 0) / 100
+                    if final_price > filters['max_price']:
+                        continue
+                # Free games pass the filter
+                elif not details.get("is_free", False):
+                    # No price info and not free - skip
+                    continue
+
+            # Early Access filter
+            if filters['exclude_early_access']:
+                if details.get("release_date", {}).get("coming_soon", False):
+                    continue
+                # Check if it has early access category
+                categories = [c.get("description", "") for c in details.get("categories", [])]
+                if "Early Access" in categories:
+                    continue
+
+            # Multiplayer filter
+            if filters['multiplayer_only']:
+                categories = [c.get("description", "").lower() for c in details.get("categories", [])]
+                multiplayer_keywords = ["multi-player", "multiplayer", "co-op", "online pvp", "online co-op"]
+                has_multiplayer = any(keyword in " ".join(categories) for keyword in multiplayer_keywords)
+                if not has_multiplayer:
+                    continue
+
             # Calculate recommendation score
             score = 0
             match_reasons = []
@@ -272,9 +361,22 @@ class SteamRecommendation(commands.Cog):
 
     async def _create_recommendation_embed(self, recommendation, current_index, total_count):
         """Create an embed for a single recommendation"""
-        details = recommendation["details"]
-        
-        name = details.get("name", "Unknown Game")
+        # Debug logging
+        logger.debug(f"Creating embed for recommendation: {recommendation.keys()}")
+
+        details = recommendation.get("details", {})
+        if not details:
+            logger.error(f"No details found in recommendation! Keys: {recommendation.keys()}")
+            logger.error(f"Full recommendation data: {recommendation}")
+
+        name = details.get("name")
+        if not name:
+            # Fallback: try to get name from other possible locations
+            name = recommendation.get("name") or details.get("title") or f"App ID {recommendation.get('app_id', 'Unknown')}"
+            logger.error(f"Name not found in details! Using fallback: {name}")
+            logger.error(f"Details keys: {list(details.keys())[:10]}")
+            logger.error(f"Recommendation keys: {list(recommendation.keys())}")
+
         description = details.get("short_description", "No description available.")
         if len(description) > 300:
             description = description[:297] + "..."
