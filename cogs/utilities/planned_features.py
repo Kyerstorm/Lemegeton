@@ -3,143 +3,124 @@ from discord.ext import commands
 from discord import app_commands
 from typing import Optional, List
 import logging
-import json
-from pathlib import Path
 from datetime import datetime
+import database
 
 # Set up logging
 logger = logging.getLogger('planned_features')
 
 class PlannedFeatures(commands.Cog):
     """Planned features management system"""
-    
+
     def __init__(self, bot):
         self.bot = bot
-        self.data_file = Path("data") / "planned_features.json"
-        self.data_file.parent.mkdir(parents=True, exist_ok=True)
-        self._init_data_file()
-    
-    def _init_data_file(self):
-        """Initialize the planned features JSON file if it doesn't exist."""
-        try:
-            if not self.data_file.exists():
-                self.data_file.write_text("{}")
-                logger.info("Planned features JSON file initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize planned features JSON file: {e}")
-    
-    def _load_data(self) -> dict:
-        """Load data from the JSON file."""
-        try:
-            if self.data_file.exists():
-                return json.loads(self.data_file.read_text())
-            return {}
-        except Exception as e:
-            logger.error(f"Failed to load planned features data: {e}")
-            return {}
-    
-    def _save_data(self, data: dict) -> bool:
-        """Save data to the JSON file."""
-        try:
-            self.data_file.write_text(json.dumps(data, indent=2))
-            return True
-        except Exception as e:
-            logger.error(f"Failed to save planned features data: {e}")
-            return False
+        logger.info("PlannedFeatures cog initialized (using database)")
     
     async def get_planned_features(self, status: str = 'planned') -> List[dict]:
         """Get all planned features with a specific status."""
         try:
-            data = self._load_data()
+            rows = await database.execute_db_operation(
+                f"get {status} planned features",
+                """SELECT id, name, description, added_date, added_by, uploaded_from_file,
+                          last_edited, last_edited_by, status
+                   FROM planned_features
+                   WHERE status = ?
+                   ORDER BY added_date DESC""",
+                (status,),
+                fetch_type='all'
+            )
+
+            if not rows:
+                return []
+
             features = []
-            for feature_id, feature_data in data.items():
-                if feature_data.get('status') == status:
-                    features.append({
-                        'id': int(feature_id),
-                        **feature_data
-                    })
-            # Sort by added_date descending
-            features.sort(key=lambda x: x.get('added_date', ''), reverse=True)
+            for row in rows:
+                features.append({
+                    'id': row[0],
+                    'name': row[1],
+                    'description': row[2],
+                    'added_date': row[3],
+                    'added_by': row[4],
+                    'uploaded_from_file': row[5],
+                    'last_edited': row[6],
+                    'last_edited_by': row[7],
+                    'status': row[8]
+                })
+
             return features
         except Exception as e:
-            logger.error(f"Error getting {status} features: {e}")
+            logger.error(f"Error getting {status} features: {e}", exc_info=True)
             return []
     
     async def add_planned_feature(self, name: str, description: str, added_by: str, **kwargs) -> int:
         """Add a new planned feature. Returns the feature ID."""
         try:
-            data = self._load_data()
-            
-            # Generate new ID
-            existing_ids = [int(fid) for fid in data.keys()]
-            feature_id = max(existing_ids) + 1 if existing_ids else 1
-            
             added_date = datetime.now().isoformat()
             uploaded_from_file = kwargs.get('uploaded_from_file')
-            
-            feature_data = {
-                'name': name,
-                'description': description,
-                'added_date': added_date,
-                'added_by': added_by,
-                'uploaded_from_file': uploaded_from_file,
-                'status': 'planned'
-            }
-            
-            data[str(feature_id)] = feature_data
-            success = self._save_data(data)
-            
-            if success:
+
+            # Insert and get the auto-generated ID
+            feature_id = await database.execute_db_operation(
+                "insert planned feature",
+                """INSERT INTO planned_features
+                   (name, description, added_date, added_by, uploaded_from_file, status)
+                   VALUES (?, ?, ?, ?, ?, 'planned')""",
+                (name, description, added_date, added_by, uploaded_from_file),
+                fetch_type='lastrowid'
+            )
+
+            if feature_id:
                 logger.info(f"Added planned feature: {name} (ID: {feature_id})")
                 return feature_id
             return 0
         except Exception as e:
-            logger.error(f"Error adding planned feature {name}: {e}")
+            logger.error(f"Error adding planned feature {name}: {e}", exc_info=True)
             return 0
     
     async def update_planned_feature(self, feature_id: int, **kwargs) -> bool:
         """Update a planned feature with provided fields."""
         try:
-            data = self._load_data()
-            feature_key = str(feature_id)
-            
-            if feature_key not in data:
-                logger.error(f"Feature ID {feature_id} not found")
-                return False
-            
             # Update last_edited timestamp if any changes are made
             if any(key in kwargs for key in ['name', 'description', 'status']):
                 kwargs['last_edited'] = datetime.now().isoformat()
-            
-            # Update the feature data
-            data[feature_key].update(kwargs)
-            success = self._save_data(data)
-            
-            if success:
-                logger.info(f"Updated planned feature ID {feature_id}")
-            return success
+
+            # Build UPDATE query dynamically based on provided fields
+            update_fields = []
+            values = []
+            for key, value in kwargs.items():
+                update_fields.append(f"{key} = ?")
+                values.append(value)
+
+            if not update_fields:
+                return True  # Nothing to update
+
+            values.append(feature_id)  # For WHERE clause
+            query = f"UPDATE planned_features SET {', '.join(update_fields)} WHERE id = ?"
+
+            await database.execute_db_operation(
+                f"update planned feature {feature_id}",
+                query,
+                tuple(values)
+            )
+
+            logger.info(f"Updated planned feature ID {feature_id}")
+            return True
         except Exception as e:
-            logger.error(f"Error updating planned feature {feature_id}: {e}")
+            logger.error(f"Error updating planned feature {feature_id}: {e}", exc_info=True)
             return False
-    
+
     async def delete_planned_feature(self, feature_id: int) -> bool:
         """Delete a planned feature."""
         try:
-            data = self._load_data()
-            feature_key = str(feature_id)
-            
-            if feature_key not in data:
-                logger.error(f"Feature ID {feature_id} not found")
-                return False
-            
-            del data[feature_key]
-            success = self._save_data(data)
-            
-            if success:
-                logger.info(f"Deleted planned feature ID {feature_id}")
-            return success
+            await database.execute_db_operation(
+                f"delete planned feature {feature_id}",
+                "DELETE FROM planned_features WHERE id = ?",
+                (feature_id,)
+            )
+
+            logger.info(f"Deleted planned feature ID {feature_id}")
+            return True
         except Exception as e:
-            logger.error(f"Error deleting planned feature {feature_id}: {e}")
+            logger.error(f"Error deleting planned feature {feature_id}: {e}", exc_info=True)
             return False
     
     async def has_mod_permissions(self, interaction: discord.Interaction) -> bool:

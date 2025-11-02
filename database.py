@@ -4141,6 +4141,16 @@ async def clear_guild_records(guild_id: int):
                     ("challenge_rules", "guild_id"),
                     ("welcome_dm", "guild_id"),
                     ("paginator_state", "guild_id"),
+                    # Phase 2 consolidated tables
+                    ("birthdays", "guild_id"),
+                    ("birthday_guild_config", "guild_id"),
+                    ("dashboard_guild_configs", "guild_id"),
+                    ("dashboard_audit_log", "guild_id"),
+                    ("mute_roles", "guild_id"),
+                    ("mutes", "guild_id"),
+                    ("mute_logs", "guild_id"),
+                    ("clear_logs", "guild_id"),
+                    ("channel_lock_logs", "guild_id"),
                 ]
                 
                 for table_name, column_name in guild_tables:
@@ -4192,7 +4202,10 @@ async def get_all_guild_ids_with_records():
             "user_progress_checkpoint", "user_manga_progress",
             "cached_stats", "manga_recommendations_votes", "steam_users",
             "bot_config", "challenge_manga", "challenge_rules", "welcome_dm",
-            "paginator_state"
+            "paginator_state",
+            "birthdays", "birthday_guild_config", "dashboard_guild_configs",
+            "dashboard_audit_log", "mute_roles", "mutes", "mute_logs",
+            "clear_logs", "channel_lock_logs"
         ]
 
         for table in tables_with_guild_id:
