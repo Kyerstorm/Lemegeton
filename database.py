@@ -1619,6 +1619,44 @@ async def init_say_command_logs_table():
         logger.info("✅ Say command logs table ready.")
 
 
+async def init_reminders_table():
+    """Initialize the reminders table for user reminder system."""
+    logger.info("🔧 Initializing reminders table...")
+
+    async with aiosqlite.connect(config.DB_PATH, timeout=DB_TIMEOUT) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS reminders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                guild_id INTEGER,
+                channel_id INTEGER,
+                message TEXT NOT NULL,
+                remind_at TIMESTAMP NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_recurring INTEGER DEFAULT 0,
+                recurrence_pattern TEXT,
+                snoozed_until TIMESTAMP,
+                is_completed INTEGER DEFAULT 0,
+                completed_at TIMESTAMP
+            )
+        """)
+
+        # Create indexes for efficient reminder checking
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id)
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_reminders_remind_at ON reminders(remind_at)
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_reminders_completed ON reminders(is_completed)
+        """)
+
+        await db.commit()
+
+        logger.info("✅ Reminders table ready.")
+
+
 async def add_bot_moderator(discord_id: int, username: str, added_by: int):
     """Add a bot moderator."""
     try:
