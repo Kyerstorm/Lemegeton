@@ -1352,14 +1352,15 @@ async def init_invite_tracker_tables():
                 )
             """)
             
-            # Recruitment stats table - tracks total recruits per user
+            # Recruitment stats table - tracks total recruits per user per guild
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS recruitment_stats (
-                    user_id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
                     guild_id INTEGER NOT NULL,
                     username TEXT NOT NULL,
                     total_recruits INTEGER DEFAULT 0,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id, guild_id)
                 )
             """)
             
@@ -1384,7 +1385,19 @@ async def init_invite_tracker_tables():
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            
+
+            # Invite theme settings - stores custom messages and theme preferences
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS invite_theme_settings (
+                    guild_id INTEGER PRIMARY KEY,
+                    xianxia_theme_enabled INTEGER DEFAULT 1,
+                    custom_join_messages TEXT,
+                    custom_leave_messages TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             await db.commit()
             logger.info("✅ Invite tracker tables initialized successfully")
     
