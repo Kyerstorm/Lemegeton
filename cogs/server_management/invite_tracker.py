@@ -8,6 +8,7 @@ import aiosqlite
 import asyncio
 from datetime import datetime, timezone
 import random
+import json
 
 from database import DB_PATH, execute_db_operation
 
@@ -298,12 +299,18 @@ class InviteTracker(commands.Cog):
             logger.error(f"Error recording invite join for {member}: {e}")
             recruit_count = 1
         
-        # Send themed join message
-        message_template = random.choice(XIANXIA_JOIN_MESSAGES)
+        # Get appropriate messages based on theme settings
+        join_messages = await self._get_theme_messages(guild.id, "join")
+        message_template = random.choice(join_messages)
         recruitment_action = random.choice(RECRUITMENT_TITLES)
-        
-        join_message = f"{message_template.format(joiner=member.mention, inviter=inviter.display_name)}\n"
-        join_message += f"{inviter.display_name} {recruitment_action} **{recruit_count}** disciples."
+
+        # Format the message with placeholders
+        join_message = message_template.format(
+            joiner=member.mention,
+            inviter=inviter.display_name,
+            server=guild.name
+        )
+        join_message += f"\n{inviter.display_name} {recruitment_action} **{recruit_count}** disciples."
         
         # Find the configured announcement channel
         channel = await self._get_announcement_channel(guild)
@@ -329,14 +336,20 @@ class InviteTracker(commands.Cog):
             logger.debug(f"Unknown join in {guild.name} ignored - invite tracker not configured for this guild")
             return
 
-        # Still send a generic join message
+        # Get appropriate messages based on theme settings (for unknown joins)
+        join_messages = await self._get_theme_messages(guild.id, "join")
+
+        # For unknown joins, we don't have an inviter, so use a fallback format
+        # Pick a message that doesn't require inviter info, or adapt it
         generic_messages = [
             f"{member.mention} has joined the sect through mysterious means.",
             f"{member.mention} has found their way to the sect. Welcome, new disciple!",
             f"{member.mention} has entered the sect. Their dao led them here.",
-            f"{member.mention} has arrived at the sect to begin cultivation."
+            f"{member.mention} has arrived at the sect to begin cultivation.",
+            f"{member.mention} has joined {guild.name}!",
+            f"Welcome {member.mention} to {guild.name}!"
         ]
-        
+
         join_message = random.choice(generic_messages)
         
         channel = await self._get_announcement_channel(guild)
@@ -407,8 +420,15 @@ class InviteTracker(commands.Cog):
         except Exception as e:
             logger.error(f"Error recording member leave for {member}: {e}")
         
-        # Send themed leave message
-        leave_message = random.choice(XIANXIA_LEAVE_MESSAGES).format(user=member.display_name)
+        # Get appropriate messages based on theme settings
+        leave_messages = await self._get_theme_messages(guild.id, "leave")
+        message_template = random.choice(leave_messages)
+
+        # Format the message with placeholders
+        leave_message = message_template.format(
+            user=member.display_name,
+            server=guild.name
+        )
 
         channel = await self._get_announcement_channel(guild)
         if channel:
@@ -422,6 +442,73 @@ class InviteTracker(commands.Cog):
         else:
             logger.info(f"No announcement channel configured for {guild.name} - leave message not sent. Use /set_invite_channel to configure.")
     
+    async def _get_theme_messages(self, guild_id: int, message_type: str) -> List[str]:
+        """Get appropriate messages based on theme settings
+
+        Args:
+            guild_id: The guild ID
+            message_type: Either 'join' or 'leave'
+
+        Returns:
+            List of messages to randomly choose from
+        """
+        try:
+            # Load theme settings from database
+            settings = await execute_db_operation(
+                "get theme settings for messages",
+                """
+                SELECT xianxia_theme_enabled, custom_join_messages, custom_leave_messages
+                FROM invite_theme_settings
+                WHERE guild_id = ?
+                """,
+                (guild_id,),
+                fetch_type='one'
+            )
+
+            if settings:
+                xianxia_enabled, custom_join_json, custom_leave_json = settings
+
+                # Parse custom messages if they exist
+                if message_type == "join" and custom_join_json:
+                    custom_messages = json.loads(custom_join_json)
+                    if custom_messages:
+                        return custom_messages
+                elif message_type == "leave" and custom_leave_json:
+                    custom_messages = json.loads(custom_leave_json)
+                    if custom_messages:
+                        return custom_messages
+
+                # If xianxia theme is disabled and no custom messages, use generic messages
+                if not xianxia_enabled:
+                    if message_type == "join":
+                        return [
+                            "{joiner} has joined the server!",
+                            "{joiner} just arrived. Welcome!",
+                            "Welcome {joiner} to {server}!",
+                            "{joiner} has entered the server."
+                        ]
+                    else:  # leave
+                        return [
+                            "{user} has left the server.",
+                            "{user} just left.",
+                            "Goodbye, {user}.",
+                            "{user} has departed."
+                        ]
+
+            # Default: use xianxia messages
+            if message_type == "join":
+                return XIANXIA_JOIN_MESSAGES
+            else:
+                return XIANXIA_LEAVE_MESSAGES
+
+        except Exception as e:
+            logger.error(f"Error loading theme messages: {e}")
+            # Fallback to xianxia messages on error
+            if message_type == "join":
+                return XIANXIA_JOIN_MESSAGES
+            else:
+                return XIANXIA_LEAVE_MESSAGES
+
     async def _get_announcement_channel(self, guild: discord.Guild) -> Optional[discord.TextChannel]:
         """Get the configured announcement channel for invite messages"""
         # First priority: Check if a specific channel is configured for this guild
@@ -523,9 +610,607 @@ class InviteTracker(commands.Cog):
     #     except:
     #         logger.error("Failed to send error message - interaction may have expired")
     
+    @app_commands.command(name="invite-stats", description="View recruitment statistics for the server or a specific user")
+    @app_commands.describe(user="Optional: View stats for a specific user")
+    @app_commands.default_permissions(manage_guild=True)
+    async def invite_stats(self, interaction: discord.Interaction, user: Optional[discord.User] = None):
+        """Display recruitment statistics for the server or a specific user"""
+        await interaction.response.defer()
+
+        guild_id = interaction.guild_id
+
+        try:
+            if user:
+                # Show individual user stats
+                await self._show_user_stats(interaction, user, guild_id)
+            else:
+                # Show guild-wide stats
+                await self._show_guild_stats(interaction, guild_id)
+
+        except Exception as e:
+            logger.error(f"Error displaying invite stats: {e}", exc_info=True)
+            await interaction.followup.send(
+                "❌ An error occurred while fetching statistics. Please try again.",
+                ephemeral=True
+            )
+
+    async def _show_guild_stats(self, interaction: discord.Interaction, guild_id: int):
+        """Display guild-wide recruitment statistics"""
+        # Get total invites used (all time)
+        total_invites_result = await execute_db_operation(
+            "get total invites",
+            "SELECT COUNT(*) FROM invite_uses WHERE guild_id = ?",
+            (guild_id,),
+            fetch_type='one'
+        )
+        total_invites = total_invites_result[0] if total_invites_result else 0
+
+        # Get invites used this month
+        month_invites_result = await execute_db_operation(
+            "get monthly invites",
+            """
+            SELECT COUNT(*) FROM invite_uses
+            WHERE guild_id = ?
+            AND strftime('%Y-%m', joined_at) = strftime('%Y-%m', 'now')
+            """,
+            (guild_id,),
+            fetch_type='one'
+        )
+        month_invites = month_invites_result[0] if month_invites_result else 0
+
+        # Get member retention rate
+        total_leaves_result = await execute_db_operation(
+            "get total leaves",
+            "SELECT COUNT(*) FROM user_leaves WHERE guild_id = ?",
+            (guild_id,),
+            fetch_type='one'
+        )
+        total_leaves = total_leaves_result[0] if total_leaves_result else 0
+
+        # Calculate retention rate
+        if total_invites > 0:
+            retention_rate = ((total_invites - total_leaves) / total_invites) * 100
+        else:
+            retention_rate = 0
+
+        # Get top 3 recruiters
+        top_recruiters = await execute_db_operation(
+            "get top 3 recruiters",
+            """
+            SELECT user_id, username, total_recruits
+            FROM recruitment_stats
+            WHERE guild_id = ?
+            ORDER BY total_recruits DESC
+            LIMIT 3
+            """,
+            (guild_id,),
+            fetch_type='all'
+        )
+
+        # Get average days in server for members who left
+        avg_stay_result = await execute_db_operation(
+            "get average stay duration",
+            """
+            SELECT AVG(days_in_server) FROM user_leaves
+            WHERE guild_id = ? AND days_in_server > 0
+            """,
+            (guild_id,),
+            fetch_type='one'
+        )
+        avg_stay_days = avg_stay_result[0] if avg_stay_result and avg_stay_result[0] else 0
+
+        # Create embed
+        embed = discord.Embed(
+            title="📊 Sect Recruitment Statistics",
+            description="*A comprehensive view of our sect's growth and prosperity*",
+            color=discord.Color.blue()
+        )
+
+        # Overall stats
+        embed.add_field(
+            name="🎯 Overall Recruitment",
+            value=f"**Total Disciples Recruited:** {total_invites}\n"
+                  f"**This Month:** {month_invites}\n"
+                  f"**Retention Rate:** {retention_rate:.1f}%",
+            inline=False
+        )
+
+        # Member activity
+        embed.add_field(
+            name="👥 Member Activity",
+            value=f"**Members Still in Sect:** {total_invites - total_leaves}\n"
+                  f"**Departed Members:** {total_leaves}\n"
+                  f"**Average Stay (departed):** {avg_stay_days:.1f} days",
+            inline=False
+        )
+
+        # Top recruiters
+        if top_recruiters:
+            top_text = ""
+            medals = ["🥇", "🥈", "🥉"]
+            for idx, (user_id, username, recruits) in enumerate(top_recruiters):
+                member = interaction.guild.get_member(user_id)
+                display_name = member.mention if member else f"**{username}**"
+                medal = medals[idx] if idx < 3 else "▪️"
+                top_text += f"{medal} {display_name} — **{recruits}** disciples\n"
+
+            embed.add_field(
+                name="🌟 Top Recruiters",
+                value=top_text,
+                inline=False
+            )
+
+        embed.set_footer(text="Use /invite-leaderboard to see the full rankings • /invite-stats @user for individual stats")
+
+        await interaction.followup.send(embed=embed)
+        logger.info(f"Displayed guild-wide invite stats for guild {guild_id}")
+
+    async def _show_user_stats(self, interaction: discord.Interaction, user: discord.User, guild_id: int):
+        """Display individual user recruitment statistics"""
+        # Get user's recruitment stats
+        stats_result = await execute_db_operation(
+            "get user recruitment stats",
+            """
+            SELECT total_recruits FROM recruitment_stats
+            WHERE user_id = ? AND guild_id = ?
+            """,
+            (user.id, guild_id),
+            fetch_type='one'
+        )
+
+        if not stats_result:
+            await interaction.followup.send(
+                f"📜 **{user.display_name}** has not recruited any disciples to the sect yet.",
+                ephemeral=True
+            )
+            return
+
+        total_recruits = stats_result[0]
+
+        # Get list of members they invited
+        invited_members = await execute_db_operation(
+            "get invited members",
+            """
+            SELECT joiner_id, joiner_name, joined_at
+            FROM invite_uses
+            WHERE inviter_id = ? AND guild_id = ?
+            ORDER BY joined_at DESC
+            LIMIT 10
+            """,
+            (user.id, guild_id),
+            fetch_type='all'
+        )
+
+        # Calculate how many are still in the server
+        still_in_server = 0
+        for joiner_id, _, _ in invited_members:
+            member = interaction.guild.get_member(joiner_id)
+            if member:
+                still_in_server += 1
+
+        # Calculate user retention rate
+        user_retention_rate = (still_in_server / total_recruits * 100) if total_recruits > 0 else 0
+
+        # Get user's rank
+        rank_result = await execute_db_operation(
+            "get user rank",
+            """
+            SELECT COUNT(*) + 1 FROM recruitment_stats
+            WHERE guild_id = ? AND total_recruits > (
+                SELECT total_recruits FROM recruitment_stats
+                WHERE user_id = ? AND guild_id = ?
+            )
+            """,
+            (guild_id, user.id, guild_id),
+            fetch_type='one'
+        )
+        user_rank = rank_result[0] if rank_result else "Unranked"
+
+        # Create embed
+        embed = discord.Embed(
+            title=f"📊 Recruitment Stats: {user.display_name}",
+            description="*Individual contribution to the sect's growth*",
+            color=discord.Color.green()
+        )
+
+        embed.set_thumbnail(url=user.display_avatar.url)
+
+        embed.add_field(
+            name="🎯 Recruitment Summary",
+            value=f"**Total Disciples Recruited:** {total_recruits}\n"
+                  f"**Still in Sect:** {still_in_server}\n"
+                  f"**Retention Rate:** {user_retention_rate:.1f}%\n"
+                  f"**Server Rank:** #{user_rank}",
+            inline=False
+        )
+
+        # Show recent recruits
+        if invited_members:
+            recent_text = ""
+            for joiner_id, joiner_name, joined_at in invited_members[:5]:
+                member = interaction.guild.get_member(joiner_id)
+                status = "✅ Active" if member else "❌ Left"
+                recent_text += f"• **{joiner_name}** — {status}\n"
+
+            embed.add_field(
+                name="🎭 Recent Recruits (Last 5)",
+                value=recent_text,
+                inline=False
+            )
+
+        embed.set_footer(text="Use /invite-leaderboard to see all rankings")
+
+        await interaction.followup.send(embed=embed)
+        logger.info(f"Displayed user invite stats for {user.id} in guild {guild_id}")
+
+    @app_commands.command(name="invite-leaderboard", description="View the top recruiters in the server")
+    @app_commands.default_permissions(manage_guild=True)
+    async def invite_leaderboard(self, interaction: discord.Interaction):
+        """Display the top recruiters in the server with xianxia-themed presentation"""
+        await interaction.response.defer()
+
+        guild_id = interaction.guild_id
+
+        try:
+            # Fetch top 10 recruiters
+            results = await execute_db_operation(
+                "get top recruiters",
+                """
+                SELECT user_id, username, total_recruits
+                FROM recruitment_stats
+                WHERE guild_id = ?
+                ORDER BY total_recruits DESC
+                LIMIT 10
+                """,
+                (guild_id,),
+                fetch_type='all'
+            )
+
+            if not results:
+                await interaction.followup.send(
+                    "📜 **No Recruitment Data**\n\n"
+                    "No disciples have been recruited to the sect yet. "
+                    "The path of cultivation begins with the first step.",
+                    ephemeral=True
+                )
+                return
+
+            # Create xianxia-themed embed
+            embed = discord.Embed(
+                title="🏆 Sect Recruitment Leaderboard",
+                description="*The most distinguished cultivators who have brought disciples to our sect*",
+                color=discord.Color.gold()
+            )
+
+            # Rank titles for top 3
+            rank_titles = {
+                1: "🥇 Grand Elder",
+                2: "🥈 Core Elder",
+                3: "🥉 Inner Elder"
+            }
+
+            leaderboard_text = ""
+            for idx, (user_id, username, recruits) in enumerate(results, 1):
+                # Try to get the member object for mention
+                member = interaction.guild.get_member(user_id)
+                display_name = member.mention if member else f"**{username}**"
+
+                # Special titles for top 3
+                if idx in rank_titles:
+                    rank_display = rank_titles[idx]
+                else:
+                    rank_display = f"**#{idx}**"
+
+                leaderboard_text += f"{rank_display} {display_name} — **{recruits}** disciples\n"
+
+            embed.add_field(
+                name="🌟 Hall of Honored Recruiters",
+                value=leaderboard_text,
+                inline=False
+            )
+
+            # Add footer with motivational text
+            embed.set_footer(text="Continue recruiting to ascend the ranks • Use /invite-stats for detailed statistics")
+
+            await interaction.followup.send(embed=embed)
+            logger.info(f"Displayed invite leaderboard for guild {guild_id}")
+
+        except Exception as e:
+            logger.error(f"Error displaying invite leaderboard: {e}", exc_info=True)
+            await interaction.followup.send(
+                "❌ An error occurred while fetching the leaderboard. Please try again.",
+                ephemeral=True
+            )
+
+    @app_commands.command(name="invite-theme", description="Customize join/leave messages and theme settings")
+    @app_commands.default_permissions(manage_guild=True)
+    async def invite_theme(self, interaction: discord.Interaction):
+        """Display the theme customization menu"""
+        await interaction.response.defer(ephemeral=True)
+
+        guild_id = interaction.guild_id
+
+        try:
+            # Load current settings
+            settings = await execute_db_operation(
+                "get invite theme settings",
+                """
+                SELECT xianxia_theme_enabled, custom_join_messages, custom_leave_messages
+                FROM invite_theme_settings
+                WHERE guild_id = ?
+                """,
+                (guild_id,),
+                fetch_type='one'
+            )
+
+            if settings:
+                xianxia_enabled, custom_join_json, custom_leave_json = settings
+                custom_join = json.loads(custom_join_json) if custom_join_json else []
+                custom_leave = json.loads(custom_leave_json) if custom_leave_json else []
+            else:
+                xianxia_enabled = 1
+                custom_join = []
+                custom_leave = []
+
+            # Create and send the theme menu
+            view = InviteThemeView(guild_id, xianxia_enabled, custom_join, custom_leave, interaction.user.id)
+            embed = await view.create_settings_embed(interaction.guild)
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+
+        except Exception as e:
+            logger.error(f"Error displaying invite theme menu: {e}", exc_info=True)
+            await interaction.followup.send(
+                "❌ An error occurred while loading theme settings. Please try again.",
+                ephemeral=True
+            )
+
     async def cog_unload(self):
         """Clean up when cog is unloaded"""
         logger.info("Invite Tracker cog unloaded")
+
+
+# ------------------------------------------------------
+# Interactive UI Components for Invite Theme Customization
+# ------------------------------------------------------
+
+class CustomMessageModal(discord.ui.Modal, title="Custom Message Editor"):
+    """Modal for editing custom join/leave messages"""
+
+    def __init__(self, guild_id: int, message_type: str, existing_messages: List[str]):
+        super().__init__()
+        self.guild_id = guild_id
+        self.message_type = message_type
+
+        # Create text input with existing messages
+        placeholder_text = (
+            "Available placeholders:\n"
+            "{joiner} - Mention the new member\n"
+            "{inviter} - Inviter's display name\n"
+            "{server} - Server name"
+        ) if message_type == "join" else (
+            "Available placeholders:\n"
+            "{user} - Member's display name\n"
+            "{server} - Server name"
+        )
+
+        self.message_input = discord.ui.TextInput(
+            label=f"Custom {message_type.capitalize()} Messages",
+            style=discord.TextStyle.paragraph,
+            placeholder=placeholder_text,
+            default="\n".join(existing_messages) if existing_messages else "",
+            max_length=2000,
+            required=False
+        )
+        self.add_item(self.message_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        """Save the custom messages"""
+        await interaction.response.defer(ephemeral=True)
+
+        # Parse messages (one per line)
+        raw_text = self.message_input.value.strip()
+        if raw_text:
+            messages = [msg.strip() for msg in raw_text.split('\n') if msg.strip()]
+        else:
+            messages = []
+
+        try:
+            # Update database
+            if self.message_type == "join":
+                await execute_db_operation(
+                    "update custom join messages",
+                    """
+                    INSERT OR REPLACE INTO invite_theme_settings
+                    (guild_id, custom_join_messages, xianxia_theme_enabled, custom_leave_messages)
+                    VALUES (?, ?, COALESCE((
+                        SELECT xianxia_theme_enabled FROM invite_theme_settings WHERE guild_id = ?
+                    ), 1), COALESCE((
+                        SELECT custom_leave_messages FROM invite_theme_settings WHERE guild_id = ?
+                    ), NULL))
+                    """,
+                    (self.guild_id, json.dumps(messages) if messages else None, self.guild_id, self.guild_id)
+                )
+            else:  # leave messages
+                await execute_db_operation(
+                    "update custom leave messages",
+                    """
+                    INSERT OR REPLACE INTO invite_theme_settings
+                    (guild_id, custom_leave_messages, xianxia_theme_enabled, custom_join_messages)
+                    VALUES (?, ?, COALESCE((
+                        SELECT xianxia_theme_enabled FROM invite_theme_settings WHERE guild_id = ?
+                    ), 1), COALESCE((
+                        SELECT custom_join_messages FROM invite_theme_settings WHERE guild_id = ?
+                    ), NULL))
+                    """,
+                    (self.guild_id, json.dumps(messages) if messages else None, self.guild_id, self.guild_id)
+                )
+
+            message_count = len(messages)
+            await interaction.followup.send(
+                f"✅ Successfully saved **{message_count}** custom {self.message_type} message(s)!\n\n"
+                f"These will be used randomly when members {self.message_type}.",
+                ephemeral=True
+            )
+            logger.info(f"Updated custom {self.message_type} messages for guild {self.guild_id}: {message_count} messages")
+
+        except Exception as e:
+            logger.error(f"Error saving custom messages: {e}", exc_info=True)
+            await interaction.followup.send(
+                "❌ An error occurred while saving messages. Please try again.",
+                ephemeral=True
+            )
+
+
+class InviteThemeView(discord.ui.View):
+    """Interactive view for invite theme customization"""
+
+    def __init__(self, guild_id: int, xianxia_enabled: int, custom_join: List[str], custom_leave: List[str], owner_id: int):
+        super().__init__(timeout=180)
+        self.guild_id = guild_id
+        self.xianxia_enabled = bool(xianxia_enabled)
+        self.custom_join = custom_join
+        self.custom_leave = custom_leave
+        self.owner_id = owner_id
+
+    async def create_settings_embed(self, guild: discord.Guild) -> discord.Embed:
+        """Create the settings overview embed"""
+        embed = discord.Embed(
+            title="🎨 Invite Theme Customization",
+            description="Customize how join and leave messages appear in your server",
+            color=discord.Color.purple()
+        )
+
+        # Theme status
+        theme_status = "✅ Enabled (Xianxia cultivation theme)" if self.xianxia_enabled else "❌ Disabled"
+        embed.add_field(
+            name="📜 Current Theme",
+            value=theme_status,
+            inline=False
+        )
+
+        # Custom messages status
+        join_count = len(self.custom_join)
+        leave_count = len(self.custom_leave)
+
+        embed.add_field(
+            name="💬 Custom Join Messages",
+            value=f"**{join_count}** custom message(s) configured" if join_count > 0 else "No custom messages (using default xianxia messages)",
+            inline=True
+        )
+
+        embed.add_field(
+            name="👋 Custom Leave Messages",
+            value=f"**{leave_count}** custom message(s) configured" if leave_count > 0 else "No custom messages (using default xianxia messages)",
+            inline=True
+        )
+
+        embed.set_footer(text="Use the buttons below to customize your theme settings")
+
+        return embed
+
+    @discord.ui.button(label="Toggle Xianxia Theme", style=discord.ButtonStyle.primary, emoji="📜", row=0)
+    async def toggle_theme(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Toggle the xianxia theme on/off"""
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("❌ This isn't your menu!", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            # Toggle the theme
+            new_status = 0 if self.xianxia_enabled else 1
+
+            await execute_db_operation(
+                "toggle xianxia theme",
+                """
+                INSERT OR REPLACE INTO invite_theme_settings
+                (guild_id, xianxia_theme_enabled, custom_join_messages, custom_leave_messages)
+                VALUES (?, ?, COALESCE((
+                    SELECT custom_join_messages FROM invite_theme_settings WHERE guild_id = ?
+                ), NULL), COALESCE((
+                    SELECT custom_leave_messages FROM invite_theme_settings WHERE guild_id = ?
+                ), NULL))
+                """,
+                (self.guild_id, new_status, self.guild_id, self.guild_id)
+            )
+
+            self.xianxia_enabled = bool(new_status)
+
+            # Update embed
+            embed = await self.create_settings_embed(interaction.guild)
+            await interaction.edit_original_response(embed=embed, view=self)
+
+            status_text = "enabled" if new_status else "disabled"
+            await interaction.followup.send(
+                f"✅ Xianxia theme **{status_text}**!",
+                ephemeral=True
+            )
+            logger.info(f"Toggled xianxia theme to {status_text} for guild {self.guild_id}")
+
+        except Exception as e:
+            logger.error(f"Error toggling theme: {e}", exc_info=True)
+            await interaction.followup.send("❌ An error occurred. Please try again.", ephemeral=True)
+
+    @discord.ui.button(label="Edit Join Messages", style=discord.ButtonStyle.secondary, emoji="💬", row=1)
+    async def edit_join_messages(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Open modal to edit join messages"""
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("❌ This isn't your menu!", ephemeral=True)
+            return
+
+        modal = CustomMessageModal(self.guild_id, "join", self.custom_join)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="Edit Leave Messages", style=discord.ButtonStyle.secondary, emoji="👋", row=1)
+    async def edit_leave_messages(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Open modal to edit leave messages"""
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("❌ This isn't your menu!", ephemeral=True)
+            return
+
+        modal = CustomMessageModal(self.guild_id, "leave", self.custom_leave)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="Reset to Defaults", style=discord.ButtonStyle.danger, emoji="🔄", row=2)
+    async def reset_to_defaults(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Reset all customizations to default xianxia theme"""
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("❌ This isn't your menu!", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            # Reset to defaults
+            await execute_db_operation(
+                "reset theme to defaults",
+                """
+                INSERT OR REPLACE INTO invite_theme_settings
+                (guild_id, xianxia_theme_enabled, custom_join_messages, custom_leave_messages)
+                VALUES (?, 1, NULL, NULL)
+                """,
+                (self.guild_id,)
+            )
+
+            self.xianxia_enabled = True
+            self.custom_join = []
+            self.custom_leave = []
+
+            # Update embed
+            embed = await self.create_settings_embed(interaction.guild)
+            await interaction.edit_original_response(embed=embed, view=self)
+
+            await interaction.followup.send(
+                "✅ Reset to default xianxia theme!\n\n"
+                "All custom messages have been cleared and the xianxia theme has been re-enabled.",
+                ephemeral=True
+            )
+            logger.info(f"Reset invite theme to defaults for guild {self.guild_id}")
+
+        except Exception as e:
+            logger.error(f"Error resetting theme: {e}", exc_info=True)
+            await interaction.followup.send("❌ An error occurred. Please try again.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
