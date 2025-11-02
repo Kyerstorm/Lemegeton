@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import List, Dict, Optional
 
 from helpers.media_helper import fetch_random_media
-from database import get_all_users
+from database import get_all_users_guild_aware
 
 # ------------------------------------------------------
 # Logging Setup - Clears on each bot run
@@ -257,9 +257,9 @@ class Random(commands.Cog):
         embed.set_footer(text="🎲 Random suggestion from AniList")
         return embed
 
-    async def create_progress_embed(self, media_data: Dict, media_type: str) -> Optional[discord.Embed]:
+    async def create_progress_embed(self, media_data: Dict, media_type: str, guild_id: int) -> Optional[discord.Embed]:
         """Create user progress embed showing registered users' progress."""
-        users = await get_all_users()
+        users = await get_all_users_guild_aware(guild_id)
         if not users:
             return None
 
@@ -349,7 +349,7 @@ class Random(commands.Cog):
                     enhanced_embed = await self.create_enhanced_embed(detailed_media, selected_type)
                     
                     # Create user progress embed
-                    progress_embed = await self.create_progress_embed(detailed_media, selected_type)
+                    progress_embed = await self.create_progress_embed(detailed_media, selected_type, interaction.guild_id)
                     
                     if progress_embed:
                         # Create interactive view with both embeds
