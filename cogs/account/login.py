@@ -129,30 +129,68 @@ class LoginView(discord.ui.View):
 
     @discord.ui.button(label="ℹ️ Status", style=discord.ButtonStyle.secondary, emoji="ℹ️")
     async def status_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Show user's current registration status."""
+        """Show user's current registration status with unified gaming profile."""
         logger.debug(f"Status button clicked by {interaction.user.display_name} (ID: {self.user_id})")
-        
+
+        await interaction.response.defer(ephemeral=True)
+
         embed = discord.Embed(title="📊 Your Account Status", color=discord.Color.blue())
-        
+
         status_lines = []
-        
+
         # AniList status
         if self.is_registered:
-            status_lines.append(f"� **AniList**: ✅ Connected ({self.anilist_username or 'Unknown'})")
+            status_lines.append(f"📚 **AniList**: ✅ Connected ({self.anilist_username or 'Unknown'})")
         else:
             status_lines.append("📚 **AniList**: ❌ Not connected")
-        
-        # Steam status
+
+        # Steam status with detailed stats
         if self.steam_data:
             vanity = self.steam_data.get('vanity_name', 'Unknown')
+            steamid = self.steam_data.get('steam_id')
+
             status_lines.append(f"🎮 **Steam**: ✅ Connected ({vanity})")
+
+            # Fetch detailed Steam stats
+            if steamid and STEAM_API_KEY:
+                try:
+                    # Import gaming helpers
+                    import sys
+                    from pathlib import Path
+                    repo_root = Path(__file__).resolve().parents[2]
+                    if str(repo_root) not in sys.path:
+                        sys.path.insert(0, str(repo_root))
+
+                    from helpers.steam_helper import get_library_stats
+
+                    # Get library statistics
+                    library_stats = await get_library_stats(STEAM_API_KEY, steamid)
+
+                    if library_stats and library_stats.get('total_games', 0) > 0:
+                        total_games = library_stats.get('total_games', 0)
+                        total_hours = library_stats.get('total_playtime_hours', 0)
+                        never_played = library_stats.get('never_played', 0)
+
+                        embed.add_field(
+                            name="🎮 Steam Library Stats",
+                            value=(
+                                f"**Games Owned**: {total_games:,}\n"
+                                f"**Total Playtime**: {total_hours:,.0f} hours\n"
+                                f"**Unplayed Games**: {never_played} ({library_stats.get('never_played_percentage', 0):.1f}%)"
+                            ),
+                            inline=False
+                        )
+                        logger.debug(f"Fetched Steam stats for {vanity}: {total_games} games, {total_hours:.0f} hours")
+                except Exception as e:
+                    logger.warning(f"Could not fetch Steam stats: {e}")
+                    # Don't show error to user, just skip the stats
         else:
             status_lines.append("🎮 **Steam**: ❌ Not connected")
-        
+
         embed.description = "\n".join(status_lines)
-        
+
         if not self.is_registered and not self.steam_data:
-            embed.description += "\n\n� Connect your accounts to use the bot's features!"
+            embed.description += "\n\n💡 Connect your accounts to use the bot's features!"
             embed.color = discord.Color.orange()
         elif self.is_registered and self.steam_data:
             embed.description += "\n\n🎉 All services connected! You have access to all features."
@@ -160,9 +198,9 @@ class LoginView(discord.ui.View):
         else:
             embed.description += "\n\n⚡ Consider connecting both services for the full experience!"
             embed.color = discord.Color.gold()
-            
-        embed.set_footer(text="Use the buttons above to manage your connections")
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+        embed.set_footer(text="Use /steam-profile for detailed gaming stats • Use buttons above to manage connections")
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     async def on_timeout(self):
         """Handle view timeout by disabling buttons."""
