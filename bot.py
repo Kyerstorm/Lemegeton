@@ -16,7 +16,14 @@ from datetime import datetime
 # Add project root to sys.path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from config import TOKEN, GUILD_ID, BOT_ID, ADMIN_DISCORD_ID
+from config import (
+    TOKEN, GUILD_ID, BOT_ID, ADMIN_DISCORD_ID,
+    DISCORD_WEBHOOK_URL, LOG_MAX_SIZE, TRENDING_REFRESH_INTERVAL,
+    STATUS_UPDATE_INTERVAL, COG_WATCH_INTERVAL_PROD, COG_WATCH_INTERVAL_DEV,
+    ANILIST_API_TIMEOUT, DEFAULT_TRENDING_FALLBACK, API_MAX_RETRIES,
+    API_RETRY_BASE_DELAY, DB_CONNECTION_POOL_SIZE, USER_CLEANUP_INTERVAL,
+    TWITCH_STREAMING_URL, ANILIST_API_URL
+)
 import hashlib
 import json
 
@@ -26,13 +33,8 @@ import json
 # Configuration constants
 LOG_DIR = "logs"
 LOG_FILE = "bot.log"
-LOG_MAX_SIZE = 50 * 1024 * 1024  # 50MB max log file size
-TRENDING_REFRESH_INTERVAL = 3 * 60 * 60  
-STATUS_UPDATE_INTERVAL = 3600  # 1 hour 
-# Adjust cog watch interval based on environment (10s for production, 2s for development)
-COG_WATCH_INTERVAL = 10 if os.getenv("ENVIRONMENT") == "production" else 2
-ANILIST_API_TIMEOUT = 10 
-DEFAULT_TRENDING_FALLBACK = ["AniList API ❤️"]
+# Adjust cog watch interval based on environment
+COG_WATCH_INTERVAL = COG_WATCH_INTERVAL_PROD if os.getenv("ENVIRONMENT") == "production" else COG_WATCH_INTERVAL_DEV
 
 # Ensure logs directory exists
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -404,7 +406,7 @@ class DatabaseConnectionPool:
 
 
 # Initialize utility instances (will be populated after bot creation)
-api_retry_handler = APIRetryHandler(max_retries=3, base_delay=1.0)
+api_retry_handler = APIRetryHandler(max_retries=API_MAX_RETRIES, base_delay=API_RETRY_BASE_DELAY)
 webhook_notifier = None  # Initialized later with config
 shutdown_handler = None  # Initialized after bot creation
 db_pool = None  # Initialized in main()
@@ -453,16 +455,14 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents, application_id=BOT_ID)
 
-# Initialize webhook notifier with Discord webhook
-DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1434672224236998666/cGE1MYLtUQfhFTEF7PYV2UPFZ5pFvdHDDm7N57q62LzWC0nSdaoC-GyAuFpgX0DzHb9S'
-
+# Initialize webhook notifier with Discord webhook from config
 WEBHOOK_URLS = {
     'bot_ready': DISCORD_WEBHOOK_URL,
     'bot_shutdown': DISCORD_WEBHOOK_URL,
     'error_occurred': DISCORD_WEBHOOK_URL,
     'guild_joined': DISCORD_WEBHOOK_URL,
     'guild_removed': DISCORD_WEBHOOK_URL,
-}
+} if DISCORD_WEBHOOK_URL else {}
 webhook_notifier = WebhookNotifier(WEBHOOK_URLS)
 
 # Initialize graceful shutdown handler
@@ -488,7 +488,6 @@ if MONITORING_ENABLED:
 # ------------------------------------------------------
 # AniList API Function
 # ------------------------------------------------------
-ANILIST_API_URL = "https://graphql.anilist.co"
 
 async def _fetch_trending_anime_internal():
     """
@@ -666,14 +665,14 @@ async def cleanup_stale_users():
 
 async def schedule_user_cleanup():
     """
-    Schedule user cleanup to run every 6 hours.
+    Schedule user cleanup to run at configured interval.
     """
-    logger.info("Starting user cleanup scheduler (runs every 6 hours)")
-    
+    logger.info(f"Starting user cleanup scheduler (runs every {USER_CLEANUP_INTERVAL/3600:.1f} hours)")
+
     try:
         while not bot.is_closed():
-            # Wait 6 hours (6 * 60 * 60 = 21600 seconds)
-            await asyncio.sleep(21600)
+            # Wait for configured interval
+            await asyncio.sleep(USER_CLEANUP_INTERVAL)
             
             try:
                 logger.info("Running scheduled user cleanup")
@@ -744,14 +743,14 @@ async def cleanup_left_guilds():
 
 async def schedule_guild_cleanup():
     """
-    Schedule guild cleanup to run every 6 hours.
+    Schedule guild cleanup to run at configured interval.
     """
-    logger.info("Starting guild cleanup scheduler (runs every 6 hours)")
-    
+    logger.info(f"Starting guild cleanup scheduler (runs every {USER_CLEANUP_INTERVAL/3600:.1f} hours)")
+
     try:
         while not bot.is_closed():
-            # Wait 6 hours (6 * 60 * 60 = 21600 seconds)
-            await asyncio.sleep(21600)
+            # Wait for configured interval
+            await asyncio.sleep(USER_CLEANUP_INTERVAL)
             
             try:
                 logger.info("Running scheduled guild cleanup")
@@ -820,7 +819,7 @@ async def update_streaming_status():
                 # Create and set streaming activity
                 stream = discord.Streaming(
                     name=status_text,
-                    url="https://www.twitch.tv/owobotplays"
+                    url=TWITCH_STREAMING_URL
                 )
                 
                 await bot.change_presence(activity=stream)
@@ -1397,7 +1396,7 @@ async def main():
 
             # Initialize database connection pool
             global db_pool
-            db_pool = DatabaseConnectionPool(db_path="data/database.db", pool_size=5)
+            db_pool = DatabaseConnectionPool(db_path="data/database.db", pool_size=DB_CONNECTION_POOL_SIZE)
             await db_pool.initialize()
 
         except Exception as db_error:
