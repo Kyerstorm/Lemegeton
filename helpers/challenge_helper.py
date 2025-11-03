@@ -109,63 +109,73 @@ async def get_manga_difficulty(total_chapters: int, medium_type: str = "manga") 
         logger.error(f"Error calculating manga difficulty: {e}", exc_info=True)
         return 2.0  # Default fallback difficulty
 
-async def get_challenge_difficulty(db, challenge_id: int) -> str:
+async def get_challenge_difficulty(db, challenge_id: int, guild_id: int = None) -> str:
     """
-    Calculate overall difficulty for a challenge based on all manga in it with comprehensive logging.
+    Calculate overall difficulty for a challenge based on all manga in it.
+
+    Uses Method 2 (Balanced): (avg_chapters / 100) * (manga_count / 10)
+
+    This replaces the old "average difficulty score" method with a more
+    accurate calculation based on actual challenge data analysis.
+
     Returns a difficulty string: Easy / Medium / Hard / Very Hard / Extreme
     """
     logger.info(f"Calculating challenge difficulty for challenge ID: {challenge_id}")
-    
+
     try:
         # Validate input
         if not isinstance(challenge_id, int) or challenge_id <= 0:
             logger.error(f"Invalid challenge_id: {challenge_id}")
             return "Medium"
-            
-        logger.debug(f"Querying database for manga in challenge {challenge_id}")
-        cursor = await db.execute(
-            "SELECT total_chapters, medium_type FROM challenge_manga WHERE challenge_id = ?",
-            (challenge_id,)
-        )
-        manga_rows = await cursor.fetchall()
+
+        # Query for guild-specific or global challenge manga
+        if guild_id:
+            logger.debug(f"Querying guild_challenge_manga for guild {guild_id}, challenge {challenge_id}")
+            cursor = await db.execute("""
+                SELECT COUNT(*) as manga_count, AVG(total_chapters) as avg_chapters
+                FROM guild_challenge_manga
+                WHERE guild_id = ? AND challenge_id = ?
+            """, (guild_id, challenge_id))
+        else:
+            logger.debug(f"Querying challenge_manga for challenge {challenge_id}")
+            cursor = await db.execute("""
+                SELECT COUNT(*) as manga_count, AVG(total_chapters) as avg_chapters
+                FROM challenge_manga
+                WHERE challenge_id = ?
+            """, (challenge_id,))
+
+        row = await cursor.fetchone()
         await cursor.close()
 
-        if not manga_rows:
+        if not row or row[0] == 0:
             logger.warning(f"No manga found for challenge {challenge_id}, returning default difficulty")
             return "Medium"
-            
-        logger.debug(f"Found {len(manga_rows)} manga entries for challenge {challenge_id}")
 
-        # Calculate individual difficulties
-        difficulty_scores = []
-        for i, (total_chapters, medium_type) in enumerate(manga_rows):
-            try:
-                difficulty = await get_manga_difficulty(total_chapters or 0, medium_type or "manga")
-                difficulty_scores.append(difficulty)
-                logger.debug(f"Manga {i+1}/{len(manga_rows)}: {total_chapters} {medium_type} = {difficulty:.2f}")
-            except Exception as e:
-                logger.warning(f"Error calculating difficulty for manga {i+1}: {e}")
-                difficulty_scores.append(2.0)  # Default fallback
-                
-        # Calculate average difficulty
-        if difficulty_scores:
-            total_score = sum(difficulty_scores)
-            avg_score = total_score / len(difficulty_scores)
-            logger.debug(f"Average difficulty score: {avg_score:.2f} (from {len(difficulty_scores)} manga)")
+        manga_count = row[0]
+        avg_chapters = row[1] or 0
+
+        logger.debug(f"Found {manga_count} manga entries with avg {avg_chapters:.1f} chapters")
+
+        # ✅ New Formula: (avg_chapters / 100) * (manga_count / 10)
+        difficulty_score = (avg_chapters / 100.0) * (manga_count / 10.0)
+
+        logger.debug(f"Difficulty score: {difficulty_score:.2f} = ({avg_chapters}/100) * ({manga_count}/10)")
+
+        # Determine difficulty label based on score
+        if difficulty_score < 0.8:
+            difficulty_label = "Easy"
+        elif difficulty_score < 1.5:
+            difficulty_label = "Medium"
+        elif difficulty_score < 2.5:
+            difficulty_label = "Hard"
+        elif difficulty_score < 4.0:
+            difficulty_label = "Very Hard"
         else:
-            logger.warning("No valid difficulty scores calculated, using default")
-            avg_score = 2.5
-            
-        # Determine difficulty label
-        difficulty_label = "Medium"  # Default
-        for threshold, label in DIFFICULTY_LABELS:
-            if avg_score <= threshold:
-                difficulty_label = label
-                break
-                
-        logger.info(f"Challenge {challenge_id} difficulty: {difficulty_label} (avg score: {avg_score:.2f})")
+            difficulty_label = "Extreme"
+
+        logger.info(f"Challenge {challenge_id} difficulty: {difficulty_label} (score: {difficulty_score:.2f}, {manga_count} manga, {avg_chapters:.1f} avg chapters)")
         return difficulty_label
-        
+
     except Exception as e:
         logger.error(f"Error calculating challenge difficulty for {challenge_id}: {e}", exc_info=True)
         return "Medium"  # Safe fallback
@@ -178,12 +188,12 @@ async def get_challenge_difficulty(db, challenge_id: int) -> str:
 STATUS_MULTIPLIERS = {
     "Completed": 1.2,
     "Caught Up": 1.2,
-    "Skipped": 0.6,
+    "Skipped": 0.3,    
     "Dropped": 0.3,
-    "Paused": 0.4,
+    "Paused": 0.5,     
     "In Progress": 0.8,
     "Not Started": 0,
-    "Reread": 1.5
+    "Reread": 1.5       
 }
 
 CHAPTER_BASE_POINTS = {
@@ -237,26 +247,31 @@ def calculate_manga_points(
         
         # Get status multiplier
         if status == "Reread":
-            multiplier = 1.5 + max(repeat_count - 1, 0) * 0.3
-            logger.debug(f"Reread multiplier: {multiplier} (repeat count: {repeat_count})")
+            # ✅ Cap at 1 reread to prevent infinite scaling
+            effective_rereads = min(repeat_count, 1)
+            multiplier = 1.5 + max(effective_rereads - 1, 0) * 0.3
+            if repeat_count > 1:
+                logger.debug(f"Reread multiplier: {multiplier} (repeat count: {repeat_count}, capped at {effective_rereads})")
+            else:
+                logger.debug(f"Reread multiplier: {multiplier} (repeat count: {repeat_count})")
         else:
             multiplier = STATUS_MULTIPLIERS.get(status, 0)
             if status not in STATUS_MULTIPLIERS:
                 logger.warning(f"Unknown status '{status}', using 0 multiplier")
             logger.debug(f"Status multiplier for '{status}': {multiplier}")
-        
+
         # Apply difficulty scaling
         difficulty_factor = difficulty / 3.0
         logger.debug(f"Difficulty factor: {difficulty_factor:.2f}")
-        
+
         # Calculate base points
         points = base_points * multiplier * difficulty_factor
-        
-        # Apply partial completion for "In Progress" status
-        if status == "In Progress" and total_chapters > 0:
+
+        # ✅ Apply partial completion for all incomplete statuses
+        if status in ["In Progress", "Paused", "Dropped"] and total_chapters > 0:
             completion_ratio = min(chapters_read / total_chapters, 1.0)
             points *= completion_ratio
-            logger.debug(f"In Progress completion ratio: {completion_ratio:.2f}")
+            logger.debug(f"{status} completion ratio: {completion_ratio:.2f} ({chapters_read}/{total_chapters} chapters)")
         
         final_points = max(0, round(points))
         logger.info(f"Points calculated: {total_chapters}ch {status} (diff: {difficulty:.1f}) = {final_points} points")
