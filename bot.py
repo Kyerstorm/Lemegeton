@@ -7,6 +7,7 @@ import time
 import aiohttp
 import discord
 from discord.ext import commands
+import config
 from database import init_db, get_all_users_guild_aware, remove_user, clear_guild_records, get_all_guild_ids_with_records
 import signal
 import random
@@ -1396,7 +1397,7 @@ async def main():
 
             # Initialize database connection pool
             global db_pool
-            db_pool = DatabaseConnectionPool(db_path="data/database.db", pool_size=DB_CONNECTION_POOL_SIZE)
+            db_pool = DatabaseConnectionPool(db_path=config.DB_PATH, pool_size=DB_CONNECTION_POOL_SIZE)
             await db_pool.initialize()
 
         except Exception as db_error:
