@@ -38,7 +38,7 @@ user_progress_cache = {}  # {(user_id, manga_id): (chapters_read, status)}
 ANILIST_API = "https://graphql.anilist.co"
 
 async def fetch_anilist_progress(anilist_id: int, manga_id: int):
-    """Fetch AniList progress for a specific manga - same logic as challenge_update.py"""
+    """Fetch AniList progress for a specific manga - includes media release status"""
     query = """
     query ($userId: Int, $mediaId: Int) {
       MediaList(userId: $userId, mediaId: $mediaId) {
@@ -46,6 +46,9 @@ async def fetch_anilist_progress(anilist_id: int, manga_id: int):
         status
         repeat
         startedAt { year month day }
+        media {
+          status
+        }
       }
     }
     """
@@ -56,13 +59,13 @@ async def fetch_anilist_progress(anilist_id: int, manga_id: int):
             async with session.post(ANILIST_API, json={"query": query, "variables": variables}) as resp:
                 if resp.status != 200:
                     logger.error(f"AniList API returned status {resp.status} for user {anilist_id}, manga {manga_id}")
-                    return {"progress": 0, "status": "CURRENT", "repeat": 0, "started_at": None}
+                    return {"progress": 0, "status": "CURRENT", "repeat": 0, "started_at": None, "media_status": None}
 
                 data = await resp.json()
                 media_list = data.get("data", {}).get("MediaList")
                 if not media_list:
                     logger.warning(f"No media list entry for user {anilist_id}, manga {manga_id}")
-                    return {"progress": 0, "status": "CURRENT", "repeat": 0, "started_at": None}
+                    return {"progress": 0, "status": "CURRENT", "repeat": 0, "started_at": None, "media_status": None}
 
                 progress = media_list.get("progress", 0)
                 status = media_list.get("status", "CURRENT")
@@ -72,11 +75,21 @@ async def fetch_anilist_progress(anilist_id: int, manga_id: int):
                 if started and started.get("year"):
                     started_at = f"{started['year']:04}-{started.get('month',1):02}-{started.get('day',1):02}"
 
-                return {"progress": progress, "status": status, "repeat": repeat, "started_at": started_at}
+                # Get manga release status (FINISHED, RELEASING, etc.)
+                media = media_list.get("media", {})
+                media_status = media.get("status") if media else None
+
+                return {
+                    "progress": progress,
+                    "status": status,
+                    "repeat": repeat,
+                    "started_at": started_at,
+                    "media_status": media_status
+                }
 
     except Exception as e:
         logger.error(f"AniList fetch failed for user {anilist_id}, manga {manga_id}: {e}")
-        return {"progress": 0, "status": "CURRENT", "repeat": 0, "started_at": None}
+        return {"progress": 0, "status": "CURRENT", "repeat": 0, "started_at": None, "media_status": None}
 
 # -----------------------------------------
 # Fetch AniList info for a Discord user
@@ -304,6 +317,11 @@ class MangaChallenges(commands.Cog):
                 self.current_page = 0
                 self.message: Optional[discord.Message] = None
 
+                # Update state tracking
+                self.is_updating = False
+                self.updating_page_index = None
+                self.update_cancelled = False
+
                 # Dropdown
                 self.select = discord.ui.Select(
                     placeholder="Select Challenge",
@@ -312,8 +330,20 @@ class MangaChallenges(commands.Cog):
                 self.select.callback = self.select_callback
                 self.add_item(self.select)
 
-            def determine_status(self, ani_progress, ani_status, ani_repeat, total_chapters, ani_started_at, challenge_start_date):
-                """Same status logic as challenge_update.py"""
+            def determine_status(self, ani_progress, ani_status, ani_repeat, total_chapters, ani_started_at, challenge_start_date, media_status=None):
+                """
+                Determine manga status based on AniList data and challenge dates.
+
+                Priority order:
+                1. Skipped - Started before challenge (reading or completed status)
+                2. Reread - Completed with rereads > 1
+                3. Completed - User finished + manga is FINISHED + rereads == 0
+                4. Caught Up - User finished + manga is RELEASING + rereads == 0
+                5. In Progress - Currently reading, progress < total
+                6. Paused - Paused status with >= 25 chapters
+                7. Dropped - Dropped status
+                8. Not Started - Default fallback
+                """
                 def _to_date(val):
                     if not val:
                         return None
@@ -325,158 +355,255 @@ class MangaChallenges(commands.Cog):
                         pass
                     return None
 
-                # baseline total
+                # Baseline total chapters
                 effective_total = total_chapters if (isinstance(total_chapters, (int, float)) and total_chapters > 0) else 1
 
-                # normalize numeric / text inputs
+                # Normalize numeric inputs
                 try:
                     ani_progress_num = max(0, int(ani_progress or 0))
                 except Exception:
                     ani_progress_num = 0
+
                 try:
                     ani_repeat_num = max(0, int(ani_repeat or 0))
                 except Exception:
                     ani_repeat_num = 0
 
                 status_upper = (ani_status or "").upper()
+                media_status_upper = (media_status or "").upper()
 
-                # parse dates for skipped-check
+                # Parse dates for skipped check
                 started_at_val = _to_date(ani_started_at)
                 challenge_start_date_val = _to_date(challenge_start_date)
 
+                # Calculate progress percentage for skipped check
                 pct_progress = (ani_progress_num / effective_total) if effective_total else 0.0
 
-                # Priority order (same as challenge_update.py):
-                # 1) Skipped: started before challenge and already had meaningful progress
-                if challenge_start_date_val and started_at_val and started_at_val < challenge_start_date_val and pct_progress >= 0.25:
-                    return "Skipped"
-                # 2) Reread: completed/current + repeat >= 1 + progress >= total
-                elif status_upper in ("COMPLETED", "CURRENT") and ani_repeat_num >= 1 and ani_progress_num >= effective_total:
+                logger.debug(
+                    f"Status determination: progress={ani_progress_num}/{effective_total} ({pct_progress:.1%}), "
+                    f"status={status_upper}, repeat={ani_repeat_num}, media_status={media_status_upper}, "
+                    f"started={started_at_val}, challenge_start={challenge_start_date_val}"
+                )
+
+                # Priority 1: SKIPPED - Started before challenge with reading/completed status and 25% progress
+                if challenge_start_date_val and started_at_val and started_at_val < challenge_start_date_val:
+                    if status_upper in ("CURRENT", "COMPLETED") and pct_progress >= 0.25:
+                        logger.debug(f"Status: Skipped (started before challenge with {pct_progress:.1%} progress)")
+                        return "Skipped"
+
+                # Priority 2: REREAD - Completed with multiple rereads
+                if status_upper == "COMPLETED" and ani_progress_num >= effective_total and ani_repeat_num >= 1:
+                    logger.debug(f"Status: Reread (repeat count: {ani_repeat_num})")
                     return "Reread"
-                # 3) Caught Up: current + progress >= total
-                elif status_upper == "CURRENT" and ani_progress_num >= effective_total:
-                    return "Caught Up"
-                # 4) Completed: completed status + progress >= total
-                elif status_upper == "COMPLETED" and ani_progress_num >= effective_total:
-                    return "Completed"
-                # 5) In Progress: current status + 0 < progress < total
-                elif status_upper == "CURRENT" and 0 < ani_progress_num < effective_total:
+
+                # Priority 3 & 4: COMPLETED vs CAUGHT UP - Finished reading, check manga status
+                if ani_progress_num >= effective_total and ani_repeat_num == 0:
+                    if status_upper == "COMPLETED":
+                        # User marked as completed - check if manga is finished
+                        if media_status_upper == "FINISHED":
+                            logger.debug("Status: Completed (manga finished releasing)")
+                            return "Completed"
+                        else:
+                            # Manga still releasing/hiatus/cancelled
+                            logger.debug(f"Status: Caught Up (manga status: {media_status_upper})")
+                            return "Caught Up"
+                    elif status_upper == "CURRENT":
+                        # User still has as "reading" but caught up
+                        logger.debug(f"Status: Caught Up (current, caught up, manga: {media_status_upper})")
+                        return "Caught Up"
+
+                # Priority 5: IN PROGRESS - Currently reading
+                if status_upper == "CURRENT" and 0 < ani_progress_num < effective_total:
+                    logger.debug(f"Status: In Progress ({ani_progress_num}/{effective_total})")
                     return "In Progress"
-                # 6) Paused
-                elif status_upper == "PAUSED":
+
+                # Priority 6: PAUSED - Paused with sufficient progress
+                if status_upper == "PAUSED" and ani_progress_num >= 25:
+                    logger.debug(f"Status: Paused ({ani_progress_num} chapters)")
                     return "Paused"
-                # 7) Dropped
-                elif status_upper == "DROPPED":
+
+                # Priority 7: DROPPED - Dropped status
+                if status_upper == "DROPPED":
+                    logger.debug("Status: Dropped")
                     return "Dropped"
-                # 8) Fallback
-                else:
-                    return "Not Started"
+
+                # Priority 8: NOT STARTED - Default fallback
+                logger.debug("Status: Not Started (default)")
+                return "Not Started"
 
             async def update_current_page(self, interaction: discord.Interaction):
-                """Update only the manga on the current page"""
+                """Update only the manga on the current page with live progress updates"""
                 logger.info(f"Updating challenge progress page for user {self.target_id} in guild {interaction.guild.id}")
                 await interaction.response.defer()
+
+                # Prevent multiple simultaneous updates
+                if self.is_updating:
+                    await interaction.followup.send("⚠️ An update is already in progress. Please wait...", ephemeral=True)
+                    return
 
                 if self.current_page not in self.page_to_challenge_id:
                     await interaction.followup.send("❌ Unable to determine current page data.", ephemeral=True)
                     return
 
+                # Mark as updating and store which page
+                self.is_updating = True
+                self.updating_page_index = self.current_page
+                self.update_cancelled = False
+
                 challenge_id, start_idx, end_idx = self.page_to_challenge_id[self.current_page]
-                
-                # Get guild-specific challenge info
-                async with aiosqlite.connect(DB_PATH) as db:
-                    cursor = await db.execute("SELECT start_date FROM guild_challenges WHERE guild_id = ? AND challenge_id = ?", (interaction.guild.id, challenge_id))
-                    challenge_row = await cursor.fetchone()
-                    await cursor.close()
-                    challenge_start_date = challenge_row[0] if challenge_row else None
 
-                    # Get manga for this page
-                    manga_data = self.all_manga_data.get(challenge_id, [])
-                    page_manga = manga_data[start_idx:end_idx]
+                try:
+                    # Disable navigation buttons during update
+                    self._disable_navigation(True)
+                    await self._update_view()
 
-                    updated_count = 0
-                    description_lines = []
+                    # Get guild-specific challenge info
+                    async with aiosqlite.connect(DB_PATH) as db:
+                        cursor = await db.execute("SELECT title, start_date FROM guild_challenges WHERE guild_id = ? AND challenge_id = ?", (interaction.guild.id, challenge_id))
+                        challenge_row = await cursor.fetchone()
+                        await cursor.close()
+                        challenge_title = challenge_row[0] if challenge_row else f"Challenge {challenge_id}"
+                        challenge_start_date = challenge_row[1] if challenge_row else None
 
-                    for manga_id, manga_title, total_chapters, medium_type in page_manga:
-                        # Fetch from AniList
-                        ani_data = await fetch_anilist_progress(self.anilist_id, manga_id)
-                        await asyncio.sleep(1)  # Rate limiting
+                        # Get manga for this page
+                        manga_data = self.all_manga_data.get(challenge_id, [])
+                        page_manga = manga_data[start_idx:end_idx]
+                        total_manga = len(page_manga)
 
-                        ani_progress = ani_data['progress']
-                        ani_status = ani_data['status']
-                        ani_repeat = ani_data['repeat']
-                        ani_started_at = ani_data['started_at']
+                        updated_count = 0
+                        description_lines = []
 
-                        # Determine status using same logic as challenge_update
-                        status = self.determine_status(
-                            ani_progress, ani_status, ani_repeat, 
-                            total_chapters, ani_started_at, challenge_start_date
-                        )
+                        for idx, (manga_id, manga_title, total_chapters, medium_type) in enumerate(page_manga):
+                            # Check if update was cancelled (page changed)
+                            if self.update_cancelled or self.current_page != self.updating_page_index:
+                                logger.info(f"Update cancelled - page changed from {self.updating_page_index} to {self.current_page}")
+                                await interaction.followup.send("⚠️ Update cancelled - page was changed", ephemeral=True)
+                                return
 
-                        # Calculate points
-                        difficulty = await get_manga_difficulty(total_chapters, medium_type)
-                        points = calculate_manga_points(total_chapters, ani_progress, status, difficulty, ani_repeat)
+                            # Fetch from AniList
+                            ani_data = await fetch_anilist_progress(self.anilist_id, manga_id)
+                            await asyncio.sleep(2.5)  # ✅ Rate limiting: 2.5s = 24 req/min
 
-                        # Update database using guild-aware function
-                        # Signature: upsert_user_manga_progress_guild_aware(discord_id, guild_id, manga_id, title, chapters, points, status, repeat=0, started_at=None)
-                        await upsert_user_manga_progress_guild_aware(
-                            self.target_id,
-                            interaction.guild.id,
-                            manga_id,
-                            manga_title,
-                            ani_progress,
-                            points,
-                            status,
-                            ani_repeat,
-                            ani_started_at
-                        )
+                            ani_progress = ani_data['progress']
+                            ani_status = ani_data['status']
+                            ani_repeat = ani_data['repeat']
+                            ani_started_at = ani_data['started_at']
+                            media_status = ani_data.get('media_status')
 
-                        # Update cache
-                        cache_key = (self.target_id, manga_id)
-                        user_progress_cache[cache_key] = {
-                            "title": manga_title,
-                            "chapters_read": ani_progress,
-                            "status": status,
-                            "medium_type": medium_type
-                        }
+                            # Determine status
+                            status = self.determine_status(
+                                ani_progress, ani_status, ani_repeat,
+                                total_chapters, ani_started_at, challenge_start_date, media_status
+                            )
 
-                        # Add to description
-                        description_lines.append(
-                            f"[{manga_title}](https://anilist.co/manga/{manga_id}) - `{ani_progress}/{total_chapters}` • Status: `{status}`"
-                        )
-                        updated_count += 1
+                            # Calculate points
+                            difficulty = await get_manga_difficulty(total_chapters, medium_type)
+                            points = calculate_manga_points(total_chapters, ani_progress, status, difficulty, ani_repeat)
 
-                    await db.commit()
+                            # Update database
+                            await upsert_user_manga_progress_guild_aware(
+                                self.target_id,
+                                interaction.guild.id,
+                                manga_id,
+                                manga_title,
+                                ani_progress,
+                                points,
+                                status,
+                                ani_repeat,
+                                ani_started_at
+                            )
 
-                    # Update embed
-                    description = "\n\n".join(description_lines) if description_lines else "_No manga added to this challenge yet._"
-                    
-                    cursor = await db.execute("SELECT title FROM guild_challenges WHERE guild_id = ? AND challenge_id = ?", (interaction.guild.id, challenge_id))
-                    challenge_title_row = await cursor.fetchone()
-                    await cursor.close()
-                    challenge_title = challenge_title_row[0] if challenge_title_row else f"Challenge {challenge_id}"
+                            # Update cache
+                            cache_key = (self.target_id, manga_id)
+                            user_progress_cache[cache_key] = {
+                                "title": manga_title,
+                                "chapters_read": ani_progress,
+                                "status": status,
+                                "medium_type": medium_type
+                            }
 
-                    # Update the embed in our list
-                    updated_embed = discord.Embed(
-                        title=f"� Guild Challenge: {challenge_title}",
-                        description=description,
-                        color=discord.Color.green()
-                    )
-                    target = self.bot.get_user(self.target_id) or f"User {self.target_id}"
-                    updated_embed.set_author(name=f"Progress for {target.display_name if hasattr(target, 'display_name') else target} ({self.anilist_username}) | {interaction.guild.name}")
-                    updated_embed.set_footer(
-                        text=f"Page {self.current_page + 1} of {len(self.embeds)} | "
-                            f"Guild Challenge ID: {challenge_id} | Updated {updated_count} manga | Guild: {interaction.guild.name}"
-                    )
-                    
-                    self.embeds[self.current_page] = updated_embed
+                            # Add to description
+                            description_lines.append(
+                                f"[{manga_title}](https://anilist.co/manga/{manga_id}) - `{ani_progress}/{total_chapters}` • Status: `{status}`"
+                            )
+                            updated_count += 1
 
-                    # Update the message
-                    await interaction.followup.edit_message(
-                        message_id=self.message.id, embed=updated_embed, view=self
-                    )
+                            # ✅ LIVE UPDATE: Update embed after each manga
+                            # Check again before updating
+                            if self.current_page == self.updating_page_index:
+                                # Build current description with progress indicator
+                                current_description = "\n\n".join(description_lines)
+                                progress_text = f"\n\n⏳ **Updating... {updated_count}/{total_manga} manga processed**"
 
-                await interaction.followup.send(f"✅ Updated {updated_count} manga on this page!", ephemeral=True)
+                                live_embed = discord.Embed(
+                                    title=f"📚 Guild Challenge: {challenge_title}",
+                                    description=current_description + progress_text,
+                                    color=discord.Color.orange()  # Orange while updating
+                                )
+                                target = self.bot.get_user(self.target_id) or f"User {self.target_id}"
+                                live_embed.set_author(name=f"Progress for {target.display_name if hasattr(target, 'display_name') else target} ({self.anilist_username}) | {interaction.guild.name}")
+                                live_embed.set_footer(
+                                    text=f"Page {self.current_page + 1} of {len(self.embeds)} | "
+                                        f"Updating... {updated_count}/{total_manga} | Guild: {interaction.guild.name}"
+                                )
+
+                                try:
+                                    await interaction.followup.edit_message(
+                                        message_id=self.message.id, embed=live_embed, view=self
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"Failed to update embed during live update: {e}")
+
+                        await db.commit()
+
+                        # Final update - only if still on same page
+                        if self.current_page == self.updating_page_index:
+                            description = "\n\n".join(description_lines) if description_lines else "_No manga added to this challenge yet._"
+
+                            final_embed = discord.Embed(
+                                title=f"📚 Guild Challenge: {challenge_title}",
+                                description=description,
+                                color=discord.Color.green()  # Green when complete
+                            )
+                            target = self.bot.get_user(self.target_id) or f"User {self.target_id}"
+                            final_embed.set_author(name=f"Progress for {target.display_name if hasattr(target, 'display_name') else target} ({self.anilist_username}) | {interaction.guild.name}")
+                            final_embed.set_footer(
+                                text=f"Page {self.current_page + 1} of {len(self.embeds)} | "
+                                    f"Guild Challenge ID: {challenge_id} | ✅ Updated {updated_count} manga | Guild: {interaction.guild.name}"
+                            )
+
+                            self.embeds[self.current_page] = final_embed
+
+                            await interaction.followup.edit_message(
+                                message_id=self.message.id, embed=final_embed, view=self
+                            )
+                            await interaction.followup.send(f"✅ Updated {updated_count} manga on this page!", ephemeral=True)
+                        else:
+                            logger.info(f"Skipped final update - page changed from {self.updating_page_index} to {self.current_page}")
+
+                finally:
+                    # Always re-enable navigation when done
+                    self.is_updating = False
+                    self.updating_page_index = None
+                    self._disable_navigation(False)
+                    await self._update_view()
+
+            def _disable_navigation(self, disabled: bool):
+                """Enable or disable navigation buttons"""
+                for item in self.children:
+                    if isinstance(item, discord.ui.Button):
+                        if item.label in ["⬅️ Previous", "➡️ Next"]:
+                            item.disabled = disabled
+                    elif isinstance(item, discord.ui.Select):
+                        item.disabled = disabled
+
+            async def _update_view(self):
+                """Update the view's buttons state"""
+                try:
+                    if self.message:
+                        await self.message.edit(view=self)
+                except Exception as e:
+                    logger.warning(f"Failed to update view: {e}")
 
             async def update_message(self, interaction: discord.Interaction):
                 embed = self.embeds[self.current_page]
@@ -493,11 +620,19 @@ class MangaChallenges(commands.Cog):
 
             @discord.ui.button(label="⬅️ Previous", style=discord.ButtonStyle.secondary, row=1)
             async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+                # Cancel any ongoing update when changing pages
+                if self.is_updating:
+                    self.update_cancelled = True
+                    logger.info("Update cancelled by user navigation (Previous)")
                 self.current_page = (self.current_page - 1) % len(self.embeds)
                 await self.update_message(interaction)
 
             @discord.ui.button(label="➡️ Next", style=discord.ButtonStyle.secondary, row=1)
             async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+                # Cancel any ongoing update when changing pages
+                if self.is_updating:
+                    self.update_cancelled = True
+                    logger.info("Update cancelled by user navigation (Next)")
                 self.current_page = (self.current_page + 1) % len(self.embeds)
                 await self.update_message(interaction)
 
@@ -506,6 +641,10 @@ class MangaChallenges(commands.Cog):
                 await self.update_current_page(interaction)
 
             async def select_callback(self, interaction: discord.Interaction):
+                # Cancel any ongoing update when changing pages
+                if self.is_updating:
+                    self.update_cancelled = True
+                    logger.info("Update cancelled by user navigation (Dropdown)")
                 self.current_page = int(self.select.values[0])
                 await self.update_message(interaction)
 
