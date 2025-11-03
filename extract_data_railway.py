@@ -16,28 +16,36 @@ def extract_data():
     print("🚀 Railway Data Extractor")
     print("=" * 60)
     
-    # Paths
-    zip_path = Path("/app/data_upload.zip")
-    data_dir = Path("/app/data")
+    # Paths - look for zip in current directory or /app
+    current_dir = Path.cwd()
+    zip_path = current_dir / "data_upload.zip"
+    
+    # If running on Railway, data directory is /app/data
+    # Otherwise use ./data for local testing
+    if Path("/app/data").exists():
+        data_dir = Path("/app/data")
+    else:
+        data_dir = current_dir / "data"
+    
+    print(f"\n🔍 Current directory: {current_dir}")
+    print(f"📁 Target directory: {data_dir}")
+    print(f"📦 Looking for archive at: {zip_path}")
     
     # Create data directory if it doesn't exist
     data_dir.mkdir(exist_ok=True, parents=True)
     
-    print(f"\n📁 Target directory: {data_dir}")
-    print(f"📦 Archive path: {zip_path}")
-    
     # Check if zip file exists
     if not zip_path.exists():
         print(f"\n❌ ERROR: {zip_path} not found!")
-        print("\n📋 Instructions:")
-        print("1. Upload data_upload.zip to your Railway deployment")
-        print("2. Place it in /app/data_upload.zip")
-        print("3. Run this script again")
+        print("\n📋 Files found in current directory:")
+        for item in sorted(current_dir.glob("*"))[:15]:
+            if item.is_file() and not item.name.startswith('.'):
+                print(f"  • {item.name}")
         
-        # Show current files
-        print(f"\n📂 Files in /app:")
-        for item in Path("/app").glob("*"):
-            print(f"  • {item.name}")
+        print("\n📋 To fix this:")
+        print("1. Make sure data_upload.zip is committed and pushed to git")
+        print("2. Deploy to Railway with: railway up")
+        print("3. Run this script again")
         
         return False
     
