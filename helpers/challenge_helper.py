@@ -4,7 +4,6 @@ import logging
 import math
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
-from config import CHALLENGE_ROLE_IDS, GUILD_ID
 from config import ALL_STAR_STAGE1_ROLE_ID, ALL_STAR_STAGE2_ROLE_ID, ALL_STAR_COMPLETED_ROLE_ID
 
 # Configuration constants
@@ -41,23 +40,29 @@ logger.addHandler(file_handler)
 logger.info("Challenge Helper logging system initialized")
 
 # Difficulty calculation constants
+# ✅ Rebalanced with filled gaps for more granular difficulty assessment
 DIFFICULTY_THRESHOLDS = [
-    (25, 1.0),
-    (50, 1.5),
-    (100, 2.0),
-    (200, 2.5),
-    (300, 3.0),
-    (500, 3.5),
-    (1000, 4.0),
-    (1500, 4.3),
-    (2000, 4.6),
-    (float('inf'), 5.0)
+    (25, 1.0),      # Very short
+    (50, 1.5),      # Short
+    (100, 2.0),     # Medium
+    (200, 2.5),     # Long
+    (300, 3.0),     # Very long
+    (400, 3.25),    # ✅ Fill gap
+    (500, 3.5),     # Epic
+    (750, 3.75),    # ✅ Fill gap
+    (1000, 4.0),    # Massive
+    (1250, 4.15),   # ✅ Fill gap
+    (1500, 4.3),    # Huge
+    (1750, 4.45),   # ✅ Fill gap
+    (2000, 4.6),    # Gigantic
+    (float('inf'), 5.0)  # One Piece territory
 ]
 
+# ✅ Reduced multiplier impact - was too subjective at 10% difference
 MEDIUM_TYPE_MULTIPLIERS = {
-    "manga": 1.1,
-    "manhwa": 1.0,
-    "manhua": 0.9
+    "manga": 1.05,    # Reduced from 1.1 (5% instead of 10%)
+    "manhwa": 1.0,    # Baseline
+    "manhua": 0.95    # Reduced from 0.9 (5% instead of 10%)
 }
 
 DIFFICULTY_LABELS = [
@@ -196,14 +201,18 @@ STATUS_MULTIPLIERS = {
     "Reread": 1.5       
 }
 
+# ✅ Rebalanced with square root scaling to prevent short manga exploitation
+# Formula: base_points = 10 * sqrt(chapters / 25)
+# This provides more balanced scaling between short and long manga
 CHAPTER_BASE_POINTS = {
-    25: 10,
-    100: 20,
-    250: 35,
-    500: 50,
-    1000: 75,
-    2000: 100,
-    float('inf'): 120
+    25: 10,      # 10 * sqrt(25/25) = 10
+    50: 14,      # 10 * sqrt(50/25) = 14.1
+    100: 20,     # 10 * sqrt(100/25) = 20
+    250: 32,     # 10 * sqrt(250/25) = 31.6
+    500: 45,     # 10 * sqrt(500/25) = 44.7
+    1000: 63,    # 10 * sqrt(1000/25) = 63.2
+    2000: 89,    # 10 * sqrt(2000/25) = 89.4
+    float('inf'): 120  # Cap for extreme cases
 }
 
 def calculate_manga_points(
@@ -260,15 +269,17 @@ def calculate_manga_points(
                 logger.warning(f"Unknown status '{status}', using 0 multiplier")
             logger.debug(f"Status multiplier for '{status}': {multiplier}")
 
-        # Apply difficulty scaling
-        difficulty_factor = difficulty / 3.0
-        logger.debug(f"Difficulty factor: {difficulty_factor:.2f}")
+        # ✅ Apply balanced difficulty scaling (0.8x to 1.3x range instead of arbitrary /3.0)
+        # Old: difficulty / 3.0 gave 0.33x to 1.67x (too extreme)
+        # New: 0.8 + (difficulty / 10.0) gives 0.9x to 1.3x (more balanced)
+        difficulty_factor = 0.8 + (difficulty / 10.0)
+        logger.debug(f"Difficulty factor: {difficulty_factor:.2f} (difficulty: {difficulty:.2f})")
 
         # Calculate base points
         points = base_points * multiplier * difficulty_factor
 
-        # ✅ Apply partial completion for all incomplete statuses
-        if status in ["In Progress", "Paused", "Dropped"] and total_chapters > 0:
+        # ✅ Apply partial completion for all incomplete statuses (including Skipped)
+        if status in ["In Progress", "Paused", "Dropped", "Skipped"] and total_chapters > 0:
             completion_ratio = min(chapters_read / total_chapters, 1.0)
             points *= completion_ratio
             logger.debug(f"{status} completion ratio: {completion_ratio:.2f} ({chapters_read}/{total_chapters} chapters)")
@@ -350,32 +361,51 @@ def calculate_challenge_completion_bonus(user_progress: list) -> int:
 # -----------------------------
 # Role Assignment
 # -----------------------------
-async def assign_challenge_role(bot: commands.Bot, discord_id: int, challenge_id: int, challenge_progress: list):
+async def assign_challenge_role(bot: commands.Bot, discord_id: int, guild_id: int, challenge_id: int, challenge_progress: list):
     """
     Assign role for a specific challenge based on user's progress with comprehensive logging.
     Only assigns role when all titles are completed, caught up, reread, or skipped.
-    Returns a list of roles that were assigned.
+
+    Args:
+        bot: Discord bot instance
+        discord_id: Discord user ID
+        guild_id: Guild ID for multi-guild support
+        challenge_id: Challenge ID
+        challenge_progress: List of progress entries with status information
+
+    Returns:
+        List of roles that were assigned
     """
-    logger.info(f"Assigning challenge role for user {discord_id}, challenge {challenge_id}")
+    logger.info(f"Assigning challenge role for user {discord_id}, guild {guild_id}, challenge {challenge_id}")
     assigned_roles = []
-    
+
     try:
         # Validate inputs
         if not isinstance(discord_id, int) or discord_id <= 0:
             logger.error(f"Invalid discord_id: {discord_id}")
             return assigned_roles
-            
+
+        if not isinstance(guild_id, int) or guild_id <= 0:
+            logger.error(f"Invalid guild_id: {guild_id}")
+            return assigned_roles
+
         if not isinstance(challenge_id, int) or challenge_id <= 0:
             logger.error(f"Invalid challenge_id: {challenge_id}")
             return assigned_roles
-            
+
         if not isinstance(challenge_progress, list):
             logger.error(f"Invalid challenge_progress type: {type(challenge_progress)}")
             return assigned_roles
-            
+
+        # Import database function to get guild-specific challenge roles
+        from database import get_challenge_role_ids_for_guild
+
+        # Get challenge role configuration for this guild
+        challenge_role_ids = await get_challenge_role_ids_for_guild(guild_id)
+
         # Check if challenge has role assignments configured
-        if challenge_id not in CHALLENGE_ROLE_IDS:
-            logger.debug(f"No role configuration found for challenge {challenge_id}")
+        if challenge_id not in challenge_role_ids:
+            logger.debug(f"No role configuration found for challenge {challenge_id} in guild {guild_id}")
             return assigned_roles
 
         total_titles = len(challenge_progress)
@@ -410,31 +440,31 @@ async def assign_challenge_role(bot: commands.Bot, discord_id: int, challenge_id
             return assigned_roles
 
         # Determine role to assign
-        thresholds = CHALLENGE_ROLE_IDS[challenge_id]
+        thresholds = challenge_role_ids[challenge_id]
         completion_percentage = 1.0  # 100% completion
-        
+
         role_to_assign = None
         for threshold in sorted(thresholds.keys(), reverse=True):
             if completion_percentage >= threshold:
                 role_to_assign = thresholds[threshold]
                 logger.debug(f"Role selected: {role_to_assign} for threshold {threshold}")
                 break
-                
+
         if not role_to_assign:
             logger.warning(f"No role found for completion percentage {completion_percentage}")
             return assigned_roles
 
         # Get Discord guild and member
-        logger.debug(f"Getting guild {GUILD_ID}")
-        guild = bot.get_guild(GUILD_ID)
+        logger.debug(f"Getting guild {guild_id}")
+        guild = bot.get_guild(guild_id)
         if not guild:
-            logger.error(f"Guild {GUILD_ID} not found")
+            logger.error(f"Guild {guild_id} not found")
             return assigned_roles
 
         logger.debug(f"Getting member {discord_id}")
         member = guild.get_member(discord_id)
         if not member:
-            logger.warning(f"Member {discord_id} not found in guild {GUILD_ID}")
+            logger.warning(f"Member {discord_id} not found in guild {guild_id}")
             return assigned_roles
 
         # Remove other challenge roles first
