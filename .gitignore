@@ -44,6 +44,12 @@ copilot-instructions-updated.md
 ehthumbs.db
 Thumbs.db
 
+# Windows reserved names (prevent errors)
+nul
+
+# Temporary upload directory
+data_upload/
+
 # IDE
 .vscode/settings.json
 .vscode/launch.json
