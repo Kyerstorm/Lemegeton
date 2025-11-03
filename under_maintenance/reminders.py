@@ -7,6 +7,7 @@ from typing import Optional
 from datetime import datetime, timedelta
 import re
 from database import execute_db_operation, init_reminders_table
+from cogs_test.general_commands.dashboard import command_meta
 
 # ------------------------------------------------------
 # Logging Setup
@@ -149,9 +150,8 @@ class RemindersCog(commands.Cog):
         self.check_reminders.cancel()
         logger.info("RemindersCog unloaded - background task stopped")
 
-    @tasks.loop(minutes=1)
-    async def check_reminders(self):
-        """Background task to check for due reminders every minute"""
+    async def _run_reminder_check(self):
+        """Internal method to perform the actual reminder checking logic."""
         try:
             now = datetime.utcnow()
 
@@ -174,35 +174,72 @@ class RemindersCog(commands.Cog):
             logger.info(f"Processing {len(reminders)} due reminders")
 
             for reminder in reminders:
+                mark_completed = False
                 try:
                     await self.send_reminder(reminder)
+                    mark_completed = True
+                    logger.info(f"Successfully sent reminder {reminder['id']} to user {reminder['user_id']}")
 
-                    # Mark as completed
-                    await execute_db_operation(
-                        "mark reminder completed",
-                        """UPDATE reminders
-                           SET is_completed = 1, completed_at = ?
-                           WHERE id = ?""",
-                        (now.isoformat(), reminder['id'])
-                    )
+                except discord.Forbidden as e:
+                    # User has DMs disabled or bot is blocked - mark as completed to avoid spam
+                    logger.error(f"Cannot send reminder {reminder['id']} - user {reminder['user_id']} has DMs disabled or bot blocked. Marking as completed.")
+                    mark_completed = True
 
-                    logger.info(f"Sent reminder {reminder['id']} to user {reminder['user_id']}")
+                except discord.NotFound as e:
+                    # User or channel no longer exists - mark as completed
+                    logger.error(f"Cannot send reminder {reminder['id']} - user/channel not found. Marking as completed.")
+                    mark_completed = True
 
                 except Exception as e:
-                    logger.error(f"Error sending reminder {reminder['id']}: {e}", exc_info=True)
+                    # Temporary error (e.g., network issue) - don't mark as completed, will retry next cycle
+                    logger.error(f"Temporary error sending reminder {reminder['id']}: {e}. Will retry next cycle.", exc_info=True)
+                    mark_completed = False
+
+                finally:
+                    # Mark as completed if sent successfully or if permanent error occurred
+                    if mark_completed:
+                        try:
+                            await execute_db_operation(
+                                "mark reminder completed",
+                                """UPDATE reminders
+                                   SET is_completed = 1, completed_at = ?
+                                   WHERE id = ?""",
+                                (now.isoformat(), reminder['id'])
+                            )
+                            logger.info(f"Marked reminder {reminder['id']} as completed")
+                        except Exception as db_error:
+                            logger.error(f"Failed to mark reminder {reminder['id']} as completed: {db_error}", exc_info=True)
 
         except Exception as e:
             logger.error(f"Error in check_reminders task: {e}", exc_info=True)
 
+    @tasks.loop(minutes=1)
+    async def check_reminders(self):
+        """Background task to check for due reminders every minute"""
+        await self._run_reminder_check()
+
     @check_reminders.before_loop
     async def before_check_reminders(self):
-        """Wait for bot to be ready before starting reminder checks"""
+        """Wait for bot to be ready before starting reminder checks, then run an immediate check."""
         await self.bot.wait_until_ready()
-        logger.info("Bot ready - starting reminder check loop")
+        logger.info("Bot ready - running immediate reminder check on startup")
+
+        # Run an immediate check on startup instead of waiting 1 minute
+        try:
+            await self._run_reminder_check()
+        except Exception as e:
+            logger.error(f"Error during initial startup reminder check: {e}", exc_info=True)
 
     async def send_reminder(self, reminder: dict):
-        """Send a reminder to the user"""
-        user = await self.bot.fetch_user(reminder['user_id'])
+        """Send a reminder to the user. Raises exception if delivery fails."""
+        try:
+            user = await self.bot.fetch_user(reminder['user_id'])
+        except discord.NotFound:
+            logger.error(f"User {reminder['user_id']} not found for reminder {reminder['id']}")
+            raise  # Re-raise to mark reminder as failed
+        except Exception as e:
+            logger.error(f"Error fetching user {reminder['user_id']} for reminder {reminder['id']}: {e}")
+            raise
 
         embed = discord.Embed(
             title="⏰ Reminder!",
@@ -232,20 +269,39 @@ class RemindersCog(commands.Cog):
             try:
                 channel = await self.bot.fetch_channel(reminder['channel_id'])
                 await channel.send(f"<@{reminder['user_id']}>", embed=embed)
+                logger.info(f"Sent reminder {reminder['id']} to channel {reminder['channel_id']}")
             except discord.NotFound:
-                # Channel deleted, send DM instead
-                await user.send(embed=embed)
+                # Channel deleted, try DM instead
+                logger.warning(f"Channel {reminder['channel_id']} not found for reminder {reminder['id']}, sending DM")
+                try:
+                    await user.send(embed=embed)
+                    logger.info(f"Sent reminder {reminder['id']} to user {reminder['user_id']} via DM (channel deleted)")
+                except discord.Forbidden:
+                    logger.error(f"Cannot send DM to user {reminder['user_id']} for reminder {reminder['id']} - DMs disabled")
+                    raise
             except discord.Forbidden:
-                # No permission, send DM instead
-                await user.send(embed=embed)
+                # No permission in channel, try DM instead
+                logger.warning(f"No permission to send in channel {reminder['channel_id']} for reminder {reminder['id']}, sending DM")
+                try:
+                    await user.send(embed=embed)
+                    logger.info(f"Sent reminder {reminder['id']} to user {reminder['user_id']} via DM (no channel permission)")
+                except discord.Forbidden:
+                    logger.error(f"Cannot send DM to user {reminder['user_id']} for reminder {reminder['id']} - DMs disabled")
+                    raise
         else:
             # Send DM
-            await user.send(embed=embed)
+            try:
+                await user.send(embed=embed)
+                logger.info(f"Sent reminder {reminder['id']} to user {reminder['user_id']} via DM")
+            except discord.Forbidden:
+                logger.error(f"Cannot send DM to user {reminder['user_id']} for reminder {reminder['id']} - DMs disabled or bot blocked")
+                raise
 
     @app_commands.command(
         name="remind",
         description="Set a reminder with natural language time parsing"
     )
+    @command_meta(section="Utilities", name="Reminders")
     @app_commands.describe(
         when="When to remind you (e.g., 'in 5 minutes', 'tomorrow at 3pm', '2025-12-25 18:00')",
         message="What to remind you about",
