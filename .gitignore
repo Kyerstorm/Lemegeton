@@ -47,8 +47,14 @@ Thumbs.db
 # Windows reserved names (prevent errors)
 nul
 
-# Temporary upload directory
+# Temporary upload directory and files
 data_upload/
+data_upload.zip
+extract_data_railway.py
+upload_to_railway.py
+sync_data_to_railway.py
+RAILWAY_DATA_UPLOAD_GUIDE.md
+_temp_upload_*.py
 
 # IDE
 .vscode/settings.json
