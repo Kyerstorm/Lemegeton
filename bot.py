@@ -769,14 +769,9 @@ async def schedule_guild_cleanup():
 
 # Dynamic status message templates for variety
 STATUS_TEMPLATES = [
-    "🎥 {anime}",
-    "📺 Trending: {anime}",
-    "⭐ {anime}",
     "🔥 Hot: {anime}",
-    "💫 Now: {anime}",
-    "🎬 Watching: {anime}",
+    "💫 Trending: {anime}",
     "✨ Popular: {anime}",
-    "🌟 {anime}",
 ]
 
 async def update_streaming_status():
