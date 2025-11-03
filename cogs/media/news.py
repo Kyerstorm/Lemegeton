@@ -22,6 +22,7 @@ except ImportError:
 
 import database
 from helpers.command_logger import log_command
+from cogs_test.general_commands.dashboard import command_meta
 
 # Set up logging
 logger = logging.getLogger("NewsBot")
@@ -769,6 +770,7 @@ class NewsCog(commands.Cog):
     # Replace individual commands with single admin interface
     @bot_moderator_only()
     @app_commands.command(name="admin-news-manage", description="Manage Twitter news monitoring system")
+    @command_meta(section="Media", name="News Management")
     @log_command
     async def news_manage(self, interaction: discord.Interaction):
         """Main news management interface with all functionality."""
@@ -886,6 +888,7 @@ class NewsCog(commands.Cog):
                 pass  # Interaction might be expired
 
     @app_commands.command(name="test-twitter-scrape", description="Test Twitter scraping for debugging")
+    @command_meta(section="Media", name="Test Twitter Scrape")
     @app_commands.describe(username="Twitter username to test scraping")
     async def test_scrape(self, interaction: discord.Interaction, username: str):
         """Test command to debug Twitter scraping issues."""
@@ -957,9 +960,8 @@ class NewsCog(commands.Cog):
         
         await interaction.followup.send(embed=embed)
 
-    @tasks.loop(minutes=15)
-    async def check_tweets(self):
-        """Check for new tweets every 15 minutes. This task is designed to recover from errors."""
+    async def _run_tweet_check(self):
+        """Internal method to perform the actual tweet checking logic."""
         try:
             current_time = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
             print(f"\n🔄 Tweet check started at {current_time}")
@@ -1100,14 +1102,32 @@ class NewsCog(commands.Cog):
             traceback.print_exc()
             # Task will continue and retry in 15 minutes
 
+    @tasks.loop(minutes=15)
+    async def check_tweets(self):
+        """Check for new tweets every 15 minutes. This task is designed to recover from errors."""
+        await self._run_tweet_check()
+
     @check_tweets.before_loop
     async def before_check_tweets(self):
-        """Wait for the bot to be ready before starting the task."""
+        """Wait for the bot to be ready before starting the task, then run an immediate check."""
         print("⏳ Tweet checker task waiting for bot to be ready...")
         logger.info("Tweet checker task waiting for bot to be ready")
         await self.bot.wait_until_ready()
-        print("✅ Bot is ready - tweet checker task starting")
-        logger.info("Bot is ready - tweet checker task starting")
+
+        # Small delay to ensure bot is fully initialized
+        await asyncio.sleep(5)
+
+        print("✅ Bot is ready - running immediate tweet check on startup")
+        logger.info("Bot is ready - running immediate tweet check on startup")
+
+        # Run the check immediately on startup instead of waiting 15 minutes
+        try:
+            await self._run_tweet_check()
+        except Exception as e:
+            print(f"❌ Error during initial startup check: {e}")
+            logger.error(f"Error during initial startup check: {e}")
+            import traceback
+            traceback.print_exc()
 
     @check_tweets.error
     async def check_tweets_error(self, error):
@@ -1311,7 +1331,7 @@ class NewsManagementView(discord.ui.View):
         
         # Run the check_tweets logic manually
         try:
-            await self.cog.check_tweets()
+            await self.cog._run_tweet_check()
             
             success_embed = discord.Embed(
                 title="✅ Force Update Complete",

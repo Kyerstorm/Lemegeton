@@ -20,6 +20,7 @@ if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
 from helpers.command_logger import log_command
+from cogs_test.general_commands.dashboard import command_meta
 
 # Logging setup
 logger = logging.getLogger("Timestamp")
@@ -124,6 +125,7 @@ class TimestampConverter(commands.Cog):
         name="timestamp",
         description="Convert a date and time to Discord's universal timestamp format"
     )
+    @command_meta(section="Utilities", name="Timestamp Generator")
     @app_commands.describe(
         time="Time in HH:MM format, 24-hour (e.g., 18:00)",
         date="Date in YYYY-MM-DD format (e.g., 2025-12-25) - Optional, defaults to today"

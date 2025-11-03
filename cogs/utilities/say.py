@@ -6,6 +6,7 @@ import logging
 from typing import Optional
 from datetime import datetime
 from database import is_user_bot_moderator, execute_db_operation, init_say_command_logs_table
+from cogs_test.general_commands.dashboard import command_meta
 
 logger = logging.getLogger("say")
 
@@ -45,6 +46,7 @@ class Say(commands.Cog):
         name="say",
         description="Make the bot say something (Moderators only). Supports markdown, embeds, and channel targeting."
     )
+    @command_meta(section="Utilities", name="Say")
     @app_commands.describe(
         message="What the bot should say",
         channel="Channel to send message in (optional, defaults to current channel)",

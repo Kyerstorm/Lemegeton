@@ -9,13 +9,14 @@ import logging
 import config
 
 from database import (
-    set_guild_bot_update_channel, 
+    set_guild_bot_update_channel,
     get_guild_bot_update_channel,
     get_all_guild_bot_update_channels,
     remove_guild_bot_update_channel,
     is_user_bot_moderator,
     is_bot_moderator
 )
+from cogs_test.general_commands.dashboard import command_meta
 
 # Setup logger
 logger = logging.getLogger("changelog")
@@ -296,6 +297,7 @@ class Changelog(commands.Cog):
 
     @bot_moderator_only()
     @app_commands.command(name="changelog", description="Create and publish a changelog from text or file (Bot Moderator only)")
+    @command_meta(section="Admin", name="Changelog")
     @app_commands.describe(
         text="Changelog text (use this OR upload a file)",
         file="Text file to convert into changelog (use this OR provide text)",
@@ -657,6 +659,7 @@ class Changelog(commands.Cog):
     @changelog_only()
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.command(name="set_bot_updates_channel", description="Set channel to receive bot updates and announcements (Admin only)")
+    @command_meta(section="Admin", name="Set Bot Updates Channel")
     async def set_bot_updates_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
         """Set the channel where bot updates and announcements will be published."""
         if interaction.guild is None:

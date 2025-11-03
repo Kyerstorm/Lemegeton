@@ -33,6 +33,7 @@ from helpers.gaming_utils import (
     get_protondb_url
 )
 from helpers.command_logger import log_command
+from cogs_test.general_commands.dashboard import command_meta
 
 # Logging setup
 logger = logging.getLogger("SteamGame")
@@ -364,6 +365,7 @@ class SteamGame(commands.Cog):
         name="steam-game",
         description="Search for a Steam game and view detailed information"
     )
+    @command_meta(section="Gaming", name="Steam Game")
     @app_commands.describe(query="Name of the game to search for")
     @log_command
     async def steam_game(self, interaction: discord.Interaction, query: str):

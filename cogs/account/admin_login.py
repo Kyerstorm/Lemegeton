@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 import config
 from database import is_user_bot_moderator, is_user_moderator
+from cogs_test.general_commands.dashboard import command_meta
 
 # ────────────────────────────────────────────────────────────────
 # Configuration and constants (same style as login.py)
@@ -188,6 +189,7 @@ class AdminLogin(commands.Cog):
         discord_user="The Discord user to link.",
         anilist_user="The AniList username to link."
     )
+    @command_meta(section="Account", name="Admin Login")
     async def admin_login(self, interaction: discord.Interaction, discord_user: discord.Member, anilist_user: str):
         """Link or update AniList account."""
         try:

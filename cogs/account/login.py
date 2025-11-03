@@ -11,10 +11,11 @@ from typing import Optional
 
 from database import (
     # Guild-aware functions (multi-guild support)
-    add_user_guild_aware, get_user_guild_aware, register_user_guild_aware, 
+    add_user_guild_aware, get_user_guild_aware, register_user_guild_aware,
     is_user_registered_in_guild, update_username, remove_user
 )
 from config import STEAM_API_KEY, DB_PATH
+from cogs_test.general_commands.dashboard import command_meta
 
 # Configuration constants
 LOG_DIR = Path("logs")
@@ -881,6 +882,7 @@ class Login(commands.Cog):
         name="login",
         description="🔐 Manage your account - register with AniList and/or Steam"
     )
+    @command_meta(section="Account", name="Login")
     async def login(self, interaction: discord.Interaction):
         """Smart login command that manages both AniList and Steam connections."""
         try:

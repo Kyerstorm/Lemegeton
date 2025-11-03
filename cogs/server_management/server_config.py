@@ -14,6 +14,7 @@ from database import (
     get_guild_bot_update_channel, remove_guild_bot_update_channel,
     is_user_moderator, execute_db_operation
 )
+from cogs_test.general_commands.dashboard import command_meta
 
 # ------------------------------------------------------
 # Logging Setup
@@ -455,6 +456,7 @@ class ServerConfig(commands.Cog):
         logger.info("ServerConfig cog initialized")
     
     @app_commands.command(name="server-config", description="⚙️ Configure server settings - roles, channels, and notifications")
+    @command_meta(section="Server Management", name="Server Config")
     @app_commands.default_permissions(manage_guild=True)
     async def server_config(self, interaction: discord.Interaction):
         """Unified server configuration interface"""

@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Tuple
 import json
 from datetime import datetime, timedelta
 import time
+from cogs_test.general_commands.dashboard import command_meta
 
 # ------------------------------------------------------
 # RECOMMENDATIONS COG LOGGING SETUP
@@ -693,6 +694,7 @@ class RecommendationsCog(commands.Cog):
         return final_recommendations
 
     @app_commands.command(name="recommendations", description="Get personalized manga recommendations based on your highly-rated library")
+    @command_meta(section="Media", name="Recommendations")
     @app_commands.describe(username="AniList username (optional, uses your linked account if not provided)")
     async def recommendations(self, interaction: discord.Interaction, username: Optional[str] = None):
         """Generate personalized manga recommendations."""

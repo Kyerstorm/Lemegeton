@@ -11,6 +11,7 @@ import random
 import json
 
 from database import DB_PATH, execute_db_operation
+from cogs_test.general_commands.dashboard import command_meta
 
 # ------------------------------------------------------
 # Logging Setup - Clears on each bot run
@@ -611,6 +612,7 @@ class InviteTracker(commands.Cog):
     #         logger.error("Failed to send error message - interaction may have expired")
     
     @app_commands.command(name="invite-stats", description="View recruitment statistics for the server or a specific user")
+    @command_meta(section="Server Management", name="Invite Stats")
     @app_commands.describe(user="Optional: View stats for a specific user")
     @app_commands.default_permissions(manage_guild=True)
     async def invite_stats(self, interaction: discord.Interaction, user: Optional[discord.User] = None):
@@ -844,6 +846,7 @@ class InviteTracker(commands.Cog):
         logger.info(f"Displayed user invite stats for {user.id} in guild {guild_id}")
 
     @app_commands.command(name="invite-leaderboard", description="View the top recruiters in the server")
+    @command_meta(section="Server Management", name="Invite Leaderboard")
     @app_commands.default_permissions(manage_guild=True)
     async def invite_leaderboard(self, interaction: discord.Interaction):
         """Display the top recruiters in the server with xianxia-themed presentation"""
@@ -923,6 +926,7 @@ class InviteTracker(commands.Cog):
             )
 
     @app_commands.command(name="invite-theme", description="Customize join/leave messages and theme settings")
+    @command_meta(section="Server Management", name="Invite Theme")
     @app_commands.default_permissions(manage_guild=True)
     async def invite_theme(self, interaction: discord.Interaction):
         """Display the theme customization menu"""

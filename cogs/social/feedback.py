@@ -8,6 +8,7 @@ from config import CHANNEL_ID
 import database
 import config
 import io
+from cogs_test.general_commands.dashboard import command_meta
 
 # ------------------------------------------------------
 # Logging Setup - Safe handling
@@ -115,6 +116,7 @@ class Feedback(commands.Cog):
         return files, embeds
 
     @app_commands.command(name="feedback", description="Submit an idea or report a bug")
+    @command_meta(section="Social", name="Feedback")
     @app_commands.choices(type=[
         app_commands.Choice(name="Ideas", value="ideas"),
         app_commands.Choice(name="Bugs", value="bugs")

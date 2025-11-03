@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 import database
 import re
 from difflib import SequenceMatcher
+from cogs_test.general_commands.dashboard import command_meta
 
 # IGDB integration
 try:
@@ -943,6 +944,7 @@ class ThreeByThree(commands.Cog):
             return None
     
     @app_commands.command(name="3x3", description="🎨 Create a 3x3 grid of your favorite anime, manga, or characters")
+    @command_meta(section="Media", name="3x3 Grid")
     @app_commands.describe(media_type="Choose anime, manga, or character")
     @app_commands.choices(media_type=[
         app_commands.Choice(name="Anime", value="anime"),

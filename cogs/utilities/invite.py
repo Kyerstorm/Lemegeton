@@ -4,6 +4,7 @@ from discord.ext import commands
 import logging
 from pathlib import Path
 from config import BOT_ID
+from cogs_test.general_commands.dashboard import command_meta
 
 # ------------------------------------------------------
 # Logging Setup - Safe handling
@@ -48,6 +49,7 @@ class InviteCog(commands.Cog):
         logger.info("Invite cog loaded successfully")
 
     @app_commands.command(name="invite", description="Add Lemegeton bot to your server - your ultimate AniList companion!")
+    @command_meta(section="Utilities", name="Invite Bot")
     async def invite(self, interaction: discord.Interaction):
         """Generate an invite link for the bot with appropriate permissions."""
         

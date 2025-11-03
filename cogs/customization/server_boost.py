@@ -3,6 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 import logging
 from pathlib import Path
+from cogs_test.general_commands.dashboard import command_meta
 
 # ------------------------------------------------------
 # Logging Setup - Clears on each bot run
@@ -49,6 +50,7 @@ class ServerBoost(commands.Cog):
     # ============================================================================
 
     @app_commands.command(name="nitro-role-set", description="Create and apply a custom role with your chosen color (Server Boosters only)")
+    @command_meta(section="Customization", name="Nitro Role Set")
     @app_commands.describe(
         role_name="Name for your custom role",
         hex_color="Hex color code (e.g. #FF0000 for red)"

@@ -10,6 +10,7 @@ from typing import List, Dict, Optional
 
 from helpers.media_helper import fetch_random_media
 from database import get_all_users_guild_aware
+from cogs_test.general_commands.dashboard import command_meta
 
 # ------------------------------------------------------
 # Logging Setup - Clears on each bot run
@@ -442,6 +443,7 @@ class Random(commands.Cog):
         name="random",
         description="🎲 Get a completely random Anime, Manga, Light Novel, or All suggestion from AniList"
     )
+    @command_meta(section="Media", name="Random")
     @app_commands.describe(media_type="Choose the type of media to get a random suggestion for")
     @app_commands.choices(media_type=MEDIA_TYPE_CHOICES)
     async def random_media(self, interaction: discord.Interaction, media_type: app_commands.Choice[str]) -> None:

@@ -18,6 +18,7 @@ from database import (
     get_scan_metadata,
     set_scan_metadata
 )
+from cogs_test.general_commands.dashboard import command_meta
 
 ANILIST_URL = "https://graphql.anilist.co"
 
@@ -368,6 +369,7 @@ class Finisher(commands.Cog):
     @mod_only()
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.command(name="set_animanga_completion_channel", description="Set channel to receive anime/manga updates (Mod only)")
+    @command_meta(section="Media", name="Set Completion Channel")
     async def set_animanga_completion_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
         if interaction.guild is None:
             await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
@@ -400,6 +402,7 @@ class Finisher(commands.Cog):
     @mod_only()
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.command(name="show_manga_channel", description="Show currently configured manga update channel (Mod only)")
+    @command_meta(section="Media", name="Show Manga Channel")
     async def show_manga_channel(self, interaction: discord.Interaction):
         if interaction.guild is None:
             await interaction.response.send_message("This command must be used in a server.", ephemeral=True)

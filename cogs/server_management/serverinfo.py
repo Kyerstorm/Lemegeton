@@ -19,6 +19,8 @@ import math
 import asyncio
 from typing import List, Optional
 
+from cogs_test.general_commands.dashboard import command_meta
+
 # ---------------------------
 # Palette & Embed helper
 # ---------------------------
@@ -324,6 +326,7 @@ class ServerInfo(commands.Cog):
         return pages
 
     @app_commands.command(name="server", description="Display refined server information (Dark Luxury).")
+    @command_meta(section="Server Management", name="Server Info")
     async def server(self, interaction: discord.Interaction):
         await interaction.response.defer(thinking=True)
         # invoked in a guild

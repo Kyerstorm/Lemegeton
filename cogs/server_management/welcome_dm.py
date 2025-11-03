@@ -9,6 +9,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any
 
+from cogs_test.general_commands.dashboard import command_meta
+
 logger = logging.getLogger("WelcomeDM")
 
 class WelcomeDM(commands.Cog):
@@ -121,6 +123,7 @@ class WelcomeDM(commands.Cog):
         name="set-welcome-dm",
         description="Set the welcome DM message by uploading a text file (Admin only)"
     )
+    @command_meta(section="Server Management", name="Set Welcome DM")
     @app_commands.describe(
         text_file="Upload a .txt file containing the welcome message"
     )
@@ -226,6 +229,7 @@ class WelcomeDM(commands.Cog):
         name="welcome-dm-status",
         description="Check the current welcome DM configuration (Admin only)"
     )
+    @command_meta(section="Server Management", name="Welcome DM Status")
     async def welcome_dm_status(self, interaction: discord.Interaction):
         """Admin command to check current welcome DM status."""
         

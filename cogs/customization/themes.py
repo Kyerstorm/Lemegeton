@@ -15,6 +15,7 @@ import asyncio
 from dataclasses import dataclass, asdict
 import random
 from pathlib import Path
+from cogs_test.general_commands.dashboard import command_meta
 
 # Set up dedicated logging for theme system
 LOG_DIR = Path("logs")
@@ -685,6 +686,7 @@ class CustomThemeSystem(commands.Cog):
         return embed
     
     @app_commands.command(name="theme", description="🎨 Complete theme customization system - Browse, preview, and apply themes")
+    @command_meta(section="Customization", name="Theme")
     async def theme_command(self, interaction: discord.Interaction):
         """Unified theme management command with interactive interface"""
         try:
@@ -1006,6 +1008,7 @@ class CustomThemeSystem(commands.Cog):
     
     @bot_moderator_only()
     @app_commands.command(name="admin-guild-theme", description="Manage guild-wide theme settings (Bot Moderator only)")
+    @command_meta(section="Customization", name="Admin Guild Theme")
     @app_commands.describe(
         action="What would you like to do?",
         theme="Theme to set as guild default"

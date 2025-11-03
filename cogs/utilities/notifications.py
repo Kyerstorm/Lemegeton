@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional
 import config
+from cogs_test.general_commands.dashboard import command_meta
 
 # ------------------------------------------------------
 # Logging Setup
@@ -391,6 +392,7 @@ class NotificationsCog(commands.Cog):
         return subscriptions
 
     @app_commands.command(name="notifications", description="Manage your notification preferences for bot updates, events, and more")
+    @command_meta(section="Utilities", name="Notifications")
     async def notifications(self, interaction: discord.Interaction):
         """Main command to manage notification subscriptions with multi-select interface"""
         try:

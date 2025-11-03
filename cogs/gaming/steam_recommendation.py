@@ -17,6 +17,7 @@ try:
             logger, safe_json, STEAM_API_KEY, DB_PATH,
             RecommendationView, create_recommendation_embed
         )
+        from cogs_test.general_commands.dashboard import command_meta
     except Exception:
         import sys
         repo_root = Path(__file__).resolve().parents[2]
@@ -28,6 +29,7 @@ try:
             logger, safe_json, STEAM_API_KEY, DB_PATH,
             RecommendationView, create_recommendation_embed
         )
+        from cogs_test.general_commands.dashboard import command_meta
 except ModuleNotFoundError:
     # Some deployment environments don't put the project root on sys.path.
     # Try to add the repo root (two levels up from this file: ../..) to sys.path
@@ -43,6 +45,7 @@ except ModuleNotFoundError:
         logger, safe_json, STEAM_API_KEY, DB_PATH,
         RecommendationView, create_recommendation_embed
     )
+    from cogs_test.general_commands.dashboard import command_meta
 
 
 class SteamRecommendation(commands.Cog):
@@ -52,6 +55,7 @@ class SteamRecommendation(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="steam-recommendation", description="Get personalized game recommendations based on your Steam library")
+    @command_meta(section="Gaming", name="Steam Recommendations")
     @app_commands.describe(
         genre="Filter by specific genre",
         max_price="Maximum price in USD (leave blank for any price)",

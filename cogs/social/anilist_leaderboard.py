@@ -26,6 +26,7 @@ from database import (
 )
 from helpers.media_helper import fetch_user_stats
 from config import DB_PATH
+from cogs_test.general_commands.dashboard import command_meta
 
 # ------------------------------------------------------
 # Logging Setup - Clears on each bot run
@@ -1156,6 +1157,7 @@ class Leaderboard(commands.Cog):
         name="anilist_leaderboard",
         description="🏆 Show leaderboard ranked by manga, anime, or combined activity"
     )
+    @command_meta(section="Social", name="AniList Leaderboard")
     async def anilist_leaderboard(self, interaction: discord.Interaction, medium: app_commands.Choice[str]) -> None:
         """Display the leaderboard for the specified medium.
         

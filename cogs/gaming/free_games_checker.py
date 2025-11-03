@@ -16,6 +16,7 @@ import aiohttp
 
 from helpers.command_logger import log_command
 import database
+from cogs_test.general_commands.dashboard import command_meta
 
 # Set up logging
 logger = logging.getLogger("FreeGames")
@@ -929,6 +930,7 @@ class FreeGamesCog(commands.Cog):
             self._task_started = False
     
     @app_commands.command(name="free-games", description="Manage free games notifications and check current deals")
+    @command_meta(section="Gaming", name="Free Games")
     @log_command
     async def free_games(self, interaction: discord.Interaction):
         """Main free games management interface with all functionality."""
@@ -1007,6 +1009,7 @@ class FreeGamesCog(commands.Cog):
                 pass
 
     @app_commands.command(name="check-free-games", description="🎮 Test command: Check current free games from all platforms")
+    @command_meta(section="Gaming", name="Check Free Games")
     @log_command
     async def check_free_games_now(self, interaction: discord.Interaction):
         """Test command to immediately check and display current free games."""

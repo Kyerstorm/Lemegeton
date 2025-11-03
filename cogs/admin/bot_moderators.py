@@ -11,9 +11,10 @@ from pathlib import Path
 from datetime import datetime
 
 from database import (
-    add_bot_moderator, remove_bot_moderator, get_all_bot_moderators, 
+    add_bot_moderator, remove_bot_moderator, get_all_bot_moderators,
     is_user_bot_moderator
 )
+from cogs_test.general_commands.dashboard import command_meta
 
 # ------------------------------------------------------
 # Logging Setup
@@ -325,6 +326,7 @@ class BotModerators(commands.Cog):
         logger.info("BotModerators cog initialized")
     
     @app_commands.command(name="admin-moderator-manage", description="👑 Manage bot moderators (bot-wide permissions)")
+    @command_meta(section="Admin", name="Moderator Management")
     async def moderators(self, interaction: discord.Interaction):
         """Unified bot moderators management interface"""
         

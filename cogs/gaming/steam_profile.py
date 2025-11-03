@@ -23,6 +23,7 @@ try:
         )
         from helpers.gaming_utils import gaming_error_handler, format_playtime
         from helpers.command_logger import log_command
+        from cogs_test.general_commands.dashboard import command_meta
     except Exception:
         import sys
         repo_root = Path(__file__).resolve().parents[2]
@@ -57,6 +58,7 @@ except ModuleNotFoundError:
     )
     from helpers.gaming_utils import gaming_error_handler, format_playtime
     from helpers.command_logger import log_command
+    from cogs_test.general_commands.dashboard import command_meta
 
 
 class SteamProfile(commands.Cog):
@@ -66,6 +68,7 @@ class SteamProfile(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="steam-profile", description="Show detailed Steam profile with library stats and analytics")
+    @command_meta(section="Gaming", name="Steam Profile")
     @app_commands.describe(user="Steam vanity URL or SteamID64 (leave blank for your own profile)")
     @gaming_error_handler
     @log_command

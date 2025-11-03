@@ -6,6 +6,7 @@ import logging
 from typing import List, Dict, Optional, Tuple
 from discord.ui import View, Button
 from database import get_all_users_guild_aware
+from cogs_test.general_commands.dashboard import command_meta
 
 logger = logging.getLogger("BrowseCog")
 API_URL = "https://graphql.anilist.co"
@@ -198,6 +199,7 @@ class BrowseCog(commands.Cog):
         name="browse",
         description="Search Anime, Manga, Light Novels and General Novels"
     )
+    @command_meta(section="Media", name="Browse")
     @app_commands.describe(
         media_type="Choose a media type",
         title="Choose the title"

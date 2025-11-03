@@ -12,6 +12,7 @@ from typing import Optional
 import json
 from datetime import datetime, timedelta
 from config import DB_PATH
+from cogs_test.general_commands.dashboard import command_meta
 
 # ------------------------------------------------------
 # Logging Setup - Auto-clearing
@@ -674,6 +675,7 @@ class Affinity(commands.Cog):
         name="affinity",
         description="Compare your affinity with all users or a specific user in this server"
     )
+    @command_meta(section="Social", name="Affinity")
     @app_commands.describe(
         user="Optional: Compare with a specific user instead of all users"
     )

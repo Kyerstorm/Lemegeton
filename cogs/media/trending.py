@@ -7,6 +7,7 @@ import random
 import re
 import logging
 from pathlib import Path
+from cogs_test.general_commands.dashboard import command_meta
 
 # ------------------------------------------------------
 # Logging Setup - Clears on each bot run
@@ -69,6 +70,7 @@ class Trending(commands.Cog):
         name="trending",
         description="🔥 View the currently trending anime, manga, or light novels on AniList"
     )
+    @command_meta(section="Media", name="Trending")
     @app_commands.describe(
         media_type="Choose Anime, Manga, Light Novels, or All"
     )

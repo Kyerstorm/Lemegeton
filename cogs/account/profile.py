@@ -30,6 +30,7 @@ from database import (
     get_user_guild_aware, get_user_achievements_guild_aware,
     save_user_guild_aware, upsert_user_stats_guild_aware
 )
+from cogs_test.general_commands.dashboard import command_meta
 
 ANILIST_API_URL = "https://graphql.anilist.co"
 
@@ -715,6 +716,7 @@ class Profile(commands.Cog):
 
     @app_commands.command(name="profile", description="View your AniList profile (with stats & achievements) or another user's.")
     @app_commands.describe(user="Optional: Discord user whose profile to view")
+    @command_meta(section="Account", name="Profile")
     async def profile(self, interaction: discord.Interaction, user: Optional[discord.Member] = None):
         try:
             # Defer FIRST - before any other operations

@@ -11,6 +11,7 @@ import traceback
 import unicodedata
 import urllib.parse
 import re
+from cogs_test.general_commands.dashboard import command_meta
 
 ANILIST_API_URL = "https://graphql.anilist.co"
 
@@ -249,6 +250,7 @@ class TrailerCog(commands.Cog):
         return choices
 
     @app_commands.command(name="trailer", description="🎬 Get the trailer for an anime/manga from AniList")
+    @command_meta(section="Media", name="Trailer")
     @app_commands.describe(
         type="Choose whether it's anime or manga",
         title="The title to search for",
