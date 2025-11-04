@@ -238,8 +238,9 @@ class DashboardView(ui.View):
 
     async def send_initial(self, interaction: discord.Interaction):
         embed = self.build_embed_for_section(self.sections[self.current_index], interaction.user)
-        await interaction.response.send_message(embed=embed, view=self, ephemeral=False)
+        await interaction.followup.send(embed=embed, view=self, ephemeral=False)
         await self.update_section_message(interaction)
+
 
     def build_embed_for_section(self, section: str, actor: discord.User) -> discord.Embed:
         color = PALETTE["midnight_blue"]
@@ -519,32 +520,98 @@ demo_cmd = app_commands.Command(name="demo", description="Demo command", callbac
 COMMAND_REGISTRY.register("demo", demo_cmd, section="General", display_name="Demo Command")
 
 # ---------------------------
-# Placeholders for sections
+# Current Commands by Section
 # ---------------------------
-# You asked for placeholders where you can add your sections.
+# This section documents all 43 commands currently registered in the dashboard across 8 sections.
+# Commands are automatically discovered via the @command_meta decorator at bot startup.
 #
-# Below are commented placeholders demonstrating how to define sections and how to annotate
-# your app commands so they appear in the dashboard.
+# Usage example for adding new commands:
 #
-# Example usage:
+# @app_commands.command(name="mycommand", description="Description")
+# @command_meta(section="SectionName", name="Display Name")
+# async def mycommand(interaction: discord.Interaction):
+#     # command implementation
 #
-# @app_commands.command(name="kick", description="Kick a member")
-# @command_meta(section="Moderation", name="Kick")
-# @app_commands.check(app_command_enabled_check())
-# async def kick(interaction: discord.Interaction, member: discord.Member, reason: Optional[str] = None):
-#     # your moderation logic
-#     await interaction.response.send_message(f"Kicked {member}.", ephemeral=True)
+# The command will be automatically registered when the cog is loaded.
 #
-# COMMAND_REGISTRY.register("kick", <the_command_obj>, section="Moderation", display_name="Kick")
+# CURRENT SECTIONS AND COMMANDS (43 total):
 #
-# Placeholders:
-# - Moderation
-# - Utility
-# - Fun
-# - Economy
-# - Info
+# ========================================
+# Account (3 commands)
+# ========================================
+# - Login                      (/login)
+# - Profile                    (/profile)
+# - Admin Login                (/admin-login)
 #
-# Add them by decorating and registering commands as shown above.
+# ========================================
+# Admin (3 commands)
+# ========================================
+# - Moderator Management       (/bot-moderators)
+# - Changelog                  (/changelog)
+# - Set Bot Updates Channel    (/set-bot-updates-channel)
+#
+# ========================================
+# Customization (3 commands)
+# ========================================
+# - Theme                      (/theme)
+# - Admin Guild Theme          (/admin-guild-theme)
+# - Nitro Role Set             (/nitrorole-set)
+#
+# ========================================
+# Gaming (5 commands)
+# ========================================
+# - Steam Profile              (/steam-profile)
+# - Steam Recommendations      (/steam-recommendation)
+# - Steam Game                 (/steam-game)
+# - Free Games                 (/free-games)
+# - Check Free Games           (/check-free-games)
+#
+# ========================================
+# Media (11 commands)
+# ========================================
+# - Browse                     (/browse)
+# - Recommendations            (/recommendations)
+# - Trending                   (/trending)
+# - Random                     (/random)
+# - Trailer                    (/trailer)
+# - 3x3 Grid                   (/three-by-three)
+# - News Management            (/news)
+# - Test Twitter Scrape        (/test-twitter-scrape)
+# - Set Completion Channel     (/set-manga-completion-channel)
+# - Show Manga Channel         (/show-manga-completion-channel)
+#
+# ========================================
+# Server Management (8 commands)
+# ========================================
+# - Server Info                (/serverinfo)
+# - Server Config              (/server-config)
+# - Invite Stats               (/invite-stats)
+# - Invite Leaderboard         (/invite-leaderboard)
+# - Invite Theme               (/invite-theme)
+# - Set Welcome DM             (/set-welcome-dm)
+# - Welcome DM Status          (/welcome-dm-status)
+#
+# ========================================
+# Social (3 commands)
+# ========================================
+# - AniList Leaderboard        (/anilist-leaderboard)
+# - Affinity                   (/affinity)
+# - Feedback                   (/feedback)
+#
+# ========================================
+# Utilities (7 commands)
+# ========================================
+# - Help                       (/help)
+# - Notifications              (/notifications)
+# - Say                        (/say)
+# - User Info                  (/userinfo)
+# - Timestamp Generator        (/timestamp)
+# - Invite Bot                 (/invite)
+# - Planned Features           (/planned-features)
+#
+# ========================================
+# TOTAL: 43 commands across 8 sections
+# ========================================
 
 # loader for extension
 async def setup(bot: commands.Bot):
