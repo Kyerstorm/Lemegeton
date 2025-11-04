@@ -72,3 +72,5 @@ env/
 # Local Netlify folder
 .netlify
 structured_changelog.txt
+CLAUDE.md
+claude.exe
