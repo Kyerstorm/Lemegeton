@@ -16,13 +16,15 @@ from database import (
 )
 from config import STEAM_API_KEY, DB_PATH
 from cogs_test.general_commands.dashboard import command_meta
+from helpers.anilist_helper import fetch_anilist_user_basic
+from helpers.text_helper import validate_anilist_username
+from helpers.embed_helper import build_error_embed, build_success_embed
+from helpers.steam_helper import resolve_vanity_url, get_player_summaries
 
 # Configuration constants
 LOG_DIR = Path("logs")
 LOG_FILE = LOG_DIR / "login.log"
 MAX_USERNAME_LENGTH = 50
-USERNAME_REGEX = r"^[\w-]+$"
-ANILIST_ENDPOINT = "https://graphql.anilist.co"
 STEAM_VANITY_REGEX = r"^[a-zA-Z0-9_-]+$"
 VIEW_TIMEOUT = 60
 
@@ -448,69 +450,24 @@ class Login(commands.Cog):
 
     def _is_valid_username(self, username: str) -> bool:
         """Validate username format and length."""
-        if not username or not isinstance(username, str):
-            return False
-        return bool(re.match(USERNAME_REGEX, username)) and 0 < len(username) <= MAX_USERNAME_LENGTH
+        return validate_anilist_username(username, max_length=MAX_USERNAME_LENGTH)
 
     async def _fetch_anilist_id(self, anilist_username: str) -> Optional[dict]:
-        """Fetch AniList user ID and avatar from username via GraphQL API.
+        """Fetch AniList user ID and avatar from username using helper function.
         
         Returns:
-            dict with 'id', 'name', and 'avatar' keys, or None if user not found
+            dict with 'id', 'name', and 'avatar' keys, or dict with 'error' key if not found
         """
-        query = """
-        query ($name: String) {
-          User(name: $name) { 
-            id 
-            name
-            avatar {
-              large
-              medium
-            }
-          }
-        }
-        """
-        
         logger.debug(f"Fetching AniList ID for username: {anilist_username}")
         
-        try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-                async with session.post(
-                    ANILIST_ENDPOINT,
-                    json={"query": query, "variables": {"name": anilist_username}}
-                ) as resp:
-                    if resp.status == 404:
-                        logger.warning(f"AniList user not found: {anilist_username}")
-                        return {"error": "not_found", "message": "User does not exist on AniList"}
-                    elif resp.status == 429:
-                        logger.warning(f"AniList API rate limit hit for: {anilist_username}")
-                        return {"error": "rate_limit", "message": "Too many requests. Please try again in a moment."}
-                    elif resp.status != 200:
-                        logger.warning(f"AniList API returned status {resp.status} for username: {anilist_username}")
-                        return {"error": "api_error", "message": f"AniList API error (status {resp.status})"}
-                    
-                    data = await resp.json()
-                    logger.debug(f"AniList API response received for username: {anilist_username}")
-                    
-                    user_data = data.get("data", {}).get("User")
-                    if user_data and "id" in user_data:
-                        result = {
-                            "id": user_data["id"],
-                            "name": user_data.get("name", anilist_username),
-                            "avatar": user_data.get("avatar", {}).get("large") or user_data.get("avatar", {}).get("medium")
-                        }
-                        logger.info(f"Successfully found AniList user: {result['name']} (ID: {result['id']})")
-                        return result
-                    
-                    logger.warning(f"AniList user not found: {anilist_username}")
-                    return {"error": "not_found", "message": "User does not exist on AniList"}
-                    
-        except aiohttp.ClientError as e:
-            logger.error(f"Network error while fetching AniList ID for {anilist_username}: {e}")
-            return {"error": "network", "message": "Network connection error. Please check your internet connection."}
-        except Exception as e:
-            logger.error(f"Unexpected error while fetching AniList ID for {anilist_username}: {e}", exc_info=True)
-            return {"error": "unexpected", "message": "An unexpected error occurred. Please try again later."}
+        user_data = await fetch_anilist_user_basic(anilist_username)
+        
+        if user_data:
+            logger.info(f"Successfully found AniList user: {user_data['name']} (ID: {user_data['id']})")
+            return user_data
+        
+        logger.warning(f"AniList user not found: {anilist_username}")
+        return {"error": "not_found", "message": "User does not exist on AniList"}
 
     async def handle_register(self, user_id: int, guild_id: int, discord_user: str, anilist_username: str) -> str:
         """Handle user registration with comprehensive validation and logging."""
@@ -533,8 +490,12 @@ class Login(commands.Cog):
         # Fetch and validate AniList ID with enhanced error messages
         anilist_data = await self._fetch_anilist_id(anilist_username)
         if not anilist_data or "error" in anilist_data:
-            error_type = anilist_data.get("error", "unknown") if anilist_data else "unknown"
-            error_msg = anilist_data.get("message", "Unknown error") if anilist_data else "Unknown error"
+            if anilist_data and "error" in anilist_data:
+                error_type = anilist_data.get("error", "unknown")
+                error_msg = anilist_data.get("message", "Unknown error")
+            else:
+                error_type = "not_found"
+                error_msg = "User does not exist on AniList"
             
             logger.warning(f"AniList user '{anilist_username}' fetch failed for {discord_user} (ID: {user_id}) in guild {guild_id}: {error_type}")
             
@@ -566,10 +527,9 @@ class Login(commands.Cog):
                 logger.info(f"Updated registration for {discord_user} (ID: {user_id}) in guild {guild_id} -> AniList: {actual_name} (ID: {anilist_id})")
                 
                 # Create rich embed with avatar
-                embed = discord.Embed(
-                    title="✅ AniList Updated",
-                    description=f"Your AniList username has been updated to **{actual_name}** in this server!",
-                    color=discord.Color.green()
+                embed = build_success_embed(
+                    "AniList Updated",
+                    f"Your AniList username has been updated to **{actual_name}** in this server!"
                 )
                 if avatar_url:
                     embed.set_thumbnail(url=avatar_url)
@@ -581,15 +541,15 @@ class Login(commands.Cog):
                 logger.info(f"Successfully registered new user {discord_user} (ID: {user_id}) in guild {guild_id} -> AniList: {actual_name} (ID: {anilist_id})")
                 
                 # Create rich embed with avatar
-                embed = discord.Embed(
-                    title="🎉 Registration Successful",
-                    description=f"Successfully registered with AniList username **{actual_name}** in this server!",
-                    color=discord.Color.blue()
+                embed = build_success_embed(
+                    "Registration Successful",
+                    f"Successfully registered with AniList username **{actual_name}** in this server!"
                 )
                 if avatar_url:
                     embed.set_thumbnail(url=avatar_url)
                 embed.add_field(name="Profile", value=f"https://anilist.co/user/{actual_name}", inline=False)
                 embed.set_footer(text="You can now use all AniList features!")
+                embed.color = discord.Color.blue()  # Keep blue for registration
                 return embed
                 
         except Exception as e:
@@ -616,7 +576,7 @@ class Login(commands.Cog):
         logger.info(f"Added new user to database: {discord_user} (ID: {user_id}) in guild {guild_id}")
 
     async def _resolve_steam_vanity(self, vanity_name: str) -> Optional[dict]:
-        """Resolve Steam vanity name to Steam ID and fetch avatar using Steam API.
+        """Resolve Steam vanity name to Steam ID and fetch avatar using Steam helper functions.
         
         Returns:
             dict with 'steam_id', 'vanity_name', and 'avatar' keys, or dict with 'error' key
@@ -632,45 +592,30 @@ class Login(commands.Cog):
         if vanity_name.isdigit() and len(vanity_name) >= 17:
             steam_id = vanity_name
         else:
-            # Resolve vanity URL to Steam ID
-            url = f"http://api.steampowered.com/ISteamUser/ResolveVanityURL/v0001/?key={STEAM_API_KEY}&vanityurl={vanity_name}"
-            
+            # Resolve vanity URL to Steam ID using helper
             try:
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-                    async with session.get(url) as resp:
-                        if resp.status != 200:
-                            logger.warning(f"Steam API returned status {resp.status} for vanity: {vanity_name}")
-                            return {"error": "api_error", "message": f"Steam API error (status {resp.status})"}
-                        
-                        data = await resp.json()
-                        response_data = data.get("response", {})
-                        
-                        if response_data.get("success") == 1:
-                            steam_id = response_data.get("steamid")
-                            logger.info(f"Successfully resolved Steam vanity '{vanity_name}' to ID: {steam_id}")
-                        else:
-                            logger.warning(f"Steam vanity name not found: {vanity_name}")
-                            return {"error": "not_found", "message": f"Steam user **{vanity_name}** not found. Please check the vanity name and try again.\n\n💡 **Tip:** Your vanity URL is the part after `/id/` in your Steam profile URL."}
+                    steam_id = await resolve_vanity_url(session, STEAM_API_KEY, vanity_name)
+                    if not steam_id:
+                        logger.warning(f"Steam vanity name not found: {vanity_name}")
+                        return {"error": "not_found", "message": f"Steam user **{vanity_name}** not found. Please check the vanity name and try again.\n\n💡 **Tip:** Your vanity URL is the part after `/id/` in your Steam profile URL."}
+                    logger.info(f"Successfully resolved Steam vanity '{vanity_name}' to ID: {steam_id}")
             except Exception as e:
                 logger.error(f"Error resolving Steam vanity name '{vanity_name}': {e}")
                 return {"error": "network", "message": "Network error while connecting to Steam. Please try again."}
         
-        # Fetch player summary for avatar
+        # Fetch player summary for avatar using helper
         try:
-            summary_url = f"http://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key={STEAM_API_KEY}&steamids={steam_id}"
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-                async with session.get(summary_url) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        players = data.get("response", {}).get("players", [])
-                        if players:
-                            player = players[0]
-                            return {
-                                "steam_id": steam_id,
-                                "vanity_name": vanity_name,
-                                "avatar": player.get("avatarfull") or player.get("avatarmedium"),
-                                "profile_url": player.get("profileurl")
-                            }
+                players = await get_player_summaries(session, STEAM_API_KEY, steam_id)
+                if players:
+                    player = players[0]
+                    return {
+                        "steam_id": steam_id,
+                        "vanity_name": vanity_name,
+                        "avatar": player.get("avatarfull") or player.get("avatarmedium"),
+                        "profile_url": player.get("profileurl")
+                    }
         except Exception as e:
             logger.warning(f"Could not fetch Steam avatar for {steam_id}: {e}")
         
@@ -752,10 +697,9 @@ class Login(commands.Cog):
                     logger.info(f"Updated Steam registration for {discord_user} (ID: {user_id}) -> Steam: {vanity_name}")
                     
                     # Create rich embed with avatar
-                    embed = discord.Embed(
-                        title="✅ Steam Updated",
-                        description=f"Your Steam profile has been updated to **{vanity_name}**!",
-                        color=discord.Color.green()
+                    embed = build_success_embed(
+                        "Steam Updated",
+                        f"Your Steam profile has been updated to **{vanity_name}**!"
                     )
                     if avatar_url:
                         embed.set_thumbnail(url=avatar_url)
@@ -778,16 +722,16 @@ class Login(commands.Cog):
                     logger.info(f"Successfully registered Steam user {discord_user} (ID: {user_id}) -> Steam: {vanity_name}")
                     
                     # Create rich embed with avatar
-                    embed = discord.Embed(
-                        title="🎉 Steam Registration Successful",
-                        description=f"Successfully registered with Steam profile **{vanity_name}**!",
-                        color=discord.Color.blue()
+                    embed = build_success_embed(
+                        "Steam Registration Successful",
+                        f"Successfully registered with Steam profile **{vanity_name}**!"
                     )
                     if avatar_url:
                         embed.set_thumbnail(url=avatar_url)
                     if profile_url:
                         embed.add_field(name="Profile", value=profile_url, inline=False)
                     embed.set_footer(text="You can now use all Steam features!")
+                    embed.color = discord.Color.blue()  # Keep blue for registration
                     return embed
                 
         except Exception as e:
