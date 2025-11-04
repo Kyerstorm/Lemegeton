@@ -166,13 +166,9 @@ if exist ".venv\Scripts\activate.bat" (
 echo.
 echo [*] Restarting bot...
 echo [*] Press Ctrl+C to stop the bot
-echo [*] Opening new menu window for bot management...
 echo.
 echo ============================================================
 echo.
-
-:: Open a new start.bat window for menu access
-start "Lemegeton Bot Manager" "%~f0"
 
 :: Run bot in current window
 python bot.py
