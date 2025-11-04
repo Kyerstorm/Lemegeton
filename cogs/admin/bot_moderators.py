@@ -8,13 +8,15 @@ from discord.ext import commands
 from discord import app_commands
 import logging
 from pathlib import Path
-from datetime import datetime
 
 from database import (
     add_bot_moderator, remove_bot_moderator, get_all_bot_moderators,
     is_user_bot_moderator
 )
 from cogs_test.general_commands.dashboard import command_meta
+from helpers.text_helper import validate_discord_id, format_discord_timestamp
+from helpers.embed_helper import build_error_embed, build_success_embed, build_info_embed
+from helpers.utility_helper import fetch_user_safe
 
 # ------------------------------------------------------
 # Logging Setup
@@ -63,10 +65,9 @@ class BotModeratorsMainView(discord.ui.View):
             moderators = await get_all_bot_moderators()
             
             if not moderators:
-                embed = discord.Embed(
-                    title="👥 Bot Moderators",
-                    description="There are currently no bot moderators configured.\n\nUse the **Add Moderator** button to add bot moderators.",
-                    color=0xED4245
+                embed = build_info_embed(
+                    "Bot Moderators",
+                    "There are currently no bot moderators configured.\n\nUse the **Add Moderator** button to add bot moderators."
                 )
                 embed.set_footer(text="Bot moderators can publish changelogs and manage bot-wide settings")
                 await interaction.followup.send(embed=embed, ephemeral=True)
@@ -76,7 +77,7 @@ class BotModeratorsMainView(discord.ui.View):
             embed = discord.Embed(
                 title="👑 Bot Moderators",
                 description="Users who can perform bot-wide actions (changelog publishing, bot management, etc.)",
-                color=0x9B59B6
+                color=discord.Color.purple()
             )
             
             moderator_list = []
@@ -88,18 +89,8 @@ class BotModeratorsMainView(discord.ui.View):
                 added_by_user = self.cog.bot.get_user(added_by)
                 added_by_mention = added_by_user.display_name if added_by_user else f"ID: {added_by}"
                 
-                # Parse timestamp
-                try:
-                    if isinstance(created_at, str):
-                        dt = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S")
-                        timestamp = int(dt.timestamp())
-                    elif hasattr(created_at, 'timestamp'):
-                        timestamp = int(created_at.timestamp())
-                    else:
-                        timestamp = int(created_at)
-                    date_display = f"<t:{timestamp}:R>"
-                except (ValueError, TypeError):
-                    date_display = str(created_at)
+                # Format timestamp using helper
+                date_display = format_discord_timestamp(created_at, "R")
                 
                 moderator_list.append(
                     f"👑 {user_mention} (`{username}`)\n"
@@ -119,7 +110,8 @@ class BotModeratorsMainView(discord.ui.View):
         
         except Exception as e:
             logger.error(f"Error viewing bot moderators: {e}", exc_info=True)
-            await interaction.followup.send("❌ Error loading bot moderators list.", ephemeral=True)
+            embed = build_error_embed("Error", "Failed to load bot moderators list.")
+            await interaction.followup.send(embed=embed, ephemeral=True)
     
     @discord.ui.button(label="➕ Add Moderator", style=discord.ButtonStyle.success, row=0)
     async def add_moderator(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -136,10 +128,9 @@ class BotModeratorsMainView(discord.ui.View):
     @discord.ui.button(label="ℹ️ About Bot Moderators", style=discord.ButtonStyle.secondary, row=1)
     async def about_moderators(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Show information about bot moderators"""
-        embed = discord.Embed(
-            title="ℹ️ About Bot Moderators",
-            description="Bot moderators have elevated permissions for bot-wide actions.",
-            color=0x5865F2
+        embed = build_info_embed(
+            "About Bot Moderators",
+            "Bot moderators have elevated permissions for bot-wide actions."
         )
         
         embed.add_field(
@@ -198,39 +189,44 @@ class AddBotModeratorModal(discord.ui.Modal):
         await interaction.response.defer(ephemeral=True)
         
         try:
-            # Parse user ID from input
-            user_id_str = self.user_id.value.strip()
+            # Parse user ID from input using helper
+            user_id = validate_discord_id(self.user_id.value)
             
-            # Remove mention formatting if present
-            user_id_str = user_id_str.replace("<@", "").replace("!", "").replace(">", "")
+            if not user_id:
+                embed = build_error_embed(
+                    "Invalid User ID",
+                    "Please enter a valid user ID or mention (e.g., `123456789` or `@username`)."
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
             
-            # Convert to int
-            user_id = int(user_id_str)
-            
-            # Get the user
-            user = self.cog.bot.get_user(user_id)
+            # Fetch the user using helper
+            user = await fetch_user_safe(self.cog.bot, user_id)
             
             if not user:
-                # Try to fetch user if not in cache
-                try:
-                    user = await self.cog.bot.fetch_user(user_id)
-                except discord.NotFound:
-                    await interaction.followup.send("❌ User not found. Please check the user ID.", ephemeral=True)
-                    return
+                embed = build_error_embed(
+                    "User Not Found",
+                    "Could not find user with that ID. Please check the user ID and try again."
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
             
             # Check if user is a bot
             if user.bot:
-                await interaction.followup.send("❌ Cannot add bots as bot moderators.", ephemeral=True)
+                embed = build_error_embed(
+                    "Cannot Add Bot",
+                    "Cannot add bots as bot moderators."
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
                 return
             
             # Add the bot moderator
             success = await add_bot_moderator(user.id, user.display_name, interaction.user.id)
             
             if success:
-                embed = discord.Embed(
-                    title="✅ Bot Moderator Added",
-                    description=f"**User:** {user.mention}\n**Name:** {user.display_name}\n\nThis user can now perform bot-wide actions.",
-                    color=0x57F287
+                embed = build_success_embed(
+                    "Bot Moderator Added",
+                    f"**User:** {user.mention}\n**Name:** {user.display_name}\n\nThis user can now perform bot-wide actions."
                 )
                 embed.add_field(
                     name="🔑 Granted Permissions",
@@ -241,13 +237,16 @@ class AddBotModeratorModal(discord.ui.Modal):
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 logger.info(f"Added bot moderator: {user.display_name} ({user.id}) by {interaction.user.display_name} ({interaction.user.id})")
             else:
-                await interaction.followup.send("❌ Failed to add bot moderator. They may already be a moderator.", ephemeral=True)
+                embed = build_error_embed(
+                    "Failed to Add Moderator",
+                    "Failed to add bot moderator. They may already be a moderator."
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
         
-        except ValueError:
-            await interaction.followup.send("❌ Invalid user ID format. Please enter a valid number.", ephemeral=True)
         except Exception as e:
             logger.error(f"Error adding bot moderator: {e}", exc_info=True)
-            await interaction.followup.send("❌ Error adding bot moderator.", ephemeral=True)
+            embed = build_error_embed("Error", "An error occurred while adding bot moderator.")
+            await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 class RemoveBotModeratorModal(discord.ui.Modal):
@@ -268,25 +267,19 @@ class RemoveBotModeratorModal(discord.ui.Modal):
         await interaction.response.defer(ephemeral=True)
         
         try:
-            # Parse user ID from input
-            user_id_str = self.user_id.value.strip()
+            # Parse user ID from input using helper
+            user_id = validate_discord_id(self.user_id.value)
             
-            # Remove mention formatting if present
-            user_id_str = user_id_str.replace("<@", "").replace("!", "").replace(">", "")
+            if not user_id:
+                embed = build_error_embed(
+                    "Invalid User ID",
+                    "Please enter a valid user ID or mention (e.g., `123456789` or `@username`)."
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
             
-            # Convert to int
-            user_id = int(user_id_str)
-            
-            # Get the user (for display purposes)
-            user = self.cog.bot.get_user(user_id)
-            
-            if not user:
-                # Try to fetch user if not in cache
-                try:
-                    user = await self.cog.bot.fetch_user(user_id)
-                except discord.NotFound:
-                    # User not found, but we can still remove them from database
-                    pass
+            # Fetch the user using helper (optional, for display purposes)
+            user = await fetch_user_safe(self.cog.bot, user_id)
             
             # Remove the bot moderator
             success = await remove_bot_moderator(user_id)
@@ -295,10 +288,9 @@ class RemoveBotModeratorModal(discord.ui.Modal):
                 user_display = user.mention if user else f"<@{user_id}>"
                 user_name = user.display_name if user else f"User ID: {user_id}"
                 
-                embed = discord.Embed(
-                    title="✅ Bot Moderator Removed",
-                    description=f"**User:** {user_display}\n**Name:** {user_name}\n\nThis user can no longer perform bot-wide actions.",
-                    color=0x57F287
+                embed = build_success_embed(
+                    "Bot Moderator Removed",
+                    f"**User:** {user_display}\n**Name:** {user_name}\n\nThis user can no longer perform bot-wide actions."
                 )
                 embed.add_field(
                     name="🚫 Revoked Permissions",
@@ -309,13 +301,16 @@ class RemoveBotModeratorModal(discord.ui.Modal):
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 logger.info(f"Removed bot moderator: {user_name} ({user_id}) by {interaction.user.display_name} ({interaction.user.id})")
             else:
-                await interaction.followup.send("❌ Failed to remove bot moderator. They may not be a moderator.", ephemeral=True)
+                embed = build_error_embed(
+                    "Failed to Remove Moderator",
+                    "Failed to remove bot moderator. They may not be a moderator."
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
         
-        except ValueError:
-            await interaction.followup.send("❌ Invalid user ID format. Please enter a valid number.", ephemeral=True)
         except Exception as e:
             logger.error(f"Error removing bot moderator: {e}", exc_info=True)
-            await interaction.followup.send("❌ Error removing bot moderator.", ephemeral=True)
+            embed = build_error_embed("Error", "An error occurred while removing bot moderator.")
+            await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 class BotModerators(commands.Cog):
@@ -351,7 +346,7 @@ class BotModerators(commands.Cog):
                     "⚠️ **Important:** Bot moderators have elevated permissions across **all servers**. "
                     "Only grant this role to highly trusted users."
                 ),
-                color=0x9B59B6
+                color=discord.Color.purple()
             )
             
             embed.add_field(
@@ -384,7 +379,8 @@ class BotModerators(commands.Cog):
         
         except Exception as e:
             logger.error(f"Error in bot moderators command: {e}", exc_info=True)
-            await interaction.response.send_message("❌ Error opening bot moderators management. Please try again.", ephemeral=True)
+            embed = build_error_embed("Error", "Failed to open bot moderators management. Please try again.")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 async def setup(bot):

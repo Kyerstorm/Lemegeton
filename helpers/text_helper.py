@@ -161,6 +161,49 @@ def format_timestamp(dt: datetime, format_type: str = "relative") -> str:
         return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
+def format_discord_timestamp(created_at: Any, format_type: str = "R") -> str:
+    """
+    Format created_at value to Discord timestamp format.
+    Handles various input types (str, datetime, int, timestamp).
+    
+    Args:
+        created_at: Timestamp value (str, datetime, int, or timestamp object)
+        format_type: Discord timestamp format (default: "R" for relative)
+                     Options: "t", "T", "d", "D", "f", "F", "R"
+    
+    Returns:
+        Discord timestamp string (e.g., "<t:1234567890:R>") or fallback string
+    """
+    from datetime import datetime
+    
+    try:
+        if isinstance(created_at, str):
+            # Try parsing common datetime formats
+            try:
+                dt = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S")
+                timestamp = int(dt.timestamp())
+            except ValueError:
+                # Try ISO format
+                try:
+                    dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                    timestamp = int(dt.timestamp())
+                except ValueError:
+                    return str(created_at)
+        elif hasattr(created_at, 'timestamp'):
+            # datetime object
+            timestamp = int(created_at.timestamp())
+        elif isinstance(created_at, (int, float)):
+            # Already a timestamp
+            timestamp = int(created_at)
+        else:
+            return str(created_at)
+        
+        return f"<t:{timestamp}:{format_type}>"
+    
+    except (ValueError, TypeError, AttributeError):
+        return str(created_at)
+
+
 # ===== TEXT CLEANING FUNCTIONS =====
 
 def clean_html(text: str) -> str:

@@ -301,6 +301,34 @@ def format_role_mention(role_id: int) -> str:
     return f"<@&{role_id}>"
 
 
+async def fetch_user_safe(bot: commands.Bot, user_id: int) -> Optional[discord.User]:
+    """
+    Fetch Discord user with fallback logic (get_user -> fetch_user).
+    Returns None if user not found.
+    
+    Args:
+        bot: Discord bot instance
+        user_id: Discord user ID to fetch
+    
+    Returns:
+        discord.User if found, None otherwise
+    """
+    # Try cache first
+    user = bot.get_user(user_id)
+    if user:
+        return user
+    
+    # Try to fetch if not in cache
+    try:
+        user = await bot.fetch_user(user_id)
+        return user
+    except discord.NotFound:
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching user {user_id}: {e}")
+        return None
+
+
 def safe_send_message(
     messageable: discord.abc.Messageable,
     content: str = None,
