@@ -99,6 +99,40 @@ async def fetch_anilist_user_id(username: str) -> Optional[int]:
     return None
 
 
+async def fetch_anilist_user_basic(username: str) -> Optional[Dict[str, Any]]:
+    """
+    Fetch basic AniList user information (id, name, avatar).
+    Returns dict with 'id', 'name', and 'avatar' keys, or None if user not found.
+    """
+    query = """
+    query($name: String) {
+        User(name: $name) {
+            id
+            name
+            avatar {
+                large
+                medium
+            }
+        }
+    }
+    """
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            data = await post_graphql(session, query, {"name": username})
+            if data and "User" in data:
+                user = data["User"]
+                avatar = user.get("avatar", {})
+                return {
+                    "id": user["id"],
+                    "name": user.get("name", username),
+                    "avatar": avatar.get("large") or avatar.get("medium")
+                }
+    except Exception as e:
+        logger.error(f"Error fetching basic user info for {username}: {e}")
+    return None
+
+
 # ===== MEDIA FETCHING FUNCTIONS =====
 
 async def fetch_media_by_id(media_id: int, media_type: str) -> Optional[Dict]:

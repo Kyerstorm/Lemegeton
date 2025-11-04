@@ -1,24 +1,21 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-import aiohttp
 import logging
-import re
 from pathlib import Path
-import config
 from database import is_user_bot_moderator, get_user_guild_aware, register_user_guild_aware
 from cogs_test.general_commands.dashboard import command_meta
 from helpers.command_logger import log_command
+from helpers.anilist_helper import fetch_anilist_user_basic
+from helpers.text_helper import validate_anilist_username
+from helpers.embed_helper import build_error_embed, build_success_embed
 
 # ────────────────────────────────────────────────────────────────
-# Configuration and constants (same style as login.py)
+# Configuration and constants
 # ────────────────────────────────────────────────────────────────
 LOG_DIR = Path("logs")
 LOG_FILE = LOG_DIR / "admin_login.log"
-# DB_PATH removed - using database.py functions instead
-ANILIST_ENDPOINT = "https://graphql.anilist.co"
 MAX_USERNAME_LENGTH = 50
-USERNAME_REGEX = r"^[\w-]+$"
 
 LOG_DIR.mkdir(exist_ok=True)
 
@@ -84,29 +81,28 @@ class SwapAniListView(discord.ui.View):
         # Fetch new AniList data
         user_data = await self.cog._fetch_anilist_user(self.new_username)
         if not user_data:
-            embed = discord.Embed(
-                title="❌ AniList Swap Failed",
-                description=f"Could not find AniList user **{self.new_username}**.",
-                color=discord.Color.red()
+            embed = build_error_embed(
+                "AniList Swap Failed",
+                f"Could not find AniList user **{self.new_username}**."
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
         anilist_id = user_data["id"]
         actual_name = user_data["name"]
-        avatar = user_data["avatar"]["large"] or user_data["avatar"]["medium"]
+        avatar = user_data.get("avatar")
 
         await self.cog._register_user(
             self.target_user.id, self.guild_id, str(self.target_user), actual_name, anilist_id
         )
 
-        embed = discord.Embed(
-            title="✅ AniList Username Updated",
-            description=f"Successfully updated **{self.target_user.mention}**'s AniList username to **{actual_name}**.",
-            color=discord.Color.green()
+        embed = build_success_embed(
+            "AniList Username Updated",
+            f"Successfully updated **{self.target_user.mention}**'s AniList username to **{actual_name}**."
         )
         embed.add_field(name="Profile", value=f"[View AniList Profile](https://anilist.co/user/{actual_name})", inline=False)
-        embed.set_thumbnail(url=avatar)
+        if avatar:
+            embed.set_thumbnail(url=avatar)
         embed.set_footer(text="AniList profile updated successfully!")
 
         await interaction.followup.send(embed=embed, ephemeral=True)
@@ -124,37 +120,13 @@ class AdminLogin(commands.Cog):
         logger.info("AdminLogin cog initialized")
 
     async def _is_valid_username(self, username: str) -> bool:
-        return bool(re.match(USERNAME_REGEX, username)) and 0 < len(username) <= MAX_USERNAME_LENGTH
+        """Validate AniList username format."""
+        return validate_anilist_username(username, max_length=MAX_USERNAME_LENGTH)
 
     async def _fetch_anilist_user(self, username: str):
-        """Fetch AniList user info using GraphQL."""
-        query = """
-        query ($name: String) {
-          User(name: $name) {
-            id
-            name
-            avatar {
-              large
-              medium
-            }
-          }
-        }
-        """
+        """Fetch AniList user info using helper function."""
         logger.debug(f"Fetching AniList user data for {username}")
-        try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-                async with session.post(
-                    ANILIST_ENDPOINT,
-                    json={"query": query, "variables": {"name": username}}
-                ) as resp:
-                    data = await resp.json()
-                    if resp.status != 200 or "data" not in data:
-                        logger.warning(f"AniList API error: {resp.status} → {data}")
-                        return None
-                    return data["data"]["User"]
-        except Exception as e:
-            logger.error(f"Error fetching AniList user: {e}", exc_info=True)
-            return None
+        return await fetch_anilist_user_basic(username)
 
     async def _get_existing_user(self, user_id: int, guild_id: int):
         """Check if user is already registered in DB."""
@@ -231,18 +203,17 @@ class AdminLogin(commands.Cog):
             # Fetch AniList data
             user_data = await self._fetch_anilist_user(anilist_user)
             if not user_data:
-                embed = discord.Embed(
-                    title="❌ AniList Login Failed",
-                    description=f"Could not find AniList user **{anilist_user}**.\n\n"
-                                f"💡 Check the username is correct and exists on AniList.",
-                    color=discord.Color.red()
+                embed = build_error_embed(
+                    "AniList Login Failed",
+                    f"Could not find AniList user **{anilist_user}**.\n\n"
+                    f"💡 Check the username is correct and exists on AniList."
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
 
             anilist_id = user_data["id"]
             actual_name = user_data["name"]
-            avatar = user_data["avatar"]["large"] or user_data["avatar"]["medium"]
+            avatar = user_data.get("avatar")
 
             # Save or update DB record
             await self._register_user(user_id, guild_id, str(discord_user), actual_name, anilist_id)

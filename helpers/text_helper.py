@@ -312,18 +312,20 @@ def validate_url(url: str) -> bool:
     return bool(re.match(url_pattern, url))
 
 
-def validate_anilist_username(username: str) -> bool:
+def validate_anilist_username(username: str, max_length: int = 50) -> bool:
     """
     Validate AniList username format.
+    Supports both strict (alphanumeric + underscore, max 20) and relaxed (alphanumeric + underscore + hyphen, max 50) formats.
     """
     if not username:
         return False
     
-    # AniList usernames: 1-20 characters, alphanumeric + underscore
-    if len(username) < 1 or len(username) > 20:
+    # Length validation
+    if len(username) < 1 or len(username) > max_length:
         return False
     
-    return bool(re.match(r'^[a-zA-Z0-9_]+$', username))
+    # Pattern validation: allow alphanumeric, underscore, and hyphen
+    return bool(re.match(r'^[\w-]+$', username))
 
 
 # ===== STRING PROCESSING FUNCTIONS =====
