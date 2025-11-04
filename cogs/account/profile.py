@@ -10,20 +10,6 @@ from typing import Optional, List, Dict, Tuple
 from datetime import datetime, timedelta
 import re
 import json
-import urllib.parse
-
-def sanitize_url(url: str) -> Optional[str]:
-    """Ensure URL is well-formed and safe for Discord embeds"""
-    if not url or not isinstance(url, str):
-        return None
-    url = url.strip()  # remove leading/trailing spaces
-    # Encode spaces or illegal characters in query
-    url = re.sub(r'\s+', '', url)
-    parsed = urllib.parse.urlparse(url)
-    if not parsed.scheme or not parsed.netloc:
-        return None
-    # Rebuild a safe URL
-    return urllib.parse.urlunparse(parsed)
 
 from database import (
     # Guild-aware functions (multi-guild support)
@@ -31,8 +17,14 @@ from database import (
     save_user_guild_aware, upsert_user_stats_guild_aware
 )
 from cogs_test.general_commands.dashboard import command_meta
-
-ANILIST_API_URL = "https://graphql.anilist.co"
+from helpers.anilist_helper import post_graphql
+from helpers.text_helper import sanitize_url
+from helpers.profile_helper import (
+    generate_progress_bar,
+    check_milestone_achievements,
+    check_score_achievements,
+    calculate_format_distribution
+)
 
 # Configuration constants
 LOG_DIR = Path("logs")
@@ -181,32 +173,34 @@ query ($userId: Int) {
 """
 
 async def fetch_user_stats(username: str) -> Optional[dict]:
+    """Fetch comprehensive user stats using AniList helper."""
     variables = {"username": username}
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.post(ANILIST_API_URL, json={"query": USER_STATS_QUERY, "variables": variables}) as resp:
-                if resp.status != 200:
-                    logger.error(f"AniList API request failed [{resp.status}] for {username}")
-                    return None
-                return await resp.json()
-        except Exception as e:
-            logger.exception(f"Error fetching AniList stats for {username}: {e}")
+    try:
+        async with aiohttp.ClientSession() as session:
+            data = await post_graphql(session, USER_STATS_QUERY, variables)
+            if data:
+                # post_graphql returns the 'data' dict directly (e.g., {"User": {...}})
+                # but code expects {"data": {"User": {...}}}, so wrap it
+                return {"data": data}
             return None
+    except Exception as e:
+        logger.exception(f"Error fetching AniList stats for {username}: {e}")
+        return None
 
 
 async def fetch_social_stats(user_id: int) -> Optional[dict]:
-    """Fetch followers and following counts for a user"""
+    """Fetch followers and following counts for a user using AniList helper."""
     variables = {"userId": user_id}
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.post(ANILIST_API_URL, json={"query": SOCIAL_STATS_QUERY, "variables": variables}) as resp:
-                if resp.status != 200:
-                    logger.error(f"AniList API request failed [{resp.status}] for user_id {user_id}")
-                    return None
-                return await resp.json()
-        except Exception as e:
-            logger.exception(f"Error fetching social stats for user_id {user_id}: {e}")
+    try:
+        async with aiohttp.ClientSession() as session:
+            data = await post_graphql(session, SOCIAL_STATS_QUERY, variables)
+            if data:
+                # post_graphql returns the 'data' dict, but we need to wrap it in the expected format
+                return {"data": data}
             return None
+    except Exception as e:
+        logger.exception(f"Error fetching social stats for user_id {user_id}: {e}")
+        return None
 
 
 # -----------------------------
@@ -262,100 +256,8 @@ def build_achievements(anime_stats: dict, manga_stats: dict) -> Dict[str, any]:
     a_avg = calc_weighted_avg(anime_stats.get("scores", []))
     m_avg = calc_weighted_avg(manga_stats.get("scores", []))
 
-    # Format distribution for manga - using country data to distinguish Manga/Manhwa/Manhua
-    # Adjust counts to exclude planning entries
-    total_manga_entries = total_manga
-    manga_planning_ratio = m_planning / total_manga_entries if total_manga_entries > 0 else 0
-    logger.info(f"Manga planning ratio: {manga_planning_ratio} (planning: {m_planning}, total: {total_manga_entries})")
-    
-    format_distribution = {}
-    logger.info(f"Manga formats from AniList: {manga_stats.get('formats', [])}")
-    logger.info(f"Manga countries from AniList: {manga_stats.get('countries', [])}")
-    
-    # Initialize all format types to 0
-    format_distribution = {
-        "Manga": 0,      # Japan
-        "Manhwa": 0,     # South Korea
-        "Manhua": 0,     # China
-        "Light Novel": 0,
-        "Novel": 0,
-        "One Shot": 0,
-        "Doujinshi": 0
-    }
-    
-    # Process country data to get Manga/Manhwa/Manhua distinction
-    for country_data in manga_stats.get("countries", []):
-        country = country_data.get("country", "Unknown")
-        count = country_data.get("count", 0)
-        # Adjust count to exclude planning entries (assume planning is distributed proportionally)
-        adjusted_count = int(count * (1 - manga_planning_ratio))
-        logger.info(f"Processing manga country: {country} with count: {count} -> adjusted: {adjusted_count}")
-        
-        if country == "JP":  # Japan
-            format_distribution["Manga"] += adjusted_count
-        elif country == "KR":  # South Korea
-            format_distribution["Manhwa"] += adjusted_count  
-        elif country == "CN":  # China
-            format_distribution["Manhua"] += adjusted_count
-        else:
-            # For other countries, add to general manga category
-            format_distribution["Manga"] += adjusted_count
-            logger.info(f"Unknown country {country}, adding to Manga category")
-    
-    # Process format data for other types (Light Novel, Novel, One Shot, etc.)
-    for f in manga_stats.get("formats", []):
-        format_name = f.get("format", "Unknown")
-        count = f.get("count", 0)
-        # Adjust count to exclude planning entries
-        adjusted_count = int(count * (1 - manga_planning_ratio))
-        logger.info(f"Processing manga format: {format_name} with count: {count} -> adjusted: {adjusted_count}")
-        
-        if format_name == "LIGHT_NOVEL":
-            format_distribution["Light Novel"] = adjusted_count
-        elif format_name == "NOVEL":
-            format_distribution["Novel"] = adjusted_count
-        elif format_name == "ONE_SHOT":
-            format_distribution["One Shot"] = adjusted_count
-        elif format_name == "DOUJINSHI":
-            format_distribution["Doujinshi"] = adjusted_count
-        # Note: We don't process "MANGA" format here since we're using country data instead
-    
-    logger.info(f"Final manga format_distribution (excluding planning): {format_distribution}")
-
-    # Format distribution for anime - exclude planning entries
-    total_anime_entries = total_anime
-    anime_planning_ratio = a_planning / total_anime_entries if total_anime_entries > 0 else 0
-    logger.info(f"Anime planning ratio: {anime_planning_ratio} (planning: {a_planning}, total: {total_anime_entries})")
-    
-    anime_format_distribution = {}
-    for f in anime_stats.get("formats", []):
-        format_name = f.get("format", "Unknown")
-        count = f.get("count", 0)
-        # Adjust count to exclude planning entries
-        adjusted_count = int(count * (1 - anime_planning_ratio))
-        logger.info(f"Processing anime format: {format_name} with count: {count} -> adjusted: {adjusted_count}")
-        
-        # Map AniList anime format names to more readable names
-        if format_name == "TV":
-            format_display = "TV Series"
-        elif format_name == "MOVIE":
-            format_display = "Movie"
-        elif format_name == "OVA":
-            format_display = "OVA"
-        elif format_name == "ONA":
-            format_display = "ONA"
-        elif format_name == "SPECIAL":
-            format_display = "Special"
-        elif format_name == "TV_SHORT":
-            format_display = "TV Short"
-        elif format_name == "MUSIC":
-            format_display = "Music Video"
-        else:
-            format_display = format_name.replace("_", " ").title()
-        
-        anime_format_distribution[format_display] = adjusted_count
-    
-    logger.info(f"Final anime format_distribution (excluding planning): {anime_format_distribution}")
+    # Format distribution using helper function
+    format_distribution, anime_format_distribution = calculate_format_distribution(manga_stats, anime_stats)
 
     # Genre variety calculation
     all_genres = {}
@@ -378,15 +280,7 @@ def build_achievements(anime_stats: dict, manga_stats: dict) -> Dict[str, any]:
         (750, "📚 Manga Master (750 Manga)"),
         (1000, "📚 Ultimate Manga Collector (1000 Manga)")
     ]
-
-    for threshold, title in manga_milestones:
-        if m_completed >= threshold:
-            achieved.append(title)
-        else:
-            prog_bar = "█" * min(10, int(m_completed / threshold * 10))
-            prog_bar += "░" * (10 - len(prog_bar))
-            progress.append(f"{title}\n`{prog_bar}` {m_completed}/{threshold}")
-            break
+    check_milestone_achievements(m_completed, manga_milestones, achieved, progress)
 
     # ANIME COMPLETION ACHIEVEMENTS
     anime_milestones = [
@@ -399,15 +293,7 @@ def build_achievements(anime_stats: dict, manga_stats: dict) -> Dict[str, any]:
         (750, "🎬 Anime Master (750 Anime)"),
         (1000, "🎬 Anime Marathoner (1000 Anime)")
     ]
-
-    for threshold, title in anime_milestones:
-        if a_completed >= threshold:
-            achieved.append(title)
-        else:
-            prog_bar = "█" * min(10, int(a_completed / threshold * 10))
-            prog_bar += "░" * (10 - len(prog_bar))
-            progress.append(f"{title}\n`{prog_bar}` {a_completed}/{threshold}")
-            break
+    check_milestone_achievements(a_completed, anime_milestones, achieved, progress)
 
     # SCORING ACHIEVEMENTS
     score_achievements = [
@@ -419,30 +305,10 @@ def build_achievements(anime_stats: dict, manga_stats: dict) -> Dict[str, any]:
     ]
 
     # Manga scoring
-    for threshold, title in score_achievements:
-        if m_avg >= threshold and m_completed >= 10:
-            achieved.append(f"{title} (Manga: {m_avg})")
-        elif m_completed >= 10:
-            next_threshold = next((t for t, _ in score_achievements if t > m_avg), None)
-            if next_threshold:
-                prog_bar = "█" * min(10, int(m_avg / next_threshold * 10))
-                prog_bar += "░" * (10 - len(prog_bar))
-                next_title = next(title for t, title in score_achievements if t == next_threshold)
-                progress.append(f"{next_title} (Manga)\n`{prog_bar}` {m_avg:.1f}/{next_threshold}")
-            break
+    check_score_achievements(m_avg, m_completed, 10, score_achievements, achieved, progress, "Manga")
 
     # Anime scoring
-    for threshold, title in score_achievements:
-        if a_avg >= threshold and a_completed >= 10:
-            achieved.append(f"{title} (Anime: {a_avg})")
-        elif a_completed >= 10:
-            next_threshold = next((t for t, _ in score_achievements if t > a_avg), None)
-            if next_threshold:
-                prog_bar = "█" * min(10, int(a_avg / next_threshold * 10))
-                prog_bar += "░" * (10 - len(prog_bar))
-                next_title = next(title for t, title in score_achievements if t == next_threshold)
-                progress.append(f"{next_title} (Anime)\n`{prog_bar}` {a_avg:.1f}/{next_threshold}")
-            break
+    check_score_achievements(a_avg, a_completed, 10, score_achievements, achieved, progress, "Anime")
 
     # GENRE VARIETY ACHIEVEMENTS
     genre_milestones = [
@@ -451,15 +317,7 @@ def build_achievements(anime_stats: dict, manga_stats: dict) -> Dict[str, any]:
         (15, "🌟 Genre Connoisseur (15+ genres)"),
         (20, "🌈 Diversity Master (20+ genres)")
     ]
-
-    for threshold, title in genre_milestones:
-        if unique_genres >= threshold:
-            achieved.append(title)
-        else:
-            prog_bar = "█" * min(10, int(unique_genres / threshold * 10))
-            prog_bar += "░" * (10 - len(prog_bar))
-            progress.append(f"{title}\n`{prog_bar}` {unique_genres}/{threshold}")
-            break
+    check_milestone_achievements(unique_genres, genre_milestones, achieved, progress)
 
     # BINGE ACHIEVEMENTS
     binge_milestones = [
@@ -468,13 +326,11 @@ def build_achievements(anime_stats: dict, manga_stats: dict) -> Dict[str, any]:
         (100, "🔥 Obsessed"),
         (200, "🔥 Genre Master")
     ]
-
     for threshold, title in binge_milestones:
         if max_genre_count >= threshold:
             achieved.append(f"{title} ({max_genre_count} in one genre)")
         else:
-            prog_bar = "█" * min(10, int(max_genre_count / threshold * 10))
-            prog_bar += "░" * (10 - len(prog_bar))
+            prog_bar = generate_progress_bar(max_genre_count, threshold)
             progress.append(f"{title}\n`{prog_bar}` {max_genre_count}/{threshold}")
             break
 
@@ -487,15 +343,7 @@ def build_achievements(anime_stats: dict, manga_stats: dict) -> Dict[str, any]:
         (500, "📝 Power User (500+ entries)"),
         (1000, "📝 Database Destroyer (1000+ entries)")
     ]
-
-    for threshold, title in activity_milestones:
-        if total_entries >= threshold:
-            achieved.append(title)
-        else:
-            prog_bar = "█" * min(10, int(total_entries / threshold * 10))
-            prog_bar += "░" * (10 - len(prog_bar))
-            progress.append(f"{title}\n`{prog_bar}` {total_entries}/{threshold}")
-            break
+    check_milestone_achievements(total_entries, activity_milestones, achieved, progress)
 
     # PLANNING ACHIEVEMENTS
     total_planning = a_planning + m_planning
@@ -519,12 +367,12 @@ def build_achievements(anime_stats: dict, manga_stats: dict) -> Dict[str, any]:
     total_started_entries = (a_completed + m_completed + a_dropped + m_dropped + 
                            a_paused + m_paused + a_watching + m_reading)
     
-    # Debug logging to understand the values
-    logger.info(f"Completion rate calculation: total_anime={total_anime}, total_manga={total_manga}")
-    logger.info(f"a_completed={a_completed}, m_completed={m_completed}, a_planning={a_planning}, m_planning={m_planning}")
-    logger.info(f"a_dropped={a_dropped}, m_dropped={m_dropped}, a_paused={a_paused}, m_paused={m_paused}")
-    logger.info(f"a_watching={a_watching}, m_reading={m_reading}")
-    logger.info(f"total_started_entries={total_started_entries}")
+    # Debug logging - changed to debug level
+    logger.debug(f"Completion rate calculation: total_anime={total_anime}, total_manga={total_manga}")
+    logger.debug(f"a_completed={a_completed}, m_completed={m_completed}, a_planning={a_planning}, m_planning={m_planning}")
+    logger.debug(f"a_dropped={a_dropped}, m_dropped={m_dropped}, a_paused={a_paused}, m_paused={m_paused}")
+    logger.debug(f"a_watching={a_watching}, m_reading={m_reading}")
+    logger.debug(f"total_started_entries={total_started_entries}")
     
     if total_started_entries > 0:
         completion_rate = (a_completed + m_completed) / total_started_entries
@@ -1212,16 +1060,14 @@ class AchievementsView(discord.ui.View):
         
         # Format Distribution - Manga
         format_dist = stats.get("format_distribution", {})
-        logger.info(f"Stats format_distribution: {format_dist}")
+        logger.debug(f"Stats format_distribution: {format_dist}")
         if format_dist:
             format_lines = []
             # Sort by count (descending) and take top entries
             sorted_formats = sorted(format_dist.items(), key=lambda x: x[1], reverse=True)
-            logger.info(f"Sorted manga formats: {sorted_formats}")
+            logger.debug(f"Sorted manga formats: {sorted_formats}")
             for format_name, count in sorted_formats:
-                logger.info(f"Checking manga format {format_name} with count {count}")
-                # Show all formats, even with 0 count for debugging
-                # if count > 0:  # Only show formats with content
+                logger.debug(f"Checking manga format {format_name} with count {count}")
                 # Add emojis for different manga formats
                 if format_name == "Manga":
                     emoji = "📚"
@@ -1243,7 +1089,7 @@ class AchievementsView(discord.ui.View):
                 if count > 0:  # Only add non-zero entries to the display
                     format_lines.append(f"{emoji} **{format_name}** - {count:,} entries")
             
-            logger.info(f"Final manga format_lines: {format_lines}")
+            logger.debug(f"Final manga format_lines: {format_lines}")
             if format_lines:
                 embed.add_field(
                     name="📚 Manga Format Distribution",
@@ -1251,9 +1097,9 @@ class AchievementsView(discord.ui.View):
                     inline=True
                 )
             else:
-                logger.info("No manga format lines to display (all counts were 0)")
+                logger.debug("No manga format lines to display (all counts were 0)")
         else:
-            logger.info("No manga format distribution data found in stats")
+            logger.debug("No manga format distribution data found in stats")
         
         # Format Distribution - Anime
         anime_format_dist = stats.get("anime_format_distribution", {})
