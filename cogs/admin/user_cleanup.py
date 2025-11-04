@@ -3,10 +3,11 @@ from discord.ext import commands, tasks
 import logging
 import asyncio
 from pathlib import Path
-from typing import List, Dict, Set
-from datetime import datetime, timedelta
+from typing import List, Dict, Set, Tuple, Any
+from datetime import datetime
 
 from database import execute_db_operation
+from helpers.embed_helper import build_error_embed, build_success_embed, build_info_embed, build_warning_embed
 
 # Configuration constants
 LOG_DIR = Path("logs")
@@ -56,26 +57,18 @@ class UserCleanup(commands.Cog):
     
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.cleanup_task_started = False
-        logger.info("UserCleanup cog initialized")
+        logger.info("UserCleanup cog initialized - provides manual cleanup commands")
 
     async def cog_load(self):
         """Called when the cog is loaded."""
-        logger.info("UserCleanup cog loaded - starting cleanup task")
-        # Start the cleanup task when the cog loads
-        if not self.cleanup_task_started:
-            self.cleanup_inactive_users.start()
-            self.cleanup_task_started = True
+        logger.info("UserCleanup cog loaded - manual cleanup commands available")
+        logger.info("Note: Automatic cleanup is handled by bot.py on startup and periodic schedule")
 
     async def cog_unload(self):
         """Called when the cog is unloaded."""
-        logger.info("UserCleanup cog unloading - stopping cleanup task")
-        # Stop the cleanup task when the cog unloads
-        if self.cleanup_task_started:
-            self.cleanup_inactive_users.cancel()
-            self.cleanup_task_started = False
+        logger.info("UserCleanup cog unloading")
 
-    async def get_all_registered_users(self) -> List[Dict]:
+    async def get_all_registered_users(self) -> List[Tuple[Any, ...]]:
         """Get all registered users from the database."""
         try:
             # Check if guild_id column exists, if not fall back to old schema
@@ -258,57 +251,43 @@ class UserCleanup(commands.Cog):
         
         return total_stats
 
-    @tasks.loop(hours=CLEANUP_INTERVAL_HOURS)
-    async def cleanup_inactive_users(self):
-        """Background task that runs user cleanup periodically."""
-        try:
-            logger.info(f"⏰ Automated user cleanup started (runs every {CLEANUP_INTERVAL_HOURS} hours)")
-            stats = await self.perform_full_cleanup()
-            
-            if stats['total_removed'] > 0:
-                logger.info(f"🧹 Cleanup summary: Removed {stats['total_removed']} inactive users "
-                           f"from {stats['guilds_processed']} guilds")
-            else:
-                logger.info("✨ No inactive users found - database is clean!")
-                
-        except Exception as e:
-            logger.error(f"Error in automated cleanup task: {e}", exc_info=True)
-
-    @cleanup_inactive_users.before_loop
-    async def before_cleanup_task(self):
-        """Wait for bot to be ready before starting the cleanup task."""
-        await self.bot.wait_until_ready()
-        logger.info("Bot is ready - user cleanup task will start")
+    # Automatic cleanup is now handled by bot.py's schedule_user_cleanup()
+    # This cog provides manual admin commands that call bot.py's cleanup functions
 
     @commands.command(name="cleanup_users")
     @commands.has_permissions(administrator=True)
     async def manual_cleanup(self, ctx):
         """Manually trigger user cleanup for the current guild."""
         try:
-            await ctx.send("🧹 Starting manual user cleanup for this server...")
+            info_embed = build_info_embed(
+                "User Cleanup",
+                "Starting manual user cleanup for this server..."
+            )
+            await ctx.send(embed=info_embed)
             
             stats = await self.cleanup_users_for_guild(ctx.guild)
             
-            embed = discord.Embed(
-                title="🧹 User Cleanup Complete",
-                color=discord.Color.green()
-            )
-            
-            embed.add_field(
-                name="📊 Statistics",
-                value=f"**Checked:** {stats['checked']} users\n"
-                      f"**Removed:** {stats['removed']} inactive users\n"
-                      f"**Errors:** {stats['errors']}",
-                inline=False
+            stats_text = (
+                f"**Checked:** {stats['checked']} users\n"
+                f"**Removed:** {stats['removed']} inactive users\n"
+                f"**Errors:** {stats['errors']}"
             )
             
             if stats['removed'] > 0:
+                embed = build_success_embed(
+                    "User Cleanup Complete",
+                    stats_text
+                )
                 embed.add_field(
                     name="✅ Result", 
                     value=f"Successfully cleaned up {stats['removed']} users who left the server.",
                     inline=False
                 )
             else:
+                embed = build_success_embed(
+                    "User Cleanup Complete",
+                    stats_text
+                )
                 embed.add_field(
                     name="✨ Result", 
                     value="No inactive users found - database is already clean!",
@@ -319,38 +298,47 @@ class UserCleanup(commands.Cog):
             
         except Exception as e:
             logger.error(f"Error in manual cleanup command: {e}", exc_info=True)
-            await ctx.send(f"❌ Error during cleanup: {str(e)}")
+            embed = build_error_embed(
+                "Cleanup Error",
+                f"Error during cleanup: {str(e)}"
+            )
+            await ctx.send(embed=embed)
 
     @commands.command(name="cleanup_all_guilds")
     @commands.has_permissions(administrator=True)
     async def manual_full_cleanup(self, ctx):
         """Manually trigger user cleanup for all guilds."""
         try:
-            await ctx.send("🚀 Starting manual user cleanup for ALL servers...")
+            info_embed = build_info_embed(
+                "Full User Cleanup",
+                "Starting manual user cleanup for ALL servers..."
+            )
+            await ctx.send(embed=info_embed)
             
             stats = await self.perform_full_cleanup()
             
-            embed = discord.Embed(
-                title="🚀 Full User Cleanup Complete",
-                color=discord.Color.blue()
-            )
-            
-            embed.add_field(
-                name="📊 Statistics",
-                value=f"**Guilds Processed:** {stats['guilds_processed']}\n"
-                      f"**Total Checked:** {stats['total_checked']} users\n"
-                      f"**Total Removed:** {stats['total_removed']} inactive users\n"
-                      f"**Total Errors:** {stats['total_errors']}",
-                inline=False
+            stats_text = (
+                f"**Guilds Processed:** {stats['guilds_processed']}\n"
+                f"**Total Checked:** {stats['total_checked']} users\n"
+                f"**Total Removed:** {stats['total_removed']} inactive users\n"
+                f"**Total Errors:** {stats['total_errors']}"
             )
             
             if stats['total_removed'] > 0:
+                embed = build_success_embed(
+                    "Full User Cleanup Complete",
+                    stats_text
+                )
                 embed.add_field(
                     name="✅ Result", 
                     value=f"Successfully cleaned up {stats['total_removed']} users across {stats['guilds_processed']} servers.",
                     inline=False
                 )
             else:
+                embed = build_success_embed(
+                    "Full User Cleanup Complete",
+                    stats_text
+                )
                 embed.add_field(
                     name="✨ Result", 
                     value="No inactive users found - all databases are clean!",
@@ -361,16 +349,20 @@ class UserCleanup(commands.Cog):
             
         except Exception as e:
             logger.error(f"Error in manual full cleanup command: {e}", exc_info=True)
-            await ctx.send(f"❌ Error during full cleanup: {str(e)}")
+            embed = build_error_embed(
+                "Full Cleanup Error",
+                f"Error during full cleanup: {str(e)}"
+            )
+            await ctx.send(embed=embed)
 
     @commands.command(name="cleanup_status")
     @commands.has_permissions(administrator=True)
     async def cleanup_status(self, ctx):
         """Show the status of the user cleanup system."""
         try:
-            embed = discord.Embed(
-                title="🔧 User Cleanup System Status",
-                color=discord.Color.blue()
+            embed = build_info_embed(
+                "User Cleanup System Status",
+                "Current status and configuration of the user cleanup system"
             )
             
             # Task status
@@ -415,14 +407,22 @@ class UserCleanup(commands.Cog):
             
         except Exception as e:
             logger.error(f"Error in cleanup status command: {e}", exc_info=True)
-            await ctx.send(f"❌ Error getting cleanup status: {str(e)}")
+            embed = build_error_embed(
+                "Status Error",
+                f"Error getting cleanup status: {str(e)}"
+            )
+            await ctx.send(embed=embed)
 
     @commands.command(name="cleanup_test")
     @commands.has_permissions(administrator=True)
     async def cleanup_test(self, ctx):
         """Test the user cleanup system with detailed output."""
         try:
-            await ctx.send("🧪 Testing user cleanup system...")
+            info_embed = build_info_embed(
+                "Cleanup Test",
+                "Testing user cleanup system..."
+            )
+            await ctx.send(embed=info_embed)
             
             # Get current statistics
             all_users = await self.get_all_registered_users()
@@ -449,18 +449,12 @@ class UserCleanup(commands.Cog):
                 if discord_id not in guild_members:
                     users_left.append((discord_id, username))
             
-            embed = discord.Embed(
-                title="🧪 User Cleanup Test Results",
-                color=discord.Color.orange()
-            )
-            
-            embed.add_field(
-                name="📊 Statistics",
-                value=f"**Total Registered Users:** {len(all_users)}\n"
-                      f"**Guild Members:** {len(guild_members)}\n"
-                      f"**Guild Registered Users:** {len(guild_users)}\n"
-                      f"**Users Who Left:** {len(users_left)}",
-                inline=False
+            embed = build_info_embed(
+                "User Cleanup Test Results",
+                f"**Total Registered Users:** {len(all_users)}\n"
+                f"**Guild Members:** {len(guild_members)}\n"
+                f"**Guild Registered Users:** {len(guild_users)}\n"
+                f"**Users Who Left:** {len(users_left)}"
             )
             
             if users_left:
@@ -496,7 +490,11 @@ class UserCleanup(commands.Cog):
             
         except Exception as e:
             logger.error(f"Error in cleanup test command: {e}", exc_info=True)
-            await ctx.send(f"❌ Error during cleanup test: {str(e)}")
+            embed = build_error_embed(
+                "Cleanup Test Error",
+                f"Error during cleanup test: {str(e)}"
+            )
+            await ctx.send(embed=embed)
 
 
 async def setup(bot: commands.Bot):

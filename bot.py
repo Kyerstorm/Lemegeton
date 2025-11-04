@@ -606,18 +606,50 @@ async def fetch_trending_anime_list():
 
 
 # ------------------------------------------------------
-# User Cleanup Task
+# User Cleanup Task (Enhanced with chunking and batching)
 # ------------------------------------------------------
+# Configuration constants for cleanup
+CLEANUP_BATCH_SIZE = 50  # Process users in batches to avoid blocking
+CLEANUP_BATCH_DELAY = 1.0  # Delay between batches in seconds
+
+async def get_guild_members_set(guild: discord.Guild) -> set[int]:
+    """
+    Get all member IDs from a guild, ensuring complete member list by chunking if needed.
+    Returns set of member IDs for fast lookup.
+    """
+    try:
+        # Ensure we have the latest member list by chunking if needed
+        if not guild.chunked:
+            logger.debug(f"Chunking guild {guild.name} to get complete member list")
+            await guild.chunk(cache=True)
+        
+        member_ids = {member.id for member in guild.members}
+        logger.debug(f"Guild {guild.name} has {len(member_ids)} members")
+        return member_ids
+        
+    except Exception as e:
+        logger.error(f"Failed to get members for guild {guild.name} ({guild.id}): {e}", exc_info=True)
+        return set()
+
 async def cleanup_stale_users():
     """
     Clean up user records for users who are no longer in their registered guilds.
-    Runs on startup and every 6 hours to maintain database integrity.
+    Enhanced with chunking, batching, and detailed statistics.
+    Runs on startup and every USER_CLEANUP_INTERVAL to maintain database integrity.
+    
+    Returns:
+        dict with statistics: {'checked': int, 'removed': int, 'errors': int, 'guilds_processed': int}
     """
-    logger.info("Starting user cleanup task")
+    logger.info("🧹 Starting user cleanup task (enhanced)")
+    
+    stats = {
+        'checked': 0,
+        'removed': 0,
+        'errors': 0,
+        'guilds_processed': 0
+    }
 
     try:
-        total_cleaned = 0
-
         for guild in bot.guilds:
             logger.debug(f"Checking guild: {guild.name} (ID: {guild.id})")
 
@@ -630,43 +662,71 @@ async def cleanup_stale_users():
                     continue
 
                 logger.debug(f"Found {len(guild_users)} registered users in guild {guild.name}")
+                
+                # Get complete member list with chunking
+                current_members = await get_guild_members_set(guild)
+                
+                if not current_members:
+                    logger.warning(f"No members found for guild {guild.name} - skipping cleanup")
+                    continue
+                
+                # Process users in batches to avoid blocking
+                for i in range(0, len(guild_users), CLEANUP_BATCH_SIZE):
+                    batch = guild_users[i:i + CLEANUP_BATCH_SIZE]
+                    logger.debug(f"Processing batch {i//CLEANUP_BATCH_SIZE + 1} ({len(batch)} users) for guild {guild.name}")
 
-                for user_data in guild_users:
-                    discord_id = user_data[1]  # discord_id is at index 1
-                    username = user_data[3]    # username is at index 3
+                    for user_data in batch:
+                        stats['checked'] += 1
+                        discord_id = user_data[1]  # discord_id is at index 1
+                        username = user_data[3] if len(user_data) > 3 else f"User {discord_id}"  # username is at index 3
 
-                    try:
-                        # Check if user is still in the guild
-                        member = guild.get_member(discord_id)
+                        try:
+                            # Check if user is still in the guild (fast set lookup)
+                            if discord_id not in current_members:
+                                # User not found in guild, remove their records
+                                logger.info(f"👻 Removing stale user record: {username} (ID: {discord_id}) from guild {guild.name}")
+                                success = await remove_user(discord_id, guild.id)
+                                if success:
+                                    stats['removed'] += 1
+                                    logger.info(f"🗑️ Successfully removed records for user {username} from guild {guild.name}")
+                                else:
+                                    stats['errors'] += 1
+                                    logger.warning(f"Failed to remove records for user {username} from guild {guild.name}")
 
-                        if member is None:
-                            # User not found in guild, remove their records
-                            logger.info(f"Removing stale user record: {username} (ID: {discord_id}) from guild {guild.name}")
-                            success = await remove_user(discord_id, guild.id)
-                            if success:
-                                total_cleaned += 1
-                                logger.info(f"Successfully removed records for user {username} from guild {guild.name}")
-                            else:
-                                logger.warning(f"Failed to remove records for user {username} from guild {guild.name}")
-
-                    except Exception as member_check_error:
-                        logger.error(f"Error checking membership for user {discord_id} in guild {guild.id}: {member_check_error}")
-                        # Don't remove on error - could be permission issue
+                        except Exception as user_error:
+                            stats['errors'] += 1
+                            logger.error(f"Error processing user {discord_id} in guild {guild.id}: {user_error}", exc_info=True)
+                    
+                    # Small delay between batches to avoid blocking
+                    if i + CLEANUP_BATCH_SIZE < len(guild_users):
+                        await asyncio.sleep(CLEANUP_BATCH_DELAY)
+                
+                stats['guilds_processed'] += 1
+                logger.info(f"🏁 Cleanup completed for guild {guild.name}: "
+                           f"checked={stats['checked']}, removed={stats['removed']}, errors={stats['errors']}")
 
             except Exception as guild_error:
-                logger.error(f"Error processing guild {guild.id}: {guild_error}")
+                stats['errors'] += 1
+                logger.error(f"Error processing guild {guild.id}: {guild_error}", exc_info=True)
 
-        if total_cleaned > 0:
-            logger.info(f"User cleanup completed: removed {total_cleaned} stale user records")
+        # Summary logging
+        if stats['removed'] > 0:
+            logger.info(f"✅ User cleanup completed: removed {stats['removed']} stale user records "
+                       f"from {stats['guilds_processed']} guilds (checked {stats['checked']} users, {stats['errors']} errors)")
         else:
-            logger.info("User cleanup completed: no stale records found")
+            logger.info(f"✨ User cleanup completed: no stale records found "
+                       f"({stats['checked']} users checked across {stats['guilds_processed']} guilds)")
 
     except Exception as e:
         logger.error(f"Fatal error in user cleanup task: {e}", exc_info=True)
+        stats['errors'] += 1
+    
+    return stats
 
 async def schedule_user_cleanup():
     """
     Schedule user cleanup to run at configured interval.
+    Enhanced with better error handling and statistics reporting.
     """
     logger.info(f"Starting user cleanup scheduler (runs every {USER_CLEANUP_INTERVAL/3600:.1f} hours)")
 
@@ -676,10 +736,18 @@ async def schedule_user_cleanup():
             await asyncio.sleep(USER_CLEANUP_INTERVAL)
             
             try:
-                logger.info("Running scheduled user cleanup")
-                await cleanup_stale_users()
+                logger.info("⏰ Running scheduled user cleanup")
+                stats = await cleanup_stale_users()
+                
+                # Log summary
+                if stats['removed'] > 0:
+                    logger.info(f"🧹 Scheduled cleanup summary: Removed {stats['removed']} inactive users "
+                               f"from {stats['guilds_processed']} guilds")
+                else:
+                    logger.info("✨ Scheduled cleanup: No inactive users found - database is clean!")
+                    
             except Exception as cleanup_error:
-                logger.error(f"Error in scheduled user cleanup: {cleanup_error}")
+                logger.error(f"Error in scheduled user cleanup: {cleanup_error}", exc_info=True)
                 # Continue the loop despite errors
                 
     except Exception as e:
@@ -1253,9 +1321,12 @@ async def on_ready():
             logger.error(f"Failed to start streaming status updater: {status_task_error}")
         
         try:
-            logger.debug("Running initial user cleanup")
-            await cleanup_stale_users()
-            logger.info("✅ Initial user cleanup completed")
+            logger.debug("Running initial user cleanup on startup")
+            startup_stats = await cleanup_stale_users()
+            if startup_stats['removed'] > 0:
+                logger.info(f"✅ Initial user cleanup completed: removed {startup_stats['removed']} stale records")
+            else:
+                logger.info("✅ Initial user cleanup completed: no stale records found")
             
             logger.debug("Running initial guild cleanup")
             await cleanup_left_guilds()
