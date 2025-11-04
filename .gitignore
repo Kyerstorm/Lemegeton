@@ -1,6 +1,7 @@
 .env
 data/
 web/
+tools/
 
 
 # Python cache
