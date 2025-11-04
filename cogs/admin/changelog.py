@@ -12,11 +12,11 @@ from database import (
     set_guild_bot_update_channel,
     get_guild_bot_update_channel,
     get_all_guild_bot_update_channels,
-    remove_guild_bot_update_channel,
     is_user_bot_moderator,
     is_bot_moderator
 )
 from cogs_test.general_commands.dashboard import command_meta
+from helpers.embed_helper import build_error_embed, build_success_embed, build_info_embed, build_warning_embed
 
 # Setup logger
 logger = logging.getLogger("changelog")
@@ -229,7 +229,8 @@ class Changelog(commands.Cog):
                         content_type = response.headers.get('content-type', '').lower()
                         return content_type.startswith('image/')
                     return False
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Error validating image URL {url}: {e}")
             return False
 
     async def _process_image(self, image_input: str) -> Optional[discord.File]:
@@ -265,7 +266,8 @@ class Changelog(commands.Cog):
                                 filename=f"changelog_image.{ext}"
                             )
             return None
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Error processing image from {image_input}: {e}")
             return None
 
 
@@ -341,26 +343,26 @@ class Changelog(commands.Cog):
 
             # Validate that at least one input method is provided
             if not text and not file:
-                await interaction.followup.send(
-                    "❌ **No content provided**\n\n"
+                embed = build_error_embed(
+                    "No Content Provided",
                     "Please provide either:\n"
                     "• `text`: Type your changelog message directly\n"
                     "• `file`: Upload a .txt or .md file\n\n"
-                    "You must provide at least one of these options.",
-                    ephemeral=True
+                    "You must provide at least one of these options."
                 )
+                await interaction.followup.send(embed=embed, ephemeral=True)
                 return
 
             # Validate that only one input method is used
             if text and file:
-                await interaction.followup.send(
-                    "❌ **Multiple inputs provided**\n\n"
+                embed = build_error_embed(
+                    "Multiple Inputs Provided",
                     "Please use only ONE of these options:\n"
                     "• `text`: Type your changelog message directly\n"
                     "• `file`: Upload a .txt or .md file\n\n"
-                    "Don't use both at the same time.",
-                    ephemeral=True
+                    "Don't use both at the same time."
                 )
+                await interaction.followup.send(embed=embed, ephemeral=True)
                 return
 
             # Process content based on input method
@@ -370,11 +372,19 @@ class Changelog(commands.Cog):
             if file:
                 # Validate file
                 if not file.filename.lower().endswith(('.txt', '.md')):
-                    await interaction.followup.send("❌ Please upload a .txt or .md file.", ephemeral=True)
+                    embed = build_error_embed(
+                        "Invalid File Type",
+                        "Please upload a .txt or .md file."
+                    )
+                    await interaction.followup.send(embed=embed, ephemeral=True)
                     return
 
                 if file.size > 1024 * 1024:  # 1MB limit
-                    await interaction.followup.send("❌ File is too large. Maximum size is 1MB.", ephemeral=True)
+                    embed = build_error_embed(
+                        "File Too Large",
+                        "File is too large. Maximum size is 1MB."
+                    )
+                    await interaction.followup.send(embed=embed, ephemeral=True)
                     return
 
                 # Download and read file content
@@ -386,11 +396,21 @@ class Changelog(commands.Cog):
                     try:
                         text_content = file_content.decode('latin-1')
                         source_info = f"From: {file.filename}"
-                    except:
-                        await interaction.followup.send("❌ Could not decode file. Please ensure it's a text file with UTF-8 or Latin-1 encoding.", ephemeral=True)
+                    except Exception as decode_error:
+                        embed = build_error_embed(
+                            "File Decode Error",
+                            "Could not decode file. Please ensure it's a text file with UTF-8 or Latin-1 encoding."
+                        )
+                        logger.warning(f"Failed to decode file {file.filename}: {decode_error}")
+                        await interaction.followup.send(embed=embed, ephemeral=True)
                         return
                 except Exception as e:
-                    await interaction.followup.send(f"❌ Failed to read file: {str(e)}", ephemeral=True)
+                    embed = build_error_embed(
+                        "File Read Error",
+                        f"Failed to read file: {str(e)}"
+                    )
+                    logger.error(f"Error reading file {file.filename}: {e}", exc_info=True)
+                    await interaction.followup.send(embed=embed, ephemeral=True)
                     return
             else:
                 # Use direct text input
@@ -454,7 +474,11 @@ class Changelog(commands.Cog):
                 update_channels = await get_all_guild_bot_update_channels()
                 
                 if not update_channels:
-                    await interaction.followup.send("❌ No servers have configured bot update channels.", ephemeral=True)
+                    embed = build_error_embed(
+                        "No Update Channels Configured",
+                        "No servers have configured bot update channels."
+                    )
+                    await interaction.followup.send(embed=embed, ephemeral=True)
                     return
                 
                 # Send to all configured channels (no role mentions by default)
@@ -494,34 +518,50 @@ class Changelog(commands.Cog):
                         logger.error(f"Error publishing to guild {guild_id}: {e}")
                 
                 # Send summary
-                summary = f"✅ {type_config['title']} published to {success_count}/{len(update_channels)} configured servers."
                 if failed_guilds:
-                    summary += f"\n\n❌ Failed to send to:\n" + "\n".join(f"• {failure}" for failure in failed_guilds[:5])
+                    failed_list = "\n".join(f"• {failure}" for failure in failed_guilds[:5])
                     if len(failed_guilds) > 5:
-                        summary += f"\n• ... and {len(failed_guilds) - 5} more"
+                        failed_list += f"\n• ... and {len(failed_guilds) - 5} more"
+                    
+                    embed = build_warning_embed(
+                        f"{type_config['title']} Published",
+                        f"Published to {success_count}/{len(update_channels)} configured servers.\n\n"
+                        f"⚠️ **Failed to send to:**\n{failed_list}"
+                    )
+                else:
+                    embed = build_success_embed(
+                        f"{type_config['title']} Published",
+                        f"Successfully published to {success_count}/{len(update_channels)} configured servers."
+                    )
                 
-                await interaction.followup.send(summary, ephemeral=True)
+                await interaction.followup.send(embed=embed, ephemeral=True)
             
             else:
                 # Publish to current server only
                 if not interaction.guild:
-                    await interaction.followup.send("❌ This command must be used in a server for current server publishing.", ephemeral=True)
+                    embed = build_error_embed(
+                        "Server Required",
+                        "This command must be used in a server for current server publishing."
+                    )
+                    await interaction.followup.send(embed=embed, ephemeral=True)
                     return
                     
                 channel_id = await get_guild_bot_update_channel(interaction.guild.id)
                 if not channel_id:
-                    await interaction.followup.send(
-                        "❌ No bot updates channel configured for this server. Use `/set_bot_updates_channel` to configure one.", 
-                        ephemeral=True
+                    embed = build_error_embed(
+                        "No Update Channel Configured",
+                        "No bot updates channel configured for this server. Use `/set_bot_updates_channel` to configure one."
                     )
+                    await interaction.followup.send(embed=embed, ephemeral=True)
                     return
                     
                 channel = self.bot.get_channel(channel_id)
                 if not channel:
-                    await interaction.followup.send(
-                        "❌ Configured bot updates channel not found. Please reconfigure with `/set_bot_updates_channel`.", 
-                        ephemeral=True
+                    embed = build_error_embed(
+                        "Channel Not Found",
+                        "Configured bot updates channel not found. Please reconfigure with `/set_bot_updates_channel`."
                     )
+                    await interaction.followup.send(embed=embed, ephemeral=True)
                     return
                 
                 content_msg = None
@@ -532,7 +572,11 @@ class Changelog(commands.Cog):
                     try:
                         role_to_mention = interaction.guild.get_role(int(role))
                         if not role_to_mention:
-                            await interaction.followup.send(f"⚠️ Could not find the specified role. No role will be mentioned.", ephemeral=True)
+                            embed = build_warning_embed(
+                                "Role Not Found",
+                                "Could not find the specified role. No role will be mentioned."
+                            )
+                            await interaction.followup.send(embed=embed, ephemeral=True)
                         else:
                             # Use the safe mention method
                             mention_text, was_modified = await self.mention_role_safely(role_to_mention)
@@ -544,8 +588,13 @@ class Changelog(commands.Cog):
                                     await role_to_mention.edit(mentionable=False)
                                 except Exception as e:
                                     logger.warning(f"Failed to restore role mentionability: {e}")
-                    except (ValueError, TypeError):
-                        await interaction.followup.send(f"⚠️ Invalid role ID. No role will be mentioned.", ephemeral=True)
+                    except (ValueError, TypeError) as e:
+                        embed = build_warning_embed(
+                            "Invalid Role ID",
+                            "Invalid role ID. No role will be mentioned."
+                        )
+                        logger.warning(f"Invalid role ID provided: {role} - {e}")
+                        await interaction.followup.send(embed=embed, ephemeral=True)
                 
                 if image_file:
                     await channel.send(content=content_msg, embed=embed, file=image_file)
@@ -562,11 +611,21 @@ class Changelog(commands.Cog):
                 else:
                     source_desc = "from direct text input"
 
-                await interaction.followup.send(f"✅ {type_config['title']} created {source_desc} and published to {channel.mention}{mention_info}!", ephemeral=True)
+                success_message = f"{type_config['title']} created {source_desc} and published to {channel.mention}{mention_info}!"
+                embed = build_success_embed(
+                    "Changelog Published",
+                    success_message
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
             
         except Exception as e:
+            logger.error(f"Error processing changelog: {e}", exc_info=True)
             try:
-                await interaction.followup.send(f"❌ Failed to process and publish changelog: {str(e)}", ephemeral=True)
+                embed = build_error_embed(
+                    "Changelog Processing Error",
+                    f"Failed to process and publish changelog: {str(e)}"
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
             except:
                 pass
             raise e
@@ -663,7 +722,11 @@ class Changelog(commands.Cog):
     async def set_bot_updates_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
         """Set the channel where bot updates and announcements will be published."""
         if interaction.guild is None:
-            await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+            embed = build_error_embed(
+                "Server Required",
+                "This command must be used in a server."
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
             
         await interaction.response.defer(ephemeral=True)
@@ -672,50 +735,28 @@ class Changelog(commands.Cog):
             bot_member = interaction.guild.me
             perms = channel.permissions_for(bot_member) if bot_member else None
             if perms and not perms.send_messages:
-                await interaction.followup.send("❌ I don't have permission to send messages in that channel.", ephemeral=True)
+                embed = build_error_embed(
+                    "Missing Permissions",
+                    "I don't have permission to send messages in that channel."
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
                 return
 
             await set_guild_bot_update_channel(interaction.guild.id, channel.id)
-            await interaction.followup.send(f"✅ Bot updates will be sent to {channel.mention}", ephemeral=True)
+            embed = build_success_embed(
+                "Bot Updates Channel Configured",
+                f"Bot updates will be sent to {channel.mention}"
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
             
         except Exception as e:
-            await interaction.followup.send("❌ Failed to set bot updates channel.", ephemeral=True)
+            logger.error(f"Error setting bot updates channel: {e}", exc_info=True)
+            embed = build_error_embed(
+                "Configuration Error",
+                "Failed to set bot updates channel."
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
             raise e
-
-    # ============================================================================
-    # DEPRECATED COMMANDS - USE /server-config INSTEAD
-    # These commands have been consolidated into the unified /server-config interface
-    # Located in: cogs/server_management/server_config.py
-    # Kept here commented for reference only
-    # ============================================================================
-    
-    # @changelog_only()
-    # @app_commands.default_permissions(manage_guild=True)
-    # @app_commands.command(name="show_bot_updates_channel", description="⚠️ DEPRECATED - Use /server-config instead")
-    # async def show_bot_updates_channel(self, interaction: discord.Interaction):
-    #     """DEPRECATED: Show the currently configured bot updates channel. Use /server-config instead."""
-    #     await interaction.response.send_message(
-    #         "⚠️ **This command has been deprecated**\n\n"
-    #         "Please use `/server-config` for a unified configuration interface.\n"
-    #         "You can view bot updates channels and all server settings there.",
-    #         ephemeral=True
-    #     )
-    
-    # @changelog_only()
-    # @app_commands.default_permissions(manage_guild=True)
-    # @app_commands.command(name="remove_bot_updates_channel", description="⚠️ DEPRECATED - Use /server-config instead")
-    # async def remove_bot_updates_channel(self, interaction: discord.Interaction):
-    #     """DEPRECATED: Remove the bot updates channel configuration. Use /server-config instead."""
-    #     await interaction.response.send_message(
-    #         "⚠️ **This command has been deprecated**\n\n"
-    #         "Please use `/server-config` for a unified configuration interface.\n"
-    #         "You can manage bot updates channels and all server settings there.",
-    #         ephemeral=True
-    #     )
-    
-    # ============================================================================
-    # END DEPRECATED COMMANDS
-    # ============================================================================
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Changelog(bot))
