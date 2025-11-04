@@ -312,6 +312,28 @@ def validate_url(url: str) -> bool:
     return bool(re.match(url_pattern, url))
 
 
+def sanitize_url(url: str) -> Optional[str]:
+    """
+    Ensure URL is well-formed and safe for Discord embeds.
+    Removes whitespace, validates scheme and netloc, and rebuilds safely.
+    """
+    import urllib.parse
+    
+    if not url or not isinstance(url, str):
+        return None
+    
+    url = url.strip()  # Remove leading/trailing spaces
+    # Encode spaces or illegal characters in query
+    url = re.sub(r'\s+', '', url)
+    parsed = urllib.parse.urlparse(url)
+    
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    
+    # Rebuild a safe URL
+    return urllib.parse.urlunparse(parsed)
+
+
 def validate_anilist_username(username: str, max_length: int = 50) -> bool:
     """
     Validate AniList username format.
