@@ -506,21 +506,37 @@ class MangaChallenges(commands.Cog):
                 # Calculate progress percentage for skipped check
                 pct_progress = (ani_progress_num / effective_total) if effective_total else 0.0
 
+                # Validate date types before comparison
+                from datetime import date as date_type
+                both_dates_valid = (
+                    started_at_val is not None 
+                    and challenge_start_date_val is not None
+                    and isinstance(started_at_val, date_type)
+                    and isinstance(challenge_start_date_val, date_type)
+                )
+
                 logger.debug(
                     f"Status determination: progress={ani_progress_num}/{effective_total} ({pct_progress:.1%}), "
                     f"status={status_upper}, repeat={ani_repeat_num}, media_status={media_status_upper}, "
-                    f"started_at_raw='{ani_started_at}', started_at_parsed={started_at_val}, "
-                    f"challenge_start_raw='{challenge_start_date}', challenge_start_parsed={challenge_start_date_val}"
+                    f"started_at_raw='{ani_started_at}', started_at_parsed={started_at_val} (type: {type(started_at_val).__name__}), "
+                    f"challenge_start_raw='{challenge_start_date}', challenge_start_parsed={challenge_start_date_val} (type: {type(challenge_start_date_val).__name__}), "
+                    f"dates_valid={both_dates_valid}"
                 )
 
                 # Priority 1: SKIPPED - Started before challenge with 25%+ progress
                 # Applies to ALL statuses: completed, caught up, paused, dropped, in progress
                 # This ensures titles started before challenge existence are marked as skipped
-                if challenge_start_date_val and started_at_val:
-                    if started_at_val < challenge_start_date_val:
+                # IMPORTANT: Only mark as skipped if started_at is BEFORE challenge_start_date
+                if both_dates_valid:
+                    date_comparison = started_at_val < challenge_start_date_val
+                    logger.debug(
+                        f"Date comparison: {started_at_val} < {challenge_start_date_val} = {date_comparison}"
+                    )
+                    
+                    if date_comparison:  # Started BEFORE challenge
                         if pct_progress >= 0.25:
                             logger.info(
-                                f"✅ Status: Skipped (started {started_at_val} before challenge {challenge_start_date_val} "
+                                f"✅ Status: Skipped (started {started_at_val} BEFORE challenge {challenge_start_date_val} "
                                 f"with {pct_progress:.1%} progress, AniList status: {status_upper})"
                             )
                             return "Skipped"
@@ -529,9 +545,9 @@ class MangaChallenges(commands.Cog):
                                 f"⚠️ Skipped check failed: progress {pct_progress:.1%} < 25% threshold "
                                 f"(started {started_at_val} before challenge {challenge_start_date_val})"
                             )
-                    else:
+                    else:  # Started AFTER or ON challenge date - NOT skipped
                         logger.debug(
-                            f"⚠️ Skipped check failed: started {started_at_val} is NOT before challenge {challenge_start_date_val}"
+                            f"✅ Skipped check passed: started {started_at_val} is AFTER or ON challenge {challenge_start_date_val} - proceeding to normal status checks"
                         )
                 else:
                     missing_dates = []
