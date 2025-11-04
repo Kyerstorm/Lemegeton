@@ -23,6 +23,7 @@ try:
         )
         from helpers.gaming_utils import gaming_error_handler, format_playtime
         from helpers.command_logger import log_command
+        from helpers.embed_helper import build_error_embed, build_warning_embed
         from cogs_test.general_commands.dashboard import command_meta
     except Exception:
         import sys
@@ -39,6 +40,7 @@ try:
         )
         from helpers.gaming_utils import gaming_error_handler, format_playtime
         from helpers.command_logger import log_command
+        from helpers.embed_helper import build_error_embed, build_warning_embed
 except ModuleNotFoundError:
     # Some deployment environments don't put the project root on sys.path.
     # Try to add the repo root (two levels up from this file: ../..) to sys.path
@@ -58,6 +60,7 @@ except ModuleNotFoundError:
     )
     from helpers.gaming_utils import gaming_error_handler, format_playtime
     from helpers.command_logger import log_command
+    from helpers.embed_helper import build_error_embed, build_warning_embed
     from cogs_test.general_commands.dashboard import command_meta
 
 
@@ -86,7 +89,11 @@ class SteamProfile(commands.Cog):
                 await cur.close()
 
                 if not row:
-                    return await interaction.followup.send("❌ You have not registered a Steam account. Use `/login` to register your Steam account.")
+                    embed = build_error_embed(
+                        "Account Not Registered",
+                        "You have not registered a Steam account. Use `/login` to register your Steam account."
+                    )
+                    return await interaction.followup.send(embed=embed)
                 steamid, vanity = row
                 user = vanity
         logger.debug(f"Resolved steam identifier: steamid={steamid} vanity={vanity} (user param now={user})")
@@ -96,7 +103,11 @@ class SteamProfile(commands.Cog):
                 res = await safe_json(session, "https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/",
                                       params={"key": STEAM_API_KEY, "vanityurl": user})
                 if not res or res.get("response", {}).get("success") != 1:
-                    return await interaction.followup.send("❌ Could not resolve that user.")
+                    embed = build_error_embed(
+                        "User Not Found",
+                        "Could not resolve that user."
+                    )
+                    return await interaction.followup.send(embed=embed)
                 steamid = res["response"]["steamid"]
 
             # player summary
@@ -105,7 +116,11 @@ class SteamProfile(commands.Cog):
             players = ps.get("response", {}).get("players", []) if ps else []
             if not players:
                 logger.warning(f"No players data returned for steamid={steamid}")
-                return await interaction.followup.send("❌ No profile data found.")
+                embed = build_error_embed(
+                    "Profile Not Found",
+                    "No profile data found."
+                )
+                return await interaction.followup.send(embed=embed)
             player = players[0]
             logger.debug(f"Fetched player summary for steamid={steamid} -> personaname={player.get('personaname')}")
 
@@ -322,7 +337,11 @@ class SteamProfile(commands.Cog):
                 view.is_ephemeral = new_ephemeral
             except Exception:
                 try:
-                    await btn_inter.followup.send("⚠️ Could not toggle visibility.")
+                    embed = build_warning_embed(
+                        "Toggle Failed",
+                        "Could not toggle visibility."
+                    )
+                    await btn_inter.followup.send(embed=embed)
                 except Exception:
                     pass
         toggle_button.callback = toggle_cb
@@ -392,11 +411,19 @@ class SteamProfile(commands.Cog):
                     await progress_msg.edit(content="🔎 Scraping groups...")
                     await self._send_groups(sel_inter, steamid, progress_msg=progress_msg)
                 else:
-                    await progress_msg.edit(content="⚠️ Unknown selection.")
+                    embed = build_warning_embed(
+                    "Unknown Selection",
+                    "Unknown selection."
+                )
+                await progress_msg.edit(content=None, embed=embed)
             except Exception:
                 logger.exception("Error processing details selection")
                 try:
-                    await progress_msg.edit(content="⚠️ Failed to fetch details.")
+                    embed = build_error_embed(
+                        "Fetch Failed",
+                        "Failed to fetch details."
+                    )
+                    await progress_msg.edit(content=None, embed=embed)
                 except Exception:
                     pass
 
@@ -659,10 +686,14 @@ class SteamProfile(commands.Cog):
         async with aiohttp.ClientSession() as session:
             html = await fetch_text(session, f"https://steamcommunity.com/profiles/{steamid}/screenshots/") or await fetch_text(session, f"https://steamcommunity.com/profiles/{steamid}") or await fetch_text(session, f"https://steamcommunity.com/id/{steamid}/screenshots/")
         if not html:
+            embed = build_warning_embed(
+                "Screenshots Unavailable",
+                "Could not fetch screenshots or profile is private."
+            )
             try:
-                await progress_msg.edit(content="⚠️ Could not fetch screenshots or profile is private.")
+                await progress_msg.edit(content=None, embed=embed)
             except Exception:
-                await interaction.followup.send("⚠️ Could not fetch screenshots or profile is private.", ephemeral=True)
+                await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
         soup = BeautifulSoup(html, "html.parser")
@@ -675,11 +706,15 @@ class SteamProfile(commands.Cog):
         # dedupe
         imgs = list(dict.fromkeys(imgs))
         if not imgs:
+            embed = build_warning_embed(
+                "No Screenshots",
+                "No screenshots found or profile private."
+            )
             try:
                 if progress_msg:
-                    await progress_msg.edit(content="⚠️ No screenshots found or profile private.")
+                    await progress_msg.edit(content=None, embed=embed)
                 else:
-                    await interaction.followup.send("⚠️ No screenshots found or profile private.", ephemeral=True)
+                    await interaction.followup.send(embed=embed, ephemeral=True)
             except Exception:
                 pass
             return
@@ -741,10 +776,14 @@ class SteamProfile(commands.Cog):
         async with aiohttp.ClientSession() as session:
             html = await fetch_text(session, f"https://steamcommunity.com/profiles/{steamid}/videos/") or await fetch_text(session, f"https://steamcommunity.com/profiles/{steamid}") or await fetch_text(session, f"https://steamcommunity.com/id/{steamid}/videos/")
         if not html:
+            embed = build_warning_embed(
+                "Videos Unavailable",
+                "Could not fetch videos or profile is private."
+            )
             try:
-                await progress_msg.edit(content="⚠️ Could not fetch videos or profile is private.")
+                await progress_msg.edit(content=None, embed=embed)
             except Exception:
-                await interaction.followup.send("⚠️ Could not fetch videos or profile is private.", ephemeral=True)
+                await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
         soup = BeautifulSoup(html, "html.parser")
@@ -756,11 +795,15 @@ class SteamProfile(commands.Cog):
                 videos.append(href)
         videos = list(dict.fromkeys(videos))
         if not videos:
+            embed = build_warning_embed(
+                "No Videos",
+                "No videos found."
+            )
             try:
                 if progress_msg:
-                    await progress_msg.edit(content="⚠️ No videos found.")
+                    await progress_msg.edit(content=None, embed=embed)
                 else:
-                    await interaction.followup.send("⚠️ No videos found.", ephemeral=True)
+                    await interaction.followup.send(embed=embed, ephemeral=True)
             except Exception:
                 pass
             return
@@ -783,11 +826,15 @@ class SteamProfile(commands.Cog):
         async with aiohttp.ClientSession() as session:
             html = await fetch_text(session, f"https://steamcommunity.com/profiles/{steamid}") or await fetch_text(session, f"https://steamcommunity.com/id/{steamid}")
         if not html:
+            embed = build_warning_embed(
+                "Profile Unavailable",
+                "Could not fetch profile (private?)"
+            )
             try:
                 if progress_msg:
-                    await progress_msg.edit(content="⚠️ Could not fetch profile (private?)")
+                    await progress_msg.edit(content=None, embed=embed)
                 else:
-                    await interaction.followup.send("⚠️ Could not fetch profile (private?)", ephemeral=True)
+                    await interaction.followup.send(embed=embed, ephemeral=True)
             except Exception:
                 pass
             return
@@ -832,11 +879,15 @@ class SteamProfile(commands.Cog):
                         continue
 
         if not parsed:
+            embed = build_warning_embed(
+                "No Comments",
+                "No comments found or profile private."
+            )
             try:
                 if progress_msg:
-                    await progress_msg.edit(content="⚠️ No comments found or profile private.")
+                    await progress_msg.edit(content=None, embed=embed)
                 else:
-                    await interaction.followup.send("⚠️ No comments found or profile private.", ephemeral=True)
+                    await interaction.followup.send(embed=embed, ephemeral=True)
             except Exception:
                 pass
             return
@@ -911,11 +962,15 @@ class SteamProfile(commands.Cog):
         async with aiohttp.ClientSession() as session:
             html = await fetch_text(session, f"https://steamcommunity.com/profiles/{steamid}/groups/") or await fetch_text(session, f"https://steamcommunity.com/profiles/{steamid}") or await fetch_text(session, f"https://steamcommunity.com/id/{steamid}/groups/")
         if not html:
+            embed = build_warning_embed(
+                "Groups Unavailable",
+                "Could not fetch groups."
+            )
             try:
                 if progress_msg:
-                    await progress_msg.edit(content="⚠️ Could not fetch groups.")
+                    await progress_msg.edit(content=None, embed=embed)
                 else:
-                    await interaction.followup.send("⚠️ Could not fetch groups.", ephemeral=True)
+                    await interaction.followup.send(embed=embed, ephemeral=True)
             except Exception:
                 pass
             return
@@ -933,11 +988,15 @@ class SteamProfile(commands.Cog):
                 if "/groups/" in a["href"]:
                     groups.append({"name": a.get_text(" ", strip=True), "url": a["href"]})
         if not groups:
+            embed = build_warning_embed(
+                "No Groups",
+                "No groups found."
+            )
             try:
                 if progress_msg:
-                    await progress_msg.edit(content="⚠️ No groups found.")
+                    await progress_msg.edit(content=None, embed=embed)
                 else:
-                    await interaction.followup.send("⚠️ No groups found.", ephemeral=True)
+                    await interaction.followup.send(embed=embed, ephemeral=True)
             except Exception:
                 pass
             return

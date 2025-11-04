@@ -15,6 +15,7 @@ from discord import app_commands
 import aiohttp
 
 from helpers.command_logger import log_command
+from helpers.embed_helper import build_error_embed, build_success_embed, build_info_embed, build_warning_embed
 import database
 from cogs_test.general_commands.dashboard import command_meta
 
@@ -549,34 +550,31 @@ class FreeGamesManagementView(discord.ui.View):
                 all_games.append({**game, 'platform': 'Steam', 'emoji': '🎮'})
             
             if not all_games:
-                embed = discord.Embed(
-                    title="🎮 Currently Free Games",
-                    description="😢 No free games available right now. Check back later!",
-                    color=0xffaa00,
-                    timestamp=datetime.utcnow()
+                embed = build_info_embed(
+                    "Currently Free Games",
+                    "No free games available right now. Check back later!"
                 )
+                embed.timestamp = datetime.utcnow()
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
             
             # Send header message
             now = datetime.utcnow()
-            header_embed = discord.Embed(
-                title="🎮 Currently Free Games",
-                description=f"**{len(all_games)}** free game{'s' if len(all_games) != 1 else ''} available now!",
-                color=0x00ff00,
-                timestamp=now
+            header_embed = build_success_embed(
+                "Currently Free Games",
+                f"**{len(all_games)}** free game{'s' if len(all_games) != 1 else ''} available now!"
             )
+            header_embed.timestamp = now
             await interaction.followup.send(embed=header_embed, ephemeral=True)
             
             # Send individual game embeds with claim buttons
             for i, game in enumerate(all_games, 1):
                 # Create detailed embed for each game
-                embed = discord.Embed(
-                    title=game['title'],
-                    description=game.get('description', 'No description available')[:4096],
-                    color=0x00ff00,
-                    timestamp=now
+                embed = build_success_embed(
+                    game['title'],
+                    game.get('description', 'No description available')[:4096]
                 )
+                embed.timestamp = now
                 
                 # Add platform field
                 embed.add_field(
@@ -625,12 +623,13 @@ class FreeGamesManagementView(discord.ui.View):
             logger.info(f"Sent {len(all_games)} free game embeds to {interaction.user.display_name}")
             
         except Exception as e:
-            logger.error(f"Error checking free games: {e}")
+            logger.error(f"Error checking free games: {e}", exc_info=True)
             try:
-                await interaction.followup.send(
-                    "❌ An error occurred while fetching free games. Please try again later.",
-                    ephemeral=True
+                embed = build_error_embed(
+                    "Error Fetching Games",
+                    "An error occurred while fetching free games. Please try again later."
                 )
+                await interaction.followup.send(embed=embed, ephemeral=True)
             except:
                 pass
     
@@ -641,10 +640,11 @@ class FreeGamesManagementView(discord.ui.View):
         
         # Check admin permissions
         if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message(
-                "❌ You need administrator permissions to setup free game notifications.",
-                ephemeral=True
+            embed = build_error_embed(
+                "Permission Denied",
+                "You need administrator permissions to setup free game notifications."
             )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
         # Show channel select modal
@@ -658,10 +658,11 @@ class FreeGamesManagementView(discord.ui.View):
         
         # Check admin permissions
         if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message(
-                "❌ You need administrator permissions to disable free game notifications.",
-                ephemeral=True
+            embed = build_error_embed(
+                "Permission Denied",
+                "You need administrator permissions to disable free game notifications."
             )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
         try:
@@ -687,10 +688,9 @@ class FreeGamesManagementView(discord.ui.View):
             success = await database.remove_free_games_channel(guild_id)
             
             if success:
-                embed = discord.Embed(
-                    title="✅ Notifications Disabled",
-                    description="Free games notifications have been disabled for this server.",
-                    color=0xffaa00
+                embed = build_warning_embed(
+                    "Notifications Disabled",
+                    "Free games notifications have been disabled for this server."
                 )
                 embed.add_field(
                     name="ℹ️ Note",
@@ -698,22 +698,22 @@ class FreeGamesManagementView(discord.ui.View):
                     inline=False
                 )
             else:
-                embed = discord.Embed(
-                    title="❌ Error",
-                    description="Failed to disable notifications. Please try again.",
-                    color=0xff0000
+                embed = build_error_embed(
+                    "Error",
+                    "Failed to disable notifications. Please try again."
                 )
             
             await interaction.followup.send(embed=embed, ephemeral=True)
             logger.info(f"Disabled free games notifications for guild {guild_id}")
             
         except Exception as e:
-            logger.error(f"Error disabling notifications: {e}")
+            logger.error(f"Error disabling notifications: {e}", exc_info=True)
             try:
-                await interaction.followup.send(
-                    "❌ An error occurred while disabling notifications.",
-                    ephemeral=True
+                embed = build_error_embed(
+                    "Error",
+                    "An error occurred while disabling notifications."
                 )
+                await interaction.followup.send(embed=embed, ephemeral=True)
             except:
                 pass
     
@@ -732,22 +732,23 @@ class FreeGamesManagementView(discord.ui.View):
             guild_id = interaction.guild_id
             channel_id = await database.get_free_games_channel(guild_id)
             
-            embed = discord.Embed(
-                title="📊 Free Games Notification Status",
-                color=0x1DA1F2
-            )
-            
             if channel_id:
                 channel = interaction.guild.get_channel(channel_id)
                 if channel:
-                    embed.description = f"✅ **Notifications Enabled**\n\nDaily notifications are sent to {channel.mention} at 12:00 PM UTC."
-                    embed.color = 0x00ff00
+                    embed = build_success_embed(
+                        "Free Games Notification Status",
+                        f"**Notifications Enabled**\n\nDaily notifications are sent to {channel.mention} at 12:00 PM UTC."
+                    )
                 else:
-                    embed.description = f"⚠️ **Channel Not Found**\n\nNotifications are configured but the channel (ID: {channel_id}) no longer exists.\n\nPlease setup notifications again."
-                    embed.color = 0xffaa00
+                    embed = build_warning_embed(
+                        "Free Games Notification Status",
+                        f"**Channel Not Found**\n\nNotifications are configured but the channel (ID: {channel_id}) no longer exists.\n\nPlease setup notifications again."
+                    )
             else:
-                embed.description = "❌ **Notifications Disabled**\n\nAutomatic notifications are not enabled for this server.\n\nUse the 'Setup Notifications' button to enable them."
-                embed.color = 0xff0000
+                embed = build_error_embed(
+                    "Free Games Notification Status",
+                    "**Notifications Disabled**\n\nAutomatic notifications are not enabled for this server.\n\nUse the 'Setup Notifications' button to enable them."
+                )
             
             embed.add_field(
                 name="🔔 Notification Schedule",
@@ -758,12 +759,13 @@ class FreeGamesManagementView(discord.ui.View):
             await interaction.followup.send(embed=embed, ephemeral=True)
             
         except Exception as e:
-            logger.error(f"Error getting status: {e}")
+            logger.error(f"Error getting status: {e}", exc_info=True)
             try:
-                await interaction.followup.send(
-                    "❌ An error occurred while getting status.",
-                    ephemeral=True
+                embed = build_error_embed(
+                    "Error",
+                    "An error occurred while getting status."
                 )
+                await interaction.followup.send(embed=embed, ephemeral=True)
             except:
                 pass
     
@@ -801,36 +803,40 @@ class ChannelSetupModal(discord.ui.Modal, title="Setup Free Games Notifications"
             try:
                 channel_id = int(channel_id_str)
             except ValueError:
-                await interaction.followup.send(
-                    "❌ Invalid channel ID. Please enter a valid number.",
-                    ephemeral=True
+                embed = build_error_embed(
+                    "Invalid Input",
+                    "Invalid channel ID. Please enter a valid number."
                 )
+                await interaction.followup.send(embed=embed, ephemeral=True)
                 return
             
             # Verify channel exists and bot can access it
             channel = interaction.guild.get_channel(channel_id)
             
             if not channel:
-                await interaction.followup.send(
-                    "❌ Channel not found. Make sure the channel exists and the bot has access to it.",
-                    ephemeral=True
+                embed = build_error_embed(
+                    "Channel Not Found",
+                    "Channel not found. Make sure the channel exists and the bot has access to it."
                 )
+                await interaction.followup.send(embed=embed, ephemeral=True)
                 return
             
             if not isinstance(channel, discord.TextChannel):
-                await interaction.followup.send(
-                    "❌ The specified channel must be a text channel.",
-                    ephemeral=True
+                embed = build_error_embed(
+                    "Invalid Channel Type",
+                    "The specified channel must be a text channel."
                 )
+                await interaction.followup.send(embed=embed, ephemeral=True)
                 return
             
             # Check bot permissions
             permissions = channel.permissions_for(interaction.guild.me)
             if not permissions.send_messages or not permissions.embed_links:
-                await interaction.followup.send(
-                    f"❌ I don't have permission to send messages in {channel.mention}. Please grant me the necessary permissions.",
-                    ephemeral=True
+                embed = build_error_embed(
+                    "Missing Permissions",
+                    f"I don't have permission to send messages in {channel.mention}. Please grant me the necessary permissions."
                 )
+                await interaction.followup.send(embed=embed, ephemeral=True)
                 return
             
             # Save to database
@@ -838,10 +844,9 @@ class ChannelSetupModal(discord.ui.Modal, title="Setup Free Games Notifications"
             success = await database.set_free_games_channel(guild_id, channel_id)
             
             if success:
-                embed = discord.Embed(
-                    title="✅ Notifications Enabled",
-                    description=f"I'll post new free games in {channel.mention} every day at 12:00 PM UTC.",
-                    color=0x00ff00
+                embed = build_success_embed(
+                    "Notifications Enabled",
+                    f"I'll post new free games in {channel.mention} every day at 12:00 PM UTC."
                 )
                 embed.add_field(
                     name="🔔 What You'll Get",
@@ -852,21 +857,21 @@ class ChannelSetupModal(discord.ui.Modal, title="Setup Free Games Notifications"
                 
                 logger.info(f"Set free games channel for guild {guild_id} to {channel_id}")
             else:
-                embed = discord.Embed(
-                    title="❌ Setup Failed",
-                    description="Failed to save notification settings. Please try again.",
-                    color=0xff0000
+                embed = build_error_embed(
+                    "Setup Failed",
+                    "Failed to save notification settings. Please try again."
                 )
             
             await interaction.followup.send(embed=embed, ephemeral=True)
             
         except Exception as e:
-            logger.error(f"Error in channel setup modal: {e}")
+            logger.error(f"Error in channel setup modal: {e}", exc_info=True)
             try:
-                await interaction.followup.send(
-                    "❌ An error occurred while setting up notifications.",
-                    ephemeral=True
+                embed = build_error_embed(
+                    "Error",
+                    "An error occurred while setting up notifications."
                 )
+                await interaction.followup.send(embed=embed, ephemeral=True)
             except:
                 pass
 
@@ -948,25 +953,27 @@ class FreeGamesCog(commands.Cog):
             channel_id = await database.get_free_games_channel(guild_id)
             
             # Create status embed
-            embed = discord.Embed(
-                title="🎮 Free Games Management",
-                description="Manage automatic notifications for free games from Epic, GOG, and Steam.",
-                color=0x00ff00,
-                timestamp=datetime.utcnow()
-            )
-            
-            # Add notification status
             if channel_id:
                 channel = interaction.guild.get_channel(channel_id)
                 if channel:
-                    status_text = f"✅ **Notifications Enabled**\n\nDaily posts to {channel.mention} at 12:00 PM UTC"
-                    embed.color = 0x00ff00
+                    embed = build_success_embed(
+                        "Free Games Management",
+                        "Manage automatic notifications for free games from Epic, GOG, and Steam."
+                    )
+                    status_text = f"**Notifications Enabled**\n\nDaily posts to {channel.mention} at 12:00 PM UTC"
                 else:
-                    status_text = f"⚠️ **Channel Not Found**\n\nConfigured channel (ID: {channel_id}) no longer exists"
-                    embed.color = 0xffaa00
+                    embed = build_warning_embed(
+                        "Free Games Management",
+                        "Manage automatic notifications for free games from Epic, GOG, and Steam."
+                    )
+                    status_text = f"**Channel Not Found**\n\nConfigured channel (ID: {channel_id}) no longer exists"
             else:
-                status_text = "❌ **Notifications Disabled**\n\nNo automatic notifications configured"
-                embed.color = 0x1DA1F2
+                embed = build_info_embed(
+                    "Free Games Management",
+                    "Manage automatic notifications for free games from Epic, GOG, and Steam."
+                )
+                status_text = "**Notifications Disabled**\n\nNo automatic notifications configured"
+            embed.timestamp = datetime.utcnow()
             
             embed.add_field(
                 name="📊 Current Status",
@@ -979,7 +986,7 @@ class FreeGamesCog(commands.Cog):
                 value=(
                     "🎮 **Check Free Games** - See current free games\n"
                     "🔔 **Setup Notifications** - Configure automatic posts (Admin)\n"
-                    "❌ **Disable Notifications** - Stop automatic posts (Admin)\n"
+                    "**Disable Notifications** - Stop automatic posts (Admin)\n"
                     "ℹ️ **Status** - View detailed notification status"
                 ),
                 inline=False
@@ -999,12 +1006,13 @@ class FreeGamesCog(commands.Cog):
             logger.info(f"Sent free games management interface to {interaction.user.display_name}")
             
         except Exception as e:
-            logger.error(f"Error in free_games command: {e}")
+            logger.error(f"Error in free_games command: {e}", exc_info=True)
             try:
-                await interaction.followup.send(
-                    "❌ An error occurred while loading the free games management system.",
-                    ephemeral=True
+                embed = build_error_embed(
+                    "Error",
+                    "An error occurred while loading the free games management system."
                 )
+                await interaction.followup.send(embed=embed, ephemeral=True)
             except:
                 pass
 
@@ -1043,12 +1051,11 @@ class FreeGamesCog(commands.Cog):
                 all_games.append({**game, 'platform': 'Steam', 'emoji': '🎮'})
 
             if not all_games:
-                embed = discord.Embed(
-                    title="🎮 No Free Games Found",
-                    description="No temporarily free games found on any platform at the moment.\n\nNote: This only checks for games that were paid but are now free (like Epic's weekly free games).",
-                    color=0x1DA1F2,
-                    timestamp=datetime.utcnow()
+                embed = build_info_embed(
+                    "No Free Games Found",
+                    "No temporarily free games found on any platform at the moment.\n\nNote: This only checks for games that were paid but are now free (like Epic's weekly free games)."
                 )
+                embed.timestamp = datetime.utcnow()
                 embed.add_field(
                     name="📊 Checked Platforms",
                     value="• Epic Games Store ✓\n• GOG ✓\n• Steam ✓",
@@ -1059,12 +1066,11 @@ class FreeGamesCog(commands.Cog):
                 return
 
             # Send header
-            header_embed = discord.Embed(
-                title="🎮 Current Free Games",
-                description=f"Found **{len(all_games)}** free game{'s' if len(all_games) != 1 else ''} currently available!",
-                color=0x00ff00,
-                timestamp=datetime.utcnow()
+            header_embed = build_success_embed(
+                "Current Free Games",
+                f"Found **{len(all_games)}** free game{'s' if len(all_games) != 1 else ''} currently available!"
             )
+            header_embed.timestamp = datetime.utcnow()
             header_embed.add_field(
                 name="📊 Results",
                 value=(
@@ -1079,12 +1085,11 @@ class FreeGamesCog(commands.Cog):
 
             # Send individual game embeds
             for i, game in enumerate(all_games, 1):
-                embed = discord.Embed(
-                    title=game['title'],
-                    description=game.get('description', 'No description available')[:4096],
-                    color=0x00ff00,
-                    timestamp=datetime.utcnow()
+                embed = build_success_embed(
+                    game['title'],
+                    game.get('description', 'No description available')[:4096]
                 )
+                embed.timestamp = datetime.utcnow()
 
                 # Add platform field
                 embed.add_field(
@@ -1209,24 +1214,22 @@ class FreeGamesCog(commands.Cog):
                         continue
                     
                     # Send header message
-                    header_embed = discord.Embed(
-                        title="🎮 Free Games Alert!",
-                        description=f"**{total_games}** new free game{'s' if total_games != 1 else ''} available today!",
-                        color=0x00ff00,
-                        timestamp=now
+                    header_embed = build_success_embed(
+                        "Free Games Alert!",
+                        f"**{total_games}** new free game{'s' if total_games != 1 else ''} available today!"
                     )
+                    header_embed.timestamp = now
                     header_embed.set_footer(text="Use /free-games to check free games anytime")
                     await channel.send(embed=header_embed)
                     
                     # Send individual game embeds with claim buttons
                     for i, game in enumerate(new_games, 1):
                         # Create detailed embed for each game (matching manual check format)
-                        embed = discord.Embed(
-                            title=game['title'],
-                            description=game.get('description', 'No description available')[:4096],
-                            color=0x00ff00,
-                            timestamp=now
+                        embed = build_success_embed(
+                            game['title'],
+                            game.get('description', 'No description available')[:4096]
                         )
+                        embed.timestamp = now
                         
                         # Add platform field
                         embed.add_field(

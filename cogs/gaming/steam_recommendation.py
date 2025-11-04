@@ -17,6 +17,7 @@ try:
             logger, safe_json, STEAM_API_KEY, DB_PATH,
             RecommendationView, create_recommendation_embed
         )
+        from helpers.embed_helper import build_error_embed, build_info_embed
         from cogs_test.general_commands.dashboard import command_meta
     except Exception:
         import sys
@@ -29,6 +30,7 @@ try:
             logger, safe_json, STEAM_API_KEY, DB_PATH,
             RecommendationView, create_recommendation_embed
         )
+        from helpers.embed_helper import build_error_embed, build_info_embed
         from cogs_test.general_commands.dashboard import command_meta
 except ModuleNotFoundError:
     # Some deployment environments don't put the project root on sys.path.
@@ -45,6 +47,7 @@ except ModuleNotFoundError:
         logger, safe_json, STEAM_API_KEY, DB_PATH,
         RecommendationView, create_recommendation_embed
     )
+    from helpers.embed_helper import build_error_embed, build_info_embed
     from cogs_test.general_commands.dashboard import command_meta
 
 
@@ -112,7 +115,11 @@ class SteamRecommendation(commands.Cog):
                 row = await cur.fetchone()
                 await cur.close()
             if not row:
-                return await interaction.followup.send("❌ You have not registered a Steam account. Use `/login` to register your Steam account.", ephemeral=True)
+                embed = build_error_embed(
+                    "Account Not Registered",
+                    "You have not registered a Steam account. Use `/login` to register your Steam account."
+                )
+                return await interaction.followup.send(embed=embed, ephemeral=True)
             steamid = row[0]
 
         async with aiohttp.ClientSession() as session:
@@ -122,10 +129,18 @@ class SteamRecommendation(commands.Cog):
             owned_games = owned.get("response", {}).get("games", []) if owned else []
             
             if not owned_games:
-                return await interaction.followup.send("❌ No games found in your library or profile is private.", ephemeral=True)
+                embed = build_error_embed(
+                    "No Games Found",
+                    "No games found in your library or profile is private."
+                )
+                return await interaction.followup.send(embed=embed, ephemeral=True)
 
             if len(owned_games) < 3:
-                return await interaction.followup.send("❌ You need at least 3 games in your library to get recommendations.", ephemeral=True)
+                embed = build_error_embed(
+                    "Insufficient Games",
+                    "You need at least 3 games in your library to get recommendations."
+                )
+                return await interaction.followup.send(embed=embed, ephemeral=True)
 
             # Analyze user preferences
             filter_msg = []
@@ -139,12 +154,20 @@ class SteamRecommendation(commands.Cog):
                 filter_msg.append("Multiplayer Only")
 
             filter_text = f" ({', '.join(filter_msg)})" if filter_msg else ""
-            await interaction.followup.send(f"🔄 Analyzing your game library and preferences{filter_text}...", ephemeral=True)
+            embed = build_info_embed(
+                "Analyzing Library",
+                f"Analyzing your game library and preferences{filter_text}..."
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
 
             recommendations = await self._generate_recommendations(session, owned_games, steamid, filters)
 
             if not recommendations:
-                return await interaction.edit_original_response(content="❌ No recommendations found matching your filters. Try adjusting your criteria.")
+                embed = build_error_embed(
+                    "No Recommendations Found",
+                    "No recommendations found matching your filters. Try adjusting your criteria."
+                )
+                return await interaction.edit_original_response(content=None, embed=embed)
 
             # Create interactive recommendation view
             view = RecommendationView(recommendations, interaction.user)
@@ -370,16 +393,16 @@ class SteamRecommendation(commands.Cog):
 
         details = recommendation.get("details", {})
         if not details:
-            logger.error(f"No details found in recommendation! Keys: {recommendation.keys()}")
-            logger.error(f"Full recommendation data: {recommendation}")
+            logger.error(f"No details found in recommendation! Keys: {recommendation.keys()}", exc_info=True)
+            logger.error(f"Full recommendation data: {recommendation}", exc_info=True)
 
         name = details.get("name")
         if not name:
             # Fallback: try to get name from other possible locations
             name = recommendation.get("name") or details.get("title") or f"App ID {recommendation.get('app_id', 'Unknown')}"
-            logger.error(f"Name not found in details! Using fallback: {name}")
-            logger.error(f"Details keys: {list(details.keys())[:10]}")
-            logger.error(f"Recommendation keys: {list(recommendation.keys())}")
+            logger.error(f"Name not found in details! Using fallback: {name}", exc_info=True)
+            logger.error(f"Details keys: {list(details.keys())[:10]}", exc_info=True)
+            logger.error(f"Recommendation keys: {list(recommendation.keys())}", exc_info=True)
 
         description = details.get("short_description", "No description available.")
         if len(description) > 300:

@@ -33,6 +33,7 @@ from helpers.gaming_utils import (
     get_protondb_url
 )
 from helpers.command_logger import log_command
+from helpers.embed_helper import build_error_embed, build_info_embed
 from cogs_test.general_commands.dashboard import command_meta
 
 # Logging setup
@@ -71,10 +72,10 @@ async def fetch_game_details(session: aiohttp.ClientSession, app_id: int) -> Opt
                 return None
 
     except asyncio.TimeoutError:
-        logger.error(f"Timeout fetching details for app {app_id}")
+        logger.error(f"Timeout fetching details for app {app_id}", exc_info=True)
         return None
     except Exception as e:
-        logger.error(f"Error fetching game details for {app_id}: {e}")
+        logger.error(f"Error fetching game details for {app_id}: {e}", exc_info=True)
         return None
 
 
@@ -95,7 +96,7 @@ async def batch_fetch_game_details(session: aiohttp.ClientSession,
         elif result is None:
             logger.warning("Game details fetch returned None")
         else:
-            logger.error(f"Exception in batch fetch: {result}")
+            logger.error(f"Exception in batch fetch: {result}", exc_info=True)
 
     return valid_results
 
@@ -251,10 +252,11 @@ class GameSearchView(discord.ui.View):
 
         # Verify button ownership
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message(
-                "❌ This isn't your search!",
-                ephemeral=True
+            embed = build_error_embed(
+                "Permission Denied",
+                "This isn't your search!"
             )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
         # Wrap around to last result
@@ -273,10 +275,11 @@ class GameSearchView(discord.ui.View):
 
         # Verify button ownership
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message(
-                "❌ This isn't your search!",
-                ephemeral=True
+            embed = build_error_embed(
+                "Permission Denied",
+                "This isn't your search!"
             )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
         await interaction.response.defer()
@@ -316,10 +319,11 @@ class GameSearchView(discord.ui.View):
         except Exception as e:
             logger.error(f"Error showing game details: {e}", exc_info=True)
             try:
-                await interaction.followup.send(
-                    "❌ An error occurred while loading game details.",
-                    ephemeral=True
+                embed = build_error_embed(
+                    "Error Loading Details",
+                    "An error occurred while loading game details."
                 )
+                await interaction.followup.send(embed=embed, ephemeral=True)
             except:
                 pass
 
@@ -329,10 +333,11 @@ class GameSearchView(discord.ui.View):
 
         # Verify button ownership
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message(
-                "❌ This isn't your search!",
-                ephemeral=True
+            embed = build_error_embed(
+                "Permission Denied",
+                "This isn't your search!"
             )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
         # Wrap around to first result
@@ -375,10 +380,11 @@ class SteamGame(commands.Cog):
 
         # Validate input
         if not query or len(query.strip()) < 2:
-            await interaction.response.send_message(
-                "❌ Please provide a game name with at least 2 characters.",
-                ephemeral=True
+            embed = build_error_embed(
+                "Invalid Input",
+                "Please provide a game name with at least 2 characters."
             )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
         query = query.strip()
@@ -393,14 +399,14 @@ class SteamGame(commands.Cog):
                 search_results = await search_steam_apps(session, query, max_results=3)
 
                 if not search_results:
-                    await interaction.followup.send(
-                        f"🔍 No games found for **'{query}'**\n\n"
-                        "💡 Try:\n"
+                    embed = build_info_embed(
+                        f"No Games Found for '{query}'",
+                        "Try:\n"
                         "• Checking your spelling\n"
                         "• Using fewer/different keywords\n"
-                        "• Searching for the full game title",
-                        ephemeral=True
+                        "• Searching for the full game title"
                     )
+                    await interaction.followup.send(embed=embed, ephemeral=True)
                     return
 
                 # Step 2: Fetch detailed info for top 3 results
@@ -411,10 +417,11 @@ class SteamGame(commands.Cog):
 
                 # Filter out failed fetches
                 if not game_details:
-                    await interaction.followup.send(
-                        "❌ Failed to fetch game details from Steam. Please try again.",
-                        ephemeral=True
+                    embed = build_error_embed(
+                        "Failed to Fetch Details",
+                        "Failed to fetch game details from Steam. Please try again."
                     )
+                    await interaction.followup.send(embed=embed, ephemeral=True)
                     return
 
                 # Match search results with detailed data
@@ -434,10 +441,11 @@ class SteamGame(commands.Cog):
                         matched_details.append(detail)
 
                 if not matched_details:
-                    await interaction.followup.send(
-                        "❌ Could not retrieve detailed information for these games. Try again later.",
-                        ephemeral=True
+                    embed = build_error_embed(
+                        "Details Unavailable",
+                        "Could not retrieve detailed information for these games. Try again later."
                     )
+                    await interaction.followup.send(embed=embed, ephemeral=True)
                     return
 
                 # Step 3: Create carousel view
@@ -462,20 +470,22 @@ class SteamGame(commands.Cog):
                 logger.info(f"Steam search completed for '{query}' - {len(matched_results)} results")
 
         except aiohttp.ClientError as e:
-            logger.error(f"Network error during Steam search: {e}")
-            await interaction.followup.send(
-                "❌ Network error while connecting to Steam. Please try again.",
-                ephemeral=True
+            logger.error(f"Network error during Steam search: {e}", exc_info=True)
+            embed = build_error_embed(
+                "Network Error",
+                "Network error while connecting to Steam. Please try again."
             )
+            await interaction.followup.send(embed=embed, ephemeral=True)
         except discord.NotFound:
-            logger.error("Interaction expired before command could complete")
+            logger.error("Interaction expired before command could complete", exc_info=True)
         except Exception as e:
             logger.error(f"Error in steam_game command: {e}", exc_info=True)
             try:
-                await interaction.followup.send(
-                    "❌ An unexpected error occurred. Please try again later.",
-                    ephemeral=True
+                embed = build_error_embed(
+                    "Unexpected Error",
+                    "An unexpected error occurred. Please try again later."
                 )
+                await interaction.followup.send(embed=embed, ephemeral=True)
             except:
                 pass
 
