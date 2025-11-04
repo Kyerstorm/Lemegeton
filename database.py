@@ -1588,6 +1588,74 @@ async def init_userinfo_usage_table():
         logger.info("✅ Userinfo usage table ready.")
 
 
+async def init_booster_roles_table():
+    """Initialize the booster roles table for tracking server booster custom roles."""
+    logger.info("🔧 Initializing booster roles table...")
+    
+    try:
+        async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS booster_roles (
+                    discord_id INTEGER NOT NULL,
+                    guild_id INTEGER NOT NULL,
+                    role_id INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (discord_id, guild_id)
+                )
+            """)
+            await db.commit()
+            logger.info("✅ Booster roles table ready.")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize booster roles table: {e}", exc_info=True)
+        raise
+
+async def get_booster_role(discord_id: int, guild_id: int) -> Optional[int]:
+    """Get the booster role ID for a user in a guild."""
+    try:
+        role = await execute_db_operation(
+            "get booster role",
+            "SELECT role_id FROM booster_roles WHERE discord_id = ? AND guild_id = ?",
+            (discord_id, guild_id),
+            fetch_type='one'
+        )
+        return role[0] if role else None
+    except Exception as e:
+        logger.error(f"Error getting booster role for {discord_id} in guild {guild_id}: {e}", exc_info=True)
+        return None
+
+async def set_booster_role(discord_id: int, guild_id: int, role_id: int) -> bool:
+    """Set or update the booster role for a user in a guild."""
+    try:
+        await execute_db_operation(
+            "set booster role",
+            """INSERT INTO booster_roles (discord_id, guild_id, role_id, updated_at)
+               VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+               ON CONFLICT(discord_id, guild_id) DO UPDATE SET
+                   role_id = excluded.role_id,
+                   updated_at = CURRENT_TIMESTAMP""",
+            (discord_id, guild_id, role_id)
+        )
+        logger.info(f"✅ Set booster role {role_id} for user {discord_id} in guild {guild_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Error setting booster role for {discord_id} in guild {guild_id}: {e}", exc_info=True)
+        return False
+
+async def remove_booster_role(discord_id: int, guild_id: int) -> bool:
+    """Remove the booster role tracking for a user in a guild."""
+    try:
+        await execute_db_operation(
+            "remove booster role",
+            "DELETE FROM booster_roles WHERE discord_id = ? AND guild_id = ?",
+            (discord_id, guild_id)
+        )
+        logger.info(f"✅ Removed booster role tracking for user {discord_id} in guild {guild_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Error removing booster role for {discord_id} in guild {guild_id}: {e}", exc_info=True)
+        return False
+
 async def init_say_command_logs_table():
     """Initialize the say command logs table for moderation accountability."""
     logger.info("🔧 Initializing say command logs table...")
@@ -2038,6 +2106,7 @@ async def init_db():
         ("Steam Users", init_steam_users_table),
         ("Challenge Manga", init_challenge_manga_table),
         ("News Tables", init_news_tables),
+        ("Booster Roles", init_booster_roles_table),
     ]
     
     start_time = time.time()

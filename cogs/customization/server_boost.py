@@ -4,6 +4,8 @@ from discord import app_commands
 import logging
 from pathlib import Path
 from cogs_test.general_commands.dashboard import command_meta
+from helpers.embed_helper import build_error_embed, build_success_embed, build_info_embed
+from database import get_booster_role, set_booster_role, remove_booster_role
 
 # ------------------------------------------------------
 # Logging Setup - Clears on each bot run
@@ -61,21 +63,21 @@ class ServerBoost(commands.Cog):
 
         # Check if user is a server booster
         if not interaction.user.premium_since:
-            await interaction.followup.send(
-                "❌ **Server Booster Required**\n\n"
+            embed = build_error_embed(
+                "Server Booster Required",
                 "This command is only available to server boosters. "
-                "Boost this server to unlock custom role creation!",
-                ephemeral=True
+                "Boost this server to unlock custom role creation!"
             )
+            await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
         # Validate role name
         if len(role_name) < 1 or len(role_name) > 100:
-            await interaction.followup.send(
-                "❌ **Invalid Role Name**\n\n"
-                "Role name must be between 1-100 characters long.",
-                ephemeral=True
+            embed = build_error_embed(
+                "Invalid Role Name",
+                "Role name must be between 1-100 characters long."
             )
+            await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
         # Validate hex color
@@ -89,15 +91,69 @@ class ServerBoost(commands.Cog):
             if len(hex_color) != 7:
                 raise ValueError("Invalid length")
         except ValueError:
-            await interaction.followup.send(
-                "❌ **Invalid Hex Color**\n\n"
-                "Please provide a valid hex color code (e.g. #FF0000, #00FF00, #0000FF).",
-                ephemeral=True
+            embed = build_error_embed(
+                "Invalid Hex Color",
+                "Please provide a valid hex color code (e.g. #FF0000, #00FF00, #0000FF)."
             )
+            await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
         try:
-            # Create new role (users can have multiple custom roles if they want)
+            # Check if user already has a booster role in this guild
+            existing_role_id = await get_booster_role(interaction.user.id, interaction.guild.id)
+            
+            if existing_role_id:
+                # User already has a booster role - update it instead of creating new one
+                existing_role = interaction.guild.get_role(existing_role_id)
+                
+                if existing_role:
+                    # Role still exists - update it
+                    try:
+                        await existing_role.edit(
+                            name=role_name,
+                            color=discord.Color.from_str(hex_color),
+                            reason=f"Booster role updated by {interaction.user}"
+                        )
+                        
+                        # Ensure user still has the role
+                        if existing_role not in interaction.user.roles:
+                            await interaction.user.add_roles(existing_role)
+                        
+                        # Update database tracking
+                        await set_booster_role(interaction.user.id, interaction.guild.id, existing_role.id)
+                        
+                        embed = build_success_embed(
+                            "Role Updated!",
+                            f"Your booster role has been updated:\n"
+                            f"**Name:** {role_name}\n"
+                            f"**Color:** {hex_color}\n\n"
+                            f"You can only have one booster role per server. Use this command again to update it!"
+                        )
+                        await interaction.followup.send(embed=embed, ephemeral=True)
+                        logger.info(f"Updated booster role {existing_role.id} for user {interaction.user.id} in guild {interaction.guild.id}")
+                        return
+                    except discord.Forbidden:
+                        embed = build_error_embed(
+                            "Permission Error",
+                            "The bot doesn't have permission to edit roles. Please contact a server administrator."
+                        )
+                        await interaction.followup.send(embed=embed, ephemeral=True)
+                        return
+                    except Exception as e:
+                        logger.error(f"Error updating booster role: {e}", exc_info=True)
+                        embed = build_error_embed(
+                            "Error",
+                            "An error occurred while updating your role. Please try again later."
+                        )
+                        await interaction.followup.send(embed=embed, ephemeral=True)
+                        return
+                else:
+                    # Role was deleted - remove from database and create new one
+                    logger.warning(f"Booster role {existing_role_id} not found for user {interaction.user.id}, removing from database")
+                    await remove_booster_role(interaction.user.id, interaction.guild.id)
+                    existing_role_id = None
+            
+            # No existing role or role was deleted - create new role
             # Find the highest role the bot can manage
             bot_member = interaction.guild.get_member(self.bot.user.id)
             highest_bot_role = max(
@@ -107,11 +163,11 @@ class ServerBoost(commands.Cog):
             )
 
             if not highest_bot_role:
-                await interaction.followup.send(
-                    "❌ **Bot Permission Error**\n\n"
-                    "The bot doesn't have permission to manage roles. Please contact a server administrator.",
-                    ephemeral=True
+                embed = build_error_embed(
+                    "Bot Permission Error",
+                    "The bot doesn't have permission to manage roles. Please contact a server administrator."
                 )
+                await interaction.followup.send(embed=embed, ephemeral=True)
                 return
 
             # Create role below the highest manageable role
@@ -129,29 +185,33 @@ class ServerBoost(commands.Cog):
 
             # Assign role to user
             await interaction.user.add_roles(new_role)
+            
+            # Store in database
+            await set_booster_role(interaction.user.id, interaction.guild.id, new_role.id)
 
-            await interaction.followup.send(
-                f"✅ **Role Created!**\n\n"
+            embed = build_success_embed(
+                "Role Created!",
                 f"Your new booster role has been created and assigned:\n"
                 f"**Name:** {role_name}\n"
                 f"**Color:** {hex_color}\n\n"
-                f"You can create additional roles by running this command again!",
-                ephemeral=True
+                f"You can only have one booster role per server. Use this command again to update it!"
             )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            logger.info(f"Created booster role {new_role.id} for user {interaction.user.id} in guild {interaction.guild.id}")
 
         except discord.Forbidden:
-            await interaction.followup.send(
-                "❌ **Permission Error**\n\n"
-                "The bot doesn't have permission to create or manage roles. Please contact a server administrator.",
-                ephemeral=True
+            embed = build_error_embed(
+                "Permission Error",
+                "The bot doesn't have permission to create or manage roles. Please contact a server administrator."
             )
+            await interaction.followup.send(embed=embed, ephemeral=True)
         except Exception as e:
-            logger.error(f"Error creating booster role: {e}")
-            await interaction.followup.send(
-                "❌ **Error**\n\n"
-                "An unexpected error occurred while creating your role. Please try again later.",
-                ephemeral=True
+            logger.error(f"Error creating booster role: {e}", exc_info=True)
+            embed = build_error_embed(
+                "Error",
+                "An unexpected error occurred while creating your role. Please try again later."
             )
+            await interaction.followup.send(embed=embed, ephemeral=True)
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
@@ -175,7 +235,8 @@ class ServerBoost(commands.Cog):
 
                 embed.add_field(
                     name="💡 Tips",
-                    value="• You can update your role anytime by running the command again\n"
+                    value="• You can only have **one** booster role per server\n"
+                          "• Update your role anytime by running the command again\n"
                           "• Choose any hex color you like!",
                     inline=False
                 )
