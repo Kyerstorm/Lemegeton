@@ -1,3 +1,4 @@
+# gpt.py
 import os
 import re
 import json
@@ -44,9 +45,20 @@ import aiohttp
 import aiosqlite
 from dotenv import load_dotenv
 
+# local helpers (expect these modules to exist in project)
+try:
+    import database  # your database (2).py module should be importable as 'database'
+except Exception:
+    database = None
+
+try:
+    import utility_helper as utility
+except Exception:
+    utility = None
+
 load_dotenv()
 
-logger = logging.getLogger("gpt_v2")
+logger = logging.getLogger("gptcog")
 logger.setLevel(logging.INFO)
 
 # ---------------- PERSONAS ----------------
@@ -152,14 +164,7 @@ PERSONAS: Dict[str, Dict[str, Any]] = {
     }
 }
 
-PERSONA_LEXICON = {
-    "roast":["bruh","mid","roasted","clapped","rekt"],
-    "manhua":["heavens","blood","scroll","fate","ascend"],
-    "dreamcore":["drift","hush","whisper","softly"],
-    "ethereal":["moon","soft","faint","gleam"],
-}
-
-# ---------------- Provider layer----------------
+# ---------------- Provider layer (kept minimal) ----------------
 class ProviderType(Enum):
     FREE = "free"
     OPENAI = "openai"
@@ -195,96 +200,73 @@ class BaseProvider(ABC):
     def supports_image_generation(self) -> bool:
         pass
 
-# -- FreeProvider (g4f) simplified --
+# Lightweight FreeProvider fallback (g4f may not be available)
 class FreeProvider(BaseProvider):
     def __init__(self):
         super().__init__()
-        # minimal verified providers list from your earlier file
-        self.working_providers = []
-        if G4FProviderModule is not None:
-            for name in ("Blackbox", "Chatai", "CohereForAI_C4AI_Command"):
-                provider_attr = getattr(G4FProviderModule, name, None)
-                if provider_attr is not None:
-                    if name == "Blackbox":
-                        models = ["blackboxai"]
-                    elif name == "Chatai":
-                        models = ["gpt-3.5-turbo","gpt-4"]
-                    else:
-                        models = ["command-r-plus","command-r"]
-                    self.working_providers.append({"provider": provider_attr, "models": models, "name": name})
-        # create a default client where possible
         try:
             self.client = G4FClient()
         except Exception:
             self.client = None
 
-    def _select_model(self, model: Optional[str]) -> str:
-        return model or "gpt-3.5-turbo"
-
     async def chat_completion(self, messages: List[Dict[str,str]], model: Optional[str] = None, **kwargs) -> str:
-        if G4FClient is None:
-            raise RuntimeError("g4f client not available")
+        # Very simplified fallback behaviour — join messages into a prompt
         prompt = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
-        # Use simplest path: let AsyncClient attempt a completion (may vary by environment)
+        # If g4f is available, try it; otherwise return a minimal safe reply.
         if G4FAsyncClient is not None:
             client = G4FAsyncClient()
-            result = await client.chat.completions.create(model=self._select_model(model), messages=[{"role":"user","content":prompt}])
-            # parse result
-            if isinstance(result, dict):
-                choices = result.get("choices", [])
-                if choices and isinstance(choices, list):
-                    msg = choices[0].get("message", {}).get("content")
-                    if msg:
-                        return msg
-            if hasattr(result, "choices"):
-                try:
-                    return result.choices[0].message.content
-                except Exception:
-                    pass
-            return str(result)
-        else:
-            # fallback to synchronous client via thread
-            client = G4FClient()
-            def call():
-                return client.chat.completions.create(model=self._select_model(model), messages=[{"role":"user","content":prompt}], timeout=30)
-            res = await asyncio.to_thread(call)
-            # attempt parse
+            res = await asyncio.to_thread(lambda: G4FClient().chat.completions.create(model="gpt-3.5-turbo", messages=[{"role":"user","content":prompt}]))
             if isinstance(res, dict):
                 choices = res.get("choices", [])
                 if choices:
                     return choices[0].get("message", {}).get("content", str(res))
-            if hasattr(res, "choices"):
-                try:
-                    return res.choices[0].message.content
-                except Exception:
-                    pass
-            return str(res)
+            try:
+                return str(res)
+            except Exception:
+                return "I'm unable to respond right now."
+        return "I'm unable to respond right now."
 
     async def generate_image(self, prompt: str, model: Optional[str] = None, **kwargs) -> str:
-        if G4FAsyncClient is None:
-            raise RuntimeError("g4f async client not available")
-        image_provider = getattr(G4FProviderModule, "BingCreateImages", None) or getattr(G4FProviderModule, "OpenaiChat", None)
-        client = G4FAsyncClient(image_provider=image_provider)
-        resp = await client.images.generate(prompt=prompt)
-        # return first entry or string
-        if isinstance(resp, list):
-            return resp[0]
-        if hasattr(resp, "url"):
-            return resp.url
-        return str(resp)
+        raise NotImplementedError
 
     def get_available_models(self) -> List[ModelInfo]:
-        return [ModelInfo("gpt-3.5-turbo", ProviderType.FREE, "Free gpt-3.5-like")]
+        return [ModelInfo("gpt-3.5-turbo", ProviderType.FREE, "Free fallback")]
 
     def supports_image_generation(self) -> bool:
-        return True
+        return False
 
-# -- OpenAIProvider --
+# Provider manager (keeps available providers, but /provider removed)
+class ProviderManager:
+    def __init__(self):
+        self.providers: Dict[ProviderType, BaseProvider] = {}
+        self.current_provider = ProviderType.FREE
+        self._initialize_providers()
+
+    def _initialize_providers(self):
+        # Always include Free provider
+        self.providers[ProviderType.FREE] = FreeProvider()
+        # Try to initialize OpenAI if key present
+        if AsyncOpenAI is not None and os.getenv("OPENAI_KEY"):
+            try:
+                self.providers[ProviderType.OPENAI] = OpenAIProvider(os.getenv("OPENAI_KEY"))
+                self.current_provider = ProviderType.OPENAI
+            except Exception as e:
+                logger.debug("OpenAI init failed: %s", e)
+
+    def get_provider(self, provider_type: Optional[ProviderType] = None) -> BaseProvider:
+        if provider_type:
+            return self.providers.get(provider_type, self.providers[ProviderType.FREE])
+        return self.providers.get(self.current_provider, self.providers[ProviderType.FREE])
+
+    def get_available_providers(self) -> List[ProviderType]:
+        return list(self.providers.keys())
+
+# Minimal OpenAIProvider wrapper if SDK present
 class OpenAIProvider(BaseProvider):
     def __init__(self, api_key: str):
         super().__init__(api_key)
         if AsyncOpenAI is None:
-            raise RuntimeError("openai SDK (AsyncOpenAI) not available")
+            raise RuntimeError("openai SDK not available")
         self.client = AsyncOpenAI(api_key=api_key)
 
     async def chat_completion(self, messages: List[Dict[str,str]], model: Optional[str] = None, **kwargs) -> str:
@@ -293,231 +275,32 @@ class OpenAIProvider(BaseProvider):
         return resp.choices[0].message.content
 
     async def generate_image(self, prompt: str, model: Optional[str] = None, **kwargs) -> str:
-        model = model or "dall-e-3"
-        resp = await self.client.images.generate(model=model, prompt=prompt, size=kwargs.get("size","1024x1024"), n=kwargs.get("n",1))
-        # Return URL
+        resp = await self.client.images.generate(model="gpt-image-1", prompt=prompt, n=kwargs.get("n",1))
         return resp.data[0].url
 
     def get_available_models(self) -> List[ModelInfo]:
-        return [ModelInfo("gpt-4o-mini", ProviderType.OPENAI, "OpenAI GPT-4 variant")]
+        return [ModelInfo("gpt-4o-mini", ProviderType.OPENAI, "OpenAI")]
 
     def supports_image_generation(self) -> bool:
         return True
 
-# -- ClaudeProvider (minimal) --
-class ClaudeProvider(BaseProvider):
-    def __init__(self, api_key: str):
-        super().__init__(api_key)
-        if AsyncAnthropic is None:
-            self.client = None
-            logger.warning("Anthropic SDK not installed; Claude disabled.")
-        else:
-            self.client = AsyncAnthropic(api_key=api_key)
-
-    async def chat_completion(self, messages: List[Dict[str,str]], model: Optional[str] = None, **kwargs) -> str:
-        if self.client is None:
-            raise RuntimeError("Anthropic SDK unavailable")
-        system_message = None
-        claude_msgs = []
-        for m in messages:
-            if m["role"] == "system":
-                system_message = m["content"]
-            else:
-                claude_msgs.append({"role": m["role"], "content": m["content"]})
-        resp = await self.client.messages.create(model=model or "claude-3-5-haiku-latest", messages=claude_msgs, system=system_message, max_tokens=kwargs.get("max_tokens",4096))
-        # parse
-        if hasattr(resp, "content"):
-            try:
-                return resp.content[0].text
-            except Exception:
-                pass
-        return str(resp)
-
-    async def generate_image(self, prompt: str, model: Optional[str] = None, **kwargs) -> str:
-        raise NotImplementedError("Claude does not support image generation")
-
-    def get_available_models(self) -> List[ModelInfo]:
-        return [ModelInfo("claude-3-5-haiku-latest", ProviderType.CLAUDE, "Claude")] 
-
-    def supports_image_generation(self) -> bool:
-        return False
-
-# -- GeminiProvider (minimal) --
-class GeminiProvider(BaseProvider):
-    def __init__(self, api_key: str):
-        super().__init__(api_key)
-        if genai is None:
-            self.client = None
-            logger.warning("Google generativeai SDK not installed; Gemini disabled.")
-        else:
-            genai.configure(api_key=api_key)
-
-    async def chat_completion(self, messages: List[Dict[str,str]], model: Optional[str] = None, **kwargs) -> str:
-        if genai is None:
-            raise RuntimeError("Gemini SDK not available")
-        model_name = model or "gemini-2.0-flash-exp"
-        gem = genai.GenerativeModel(model_name)
-        chat = gem.start_chat(history=[])
-        resp = None
-        for m in messages:
-            if m["role"] == "user":
-                resp = await asyncio.to_thread(lambda c=m["content"]: chat.send_message(c))
-            elif m["role"] == "assistant":
-                chat.history.append({"role":"model","parts":[m["content"]]})
-        return getattr(resp, "text", str(resp) if resp else "")
-
-    async def generate_image(self, prompt: str, model: Optional[str] = None, **kwargs) -> str:
-        if genai is None:
-            raise RuntimeError("Gemini SDK not available")
-        model_name = model or "imagen-3.0-generate-001"
-        imagen = genai.ImageGenerationModel(model_name)
-        resp = await asyncio.to_thread(lambda: imagen.generate_images(prompt=prompt, number_of_images=kwargs.get("n",1), aspect_ratio=kwargs.get("aspect_ratio","1:1")))
-        if hasattr(resp, "images") and resp.images:
-            img = resp.images[0]
-            if hasattr(img, "uri"):
-                return img.uri
-            if hasattr(img, "_image_bytes"):
-                return img._image_bytes
-        return str(resp)
-
-    def get_available_models(self) -> List[ModelInfo]:
-        return [ModelInfo("gemini-2.0-flash-exp", ProviderType.GEMINI, "Gemini")]
-
-    def supports_image_generation(self) -> bool:
-        return True
-
-# -- GrokProvider (minimal) --
-class GrokProvider(BaseProvider):
-    def __init__(self, api_key: str):
-        super().__init__(api_key)
-        self.api_key = api_key
-        self.base_url = "https://api.x.ai/v1"
-
-    async def chat_completion(self, messages: List[Dict[str,str]], model: Optional[str] = None, **kwargs) -> str:
-        try:
-            model = model or "grok-2-latest"
-            hdrs = {"Authorization": f"Bearer {self.api_key}", "Content-Type":"application/json"}
-            data = {"model": model, "messages": messages, "temperature": kwargs.get("temperature",0.7), "max_tokens": kwargs.get("max_tokens",4096)}
-            async with aiohttp.ClientSession() as session:
-                async with session.post(f"{self.base_url}/chat/completions", headers=hdrs, json=data) as resp:
-                    j = await resp.json()
-                    if resp.status != 200:
-                        raise Exception(f"Grok error: {j}")
-                    return j["choices"][0]["message"]["content"]
-        except Exception as e:
-            logger.error("Grok error: %s", e)
-            raise
-
-    async def generate_image(self, prompt: str, model: Optional[str] = None, **kwargs) -> str:
-        raise NotImplementedError("Grok does not support image generation")
-
-    def get_available_models(self) -> List[ModelInfo]:
-        return [ModelInfo("grok-2-latest", ProviderType.GROK, "Grok")]
-
-    def supports_image_generation(self) -> bool:
-        return False
-
-# -- ProviderManager: init providers based on env keys
-class ProviderManager:
-    def __init__(self):
-        self.providers: Dict[ProviderType, BaseProvider] = {}
-        self.current_provider = ProviderType.FREE
-        self._initialize_providers()
-
-    def _validate_api_key(self, api_key: str, provider_name: str, pattern: Optional[str] = None) -> bool:
-        if not api_key or len(api_key) < 10:
-            logger.warning(f"{provider_name} API key invalid/too short.")
-            return False
-        return True
-
-    def _initialize_providers(self):
-        # Always include Free provider
-        self.providers[ProviderType.FREE] = FreeProvider()
-        logger.info("Free provider initialized")
-
-        cfgs = [
-            ("OPENAI_KEY", ProviderType.OPENAI, OpenAIProvider),
-            ("CLAUDE_KEY", ProviderType.CLAUDE, ClaudeProvider),
-            ("GEMINI_KEY", ProviderType.GEMINI, GeminiProvider),
-            ("GROK_KEY", ProviderType.GROK, GrokProvider),
-        ]
-
-        for env_key, ptype, pclass in cfgs:
-            key = os.getenv(env_key)
-            if key:
-                if self._validate_api_key(key, ptype.value):
-                    try:
-                        self.providers[ptype] = pclass(key)
-                        logger.info(f"Initialized provider {ptype.value}")
-                    except Exception as e:
-                        logger.error(f"Failed to init {ptype.value}: {e}")
-                else:
-                    logger.warning(f"Skipping provider {ptype.value} due to key validation")
-
-    def set_current_provider(self, provider_type: ProviderType):
-        if provider_type not in self.providers:
-            raise ValueError("Provider not available")
-        self.current_provider = provider_type
-
-    def get_provider(self, provider_type: Optional[ProviderType] = None) -> BaseProvider:
-        if provider_type:
-            return self.providers[provider_type]
-        return self.providers[self.current_provider]
-
-    def get_available_providers(self) -> List[ProviderType]:
-        return list(self.providers.keys())
-
-    def get_provider_models(self, provider_type: ProviderType) -> List[ModelInfo]:
-        p = self.providers.get(provider_type)
-        if not p:
-            return []
-        return p.get_available_models()
-
-# ---------------- Image helper (draw) ----------------
+# ---------------- Image helper ----------------
 openai_client = None
 if AsyncOpenAI is not None and os.getenv("OPENAI_KEY"):
     try:
         openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_KEY"))
-    except Exception as e:
-        logger.warning("AsyncOpenAI init failed: %s", e)
+    except Exception:
         openai_client = None
 
-def _get_g4f_image_provider(name: str):
-    if G4FProviderModule is None:
-        return None
-    return getattr(G4FProviderModule, name, None)
-
 async def draw(prompt: str, provider_name: str = "openai", size: int = 1024, count: int = 1) -> List[Any]:
-    """
-    Returns a list of either URLs or bytes (if provider returns bytes).
-    """
-    # prefer OpenAI if configured and OPENAI_ENABLED != "False"
-    use_openai = (os.getenv("OPENAI_ENABLED", "True") != "False") and openai_client is not None
-    if provider_name.lower() == "openai" and use_openai:
-        resp = await openai_client.images.generate(
-            model="gpt-image-1",
-            prompt=prompt,
-            size=f"{size}x{size}" if isinstance(size, int) else str(size),
-            n=count
-        )
-        urls = [d.url for d in resp.data]
-        return urls
-    else:
-        # fallback to g4f
-        if G4FAsyncClient is None:
-            raise RuntimeError("g4f async client not available for image generation.")
-        image_provider = _get_g4f_image_provider(provider_name) or _get_g4f_image_provider("BingCreateImages")
-        client = G4FAsyncClient(image_provider=image_provider)
-        resp = await client.images.generate(prompt=prompt)
-        if isinstance(resp, list):
-            return resp[:count]
-        return [str(resp)]
+    if provider_name.lower() == "openai" and openai_client is not None:
+        resp = await openai_client.images.generate(model="gpt-image-1", prompt=prompt, n=count, size=f"{size}x{size}")
+        return [d.url for d in resp.data]
+    # Fallback - not implemented in this minimal context
+    raise RuntimeError("No image provider available")
 
 # ---------------- Persistence with aiosqlite ----------------
 DB_PATH = os.getenv("GPT_COG_DB", "data/gpt_cog.db")
-# schema:
-# conversations: id INTEGER PRIMARY KEY, guild_id TEXT, user_id TEXT, ts TEXT, role TEXT, content TEXT
-# guild_settings: guild_id TEXT PRIMARY KEY, persona TEXT, provider TEXT
 
 async def _ensure_db():
     async with aiosqlite.connect(DB_PATH) as db:
@@ -537,9 +320,6 @@ async def _ensure_db():
             provider TEXT
         )""")
         await db.commit()
-
-# NOTE: avoid running the event loop at import time (it breaks when the bot
-
 
 async def save_message(guild_id: Optional[int], user_id: int, role: str, content: str):
     ts = datetime.utcnow().isoformat()
@@ -569,7 +349,6 @@ async def clear_conversation(user_id: int, guild_id: Optional[int] = None):
 
 async def set_guild_persona(guild_id: int, persona: Optional[str], provider: Optional[str] = None):
     async with aiosqlite.connect(DB_PATH) as db:
-        # upsert
         await db.execute("""
             INSERT INTO guild_settings (guild_id, persona, provider)
             VALUES (?, ?, ?)
@@ -605,50 +384,89 @@ async def send_long(channel: discord.abc.Messageable, text: str, reply: Optional
     chunks = split_long_message(text, 2000)
     for i, c in enumerate(chunks):
         if reply and i == 0:
-            await reply.reply(c)
+            try:
+                await reply.reply(c)
+            except Exception:
+                await channel.send(c)
         else:
             await channel.send(c)
 
 # ---------------- Control panel UI ----------------
 class ServerControlPanelView(ui.View):
-    def __init__(self, cog: "GPTV2Cog", user_id: int, guild: discord.Guild, timeout: float = 300.0):
+    """
+    If elevated=True the panel shows provider-rotation and other advanced controls.
+    """
+    def __init__(self, cog: "GPTCog", user_id: int, guild: discord.Guild, elevated: bool = False, timeout: float = 300.0):
         super().__init__(timeout=timeout)
         self.cog = cog
         self.user_id = user_id
         self.guild = guild
+        self.elevated = elevated
 
         # persona select
         options = [discord.SelectOption(label=name, description=data.get("style",""), emoji=data.get("emoji")) for name,data in PERSONAS.items()]
-        self.persona_select = ui.Select(placeholder="Select persona (admin only)...", options=options, min_values=1, max_values=1)
+        self.persona_select = ui.Select(placeholder="Select persona...", options=options, min_values=1, max_values=1)
         self.persona_select.callback = self.persona_select_cb
         self.add_item(self.persona_select)
 
-        # buttons
-        self.rotate_provider_btn = ui.Button(label="Rotate Provider", style=discord.ButtonStyle.primary)
-        self.rotate_provider_btn.callback = self.rotate_provider_cb
-        self.add_item(self.rotate_provider_btn)
-
+        # regenerate
         self.regen_btn = ui.Button(label="Regenerate Last", style=discord.ButtonStyle.secondary)
         self.regen_btn.callback = self.regen_cb
         self.add_item(self.regen_btn)
 
+        # reset conversation
         self.reset_btn = ui.Button(label="Reset Conversation", style=discord.ButtonStyle.danger)
         self.reset_btn.callback = self.reset_cb
         self.add_item(self.reset_btn)
 
+        # advanced: rotate provider
+        if elevated:
+            self.rotate_provider_btn = ui.Button(label="Rotate Provider", style=discord.ButtonStyle.primary)
+            self.rotate_provider_btn.callback = self.rotate_provider_cb
+            self.add_item(self.rotate_provider_btn)
+
     async def persona_select_cb(self, interaction: discord.Interaction):
-        # only allow server admins (has manage_guild)
-        if not interaction.user.guild_permissions.manage_guild:
-            await interaction.response.send_message("You need Manage Guild permission to change the server persona.", ephemeral=True)
+        # Only allow change if opener or elevated mod
+        is_mod = False
+        try:
+            if database:
+                is_mod = await database.is_user_moderator(interaction.user, interaction.guild.id)
+        except Exception:
+            is_mod = interaction.user.guild_permissions.manage_guild or interaction.user.guild_permissions.administrator
+
+        if not self.elevated and interaction.user.id != self.user_id:
+            await interaction.response.send_message("This panel isn't for you.", ephemeral=True)
             return
+
+        if self.elevated and not is_mod:
+            await interaction.response.send_message("You must be a moderator to use the advanced panel.", ephemeral=True)
+            return
+
         selected = self.persona_select.values[0]
-        await set_guild_persona(self.guild.id, selected, None)
-        await interaction.response.send_message(f"Server persona set to **{selected}** {PERSONAS[selected].get('emoji','')}", ephemeral=True)
+        try:
+            await set_guild_persona(self.guild.id, selected, None)
+            # update cache
+            self.cog.guild_persona_cache[self.guild.id] = selected
+            await interaction.response.send_message(f"Server persona set to **{selected}** {PERSONAS[selected].get('emoji','')}", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"Failed to set persona: {e}", ephemeral=True)
 
     async def rotate_provider_cb(self, interaction: discord.Interaction):
-        if not interaction.user.guild_permissions.manage_guild:
-            await interaction.response.send_message("You need Manage Guild to rotate provider.", ephemeral=True)
+        # only available if panel is elevated
+        if not self.elevated:
+            await interaction.response.send_message("Not available.", ephemeral=True)
             return
+        is_mod = False
+        try:
+            if database:
+                is_mod = await database.is_user_moderator(interaction.user, interaction.guild.id)
+        except Exception:
+            is_mod = interaction.user.guild_permissions.manage_guild or interaction.user.guild_permissions.administrator
+
+        if not is_mod:
+            await interaction.response.send_message("You must be a moderator to rotate providers.", ephemeral=True)
+            return
+
         pm = self.cog.provider_manager
         avail = pm.get_available_providers()
         try:
@@ -660,22 +478,27 @@ class ServerControlPanelView(ui.View):
             await interaction.response.send_message(f"Could not rotate provider: {e}", ephemeral=True)
 
     async def regen_cb(self, interaction: discord.Interaction):
-        # regenerate last response for this user
-        if interaction.user.id != self.user_id:
+        if not self.elevated and interaction.user.id != self.user_id:
             await interaction.response.send_message("This panel isn't for you.", ephemeral=True)
             return
-        result = await self.cog.regenerate_last(interaction.user.id, interaction.guild.id if interaction.guild else None)
-        await interaction.response.send_message(result, ephemeral=True)
+        try:
+            result = await self.cog.regenerate_last(interaction.user.id, interaction.guild.id if interaction.guild else None)
+            await interaction.response.send_message(result[:1900], ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"Regenerate failed: {e}", ephemeral=True)
 
     async def reset_cb(self, interaction: discord.Interaction):
-        if interaction.user.id != self.user_id:
+        if not self.elevated and interaction.user.id != self.user_id:
             await interaction.response.send_message("This panel isn't for you.", ephemeral=True)
             return
-        await clear_conversation(interaction.user.id, interaction.guild.id if interaction.guild else None)
-        await interaction.response.send_message("Conversation reset.", ephemeral=True)
+        try:
+            await clear_conversation(interaction.user.id, interaction.guild.id if interaction.guild else None)
+            await interaction.response.send_message("Conversation reset.", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"Reset failed: {e}", ephemeral=True)
 
 class OpenPanelButton(ui.View):
-    def __init__(self, cog: "GPTV2Cog", owner_id: int, guild: discord.Guild, timeout: float = 300.0):
+    def __init__(self, cog: "GPTCog", owner_id: int, guild: discord.Guild, timeout: float = 300.0):
         super().__init__(timeout=timeout)
         self.cog = cog
         self.owner_id = owner_id
@@ -688,40 +511,41 @@ class OpenPanelButton(ui.View):
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message("Not authorized.", ephemeral=True)
             return
-        view = ServerControlPanelView(self.cog, user_id=self.owner_id, guild=self.guild)
+        elevated = False
+        try:
+            if database:
+                elevated = await database.is_user_moderator(interaction.user, interaction.guild.id)
+        except Exception:
+            elevated = interaction.user.guild_permissions.manage_guild or interaction.user.guild_permissions.administrator
+
+        view = ServerControlPanelView(self.cog, user_id=self.owner_id, guild=self.guild, elevated=elevated)
         await interaction.response.send_message("Server control panel (ephemeral):", view=view, ephemeral=True)
 
 # ---------------- The Cog ----------------
-class GPTV2Cog(commands.Cog):
+class GPTCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.provider_manager = ProviderManager()
         self.lock = asyncio.Lock()
-        # cache guild persona to avoid DB hits
         self.guild_persona_cache: Dict[int, Optional[str]] = {}
-        # background task to ensure DB persists
-        self.bot.loop.create_task(self._warmup())
+
+    async def cog_load(self):
+        """Called when the cog is loaded."""
+        # Create warmup task in async context
+        asyncio.create_task(self._warmup())
 
     async def _warmup(self):
-        # Ensure DB schema exists now that we're running inside the bot's event loop
         try:
             await _ensure_db()
         except Exception as e:
-            logger.exception("_ensure_db() failed during warmup: %s", e)
-
+            logger.exception("_ensure_db failed: %s", e)
         await self.bot.wait_until_ready()
-        # pre-load guild settings into cache
         for g in self.bot.guilds:
-            persona, provider = await get_guild_settings(g.id)
-            self.guild_persona_cache[g.id] = persona
-
-    def _detect_persona_trigger(self, text: str) -> Optional[str]:
-        t = text.lower()
-        for pname, pdata in PERSONAS.items():
-            for trig in pdata.get("triggers", []):
-                if re.search(rf"\b{re.escape(trig)}\b", t):
-                    return pname
-        return None
+            try:
+                persona, provider = await get_guild_settings(g.id)
+                self.guild_persona_cache[g.id] = persona
+            except Exception:
+                self.guild_persona_cache[g.id] = None
 
     async def _get_guild_persona(self, guild_id: Optional[int]) -> Optional[str]:
         if guild_id is None:
@@ -734,29 +558,28 @@ class GPTV2Cog(commands.Cog):
 
     async def generate_response(self, user_id: int, guild_id: Optional[int], content: str) -> str:
         """
-        Load conversation (persisted), append user message, ask provider, save assistant reply.
+        Use persisted conversation and guild persona (system message) to produce reply.
+        Note: We do NOT prefix replies with 'assistant' or similar.
         """
         async with self.lock:
             conv = await load_conversation(user_id, guild_id, limit=100)
-            # check guild persona (locked)
+
+            # ensure system persona present
             guild_persona = await self._get_guild_persona(guild_id)
             if guild_persona:
-                # if not already present as system message, insert it
                 if not any(m["role"] == "system" for m in conv):
                     await save_message(guild_id, user_id, "system", PERSONAS[guild_persona]["prompt"])
                     conv.insert(0, {"role":"system","content":PERSONAS[guild_persona]["prompt"]})
             else:
-                # if no guild persona, allow auto triggers to set persona as system message for this user-only session
-                auto_p = self._detect_persona_trigger(content)
-                if auto_p and not any(m["role"] == "system" for m in conv):
-                    await save_message(guild_id, user_id, "system", PERSONAS[auto_p]["prompt"])
-                    conv.insert(0, {"role":"system","content":PERSONAS[auto_p]["prompt"]})
+                if not any(m["role"] == "system" for m in conv):
+                    await save_message(guild_id, user_id, "system", PERSONAS["neutral"]["prompt"])
+                    conv.insert(0, {"role":"system","content":PERSONAS["neutral"]["prompt"]})
 
-            # Append user message and persist
+            # append user message
             await save_message(guild_id, user_id, "user", content)
             conv.append({"role":"user","content":content})
 
-            # trim
+            # trim conversation
             if len(conv) > 60:
                 system_msgs = [m for m in conv[:3] if m["role"] == "system"]
                 conv = system_msgs + conv[-40:]
@@ -764,18 +587,19 @@ class GPTV2Cog(commands.Cog):
             provider = self.provider_manager.get_provider()
             try:
                 result = await provider.chat_completion(messages=conv, model=None)
+                # save assistant reply (role preserved internally but we don't show label)
                 await save_message(guild_id, user_id, "assistant", result)
                 return result
             except Exception as e:
                 logger.exception("Provider error: %s", e)
-                # fallback to free
+                # fallback to free provider
                 try:
                     free = self.provider_manager.get_provider(ProviderType.FREE)
                     result = await free.chat_completion(messages=conv, model=None)
                     await save_message(guild_id, user_id, "assistant", result)
                     return result + "\n\n*⚠️ Fallback to free provider.*"
                 except Exception as e2:
-                    logger.error("Fallback failed: %s", e2)
+                    logger.exception("Fallback failed: %s", e2)
                     return "❌ I'm having trouble right now. Please try again later."
 
     async def regenerate_last(self, user_id: int, guild_id: Optional[int]) -> str:
@@ -787,7 +611,6 @@ class GPTV2Cog(commands.Cog):
                 break
         if not last_user:
             return "No user message to regenerate."
-        # We'll append new assistant reply instead of deleting historical rows
         return await self.generate_response(user_id, guild_id, last_user)
 
     # ---------------- Event listeners ----------------
@@ -797,56 +620,86 @@ class GPTV2Cog(commands.Cog):
         if message.author.bot:
             return
 
-        # SECRET: TGA -> reply with a message containing a button that opens ephemeral server control panel for clicker.
-        if re.search(r"\bTGA\b", message.content, re.IGNORECASE):
+        # If message equals the SECRET activation word (TGA), open panel
+        if re.fullmatch(r"\s*TGA\s*", message.content, flags=re.IGNORECASE):
             try:
-                view = OpenPanelButton(self, owner_id=message.author.id, guild=message.guild)
-                embed = discord.Embed(
-                    title="Server Control Panel",
-                    description="Click the button below to open the ephemeral server control panel (visible only to you).",
-                    color=0x2F3136
-                )
-                embed.set_footer(text="Control panel expires in 5 minutes")
-                await message.reply(embed=embed, view=view)
+                elevated = False
+                if database:
+                    try:
+                        elevated = await database.is_user_moderator(message.author, message.guild.id)
+                    except Exception:
+                        elevated = message.author.guild_permissions.manage_messages or message.author.guild_permissions.administrator
+                else:
+                    elevated = message.author.guild_permissions.manage_messages or message.author.guild_permissions.administrator
+
+                view = ServerControlPanelView(self, user_id=message.author.id, guild=message.guild, elevated=elevated)
+                await message.reply("Control panel opened (ephemeral-style).", view=view)
                 try:
                     await message.delete()
                 except Exception:
                     pass
             except Exception as e:
-                logger.exception("TGA handling error: %s", e)
+                logger.exception("TGA panel error: %s", e)
+            return
 
-        # handle normal mentions or replies to the bot
-        bot_mentioned = self.bot.user in message.mentions
-        is_reply_to_bot = False
+        # Determine whether this message should trigger the AI:
+        # Trigger if the message mentions (pings) the bot OR if it is a reply to a bot message
+        should_respond = False
+
+        # 1) If the bot is mentioned explicitly
+        if self.bot.user in message.mentions:
+            should_respond = True
+
+        # 2) If the message is a reply to another message, and that referenced message was sent by the bot,
+        #    then respond (unless the replied-to message appears to be a command output / interaction result).
+        replied_msg = None
         if message.reference and isinstance(message.reference.resolved, discord.Message):
-            ref = message.reference.resolved
-            if ref.author and ref.author.id == self.bot.user.id:
-                is_reply_to_bot = True
+            replied_msg = message.reference.resolved
+            if replied_msg.author and replied_msg.author.id == self.bot.user.id:
+                # Detect if replied message was created by an Interaction (command) → if so, DO NOT respond.
+                # Discord.py provides .interaction on Message for application command responses (may be None otherwise).
+                if getattr(replied_msg, "interaction", None) is not None:
+                    # This was likely a response to a slash command or interaction -> ignore
+                    should_respond = False
+                else:
+                    # Normal bot message (not interaction response) -> allow response
+                    should_respond = True
 
-        if bot_mentioned or is_reply_to_bot:
-            user_id = message.author.id
-            guild_id = message.guild.id if message.guild else None
-            # strip mention tokens
-            content = re.sub(rf"<@!{self.bot.user.id}>", "", message.content).strip()
-            # if empty content after mention, prompt
-            if not content:
+        # If neither mention nor reply-to-bot, do nothing
+        if not should_respond:
+            return
+
+        # At this point: message is a mention or a reply to a non-command bot message.
+        # If mention, strip the mention from content; if reply, use content as-is
+        content = message.content
+        if self.bot.user in message.mentions:
+            # remove mention tokens
+            content = re.sub(rf"<@!{self.bot.user.id}>", "", content)
+            content = re.sub(rf"<@{self.bot.user.id}>", "", content)
+            content = content.strip()
+
+        # If after stripping content is empty, prompt the user
+        if not content:
+            try:
                 await message.reply("Yes? Mention me with something to chat or use `/help`.", reference=message)
-                return
+            except Exception:
+                pass
+            return
 
-            # show typing indicator while generating (only for text)
-            async with message.channel.typing():
+        # Generate and reply (plain text, no embeds, no "assistant:" label)
+        async with message.channel.typing():
+            try:
+                user_id = message.author.id
+                guild_id = message.guild.id if message.guild else None
+                response = await self.generate_response(user_id, guild_id, content)
+                # send plain text reply and attach as reply to the user's message
+                await send_long(message.channel, response, reply=message)
+            except Exception as e:
+                logger.exception("Error generating reply: %s", e)
                 try:
-                    response = await self.generate_response(user_id, guild_id, content)
-                    # Determine persona for embed styling
-                    persona = await self._get_guild_persona(guild_id) or self._detect_persona_trigger(content) or "neutral"
-                    pdata = PERSONAS.get(persona, PERSONAS["neutral"])
-                    embed = discord.Embed(description=response[:4096], color=pdata.get("color", 0x007BC2))
-                    embed.set_author(name=f"{pdata.get('emoji','')} {persona}", icon_url=self.bot.user.display_avatar.url)
-                    embed.set_footer(text=pdata.get("footer",""))
-                    await message.reply(embed=embed)
-                except Exception as e:
-                    logger.exception("Reply generation error: %s", e)
                     await message.reply("❌ Error while generating response.", reference=message)
+                except Exception:
+                    pass
 
     # ---------------- Slash commands ----------------
     @app_commands.command(name="persona", description="Set server persona (Manage Guild required).")
@@ -860,18 +713,6 @@ class GPTV2Cog(commands.Cog):
         await set_guild_persona(interaction.guild.id, persona, None)
         self.guild_persona_cache[interaction.guild.id] = persona
         await interaction.response.send_message(f"Server persona set to **{persona}** {PERSONAS[persona].get('emoji','')}", ephemeral=True)
-
-    @app_commands.command(name="provider", description="Set current provider for the bot (Manage Guild required).")
-    async def provider(self, interaction: discord.Interaction, provider_name: str):
-        if not interaction.user.guild_permissions.manage_guild:
-            await interaction.response.send_message("You need Manage Guild permission to use this command.", ephemeral=True)
-            return
-        try:
-            ptype = ProviderType(provider_name)
-            self.provider_manager.set_current_provider(ptype)
-            await interaction.response.send_message(f"Provider switched to `{ptype.value}`", ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message(f"Could not switch provider: {e}", ephemeral=True)
 
     @app_commands.command(name="providers", description="List all available providers (Manage Guild required).")
     async def providers(self, interaction: discord.Interaction):
@@ -906,27 +747,17 @@ class GPTV2Cog(commands.Cog):
         prov = provider or (self.provider_manager.current_provider.value if self.provider_manager.current_provider else "openai")
         try:
             results = await draw(prompt, provider_name=prov, size=size, count=count)
-            # prefer embed with URL if possible
             sent_any = False
             for r in results:
                 if isinstance(r, bytes):
-                    # upload as file if bytes
-                    fp = discord.File(fp=discord.utils._bytes_to_file(r), filename="image.png") if hasattr(discord.utils, "_bytes_to_file") else None
-                    if fp:
-                        await interaction.followup.send(file=fp)
-                    else:
-                        await interaction.followup.send("Image generated (binary). Unable to attach in this environment.")
+                    await interaction.followup.send("Image generated (binary). Unable to attach in this environment.")
                     sent_any = True
                 else:
                     text = str(r)
-                    # If looks like URL, embed
                     if re.match(r"^https?://", text):
-                        embed = discord.Embed(title="Image result", description=f"Prompt: {prompt}", color=0x1F8B4C)
-                        embed.set_image(url=text)
-                        await interaction.followup.send(embed=embed)
+                        await interaction.followup.send(f"Image result: {text}\nPrompt: {prompt}")
                         sent_any = True
                     else:
-                        # send as plain text
                         await interaction.followup.send(text)
                         sent_any = True
             if not sent_any:
@@ -941,17 +772,17 @@ class GPTV2Cog(commands.Cog):
         try:
             # add commands to tree (safe-guard duplicates)
             self.bot.tree.add_command(self.persona)
-            self.bot.tree.add_command(self.provider)
             self.bot.tree.add_command(self.providers)
             self.bot.tree.add_command(self.models)
             self.bot.tree.add_command(self.reset)
             self.bot.tree.add_command(self.image)
             await self.bot.tree.sync()
-            logger.info("GPT v2 commands synced.")
+            logger.info("GPTCog commands synced.")
         except Exception as e:
             logger.debug("Command sync issue: %s", e)
 
 # ---------------- Setup ----------------
 async def setup(bot: commands.Bot):
     """Load the cog into a Bot (cog-only)."""
-    await bot.add_cog(GPTV2Cog(bot))
+    await bot.add_cog(GPTCog(bot))
+
