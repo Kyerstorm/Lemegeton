@@ -2,20 +2,20 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import aiohttp
-import aiosqlite
 import logging
 import re
 from pathlib import Path
 import config
-from database import is_user_bot_moderator, is_user_moderator
+from database import is_user_bot_moderator, get_user_guild_aware, register_user_guild_aware
 from cogs_test.general_commands.dashboard import command_meta
+from helpers.command_logger import log_command
 
 # ────────────────────────────────────────────────────────────────
 # Configuration and constants (same style as login.py)
 # ────────────────────────────────────────────────────────────────
 LOG_DIR = Path("logs")
 LOG_FILE = LOG_DIR / "admin_login.log"
-DB_PATH = Path(config.DB_PATH)
+# DB_PATH removed - using database.py functions instead
 ANILIST_ENDPOINT = "https://graphql.anilist.co"
 MAX_USERNAME_LENGTH = 50
 USERNAME_REGEX = r"^[\w-]+$"
@@ -42,6 +42,27 @@ if not any(isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", Non
         logger.addHandler(stream)
 
 logger.info("AdminLogin cog logging initialized")
+
+
+# ────────────────────────────────────────────────────────────────
+# Permission Check Function
+# ────────────────────────────────────────────────────────────────
+def mod_role_check():
+    """App command check that allows only bot moderators."""
+    async def predicate(interaction: discord.Interaction) -> bool:
+        # Only allow in a guild
+        if not interaction.guild:
+            return False
+
+        try:
+            # Only allow users registered as bot moderators via /admin-moderator-manage
+            is_bot_mod = await is_user_bot_moderator(interaction.user)
+            return bool(is_bot_mod)
+        except Exception:
+            logger.exception("Error checking bot moderator status")
+            return False
+
+    return app_commands.check(predicate)
 
 
 # ────────────────────────────────────────────────────────────────
@@ -105,23 +126,6 @@ class AdminLogin(commands.Cog):
     async def _is_valid_username(self, username: str) -> bool:
         return bool(re.match(USERNAME_REGEX, username)) and 0 < len(username) <= MAX_USERNAME_LENGTH
 
-    # Permission helper: restrict to DB-registered bot moderators only (via /admin-moderator-manage command)
-    def mod_role_check():
-        async def predicate(interaction: discord.Interaction):
-            # Only allow in a guild
-            if not interaction.guild:
-                return False
-
-            try:
-                # Only allow users registered as bot moderators via /admin-moderator-manage
-                is_bot_mod = await is_user_bot_moderator(interaction.user.id)
-                return bool(is_bot_mod)
-            except Exception:
-                logger.exception("Error checking bot moderator status")
-                return False
-
-        return app_commands.check(predicate)
-
     async def _fetch_anilist_user(self, username: str):
         """Fetch AniList user info using GraphQL."""
         query = """
@@ -155,14 +159,12 @@ class AdminLogin(commands.Cog):
     async def _get_existing_user(self, user_id: int, guild_id: int):
         """Check if user is already registered in DB."""
         try:
-            async with aiosqlite.connect(DB_PATH) as db:
-                cursor = await db.execute(
-                    "SELECT anilist_username, anilist_id FROM users WHERE discord_id = ? AND guild_id = ?",
-                    (user_id, guild_id)
-                )
-                result = await cursor.fetchone()
-                await cursor.close()
-                return result
+            user = await get_user_guild_aware(user_id, guild_id)
+            if user:
+                # Return (anilist_username, anilist_id) tuple for compatibility
+                # user tuple structure: (id, discord_id, guild_id, username, anilist_username, anilist_id, ...)
+                return (user[4], user[5]) if len(user) > 5 else (user[4], None)
+            return None
         except Exception as e:
             logger.error(f"Error checking existing AniList user: {e}", exc_info=True)
             return None
@@ -170,13 +172,8 @@ class AdminLogin(commands.Cog):
     async def _register_user(self, user_id: int, guild_id: int, discord_user: str, anilist_name: str, anilist_id: int):
         """Register or update user info in the guild-aware DB."""
         try:
-            async with aiosqlite.connect(DB_PATH) as db:
-                await db.execute("""
-                    INSERT OR REPLACE INTO users (discord_id, guild_id, username, anilist_username, anilist_id)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (user_id, guild_id, discord_user, anilist_name, anilist_id))
-                await db.commit()
-                logger.info(f"Registered/updated AniList user {anilist_name} for {discord_user} ({user_id}) in guild {guild_id}")
+            await register_user_guild_aware(user_id, guild_id, discord_user, anilist_name, anilist_id)
+            logger.info(f"Registered/updated AniList user {anilist_name} for {discord_user} ({user_id}) in guild {guild_id}")
         except Exception as e:
             logger.error(f"Database error registering AniList user {discord_user}: {e}", exc_info=True)
             raise
@@ -189,7 +186,9 @@ class AdminLogin(commands.Cog):
         discord_user="The Discord user to link.",
         anilist_user="The AniList username to link."
     )
+    @mod_role_check()
     @command_meta(section="Account", name="Admin Login")
+    @log_command
     async def admin_login(self, interaction: discord.Interaction, discord_user: discord.Member, anilist_user: str):
         """Link or update AniList account."""
         try:
@@ -263,12 +262,17 @@ class AdminLogin(commands.Cog):
 
             await interaction.followup.send(embed=embed, ephemeral=True)
 
+        except discord.NotFound:
+            logger.error("Interaction expired before completion")
         except Exception as e:
             logger.error(f"Error during AniList login: {e}", exc_info=True)
-            await interaction.followup.send(
-                "❌ An unexpected error occurred. Please try again later.",
-                ephemeral=True
-            )
+            try:
+                await interaction.followup.send(
+                    "❌ An unexpected error occurred. Please try again later.",
+                    ephemeral=True
+                )
+            except discord.NotFound:
+                pass  # Interaction already expired
 
     async def cog_load(self):
         logger.info("AdminLogin cog loaded successfully")
