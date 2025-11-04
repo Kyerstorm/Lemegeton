@@ -10,6 +10,7 @@ from typing import List, Optional, Dict, Any
 import asyncio
 import logging
 from pathlib import Path
+from helpers.embed_helper import build_error_embed, build_info_embed
 
 # Set up dedicated logging for theme showcase
 LOG_DIR = Path("logs")
@@ -70,7 +71,7 @@ class ThemePreviewView(discord.ui.View):
     def _get_preview_embed(self) -> discord.Embed:
         """Create preview embed for current theme"""
         if not self.themes:
-            return discord.Embed(title="❌ No Themes", color=0xFF0000)
+            return build_error_embed("No Themes", "No themes available for preview.")
         
         theme = self.themes[self.current_index]
         
@@ -179,7 +180,8 @@ class ThemePreviewView(discord.ui.View):
             logger.info(f"Successfully applied theme '{theme.name}' for user {interaction.user.id}")
         else:
             logger.error(f"Failed to apply theme '{theme.name}' for user {interaction.user.id}")
-            await interaction.response.send_message("❌ Failed to apply theme.", ephemeral=True)
+            embed = build_error_embed("Failed to Apply Theme", "An error occurred while applying the theme.")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
     
     @discord.ui.button(label="🎲 Random", style=discord.ButtonStyle.secondary)
     async def random_theme(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -199,10 +201,9 @@ class ThemePreviewView(discord.ui.View):
     @discord.ui.button(label="❌ Close", style=discord.ButtonStyle.danger)
     async def close_preview(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Close the preview"""
-        embed = discord.Embed(
-            title="🎨 Theme Preview Closed",
-            description="Theme preview session ended.",
-            color=0x666666
+        embed = build_info_embed(
+            "🎨 Theme Preview Closed",
+            "Theme preview session ended."
         )
         
         # Disable all buttons
@@ -279,10 +280,9 @@ class ThemeCategorySelect(discord.ui.Select):
                 themes = self.theme_manager.get_themes_by_category(category)
             
             if not themes:
-                embed = discord.Embed(
-                    title="❌ No Themes Found",
-                    description=f"No themes available in category: {self.values[0]}",
-                    color=0xFF0000
+                embed = build_error_embed(
+                    "No Themes Found",
+                    f"No themes available in category: {self.values[0]}"
                 )
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
@@ -294,11 +294,10 @@ class ThemeCategorySelect(discord.ui.Select):
             await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         
         except Exception as e:
-            logger.error(f"Error in theme category callback: {e}")
-            embed = discord.Embed(
-                title="❌ Error",
-                description="An error occurred while loading themes.",
-                color=0xFF0000
+            logger.error(f"Error in theme category callback: {e}", exc_info=True)
+            embed = build_error_embed(
+                "Error",
+                "An error occurred while loading themes."
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
 

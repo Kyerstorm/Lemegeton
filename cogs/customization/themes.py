@@ -16,6 +16,7 @@ from dataclasses import dataclass, asdict
 import random
 from pathlib import Path
 from cogs_test.general_commands.dashboard import command_meta
+from helpers.embed_helper import build_error_embed, build_success_embed, build_info_embed, build_warning_embed
 
 # Set up dedicated logging for theme system
 LOG_DIR = Path("logs")
@@ -491,18 +492,18 @@ class ThemeMainMenuView(discord.ui.View):
         """Open interactive theme browser with live preview"""
         try:
             from .theme_showcase import ThemeCategoryView
+            from helpers.embed_helper import build_info_embed
             
-            embed = discord.Embed(
-                title="🎨 Theme Preview & Browser",
-                description=(
+            embed = build_info_embed(
+                "🎨 Theme Preview & Browser",
+                (
                     "Choose a category below to preview and test themes!\n\n"
                     "🖱️ **How to use:**\n"
                     "• Select a category from the dropdown\n"
                     "• Navigate through themes with buttons\n"
                     "• Preview how embeds look with each theme\n"
                     "• Apply themes you like instantly"
-                ),
-                color=0x02A9FF
+                )
             )
             
             embed.add_field(
@@ -521,8 +522,12 @@ class ThemeMainMenuView(discord.ui.View):
             await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
             logger.info(f"Theme browser opened for user {interaction.user.id}")
         except Exception as e:
-            logger.error(f"Error opening theme browser: {e}")
-            await interaction.response.send_message("❌ Error opening theme browser.", ephemeral=True)
+            logger.error(f"Error opening theme browser: {e}", exc_info=True)
+            embed = build_error_embed(
+                "Error",
+                "An error occurred while opening the theme browser. Please try again."
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
     
     @discord.ui.button(label="📋 View All Themes", style=discord.ButtonStyle.secondary, row=0)
     async def showcase_all(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -540,10 +545,9 @@ class ThemeMainMenuView(discord.ui.View):
                     category_themes[cat] = []
                 category_themes[cat].append(theme)
             
-            embed = discord.Embed(
-                title="🎨 Complete Theme Showcase",
-                description=f"Browse all **{len(themes)}** available themes organized by category:",
-                color=0x02A9FF
+            embed = build_info_embed(
+                "🎨 Complete Theme Showcase",
+                f"Browse all **{len(themes)}** available themes organized by category:"
             )
             
             for category_name, cat_themes in sorted(category_themes.items()):
@@ -624,7 +628,11 @@ class ThemeMainMenuView(discord.ui.View):
         theme = self.theme_cog.theme_manager.get_seasonal_theme()
         
         if not theme:
-            await interaction.response.send_message("❌ No seasonal theme available for current month.", ephemeral=True)
+            embed = build_warning_embed(
+                "No Seasonal Theme Available",
+                "No seasonal theme available for current month."
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
         guild_id = interaction.guild.id if interaction.guild else None
@@ -733,10 +741,9 @@ class CustomThemeSystem(commands.Cog):
         except Exception as e:
             guild_id = interaction.guild.id if interaction.guild else None
             logger.error(f"Error in theme command for user {interaction.user.id} in guild {guild_id}: {e}", exc_info=True)
-            embed = discord.Embed(
-                title="❌ Error",
-                description="An error occurred while opening theme system. Please try again.",
-                color=0xFF0000
+            embed = build_error_embed(
+                "Error",
+                "An error occurred while opening theme system. Please try again."
             )
             
             try:
@@ -756,19 +763,17 @@ class CustomThemeSystem(commands.Cog):
                 themes = list(self.theme_manager.themes.values())
         
         if not themes:
-            embed = discord.Embed(
-                title="📋 No Themes Found",
-                description=f"No themes found in category: {category}",
-                color=0xFFA500
+            embed = build_warning_embed(
+                "No Themes Found",
+                f"No themes found in category: {category}"
             )
             await interaction.followup.send(embed=embed)
             return
         
         # Create theme browser embed
-        embed = discord.Embed(
-            title=f"🎨 Available Themes ({len(themes)})",
-            description=f"**Category:** {category.title() if category != 'all' else 'All Categories'}\n\n",
-            color=0x02A9FF
+        embed = build_info_embed(
+            f"🎨 Available Themes ({len(themes)})",
+            f"**Category:** {category.title() if category != 'all' else 'All Categories'}\n\n"
         )
         
         # Group themes by category for better display
@@ -802,43 +807,43 @@ class CustomThemeSystem(commands.Cog):
         
         await interaction.followup.send(embed=embed)
     
-    async def _handle_set_theme(self, interaction: discord.Interaction, theme_name: Optional[str]):
-        """Handle setting a user's theme"""
+    def _find_theme_by_name(self, theme_name: str) -> Optional[Theme]:
+        """Find a theme by name using fuzzy matching (exact, partial, then ID)."""
         if not theme_name:
-            embed = discord.Embed(
-                title="❌ Missing Theme Name",
-                description="Please specify a theme name to apply.\nUse `/theme browse` to see available themes.",
-                color=0xFF0000
-            )
-            await interaction.followup.send(embed=embed)
-            return
+            return None
         
-        # Search for theme by name (fuzzy matching)
-        found_theme = None
         theme_name_lower = theme_name.lower()
         
         # Exact match first
         for theme in self.theme_manager.themes.values():
             if theme.name.lower() == theme_name_lower:
-                found_theme = theme
-                break
+                return theme
         
         # Partial match if no exact match
-        if not found_theme:
-            for theme in self.theme_manager.themes.values():
-                if theme_name_lower in theme.name.lower():
-                    found_theme = theme
-                    break
+        for theme in self.theme_manager.themes.values():
+            if theme_name_lower in theme.name.lower():
+                return theme
         
         # ID match as fallback
-        if not found_theme:
-            found_theme = self.theme_manager.get_theme(theme_name_lower)
+        return self.theme_manager.get_theme(theme_name_lower)
+    
+    async def _handle_set_theme(self, interaction: discord.Interaction, theme_name: Optional[str]):
+        """Handle setting a user's theme"""
+        if not theme_name:
+            embed = build_error_embed(
+                "Missing Theme Name",
+                "Please specify a theme name to apply.\nUse `/theme browse` to see available themes."
+            )
+            await interaction.followup.send(embed=embed)
+            return
+        
+        # Search for theme using extracted method
+        found_theme = self._find_theme_by_name(theme_name)
         
         if not found_theme:
-            embed = discord.Embed(
-                title="❌ Theme Not Found",
-                description=f"Could not find theme: `{theme_name}`\nUse `/theme browse` to see available themes.",
-                color=0xFF0000
+            embed = build_error_embed(
+                "Theme Not Found",
+                f"Could not find theme: `{theme_name}`\nUse `/theme browse` to see available themes."
             )
             await interaction.followup.send(embed=embed)
             return
@@ -848,11 +853,11 @@ class CustomThemeSystem(commands.Cog):
         
         if success:
             # Create themed embed to show the new theme
-            embed = discord.Embed(
-                title=f"✅ Theme Applied: {found_theme.name}",
-                description=found_theme.description,
-                color=found_theme.colors.primary
+            embed = build_success_embed(
+                f"Theme Applied: {found_theme.name}",
+                found_theme.description
             )
+            embed.color = found_theme.colors.primary
             
             embed.add_field(
                 name="🎨 Theme Details",
@@ -873,10 +878,9 @@ class CustomThemeSystem(commands.Cog):
             
             await interaction.followup.send(embed=embed)
         else:
-            embed = discord.Embed(
-                title="❌ Failed to Apply Theme",
-                description="An error occurred while applying the theme.",
-                color=0xFF0000
+            embed = build_error_embed(
+                "Failed to Apply Theme",
+                "An error occurred while applying the theme."
             )
             await interaction.followup.send(embed=embed)
     
@@ -962,10 +966,9 @@ class CustomThemeSystem(commands.Cog):
         seasonal_theme = self.theme_manager.get_seasonal_theme()
         
         if not seasonal_theme:
-            embed = discord.Embed(
-                title="🌟 No Seasonal Theme",
-                description="There's no special seasonal theme available right now.\nTry again during special seasons!",
-                color=0xFFA500
+            embed = build_warning_embed(
+                "No Seasonal Theme",
+                "There's no special seasonal theme available right now.\nTry again during special seasons!"
             )
             await interaction.followup.send(embed=embed)
             return
@@ -1039,42 +1042,30 @@ class CustomThemeSystem(commands.Cog):
                 await self._handle_reset_guild_theme(interaction)
         
         except Exception as e:
-            logger.error(f"Error in admin-guild-theme command: {e}")
-            embed = discord.Embed(
-                title="❌ Error",
-                description="An error occurred while processing the guild theme request.",
-                color=0xFF0000
+            logger.error(f"Error in admin-guild-theme command: {e}", exc_info=True)
+            embed = build_error_embed(
+                "Error",
+                "An error occurred while processing the guild theme request."
             )
             await interaction.followup.send(embed=embed)
     
     async def _handle_set_guild_theme(self, interaction: discord.Interaction, theme_name: Optional[str]):
         """Set guild default theme"""
         if not theme_name:
-            embed = discord.Embed(
-                title="❌ Missing Theme Name",
-                description="Please specify a theme name for the guild.\nUse `/theme browse` to see available themes.",
-                color=0xFF0000
+            embed = build_error_embed(
+                "Missing Theme Name",
+                "Please specify a theme name for the guild.\nUse `/theme browse` to see available themes."
             )
             await interaction.followup.send(embed=embed)
             return
         
-        # Find theme (same logic as personal themes)
-        found_theme = None
-        theme_name_lower = theme_name.lower()
-        
-        for theme in self.theme_manager.themes.values():
-            if theme.name.lower() == theme_name_lower or theme_name_lower in theme.name.lower():
-                found_theme = theme
-                break
+        # Find theme using extracted method
+        found_theme = self._find_theme_by_name(theme_name)
         
         if not found_theme:
-            found_theme = self.theme_manager.get_theme(theme_name_lower)
-        
-        if not found_theme:
-            embed = discord.Embed(
-                title="❌ Theme Not Found",
-                description=f"Could not find theme: `{theme_name}`",
-                color=0xFF0000
+            embed = build_error_embed(
+                "Theme Not Found",
+                f"Could not find theme: `{theme_name}`"
             )
             await interaction.followup.send(embed=embed)
             return
@@ -1083,11 +1074,11 @@ class CustomThemeSystem(commands.Cog):
         success = self.theme_manager.set_guild_theme(interaction.guild.id, found_theme.id)
         
         if success:
-            embed = discord.Embed(
-                title=f"✅ Guild Theme Set: {found_theme.name}",
-                description=f"Guild default theme is now: {found_theme.description}",
-                color=found_theme.colors.primary
+            embed = build_success_embed(
+                f"Guild Theme Set: {found_theme.name}",
+                f"Guild default theme is now: {found_theme.description}"
             )
+            embed.color = found_theme.colors.primary
             
             embed.add_field(
                 name="📋 Note",
@@ -1099,10 +1090,9 @@ class CustomThemeSystem(commands.Cog):
             
             await interaction.followup.send(embed=embed)
         else:
-            embed = discord.Embed(
-                title="❌ Failed to Set Guild Theme",
-                description="An error occurred while setting the guild theme.",
-                color=0xFF0000
+            embed = build_error_embed(
+                "Failed to Set Guild Theme",
+                "An error occurred while setting the guild theme."
             )
             await interaction.followup.send(embed=embed)
     
@@ -1112,17 +1102,16 @@ class CustomThemeSystem(commands.Cog):
         
         if guild_theme_id:
             guild_theme = self.theme_manager.get_theme(guild_theme_id)
-            embed = discord.Embed(
-                title=f"🏰 Guild Theme: {guild_theme.name}",
-                description=guild_theme.description,
-                color=guild_theme.colors.primary
+            embed = build_info_embed(
+                f"🏰 Guild Theme: {guild_theme.name}",
+                guild_theme.description
             )
+            embed.color = guild_theme.colors.primary
             embed.set_footer(text=f"Theme: {guild_theme.name} {guild_theme.emoji}")
         else:
-            embed = discord.Embed(
-                title="🏰 Guild Theme",
-                description="No guild theme is set. Using default/seasonal themes.",
-                color=0x02A9FF
+            embed = build_info_embed(
+                "🏰 Guild Theme",
+                "No guild theme is set. Using default/seasonal themes."
             )
         
         await interaction.followup.send(embed=embed)
@@ -1132,10 +1121,9 @@ class CustomThemeSystem(commands.Cog):
         if interaction.guild.id in self.theme_manager.guild_themes:
             del self.theme_manager.guild_themes[interaction.guild.id]
         
-        embed = discord.Embed(
-            title="🔄 Guild Theme Reset",
-            description="Guild theme has been reset. Default and seasonal themes will be used.",
-            color=0x02A9FF
+        embed = build_success_embed(
+            "Guild Theme Reset",
+            "Guild theme has been reset. Default and seasonal themes will be used."
         )
         
         await interaction.followup.send(embed=embed)
