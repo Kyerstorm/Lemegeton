@@ -302,11 +302,11 @@ class GameSearchView(discord.ui.View):
                 # Create main embed
                 main_embed = await enhanced_view.create_main_embed()
 
-                # Send full details with interactive buttons
+                # Send full details with interactive buttons (public, not ephemeral)
                 await interaction.followup.send(
                     embed=main_embed,
                     view=enhanced_view,
-                    ephemeral=True
+                    ephemeral=False
                 )
 
             # Disable search view buttons
