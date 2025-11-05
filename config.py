@@ -101,12 +101,29 @@ LOG_MAX_SIZE = _int_env("LOG_MAX_SIZE", 52428800)  # 50MB default
 STATUS_UPDATE_INTERVAL = _int_env("STATUS_UPDATE_INTERVAL", 3600)  # 1 hour
 TRENDING_REFRESH_INTERVAL = _int_env("TRENDING_REFRESH_INTERVAL", 10800)  # 3 hours
 
+# Status Message Templates
+STATUS_TEMPLATES = [
+    "🔥 Hot: {anime}",
+    "💫 Trending: {anime}",
+    "✨ Popular: {anime}",
+]
+
 # Cog Development (seconds)
 COG_WATCH_INTERVAL_PROD = _int_env("COG_WATCH_INTERVAL_PROD", 10)  # Production: 10s
 COG_WATCH_INTERVAL_DEV = _int_env("COG_WATCH_INTERVAL_DEV", 2)  # Development: 2s
 
 # Cleanup Tasks (seconds)
 USER_CLEANUP_INTERVAL = _int_env("USER_CLEANUP_INTERVAL", 21600)  # 6 hours
+GUILD_CLEANUP_INTERVAL = _int_env("GUILD_CLEANUP_INTERVAL", 21600)  # 6 hours
+CLEANUP_BATCH_SIZE = _int_env("CLEANUP_BATCH_SIZE", 50)  # Process users in batches of 50
+CLEANUP_BATCH_DELAY = _float_env("CLEANUP_BATCH_DELAY", 1.0)  # 1 second delay between batches
+CLEANUP_TIMEOUT = _int_env("CLEANUP_TIMEOUT", 600)  # 10 minutes max for cleanup operations
+
+# Cog Loading
+COG_LOAD_TIMEOUT = _int_env("COG_LOAD_TIMEOUT", 30)  # 30 seconds timeout for cog loading
+
+# Webhook Rate Limiting
+WEBHOOK_RATE_LIMIT = _int_env("WEBHOOK_RATE_LIMIT", 5)  # Max 5 webhooks per minute
 
 # ==============================================================================
 # ANILIST API CONFIGURATION
@@ -156,6 +173,11 @@ if OLLAMA_HOST == "":
 
 API_MAX_RETRIES = _int_env("API_MAX_RETRIES", 3)  # 3 retries default
 API_RETRY_BASE_DELAY = _float_env("API_RETRY_BASE_DELAY", 1.0)  # 1.0 seconds default
+
+# Circuit Breaker Configuration
+CIRCUIT_BREAKER_FAILURE_THRESHOLD = _int_env("CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5)  # Open after 5 failures
+CIRCUIT_BREAKER_TIMEOUT = _int_env("CIRCUIT_BREAKER_TIMEOUT", 60)  # 60 seconds before retry
+CIRCUIT_BREAKER_SUCCESS_THRESHOLD = _int_env("CIRCUIT_BREAKER_SUCCESS_THRESHOLD", 2)  # Close after 2 successes
 
 # ==============================================================================
 # DATABASE CONFIGURATION
@@ -244,8 +266,10 @@ __all__ = [
     'DISCORD_WEBHOOK_URL', 'AURA_WEBHOOK_URL',
 
     # Behavior
-    'LOG_MAX_SIZE', 'STATUS_UPDATE_INTERVAL', 'TRENDING_REFRESH_INTERVAL',
+    'LOG_MAX_SIZE', 'STATUS_UPDATE_INTERVAL', 'TRENDING_REFRESH_INTERVAL', 'STATUS_TEMPLATES',
     'COG_WATCH_INTERVAL_PROD', 'COG_WATCH_INTERVAL_DEV', 'USER_CLEANUP_INTERVAL',
+    'GUILD_CLEANUP_INTERVAL', 'CLEANUP_BATCH_SIZE', 'CLEANUP_BATCH_DELAY', 'CLEANUP_TIMEOUT',
+    'COG_LOAD_TIMEOUT', 'WEBHOOK_RATE_LIMIT',
 
     # AniList
     'ANILIST_API_URL', 'ANILIST_API_TIMEOUT', 'DEFAULT_TRENDING_FALLBACK',
@@ -258,6 +282,7 @@ __all__ = [
 
     # API Resilience
     'API_MAX_RETRIES', 'API_RETRY_BASE_DELAY',
+    'CIRCUIT_BREAKER_FAILURE_THRESHOLD', 'CIRCUIT_BREAKER_TIMEOUT', 'CIRCUIT_BREAKER_SUCCESS_THRESHOLD',
 
     # Database
     'DB_PATH', 'DB_CONNECTION_POOL_SIZE',
