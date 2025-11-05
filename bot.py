@@ -4,10 +4,15 @@ import os
 import asyncio
 import logging
 import time
+import warnings
 import aiohttp
 import discord
 from discord.ext import commands
 import config
+
+# Suppress deprecation warning from discord.py's internal WebSocket connection code
+# This is a known issue in discord.py 2.6.0 that will be fixed in future versions
+warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*parameter 'timeout' of type 'float' is deprecated.*")
 from database import init_db, get_all_users_guild_aware, remove_user, clear_guild_records, get_all_guild_ids_with_records
 import signal
 import random
@@ -17,16 +22,9 @@ from datetime import datetime
 # Add project root to sys.path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from config import (
-    TOKEN, GUILD_ID, BOT_ID, ADMIN_DISCORD_ID,
-    DISCORD_WEBHOOK_URL, LOG_MAX_SIZE, TRENDING_REFRESH_INTERVAL,
-    STATUS_UPDATE_INTERVAL, COG_WATCH_INTERVAL_PROD, COG_WATCH_INTERVAL_DEV,
-    ANILIST_API_TIMEOUT, DEFAULT_TRENDING_FALLBACK, API_MAX_RETRIES,
-    API_RETRY_BASE_DELAY, DB_CONNECTION_POOL_SIZE, USER_CLEANUP_INTERVAL,
-    TWITCH_STREAMING_URL, ANILIST_API_URL
-)
 import hashlib
 import json
+from collections import deque
 
 # ------------------------------------------------------
 # Logging Setup
@@ -35,7 +33,7 @@ import json
 LOG_DIR = "logs"
 LOG_FILE = "bot.log"
 # Adjust cog watch interval based on environment
-COG_WATCH_INTERVAL = COG_WATCH_INTERVAL_PROD if os.getenv("ENVIRONMENT") == "production" else COG_WATCH_INTERVAL_DEV
+COG_WATCH_INTERVAL = config.COG_WATCH_INTERVAL_PROD if os.getenv("ENVIRONMENT") == "production" else config.COG_WATCH_INTERVAL_DEV
 
 # Ensure logs directory exists
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -174,18 +172,80 @@ class APIRetryHandler:
         raise last_exception
 
 
-class WebhookNotifier:
-    """Send notifications to external webhooks for monitoring and alerts"""
+class CircuitBreaker:
+    """Circuit breaker pattern for API resilience"""
 
-    def __init__(self, webhook_urls: Optional[Dict[str, str]] = None):
+    def __init__(self, failure_threshold: int = 5, timeout: int = 60, success_threshold: int = 2):
+        self.failure_threshold = failure_threshold
+        self.timeout = timeout
+        self.success_threshold = success_threshold
+        self.failure_count = 0
+        self.success_count = 0
+        self.last_failure_time: Optional[float] = None
+        self.state = "closed"  # closed, open, half_open
+        self.logger = logging.getLogger("CircuitBreaker")
+
+    def can_execute(self) -> bool:
+        """Check if execution is allowed"""
+        if self.state == "closed":
+            return True
+
+        if self.state == "open":
+            # Check if timeout has passed
+            if self.last_failure_time and (time.time() - self.last_failure_time) >= self.timeout:
+                self.state = "half_open"
+                self.success_count = 0
+                self.logger.info("Circuit breaker entering half-open state")
+                return True
+            return False
+
+        # half_open state
+        return True
+
+    def record_success(self) -> None:
+        """Record successful execution"""
+        if self.state == "half_open":
+            self.success_count += 1
+            if self.success_count >= self.success_threshold:
+                self.state = "closed"
+                self.failure_count = 0
+                self.logger.info("Circuit breaker closed after successful recovery")
+        else:
+            self.failure_count = max(0, self.failure_count - 1)
+
+    def record_failure(self) -> None:
+        """Record failed execution"""
+        self.failure_count += 1
+        self.last_failure_time = time.time()
+
+        if self.failure_count >= self.failure_threshold:
+            self.state = "open"
+            self.logger.warning(f"Circuit breaker opened after {self.failure_count} failures")
+
+
+class WebhookNotifier:
+    """Send notifications to external webhooks for monitoring and alerts with rate limiting"""
+
+    def __init__(self, webhook_urls: Optional[Dict[str, str]] = None, rate_limit: int = 5):
         self.webhook_urls = webhook_urls or {}
         self.logger = logging.getLogger("WebhookNotifier")
         self.enabled = bool(webhook_urls)
+        self.rate_limit = rate_limit  # Max webhooks per minute
+        self.webhook_times: deque = deque(maxlen=rate_limit)
 
         if self.enabled:
-            self.logger.info(f"✅ Webhook notifier initialized with {len(webhook_urls)} endpoints")
+            self.logger.info(f"✅ Webhook notifier initialized with {len(webhook_urls)} endpoints (rate limit: {rate_limit}/min)")
         else:
             self.logger.debug("Webhook notifier initialized but no endpoints configured")
+
+    def _check_rate_limit(self) -> bool:
+        """Check if we're within rate limit"""
+        now = time.time()
+        # Remove timestamps older than 1 minute
+        while self.webhook_times and (now - self.webhook_times[0]) > 60:
+            self.webhook_times.popleft()
+
+        return len(self.webhook_times) < self.rate_limit
 
     def format_discord_embed(self, event_type: str, data: Dict, priority: str) -> Dict:
         """Format data as Discord embed"""
@@ -241,7 +301,7 @@ class WebhookNotifier:
 
     async def notify(self, event_type: str, data: Dict, priority: str = "info"):
         """
-        Send webhook notification for an event.
+        Send webhook notification for an event with rate limiting.
 
         Args:
             event_type: Type of event (e.g., 'bot_ready', 'error_occurred')
@@ -252,12 +312,19 @@ class WebhookNotifier:
             self.logger.debug(f"Webhook skipped (disabled): {event_type}")
             return
 
+        # Check rate limit
+        if not self._check_rate_limit():
+            self.logger.warning(f"Webhook rate limit exceeded, skipping event: {event_type}")
+            return
+
         webhook_url = self.webhook_urls.get(event_type)
         if not webhook_url:
             self.logger.debug(f"No webhook configured for event: {event_type}")
             return
 
         try:
+            # Record webhook send time
+            self.webhook_times.append(time.time())
             # Format as Discord embed
             embed = self.format_discord_embed(event_type, data, priority)
 
@@ -348,9 +415,9 @@ class GracefulShutdownHandler:
     async def notify_shutdown(self):
         """Notify administrators of shutdown"""
         try:
-            if ADMIN_DISCORD_ID:
+            if config.ADMIN_DISCORD_ID:
                 try:
-                    admin_user = await self.bot.fetch_user(ADMIN_DISCORD_ID)
+                    admin_user = await self.bot.fetch_user(config.ADMIN_DISCORD_ID)
                     embed = discord.Embed(
                         title="🛑 Bot Shutdown",
                         description="The bot is shutting down gracefully.",
@@ -372,45 +439,16 @@ class GracefulShutdownHandler:
         await asyncio.sleep(2)
 
 
-class DatabaseConnectionPool:
-    """
-    Simple connection pool for database operations.
-    Note: This is a basic implementation. The actual database.py handles connections,
-    so this serves as a foundation for future improvements.
-    """
-
-    def __init__(self, db_path: str, pool_size: int = 5):
-        self.db_path = db_path
-        self.pool_size = pool_size
-        self.connections = asyncio.Queue(maxsize=pool_size)
-        self.initialized = False
-        self.logger = logging.getLogger("DatabasePool")
-
-    async def initialize(self):
-        """Create connection pool - currently a placeholder for future implementation"""
-        try:
-            # Note: Actual connection pooling would require changes to database.py
-            # This is here as a framework for future enhancement
-            self.initialized = True
-            self.logger.info(f"📊 Database connection pool framework initialized (pool_size={self.pool_size})")
-            self.logger.debug("Note: Full pooling requires database.py refactoring")
-        except Exception as e:
-            self.logger.error(f"Failed to initialize database pool: {e}")
-            raise
-
-    async def close(self):
-        """Close all connections in pool"""
-        if self.initialized:
-            self.logger.info("Closing database connection pool")
-            # Future implementation would close pooled connections here
-            self.initialized = False
-
-
 # Initialize utility instances (will be populated after bot creation)
-api_retry_handler = APIRetryHandler(max_retries=API_MAX_RETRIES, base_delay=API_RETRY_BASE_DELAY)
+api_retry_handler = APIRetryHandler(max_retries=config.API_MAX_RETRIES, base_delay=config.API_RETRY_BASE_DELAY)
+anilist_circuit_breaker = CircuitBreaker(
+    failure_threshold=config.CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+    timeout=config.CIRCUIT_BREAKER_TIMEOUT,
+    success_threshold=config.CIRCUIT_BREAKER_SUCCESS_THRESHOLD
+)
 webhook_notifier = None  # Initialized later with config
 shutdown_handler = None  # Initialized after bot creation
-db_pool = None  # Initialized in main()
+background_tasks: List[asyncio.Task] = []  # Track all background tasks for proper cleanup
 
 # Uptime tracking
 bot_start_time = time.time()
@@ -454,17 +492,17 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
-bot = commands.Bot(command_prefix="!", intents=intents, application_id=BOT_ID)
+bot = commands.Bot(command_prefix="!", intents=intents, application_id=config.BOT_ID)
 
 # Initialize webhook notifier with Discord webhook from config
 WEBHOOK_URLS = {
-    'bot_ready': DISCORD_WEBHOOK_URL,
-    'bot_shutdown': DISCORD_WEBHOOK_URL,
-    'error_occurred': DISCORD_WEBHOOK_URL,
-    'guild_joined': DISCORD_WEBHOOK_URL,
-    'guild_removed': DISCORD_WEBHOOK_URL,
-} if DISCORD_WEBHOOK_URL else {}
-webhook_notifier = WebhookNotifier(WEBHOOK_URLS)
+    'bot_ready': config.DISCORD_WEBHOOK_URL,
+    'bot_shutdown': config.DISCORD_WEBHOOK_URL,
+    'error_occurred': config.DISCORD_WEBHOOK_URL,
+    'guild_joined': config.DISCORD_WEBHOOK_URL,
+    'guild_removed': config.DISCORD_WEBHOOK_URL,
+} if config.DISCORD_WEBHOOK_URL else {}
+webhook_notifier = WebhookNotifier(WEBHOOK_URLS, rate_limit=config.WEBHOOK_RATE_LIMIT)
 
 # Initialize graceful shutdown handler
 shutdown_handler = GracefulShutdownHandler(bot)
@@ -490,11 +528,19 @@ if MONITORING_ENABLED:
 # AniList API Function
 # ------------------------------------------------------
 
-async def _fetch_trending_anime_internal():
+async def _fetch_trending_anime_internal() -> List[str]:
     """
-    Internal function to fetch trending anime from AniList API.
+    Internal function to fetch trending anime from AniList API with circuit breaker.
     This is wrapped by fetch_trending_anime_list for retry logic.
+
+    Returns:
+        List of anime titles or fallback list if API fails
     """
+    # Check circuit breaker
+    if not anilist_circuit_breaker.can_execute():
+        logger.warning("AniList API circuit breaker is open, using fallback")
+        return config.DEFAULT_TRENDING_FALLBACK
+
     query = """
     query {
         Page(page: 1, perPage: 10) {
@@ -509,41 +555,45 @@ async def _fetch_trending_anime_internal():
     """
 
     try:
-        logger.debug(f"Making request to AniList API: {ANILIST_API_URL}")
-        
-        timeout = aiohttp.ClientTimeout(total=ANILIST_API_TIMEOUT)
+        logger.debug(f"Making request to AniList API: {config.ANILIST_API_URL}")
+
+        timeout = aiohttp.ClientTimeout(total=config.ANILIST_API_TIMEOUT)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             start_time = time.time()
             
             async with session.post(
-                ANILIST_API_URL, 
+                config.ANILIST_API_URL,
                 json={"query": query},
                 headers={'Content-Type': 'application/json'}
             ) as response:
-                
+
                 response_time = time.time() - start_time
                 logger.debug(f"AniList API response received in {response_time:.2f}s - Status: {response.status}")
-                
+
                 if response.status != 200:
                     logger.error(f"AniList API request failed with status {response.status}")
                     logger.debug(f"Response headers: {dict(response.headers)}")
-                    return DEFAULT_TRENDING_FALLBACK
+                    anilist_circuit_breaker.record_failure()
+                    return config.DEFAULT_TRENDING_FALLBACK
                 
                 try:
                     data = await response.json()
                     logger.debug("Successfully parsed JSON response")
                 except Exception as json_error:
                     logger.error(f"Failed to parse JSON response: {json_error}")
-                    return DEFAULT_TRENDING_FALLBACK
-                
+                    anilist_circuit_breaker.record_failure()
+                    return config.DEFAULT_TRENDING_FALLBACK
+
                 # Validate response structure
                 if not isinstance(data, dict) or 'data' not in data:
                     logger.error(f"Invalid response structure: missing 'data' field")
-                    return DEFAULT_TRENDING_FALLBACK
-                
+                    anilist_circuit_breaker.record_failure()
+                    return config.DEFAULT_TRENDING_FALLBACK
+
                 if 'Page' not in data['data'] or 'media' not in data['data']['Page']:
                     logger.error("Invalid response structure: missing Page.media")
-                    return DEFAULT_TRENDING_FALLBACK
+                    anilist_circuit_breaker.record_failure()
+                    return config.DEFAULT_TRENDING_FALLBACK
                 
                 anime_list = data["data"]["Page"]["media"]
                 logger.debug(f"Retrieved {len(anime_list)} anime entries from API")
@@ -575,24 +625,30 @@ async def _fetch_trending_anime_internal():
                 
                 if processed_titles:
                     logger.info(f"Successfully fetched {len(processed_titles)} trending anime titles")
+                    anilist_circuit_breaker.record_success()
                     return processed_titles
                 else:
                     logger.warning("No valid anime titles found, using fallback")
-                    return DEFAULT_TRENDING_FALLBACK
+                    anilist_circuit_breaker.record_failure()
+                    return config.DEFAULT_TRENDING_FALLBACK
 
     except (aiohttp.ClientTimeout, aiohttp.ClientError) as e:
         # Re-raise for retry handler
+        anilist_circuit_breaker.record_failure()
         raise
     except Exception as e:
         logger.error(f"Unexpected error fetching trending anime: {e}", exc_info=True)
+        anilist_circuit_breaker.record_failure()
         # Don't retry unexpected errors
-        return DEFAULT_TRENDING_FALLBACK
+        return config.DEFAULT_TRENDING_FALLBACK
 
 
-async def fetch_trending_anime_list():
+async def fetch_trending_anime_list() -> List[str]:
     """
-    Fetch trending anime list from AniList API with retry logic.
-    Returns a list of anime titles or fallback list if API fails.
+    Fetch trending anime list from AniList API with retry logic and circuit breaker.
+
+    Returns:
+        List of anime titles or fallback list if API fails
     """
     logger.debug("Starting AniList trending anime fetch with retry logic")
 
@@ -602,20 +658,22 @@ async def fetch_trending_anime_list():
         return result
     except Exception as e:
         logger.error(f"All retry attempts exhausted for trending anime fetch: {e}")
-        return DEFAULT_TRENDING_FALLBACK
+        return config.DEFAULT_TRENDING_FALLBACK
 
 
 # ------------------------------------------------------
 # User Cleanup Task (Enhanced with chunking and batching)
 # ------------------------------------------------------
-# Configuration constants for cleanup
-CLEANUP_BATCH_SIZE = 50  # Process users in batches to avoid blocking
-CLEANUP_BATCH_DELAY = 1.0  # Delay between batches in seconds
 
 async def get_guild_members_set(guild: discord.Guild) -> set[int]:
     """
     Get all member IDs from a guild, ensuring complete member list by chunking if needed.
-    Returns set of member IDs for fast lookup.
+
+    Args:
+        guild: The Discord guild to get members from
+
+    Returns:
+        Set of member IDs for fast lookup
     """
     try:
         # Ensure we have the latest member list by chunking if needed
@@ -631,16 +689,26 @@ async def get_guild_members_set(guild: discord.Guild) -> set[int]:
         logger.error(f"Failed to get members for guild {guild.name} ({guild.id}): {e}", exc_info=True)
         return set()
 
-async def cleanup_stale_users():
+async def cleanup_stale_users() -> Dict[str, int]:
     """
     Clean up user records for users who are no longer in their registered guilds.
-    Enhanced with chunking, batching, and detailed statistics.
+    Enhanced with chunking, batching, detailed statistics, and timeout protection.
     Runs on startup and every USER_CLEANUP_INTERVAL to maintain database integrity.
-    
+
     Returns:
-        dict with statistics: {'checked': int, 'removed': int, 'errors': int, 'guilds_processed': int}
+        Dict with statistics: {'checked': int, 'removed': int, 'errors': int, 'guilds_processed': int}
     """
     logger.info("🧹 Starting user cleanup task (enhanced)")
+
+    try:
+        # Apply timeout to prevent cleanup from running too long
+        return await asyncio.wait_for(_cleanup_stale_users_impl(), timeout=config.CLEANUP_TIMEOUT)
+    except asyncio.TimeoutError:
+        logger.error(f"❌ User cleanup timed out after {config.CLEANUP_TIMEOUT} seconds")
+        return {'checked': 0, 'removed': 0, 'errors': 1, 'guilds_processed': 0}
+
+
+async def _cleanup_stale_users_impl():
     
     stats = {
         'checked': 0,
@@ -671,9 +739,9 @@ async def cleanup_stale_users():
                     continue
                 
                 # Process users in batches to avoid blocking
-                for i in range(0, len(guild_users), CLEANUP_BATCH_SIZE):
-                    batch = guild_users[i:i + CLEANUP_BATCH_SIZE]
-                    logger.debug(f"Processing batch {i//CLEANUP_BATCH_SIZE + 1} ({len(batch)} users) for guild {guild.name}")
+                for i in range(0, len(guild_users), config.CLEANUP_BATCH_SIZE):
+                    batch = guild_users[i:i + config.CLEANUP_BATCH_SIZE]
+                    logger.debug(f"Processing batch {i//config.CLEANUP_BATCH_SIZE + 1} ({len(batch)} users) for guild {guild.name}")
 
                     for user_data in batch:
                         stats['checked'] += 1
@@ -698,8 +766,8 @@ async def cleanup_stale_users():
                             logger.error(f"Error processing user {discord_id} in guild {guild.id}: {user_error}", exc_info=True)
                     
                     # Small delay between batches to avoid blocking
-                    if i + CLEANUP_BATCH_SIZE < len(guild_users):
-                        await asyncio.sleep(CLEANUP_BATCH_DELAY)
+                    if i + config.CLEANUP_BATCH_SIZE < len(guild_users):
+                        await asyncio.sleep(config.CLEANUP_BATCH_DELAY)
                 
                 stats['guilds_processed'] += 1
                 logger.info(f"🏁 Cleanup completed for guild {guild.name}: "
@@ -728,12 +796,12 @@ async def schedule_user_cleanup():
     Schedule user cleanup to run at configured interval.
     Enhanced with better error handling and statistics reporting.
     """
-    logger.info(f"Starting user cleanup scheduler (runs every {USER_CLEANUP_INTERVAL/3600:.1f} hours)")
+    logger.info(f"Starting user cleanup scheduler (runs every {config.USER_CLEANUP_INTERVAL/3600:.1f} hours)")
 
     try:
         while not bot.is_closed():
             # Wait for configured interval
-            await asyncio.sleep(USER_CLEANUP_INTERVAL)
+            await asyncio.sleep(config.USER_CLEANUP_INTERVAL)
             
             try:
                 logger.info("⏰ Running scheduled user cleanup")
@@ -814,12 +882,12 @@ async def schedule_guild_cleanup():
     """
     Schedule guild cleanup to run at configured interval.
     """
-    logger.info(f"Starting guild cleanup scheduler (runs every {USER_CLEANUP_INTERVAL/3600:.1f} hours)")
+    logger.info(f"Starting guild cleanup scheduler (runs every {config.GUILD_CLEANUP_INTERVAL/3600:.1f} hours)")
 
     try:
         while not bot.is_closed():
             # Wait for configured interval
-            await asyncio.sleep(USER_CLEANUP_INTERVAL)
+            await asyncio.sleep(config.GUILD_CLEANUP_INTERVAL)
             
             try:
                 logger.info("Running scheduled guild cleanup")
@@ -834,13 +902,6 @@ async def schedule_guild_cleanup():
 # ------------------------------------------------------
 # Streaming Status Loop with Enhanced Templates
 # ------------------------------------------------------
-
-# Dynamic status message templates for variety
-STATUS_TEMPLATES = [
-    "🔥 Hot: {anime}",
-    "💫 Trending: {anime}",
-    "✨ Popular: {anime}",
-]
 
 async def update_streaming_status():
     """
@@ -875,7 +936,7 @@ async def update_streaming_status():
                 anime_title = trending[index]
 
                 # Select random template for variety
-                template = random.choice(STATUS_TEMPLATES)
+                template = random.choice(config.STATUS_TEMPLATES)
                 status_text = template.format(anime=anime_title)
 
                 logger.debug(f"Setting streaming status ({index+1}/{len(trending)}): {status_text}")
@@ -883,7 +944,7 @@ async def update_streaming_status():
                 # Create and set streaming activity
                 stream = discord.Streaming(
                     name=status_text,
-                    url=TWITCH_STREAMING_URL
+                    url=config.TWITCH_STREAMING_URL
                 )
                 
                 await bot.change_presence(activity=stream)
@@ -897,9 +958,9 @@ async def update_streaming_status():
                 
                 # Check if it's time to refresh trending list
                 time_since_refresh = time.time() - last_refresh
-                if time_since_refresh >= TRENDING_REFRESH_INTERVAL:
+                if time_since_refresh >= config.TRENDING_REFRESH_INTERVAL:
                     logger.info(f"🔄 Refreshing trending list after {time_since_refresh/3600:.1f} hours")
-                    
+
                     try:
                         new_trending = await fetch_trending_anime_list()
                         if new_trending != trending:
@@ -911,19 +972,19 @@ async def update_streaming_status():
                     except Exception as refresh_error:
                         logger.error(f"Error refreshing trending list: {refresh_error}")
                         # Continue with existing list
-                    
+
                     last_refresh = time.time()
-                
+
                 # Wait before next update
-                logger.debug(f"Waiting {STATUS_UPDATE_INTERVAL}s before next status update")
-                await asyncio.sleep(STATUS_UPDATE_INTERVAL)
+                logger.debug(f"Waiting {config.STATUS_UPDATE_INTERVAL}s before next status update")
+                await asyncio.sleep(config.STATUS_UPDATE_INTERVAL)
                 
             except discord.HTTPException as http_error:
                 logger.error(f"Discord HTTP error updating status: {http_error}")
-                await asyncio.sleep(STATUS_UPDATE_INTERVAL * 2)  # Wait longer on HTTP errors
+                await asyncio.sleep(config.STATUS_UPDATE_INTERVAL * 2)  # Wait longer on HTTP errors
             except Exception as status_error:
                 logger.error(f"Unexpected error in status update loop: {status_error}", exc_info=True)
-                await asyncio.sleep(STATUS_UPDATE_INTERVAL)
+                await asyncio.sleep(config.STATUS_UPDATE_INTERVAL)
                 
     except Exception as e:
         logger.error(f"Fatal error in streaming status updater: {e}", exc_info=True)
@@ -943,12 +1004,16 @@ async def load_cogs():
     Load and manage cogs with timestamp tracking and comprehensive error handling.
     Only one cog loading operation can run at a time to prevent race conditions.
     """
-    async with cog_loading_semaphore:
-        logger.debug("Acquired cog loading semaphore")
-        try:
-            await _load_cogs_impl()
-        finally:
-            logger.debug("Released cog loading semaphore")
+    try:
+        async with asyncio.timeout(config.COG_LOAD_TIMEOUT):
+            async with cog_loading_semaphore:
+                logger.debug("Acquired cog loading semaphore")
+                try:
+                    await _load_cogs_impl()
+                finally:
+                    logger.debug("Released cog loading semaphore")
+    except asyncio.TimeoutError:
+        logger.error(f"❌ Cog loading timed out after {config.COG_LOAD_TIMEOUT} seconds")
 
 async def _load_cogs_impl():
     """
@@ -1310,16 +1375,17 @@ async def on_ready():
         except Exception as sync_error:
             logger.error(f"Error syncing global commands: {sync_error}", exc_info=True)
         
-        # Start background tasks
+        # Start background tasks with tracking
         logger.info("Starting background tasks")
-        
+
         try:
             logger.debug("Creating streaming status updater task")
-            bot.loop.create_task(update_streaming_status())
+            task = bot.loop.create_task(update_streaming_status())
+            background_tasks.append(task)
             logger.info("✅ Streaming status updater started")
         except Exception as status_task_error:
             logger.error(f"Failed to start streaming status updater: {status_task_error}")
-        
+
         try:
             logger.debug("Running initial user cleanup on startup")
             startup_stats = await cleanup_stale_users()
@@ -1327,17 +1393,19 @@ async def on_ready():
                 logger.info(f"✅ Initial user cleanup completed: removed {startup_stats['removed']} stale records")
             else:
                 logger.info("✅ Initial user cleanup completed: no stale records found")
-            
+
             logger.debug("Running initial guild cleanup")
             await cleanup_left_guilds()
             logger.info("✅ Initial guild cleanup completed")
-            
+
             logger.debug("Creating user cleanup scheduler task")
-            bot.loop.create_task(schedule_user_cleanup())
+            task = bot.loop.create_task(schedule_user_cleanup())
+            background_tasks.append(task)
             logger.info("✅ User cleanup scheduler started")
-            
+
             logger.debug("Creating guild cleanup scheduler task")
-            bot.loop.create_task(schedule_guild_cleanup())
+            task = bot.loop.create_task(schedule_guild_cleanup())
+            background_tasks.append(task)
             logger.info("✅ Guild cleanup scheduler started")
         except Exception as cleanup_task_error:
             logger.error(f"Failed to start cleanup tasks: {cleanup_task_error}")
@@ -1412,6 +1480,10 @@ async def on_guild_remove(guild):
     """
     logger.info(f"👋 Bot removed from server: {guild.name} (ID: {guild.id})")
 
+    # Initialize variables in case cleanup fails
+    success = False
+    total_deleted = 0
+
     # Immediately clean up all guild data
     try:
         logger.info(f"Starting immediate cleanup for guild {guild.id}")
@@ -1431,7 +1503,7 @@ async def on_guild_remove(guild):
     await webhook_notifier.notify('guild_removed', {
         'guild_name': guild.name,
         'guild_id': guild.id,
-        'records_deleted': total_deleted if success else 0,
+        'records_deleted': total_deleted,
         'cleanup_success': success,
         'remaining_guilds': len(bot.guilds)
     }, priority='warning')
@@ -1453,23 +1525,28 @@ async def main():
     logger.info("="*60)
     logger.info("STARTING BOT INITIALIZATION")
     logger.info("="*60)
-    
+
     try:
+        # Validate configuration FIRST for fail-fast behavior
+        logger.info("Validating configuration...")
+        is_valid, missing_vars = config.validate_required_config()
+        if not is_valid:
+            logger.error(f"❌ Configuration validation failed. Missing variables: {', '.join(missing_vars)}")
+            raise ValueError(f"Required configuration missing: {', '.join(missing_vars)}")
+
+        logger.info("✅ Configuration validation passed")
+        config_summary = config.get_config_summary()
+        logger.info(f"Configuration summary: {config_summary}")
+
         # Initialize database with logging
         logger.info("Initializing database...")
         try:
             await init_db()
             logger.info("✅ Database initialization completed")
-
-            # Initialize database connection pool
-            global db_pool
-            db_pool = DatabaseConnectionPool(db_path=config.DB_PATH, pool_size=DB_CONNECTION_POOL_SIZE)
-            await db_pool.initialize()
-
         except Exception as db_error:
             logger.error(f"❌ Database initialization failed: {db_error}", exc_info=True)
             raise
-        
+
         # Load cogs with logging
         logger.info("Loading bot cogs...")
         try:
@@ -1478,38 +1555,25 @@ async def main():
         except Exception as cog_error:
             logger.error(f"❌ Cog loading failed: {cog_error}", exc_info=True)
             # Continue anyway - some cogs might have loaded successfully
-        
+
         # Start cog watcher with logging
         logger.info("Starting cog file watcher...")
         try:
-            asyncio.create_task(watch_cogs())
+            task = asyncio.create_task(watch_cogs())
+            background_tasks.append(task)
             logger.info("✅ Cog watcher started")
         except Exception as watcher_error:
             logger.error(f"❌ Cog watcher failed to start: {watcher_error}", exc_info=True)
             # Continue without watcher
-        
-        # Validate configuration
-        logger.info("Validating configuration...")
-        if not TOKEN:
-            logger.error("❌ Bot token not found in configuration")
-            raise ValueError("Bot token is required")
-        if not GUILD_ID:
-            logger.error("❌ Guild ID not found in configuration")
-            raise ValueError("Guild ID is required")
-        if not BOT_ID:
-            logger.error("❌ Bot ID not found in configuration")
-            raise ValueError("Bot ID is required")
-        
-        logger.info("✅ Configuration validation passed")
-        
+
         # Start the bot with comprehensive logging
         logger.info("Starting Discord bot connection...")
-        logger.info(f"Bot ID: {BOT_ID}")
-        logger.info(f"Target Guild: {GUILD_ID}")
+        logger.info(f"Bot ID: {config.BOT_ID}")
+        logger.info(f"Target Guild: {config.GUILD_ID}")
         logger.info("="*60)
-        
+
         try:
-            await bot.start(TOKEN)
+            await bot.start(config.TOKEN)
         except discord.LoginFailure as login_error:
             logger.error(f"❌ Bot login failed - Invalid token: {login_error}")
             raise
@@ -1529,15 +1593,24 @@ async def main():
         logger.info("Bot shutdown sequence initiated")
 
         # Send shutdown webhook
-        await webhook_notifier.notify('bot_shutdown', {
-            'uptime': get_uptime(),
-            'reason': 'Normal shutdown'
-        }, priority='info')
+        try:
+            await webhook_notifier.notify('bot_shutdown', {
+                'uptime': get_uptime(),
+                'reason': 'Normal shutdown'
+            }, priority='info')
+        except Exception as webhook_error:
+            logger.warning(f"Failed to send shutdown webhook: {webhook_error}")
 
-        # Close database pool
-        if db_pool and db_pool.initialized:
-            logger.debug("Closing database connection pool...")
-            await db_pool.close()
+        # Cancel all background tasks
+        logger.info(f"Cancelling {len(background_tasks)} background tasks...")
+        for task in background_tasks:
+            if not task.done():
+                task.cancel()
+
+        # Wait for tasks to complete cancellation
+        if background_tasks:
+            await asyncio.gather(*background_tasks, return_exceptions=True)
+            logger.info("✅ All background tasks cancelled")
 
         # Close bot connection
         if not bot.is_closed():
