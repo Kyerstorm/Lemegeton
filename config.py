@@ -66,6 +66,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 
 # Bot Identifiers (parsed as integers)
 BOT_ID = _int_env("BOT_ID")
+CLIENT_ID = _int_env("CLIENT_ID", BOT_ID)  # Application/Client ID (defaults to BOT_ID if not set)
 GUILD_ID = _int_env("GUILD_ID")
 CHANNEL_ID = _int_env("CHANNEL_ID")
 ADMIN_DISCORD_ID = _int_env("ADMIN_DISCORD_ID")
@@ -90,6 +91,9 @@ ALL_STAR_COMPLETED_ROLE_ID = _int_env("ALL_STAR_COMPLETED_ROLE_ID")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 AURA_WEBHOOK_URL = os.getenv("AURA_WEBHOOK_URL")
 
+# Webhook Rate Limiting
+WEBHOOK_RATE_LIMIT = _int_env("WEBHOOK_RATE_LIMIT", 5)  # Max 5 webhooks per minute
+
 # ==============================================================================
 # BOT BEHAVIOR CONFIGURATION
 # ==============================================================================
@@ -101,7 +105,7 @@ LOG_MAX_SIZE = _int_env("LOG_MAX_SIZE", 52428800)  # 50MB default
 STATUS_UPDATE_INTERVAL = _int_env("STATUS_UPDATE_INTERVAL", 3600)  # 1 hour
 TRENDING_REFRESH_INTERVAL = _int_env("TRENDING_REFRESH_INTERVAL", 10800)  # 3 hours
 
-# Status Message Templates
+# Dynamic status message templates for variety
 STATUS_TEMPLATES = [
     "🔥 Hot: {anime}",
     "💫 Trending: {anime}",
@@ -111,6 +115,7 @@ STATUS_TEMPLATES = [
 # Cog Development (seconds)
 COG_WATCH_INTERVAL_PROD = _int_env("COG_WATCH_INTERVAL_PROD", 10)  # Production: 10s
 COG_WATCH_INTERVAL_DEV = _int_env("COG_WATCH_INTERVAL_DEV", 2)  # Development: 2s
+COG_LOAD_TIMEOUT = _int_env("COG_LOAD_TIMEOUT", 30)  # 30 seconds timeout for cog loading
 
 # Cleanup Tasks (seconds)
 USER_CLEANUP_INTERVAL = _int_env("USER_CLEANUP_INTERVAL", 21600)  # 6 hours
@@ -118,12 +123,6 @@ GUILD_CLEANUP_INTERVAL = _int_env("GUILD_CLEANUP_INTERVAL", 21600)  # 6 hours
 CLEANUP_BATCH_SIZE = _int_env("CLEANUP_BATCH_SIZE", 50)  # Process users in batches of 50
 CLEANUP_BATCH_DELAY = _float_env("CLEANUP_BATCH_DELAY", 1.0)  # 1 second delay between batches
 CLEANUP_TIMEOUT = _int_env("CLEANUP_TIMEOUT", 600)  # 10 minutes max for cleanup operations
-
-# Cog Loading
-COG_LOAD_TIMEOUT = _int_env("COG_LOAD_TIMEOUT", 30)  # 30 seconds timeout for cog loading
-
-# Webhook Rate Limiting
-WEBHOOK_RATE_LIMIT = _int_env("WEBHOOK_RATE_LIMIT", 5)  # Max 5 webhooks per minute
 
 # ==============================================================================
 # ANILIST API CONFIGURATION
@@ -175,9 +174,9 @@ API_MAX_RETRIES = _int_env("API_MAX_RETRIES", 3)  # 3 retries default
 API_RETRY_BASE_DELAY = _float_env("API_RETRY_BASE_DELAY", 1.0)  # 1.0 seconds default
 
 # Circuit Breaker Configuration
-CIRCUIT_BREAKER_FAILURE_THRESHOLD = _int_env("CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5)  # Open after 5 failures
-CIRCUIT_BREAKER_TIMEOUT = _int_env("CIRCUIT_BREAKER_TIMEOUT", 60)  # 60 seconds before retry
-CIRCUIT_BREAKER_SUCCESS_THRESHOLD = _int_env("CIRCUIT_BREAKER_SUCCESS_THRESHOLD", 2)  # Close after 2 successes
+CIRCUIT_BREAKER_FAILURE_THRESHOLD = _int_env("CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5)  # Open circuit after 5 failures
+CIRCUIT_BREAKER_TIMEOUT = _int_env("CIRCUIT_BREAKER_TIMEOUT", 60)  # 60 seconds before attempting half-open
+CIRCUIT_BREAKER_SUCCESS_THRESHOLD = _int_env("CIRCUIT_BREAKER_SUCCESS_THRESHOLD", 2)  # Close circuit after 2 successes
 
 # ==============================================================================
 # DATABASE CONFIGURATION
@@ -185,6 +184,8 @@ CIRCUIT_BREAKER_SUCCESS_THRESHOLD = _int_env("CIRCUIT_BREAKER_SUCCESS_THRESHOLD"
 
 # Database path (Railway compatible)
 DB_PATH = os.getenv("DATABASE_PATH", os.path.join(os.path.dirname(__file__), "data", "database.db"))
+# Alias for backwards compatibility
+DATABASE_PATH = DB_PATH
 
 # Connection pool size (framework for future implementation)
 DB_CONNECTION_POOL_SIZE = _int_env("DB_CONNECTION_POOL_SIZE", 5)
@@ -259,17 +260,15 @@ def get_config_summary():
 
 __all__ = [
     # Core
-    'TOKEN', 'BOT_ID', 'GUILD_ID', 'CHANNEL_ID', 'ADMIN_DISCORD_ID',
+    'TOKEN', 'BOT_ID', 'CLIENT_ID', 'GUILD_ID', 'CHANNEL_ID', 'ADMIN_DISCORD_ID',
     'PRIMARY_GUILD_ID', 'MOD_ROLE_ID', 'BOT_UPDATE_ROLE_ID',
 
     # Monitoring
     'DISCORD_WEBHOOK_URL', 'AURA_WEBHOOK_URL',
 
     # Behavior
-    'LOG_MAX_SIZE', 'STATUS_UPDATE_INTERVAL', 'TRENDING_REFRESH_INTERVAL', 'STATUS_TEMPLATES',
+    'LOG_MAX_SIZE', 'STATUS_UPDATE_INTERVAL', 'TRENDING_REFRESH_INTERVAL',
     'COG_WATCH_INTERVAL_PROD', 'COG_WATCH_INTERVAL_DEV', 'USER_CLEANUP_INTERVAL',
-    'GUILD_CLEANUP_INTERVAL', 'CLEANUP_BATCH_SIZE', 'CLEANUP_BATCH_DELAY', 'CLEANUP_TIMEOUT',
-    'COG_LOAD_TIMEOUT', 'WEBHOOK_RATE_LIMIT',
 
     # AniList
     'ANILIST_API_URL', 'ANILIST_API_TIMEOUT', 'DEFAULT_TRENDING_FALLBACK',
@@ -282,10 +281,13 @@ __all__ = [
 
     # API Resilience
     'API_MAX_RETRIES', 'API_RETRY_BASE_DELAY',
-    'CIRCUIT_BREAKER_FAILURE_THRESHOLD', 'CIRCUIT_BREAKER_TIMEOUT', 'CIRCUIT_BREAKER_SUCCESS_THRESHOLD',
 
     # Database
-    'DB_PATH', 'DB_CONNECTION_POOL_SIZE',
+    'DB_PATH', 'DATABASE_PATH', 'DB_CONNECTION_POOL_SIZE',
+
+    # Web Dashboard
+    'DISCORD_CLIENT_SECRET', 'DASHBOARD_SECRET_KEY', 'DASHBOARD_HOST',
+    'DASHBOARD_PORT', 'DASHBOARD_REDIRECT_URI',
 
     # Legacy
     'CHALLENGE_ROLE_IDS', 'ALL_STAR_STAGE1_ROLE_ID', 'ALL_STAR_STAGE2_ROLE_ID',
