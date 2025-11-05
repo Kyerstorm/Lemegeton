@@ -14,6 +14,8 @@ import logging
 from pathlib import Path
 from typing import Optional, Callable, Awaitable, List, Dict
 from config import DB_PATH
+from helpers.embed_helper import build_error_embed, build_success_embed, build_warning_embed, build_info_embed
+from helpers.anilist_helper import post_graphql
 
 # -----------------------------
 # Logging Setup
@@ -147,18 +149,16 @@ async def fetch_anilist_library(username: str, media_type: str, extended: bool =
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post("https://graphql.anilist.co", json={"query": query, "variables": variables}) as resp:
-                if resp.status != 200:
-                    text = await resp.text()
-                    logger.warning(f"AniList API non-200 ({resp.status}) for {username}: {text[:200]}")
-                    return []
-                data = await resp.json()
+            data = await post_graphql(session, query, variables)
+            if data is None:
+                logger.warning(f"AniList API returned None for {username}")
+                return []
     except Exception as e:
         logger.error(f"HTTP error during AniList fetch for {username}: {e}", exc_info=True)
         return []
 
     # defensive checks
-    mlc = (data.get("data") or {}).get("MediaListCollection")
+    mlc = data.get("MediaListCollection")
     if not mlc:
         logger.warning(f"AniList returned no MediaListCollection for {username}: {data}")
         return []
@@ -533,26 +533,41 @@ class LibraryBackup(commands.Cog):
                     @discord.ui.button(label="📝 Register / Link AniList", style=discord.ButtonStyle.green, emoji="🔗")
                     async def register(self, button_interaction: discord.Interaction, button: discord.ui.Button):
                         if button_interaction.user.id != interaction.user.id:
-                            await button_interaction.response.send_message("❌ This button is not for you.", ephemeral=True)
+                            embed = build_error_embed(
+                                "Permission Denied",
+                                "This button is not for you."
+                            )
+                            await button_interaction.response.send_message(embed=embed, ephemeral=True)
                             return
-                        await button_interaction.response.send_message("🔎 Use `/login` to link your AniList account (or provide `username` parameter).", ephemeral=True)
+                        embed = build_info_embed(
+                            "Link Your Account",
+                            "Use `/login` to link your AniList account (or provide `username` parameter)."
+                        )
+                        await button_interaction.response.send_message(embed=embed, ephemeral=True)
 
                     @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.red, emoji="❌")
                     async def cancel(self, button_interaction: discord.Interaction, button: discord.ui.Button):
                         if button_interaction.user.id != interaction.user.id:
-                            await button_interaction.response.send_message("❌ This button is not for you.", ephemeral=True)
+                            embed = build_error_embed(
+                                "Permission Denied",
+                                "This button is not for you."
+                            )
+                            await button_interaction.response.send_message(embed=embed, ephemeral=True)
                             return
-                        await button_interaction.response.edit_message(embed=discord.Embed(title="Cancelled", description="Library backup cancelled.", color=discord.Color.red()), view=None)
+                        embed = build_info_embed(
+                            "Cancelled",
+                            "Library backup cancelled."
+                        )
+                        await button_interaction.response.edit_message(embed=embed, view=None)
 
-                embed = discord.Embed(
-                    title="❌ AniList Username Required",
-                    description=(
+                embed = build_warning_embed(
+                    "AniList Username Required",
+                    (
                         "I couldn't find your linked AniList account.\n\n"
                         "• Use `/login` to link your AniList account\n"
                         "• Or run this command again and provide the `username` parameter\n\n"
                         "*Once linked, you won't need to enter your username again.*"
-                    ),
-                    color=discord.Color.orange()
+                    )
                 )
                 embed.set_footer(text="Tip: Link your account once and forget it ✨")
                 await interaction.response.send_message(embed=embed, view=RegisterView(), ephemeral=True)
@@ -600,11 +615,19 @@ class LibraryBackup(commands.Cog):
         except Exception as e:
             logger.error(f"Error fetching AniList data for {username}: {e}", exc_info=True)
             await edit_progress(0, "Failed to fetch AniList data.")
-            await progress_msg.edit(embed=discord.Embed(title="❌ Error", description="Failed to fetch AniList data. Try again later.", color=discord.Color.red()))
+            embed = build_error_embed(
+                "Error",
+                "Failed to fetch AniList data. Try again later."
+            )
+            await progress_msg.edit(embed=embed)
             return
 
         if not user_library:
-            await progress_msg.edit(embed=discord.Embed(title="❌ No Data", description="Your AniList library is empty or private.", color=discord.Color.orange()))
+            embed = build_warning_embed(
+                "No Data",
+                "Your AniList library is empty or private."
+            )
+            await progress_msg.edit(embed=embed)
             return
 
         await edit_progress(12, "Processing entries...")
@@ -624,11 +647,11 @@ class LibraryBackup(commands.Cog):
         filtered = deduplicate_entries_by_id(filtered)
 
         if not filtered:
-            await progress_msg.edit(embed=discord.Embed(
-                title="📝 No Data Found",
-                description=(f"No entries matched your criteria for **{username}** in **{scope.name}**."),
-                color=discord.Color.orange()
-            ))
+            embed = build_warning_embed(
+                "No Data Found",
+                f"No entries matched your criteria for **{username}** in **{scope.name}**."
+            )
+            await progress_msg.edit(embed=embed)
             return
 
         # final prep before writing
@@ -644,21 +667,24 @@ class LibraryBackup(commands.Cog):
             )
         except Exception as e:
             logger.error(f"Error generating file for {username}: {e}", exc_info=True)
-            await progress_msg.edit(embed=discord.Embed(title="❌ Export Failed", description="An error occurred while generating the file.", color=discord.Color.red()))
+            embed = build_error_embed(
+                "Export Failed",
+                "An error occurred while generating the file."
+            )
+            await progress_msg.edit(embed=embed)
             return
 
         # Build final confirmation embed
-        confirm = discord.Embed(
-            title="✅ Backup Ready!",
-            description=(
+        confirm = build_success_embed(
+            "Backup Ready!",
+            (
                 f"**User:** `{username}`\n"
                 f"**File:** `{filename}`\n"
                 f"**Format:** {format.name}\n"
                 f"**Scope:** {scope.name}\n"
                 f"**Type:** {media_type.name}\n"
                 f"**Entries:** {len(filtered)}"
-            ),
-            color=discord.Color.green()
+            )
         )
         confirm.set_footer(text="Exported via /library_backup • Keep your library yours ✨")
 
@@ -668,11 +694,19 @@ class LibraryBackup(commands.Cog):
         if delivery.value == "dm":
             try:
                 await interaction.user.send(embed=confirm, file=file)
-                await progress_msg.edit(embed=discord.Embed(title="📬 Sent!", description="Your backup was delivered to your DMs.", color=discord.Color.green()))
+                embed = build_success_embed(
+                    "Sent!",
+                    "Your backup was delivered to your DMs."
+                )
+                await progress_msg.edit(embed=embed)
                 logger.info(f"Backup DM sent to {interaction.user.id}: {filename} ({len(filtered)} entries)")
             except discord.Forbidden:
                 logger.warning(f"Failed to DM {interaction.user.id} (for backup).")
-                await progress_msg.edit(embed=discord.Embed(title="❌ DM Failed", description="I couldn't send the DM. Please allow direct messages or choose Channel delivery.", color=discord.Color.red()))
+                embed = build_error_embed(
+                    "DM Failed",
+                    "I couldn't send the DM. Please allow direct messages or choose Channel delivery."
+                )
+                await progress_msg.edit(embed=embed)
         else:
             # show confirmation in ephemeral message and post file to channel (public)
             try:
@@ -681,7 +715,11 @@ class LibraryBackup(commands.Cog):
                 logger.info(f"Backup sent in channel by {interaction.user.id}: {filename} ({len(filtered)} entries)")
             except Exception as e:
                 logger.error(f"Failed to send backup in channel for {interaction.user.id}: {e}", exc_info=True)
-                await progress_msg.edit(embed=discord.Embed(title="❌ Send Failed", description="Could not send file to channel. Check permissions.", color=discord.Color.red()))
+                embed = build_error_embed(
+                    "Send Failed",
+                    "Could not send file to channel. Check permissions."
+                )
+                await progress_msg.edit(embed=embed)
 
 # -----------------------------
 # Cog Setup

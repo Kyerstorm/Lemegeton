@@ -7,10 +7,11 @@ import logging
 from typing import List, Dict, Optional, Tuple
 from discord.ui import View, Button
 from database import get_all_users_guild_aware
+from helpers.embed_helper import build_error_embed, build_info_embed
+from helpers.anilist_helper import post_graphql
 from cogs_test.general_commands.dashboard import command_meta
 
 logger = logging.getLogger("BrowseCog")
-API_URL = "https://graphql.anilist.co"
 GOOGLE_BOOKS_URL = "https://www.googleapis.com/books/v1/volumes?q="
 
 # Status order priority
@@ -33,41 +34,42 @@ class BrowseCog(commands.Cog):
     # Fetch Media Info (Anime, Manga, LN)
     # --------------------------------------------------
     async def fetch_media(self, query: str, media_type: str) -> List[Dict]:
-        graphql_query = {
-            "query": """
-            query ($search: String, $type: MediaType) {
-                Page(perPage: 10) {
-                    media(search: $search, type: $type) {
-                        id
-                        title { romaji english }
-                        description(asHtml: false)
-                        averageScore
-                        siteUrl
-                        status
-                        episodes
-                        chapters
-                        volumes
-                        startDate { year month day }
-                        endDate { year month day }
-                        genres
-                        coverImage { large medium }
-                        bannerImage
-                        externalLinks { site url }
-                        format
-                    }
+        query_str = """
+        query ($search: String, $type: MediaType) {
+            Page(perPage: 10) {
+                media(search: $search, type: $type) {
+                    id
+                    title { romaji english }
+                    description(asHtml: false)
+                    averageScore
+                    siteUrl
+                    status
+                    episodes
+                    chapters
+                    volumes
+                    startDate { year month day }
+                    endDate { year month day }
+                    genres
+                    coverImage { large medium }
+                    bannerImage
+                    externalLinks { site url }
+                    format
                 }
             }
-            """,
-            "variables": {"search": query, "type": media_type}
         }
+        """
+        variables = {"search": query, "type": media_type}
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(API_URL, json=graphql_query) as response:
-                if response.status != 200:
-                    logger.error(f"Failed AniList request: {response.status}")
+        try:
+            async with aiohttp.ClientSession() as session:
+                data = await post_graphql(session, query_str, variables)
+                if data is None:
+                    logger.warning(f"Failed AniList request for query='{query}', type={media_type}")
                     return []
-                data = await response.json()
-                return data.get("data", {}).get("Page", {}).get("media", [])
+                return data.get("Page", {}).get("media", [])
+        except Exception as e:
+            logger.error(f"Failed AniList request: {e}", exc_info=True)
+            return []
 
     # --------------------------------------------------
     # Fetch AniList Progress & Rating for a User
@@ -94,19 +96,18 @@ class BrowseCog(commands.Cog):
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(API_URL, json={"query": query, "variables": variables}) as resp:
-                    if resp.status != 200:
-                        logger.warning(f"AniList fetch failed ({resp.status}) for {anilist_username=} {media_id=}")
-                        return None
-                    payload = await resp.json()
-        except Exception:
-            logger.exception("Error requesting AniList user progress")
+                payload = await post_graphql(session, query, variables)
+                if payload is None:
+                    logger.warning(f"AniList fetch failed for {anilist_username=} {media_id=}")
+                    return None
+        except Exception as e:
+            logger.exception("Error requesting AniList user progress: %s", e, exc_info=True)
             return None
 
-        user_opts = payload.get("data", {}).get("User", {}).get("mediaListOptions", {})
+        user_opts = payload.get("User", {}).get("mediaListOptions", {})
         score_format = user_opts.get("scoreFormat", "POINT_100")
 
-        entry = payload.get("data", {}).get("MediaList")
+        entry = payload.get("MediaList")
         if not entry:
             return None
 
@@ -262,12 +263,20 @@ class BrowseCog(commands.Cog):
             async with aiohttp.ClientSession() as session:
                 async with session.get(GOOGLE_BOOKS_URL + title) as response:
                     if response.status != 200:
-                        await interaction.followup.send("❌ No results found.", ephemeral=True)
+                        embed = build_error_embed(
+                            "No Results Found",
+                            "No results found."
+                        )
+                        await interaction.followup.send(embed=embed, ephemeral=True)
                         return
                     data = await response.json()
                     items = data.get("items", [])
                     if not items:
-                        await interaction.followup.send("❌ No results found.", ephemeral=True)
+                        embed = build_error_embed(
+                            "No Results Found",
+                            "No results found."
+                        )
+                        await interaction.followup.send(embed=embed, ephemeral=True)
                         return
                     book = items[0].get("volumeInfo", {})
 
@@ -298,17 +307,29 @@ class BrowseCog(commands.Cog):
         # ✅ AniList Fetch
         results = await self.fetch_media(title, real_type)
         if not results:
-            await interaction.followup.send("❌ No results found.", ephemeral=True)
+            embed = build_error_embed(
+                "No Results Found",
+                "No results found."
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
         media = results[0]
 
         # Filter by format to ensure correct media type
         if chosen_type == "MANGA_NOVEL" and media.get("format") != "NOVEL":
-            await interaction.followup.send("❌ No Light Novel results found.", ephemeral=True)
+            embed = build_error_embed(
+                "No Light Novel Results",
+                "No Light Novel results found."
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
             return
         elif chosen_type == "MANGA" and media.get("format") == "NOVEL":
-            await interaction.followup.send("❌ No Manga results found (try Light Novel instead).", ephemeral=True)
+            embed = build_error_embed(
+                "No Manga Results",
+                "No Manga results found (try Light Novel instead)."
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
         # Format dates
@@ -541,7 +562,11 @@ class BrowseCog(commands.Cog):
                         
                         if not self.all_users or len(self.all_users) == 0:
                             try:
-                                await interaction.followup.send("No registered users found.", ephemeral=True)
+                                embed = build_info_embed(
+                                    "No Users Found",
+                                    "No registered users found."
+                                )
+                                await interaction.followup.send(embed=embed, ephemeral=True)
                             except Exception:
                                 pass
                             return
@@ -597,7 +622,11 @@ class BrowseCog(commands.Cog):
 
                     async def load_more_callback(interaction: discord.Interaction):
                         if not self.has_more_users() or self.is_loading:
-                            await interaction.response.send_message("No more users to load or already loading.", ephemeral=True)
+                            embed = build_info_embed(
+                                "Cannot Load More",
+                                "No more users to load or already loading."
+                            )
+                            await interaction.response.send_message(embed=embed, ephemeral=True)
                             return
                         
                         # Show loading message

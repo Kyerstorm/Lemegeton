@@ -7,13 +7,12 @@ import asyncio
 import typing
 import html
 import logging
-import traceback
 import unicodedata
 import urllib.parse
 import re
 from cogs_test.general_commands.dashboard import command_meta
-
-ANILIST_API_URL = "https://graphql.anilist.co"
+from helpers.embed_helper import build_error_embed, build_warning_embed, build_info_embed
+from helpers.anilist_helper import post_graphql
 
 # --- logger setup (prints to terminal, includes timestamps) ---
 logger = logging.getLogger("trailer_cog")
@@ -107,31 +106,15 @@ class TrailerCog(commands.Cog):
         """
         variables = {"search": title, "type": mtype.upper(), "limit": limit}
         try:
-            async with self.session.post(ANILIST_API_URL, json={"query": query, "variables": variables}, timeout=15) as resp:
-                text = await resp.text()
-                if resp.status != 200:
-                    logger.error("GraphQL non-200 response for search '%s' (type=%s): %s", title, mtype, resp.status)
-                    logger.debug("Response body: %s", text[:1000])
-                    return None
-                try:
-                    data = await self.session._loop.run_in_executor(None, lambda: __import__("json").loads(text))
-                except Exception:
-                    # fallback json loads if library can't parse via resp.json
-                    data = None
-                if data is None:
-                    # attempt resp.json() safely
-                    try:
-                        data = await (await self.session.post(ANILIST_API_URL, json={"query": query, "variables": variables})).json()
-                    except Exception as e:
-                        logger.error("Failed to decode JSON for GraphQL response: %s", e)
-                        logger.debug("Raw response: %s", text[:2000])
-                        return None
-                media = data.get("data", {}).get("Page", {}).get("media", [])
-                logger.debug("GraphQL returned %d items for query '%s'", len(media) if media else 0, title)
-                return media
-        except Exception:
-            logger.error("Exception while querying AniList GraphQL for '%s' (type=%s):", title, mtype)
-            traceback.print_exc()
+            data = await post_graphql(self.session, query, variables, timeout=15)
+            if data is None:
+                logger.warning("GraphQL query returned None for search '%s' (type=%s)", title, mtype)
+                return None
+            media = data.get("Page", {}).get("media", [])
+            logger.debug("GraphQL returned %d items for query '%s'", len(media) if media else 0, title)
+            return media
+        except Exception as e:
+            logger.error("Exception while querying AniList GraphQL for '%s' (type=%s): %s", title, mtype, e, exc_info=True)
             return None
 
     # fallback: scrape AniList search page for first ID, then fetch Media by id
@@ -143,7 +126,7 @@ class TrailerCog(commands.Cog):
             async with self.session.get(search_url, timeout=15) as resp:
                 text = await resp.text()
                 if resp.status != 200:
-                    logger.error("Fallback search page returned status %s for URL %s", resp.status, search_url)
+                    logger.error("Fallback search page returned status %s for URL %s", resp.status, search_url, exc_info=True)
                     logger.debug("Fallback page snippet: %s", text[:1000])
                     return None
                 # parse for /anime/<id> or /manga/<id>
@@ -168,26 +151,21 @@ class TrailerCog(commands.Cog):
                 }
                 """
                 variables = {"id": int(anilist_id)}
-                async with self.session.post(ANILIST_API_URL, json={"query": query, "variables": variables}, timeout=15) as resp2:
-                    text2 = await resp2.text()
-                    if resp2.status != 200:
-                        logger.error("Fallback GraphQL by ID returned %s for id %s", resp2.status, anilist_id)
-                        logger.debug("Response body: %s", text2[:1000])
+                try:
+                    data = await post_graphql(self.session, query, variables, timeout=15)
+                    if data is None:
+                        logger.warning("Fallback GraphQL by ID returned None for id %s", anilist_id)
                         return None
-                    try:
-                        data = await resp2.json()
-                    except Exception:
-                        logger.error("Failed to parse JSON for fallback GraphQL response (id=%s).", anilist_id)
-                        logger.debug("Raw body: %s", text2[:2000])
-                        return None
-                    media = data.get("data", {}).get("Media")
+                    media = data.get("Media")
                     if media:
                         logger.debug("Fallback GraphQL returned media id %s", media.get("id"))
                         return [media]
                     return None
-        except Exception:
-            logger.error("Exception in fallback_parse for title '%s' (type=%s):", title, mtype)
-            traceback.print_exc()
+                except Exception as e:
+                    logger.error("Failed to fetch fallback GraphQL response (id=%s): %s", anilist_id, e, exc_info=True)
+                    return None
+        except Exception as e:
+            logger.error("Exception in fallback_parse for title '%s' (type=%s): %s", title, mtype, e, exc_info=True)
             return None
 
     # tries multiple normalized variants and uses GraphQL first then fallback_parse
@@ -198,9 +176,8 @@ class TrailerCog(commands.Cog):
             logger.info("Trying GraphQL for '%s' (type=%s)", variant, mtype)
             try:
                 media_list = await self.query_anilist(variant, mtype, limit=6)
-            except Exception:
-                logger.error("Exception during query_anilist for '%s'", variant)
-                traceback.print_exc()
+            except Exception as e:
+                logger.error("Exception during query_anilist for '%s': %s", variant, e, exc_info=True)
                 media_list = None
 
             # GraphQL returned non-empty list -> done
@@ -212,9 +189,8 @@ class TrailerCog(commands.Cog):
             logger.info("GraphQL returned no results for '%s' — trying fallback parse", variant)
             try:
                 fb = await self.fallback_parse(variant, mtype)
-            except Exception:
-                logger.error("Exception during fallback_parse for '%s'", variant)
-                traceback.print_exc()
+            except Exception as e:
+                logger.error("Exception during fallback_parse for '%s': %s", variant, e, exc_info=True)
                 fb = None
             if fb:
                 logger.info("Fallback parse returned %d result(s) for '%s'", len(fb), variant)
@@ -271,13 +247,21 @@ class TrailerCog(commands.Cog):
 
         if not media_list:
             # simple, no-type message (user requested removing the "type: anime" bit)
-            await interaction.followup.send(f"⚠️ No results found for **{title}**.", ephemeral=True)
+            embed = build_warning_embed(
+                "No Results Found",
+                f"No results found for **{title}**."
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
         # filter NSFW if not allowed
         filtered = [m for m in media_list if (allow_nsfw or not m.get("isAdult"))]
         if not filtered:
-            await interaction.followup.send(f"⚠️ No results found for **{title}** (NSFW filtered).", ephemeral=True)
+            embed = build_warning_embed(
+                "No Results Found",
+                f"No results found for **{title}** (NSFW filtered)."
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
         # multiple matches -> show a select menu (ephemeral so channel isn't spammed)
@@ -313,13 +297,21 @@ class TrailerCog(commands.Cog):
                     selected_id = select.values[0]
                     chosen_m = self.media_map.get(selected_id)
                     if not chosen_m:
-                        await interaction2.followup.send("⚠️ Selected item not found (internal).", ephemeral=True)
+                        embed = build_error_embed(
+                            "Selection Error",
+                            "Selected item not found (internal)."
+                        )
+                        await interaction2.followup.send(embed=embed, ephemeral=True)
                         return
                     # send trailer publicly via the original parent_interaction (so channel receives the raw URL)
                     await self.parent_cog.send_trailer(public_interaction=self.parent_interaction, chosen=chosen_m, debug=self.debug, method=self.method_used)
 
             view = SelectMenu(self, filtered, debug, allow_nsfw, parent_interaction, method_used or "GraphQL/Fallback")
-            await interaction.followup.send("🔎 Multiple results found. Choose the correct entry (only you can see this):", view=view, ephemeral=True)
+            embed = build_info_embed(
+                "Multiple Results Found",
+                "Choose the correct entry (only you can see this):"
+            )
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
             return
 
         # only one match — post trailer
@@ -333,7 +325,11 @@ class TrailerCog(commands.Cog):
             trailer_url = (trailer.get("url") if trailer else None) or build_trailer_url((trailer.get("site") if trailer else None), (trailer.get("id") if trailer else None))
             if not trailer_url:
                 # ephemeral failure
-                await public_interaction.followup.send("⚠️ No trailer found.", ephemeral=True)
+                embed = build_warning_embed(
+                    "No Trailer Found",
+                    "No trailer found for this title."
+                )
+                await public_interaction.followup.send(embed=embed, ephemeral=True)
                 return
 
             if debug:
@@ -343,20 +339,23 @@ class TrailerCog(commands.Cog):
                 embed = discord.Embed(
                     title=f"🎬 Trailer — {html.unescape(pretty_title)}",
                     description=f"[AniList Page]({site_url})\n\n📺 Method used: **{method}**",
-                    color=0xE75480
+                    color=discord.Color.pink()
                 )
                 # show embed publicly (then raw URL publicly)
                 await public_interaction.followup.send(embed=embed)
             # send raw URL publicly so Discord auto-embeds the player
             await public_interaction.followup.send(trailer_url)
-        except Exception:
-            logger.error("Exception while sending trailer message:")
-            traceback.print_exc()
+        except Exception as e:
+            logger.error("Exception while sending trailer message: %s", e, exc_info=True)
             # send ephemeral error to user so channel isn't spammed
             try:
-                await public_interaction.followup.send("⚠️ Error sending trailer.", ephemeral=True)
-            except Exception:
-                logger.exception("Also failed to send ephemeral error followup.")
+                embed = build_error_embed(
+                    "Error",
+                    "An error occurred while sending the trailer."
+                )
+                await public_interaction.followup.send(embed=embed, ephemeral=True)
+            except Exception as e2:
+                logger.exception("Also failed to send ephemeral error followup: %s", e2, exc_info=True)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(TrailerCog(bot))

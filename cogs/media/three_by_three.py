@@ -13,6 +13,8 @@ from datetime import datetime, timedelta
 import database
 import re
 from difflib import SequenceMatcher
+from helpers.embed_helper import build_error_embed, build_info_embed
+from helpers.anilist_helper import post_graphql
 from cogs_test.general_commands.dashboard import command_meta
 
 # IGDB integration
@@ -51,8 +53,7 @@ if not logger.handlers:
     except Exception as e:
         print(f"Failed to setup file logging for 3x3 generator: {e}")
 
-# AniList API
-API_URL = "https://graphql.anilist.co"
+# AniList API - now handled by helpers.anilist_helper
 
 # Cache and data directories
 DATA_DIR = Path("data")
@@ -220,7 +221,7 @@ class CoverCache:
                 with open(CACHE_INDEX_FILE, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except Exception as e:
-                logger.error(f"Error loading cache index: {e}")
+                logger.error(f"Error loading cache index: {e}", exc_info=True)
         return {}
     
     def _save_index(self):
@@ -229,7 +230,7 @@ class CoverCache:
             with open(CACHE_INDEX_FILE, 'w', encoding='utf-8') as f:
                 json.dump(self.index, f, indent=2)
         except Exception as e:
-            logger.error(f"Error saving cache index: {e}")
+            logger.error(f"Error saving cache index: {e}", exc_info=True)
     
     def _get_cache_key(self, media_id, media_type: str) -> str:
         """Generate cache key from media ID and type"""
@@ -267,7 +268,7 @@ class CoverCache:
                         "cover_bytes": cover_bytes
                     }
                 except Exception as e:
-                    logger.error(f"Error reading cached cover: {e}")
+                    logger.error(f"Error reading cached cover: {e}", exc_info=True)
         
         logger.debug(f"Cache MISS for {media_type} {media_id}")
         return None
@@ -294,7 +295,7 @@ class CoverCache:
             
             logger.info(f"Cached cover for {media_type} {media_id}")
         except Exception as e:
-            logger.error(f"Error caching cover: {e}")
+            logger.error(f"Error caching cover: {e}", exc_info=True)
     
     def cleanup_old_cache(self):
         """Remove expired cache entries"""
@@ -475,12 +476,16 @@ class ThreeByThreeModalPart2(discord.ui.Modal):
                     invalid_inputs.append(f"Input {i}: Must be a {self.media_type} URL")
         
         if invalid_inputs:
-            error_msg = "❌ Invalid inputs found:\n" + "\n".join(invalid_inputs)
+            error_details = "\n".join(invalid_inputs)
             if self.media_type == "games":
-                error_msg += "\n\nExpected format: https://www.igdb.com/games/game-slug"
-            elif self.media_type != "games":
-                error_msg += f"\n\nExpected format: https://anilist.co/{self.media_type}/ID/Title/"
-            await interaction.followup.send(error_msg, ephemeral=True)
+                format_help = "\n\nExpected format: https://www.igdb.com/games/game-slug"
+            else:
+                format_help = f"\n\nExpected format: https://anilist.co/{self.media_type}/ID/Title/"
+            embed = build_error_embed(
+                "Invalid Inputs",
+                f"Invalid inputs found:\n{error_details}{format_help}"
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
             return
         
         logger.info(f"Generating 3x3 for {interaction.user.name}: {all_inputs}")
@@ -495,7 +500,7 @@ class ThreeByThreeModalPart2(discord.ui.Modal):
                 embed = discord.Embed(
                     title=f"🎨 {interaction.user.display_name}'s 3x3 {self.media_type.title()} Grid",
                     description=f"Your favorite {self.media_type}{'s' if self.media_type == 'character' else ''}!",
-                    color=discord.Color.purple()
+                    color=discord.Color.purple()  # Contextual color for grid display
                 )
                 embed.set_image(url=f"attachment://3x3_{self.media_type}.png")
                 embed.set_footer(text="Generated from AniList URLs" + (" character images" if self.media_type == "character" else " covers" if self.media_type != "games" else " IGDB game covers"))
@@ -504,16 +509,18 @@ class ThreeByThreeModalPart2(discord.ui.Modal):
                 
                 logger.info(f"Successfully generated 3x3 for {interaction.user.name}")
             else:
-                await interaction.followup.send(
-                    "❌ Failed to generate 3x3 grid. Please check your inputs and try again.",
-                    ephemeral=True
+                embed = build_error_embed(
+                    "Generation Failed",
+                    "Failed to generate 3x3 grid. Please check your inputs and try again."
                 )
+                await interaction.followup.send(embed=embed, ephemeral=True)
         except Exception as e:
             logger.error(f"Error generating 3x3: {e}", exc_info=True)
-            await interaction.followup.send(
-                "❌ An error occurred while generating your 3x3. Please try again.",
-                ephemeral=True
+            embed = build_error_embed(
+                "Error",
+                "An error occurred while generating your 3x3. Please try again."
             )
+            await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 class ContinueView(discord.ui.View):
@@ -592,62 +599,59 @@ class ThreeByThree(commands.Cog):
             variables = {"id": media_id, "type": media_type.upper()}
         
         try:
-            async with session.post(
-                API_URL,
-                json={"query": query, "variables": variables},
-                timeout=aiohttp.ClientTimeout(total=30)
-            ) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    
-                    if media_type == "character":
-                        character = data.get("data", {}).get("Character")
-                        if character:
-                            image_url = character["image"].get("large") or character["image"].get("medium")
-                            display_name = character["name"].get("full") or f"Character {media_id}"
-                            
-                            if image_url:
-                                async with session.get(image_url, timeout=aiohttp.ClientTimeout(total=30)) as img_response:
-                                    if img_response.status == 200:
-                                        cover_bytes = await img_response.read()
-                                        
-                                        result = {
-                                            "title": display_name,
-                                            "cover_url": image_url,
-                                            "cover_bytes": cover_bytes
-                                        }
-                                        
-                                        self.cover_cache.set(media_id, media_type, result)
-                                        return result
-                    else:
-                        media = data.get("data", {}).get("Media")
-                        if media:
-                            cover_url = media["coverImage"].get("extraLarge") or media["coverImage"].get("large")
-                            title_obj = media["title"]
-                            display_title = title_obj.get("english") or title_obj.get("romaji") or f"{media_type.title()} {media_id}"
-                            
-                            if cover_url:
-                                async with session.get(cover_url, timeout=aiohttp.ClientTimeout(total=30)) as img_response:
-                                    if img_response.status == 200:
-                                        cover_bytes = await img_response.read()
-                                        
-                                        result = {
-                                            "title": display_title,
-                                            "cover_url": cover_url,
-                                            "cover_bytes": cover_bytes
-                                        }
-                                        
-                                        self.cover_cache.set(media_id, media_type, result)
-                                        return result
-                
-                logger.warning(f"Failed to fetch {media_type} {media_id}: HTTP {response.status}")
+            data = await post_graphql(session, query, variables, timeout=30)
+            if data is None:
+                logger.warning(f"Failed to fetch {media_type} {media_id}: API returned None")
                 return None
+            
+            if media_type == "character":
+                character = data.get("Character")
+                if character:
+                    image_url = character["image"].get("large") or character["image"].get("medium")
+                    display_name = character["name"].get("full") or f"Character {media_id}"
+                    
+                    if image_url:
+                        async with session.get(image_url, timeout=aiohttp.ClientTimeout(total=30)) as img_response:
+                            if img_response.status == 200:
+                                cover_bytes = await img_response.read()
+                                
+                                result = {
+                                    "title": display_name,
+                                    "cover_url": image_url,
+                                    "cover_bytes": cover_bytes
+                                }
+                                
+                                self.cover_cache.set(media_id, media_type, result)
+                                return result
+            else:
+                media = data.get("Media")
+                if media:
+                    cover_url = media["coverImage"].get("extraLarge") or media["coverImage"].get("large")
+                    title_obj = media["title"]
+                    display_title = title_obj.get("english") or title_obj.get("romaji") or f"{media_type.title()} {media_id}"
+                    
+                    if cover_url:
+                        async with session.get(cover_url, timeout=aiohttp.ClientTimeout(total=30)) as img_response:
+                            if img_response.status == 200:
+                                cover_bytes = await img_response.read()
+                                
+                                result = {
+                                    "title": display_title,
+                                    "cover_url": cover_url,
+                                    "cover_bytes": cover_bytes
+                                }
+                                
+                                self.cover_cache.set(media_id, media_type, result)
+                                return result
+            
+            logger.warning(f"No data found for {media_type} {media_id}")
+            return None
                 
         except asyncio.TimeoutError:
-            logger.error(f"Timeout fetching {media_type} {media_id}")
+            logger.error(f"Timeout fetching {media_type} {media_id}", exc_info=True)
             return None
         except Exception as e:
-            logger.error(f"Error fetching {media_type} {media_id}: {e}")
+            logger.error(f"Error fetching {media_type} {media_id}: {e}", exc_info=True)
             return None
     
     async def fetch_game_cover(self, session: aiohttp.ClientSession, slug: str) -> Optional[Dict]:
@@ -717,10 +721,10 @@ class ThreeByThree(commands.Cog):
                     return None
                         
         except asyncio.TimeoutError:
-            logger.error(f"Timeout fetching game cover for slug {slug}")
+            logger.error(f"Timeout fetching game cover for slug {slug}", exc_info=True)
             return None
         except Exception as e:
-            logger.error(f"Error fetching game cover for slug {slug}: {e}")
+            logger.error(f"Error fetching game cover for slug {slug}: {e}", exc_info=True)
             return None
     
     async def fetch_template_titles(self, template_key: str) -> List[str]:
@@ -759,24 +763,22 @@ class ThreeByThree(commands.Cog):
         
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    API_URL,
-                    json={"query": query, "variables": variables},
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        media_list = data.get("data", {}).get("Page", {}).get("media", [])
-                        
-                        titles = []
-                        for media in media_list[:9]:
-                            title = media["title"].get("english") or media["title"].get("romaji")
-                            if title:
-                                titles.append(title)
-                        
-                        return titles
+                data = await post_graphql(session, query, variables, timeout=30)
+                if data is None:
+                    logger.warning("Failed to fetch template titles: API returned None")
+                    return []
+                
+                media_list = data.get("Page", {}).get("media", [])
+                
+                titles = []
+                for media in media_list[:9]:
+                    title = media["title"].get("english") or media["title"].get("romaji")
+                    if title:
+                        titles.append(title)
+                
+                return titles
         except Exception as e:
-            logger.error(f"Error fetching template titles: {e}")
+            logger.error(f"Error fetching template titles: {e}", exc_info=True)
         
         return []
     
@@ -956,10 +958,11 @@ class ThreeByThree(commands.Cog):
         """Create a 3x3 grid of anime/manga covers or character images"""
         
         if not PIL_AVAILABLE:
-            await interaction.response.send_message(
-                "❌ Image generation is not available. Please contact the bot administrator.",
-                ephemeral=True
+            embed = build_error_embed(
+                "Feature Unavailable",
+                "Image generation is not available. Please contact the bot administrator."
             )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
         logger.info(f"{interaction.user.name} started 3x3 creation for {media_type.value}")

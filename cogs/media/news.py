@@ -22,6 +22,7 @@ except ImportError:
 
 import database
 from helpers.command_logger import log_command
+from helpers.embed_helper import build_error_embed, build_success_embed, build_warning_embed, build_info_embed
 from cogs_test.general_commands.dashboard import command_meta
 
 # Set up logging
@@ -428,7 +429,7 @@ class NewsCog(commands.Cog):
         """Initialize the news cog and start background task."""
         if not _AIOSQLITE_AVAILABLE:
             print("❌ aiosqlite not available - news cog disabled")
-            logger.error("aiosqlite not available - news cog disabled")
+            logger.error("aiosqlite not available - news cog disabled", exc_info=True)
             return
 
         try:
@@ -447,7 +448,7 @@ class NewsCog(commands.Cog):
 
         except Exception as e:
             print(f"❌ Failed to initialize news cog: {e}")
-            logger.error(f"Failed to initialize news cog: {e}")
+            logger.error(f"Failed to initialize news cog: {e}", exc_info=True)
             import traceback
             traceback.print_exc()
 
@@ -473,11 +474,11 @@ class NewsCog(commands.Cog):
                 self._task_started = True
             else:
                 print(f"❌ Failed to start background task: {e}")
-                logger.error(f"Failed to start background task: {e}")
+                logger.error(f"Failed to start background task: {e}", exc_info=True)
                 raise
         except Exception as e:
             print(f"❌ Unexpected error starting background task: {e}")
-            logger.error(f"Unexpected error starting background task: {e}")
+            logger.error(f"Unexpected error starting background task: {e}", exc_info=True)
             raise
 
     async def _ensure_watchdog_running(self):
@@ -501,11 +502,11 @@ class NewsCog(commands.Cog):
                 self._watchdog_started = True
             else:
                 print(f"❌ Failed to start watchdog: {e}")
-                logger.error(f"Failed to start watchdog: {e}")
+                logger.error(f"Failed to start watchdog: {e}", exc_info=True)
                 raise
         except Exception as e:
             print(f"❌ Unexpected error starting watchdog: {e}")
-            logger.error(f"Unexpected error starting watchdog: {e}")
+            logger.error(f"Unexpected error starting watchdog: {e}", exc_info=True)
             raise
 
     async def cog_load(self):
@@ -549,7 +550,7 @@ class NewsCog(commands.Cog):
             with open('data/news_accounts.json', 'w') as f:
                 json.dump({'accounts': accounts}, f, indent=2)
         except Exception as e:
-            logger.error(f"Error saving news accounts: {e}")
+            logger.error(f"Error saving news accounts: {e}", exc_info=True)
 
     def _load_news_metadata(self) -> Dict:
         """Load news metadata from JSON file."""
@@ -566,7 +567,7 @@ class NewsCog(commands.Cog):
             with open('data/news_metadata.json', 'w') as f:
                 json.dump(metadata, f, indent=2)
         except Exception as e:
-            logger.error(f"Error saving news metadata: {e}")
+            logger.error(f"Error saving news metadata: {e}", exc_info=True)
 
     def _load_news_filters(self) -> List[str]:
         """Load news filters from JSON file."""
@@ -584,7 +585,7 @@ class NewsCog(commands.Cog):
             with open('data/news_filters.json', 'w') as f:
                 json.dump({'filters': filters}, f, indent=2)
         except Exception as e:
-            logger.error(f"Error saving news filters: {e}")
+            logger.error(f"Error saving news filters: {e}", exc_info=True)
 
     # JSON-based replacements for database functions
     async def get_news_accounts_json(self) -> List[Dict]:
@@ -608,7 +609,7 @@ class NewsCog(commands.Cog):
             logger.info(f"Added news account: {handle} -> channel {channel_id}")
             return True
         except Exception as e:
-            logger.error(f"Error adding news account {handle}: {e}")
+            logger.error(f"Error adding news account {handle}: {e}", exc_info=True)
             return False
 
     async def remove_news_account_json(self, handle: str) -> bool:
@@ -626,7 +627,7 @@ class NewsCog(commands.Cog):
                 logger.warning(f"News account not found: {handle}")
                 return False
         except Exception as e:
-            logger.error(f"Error removing news account {handle}: {e}")
+            logger.error(f"Error removing news account {handle}: {e}", exc_info=True)
             return False
 
     async def update_last_tweet_id_json(self, handle: str, tweet_id: str) -> bool:
@@ -640,7 +641,7 @@ class NewsCog(commands.Cog):
                     return True
             return False
         except Exception as e:
-            logger.error(f"Error updating last tweet ID for {handle}: {e}")
+            logger.error(f"Error updating last tweet ID for {handle}: {e}", exc_info=True)
             return False
 
     async def get_news_last_check_json(self) -> Optional[datetime]:
@@ -652,7 +653,7 @@ class NewsCog(commands.Cog):
                 return datetime.fromisoformat(last_check_str)
             return None
         except Exception as e:
-            logger.error(f"Error getting news last check time: {e}")
+            logger.error(f"Error getting news last check time: {e}", exc_info=True)
             return None
 
     async def set_news_last_check_json(self, check_time: datetime) -> bool:
@@ -663,7 +664,7 @@ class NewsCog(commands.Cog):
             self._save_news_metadata(metadata)
             return True
         except Exception as e:
-            logger.error(f"Error setting news last check time: {e}")
+            logger.error(f"Error setting news last check time: {e}", exc_info=True)
             return False
 
     async def get_news_filters_json(self) -> List[str]:
@@ -682,7 +683,7 @@ class NewsCog(commands.Cog):
                 return True
             return False
         except Exception as e:
-            logger.error(f"Error adding news filter keyword {word}: {e}")
+            logger.error(f"Error adding news filter keyword {word}: {e}", exc_info=True)
             return False
 
     async def remove_news_filter_json(self, word: str) -> bool:
@@ -697,7 +698,7 @@ class NewsCog(commands.Cog):
                 return True
             return False
         except Exception as e:
-            logger.error(f"Error removing news filter keyword {word}: {e}")
+            logger.error(f"Error removing news filter keyword {word}: {e}", exc_info=True)
             return False
 
     # Account-specific whitelist JSON methods
@@ -717,7 +718,7 @@ class NewsCog(commands.Cog):
             with open('data/account_whitelists.json', 'w') as f:
                 json.dump({'whitelists': whitelists}, f, indent=2)
         except Exception as e:
-            logger.error(f"Error saving account whitelists: {e}")
+            logger.error(f"Error saving account whitelists: {e}", exc_info=True)
 
     # JSON-based replacements for account whitelist database functions
     async def get_account_whitelists_json(self) -> Dict[str, List[str]]:
@@ -740,7 +741,7 @@ class NewsCog(commands.Cog):
                 return True
             return False
         except Exception as e:
-            logger.error(f"Error adding whitelist keyword '{keyword}' for {handle}: {e}")
+            logger.error(f"Error adding whitelist keyword '{keyword}' for {handle}: {e}", exc_info=True)
             return False
 
     async def remove_account_whitelist_json(self, handle: str, keyword: str) -> bool:
@@ -759,7 +760,7 @@ class NewsCog(commands.Cog):
                 return True
             return False
         except Exception as e:
-            logger.error(f"Error removing whitelist keyword '{keyword}' for {handle}: {e}")
+            logger.error(f"Error removing whitelist keyword '{keyword}' for {handle}: {e}", exc_info=True)
             return False
 
     async def get_account_whitelist_json(self, handle: str) -> List[str]:
@@ -779,10 +780,10 @@ class NewsCog(commands.Cog):
             await interaction.response.defer()
         except discord.NotFound:
             # Interaction expired, log and return
-            logger.error("Interaction expired before deferring - user may have waited too long")
+            logger.error("Interaction expired before deferring - user may have waited too long", exc_info=True)
             return
         except Exception as e:
-            logger.error(f"Failed to defer interaction: {e}")
+            logger.error(f"Failed to defer interaction: {e}", exc_info=True)
             return
         
         try:
@@ -839,10 +840,9 @@ class NewsCog(commands.Cog):
             status_lines.append(f"📊 Tracked Accounts: {len(accounts)}")
             status_lines.append(f"✅ Total Whitelist Keywords: {total_whitelist_keywords} across {len(all_account_whitelists)} accounts")
 
-            embed = discord.Embed(
-                title="📰 News Management System",
-                description="\n".join(status_lines),
-                color=0x1DA1F2
+            embed = build_info_embed(
+                "📰 News Management System",
+                "\n".join(status_lines)
             )
             
             # Add accounts field if any exist
@@ -876,14 +876,18 @@ class NewsCog(commands.Cog):
             try:
                 await interaction.followup.send(embed=embed, view=view)
             except discord.NotFound:
-                logger.error("Interaction expired before sending followup message")
+                logger.error("Interaction expired before sending followup message", exc_info=True)
             except Exception as e:
-                logger.error(f"Failed to send followup message: {e}")
+                logger.error(f"Failed to send followup message: {e}", exc_info=True)
                 
         except Exception as e:
-            logger.error(f"Error in news_manage command: {e}")
+            logger.error(f"Error in news_manage command: {e}", exc_info=True)
             try:
-                await interaction.followup.send("❌ An error occurred while loading the news management system.", ephemeral=True)
+                embed = build_error_embed(
+                    "Error",
+                    "An error occurred while loading the news management system."
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
             except:
                 pass  # Interaction might be expired
 
@@ -895,18 +899,17 @@ class NewsCog(commands.Cog):
         try:
             await interaction.response.defer()
         except discord.NotFound:
-            logger.error("Interaction expired before deferring for test-scrape command")
+            logger.error("Interaction expired before deferring for test-scrape command", exc_info=True)
             return
         except Exception as e:
-            logger.error(f"Failed to defer test-scrape interaction: {e}")
+            logger.error(f"Failed to defer test-scrape interaction: {e}", exc_info=True)
             return
         
         username = username.replace("@", "").lower()
         
-        embed = discord.Embed(
-            title="🔧 Twitter Scraping Test",
-            description=f"Testing scraping for [@{username}](https://twitter.com/{username})",
-            color=0x1DA1F2
+        embed = build_info_embed(
+            "🔧 Twitter Scraping Test",
+            f"Testing scraping for [@{username}](https://twitter.com/{username})"
         )
         
         # Test each method individually
@@ -1083,7 +1086,7 @@ class NewsCog(commands.Cog):
                         
                 except Exception as e:
                     print(f"❌ Error checking tweets for {handle}: {e}")
-                    logger.error(f"Error checking tweets for {handle}: {e}")
+                    logger.error(f"Error checking tweets for {handle}: {e}", exc_info=True)
                     import traceback
                     traceback.print_exc()
             
@@ -1125,7 +1128,7 @@ class NewsCog(commands.Cog):
             await self._run_tweet_check()
         except Exception as e:
             print(f"❌ Error during initial startup check: {e}")
-            logger.error(f"Error during initial startup check: {e}")
+            logger.error(f"Error during initial startup check: {e}", exc_info=True)
             import traceback
             traceback.print_exc()
 
@@ -1133,7 +1136,7 @@ class NewsCog(commands.Cog):
     async def check_tweets_error(self, error):
         """Handle errors in the check_tweets task to prevent it from stopping permanently."""
         print(f"💥 ERROR in check_tweets task: {error}")
-        logger.error(f"ERROR in check_tweets task: {error}")
+        logger.error(f"ERROR in check_tweets task: {error}", exc_info=True)
         import traceback
         traceback.print_exc()
         print("⏰ Task will restart in 15 minutes...")
@@ -1153,7 +1156,7 @@ class NewsCog(commands.Cog):
                 # Check if task failed
                 if self.check_tweets.failed():
                     print("❌ Task failed - restarting...")
-                    logger.error("Main task failed - watchdog restarting it")
+                    logger.error("Main task failed - watchdog restarting it", exc_info=True)
                 elif self.check_tweets.is_being_cancelled():
                     print("⏸️ Task is being cancelled - waiting...")
                     logger.info("Task is being cancelled - watchdog will check again later")
@@ -1169,7 +1172,7 @@ class NewsCog(commands.Cog):
                     logger.info("Watchdog successfully restarted main task")
                 except Exception as restart_error:
                     print(f"❌ Watchdog failed to restart task: {restart_error}")
-                    logger.error(f"Watchdog failed to restart task: {restart_error}")
+                    logger.error(f"Watchdog failed to restart task: {restart_error}", exc_info=True)
                     
                     # If restart fails, try canceling and starting fresh
                     try:
@@ -1186,7 +1189,7 @@ class NewsCog(commands.Cog):
                 
         except Exception as e:
             print(f"💥 ERROR in watchdog task: {e}")
-            logger.error(f"ERROR in watchdog task: {e}")
+            logger.error(f"ERROR in watchdog task: {e}", exc_info=True)
             import traceback
             traceback.print_exc()
             # Watchdog continues despite errors
@@ -1204,7 +1207,7 @@ class NewsCog(commands.Cog):
     async def task_watchdog_error(self, error):
         """Handle errors in the watchdog task."""
         print(f"💥 ERROR in watchdog task: {error}")
-        logger.error(f"ERROR in watchdog task: {error}")
+        logger.error(f"ERROR in watchdog task: {error}", exc_info=True)
         import traceback
         traceback.print_exc()
         print("⏰ Watchdog will restart in 5 minutes...")
@@ -1225,11 +1228,15 @@ class NewsManagementView(discord.ui.View):
             modal = AddAccountModal(self.cog)
             await interaction.response.send_modal(modal)
         except discord.NotFound:
-            logger.error("Interaction expired in add_account button")
+            logger.error("Interaction expired in add_account button", exc_info=True)
         except Exception as e:
-            logger.error(f"Error in add_account button: {e}")
+            logger.error(f"Error in add_account button: {e}", exc_info=True)
             try:
-                await interaction.response.send_message("❌ An error occurred. Please try again.", ephemeral=True)
+                embed = build_error_embed(
+                    "Error",
+                    "An error occurred. Please try again."
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
             except:
                 pass
     
@@ -1239,15 +1246,23 @@ class NewsManagementView(discord.ui.View):
         try:
             accounts = await self.cog.get_news_accounts_json()
             if not accounts:
-                await interaction.response.send_message("❌ No accounts are currently being monitored.", ephemeral=True)
+                embed = build_error_embed(
+                    "No Accounts",
+                    "No accounts are currently being monitored."
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
         except discord.NotFound:
-            logger.error("Interaction expired in remove_account button")
+            logger.error("Interaction expired in remove_account button", exc_info=True)
             return
         except Exception as e:
-            logger.error(f"Error in remove_account button: {e}")
+            logger.error(f"Error in remove_account button: {e}", exc_info=True)
             try:
-                await interaction.response.send_message("❌ An error occurred. Please try again.", ephemeral=True)
+                embed = build_error_embed(
+                    "Error",
+                    "An error occurred. Please try again."
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
             except:
                 pass
             return
@@ -1262,18 +1277,30 @@ class NewsManagementView(discord.ui.View):
             ))
         
         if len(accounts) > 25:
-            await interaction.response.send_message(f"❌ Too many accounts ({len(accounts)}). Please use individual removal commands.", ephemeral=True)
+            embed = build_error_embed(
+                "Too Many Accounts",
+                f"Too many accounts ({len(accounts)}). Please use individual removal commands."
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
         select = AccountRemoveSelect(self.cog, options)
         view = discord.ui.View()
         view.add_item(select)
-        await interaction.response.send_message("🗑️ Select an account to remove:", view=view, ephemeral=True)
+        embed = build_info_embed(
+            "Remove Account",
+            "🗑️ Select an account to remove:"
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
     
     @discord.ui.button(label="Manage Whitelist", style=discord.ButtonStyle.blurple, emoji="✅", row=1)
     async def manage_whitelist(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Manage whitelist keywords."""
-        await interaction.response.send_message("✅ Choose whitelist action:", view=WhitelistManagementView(self.cog), ephemeral=True)
+        embed = build_info_embed(
+            "Manage Whitelist",
+            "✅ Choose whitelist action:"
+        )
+        await interaction.response.send_message(embed=embed, view=WhitelistManagementView(self.cog), ephemeral=True)
     
     @discord.ui.button(label="View Details", style=discord.ButtonStyle.gray, emoji="📋", row=1)
     async def view_details(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1281,7 +1308,10 @@ class NewsManagementView(discord.ui.View):
         accounts = await self.cog.get_news_accounts_json()
         whitelist = await self.cog.get_news_filters_json()
         
-        embed = discord.Embed(title="📊 Detailed News System Information", color=0x1DA1F2)
+        embed = build_info_embed(
+            "📊 Detailed News System Information",
+            ""
+        )
         
         if accounts:
             account_details = []
@@ -1319,13 +1349,16 @@ class NewsManagementView(discord.ui.View):
         
         accounts = await self.cog.get_news_accounts_json()
         if not accounts:
-            await interaction.followup.send("❌ No accounts are currently being monitored.", ephemeral=True)
+            embed = build_error_embed(
+                "No Accounts",
+                "No accounts are currently being monitored."
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
             return
         
-        embed = discord.Embed(
-            title="⚡ Force Update Started",
-            description=f"Manually checking {len(accounts)} accounts for new tweets...",
-            color=0xffaa00
+        embed = build_info_embed(
+            "⚡ Force Update Started",
+            f"Manually checking {len(accounts)} accounts for new tweets..."
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
         
@@ -1333,18 +1366,17 @@ class NewsManagementView(discord.ui.View):
         try:
             await self.cog._run_tweet_check()
             
-            success_embed = discord.Embed(
-                title="✅ Force Update Complete",
-                description=f"Successfully checked all {len(accounts)} accounts for new tweets.",
-                color=0x00ff00
+            success_embed = build_success_embed(
+                "✅ Force Update Complete",
+                f"Successfully checked all {len(accounts)} accounts for new tweets."
             )
             await interaction.edit_original_response(embed=success_embed)
             
         except Exception as e:
-            error_embed = discord.Embed(
-                title="❌ Force Update Failed",
-                description=f"Error during manual update: {str(e)}",
-                color=0xff0000
+            logger.error(f"Error during force update: {e}", exc_info=True)
+            error_embed = build_error_embed(
+                "Force Update Failed",
+                f"Error during manual update: {str(e)}"
             )
             await interaction.edit_original_response(embed=error_embed)
     
@@ -1363,23 +1395,21 @@ class NewsManagementView(discord.ui.View):
             if not self.cog.check_tweets.is_running():
                 self.cog.check_tweets.start()
                 
-                embed = discord.Embed(
-                    title="✅ Task Restarted",
-                    description="Background tweet checking task has been restarted successfully.\n\nIt will check for new tweets every 15 minutes.",
-                    color=0x00ff00
+                embed = build_success_embed(
+                    "✅ Task Restarted",
+                    "Background tweet checking task has been restarted successfully.\n\nIt will check for new tweets every 15 minutes."
                 )
             else:
-                embed = discord.Embed(
-                    title="✅ Task Already Running",
-                    description="The background task is already running.",
-                    color=0x00ff00
+                embed = build_success_embed(
+                    "✅ Task Already Running",
+                    "The background task is already running."
                 )
             
         except Exception as e:
-            embed = discord.Embed(
-                title="❌ Restart Failed",
-                description=f"Failed to restart background task: {str(e)}",
-                color=0xff0000
+            logger.error(f"Failed to restart background task: {e}", exc_info=True)
+            embed = build_error_embed(
+                "Restart Failed",
+                f"Failed to restart background task: {str(e)}"
             )
         
         await interaction.followup.send(embed=embed, ephemeral=True)
@@ -1418,16 +1448,18 @@ class AddAccountModal(discord.ui.Modal):
                 # Verify the channel exists and is accessible
                 target_channel = interaction.guild.get_channel(target_channel_id)
                 if not target_channel:
-                    await interaction.response.send_message(
-                        f"❌ Channel with ID {target_channel_id} not found or not accessible.",
-                        ephemeral=True
+                    embed = build_error_embed(
+                        "Channel Not Found",
+                        f"Channel with ID {target_channel_id} not found or not accessible."
                     )
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
                     return
             except ValueError:
-                await interaction.response.send_message(
-                    "❌ Invalid channel ID. Please enter a valid number.",
-                    ephemeral=True
+                embed = build_error_embed(
+                    "Invalid Channel ID",
+                    "Invalid channel ID. Please enter a valid number."
                 )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
         
         try:
@@ -1448,22 +1480,20 @@ class AddAccountModal(discord.ui.Modal):
                             task_status = f"\n\n⚠️ Couldn't auto-start task: {str(task_error)}\nUse 'Restart Task' button to start manually."
                             print(f"❌ Failed to auto-start task: {task_error}")
                 
-                embed = discord.Embed(
-                    title="✅ Account Added",
-                    description=f"Now monitoring [@{username}](https://twitter.com/{username}) in {channel_mention}{task_status}",
-                    color=0x00ff00
+                embed = build_success_embed(
+                    "✅ Account Added",
+                    f"Now monitoring [@{username}](https://twitter.com/{username}) in {channel_mention}{task_status}"
                 )
             else:
-                embed = discord.Embed(
-                    title="❌ Error",
-                    description="Failed to add account (may already exist)",
-                    color=0xff0000
+                embed = build_error_embed(
+                    "Error",
+                    "Failed to add account (may already exist)"
                 )
         except Exception as e:
-            embed = discord.Embed(
-                title="❌ Error",
-                description=f"Error: {str(e)}",
-                color=0xff0000
+            logger.error(f"Error adding account: {e}", exc_info=True)
+            embed = build_error_embed(
+                "Error",
+                f"Error: {str(e)}"
             )
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -1481,16 +1511,14 @@ class AccountRemoveSelect(discord.ui.Select):
         success = await self.cog.remove_news_account_json(username)
         
         if success:
-            embed = discord.Embed(
-                title="🗑️ Account Removed",
-                description=f"Stopped monitoring [@{username}](https://twitter.com/{username})",
-                color=0xff5555
+            embed = build_info_embed(
+                "🗑️ Account Removed",
+                f"Stopped monitoring [@{username}](https://twitter.com/{username})"
             )
         else:
-            embed = discord.Embed(
-                title="❌ Error",
-                description=f"Failed to remove [@{username}](https://twitter.com/{username})",
-                color=0xff0000
+            embed = build_error_embed(
+                "Error",
+                f"Failed to remove [@{username}](https://twitter.com/{username})"
             )
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -1508,26 +1536,42 @@ class WhitelistManagementView(discord.ui.View):
         # Get available accounts
         accounts = await self.cog.get_news_accounts_json()
         if not accounts:
-            await interaction.response.send_message("❌ No Twitter accounts are being monitored. Add an account first.", ephemeral=True)
+            embed = build_error_embed(
+                "No Accounts",
+                "No Twitter accounts are being monitored. Add an account first."
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
         options = [discord.SelectOption(label=f"@{acc['handle']}", value=acc['handle']) for acc in accounts[:25]]
         
         if len(accounts) > 25:
-            await interaction.response.send_message(f"❌ Too many accounts ({len(accounts)}). Contact administrator.", ephemeral=True)
+            embed = build_error_embed(
+                "Too Many Accounts",
+                f"Too many accounts ({len(accounts)}). Contact administrator."
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
         select = AccountSelectForAdd(self.cog, options)
         view = discord.ui.View()
         view.add_item(select)
-        await interaction.response.send_message("📋 Select an account to add keywords for:", view=view, ephemeral=True)
+        embed = build_info_embed(
+            "Add Keywords",
+            "📋 Select an account to add keywords for:"
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
     
     @discord.ui.button(label="➖ Remove Keywords", style=discord.ButtonStyle.red)
     async def remove_keyword(self, interaction: discord.Interaction, button: discord.ui.Button):
         # Get accounts that have whitelists
         all_whitelists = await self.cog.get_account_whitelists_json()
         if not all_whitelists:
-            await interaction.response.send_message("❌ No whitelist keywords are currently configured for any account.", ephemeral=True)
+            embed = build_error_embed(
+                "No Whitelist Keywords",
+                "No whitelist keywords are currently configured for any account."
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
         options = [discord.SelectOption(label=f"@{handle} ({len(keywords)} keywords)", value=handle) 
@@ -1536,25 +1580,27 @@ class WhitelistManagementView(discord.ui.View):
         select = AccountSelectForRemove(self.cog, options, all_whitelists)
         view = discord.ui.View()
         view.add_item(select)
-        await interaction.response.send_message("🗑️ Select an account to remove keywords from:", view=view, ephemeral=True)
+        embed = build_info_embed(
+            "Remove Keywords",
+            "🗑️ Select an account to remove keywords from:"
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
     
     @discord.ui.button(label="📋 View All Keywords", style=discord.ButtonStyle.gray)
     async def list_keywords(self, interaction: discord.Interaction, button: discord.ui.Button):
         all_whitelists = await self.cog.get_account_whitelists_json()
         
         if not all_whitelists:
-            embed = discord.Embed(
-                title="✅ Account Whitelists", 
-                description="No account-specific whitelist keywords configured.\n\n**Current behavior:** All tweets from monitored accounts are allowed.", 
-                color=0xffaa00
+            embed = build_warning_embed(
+                "✅ Account Whitelists", 
+                "No account-specific whitelist keywords configured.\n\n**Current behavior:** All tweets from monitored accounts are allowed."
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
-        embed = discord.Embed(
-            title="✅ Account-Specific Whitelist Keywords", 
-            description="Keywords configured per account:",
-            color=0x1DA1F2
+        embed = build_info_embed(
+            "✅ Account-Specific Whitelist Keywords", 
+            "Keywords configured per account:"
         )
         embed.add_field(name="ℹ️ How it works", value="Each account's tweets must contain at least one of its whitelist keywords to be posted.", inline=False)
         
@@ -1604,7 +1650,11 @@ class AccountSelectForRemove(discord.ui.Select):
         keywords = self.all_whitelists[handle]
         
         if len(keywords) > 25:
-            await interaction.followup.send(f"❌ Too many keywords for @{handle} ({len(keywords)}). Contact administrator.", ephemeral=True)
+            embed = build_error_embed(
+                "Too Many Keywords",
+                f"Too many keywords for @{handle} ({len(keywords)}). Contact administrator."
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
             return
         
         options = [discord.SelectOption(label=keyword, value=keyword) for keyword in keywords]
@@ -1612,7 +1662,11 @@ class AccountSelectForRemove(discord.ui.Select):
         select = KeywordRemoveSelect(self.cog, handle, options)
         view = discord.ui.View()
         view.add_item(select)
-        await interaction.response.send_message(f"🗑️ Select a keyword to remove from @{handle}:", view=view, ephemeral=True)
+        embed = build_info_embed(
+            "Remove Keyword",
+            f"🗑️ Select a keyword to remove from @{handle}:"
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
 class AddAccountWhitelistModal(discord.ui.Modal):
@@ -1636,7 +1690,11 @@ class AddAccountWhitelistModal(discord.ui.Modal):
         keywords = [k.strip() for k in keywords_input.split(',') if k.strip()]
         
         if not keywords:
-            await interaction.response.send_message("❌ No valid keywords provided.", ephemeral=True)
+            embed = build_error_embed(
+                "No Keywords",
+                "No valid keywords provided."
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
         added_count = 0
@@ -1650,18 +1708,16 @@ class AddAccountWhitelistModal(discord.ui.Modal):
                 duplicate_count += 1
         
         if added_count > 0:
-            embed = discord.Embed(
-                title="✅ Keywords Added",
-                description=f"Added {added_count} keyword(s) to @{self.handle}.",
-                color=0x00ff00
+            embed = build_success_embed(
+                "✅ Keywords Added",
+                f"Added {added_count} keyword(s) to @{self.handle}."
             )
             if duplicate_count > 0:
                 embed.add_field(name="ℹ️ Note", value=f"{duplicate_count} keyword(s) already existed and were skipped.", inline=False)
         else:
-            embed = discord.Embed(
-                title="⚠️ No Keywords Added",
-                description=f"All {duplicate_count} keyword(s) already exist for @{self.handle}.",
-                color=0xffaa00
+            embed = build_warning_embed(
+                "⚠️ No Keywords Added",
+                f"All {duplicate_count} keyword(s) already exist for @{self.handle}."
             )
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -1680,16 +1736,14 @@ class KeywordRemoveSelect(discord.ui.Select):
         success = await self.cog.remove_account_whitelist_json(self.handle, keyword)
         
         if success:
-            embed = discord.Embed(
-                title="🗑️ Keyword Removed", 
-                description=f"Removed keyword **{keyword}** from @{self.handle}", 
-                color=0xff5555
+            embed = build_info_embed(
+                "🗑️ Keyword Removed", 
+                f"Removed keyword **{keyword}** from @{self.handle}"
             )
         else:
-            embed = discord.Embed(
-                title="❌ Error", 
-                description=f"Failed to remove keyword **{keyword}** from @{self.handle}", 
-                color=0xff0000
+            embed = build_error_embed(
+                "Error", 
+                f"Failed to remove keyword **{keyword}** from @{self.handle}"
             )
         
         await interaction.response.send_message(embed=embed, ephemeral=True)

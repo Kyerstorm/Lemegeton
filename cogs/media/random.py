@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import List, Dict, Optional
 
 from helpers.media_helper import fetch_random_media
+from helpers.embed_helper import build_error_embed
+from helpers.anilist_helper import post_graphql
 from database import get_all_users_guild_aware
 from cogs_test.general_commands.dashboard import command_meta
 
@@ -79,8 +81,6 @@ MEDIA_TYPE_CHOICES = [
     app_commands.Choice(name="All 🎲", value="ALL"),
 ]
 
-API_URL = "https://graphql.anilist.co"
-
 
 class Random(commands.Cog):
     """Cog for generating random anime, manga, and light novel suggestions."""
@@ -127,12 +127,11 @@ class Random(commands.Cog):
         
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(API_URL, json={"query": query, "variables": variables}) as response:
-                    if response.status != 200:
-                        logger.error(f"Failed to fetch detailed media info: {response.status}")
-                        return None
-                    data = await response.json()
-                    return data.get("data", {}).get("Media")
+                data = await post_graphql(session, query, variables)
+                if data is None:
+                    logger.warning(f"Failed to fetch detailed media info for media_id={media_id}, type={media_type}")
+                    return None
+                return data.get("Media")
         except Exception as e:
             logger.error(f"Error fetching detailed media info: {e}", exc_info=True)
             return None
@@ -159,19 +158,18 @@ class Random(commands.Cog):
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(API_URL, json={"query": query, "variables": variables}) as resp:
-                    if resp.status != 200:
-                        logger.warning(f"AniList fetch failed ({resp.status}) for {anilist_username=} {media_id=}")
-                        return None
-                    payload = await resp.json()
-        except Exception:
-            logger.exception("Error requesting AniList user progress")
+                payload = await post_graphql(session, query, variables)
+                if payload is None:
+                    logger.warning(f"AniList fetch failed for {anilist_username=} {media_id=}")
+                    return None
+        except Exception as e:
+            logger.exception("Error requesting AniList user progress", exc_info=True)
             return None
 
-        user_opts = payload.get("data", {}).get("User", {}).get("mediaListOptions", {})
+        user_opts = payload.get("User", {}).get("mediaListOptions", {})
         score_format = user_opts.get("scoreFormat", "POINT_100")
 
-        entry = payload.get("data", {}).get("MediaList")
+        entry = payload.get("MediaList")
         if not entry:
             return None
 
@@ -323,10 +321,9 @@ class Random(commands.Cog):
             
             if not basic_embed:
                 logger.warning(f"No random {selected_type} found for user {interaction.user.id}")
-                error_embed = discord.Embed(
-                    title="❌ No Results",
-                    description=f"Sorry, couldn't find any random {selected_type.lower()} right now. Please try again later!",
-                    color=discord.Color.red()
+                error_embed = build_error_embed(
+                    "No Results",
+                    f"Sorry, couldn't find any random {selected_type.lower()} right now. Please try again later!"
                 )
                 await interaction.followup.send(embed=error_embed)
                 return
@@ -372,10 +369,9 @@ class Random(commands.Cog):
             logger.error(f"Error processing random request for user {interaction.user.id}: {e}", exc_info=True)
             
             # Create error embed
-            error_embed = discord.Embed(
-                title="❌ Something Went Wrong",
-                description="An error occurred while fetching random media. Please try again later!",
-                color=discord.Color.red()
+            error_embed = build_error_embed(
+                "Error",
+                "An error occurred while fetching random media. Please try again later!"
             )
             
             # Send error response

@@ -8,6 +8,8 @@ import re
 import logging
 from pathlib import Path
 from cogs_test.general_commands.dashboard import command_meta
+from helpers.embed_helper import build_error_embed, build_warning_embed
+from helpers.anilist_helper import post_graphql
 
 # ------------------------------------------------------
 # Logging Setup - Clears on each bot run
@@ -55,7 +57,7 @@ logger.info("Trending cog logging initialized - log file cleared")
 # ------------------------------------------------------
 # Constants
 # ------------------------------------------------------
-ANILIST_ENDPOINT = "https://graphql.anilist.co"
+# Type colors are contextual (type-based), keeping them for visual distinction
 TYPE_COLORS = {"ANIME": 0x1E90FF, "MANGA": 0xFF69B4, "LN": 0x8A2BE2}
 TYPE_ICONS = {"ANIME": "🎬", "MANGA": "📖", "LN": "📚"}
 REQUEST_TIMEOUT = 10
@@ -121,7 +123,11 @@ class Trending(commands.Cog):
 
             if not all_embeds:
                 logger.warning(f"No trending results found for any requested types: {[label for _, label in media_types_to_fetch]}")
-                await interaction.followup.send("⚠️ No trending results found.", ephemeral=True)
+                embed = build_warning_embed(
+                    "No Results Found",
+                    "No trending results found."
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
                 return
 
             logger.info(f"Successfully created {len(all_embeds)} trending embeds for {interaction.user}")
@@ -136,8 +142,12 @@ class Trending(commands.Cog):
             logger.info(f"Trending command completed successfully for {interaction.user}")
 
         except Exception as e:
-            logger.error(f"Exception in trending command for {interaction.user} (ID: {interaction.user.id}): {e}")
-            await interaction.followup.send("❌ An error occurred while fetching trending data. Please try again later.", ephemeral=True)
+            logger.error(f"Exception in trending command for {interaction.user} (ID: {interaction.user.id}): {e}", exc_info=True)
+            embed = build_error_embed(
+                "Error",
+                "An error occurred while fetching trending data. Please try again later."
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
 
     async def _fetch_trending(self, fetch_type: str, label: str):
         """Fetch trending data from AniList API"""
@@ -167,26 +177,23 @@ class Trending(commands.Cog):
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)) as session:
                 logger.info(f"Making API request to AniList for {label} trending data")
-                async with session.post(
-                    ANILIST_ENDPOINT,
-                    json={"query": query, "variables": variables}
-                ) as resp:
-                    if resp.status != 200:
-                        logger.warning(f"AniList API returned status {resp.status} for {label}")
-                        return []
+                data = await post_graphql(session, query, variables, timeout=REQUEST_TIMEOUT)
+                
+                if data is None:
+                    logger.warning(f"AniList API returned None for {label}")
+                    return []
 
-                    data = await resp.json()
-                    logger.info(f"Successfully received API response for {label}")
+                logger.info(f"Successfully received API response for {label}")
 
         except asyncio.TimeoutError:
-            logger.error(f"Timeout while fetching {label} trending data")
+            logger.error(f"Timeout while fetching {label} trending data", exc_info=True)
             return []
         except Exception as e:
-            logger.error(f"Failed to fetch AniList trending data for {label}: {e}")
+            logger.error(f"Failed to fetch AniList trending data for {label}: {e}", exc_info=True)
             return []
 
         # Process response
-        page_data = data.get("data", {}).get("Page") if data else None
+        page_data = data.get("Page") if data else None
         if not page_data:
             logger.warning(f"No Page data returned from AniList for {label}: {data}")
             return []
@@ -283,7 +290,11 @@ class TrendingPaginatedView(discord.ui.View):
     @discord.ui.button(label="⬅️ Previous", style=discord.ButtonStyle.secondary)
     async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ Only the command user can navigate.", ephemeral=True)
+            embed = build_error_embed(
+                "Permission Denied",
+                "Only the command user can navigate."
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
             
         self.current = (self.current - 1) % len(self.embeds)
@@ -293,7 +304,11 @@ class TrendingPaginatedView(discord.ui.View):
     @discord.ui.button(label="➡️ Next", style=discord.ButtonStyle.secondary)
     async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ Only the command user can navigate.", ephemeral=True)
+            embed = build_error_embed(
+                "Permission Denied",
+                "Only the command user can navigate."
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
             
         self.current = (self.current + 1) % len(self.embeds)
@@ -306,104 +321,6 @@ class TrendingPaginatedView(discord.ui.View):
         # Disable all buttons
         for item in self.children:
             item.disabled = True
-
-        # AniList GraphQL query with full details
-        query = """
-        query ($type: MediaType) {
-          Page(page: 1, perPage: 10) {
-            media(type: $type, sort: TRENDING_DESC) {
-              id
-              title { romaji english }
-              format
-              status
-              episodes
-              chapters
-              genres
-              averageScore
-              description(asHtml: false)
-              coverImage { large }
-              siteUrl
-              trending
-            }
-          }
-        }
-        """
-
-        async def fetch_trending(fetch_type: str, label: str):
-            variables = {"type": fetch_type}
-            async with aiohttp.ClientSession() as session:
-                try:
-                    async with session.post(
-                        "https://graphql.anilist.co",
-                        json={"query": query, "variables": variables},
-                        timeout=10
-                    ) as resp:
-                        if resp.status != 200:
-                            # Log the failure
-                            logger.warning(f"AniList request failed with status {resp.status}")
-                            return []
-
-                        data = await resp.json()
-                except Exception as e:
-                    logger.error(f"Failed to fetch AniList trending: {e}")
-                    return []
-
-            # Check if response contains data
-            page_data = data.get("data", {}).get("Page") if data else None
-            if not page_data:
-                logger.warning(f"No Page data returned from AniList: {data}")
-                return []
-
-            media_list = page_data.get("media", [])
-            if label == "LN":
-                media_list = [m for m in media_list if m.get("format") == "NOVEL"]
-
-            return media_list
-
-
-        def build_embed_entry(m: dict, rank: int, label: str):
-            type_colors = {"ANIME": 0x1E90FF, "MANGA": 0xFF69B4, "LN": 0x8A2BE2}
-            color = discord.Color(type_colors.get(label, 0x00CED1))
-            type_icons = {"ANIME": "🎬", "MANGA": "📖", "LN": "📚"}
-
-            title_data = m.get("title") or {}
-            title = title_data.get("english") or title_data.get("romaji") or "Unknown Title"
-            url = m.get("siteUrl") or "#"
-            score = m.get("trending") or 0
-            format_ = m.get("format") or "Unknown"
-            status = m.get("status") or "Unknown"
-            episodes = m.get("episodes") or m.get("chapters") or "N/A"
-            genres = ", ".join(m.get("genres") or []) or "N/A"
-            avg_score = m.get("averageScore") or "N/A"
-
-            # Clean description
-            raw_desc = m.get("description") or "No description available"
-            clean_desc = re.sub(r"<[^>]+>", "", raw_desc)
-            clean_desc = (clean_desc[:500] + "...") if len(clean_desc) > 500 else clean_desc
-
-            embed = discord.Embed(
-                title=f"{type_icons.get(label, '')} #{rank} • {title}",
-                description=(
-                    f"Trending Score: {score}\n"
-                    f"Format: {format_}\n"
-                    f"Status: {status}\n"
-                    f"Episodes/Chapters: {episodes}\n"
-                    f"Genres: {genres}\n"
-                    f"Average Score: {avg_score}\n\n"
-                    f"Description: {clean_desc}"
-                ),
-                color=color
-            )
-
-            cover_url = m.get("coverImage", {}).get("large")
-            if cover_url:
-                embed.set_thumbnail(url=cover_url)
-
-            embed.set_author(
-                name="AniList Trending",
-                url="https://anilist.co/",
-                icon_url="https://anilist.co/img/icons/android-chrome-512x512.png"
-            )
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Trending(bot))

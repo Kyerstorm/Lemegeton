@@ -9,6 +9,8 @@ from typing import Dict, List, Optional, Tuple
 import json
 from datetime import datetime, timedelta
 import time
+from helpers.embed_helper import build_error_embed, build_warning_embed, build_info_embed, build_success_embed
+from helpers.anilist_helper import post_graphql
 from cogs_test.general_commands.dashboard import command_meta
 
 # ------------------------------------------------------
@@ -51,7 +53,7 @@ recommendations_cache = {}
 # ------------------------------------------------------
 # ANILIST API CONFIGURATION
 # ------------------------------------------------------
-ANILIST_API_URL = "https://graphql.anilist.co"
+# API URL is now handled by helpers.anilist_helper
 
 # GraphQL query to fetch user's manga list
 USER_MANGA_LIST_QUERY = """
@@ -292,10 +294,9 @@ class RecommendationsView(discord.ui.View):
         """Create detailed embed for current recommendation."""
         current_recs = self.recommendations_data.get(self.current_category, [])
         if not current_recs or self.current_index >= len(current_recs):
-            return discord.Embed(
-                title="❌ No Recommendations",
-                description=f"No {self.current_category} recommendations found.",
-                color=discord.Color.red()
+            return build_error_embed(
+                "No Recommendations",
+                f"No {self.current_category} recommendations found."
             )
         
         rec = current_recs[self.current_index]
@@ -377,7 +378,11 @@ class RecommendationsView(discord.ui.View):
 
     async def manga_button_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ This menu is not for you!", ephemeral=True)
+            embed = build_error_embed(
+                "Permission Denied",
+                "This menu is not for you!"
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
         try:
@@ -392,15 +397,23 @@ class RecommendationsView(discord.ui.View):
             
             logger.info(f"User {self.user_id} switched to manga recommendations")
         except Exception as e:
-            logger.error(f"Error in manga_button_callback: {e}")
+            logger.error(f"Error in manga_button_callback: {e}", exc_info=True)
             try:
-                await interaction.followup.send("❌ An error occurred while switching categories. Please try again.", ephemeral=True)
+                embed = build_error_embed(
+                    "Error",
+                    "An error occurred while switching categories. Please try again."
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
             except:
                 pass
 
     async def manhwa_button_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ This menu is not for you!", ephemeral=True)
+            embed = build_error_embed(
+                "Permission Denied",
+                "This menu is not for you!"
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
         try:
@@ -415,15 +428,23 @@ class RecommendationsView(discord.ui.View):
             
             logger.info(f"User {self.user_id} switched to manhwa recommendations")
         except Exception as e:
-            logger.error(f"Error in manhwa_button_callback: {e}")
+            logger.error(f"Error in manhwa_button_callback: {e}", exc_info=True)
             try:
-                await interaction.followup.send("❌ An error occurred while switching categories. Please try again.", ephemeral=True)
+                embed = build_error_embed(
+                    "Error",
+                    "An error occurred while switching categories. Please try again."
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
             except:
                 pass
 
     async def manhua_button_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ This menu is not for you!", ephemeral=True)
+            embed = build_error_embed(
+                "Permission Denied",
+                "This menu is not for you!"
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
         try:
@@ -438,15 +459,23 @@ class RecommendationsView(discord.ui.View):
             
             logger.info(f"User {self.user_id} switched to manhua recommendations")
         except Exception as e:
-            logger.error(f"Error in manhua_button_callback: {e}")
+            logger.error(f"Error in manhua_button_callback: {e}", exc_info=True)
             try:
-                await interaction.followup.send("❌ An error occurred while switching categories. Please try again.", ephemeral=True)
+                embed = build_error_embed(
+                    "Error",
+                    "An error occurred while switching categories. Please try again."
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
             except:
                 pass
 
     async def previous_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ This menu is not for you!", ephemeral=True)
+            embed = build_error_embed(
+                "Permission Denied",
+                "This menu is not for you!"
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
         try:
@@ -461,15 +490,23 @@ class RecommendationsView(discord.ui.View):
                 
                 logger.info(f"User {self.user_id} went to previous recommendation (index {self.current_index})")
         except Exception as e:
-            logger.error(f"Error in previous_callback: {e}")
+            logger.error(f"Error in previous_callback: {e}", exc_info=True)
             try:
-                await interaction.followup.send("❌ An error occurred while navigating. Please try again.", ephemeral=True)
+                embed = build_error_embed(
+                    "Error",
+                    "An error occurred while navigating. Please try again."
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
             except:
                 pass
 
     async def next_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ This menu is not for you!", ephemeral=True)
+            embed = build_error_embed(
+                "Permission Denied",
+                "This menu is not for you!"
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
         try:
@@ -485,9 +522,13 @@ class RecommendationsView(discord.ui.View):
                 
                 logger.info(f"User {self.user_id} went to next recommendation (index {self.current_index})")
         except Exception as e:
-            logger.error(f"Error in next_callback: {e}")
+            logger.error(f"Error in next_callback: {e}", exc_info=True)
             try:
-                await interaction.followup.send("❌ An error occurred while navigating. Please try again.", ephemeral=True)
+                embed = build_error_embed(
+                    "Error",
+                    "An error occurred while navigating. Please try again."
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
             except:
                 pass
 
@@ -542,39 +583,30 @@ class RecommendationsCog(commands.Cog):
         }
         
         async with aiohttp.ClientSession() as session:
-            async with session.post(
-                ANILIST_API_URL,
-                json={"query": USER_MANGA_LIST_QUERY, "variables": variables}
-            ) as response:
-                if response.status != 200:
-                    logger.error(f"AniList API error: {response.status}")
-                    raise Exception(f"AniList API returned status {response.status}")
-                
-                data = await response.json()
-                
-                if "errors" in data:
-                    logger.error(f"AniList API errors: {data['errors']}")
-                    raise Exception("AniList API returned errors")
-                
-                manga_list = []
-                user_media_ids = set()
-                
-                if data.get("data", {}).get("MediaListCollection", {}).get("lists"):
-                    for manga_list_entry in data["data"]["MediaListCollection"]["lists"]:
-                        for entry in manga_list_entry.get("entries", []):
-                            media = entry.get("media", {})
-                            media_id = media.get("id")
-                            
-                            if media_id:
-                                user_media_ids.add(media_id)
-                            
-                            # Exclude planning status from recommendation sources (unrated/incomplete)
-                            if entry.get("status") != "PLANNING":
-                                manga_list.append(entry)
-                
-                logger.info(f"Retrieved {len(manga_list)} manga entries (excluding planning)")
-                logger.info(f"User has {len(user_media_ids)} total media IDs in their list")
-                return manga_list, user_media_ids
+            data = await post_graphql(session, USER_MANGA_LIST_QUERY, variables)
+            if data is None:
+                logger.error("AniList API returned None for manga list query")
+                raise Exception("AniList API returned None")
+            
+            manga_list = []
+            user_media_ids = set()
+            
+            if data.get("MediaListCollection", {}).get("lists"):
+                for manga_list_entry in data["MediaListCollection"]["lists"]:
+                    for entry in manga_list_entry.get("entries", []):
+                        media = entry.get("media", {})
+                        media_id = media.get("id")
+                        
+                        if media_id:
+                            user_media_ids.add(media_id)
+                        
+                        # Exclude planning status from recommendation sources (unrated/incomplete)
+                        if entry.get("status") != "PLANNING":
+                            manga_list.append(entry)
+            
+            logger.info(f"Retrieved {len(manga_list)} manga entries (excluding planning)")
+            logger.info(f"User has {len(user_media_ids)} total media IDs in their list")
+            return manga_list, user_media_ids
 
     def filter_high_rated_manga(self, manga_list: List[Dict]) -> List[Dict]:
         """Filter manga with scores >= 7/10 (normalized from various scoring systems)."""
@@ -716,20 +748,21 @@ class RecommendationsCog(commands.Cog):
                     user_data = await get_user_guild_aware(interaction.user.id, interaction.guild_id)
                     db_username = user_data[4] if user_data else None  # anilist_username is at index 4
                     if not db_username:
-                        await interaction.followup.send(
-                            "❌ No AniList username provided and no linked account found. "
-                            "Please provide a username or link your account with `/login`.",
-                            ephemeral=True
+                        embed = build_error_embed(
+                            "No Username Found",
+                            "No AniList username provided and no linked account found. Please provide a username or link your account with `/login`."
                         )
+                        await interaction.followup.send(embed=embed, ephemeral=True)
                         return
                     username = db_username
                     logger.info(f"Retrieved username '{username}' from database for user {interaction.user.id}")
                 except Exception as e:
-                    logger.error(f"Error retrieving username from database: {e}")
-                    await interaction.followup.send(
-                        "❌ Error accessing database. Please provide an AniList username manually.",
-                        ephemeral=True
+                    logger.error(f"Error retrieving username from database: {e}", exc_info=True)
+                    embed = build_error_embed(
+                        "Database Error",
+                        "Error accessing database. Please provide an AniList username manually."
                     )
+                    await interaction.followup.send(embed=embed, ephemeral=True)
                     return
             
             # Check cache first
@@ -766,30 +799,30 @@ class RecommendationsCog(commands.Cog):
             try:
                 manga_list, user_media_ids = await self.fetch_user_manga_list(username)
                 if not manga_list:
-                    await interaction.edit_original_response(embed=discord.Embed(
-                        title="❌ No Manga Found",
-                        description=f"No manga found in {username}'s library (excluding planning list).",
-                        color=discord.Color.red()
-                    ))
+                    embed = build_error_embed(
+                        "No Manga Found",
+                        f"No manga found in {username}'s library (excluding planning list)."
+                    )
+                    await interaction.edit_original_response(embed=embed)
                     return
             except Exception as e:
-                logger.error(f"Error fetching manga list: {e}")
-                await interaction.edit_original_response(embed=discord.Embed(
-                    title="❌ Error",
-                    description=f"Could not fetch manga list for '{username}'. Please check the username and try again.",
-                    color=discord.Color.red()
-                ))
+                logger.error(f"Error fetching manga list: {e}", exc_info=True)
+                embed = build_error_embed(
+                    "Error",
+                    f"Could not fetch manga list for '{username}'. Please check the username and try again."
+                )
+                await interaction.edit_original_response(embed=embed)
                 return
             
             # Stage 2: Filter high-rated manga
             logger.info("Stage 2: Filtering high-rated manga")
             filtered_manga = self.filter_high_rated_manga(manga_list)
             if not filtered_manga:
-                await interaction.edit_original_response(embed=discord.Embed(
-                    title="❌ No High-Rated Manga",
-                    description=f"{username} has no manga rated 7/10 or higher to base recommendations on.",
-                    color=discord.Color.orange()
-                ))
+                embed = build_warning_embed(
+                    "No High-Rated Manga",
+                    f"{username} has no manga rated 7/10 or higher to base recommendations on."
+                )
+                await interaction.edit_original_response(embed=embed)
                 return
             
             # Stage 3: Extract recommendations
@@ -803,11 +836,11 @@ class RecommendationsCog(commands.Cog):
             # Check if we have any recommendations
             total_recommendations = sum(len(recs) for recs in final_recommendations.values())
             if total_recommendations == 0:
-                await interaction.edit_original_response(embed=discord.Embed(
-                    title="❌ No Recommendations Found",
-                    description="No recommendations found with 3+ votes. Try reading more manga to get better recommendations!",
-                    color=discord.Color.orange()
-                ))
+                embed = build_warning_embed(
+                    "No Recommendations Found",
+                    "No recommendations found with 3+ votes. Try reading more manga to get better recommendations!"
+                )
+                await interaction.edit_original_response(embed=embed)
                 return
             
             # Create pagination view
@@ -826,11 +859,11 @@ class RecommendationsCog(commands.Cog):
             
         except Exception as e:
             logger.error(f"Error in recommendations command: {e}", exc_info=True)
-            await interaction.edit_original_response(embed=discord.Embed(
-                title="❌ Error",
-                description="An unexpected error occurred while generating recommendations. Please try again later.",
-                color=discord.Color.red()
-            ))
+            embed = build_error_embed(
+                "Error",
+                "An unexpected error occurred while generating recommendations. Please try again later."
+            )
+            await interaction.edit_original_response(embed=embed)
 
 async def setup(bot):
     await bot.add_cog(RecommendationsCog(bot))
