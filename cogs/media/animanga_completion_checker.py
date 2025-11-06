@@ -18,9 +18,9 @@ from database import (
     get_scan_metadata,
     set_scan_metadata
 )
+from helpers.embed_helper import build_error_embed, build_success_embed, build_info_embed, build_warning_embed
+from helpers.anilist_helper import post_graphql
 from cogs_test.general_commands.dashboard import command_meta
-
-ANILIST_URL = "https://graphql.anilist.co"
 
 # ---------------- Logging ----------------
 LOG_DIR = "logs"
@@ -149,7 +149,7 @@ class Finisher(commands.Cog):
             else:
                 self.logger.debug("Finisher daily_check task already running, skipping start")
         except Exception as e:
-            self.logger.error(f"Failed to start daily_check task from _ensure_daily_check_started: {e}")
+            self.logger.error(f"Failed to start daily_check task from _ensure_daily_check_started: {e}", exc_info=True)
 
     # === Utilities ===
     async def fetch_manga(self):
@@ -158,18 +158,17 @@ class Finisher(commands.Cog):
         try:
             self.logger.info("Fetching manga list from AniList")
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(ANILIST_URL, json={"query": query}) as resp:
-                    if resp.status != 200:
-                        self.logger.warning(f"AniList returned status {resp.status}")
-                        return []
-                    data = await resp.json()
-                    media = data.get("data", {}).get("Page", {}).get("media", [])
-                    self.logger.info(f"AniList returned {len(media)} media entries")
-                    return media
+                data = await post_graphql(session, query, {}, timeout=15)
+                if data is None:
+                    self.logger.warning("AniList returned None for manga query")
+                    return []
+                media = data.get("Page", {}).get("media", [])
+                self.logger.info(f"AniList returned {len(media)} media entries")
+                return media
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            self.logger.exception(f"Error fetching AniList data: {e}")
+            self.logger.exception(f"Error fetching AniList data: {e}", exc_info=True)
             return []
 
     async def fetch_anime(self):
@@ -178,18 +177,17 @@ class Finisher(commands.Cog):
         try:
             self.logger.info("Fetching anime list from AniList")
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(ANILIST_URL, json={"query": anime_query}) as resp:
-                    if resp.status != 200:
-                        self.logger.warning(f"AniList returned status {resp.status} (anime)")
-                        return []
-                    data = await resp.json()
-                    media = data.get("data", {}).get("Page", {}).get("media", [])
-                    self.logger.info(f"AniList returned {len(media)} anime entries")
-                    return media
+                data = await post_graphql(session, anime_query, {}, timeout=15)
+                if data is None:
+                    self.logger.warning("AniList returned None for anime query")
+                    return []
+                media = data.get("Page", {}).get("media", [])
+                self.logger.info(f"AniList returned {len(media)} anime entries")
+                return media
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            self.logger.exception(f"Error fetching AniList anime data: {e}")
+            self.logger.exception(f"Error fetching AniList anime data: {e}", exc_info=True)
             return []
 
     async def load_previous(self):
@@ -299,7 +297,7 @@ class Finisher(commands.Cog):
                 self.logger.info(f"No configured channel for guild {guild_id}")
             return result
         except Exception as e:
-            self.logger.error(f"Error loading defined channel for guild {guild_id}: {e}")
+            self.logger.error(f"Error loading defined channel for guild {guild_id}: {e}", exc_info=True)
             return None
 
     async def save_current_anime(self, data):
@@ -327,7 +325,7 @@ class Finisher(commands.Cog):
             await set_guild_manga_channel(guild_id, channel_id)
             self.logger.info(f"Saved configured channel {channel_id} for guild {guild_id} to database")
         except Exception as e:
-            self.logger.error(f"Error saving defined channel for guild {guild_id}: {e}")
+            self.logger.error(f"Error saving defined channel for guild {guild_id}: {e}", exc_info=True)
             raise
 
     # === Last-run persistence (to ensure runs are once-per-24h) ===
@@ -372,12 +370,20 @@ class Finisher(commands.Cog):
     @command_meta(section="Media", name="Set Completion Channel")
     async def set_animanga_completion_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
         if interaction.guild is None:
-            await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+            embed = build_info_embed(
+                "Server Required",
+                "This command must be used in a server."
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         self.logger.info(f"/set_animanga_completion_channel invoked by {interaction.user} in guild {interaction.guild.id} -> channel {channel.id}")
         # Permission check
         if not await self._user_is_mod(interaction):
-            await interaction.response.send_message("❌ You don’t have permission to use this command.", ephemeral=True)
+            embed = build_error_embed(
+                "Permission Denied",
+                "You don't have permission to use this command."
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
@@ -386,16 +392,28 @@ class Finisher(commands.Cog):
             bot_member = interaction.guild.me
             perms = channel.permissions_for(bot_member) if bot_member else None
             if perms and not perms.send_messages:
-                await interaction.followup.send("I don't have permission to send messages in that channel.", ephemeral=True)
+                embed = build_error_embed(
+                    "Missing Permissions",
+                    "I don't have permission to send messages in that channel."
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
                 return
 
             await self.save_defined_channel(interaction.guild.id, channel.id)
             self.logger.info(f"Configured manga updates for guild {interaction.guild.id} -> channel {channel.id}")
-            await interaction.followup.send(f"✅ Manga updates will be sent to {channel.mention}", ephemeral=True)
-        except Exception:
-            self.logger.exception("Failed to set manga channel")
+            embed = build_success_embed(
+                "Channel Configured",
+                f"Manga updates will be sent to {channel.mention}"
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            self.logger.exception("Failed to set manga channel: %s", e, exc_info=True)
             try:
-                await interaction.followup.send("❌ Failed to set channel.", ephemeral=True)
+                embed = build_error_embed(
+                    "Configuration Failed",
+                    "Failed to set channel."
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
             except Exception:
                 pass
 
@@ -405,22 +423,42 @@ class Finisher(commands.Cog):
     @command_meta(section="Media", name="Show Manga Channel")
     async def show_manga_channel(self, interaction: discord.Interaction):
         if interaction.guild is None:
-            await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+            embed = build_info_embed(
+                "Server Required",
+                "This command must be used in a server."
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         # Permission check
         if not await self._user_is_mod(interaction):
-            await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
+            embed = build_error_embed(
+                "Permission Denied",
+                "You don't have permission to use this command."
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         self.logger.info(f"/show_manga_channel invoked by {interaction.user} in guild {interaction.guild.id}")
         cid = await self.load_defined_channel(interaction.guild.id)
         if cid:
             ch = self.bot.get_channel(cid)
             if ch:
-                await interaction.response.send_message(f"Current manga updates channel: {ch.mention}", ephemeral=True)
+                embed = build_info_embed(
+                    "Current Channel",
+                    f"Current manga updates channel: {ch.mention}"
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
             else:
-                await interaction.response.send_message(f"Configured channel id {cid} is not visible to the bot.", ephemeral=True)
+                embed = build_warning_embed(
+                    "Channel Not Found",
+                    f"Configured channel id {cid} is not visible to the bot."
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
         else:
-            await interaction.response.send_message("No channel configured for this server.", ephemeral=True)
+            embed = build_info_embed(
+                "No Channel Configured",
+                "No channel configured for this server."
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
 
     async def post_updates(self, channel, kind: str = "manga") -> int:
         """Post updates of a given kind ('manga' or 'anime') to a channel. Returns number posted."""
@@ -467,7 +505,7 @@ class Finisher(commands.Cog):
             desc = (m.get("description") or "").strip() if m.get("description") else ""
 
             # prefer a colored embed but keep status color for visibility
-            color = 0x00FF00 if m.get("status") == "FINISHED" else 0xFF0000
+            color = discord.Color.green() if m.get("status") == "FINISHED" else discord.Color.red()
 
             embed = discord.Embed(
                 title=f"{emoji} {title}",
