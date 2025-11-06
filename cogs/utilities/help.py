@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from config import BOT_ID
 from cogs_test.general_commands.dashboard import command_meta
+from helpers.embed_helper import build_error_embed, build_warning_embed
 
 # ------------------------------------------------------
 # Logging Setup - Safe handling
@@ -48,49 +49,53 @@ class HelpCog(commands.Cog):
         self.command_categories = {
             "🔐 Account Management": {
                 "login": {
-                    "desc": "Manage your account - register, update, or unregister",
+                    "desc": "🔐 Manage your account - register with AniList and/or Steam",
                     "usage": "/login",
-                    "note": "Start here to connect your AniList account!",
+                    "note": "Start here to connect your AniList account! Supports both AniList and Steam account linking.",
                     "examples": ["/login"]
-                }
-            },
-            "📊 Profile & Stats": {
+                },
                 "profile": {
                     "desc": "View your AniList profile with comprehensive stats, achievements, and bio gallery",
                     "usage": "/profile [user]",
                     "note": "Features: 🖼️ Gallery (view all bio images), 🏅 Achievements, ⭐ Favorites, 📝 Bio with auto-cleanup, 👥 Social stats, 📅 Account age. Data cached for 12 hours for faster loading.",
                     "examples": ["/profile", "/profile @username"]
+                },
+                "admin-login": {
+                    "desc": "🔐 Link a Discord user with an AniList username (Admin only)",
+                    "usage": "/admin-login <discord_user> <anilist_user>",
+                    "note": "Manually link users' Discord accounts to AniList profiles. Requires admin permissions.",
+                    "examples": ["/admin-login @user theiranilistname"]
                 }
             },
             "📺 Anime & Manga": {
                 "browse": {
-                    "desc": "Search and browse anime, manga, light novels, and general novels",
+                    "desc": "Search Anime, Manga, Light Novels and General Novels",
                     "usage": "/browse",
-                    "note": "Interactive browsing with advanced filtering and sorting options",
+                    "note": "Interactive browsing with advanced filtering and sorting options. Filter by genre, year, format, and more.",
                     "examples": ["/browse"]
                 },
                 "trending": {
-                    "desc": "View trending anime and manga",
-                    "usage": "/trending",
-                    "note": "See what's popular right now",
-                    "examples": ["/trending"]
+                    "desc": "🔥 View the currently trending anime, manga, or light novels on AniList",
+                    "usage": "/trending [media_type]",
+                    "note": "See what's popular right now on AniList. Supports Anime, Manga, Light Novels, or All.",
+                    "examples": ["/trending", "/trending anime", "/trending manga"]
                 },
                 "recommendations": {
-                    "desc": "Get personalized recommendations based on your highly-rated manga (≥8.0/10)",
-                    "usage": "/recommendations [member]",
-                    "note": "AI-powered recommendations with interactive browsing by category",
+                    "desc": "Get personalized manga recommendations based on your highly-rated library",
+                    "usage": "/recommendations [username]",
+                    "note": "AI-powered recommendations with interactive browsing by category. Based on titles rated ≥8.0/10.",
                     "examples": ["/recommendations", "/recommendations @friend"]
                 },
                 "random": {
-                    "desc": "Get random anime/manga/light novel suggestions from AniList",
+                    "desc": "🎲 Get a completely random Anime, Manga, Light Novel, or All suggestion from AniList",
                     "usage": "/random <media_type>",
                     "note": "For when you can't decide what to watch/read - supports Anime, Manga, Light Novel, or All",
                     "examples": ["/random anime", "/random manga", "/random light_novel", "/random all"]
                 },
                 "trailer": {
-                    "desc": "Get the official trailer for an anime or manga from AniList",
+                    "desc": "🎬 Get the trailer for an anime/manga from AniList",
                     "usage": "/trailer <type> <title>",
-                    "note": "Fetches trailers with autocomplete support and debug options",
+                    "note": "Fetches official trailers with autocomplete support. Supports both anime and manga.",
                     "examples": ["/trailer anime Demon Slayer", "/trailer manga Chainsaw Man"]
                 },
                 "3x3": {
@@ -99,81 +104,61 @@ class HelpCog(commands.Cog):
                     "note": "Generate shareable 3x3 grids with custom selections. Supports anime, manga, characters, and games. Fetches covers/images from AniList automatically.",
                     "examples": ["/3x3 anime", "/3x3 manga", "/3x3 character", "/3x3 games"]
                 },
-                "admin-news-manage": {
+                "news": {
                     "desc": "Manage Twitter/X news monitoring for anime/manga updates",
-                    "usage": "/admin-news-manage",
-                    "note": "Monitor Twitter accounts for anime/manga news",
-                    "examples": ["/admin-news-manage"]
-                }
-            },
-            "🏆 Challenges & Competition": {
-                "challenge_progress": {
-                    "desc": "View your reading challenge progress",
-                    "usage": "/challenge_progress",
-                    "note": "Track your annual reading goals",
-                    "examples": ["/challenge_progress"]
+                    "usage": "/news",
+                    "note": "Monitor Twitter accounts for anime/manga news. Bot Moderator only.",
+                    "examples": ["/news"]
                 },
-                "challenge_update": {
-                    "desc": "Update your challenge progress",
-                    "usage": "/challenge_update",
-                    "note": "Manually update your reading challenge",
-                    "examples": ["/challenge_update"]
+                "test-twitter-scrape": {
+                    "desc": "Test Twitter scraping for debugging",
+                    "usage": "/test-twitter-scrape <username>",
+                    "note": "Debug command to test Twitter/X scraping functionality. Bot Moderator only.",
+                    "examples": ["/test-twitter-scrape username"]
                 },
-                "challenge_manage": {
-                    "desc": "Manage reading challenges",
-                    "usage": "/challenge_manage",
-                    "note": "Create and manage reading challenges",
-                    "examples": ["/challenge_manage"]
+                "set_animanga_completion_channel": {
+                    "desc": "Set channel to receive anime/manga completion updates (Mod only)",
+                    "usage": "/set_animanga_completion_channel <channel>",
+                    "note": "Monitor when users complete series. Requires moderator permissions.",
+                    "examples": ["/set_animanga_completion_channel #completions"]
                 },
-                "challenge_leaderboard": {
-                    "desc": "View challenge leaderboards",
-                    "usage": "/challenge_leaderboard",
-                    "note": "See who's leading in various challenges",
-                    "examples": ["/challenge_leaderboard"]
-                },
-                "leaderboard": {
-                    "desc": "View server leaderboards for various metrics",
-                    "usage": "/leaderboard",
-                    "note": "Server rankings and competitions",
-                    "examples": ["/leaderboard"]
-                },
-                "affinity": {
-                    "desc": "Compare your affinity with all users or a specific user in this server",
-                    "usage": "/affinity [user]",
-                    "note": "See how similar your anime/manga tastes are with others",
-                    "examples": ["/affinity", "/affinity @friend"]
-                },
-                "anilist_leaderboard": {
-                    "desc": "🏆 Show leaderboard ranked by manga, anime, or combined activity",
-                    "usage": "/anilist_leaderboard <medium>",
-                    "note": "View rankings by chapters read, episodes watched, or completed series",
-                    "examples": ["/anilist_leaderboard chapters", "/anilist_leaderboard anime_completed"]
+                "show_manga_channel": {
+                    "desc": "Show currently configured manga update channel (Mod only)",
+                    "usage": "/show_manga_channel",
+                    "note": "View the channel currently set for anime/manga completion notifications.",
+                    "examples": ["/show_manga_channel"]
                 }
             },
             "🎮 Gaming": {
                 "steam-profile": {
-                    "desc": "Show a Steam profile (vanity or SteamID)",
-                    "usage": "/steam-profile <username>",
-                    "note": "View Steam user profiles and stats",
-                    "examples": ["/steam-profile gaben", "/steam-profile 76561197960287930"]
+                    "desc": "Show detailed Steam profile with library stats and analytics",
+                    "usage": "/steam-profile [user]",
+                    "note": "View Steam user profiles and stats. Supports vanity URLs or SteamID64. Leave blank for your own profile.",
+                    "examples": ["/steam-profile gaben", "/steam-profile 76561197960287930", "/steam-profile"]
                 },
                 "steam-recommendation": {
                     "desc": "Get personalized game recommendations based on your Steam library",
-                    "usage": "/steam-recommendation <username>",
-                    "note": "Discover new games similar to ones you enjoy",
-                    "examples": ["/steam-recommendation gaben"]
+                    "usage": "/steam-recommendation [genre] [max_price]",
+                    "note": "Discover new games similar to ones you enjoy. Filter by genre and price.",
+                    "examples": ["/steam-recommendation", "/steam-recommendation genre:action max_price:30"]
                 },
-                "steam": {
-                    "desc": "Search for games on Steam with advanced filters",
-                    "usage": "/steam game <game_name> [filters]",
-                    "note": "Filter by genre, price, platform, tags, and sort options with fuzzy matching",
-                    "examples": ["/steam game Elden Ring", "/steam game god war genre:action max_price:30"]
+                "steam-game": {
+                    "desc": "Search for a Steam game and view detailed information",
+                    "usage": "/steam-game <query>",
+                    "note": "Search Steam store with fuzzy matching. View game details, prices, and reviews.",
+                    "examples": ["/steam-game Elden Ring", "/steam-game god of war"]
                 },
                 "free-games": {
-                    "desc": "Manage free games notifications with interactive interface",
+                    "desc": "Manage free games notifications and check current deals",
                     "usage": "/free-games",
                     "note": "Check current free games and setup automatic notifications (Epic, GOG, Steam). Checks every 6 hours.",
                     "examples": ["/free-games"]
+                },
+                "check-free-games": {
+                    "desc": "🎮 Test command: Check current free games from all platforms",
+                    "usage": "/check-free-games",
+                    "note": "Immediately check for free games from Epic, GOG, and Steam. Useful for testing.",
+                    "examples": ["/check-free-games"]
                 }
             },
             "🎨 Customization": {
@@ -197,89 +182,133 @@ class HelpCog(commands.Cog):
                 }
             },
             "⚙️ Server Management": {
+                "serverinfo": {
+                    "desc": "View detailed server information",
+                    "usage": "/serverinfo",
+                    "note": "Display comprehensive server stats, member counts, channels, roles, and more. Works in any guild.",
+                    "examples": ["/serverinfo"]
+                },
                 "server-config": {
-                    "desc": "Configure server settings - roles, channels, and notifications",
+                    "desc": "⚙️ Configure server settings - roles, channels, and notifications",
                     "usage": "/server-config",
-                    "note": "Manage server-wide bot configuration (Admin only)",
+                    "note": "Unified server configuration interface. Manage roles, channels, and notification settings. Requires 'Manage Server' permission.",
                     "examples": ["/server-config"]
                 },
-                "admin-moderator-manage": {
-                    "desc": "Manage bot moderators (bot-wide permissions)",
-                    "usage": "/admin-moderator-manage",
-                    "note": "Add/remove bot moderators with elevated permissions",
-                    "examples": ["/admin-moderator-manage"]
+                "invite-stats": {
+                    "desc": "View recruitment statistics for the server or a specific user",
+                    "usage": "/invite-stats [user]",
+                    "note": "Track invite statistics and recruitment data. Requires 'Manage Server' permission.",
+                    "examples": ["/invite-stats", "/invite-stats @user"]
                 },
-                "set_bot_updates_channel": {
-                    "desc": "Set channel to receive bot updates and announcements (Admin only)",
-                    "usage": "/set_bot_updates_channel <channel>",
-                    "note": "Configure where bot update notifications appear",
-                    "examples": ["/set_bot_updates_channel #bot-updates"]
+                "invite-leaderboard": {
+                    "desc": "View the top recruiters in the server",
+                    "usage": "/invite-leaderboard",
+                    "note": "See who's leading in server recruitment. Requires 'Manage Server' permission.",
+                    "examples": ["/invite-leaderboard"]
                 },
-                "set_animanga_completion_channel": {
-                    "desc": "Set channel to receive anime/manga completion updates (Mod only)",
-                    "usage": "/set_animanga_completion_channel <channel>",
-                    "note": "Monitor when users complete series",
-                    "examples": ["/set_animanga_completion_channel #completions"]
-                },
-                "changelog": {
-                    "desc": "Create and publish a changelog from an uploaded text file (Bot Moderator only)",
-                    "usage": "/changelog <file> [options]",
-                    "note": "Publish formatted changelogs with customizable appearance and notifications",
-                    "examples": ["/changelog"]
+                "invite-theme": {
+                    "desc": "Customize invite leaderboard theme",
+                    "usage": "/invite-theme",
+                    "note": "Set the visual theme for invite leaderboards. Requires 'Manage Server' permission.",
+                    "examples": ["/invite-theme"]
                 },
                 "set-welcome-dm": {
                     "desc": "Set the welcome DM message by uploading a text file (Admin only)",
                     "usage": "/set-welcome-dm <text_file>",
-                    "note": "Configure automated welcome messages sent to new server boosters",
+                    "note": "Configure automated welcome messages sent to new server boosters. Requires admin permissions.",
                     "examples": ["/set-welcome-dm"]
                 },
                 "welcome-dm-status": {
                     "desc": "Check the current welcome DM configuration (Admin only)",
                     "usage": "/welcome-dm-status",
-                    "note": "View current welcome DM settings and status",
+                    "note": "View current welcome DM settings and status. Requires admin permissions.",
                     "examples": ["/welcome-dm-status"]
-                },
-                "admin-login": {
-                    "desc": "Link a Discord user with an AniList username (Admin only)",
-                    "usage": "/admin-login <discord_user> <anilist_user>",
-                    "note": "Manually link users' Discord accounts to AniList profiles",
-                    "examples": ["/admin-login @user theiranilistname"]
                 }
             },
-            "🛠️ Utilities": {
-                "notifications": {
-                    "desc": "Manage your bot update notification preferences",
-                    "usage": "/notifications",
-                    "note": "Control what notifications you receive",
-                    "examples": ["/notifications"]
+            "👑 Admin": {
+                "admin-moderator-manage": {
+                    "desc": "👑 Manage bot moderators (bot-wide permissions)",
+                    "usage": "/admin-moderator-manage",
+                    "note": "Add/remove bot moderators with elevated permissions. Bot Moderator only.",
+                    "examples": ["/admin-moderator-manage"]
                 },
-                "planned": {
-                    "desc": "View planned bot features",
-                    "usage": "/planned",
-                    "note": "See what's coming in future updates",
-                    "examples": ["/planned"]
+                "changelog": {
+                    "desc": "Create and publish a changelog from text or file (Bot Moderator only)",
+                    "usage": "/changelog [text] [file]",
+                    "note": "Publish formatted changelogs with customizable appearance and notifications. Use text OR upload a file.",
+                    "examples": ["/changelog", "/changelog text:New features added"]
+                },
+                "set_bot_updates_channel": {
+                    "desc": "Set channel to receive bot updates and announcements (Admin only)",
+                    "usage": "/set_bot_updates_channel <channel>",
+                    "note": "Configure where bot update notifications appear. Requires admin permissions.",
+                    "examples": ["/set_bot_updates_channel #bot-updates"]
                 }
             },
-            "ℹ️ Bot Information": {
-                "invite": {
-                    "desc": "Get an invite link to add this bot to your server",
-                    "usage": "/invite",
-                    "note": "Share the bot with other servers",
-                    "examples": ["/invite"]
+            "👥 Social": {
+                "anilist-leaderboard": {
+                    "desc": "🏆 Show leaderboard ranked by manga, anime, or combined activity",
+                    "usage": "/anilist-leaderboard <medium>",
+                    "note": "View rankings by chapters read, episodes watched, or completed series. Server-specific leaderboards.",
+                    "examples": ["/anilist-leaderboard chapters", "/anilist-leaderboard anime_completed"]
+                },
+                "affinity": {
+                    "desc": "Compare your affinity with all users or a specific user in this server",
+                    "usage": "/affinity [user]",
+                    "note": "See how similar your anime/manga tastes are with others. Calculates compatibility scores.",
+                    "examples": ["/affinity", "/affinity @friend"]
                 },
                 "feedback": {
                     "desc": "Submit ideas or report bugs",
                     "usage": "/feedback",
-                    "note": "Help improve the bot with your suggestions",
-                    "examples": ["/feedback ideas Add more themes", "/feedback bugs Profile not loading"]
-                },
-                "help": {
-                    "desc": "Display this help information",
-                    "usage": "/help [category]",
-                    "note": "Get detailed command information",
-                    "examples": ["/help", "/help anime", "/help gaming"]
+                    "note": "Help improve the bot with your suggestions. Submit feature ideas or bug reports.",
+                    "examples": ["/feedback"]
                 }
-            }
+            },
+            "🛠️ Utilities": {
+                "help": {
+                    "desc": "Get comprehensive help for bot commands and features",
+                    "usage": "/help [category]",
+                    "note": "Display this help information. Use the dropdown to explore categories.",
+                    "examples": ["/help", "/help anime", "/help gaming"]
+                },
+                "notifications": {
+                    "desc": "Manage your bot update notification preferences",
+                    "usage": "/notifications",
+                    "note": "Control what notifications you receive from the bot.",
+                    "examples": ["/notifications"]
+                },
+                "say": {
+                    "desc": "Make the bot say something (Moderators only). Supports markdown, embeds, and channel targeting.",
+                    "usage": "/say <message> [options]",
+                    "note": "Send messages as the bot. Supports embeds, markdown, and replying to messages. All usage is logged for moderation accountability.",
+                    "examples": ["/say Hello world!", "/say message:Test embed:true"]
+                },
+                "userinfo": {
+                    "desc": "View detailed user information",
+                    "usage": "/userinfo [user]",
+                    "note": "Display comprehensive user stats, badges, security info, and account details. Defaults to your own info.",
+                    "examples": ["/userinfo", "/userinfo @user"]
+                },
+                "timestamp": {
+                    "desc": "Convert a date and time to Discord's universal timestamp format",
+                    "usage": "/timestamp <time> [date]",
+                    "note": "Create Discord timestamps that display in each user's local timezone. Time in HH:MM format (24-hour).",
+                    "examples": ["/timestamp 18:00", "/timestamp 12:30 2025-12-25"]
+                },
+                "invite": {
+                    "desc": "Get an invite link to add this bot to your server",
+                    "usage": "/invite",
+                    "note": "Share the bot with other servers. Generates invite link with proper permissions.",
+                    "examples": ["/invite"]
+                },
+                "planned-features": {
+                    "desc": "View planned bot features",
+                    "usage": "/planned-features",
+                    "note": "See what's coming in future updates. Vote on features you'd like to see.",
+                    "examples": ["/planned-features"]
+                }
+            },
         }
 
         # Note: keep the curated metadata above, but filter at runtime to only show
@@ -443,14 +472,13 @@ class HelpCog(commands.Cog):
     )
     @app_commands.choices(category=[
         app_commands.Choice(name="🔐 Account Management", value="account"),
-        app_commands.Choice(name="📊 Profile & Stats", value="profile"),
         app_commands.Choice(name="📺 Anime & Manga", value="anime"),
-        app_commands.Choice(name="🏆 Challenges", value="challenges"),
         app_commands.Choice(name="🎮 Gaming", value="gaming"),
         app_commands.Choice(name="🎨 Customization", value="customization"),
         app_commands.Choice(name="⚙️ Server Management", value="server"),
+        app_commands.Choice(name="👑 Admin", value="admin"),
+        app_commands.Choice(name="👥 Social", value="social"),
         app_commands.Choice(name="🛠️ Utilities", value="utilities"),
-        app_commands.Choice(name="ℹ️ Bot Info", value="info"),
     ])
     async def help(self, interaction: discord.Interaction, category: app_commands.Choice[str] = None):
         """Display comprehensive help information for bot commands."""
@@ -477,10 +505,9 @@ class HelpCog(commands.Cog):
         except Exception as e:
             logger.error(f"Error displaying help information: {e}", exc_info=True)
             
-            error_embed = discord.Embed(
-                title="❌ Error",
-                description="Failed to load help information. Please try again later.",
-                color=discord.Color.red()
+            error_embed = build_error_embed(
+                title="Error",
+                description="Failed to load help information. Please try again later."
             )
             
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
@@ -548,14 +575,13 @@ class HelpCog(commands.Cog):
         
         category_mapping = {
             "account": "🔐 Account Management",
-            "profile": "📊 Profile & Stats", 
             "anime": "📺 Anime & Manga",
-            "challenges": "🏆 Challenges & Competition",
             "gaming": "🎮 Gaming",
             "customization": "🎨 Customization",
             "server": "⚙️ Server Management",
-            "utilities": "🛠️ Utilities",
-            "info": "ℹ️ Bot Information"
+            "admin": "👑 Admin",
+            "social": "👥 Social",
+            "utilities": "🛠️ Utilities"
         }
         
         category_name = category_mapping.get(category_key, "Unknown Category")
@@ -615,54 +641,61 @@ class HelpCog(commands.Cog):
                 "• Start with `/login` - it's required for most features\n"
                 "• Your AniList username must be exact (case-sensitive)\n"
                 "• Use the **Check AniList** button in the `/login` interface to verify usernames before registration\n"
-                "• You can update or change your linked account anytime"
-            ),
-            "profile": (
-                "• Profiles show achievements, stats, and activity\n"
-                "• Stats include detailed breakdowns of your watching history\n"
-                "• You can view other users' profiles if they're registered"
+                "• You can update or change your linked account anytime\n"
+                "• View profiles with `/profile` to see stats, achievements, and more"
             ),
             "anime": (
                 "• Most commands work with both anime and manga\n"
                 "• Recommendations use advanced AI filtering for quality results\n"
                 "• Rate titles 8.0+ for best recommendation accuracy\n"
                 "• Browse supports advanced filtering by genre, year, format\n"
-                "• News monitoring tracks Twitter/X accounts for updates\n"
+                "• News monitoring tracks Twitter/X accounts for updates (Bot Moderator only)\n"
                 "• Use `/trailer` to watch official trailers before starting a series\n"
-                "• Try `/random all` to discover completely random suggestions"
-            ),
-            "challenges": (
-                "• Join reading challenges to stay motivated\n"
-                "• Progress updates automatically from your AniList\n"
-                "• Compete with friends on the leaderboards"
+                "• Try `/random all` to discover completely random suggestions\n"
+                "• Create shareable 3x3 grids with `/3x3`"
             ),
             "gaming": (
                 "• Steam integration provides game recommendations\n"
                 "• Based on your gaming preferences and activity\n"
                 "• Discover new games similar to ones you enjoy\n"
-                "• Use `/steam game` with filters for precise searches"
+                "• Use `/steam-game` to search for specific games\n"
+                "• Free games checker monitors Epic, GOG, and Steam automatically\n"
+                "• Set up notifications for free game alerts"
             ),
             "customization": (
                 "• Themes personalize your bot experience\n"
                 "• Preview themes before applying them\n"
-                "• Server moderators can set guild-wide themes\n"
+                "• Server boosters can create custom roles with `/nitro-role-set`\n"
+                "• Bot moderators can set guild-wide themes\n"
                 "• Individual user preferences override guild themes"
             ),
             "server": (
                 "• Server-config provides centralized server management\n"
                 "• Configure roles, channels, and notification settings\n"
+                "• Track invite statistics and recruitment data\n"
+                "• Set up welcome DMs for new server boosters\n"
+                "• Requires 'Manage Server' permission for most commands"
+            ),
+            "admin": (
                 "• Bot moderators have bot-wide permissions\n"
-                "• Requires Admin or Moderator permissions"
+                "• Manage bot moderators with `/admin-moderator-manage`\n"
+                "• Publish changelogs with `/changelog`\n"
+                "• Configure bot update channels\n"
+                "• All admin commands require Bot Moderator or Admin permissions"
+            ),
+            "social": (
+                "• Compare your anime/manga tastes with others using `/affinity`\n"
+                "• View server leaderboards for activity rankings\n"
+                "• Submit feedback to help improve the bot\n"
+                "• Leaderboards are server-specific and update automatically"
             ),
             "utilities": (
                 "• Manage your notification preferences\n"
-                "• View planned features and upcoming updates\n"
-                "• These commands enhance your bot experience"
-            ),
-            "info": (
-                "• Use `/feedback` to suggest improvements\n"
-                "• Share the bot with `/invite` command\n"
-                "• Join our [Support Server](https://discord.gg/xUGD7krzws) for help"
+                "• View planned features and vote on upcoming updates\n"
+                "• Use `/say` to send messages as the bot (Moderators only)\n"
+                "• Generate Discord timestamps with `/timestamp`\n"
+                "• View detailed user information with `/userinfo`\n"
+                "• All `/say` command usage is logged for accountability"
             )
         }
         
@@ -684,7 +717,9 @@ class HelpNavigationView(discord.ui.View):
         """Only allow the original user to interact with the view."""
         if interaction.user != self.user:
             await interaction.response.send_message(
-                "❌ You can't use this menu. Use `/help` to get your own help interface!",
+                embed=build_warning_embed(
+                    description="You can't use this menu. Use `/help` to get your own help interface!"
+                ),
                 ephemeral=True
             )
             return False
@@ -716,22 +751,10 @@ class CategorySelect(discord.ui.Select):
                 emoji="🔐"
             ),
             discord.SelectOption(
-                label="Profile & Stats", 
-                value="profile",
-                description="View profiles and statistics",
-                emoji="📊"
-            ),
-            discord.SelectOption(
                 label="Anime & Manga",
                 value="anime", 
                 description="Browse, track, and discover titles",
                 emoji="📺"
-            ),
-            discord.SelectOption(
-                label="Challenges",
-                value="challenges",
-                description="Reading challenges and leaderboards", 
-                emoji="🏆"
             ),
             discord.SelectOption(
                 label="Gaming",
@@ -752,16 +775,22 @@ class CategorySelect(discord.ui.Select):
                 emoji="⚙️"
             ),
             discord.SelectOption(
-                label="Utilities",
-                value="utilities",
-                description="Notifications and utility commands",
-                emoji="🛠️"
+                label="Admin",
+                value="admin",
+                description="Bot moderation and admin commands",
+                emoji="👑"
             ),
             discord.SelectOption(
-                label="Bot Information",
-                value="info",
-                description="Feedback and bot info",
-                emoji="ℹ️"
+                label="Social",
+                value="social",
+                description="Leaderboards, affinity, and feedback",
+                emoji="👥"
+            ),
+            discord.SelectOption(
+                label="Utilities",
+                value="utilities",
+                description="Help, notifications, and utility commands",
+                emoji="🛠️"
             )
         ]
         
@@ -791,7 +820,9 @@ class CategorySelect(discord.ui.Select):
             logger.error(f"Error in category selection: {e}", exc_info=True)
             
             await interaction.response.send_message(
-                "❌ An error occurred while loading that category. Please try again.",
+                embed=build_error_embed(
+                    description="An error occurred while loading that category. Please try again."
+                ),
                 ephemeral=True
             )
 
