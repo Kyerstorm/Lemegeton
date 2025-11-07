@@ -7,7 +7,7 @@ import asyncio
 import logging
 import aiohttp
 
-from config import CHANNEL_ID
+from config import BOT_FEEDBACK_CHANNEL_ID
 from database import (
     is_user_moderator,
     set_guild_manga_channel,
@@ -614,12 +614,12 @@ class Finisher(commands.Cog):
                         self.logger.exception(f"Failed to post updates for guild {gid}")
             else:
                 # No per-guild mapping; try global fallback once
-                channel = self.bot.get_channel(CHANNEL_ID)
+                channel = self.bot.get_channel(BOT_FEEDBACK_CHANNEL_ID)
                 if channel:
                     await self.post_updates(channel, kind="manga")
                     await self.post_updates(channel, kind="anime")
                 else:
-                    self.logger.warning("No configured channels found and global CHANNEL_ID not available to bot")
+                    self.logger.warning("No configured channels found and global BOT_FEEDBACK_CHANNEL_ID not available to bot")
         except Exception:
             self.logger.exception("Failed to load configured channels for daily_check")
 

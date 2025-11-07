@@ -4,7 +4,7 @@ from discord.ext import commands
 from discord.ui import View, Button
 import logging
 from pathlib import Path
-from config import CHANNEL_ID
+from config import BOT_FEEDBACK_CHANNEL_ID
 import database
 import config
 import io
@@ -128,9 +128,9 @@ class Feedback(commands.Cog):
         logger.info(f"Feedback submission started by {user_info} - Type: {type.name}")
         
         try:
-            channel = self.bot.get_channel(CHANNEL_ID)
+            channel = self.bot.get_channel(BOT_FEEDBACK_CHANNEL_ID)
             if not channel:
-                logger.error(f"Target channel {CHANNEL_ID} not found")
+                logger.error(f"Target channel {BOT_FEEDBACK_CHANNEL_ID} not found")
                 await interaction.response.send_message("❌ Target channel not found.", ephemeral=True)
                 return
 
