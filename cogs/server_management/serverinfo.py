@@ -20,6 +20,7 @@ import asyncio
 from typing import List, Optional
 
 from cogs_test.general_commands.dashboard import command_meta
+from helpers.embed_helper import build_warning_embed
 
 # ---------------------------
 # Palette & Embed helper
@@ -120,7 +121,12 @@ class PaginatorView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
-            await interaction.response.send_message("This control is for the command user only.", ephemeral=True)
+            await interaction.response.send_message(
+                embed=build_warning_embed(
+                    description="This control is for the command user only."
+                ),
+                ephemeral=True
+            )
             return False
         return True
 
@@ -169,17 +175,32 @@ class GuildSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.author.id:
-            await interaction.response.send_message("This menu isn't for you.", ephemeral=True)
+            await interaction.response.send_message(
+                embed=build_warning_embed(
+                    description="This menu isn't for you."
+                ),
+                ephemeral=True
+            )
             return
         gid = int(self.values[0])
         guild = self.bot.get_guild(gid)
         if not guild:
-            await interaction.response.send_message("I cannot access that guild anymore.", ephemeral=True)
+            await interaction.response.send_message(
+                embed=build_warning_embed(
+                    description="I cannot access that guild anymore."
+                ),
+                ephemeral=True
+            )
             return
         # Build embed pages via cog method
         cog = interaction.client.get_cog("ServerInfo")
         if not cog:
-            await interaction.response.send_message("ServerInfo cog not loaded.", ephemeral=True)
+            await interaction.response.send_message(
+                embed=build_warning_embed(
+                    description="ServerInfo cog not loaded."
+                ),
+                ephemeral=True
+            )
             return
         pages = await cog.build_guild_pages(guild, interaction.user)
         view = PaginatorView(pages, interaction.user)

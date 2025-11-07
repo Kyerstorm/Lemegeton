@@ -7,6 +7,7 @@ import discord
 from discord.ext import commands
 import logging
 from pathlib import Path
+from helpers.embed_helper import build_info_embed
 
 # ------------------------------------------------------
 # Logging Setup
@@ -81,10 +82,9 @@ class WelcomeMessage(commands.Cog):
                 return
 
             # Create the welcome embed
-            embed = discord.Embed(
-                title="🎉 Welcome to Lemegeton!",
-                description="Thank you for adding me to your server! I'm your anime/manga tracking companion with AniList integration, AI-powered recommendations, and much more.",
-                color=discord.Color.blue()
+            embed = build_info_embed(
+                title="Welcome to Lemegeton!",
+                description="Thank you for adding me to your server! I'm your anime/manga tracking companion with AniList integration, AI-powered recommendations, and much more."
             )
 
             embed.add_field(

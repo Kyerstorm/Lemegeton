@@ -19,11 +19,12 @@ from database import (
 )
 from datetime import datetime, timedelta
 from enum import Enum
+from helpers.embed_helper import build_error_embed, build_success_embed, build_info_embed, build_warning_embed
+from helpers.anilist_helper import post_graphql
 
 logger = logging.getLogger("AniListCog")
 logger.setLevel(logging.INFO)
 
-ANILIST_API = "https://graphql.anilist.co"
 ACTIVITY_URL_RE = re.compile(r"https?://anilist\.co/activity/(\d+)", re.IGNORECASE)
 ANIME_URL_RE = re.compile(r"https?://anilist\.co/anime/(\d+)(?:/[^/\s]+)?/?", re.IGNORECASE)
 MANGA_URL_RE = re.compile(r"https?://anilist\.co/manga/(\d+)(?:/[^/\s]+)?/?", re.IGNORECASE)
@@ -32,9 +33,6 @@ REVIEW_URL_RE = re.compile(r"https?://anilist\.co/review/(\d+)", re.IGNORECASE)
 
 REPLIES_PER_PAGE = 5
 HTML_TIMEOUT = 15  # seconds for parsing fallback HTTP requests
-
-# DEFAULT EMBED COLOR requested by user
-DEFAULT_EMBED_COLOR = 0x0F1720
 
 # Enhanced Progress Filtering Options
 class ProgressFilter(Enum):
@@ -105,10 +103,9 @@ class AniListCog(commands.Cog):
             logger.info(f"Retrieved {len(users) if users else 0} users from database for guild {guild_id}")
             
             if not users:
-                return discord.Embed(
+                return build_info_embed(
                     title="👥 Registered Users' Progress",
-                    description="No registered users found.",
-                    color=discord.Color.red()
+                    description="No registered users found."
                 )
 
             col_name = "Episodes" if media_type.upper() == "ANIME" else "Chapters"
@@ -149,13 +146,10 @@ class AniListCog(commands.Cog):
                     variables = {"userName": anilist_username, "mediaId": media.get("id", 0), "type": media_type}
 
                     try:
-                        async with session.post(ANILIST_API, 
-                                              json={"query": query, "variables": variables},
-                                              timeout=10) as resp:
-                            if resp.status != 200:
-                                logger.debug(f"API error {resp.status} for user {anilist_username}")
-                                continue
-                            payload = await resp.json()
+                        payload = await post_graphql(session, query, variables, timeout=10)
+                        if not payload:
+                            logger.debug(f"API returned no data for user {anilist_username}")
+                            continue
                     except asyncio.TimeoutError:
                         logger.debug(f"Timeout fetching progress for {anilist_username}")
                         continue
@@ -163,8 +157,8 @@ class AniListCog(commands.Cog):
                         logger.debug(f"Error fetching progress for {anilist_username}: {e}")
                         continue
                     
-                    user_data = payload.get("data", {}).get("User")
-                    media_list = payload.get("data", {}).get("MediaList")
+                    user_data = payload.get("User")
+                    media_list = payload.get("MediaList")
                     
                     if not user_data:
                         logger.debug(f"No user data found for {anilist_username}")
@@ -210,10 +204,9 @@ class AniListCog(commands.Cog):
             
         except Exception as e:
             logger.error(f"Error building user progress embed: {e}", exc_info=True)
-            return discord.Embed(
+            return build_error_embed(
                 title="👥 Registered Users' Progress",
-                description="❌ An error occurred while fetching user progress data.",
-                color=discord.Color.red()
+                description="An error occurred while fetching user progress data."
             )
 
     def _apply_progress_filter(self, user_data: dict, filter_type: ProgressFilter, media: dict) -> bool:
@@ -250,10 +243,9 @@ class AniListCog(commands.Cog):
         filter_info = PROGRESS_FILTER_OPTIONS[filter_type]
         
         if not filtered_data:
-            return discord.Embed(
+            return build_warning_embed(
                 title=f"{filter_info['emoji']} User Progress - {filter_info['label']}",
-                description=f"No users found matching filter: {filter_info['description']}",
-                color=discord.Color.orange()
+                description=f"No users found matching filter: {filter_info['description']}"
             )
         
         # Build progress lines
@@ -588,33 +580,27 @@ class AniListCog(commands.Cog):
         }
         """
         try:
-            async with self.session.post(ANILIST_API, json={"query": query, "variables": {"id": activity_id}}) as resp:
-                text = await resp.text()
-                try:
-                    js = await resp.json()
-                except Exception:
-                    js = None
-
-                if resp.status != 200:
-                    logger.error("AniList API error %s: %s", resp.status, text)
-                    return None
-
-                if not js or "data" not in js or js["data"].get("Activity") is None:
-                    logger.warning("AniList returned no Activity for id %s. Response: %s", activity_id, text)
-                    return None
-
-                return js["data"]["Activity"]
+            payload = await post_graphql(self.session, query, {"id": activity_id})
+            if not payload:
+                logger.warning(f"AniList returned no Activity for id {activity_id}")
+                return None
+            
+            activity_data = payload.get("Activity")
+            if not activity_data:
+                logger.warning(f"AniList returned no Activity for id {activity_id}")
+                return None
+            
+            return activity_data
         except Exception:
-            logger.exception("AniList API fetch failed.")
+            logger.exception("AniList API fetch failed.", exc_info=True)
             return None
 
     async def render_page(self, activity: Optional[dict], page: int):
         embeds: List[discord.Embed] = []
         if not activity:
-            e = discord.Embed(
-                title="❌ Activity not found",
-                description="This AniList activity is missing, deleted, or could not be retrieved.",
-                color=discord.Color.red()
+            e = build_error_embed(
+                title="Activity not found",
+                description="This AniList activity is missing, deleted, or could not be retrieved."
             )
             embeds.append(e)
             return embeds
@@ -649,7 +635,7 @@ class AniListCog(commands.Cog):
             reply_embed = self.build_embed(activity, "Reply", r_user, r_text, media, r_likes)
             embeds.append(reply_embed)
         if not embeds:
-            embeds.append(discord.Embed(description="No replies on this page.", color=discord.Color.greyple()))
+            embeds.append(build_info_embed(description="No replies on this page."))
         return embeds
 
     # Activity paginator (persistent)
@@ -700,16 +686,16 @@ class AniListCog(commands.Cog):
             try:
                 msg_state = await self._load_message_state()
                 if not msg_state:
-                    await interaction.response.send_message("⚠️ Paginator state missing.", ephemeral=True)
+                    await interaction.response.send_message(embed=build_warning_embed(description="Paginator state missing."), ephemeral=True)
                     return
                 current = int(msg_state.get("current_page", self.current_page))
                 if current <= 1:
-                    await interaction.response.send_message("You are already on the first page.", ephemeral=True)
+                    await interaction.response.send_message(embed=build_info_embed(description="You are already on the first page."), ephemeral=True)
                     return
                 new_page = current - 1
                 activity = await self.cog.fetch_activity(self.activity_id)
                 if not activity:
-                    await interaction.response.send_message("⚠️ Could not fetch AniList activity.", ephemeral=True)
+                    await interaction.response.send_message(embed=build_warning_embed(description="Could not fetch AniList activity."), ephemeral=True)
                     return
                 embeds = await self.cog.render_page(activity, new_page)
                 msg_state["current_page"] = new_page
@@ -719,12 +705,12 @@ class AniListCog(commands.Cog):
                 try:
                     await interaction.response.edit_message(embeds=embeds, view=self)
                 except discord.HTTPException:
-                    await interaction.response.send_message("⚠️ Could not update the message (it may have been deleted).", ephemeral=True)
+                    await interaction.response.send_message(embed=build_warning_embed(description="Could not update the message (it may have been deleted)."), ephemeral=True)
                     await self.cog._remove_paginator_persistence(int(self.message_id))
             except Exception:
                 logger.exception("Paginator prev_page failure")
                 try:
-                    await interaction.response.send_message("⚠️ Failed to change page.", ephemeral=True)
+                    await interaction.response.send_message(embed=build_warning_embed(description="Failed to change page."), ephemeral=True)
                 except Exception:
                     pass
 
@@ -732,16 +718,16 @@ class AniListCog(commands.Cog):
             try:
                 msg_state = await self._load_message_state()
                 if not msg_state:
-                    await interaction.response.send_message("⚠️ Paginator state missing.", ephemeral=True)
+                    await interaction.response.send_message(embed=build_warning_embed(description="Paginator state missing."), ephemeral=True)
                     return
                 current = int(msg_state.get("current_page", self.current_page))
                 if current >= int(msg_state.get("total_pages", self.total_pages)):
-                    await interaction.response.send_message("You are already on the last page.", ephemeral=True)
+                    await interaction.response.send_message(embed=build_info_embed(description="You are already on the last page."), ephemeral=True)
                     return
                 new_page = current + 1
                 activity = await self.cog.fetch_activity(self.activity_id)
                 if not activity:
-                    await interaction.response.send_message("⚠️ Could not fetch AniList activity.", ephemeral=True)
+                    await interaction.response.send_message(embed=build_warning_embed(description="Could not fetch AniList activity."), ephemeral=True)
                     return
                 embeds = await self.cog.render_page(activity, new_page)
                 msg_state["current_page"] = new_page
@@ -751,70 +737,18 @@ class AniListCog(commands.Cog):
                 try:
                     await interaction.response.edit_message(embeds=embeds, view=self)
                 except discord.HTTPException:
-                    await interaction.response.send_message("⚠️ Could not update the message (it may have been deleted).", ephemeral=True)
+                    await interaction.response.send_message(embed=build_warning_embed(description="Could not update the message (it may have been deleted)."), ephemeral=True)
                     await self.cog._remove_paginator_persistence(int(self.message_id))
             except Exception:
                 logger.exception("Paginator next_page failure")
                 try:
-                    await interaction.response.send_message("⚠️ Failed to change page.", ephemeral=True)
+                    await interaction.response.send_message(embed=build_warning_embed(description="Failed to change page."), ephemeral=True)
                 except Exception:
                     pass
 
     # ---------------------
     # MEDIA: GraphQL fetch + Parsing fallback
     # ---------------------
-    async def fetch_media_api(self, media_id: int, media_type: str) -> Optional[dict]:
-        query = """
-        query($id: Int, $type: MediaType) {
-          Media(id: $id, type: $type) {
-            id
-            siteUrl
-            title { romaji english native }
-            description(asHtml: false)
-            coverImage { large extraLarge }
-            bannerImage
-            episodes
-            chapters
-            volumes
-            status
-            startDate { year month day }
-            endDate { year month day }
-            studios(isMain: true) { nodes { name siteUrl } }
-            popularity
-            favourites
-            source
-            tags { name isAdult rank }
-            staff(perPage: 50) {
-              edges { role node { id name { full native } siteUrl image { large } } }
-            }
-            characters(perPage: 50) {
-              edges { role node { id name { full native } siteUrl image { large } } }
-            }
-            relations { edges { relationType node { id type siteUrl title { romaji english native } coverImage { large } } } }
-            stats { scoreDistribution { score amount } statusDistribution { status amount } }
-            recommendations { edges { node { mediaRecommendation { id title { romaji english } coverImage { large } siteUrl } } } }
-          }
-        }
-        """
-        variables = {"id": media_id, "type": media_type}
-        try:
-            async with self.session.post(ANILIST_API, json={"query": query, "variables": variables}, timeout=30) as resp:
-                text = await resp.text()
-                try:
-                    js = await resp.json()
-                except Exception:
-                    js = None
-                if resp.status != 200:
-                    logger.error("AniList media API error %s: %s", resp.status, text)
-                    return None
-                if not js or "data" not in js or js["data"].get("Media") is None:
-                    logger.warning("AniList returned no Media for id %s. Response: %s", media_id, text)
-                    return None
-                return js["data"]["Media"]
-        except Exception as e:
-            logger.exception("AniList media API fetch failed.")
-            return None
-
     async def fetch_media_parse_fallback(self, media_id: int, media_type: str) -> Optional[dict]:
         """
         Parsing fallback: attempt to fetch the AniList HTML page and extract key fields.
@@ -969,12 +903,10 @@ class AniListCog(commands.Cog):
         if parsed:
             logger.info("Parsing fallback succeeded for media %s %s", media_type, media_id)
         else:
-            logger.error("Parsing fallback failed for media %s %s", media_type, media_id)
+            logger.error("Parsing fallback failed for media %s %s", media_type, media_id, exc_info=True)
         return parsed
 
-    # fetch_media_api delegates to the proper query (kept same as previous fetch_media_api)
     async def fetch_media_api(self, media_id: int, media_type: str) -> Optional[dict]:
-        # (same GraphQL query used previously; using smaller page sizes to avoid big responses)
         query = """
         query($id: Int, $type: MediaType) {
           Media(id: $id, type: $type) {
@@ -1005,21 +937,19 @@ class AniListCog(commands.Cog):
         """
         variables = {"id": media_id, "type": media_type}
         try:
-            async with self.session.post(ANILIST_API, json={"query": query, "variables": variables}, timeout=30) as resp:
-                text = await resp.text()
-                try:
-                    js = await resp.json()
-                except Exception:
-                    js = None
-                if resp.status != 200:
-                    logger.error("AniList media API error %s: %s", resp.status, text)
-                    return None
-                if not js or "data" not in js or js["data"].get("Media") is None:
-                    logger.warning("AniList API returned no Media for id %s. Response: %s", media_id, text)
-                    return None
-                return js["data"]["Media"]
+            payload = await post_graphql(self.session, query, variables, timeout=30)
+            if not payload:
+                logger.warning(f"AniList API returned no Media for id {media_id}")
+                return None
+            
+            media_data = payload.get("Media")
+            if not media_data:
+                logger.warning(f"AniList API returned no Media for id {media_id}")
+                return None
+            
+            return media_data
         except Exception:
-            logger.exception("AniList media API fetch failed (exception).")
+            logger.exception("AniList media API fetch failed.", exc_info=True)
             return None
 
     # ---------------------
@@ -1117,13 +1047,13 @@ class AniListCog(commands.Cog):
     def render_media_pages(self, media: dict, page: int, total_pages: int) -> List[discord.Embed]:
         embeds: List[discord.Embed] = []
         if not media:
-            return [discord.Embed(description="Media not found.", color=discord.Color.red())]
+            return [build_error_embed(description="Media not found.")]
         if page == 1:
             embeds.append(self.build_media_embed(media))
         else:
             raw = self.clean_text(media.get("description") or "")
             if not raw:
-                embeds.append(discord.Embed(description="No description available.", color=discord.Color.greyple()))
+                embeds.append(build_info_embed(description="No description available."))
                 return embeds
             chunk_size = 1000
             chunks = [raw[i:i + chunk_size] for i in range(0, len(raw), chunk_size)]
@@ -1136,7 +1066,7 @@ class AniListCog(commands.Cog):
     def build_relations_embed(self, media: dict) -> List[discord.Embed]:
         relations = (media.get("relations") or {}).get("edges") or []
         if not relations:
-            return [discord.Embed(description="No relations found.", color=discord.Color.greyple())]
+            return [build_info_embed(description="No relations found.")]
         embeds = []
         chunk_size = 6
         for i in range(0, len(relations), chunk_size):
@@ -1159,7 +1089,7 @@ class AniListCog(commands.Cog):
     def build_characters_embed(self, media: dict, support: bool = False) -> List[discord.Embed]:
         char_edges = (media.get("characters") or {}).get("edges") or []
         if not char_edges:
-            return [discord.Embed(description="No characters found.", color=discord.Color.greyple())]
+            return [build_info_embed(description="No characters found.")]
         if support:
             selected = [e for e in char_edges if (e.get("role") or "").upper() != "MAIN"]
             title = "Support Cast"
@@ -1189,7 +1119,7 @@ class AniListCog(commands.Cog):
     def build_staff_embed(self, media: dict) -> List[discord.Embed]:
         staff_edges = (media.get("staff") or {}).get("edges") or []
         if not staff_edges:
-            return [discord.Embed(description="No staff info found.", color=discord.Color.greyple())]
+            return [build_info_embed(description="No staff info found.")]
         embeds = []
         chunk_size = 8
         for i in range(0, len(staff_edges), chunk_size):
@@ -1256,7 +1186,7 @@ class AniListCog(commands.Cog):
     def build_tags_embed(self, media: dict) -> discord.Embed:
         tags = media.get("tags") or []
         if not tags:
-            return discord.Embed(description="No tags found.", color=discord.Color.greyple())
+            return build_info_embed(description="No tags found.")
         em = discord.Embed(title="Tags", color=discord.Color.dark_purple())
         lines = []
         for t in tags:
@@ -1342,7 +1272,7 @@ class AniListCog(commands.Cog):
             try:
                 media = await self.cog.fetch_media(self.media_id, self.media_type)
                 if not media:
-                    await interaction.response.send_message("❌ Could not fetch description.", ephemeral=True)
+                    await interaction.response.send_message(embed=build_error_embed(description="Could not fetch description."), ephemeral=True)
                     return
                 embeds = self.cog.render_media_pages(media, page=2, total_pages=2)
                 # Ensure review button and media main exist on all pages
@@ -1357,7 +1287,7 @@ class AniListCog(commands.Cog):
             except Exception:
                 logger.exception("Failed to show description")
                 try:
-                    await interaction.response.send_message("⚠️ Could not load description.", ephemeral=True)
+                    await interaction.response.send_message(embed=build_warning_embed(description="Could not load description."), ephemeral=True)
                 except Exception:
                     pass
 
@@ -1365,7 +1295,7 @@ class AniListCog(commands.Cog):
             try:
                 media = await self.cog.fetch_media(self.media_id, self.media_type)
                 if not media:
-                    await interaction.response.send_message("❌ Could not fetch main page.", ephemeral=True)
+                    await interaction.response.send_message(embed=build_error_embed(description="Could not fetch main page."), ephemeral=True)
                     return
                 embeds = self.cog.render_media_pages(media, page=1, total_pages=2)
                 self.clear_items()
@@ -1379,7 +1309,7 @@ class AniListCog(commands.Cog):
             except Exception:
                 logger.exception("Failed to show main page")
                 try:
-                    await interaction.response.send_message("⚠️ Could not load main page.", ephemeral=True)
+                    await interaction.response.send_message(embed=build_warning_embed(description="Could not load main page."), ephemeral=True)
                 except Exception:
                     pass
 
@@ -1387,7 +1317,7 @@ class AniListCog(commands.Cog):
             try:
                 media = await self.cog.fetch_media(self.media_id, self.media_type)
                 if not media:
-                    await interaction.response.send_message("❌ Could not fetch recommendations.", ephemeral=True)
+                    await interaction.response.send_message(embed=build_error_embed(description="Could not fetch recommendations."), ephemeral=True)
                     return
                 embed = self.cog.build_recommendations_embed(media)
                 self.clear_items()
@@ -1402,7 +1332,7 @@ class AniListCog(commands.Cog):
             except Exception:
                 logger.exception("show_recommendations failed")
                 try:
-                    await interaction.response.send_message("⚠️ Failed to fetch recommendations.", ephemeral=True)
+                    await interaction.response.send_message(embed=build_warning_embed(description="Failed to fetch recommendations."), ephemeral=True)
                 except Exception:
                     pass
 
@@ -1424,29 +1354,28 @@ class AniListCog(commands.Cog):
             """
             variables = {"mediaId": self.media_id, "type": self.media_type}
             try:
-                async with self.cog.session.post(ANILIST_API, json={"query": query, "variables": variables}, timeout=15) as resp:
-                    js = await resp.json()
-                    if resp.status == 200 and js.get("data") and js["data"].get("Media"):
-                        rev_nodes = js["data"]["Media"].get("reviews", {}).get("nodes", [])
-                    else:
-                        rev_nodes = []
+                payload = await post_graphql(self.cog.session, query, variables, timeout=15)
+                if payload and payload.get("Media"):
+                    rev_nodes = payload["Media"].get("reviews", {}).get("nodes", [])
+                else:
+                    rev_nodes = []
             except Exception:
                 rev_nodes = []
 
             if not rev_nodes:
-                await interaction.response.send_message("No reviews found for this media.", ephemeral=True)
+                await interaction.response.send_message(embed=build_info_embed(description="No reviews found for this media."), ephemeral=True)
                 return
 
             rid = rev_nodes[0].get("id")
             if not rid:
-                await interaction.response.send_message("No valid review found.", ephemeral=True)
+                await interaction.response.send_message(embed=build_info_embed(description="No valid review found."), ephemeral=True)
                 return
 
             review_data = await self.cog.fetch_review_api(rid)
             if not review_data:
                 review_data = await self.cog.fetch_review_parse_fallback(rid)
                 if not review_data:
-                    await interaction.response.send_message("❌ Could not fetch review.", ephemeral=True)
+                    await interaction.response.send_message(embed=build_error_embed(description="Could not fetch review."), ephemeral=True)
                     return
 
             embeds = self.cog._make_review_embeds_from_data(review_data)
@@ -1470,10 +1399,11 @@ class AniListCog(commands.Cog):
                 value = interaction.data.get("values", [None])[0]
                 media = await self.cog.fetch_media(self.media_id, self.media_type)
                 if not media:
+                    error_embed = build_error_embed(description="Could not fetch media details.")
                     if not interaction.response.is_done():
-                        await interaction.response.send_message("❌ Could not fetch media details.", ephemeral=True)
+                        await interaction.response.send_message(embed=error_embed, ephemeral=True)
                     else:
-                        await interaction.followup.send("❌ Could not fetch media details.", ephemeral=True)
+                        await interaction.followup.send(embed=error_embed, ephemeral=True)
                     return
 
                 if value == "user_progress":
@@ -1488,7 +1418,7 @@ class AniListCog(commands.Cog):
                     if embed:
                         await interaction.followup.edit_message(interaction.message.id, embeds=[embed], view=progress_view)
                     else:
-                        await interaction.followup.send("❌ Could not fetch user progress data.", ephemeral=True)
+                        await interaction.followup.send(embed=build_error_embed(description="Could not fetch user progress data."), ephemeral=True)
                     return
                     
                 # Handle other dropdown options
@@ -1510,10 +1440,11 @@ class AniListCog(commands.Cog):
                 elif value == "tags":
                     embed = self.cog.build_tags_embed(media)
                 else:
+                    error_embed = build_warning_embed(description="Unknown option.")
                     if not interaction.response.is_done():
-                        await interaction.response.send_message("Unknown option.", ephemeral=True)
+                        await interaction.response.send_message(embed=error_embed, ephemeral=True)
                     else:
-                        await interaction.followup.send("Unknown option.", ephemeral=True)
+                        await interaction.followup.send(embed=error_embed, ephemeral=True)
                     return
 
                 # Send the response
@@ -1533,16 +1464,17 @@ class AniListCog(commands.Cog):
                 logger.warning("Interaction expired or message deleted during select callback")
                 try:
                     if not interaction.response.is_done():
-                        await interaction.response.send_message("⚠️ This interaction has expired. Please try the command again.", ephemeral=True)
+                        await interaction.response.send_message(embed=build_warning_embed(description="This interaction has expired. Please try the command again."), ephemeral=True)
                 except:
                     pass
             except Exception as e:
                 logger.exception("Media select callback failed")
                 try:
+                    error_embed = build_warning_embed(description="Failed to show details. Please try again.")
                     if not interaction.response.is_done():
-                        await interaction.response.send_message("⚠️ Failed to show details. Please try again.", ephemeral=True)
+                        await interaction.response.send_message(embed=error_embed, ephemeral=True)
                     else:
-                        await interaction.followup.send("⚠️ Failed to show details. Please try again.", ephemeral=True)
+                        await interaction.followup.send(embed=error_embed, ephemeral=True)
                 except Exception:
                     logger.exception("Failed to send error message")
 
@@ -1601,15 +1533,16 @@ class AniListCog(commands.Cog):
                         if embed:
                             await interaction.followup.edit_message(interaction.message.id, embeds=[embed], view=self)
                         else:
-                            await interaction.followup.send("❌ Could not apply filter.", ephemeral=True)
+                            await interaction.followup.send(embed=build_error_embed(description="Could not apply filter."), ephemeral=True)
                     
                 except Exception as e:
                     logger.exception(f"Filter callback failed: {e}")
                     try:
+                        error_embed = build_warning_embed(description="Failed to apply filter.")
                         if not interaction.response.is_done():
-                            await interaction.response.send_message("⚠️ Failed to apply filter.", ephemeral=True)
+                            await interaction.response.send_message(embed=error_embed, ephemeral=True)
                         else:
-                            await interaction.followup.send("⚠️ Failed to apply filter.", ephemeral=True)
+                            await interaction.followup.send(embed=error_embed, ephemeral=True)
                     except:
                         pass
             
@@ -1632,10 +1565,11 @@ class AniListCog(commands.Cog):
                 except Exception as e:
                     logger.exception(f"Back to media failed: {e}")
                     try:
+                        error_embed = build_warning_embed(description="Failed to return to media view.")
                         if not interaction.response.is_done():
-                            await interaction.response.send_message("⚠️ Failed to return to media view.", ephemeral=True)
+                            await interaction.response.send_message(embed=error_embed, ephemeral=True)
                         else:
-                            await interaction.followup.send("⚠️ Failed to return to media view.", ephemeral=True)
+                            await interaction.followup.send(embed=error_embed, ephemeral=True)
                     except:
                         pass
 
@@ -1656,7 +1590,7 @@ class AniListCog(commands.Cog):
             activity_id = int(m.group(1))
             activity = await self.fetch_activity(activity_id)
             if not activity:
-                await message.channel.send("❌ Failed to fetch activity.")
+                await message.channel.send(embed=build_error_embed(description="Failed to fetch activity."))
                 return
             total_replies = len(activity.get("replies") or [])
             total_pages = 1 + math.ceil(max(0, total_replies) / REPLIES_PER_PAGE)
@@ -1682,7 +1616,7 @@ class AniListCog(commands.Cog):
             media_id = int(m.group(1))
             media = await self.fetch_media(media_id, "ANIME")
             if not media:
-                await message.channel.send("❌ Failed to fetch anime info.")
+                await message.channel.send(embed=build_error_embed(description="Failed to fetch anime info."))
                 return
             total_pages = 2
             embeds = self.render_media_pages(media, page=1, total_pages=total_pages)
@@ -1707,7 +1641,7 @@ class AniListCog(commands.Cog):
             media_id = int(m.group(1))
             media = await self.fetch_media(media_id, "MANGA")
             if not media:
-                await message.channel.send("❌ Failed to fetch manga info.")
+                await message.channel.send(embed=build_error_embed(description="Failed to fetch manga info."))
                 return
             total_pages = 2
             embeds = self.render_media_pages(media, page=1, total_pages=total_pages)
@@ -1735,7 +1669,7 @@ class AniListCog(commands.Cog):
             if not review_data:
                 review_data = await self.fetch_review_parse_fallback(review_id)
                 if not review_data:
-                    await message.channel.send("❌ Failed to fetch review.")
+                    await message.channel.send(embed=build_error_embed(description="Failed to fetch review."))
                     return
 
             # Build embeds
@@ -1756,7 +1690,7 @@ class AniListCog(commands.Cog):
             except Exception:
                 logger.exception("Failed to build/send review embed")
                 try:
-                    await message.channel.send("⚠️ Failed to render review.")
+                    await message.channel.send(embed=build_warning_embed(description="Failed to render review."))
                 except Exception:
                     pass
             return
@@ -1786,35 +1720,32 @@ class AniListCog(commands.Cog):
         """
         variables = {"id": review_id}
         try:
-            async with self.session.post(ANILIST_API, json={"query": query, "variables": variables}, timeout=20) as resp:
-                text = await resp.text()
-                try:
-                    js = await resp.json()
-                except Exception:
-                    js = None
-                if resp.status != 200:
-                    logger.warning("AniList review API returned non-200: %s - %s", resp.status, text)
-                    return None
-                if not js or "data" not in js or js["data"].get("Review") is None:
-                    logger.info("AniList review API returned no Review for id %s. Response: %s", review_id, text)
-                    return None
-                r = js["data"]["Review"]
-                # Normalize fields
-                body = r.get("body") or r.get("summary") or ""
-                # rating returned by API might be on a 100-scale or 10-scale; keep raw and normalize later
-                rating = r.get("rating") or r.get("score") or None
-                rating_amount = r.get("ratingAmount") or None  # best-effort: may represent number of people that voted on the review or not
-                user = r.get("user") or {}
-                site_url = r.get("siteUrl") or f"https://anilist.co/review/{review_id}"
-                return {
-                    "id": r.get("id"),
-                    "siteUrl": site_url,
-                    "user": user,
-                    "body": body,
-                    "rating": rating,
-                    "ratingAmount": rating_amount,
-                    "images": []  # API does not expose images in Review payload; HTML fallback may provide them
-                }
+            payload = await post_graphql(self.session, query, variables, timeout=20)
+            if not payload:
+                logger.warning(f"AniList review API returned no data for id {review_id}")
+                return None
+            
+            r = payload.get("Review")
+            if not r:
+                logger.info(f"AniList review API returned no Review for id {review_id}")
+                return None
+            
+            # Normalize fields
+            body = r.get("body") or r.get("summary") or ""
+            # rating returned by API might be on a 100-scale or 10-scale; keep raw and normalize later
+            rating = r.get("rating") or r.get("score") or None
+            rating_amount = r.get("ratingAmount") or None  # best-effort: may represent number of people that voted on the review or not
+            user = r.get("user") or {}
+            site_url = r.get("siteUrl") or f"https://anilist.co/review/{review_id}"
+            return {
+                "id": r.get("id"),
+                "siteUrl": site_url,
+                "user": user,
+                "body": body,
+                "rating": rating,
+                "ratingAmount": rating_amount,
+                "images": []  # API does not expose images in Review payload; HTML fallback may provide them
+            }
         except Exception:
             logger.exception("fetch_review_api failed")
             return None
@@ -2084,7 +2015,7 @@ class AniListCog(commands.Cog):
         if not media_links:
             if not text_chunks:
                 # empty review
-                em = discord.Embed(title=f"Review by {author_name}", url=author_url, description=rating_header or "*No review text*", color=discord.Color(DEFAULT_EMBED_COLOR))
+                em = discord.Embed(title=f"Review by {author_name}", url=author_url, description=rating_header or "*No review text*", color=discord.Color.from_rgb(15, 23, 32))
                 if avatar:
                     em.set_author(name=author_name, url=author_url, icon_url=avatar)
                 else:
@@ -2106,7 +2037,7 @@ class AniListCog(commands.Cog):
                 # limit description to 2048 to be safe (Discord desc limit)
                 if len(desc) > 2048:
                     desc = desc[:2045] + "..."
-                em = discord.Embed(title=f"Review by {author_name}", url=author_url, description=desc, color=discord.Color(DEFAULT_EMBED_COLOR))
+                em = discord.Embed(title=f"Review by {author_name}", url=author_url, description=desc, color=discord.Color.from_rgb(15, 23, 32))
                 if avatar:
                     em.set_author(name=author_name, url=author_url, icon_url=avatar)
                 else:
@@ -2133,7 +2064,7 @@ class AniListCog(commands.Cog):
             # ensure desc length safe
             if len(desc) > 2048:
                 desc = desc[:2045] + "..."
-            em = discord.Embed(title=f"Review by {author_name}", url=author_url, description=desc, color=discord.Color(DEFAULT_EMBED_COLOR))
+            em = discord.Embed(title=f"Review by {author_name}", url=author_url, description=desc, color=discord.Color.from_rgb(15, 23, 32))
             if avatar:
                 em.set_author(name=author_name, url=author_url, icon_url=avatar)
             else:

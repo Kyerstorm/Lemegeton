@@ -12,6 +12,7 @@ import json
 
 from database import DB_PATH, execute_db_operation
 from cogs_test.general_commands.dashboard import command_meta
+from helpers.embed_helper import build_error_embed, build_success_embed, build_info_embed
 
 # ------------------------------------------------------
 # Logging Setup - Clears on each bot run
@@ -143,7 +144,7 @@ class InviteTracker(commands.Cog):
             except discord.Forbidden:
                 logger.warning(f"Missing permissions to view invites in {guild.name}")
             except Exception as e:
-                logger.error(f"Error caching invites for {guild.name}: {e}")
+                logger.error(f"Error caching invites for {guild.name}: {e}", exc_info=True)
     
     @commands.Cog.listener()
     async def on_ready(self):
@@ -166,7 +167,7 @@ class InviteTracker(commands.Cog):
                 logger.info(f"Loaded announcement channel settings for {len(settings)} guilds")
             
         except Exception as e:
-            logger.error(f"Error loading channel settings: {e}")
+            logger.error(f"Error loading channel settings: {e}", exc_info=True)
     
     async def _update_invites_in_db(self, guild_id: int, invites: List[discord.Invite]):
         """Update invite database with current invite data"""
@@ -190,7 +191,7 @@ class InviteTracker(commands.Cog):
                     )
                 )
             except Exception as e:
-                logger.error(f"Error updating invite {invite.code} in database: {e}")
+                logger.error(f"Error updating invite {invite.code} in database: {e}", exc_info=True)
     
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
@@ -243,7 +244,7 @@ class InviteTracker(commands.Cog):
             logger.warning(f"Missing permissions to check invites in {guild.name}")
             await self._handle_unknown_join(member)
         except Exception as e:
-            logger.error(f"Error handling member join for {member}: {e}")
+            logger.error(f"Error handling member join for {member}: {e}", exc_info=True)
             await self._handle_unknown_join(member)
     
     async def _handle_invited_join(self, member: discord.Member, inviter: discord.Member, invite: discord.Invite):
@@ -297,7 +298,7 @@ class InviteTracker(commands.Cog):
             recruit_count = result[0] if result else 1
             
         except Exception as e:
-            logger.error(f"Error recording invite join for {member}: {e}")
+            logger.error(f"Error recording invite join for {member}: {e}", exc_info=True)
             recruit_count = 1
         
         # Get appropriate messages based on theme settings
@@ -322,7 +323,7 @@ class InviteTracker(commands.Cog):
             except discord.Forbidden:
                 logger.warning(f"Cannot send join message in {channel} - missing permissions")
             except Exception as e:
-                logger.error(f"Error sending join message: {e}")
+                logger.error(f"Error sending join message: {e}", exc_info=True)
         else:
             logger.info(f"No announcement channel configured for {guild.name} - join message not sent. Use /set_invite_channel to configure.")  
         
@@ -361,7 +362,7 @@ class InviteTracker(commands.Cog):
             except discord.Forbidden:
                 logger.warning(f"Cannot send join message in {channel} - missing permissions")
             except Exception as e:
-                logger.error(f"Error sending generic join message: {e}")
+                logger.error(f"Error sending generic join message: {e}", exc_info=True)
         else:
             logger.info(f"No announcement channel configured for {guild.name} - generic join message not sent. Use /set_invite_channel to configure.")
     
@@ -419,7 +420,7 @@ class InviteTracker(commands.Cog):
             )
             
         except Exception as e:
-            logger.error(f"Error recording member leave for {member}: {e}")
+            logger.error(f"Error recording member leave for {member}: {e}", exc_info=True)
         
         # Get appropriate messages based on theme settings
         leave_messages = await self._get_theme_messages(guild.id, "leave")
@@ -439,7 +440,7 @@ class InviteTracker(commands.Cog):
             except discord.Forbidden:
                 logger.warning(f"Cannot send leave message in {channel} - missing permissions")
             except Exception as e:
-                logger.error(f"Error sending leave message: {e}")
+                logger.error(f"Error sending leave message: {e}", exc_info=True)
         else:
             logger.info(f"No announcement channel configured for {guild.name} - leave message not sent. Use /set_invite_channel to configure.")
     
@@ -503,7 +504,7 @@ class InviteTracker(commands.Cog):
                 return XIANXIA_LEAVE_MESSAGES
 
         except Exception as e:
-            logger.error(f"Error loading theme messages: {e}")
+            logger.error(f"Error loading theme messages: {e}", exc_info=True)
             # Fallback to xianxia messages on error
             if message_type == "join":
                 return XIANXIA_JOIN_MESSAGES
@@ -632,7 +633,10 @@ class InviteTracker(commands.Cog):
         except Exception as e:
             logger.error(f"Error displaying invite stats: {e}", exc_info=True)
             await interaction.followup.send(
-                "❌ An error occurred while fetching statistics. Please try again.",
+                embed=build_error_embed(
+                    title="Error",
+                    description="An error occurred while fetching statistics. Please try again."
+                ),
                 ephemeral=True
             )
 
@@ -702,10 +706,9 @@ class InviteTracker(commands.Cog):
         avg_stay_days = avg_stay_result[0] if avg_stay_result and avg_stay_result[0] else 0
 
         # Create embed
-        embed = discord.Embed(
-            title="📊 Sect Recruitment Statistics",
-            description="*A comprehensive view of our sect's growth and prosperity*",
-            color=discord.Color.blue()
+        embed = build_info_embed(
+            title="Sect Recruitment Statistics",
+            description="*A comprehensive view of our sect's growth and prosperity*"
         )
 
         # Overall stats
@@ -809,10 +812,9 @@ class InviteTracker(commands.Cog):
         user_rank = rank_result[0] if rank_result else "Unranked"
 
         # Create embed
-        embed = discord.Embed(
-            title=f"📊 Recruitment Stats: {user.display_name}",
-            description="*Individual contribution to the sect's growth*",
-            color=discord.Color.green()
+        embed = build_success_embed(
+            title=f"Recruitment Stats: {user.display_name}",
+            description="*Individual contribution to the sect's growth*"
         )
 
         embed.set_thumbnail(url=user.display_avatar.url)
@@ -871,19 +873,20 @@ class InviteTracker(commands.Cog):
 
             if not results:
                 await interaction.followup.send(
-                    "📜 **No Recruitment Data**\n\n"
-                    "No disciples have been recruited to the sect yet. "
-                    "The path of cultivation begins with the first step.",
+                    embed=build_info_embed(
+                        title="No Recruitment Data",
+                        description="No disciples have been recruited to the sect yet.\nThe path of cultivation begins with the first step."
+                    ),
                     ephemeral=True
                 )
                 return
 
             # Create xianxia-themed embed
-            embed = discord.Embed(
-                title="🏆 Sect Recruitment Leaderboard",
-                description="*The most distinguished cultivators who have brought disciples to our sect*",
-                color=discord.Color.gold()
+            embed = build_info_embed(
+                title="Sect Recruitment Leaderboard",
+                description="*The most distinguished cultivators who have brought disciples to our sect*"
             )
+            embed.color = discord.Color.gold()  # Keep gold color for leaderboard theme
 
             # Rank titles for top 3
             rank_titles = {
@@ -921,7 +924,10 @@ class InviteTracker(commands.Cog):
         except Exception as e:
             logger.error(f"Error displaying invite leaderboard: {e}", exc_info=True)
             await interaction.followup.send(
-                "❌ An error occurred while fetching the leaderboard. Please try again.",
+                embed=build_error_embed(
+                    title="Error",
+                    description="An error occurred while fetching the leaderboard. Please try again."
+                ),
                 ephemeral=True
             )
 
@@ -964,7 +970,10 @@ class InviteTracker(commands.Cog):
         except Exception as e:
             logger.error(f"Error displaying invite theme menu: {e}", exc_info=True)
             await interaction.followup.send(
-                "❌ An error occurred while loading theme settings. Please try again.",
+                embed=build_error_embed(
+                    title="Error",
+                    description="An error occurred while loading theme settings. Please try again."
+                ),
                 ephemeral=True
             )
 
@@ -1051,8 +1060,10 @@ class CustomMessageModal(discord.ui.Modal, title="Custom Message Editor"):
 
             message_count = len(messages)
             await interaction.followup.send(
-                f"✅ Successfully saved **{message_count}** custom {self.message_type} message(s)!\n\n"
-                f"These will be used randomly when members {self.message_type}.",
+                embed=build_success_embed(
+                    title="Messages Saved",
+                    description=f"Successfully saved **{message_count}** custom {self.message_type} message(s)!\n\nThese will be used randomly when members {self.message_type}."
+                ),
                 ephemeral=True
             )
             logger.info(f"Updated custom {self.message_type} messages for guild {self.guild_id}: {message_count} messages")
@@ -1060,7 +1071,10 @@ class CustomMessageModal(discord.ui.Modal, title="Custom Message Editor"):
         except Exception as e:
             logger.error(f"Error saving custom messages: {e}", exc_info=True)
             await interaction.followup.send(
-                "❌ An error occurred while saving messages. Please try again.",
+                embed=build_error_embed(
+                    title="Error",
+                    description="An error occurred while saving messages. Please try again."
+                ),
                 ephemeral=True
             )
 
@@ -1078,11 +1092,11 @@ class InviteThemeView(discord.ui.View):
 
     async def create_settings_embed(self, guild: discord.Guild) -> discord.Embed:
         """Create the settings overview embed"""
-        embed = discord.Embed(
-            title="🎨 Invite Theme Customization",
-            description="Customize how join and leave messages appear in your server",
-            color=discord.Color.purple()
+        embed = build_info_embed(
+            title="Invite Theme Customization",
+            description="Customize how join and leave messages appear in your server"
         )
+        embed.color = discord.Color.purple()  # Keep purple color for theme customization
 
         # Theme status
         theme_status = "✅ Enabled (Xianxia cultivation theme)" if self.xianxia_enabled else "❌ Disabled"
@@ -1116,7 +1130,13 @@ class InviteThemeView(discord.ui.View):
     async def toggle_theme(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Toggle the xianxia theme on/off"""
         if interaction.user.id != self.owner_id:
-            await interaction.response.send_message("❌ This isn't your menu!", ephemeral=True)
+            await interaction.response.send_message(
+                embed=build_error_embed(
+                    title="Access Denied",
+                    description="This isn't your menu!"
+                ),
+                ephemeral=True
+            )
             return
 
         await interaction.response.defer(ephemeral=True)
@@ -1147,20 +1167,35 @@ class InviteThemeView(discord.ui.View):
 
             status_text = "enabled" if new_status else "disabled"
             await interaction.followup.send(
-                f"✅ Xianxia theme **{status_text}**!",
+                embed=build_success_embed(
+                    title="Theme Updated",
+                    description=f"Xianxia theme **{status_text}**!"
+                ),
                 ephemeral=True
             )
             logger.info(f"Toggled xianxia theme to {status_text} for guild {self.guild_id}")
 
         except Exception as e:
             logger.error(f"Error toggling theme: {e}", exc_info=True)
-            await interaction.followup.send("❌ An error occurred. Please try again.", ephemeral=True)
+            await interaction.followup.send(
+                embed=build_error_embed(
+                    title="Error",
+                    description="An error occurred. Please try again."
+                ),
+                ephemeral=True
+            )
 
     @discord.ui.button(label="Edit Join Messages", style=discord.ButtonStyle.secondary, emoji="💬", row=1)
     async def edit_join_messages(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Open modal to edit join messages"""
         if interaction.user.id != self.owner_id:
-            await interaction.response.send_message("❌ This isn't your menu!", ephemeral=True)
+            await interaction.response.send_message(
+                embed=build_error_embed(
+                    title="Access Denied",
+                    description="This isn't your menu!"
+                ),
+                ephemeral=True
+            )
             return
 
         modal = CustomMessageModal(self.guild_id, "join", self.custom_join)
@@ -1170,7 +1205,13 @@ class InviteThemeView(discord.ui.View):
     async def edit_leave_messages(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Open modal to edit leave messages"""
         if interaction.user.id != self.owner_id:
-            await interaction.response.send_message("❌ This isn't your menu!", ephemeral=True)
+            await interaction.response.send_message(
+                embed=build_error_embed(
+                    title="Access Denied",
+                    description="This isn't your menu!"
+                ),
+                ephemeral=True
+            )
             return
 
         modal = CustomMessageModal(self.guild_id, "leave", self.custom_leave)
@@ -1180,7 +1221,13 @@ class InviteThemeView(discord.ui.View):
     async def reset_to_defaults(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Reset all customizations to default xianxia theme"""
         if interaction.user.id != self.owner_id:
-            await interaction.response.send_message("❌ This isn't your menu!", ephemeral=True)
+            await interaction.response.send_message(
+                embed=build_error_embed(
+                    title="Access Denied",
+                    description="This isn't your menu!"
+                ),
+                ephemeral=True
+            )
             return
 
         await interaction.response.defer(ephemeral=True)
@@ -1206,15 +1253,23 @@ class InviteThemeView(discord.ui.View):
             await interaction.edit_original_response(embed=embed, view=self)
 
             await interaction.followup.send(
-                "✅ Reset to default xianxia theme!\n\n"
-                "All custom messages have been cleared and the xianxia theme has been re-enabled.",
+                embed=build_success_embed(
+                    title="Theme Reset",
+                    description="Reset to default xianxia theme!\n\nAll custom messages have been cleared and the xianxia theme has been re-enabled."
+                ),
                 ephemeral=True
             )
             logger.info(f"Reset invite theme to defaults for guild {self.guild_id}")
 
         except Exception as e:
             logger.error(f"Error resetting theme: {e}", exc_info=True)
-            await interaction.followup.send("❌ An error occurred. Please try again.", ephemeral=True)
+            await interaction.followup.send(
+                embed=build_error_embed(
+                    title="Error",
+                    description="An error occurred. Please try again."
+                ),
+                ephemeral=True
+            )
 
 
 async def setup(bot: commands.Bot):

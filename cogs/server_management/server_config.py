@@ -15,6 +15,7 @@ from database import (
     is_user_moderator, execute_db_operation
 )
 from cogs_test.general_commands.dashboard import command_meta
+from helpers.embed_helper import build_error_embed, build_success_embed, build_info_embed, build_warning_embed
 
 # ------------------------------------------------------
 # Logging Setup
@@ -62,35 +63,38 @@ class ServerConfigMainView(discord.ui.View):
         try:
             channel_id = await get_guild_bot_update_channel(interaction.guild.id)
             
-            embed = discord.Embed(
-                title="📢 Bot Updates Channel",
-                description="Configure where changelog and update notifications are posted.",
-                color=0x5865F2
-            )
-            
             if channel_id:
                 channel = self.cog.bot.get_channel(channel_id)
                 if channel:
+                    embed = build_success_embed(
+                        title="Bot Updates Channel",
+                        description="Configure where changelog and update notifications are posted."
+                    )
                     embed.add_field(
                         name="📊 Current Configuration",
                         value=f"**Channel:** {channel.mention}\n**Category:** {channel.category.name if channel.category else 'None'}\n**Created:** <t:{int(channel.created_at.timestamp())}:R>",
                         inline=False
                     )
-                    embed.color = 0x57F287
                 else:
+                    embed = build_warning_embed(
+                        title="Bot Updates Channel",
+                        description="Configure where changelog and update notifications are posted."
+                    )
                     embed.add_field(
                         name="⚠️ Configuration Issue",
                         value=f"Configured channel (ID: {channel_id}) is not visible to the bot.",
                         inline=False
                     )
-                    embed.color = 0xFEE75C
             else:
+                embed = build_info_embed(
+                    title="Bot Updates Channel",
+                    description="Configure where changelog and update notifications are posted."
+                )
                 embed.add_field(
                     name="📝 No Channel Configured",
                     value="No bot updates channel is currently set.\nYou won't receive automatic update notifications.",
                     inline=False
                 )
-                embed.color = 0xED4245
             
             embed.add_field(
                 name="ℹ️ About Update Notifications",
@@ -103,8 +107,14 @@ class ServerConfigMainView(discord.ui.View):
             logger.info(f"Bot updates management opened by {interaction.user.id} in guild {interaction.guild.id}")
         
         except Exception as e:
-            logger.error(f"Error in bot updates management: {e}")
-            await interaction.followup.send("❌ Error loading bot updates settings.", ephemeral=True)
+            logger.error(f"Error in bot updates management: {e}", exc_info=True)
+            await interaction.followup.send(
+                embed=build_error_embed(
+                    title="Error",
+                    description="Failed to load bot updates settings. Please try again."
+                ),
+                ephemeral=True
+            )
     
     @discord.ui.button(label="📨 Invite Tracking Channel", style=discord.ButtonStyle.primary, row=1)
     async def manage_invite_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -122,35 +132,38 @@ class ServerConfigMainView(discord.ui.View):
             
             channel_id = result[0] if result else None
             
-            embed = discord.Embed(
-                title="📨 Invite Tracking Channel",
-                description="Configure where member join/leave notifications are posted.",
-                color=0x5865F2
-            )
-            
             if channel_id:
                 channel = self.cog.bot.get_channel(channel_id)
                 if channel:
+                    embed = build_success_embed(
+                        title="Invite Tracking Channel",
+                        description="Configure where member join/leave notifications are posted."
+                    )
                     embed.add_field(
                         name="📊 Current Configuration",
                         value=f"**Channel:** {channel.mention}\n**Category:** {channel.category.name if channel.category else 'None'}\n**Created:** <t:{int(channel.created_at.timestamp())}:R>",
                         inline=False
                     )
-                    embed.color = 0x57F287
                 else:
+                    embed = build_warning_embed(
+                        title="Invite Tracking Channel",
+                        description="Configure where member join/leave notifications are posted."
+                    )
                     embed.add_field(
                         name="⚠️ Configuration Issue",
                         value=f"Configured channel (ID: {channel_id}) is not visible to the bot.",
                         inline=False
                     )
-                    embed.color = 0xFEE75C
             else:
+                embed = build_info_embed(
+                    title="Invite Tracking Channel",
+                    description="Configure where member join/leave notifications are posted."
+                )
                 embed.add_field(
                     name="📝 No Channel Configured",
                     value="No invite tracking channel is currently set.\nJoin/leave messages are disabled.",
                     inline=False
                 )
-                embed.color = 0xED4245
             
             embed.add_field(
                 name="ℹ️ About Invite Tracking",
@@ -163,8 +176,14 @@ class ServerConfigMainView(discord.ui.View):
             logger.info(f"Invite channel management opened by {interaction.user.id} in guild {interaction.guild.id}")
         
         except Exception as e:
-            logger.error(f"Error in invite channel management: {e}")
-            await interaction.followup.send("❌ Error loading invite tracking settings.", ephemeral=True)
+            logger.error(f"Error in invite channel management: {e}", exc_info=True)
+            await interaction.followup.send(
+                embed=build_error_embed(
+                    title="Error",
+                    description="Failed to load invite tracking settings. Please try again."
+                ),
+                ephemeral=True
+            )
     
     @discord.ui.button(label="📋 View All Settings", style=discord.ButtonStyle.secondary, row=1)
     async def view_all_settings(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -172,10 +191,9 @@ class ServerConfigMainView(discord.ui.View):
         await interaction.response.defer(ephemeral=True)
         
         try:
-            embed = discord.Embed(
-                title="📋 Server Configuration Overview",
-                description=f"Complete configuration for **{interaction.guild.name}**",
-                color=0x5865F2
+            embed = build_info_embed(
+                title="Server Configuration Overview",
+                description=f"Complete configuration for **{interaction.guild.name}**"
             )
             
             # Bot updates channel
@@ -218,8 +236,14 @@ class ServerConfigMainView(discord.ui.View):
             logger.info(f"All settings viewed by {interaction.user.id} in guild {interaction.guild.id}")
         
         except Exception as e:
-            logger.error(f"Error viewing all settings: {e}")
-            await interaction.followup.send("❌ Error loading server settings.", ephemeral=True)
+            logger.error(f"Error viewing all settings: {e}", exc_info=True)
+            await interaction.followup.send(
+                embed=build_error_embed(
+                    title="Error",
+                    description="Failed to load server settings. Please try again."
+                ),
+                ephemeral=True
+            )
 
 
 class BotUpdatesConfigView(discord.ui.View):
@@ -248,17 +272,22 @@ class BotUpdatesConfigView(discord.ui.View):
         try:
             await remove_guild_bot_update_channel(interaction.guild.id)
             
-            embed = discord.Embed(
-                title="✅ Bot Updates Channel Removed",
-                description="Bot updates channel configuration has been cleared.\nYou won't receive automatic update notifications.",
-                color=0x57F287
+            embed = build_success_embed(
+                title="Bot Updates Channel Removed",
+                description="Bot updates channel configuration has been cleared.\nYou won't receive automatic update notifications."
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
             logger.info(f"Bot updates channel removed for guild {interaction.guild.id} by {interaction.user.id}")
         
         except Exception as e:
-            logger.error(f"Error removing bot updates channel: {e}")
-            await interaction.followup.send("❌ Error removing bot updates channel.", ephemeral=True)
+            logger.error(f"Error removing bot updates channel: {e}", exc_info=True)
+            await interaction.followup.send(
+                embed=build_error_embed(
+                    title="Error",
+                    description="Failed to remove bot updates channel. Please try again."
+                ),
+                ephemeral=True
+            )
 
 
 class InviteChannelConfigView(discord.ui.View):
@@ -291,17 +320,22 @@ class InviteChannelConfigView(discord.ui.View):
                 (interaction.guild.id,)
             )
             
-            embed = discord.Embed(
-                title="✅ Invite Tracking Channel Removed",
-                description="Invite tracking channel configuration has been cleared.\nJoin/leave messages are now disabled.",
-                color=0x57F287
+            embed = build_success_embed(
+                title="Invite Tracking Channel Removed",
+                description="Invite tracking channel configuration has been cleared.\nJoin/leave messages are now disabled."
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
             logger.info(f"Invite channel removed for guild {interaction.guild.id} by {interaction.user.id}")
         
         except Exception as e:
-            logger.error(f"Error removing invite channel: {e}")
-            await interaction.followup.send("❌ Error removing invite tracking channel.", ephemeral=True)
+            logger.error(f"Error removing invite channel: {e}", exc_info=True)
+            await interaction.followup.send(
+                embed=build_error_embed(
+                    title="Error",
+                    description="Failed to remove invite tracking channel. Please try again."
+                ),
+                ephemeral=True
+            )
 
 
 class SetBotUpdatesChannelModal(discord.ui.Modal):
@@ -335,13 +369,25 @@ class SetBotUpdatesChannelModal(discord.ui.Modal):
             channel = self.cog.bot.get_channel(channel_id)
             
             if not channel or channel.guild.id != interaction.guild.id:
-                await interaction.followup.send("❌ Channel not found in this server. Please check the channel ID.", ephemeral=True)
+                await interaction.followup.send(
+                    embed=build_error_embed(
+                        title="Channel Not Found",
+                        description="Channel not found in this server. Please check the channel ID."
+                    ),
+                    ephemeral=True
+                )
                 return
             
             # Check permissions
             permissions = channel.permissions_for(interaction.guild.me)
             if not permissions.send_messages:
-                await interaction.followup.send(f"❌ I don't have permission to send messages in {channel.mention}.", ephemeral=True)
+                await interaction.followup.send(
+                    embed=build_error_embed(
+                        title="Permission Denied",
+                        description=f"I don't have permission to send messages in {channel.mention}."
+                    ),
+                    ephemeral=True
+                )
                 return
             
             # Set the bot updates channel (using database function)
@@ -356,19 +402,30 @@ class SetBotUpdatesChannelModal(discord.ui.Modal):
                 (interaction.guild.id, channel.id)
             )
             
-            embed = discord.Embed(
-                title="✅ Bot Updates Channel Set",
-                description=f"**Channel:** {channel.mention}\n\nChangelog updates will be posted to this channel.",
-                color=0x57F287
+            embed = build_success_embed(
+                title="Bot Updates Channel Set",
+                description=f"**Channel:** {channel.mention}\n\nChangelog updates will be posted to this channel."
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
             logger.info(f"Bot updates channel set for guild {interaction.guild.id}: #{channel.name} ({channel.id})")
         
         except ValueError:
-            await interaction.followup.send("❌ Invalid channel ID format. Please enter a valid number.", ephemeral=True)
+            await interaction.followup.send(
+                embed=build_error_embed(
+                    title="Invalid Format",
+                    description="Invalid channel ID format. Please enter a valid number."
+                ),
+                ephemeral=True
+            )
         except Exception as e:
-            logger.error(f"Error setting bot updates channel: {e}")
-            await interaction.followup.send("❌ Error setting bot updates channel.", ephemeral=True)
+            logger.error(f"Error setting bot updates channel: {e}", exc_info=True)
+            await interaction.followup.send(
+                embed=build_error_embed(
+                    title="Error",
+                    description="Failed to set bot updates channel. Please try again."
+                ),
+                ephemeral=True
+            )
 
 
 class SetInviteChannelModal(discord.ui.Modal):
@@ -402,13 +459,25 @@ class SetInviteChannelModal(discord.ui.Modal):
             channel = self.cog.bot.get_channel(channel_id)
             
             if not channel or channel.guild.id != interaction.guild.id:
-                await interaction.followup.send("❌ Channel not found in this server. Please check the channel ID.", ephemeral=True)
+                await interaction.followup.send(
+                    embed=build_error_embed(
+                        title="Channel Not Found",
+                        description="Channel not found in this server. Please check the channel ID."
+                    ),
+                    ephemeral=True
+                )
                 return
             
             # Check permissions
             permissions = channel.permissions_for(interaction.guild.me)
             if not permissions.send_messages:
-                await interaction.followup.send(f"❌ I don't have permission to send messages in {channel.mention}.", ephemeral=True)
+                await interaction.followup.send(
+                    embed=build_error_embed(
+                        title="Permission Denied",
+                        description=f"I don't have permission to send messages in {channel.mention}."
+                    ),
+                    ephemeral=True
+                )
                 return
             
             # Set the invite channel
@@ -431,21 +500,32 @@ class SetInviteChannelModal(discord.ui.Modal):
             except discord.Forbidden:
                 logger.warning(f"Missing permissions to initialize invites for {interaction.guild.name}")
             except Exception as e:
-                logger.error(f"Failed to initialize invite cache: {e}")
+                logger.error(f"Failed to initialize invite cache: {e}", exc_info=True)
             
-            embed = discord.Embed(
-                title="✅ Invite Tracking Channel Set",
-                description=f"**Channel:** {channel.mention}\n\nJoin/leave messages will be posted to this channel.",
-                color=0x57F287
+            embed = build_success_embed(
+                title="Invite Tracking Channel Set",
+                description=f"**Channel:** {channel.mention}\n\nJoin/leave messages will be posted to this channel."
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
             logger.info(f"Invite channel set for guild {interaction.guild.id}: #{channel.name} ({channel.id})")
         
         except ValueError:
-            await interaction.followup.send("❌ Invalid channel ID format. Please enter a valid number.", ephemeral=True)
+            await interaction.followup.send(
+                embed=build_error_embed(
+                    title="Invalid Format",
+                    description="Invalid channel ID format. Please enter a valid number."
+                ),
+                ephemeral=True
+            )
         except Exception as e:
-            logger.error(f"Error setting invite channel: {e}")
-            await interaction.followup.send("❌ Error setting invite tracking channel.", ephemeral=True)
+            logger.error(f"Error setting invite channel: {e}", exc_info=True)
+            await interaction.followup.send(
+                embed=build_error_embed(
+                    title="Error",
+                    description="Failed to set invite tracking channel. Please try again."
+                ),
+                ephemeral=True
+            )
 
 
 class ServerConfig(commands.Cog):
@@ -462,25 +542,36 @@ class ServerConfig(commands.Cog):
         """Unified server configuration interface"""
         
         if not interaction.guild:
-            await interaction.response.send_message("❌ This command can only be used in a server.", ephemeral=True)
+            await interaction.response.send_message(
+                embed=build_error_embed(
+                    title="Invalid Context",
+                    description="This command can only be used in a server."
+                ),
+                ephemeral=True
+            )
             return
         
         # Check permissions
         if not interaction.user.guild_permissions.manage_guild:
-            await interaction.response.send_message("❌ You need 'Manage Server' permission to use this command.", ephemeral=True)
+            await interaction.response.send_message(
+                embed=build_error_embed(
+                    title="Permission Denied",
+                    description="You need 'Manage Server' permission to use this command."
+                ),
+                ephemeral=True
+            )
             return
         
         try:
             guild_id = interaction.guild.id
             logger.info(f"Server config opened by {interaction.user.display_name} ({interaction.user.id}) in guild {guild_id}")
             
-            embed = discord.Embed(
-                title="⚙️ Server Configuration",
+            embed = build_info_embed(
+                title="Server Configuration",
                 description=(
                     f"Welcome to the server configuration panel for **{interaction.guild.name}**!\n\n"
                     "Choose a category below to view and configure settings:"
-                ),
-                color=0x5865F2
+                )
             )
             
             embed.add_field(
@@ -503,7 +594,13 @@ class ServerConfig(commands.Cog):
         
         except Exception as e:
             logger.error(f"Error in server config command: {e}", exc_info=True)
-            await interaction.response.send_message("❌ Error opening server configuration. Please try again.", ephemeral=True)
+            await interaction.response.send_message(
+                embed=build_error_embed(
+                    title="Error",
+                    description="Failed to open server configuration. Please try again."
+                ),
+                ephemeral=True
+            )
 
 
 async def setup(bot):
