@@ -1,19 +1,22 @@
 # cogs/alfiles.py
 """
-ALFiles - Fully featured cog:
-- Multi-guild
+ALFiles cog - production-ready.
+Features:
+- Multi-guild storage
 - Auto DB migrations (safe)
-- AniList GraphQL live lookup with file cache and rate-limiter
-- Add More modal + guided multi-upload (up to 10 images in one message)
-- Create draft, finalize (release) with 2-step confirm view
-- Delete with select -> preview -> confirm
-- File viewer with pagination, random, like toggle (green for liked, red for unliked)
-- Like system persisted in DB, per-user cooldowns, caches, console logs
-- /al-lb, /al-likes support server/global scope via choices dropdown
-- /al-liked shows ephemeral paginated list of user's liked files
-- /al-search <file_number> to lookup file by id
-- Robust image validation on startup and on load (HEAD request); logs invalid images
+- Uses local database helper if present (database.py) else aiosqlite fallback
+- AniList GraphQL live fetch + local cache + rate-limiter
+- AddMore flow: URL modal + guided upload (up to 10 attachments/URLs)
+- Draft create/add image/release with 2-step confirmation
+- Delete preview & confirm
+- File viewer with Prev/Next/Random and Like toggle (green when liked, red momentarily when unliked)
+- Likes persisted in DB; /al-likes (server/global), /al-liked (ephemeral), /al-lb (server/global)
+- /al-search <id>
+- Image validation at startup and per-view (HEAD/GET)
+- Console logging only
 """
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -28,7 +31,13 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-# Try to import project helpers; provide safe fallbacks if not present
+try:
+    import database
+    HAS_DATABASE_HELPER = True
+except Exception:
+    database = None
+    HAS_DATABASE_HELPER = False
+
 try:
     from helpers.utility_helper import get_user_display_name, is_valid_url, make_http_request
 except Exception:
@@ -58,6 +67,12 @@ except Exception:
                         return None
 
 logger = logging.getLogger("ALFiles")
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    ch = logging.StreamHandler()
+    ch.setFormatter(logging.Formatter("[%(levelname)s] [ALFiles] %(message)s"))
+    logger.addHandler(ch)
+
 DB_PATH = "data/alfiles.db"
 CACHE_PATH = "data/anilist_cache.json"
 
@@ -74,50 +89,113 @@ query ($name: String, $id: Int) {
 """
 
 # Config
-ANILIST_CACHE_TTL = 60 * 60 * 24  # 24h
-ANILIST_RATE_LIMIT = (5, 1.0)  # tokens, refill/sec
+ANILIST_CACHE_TTL = 60 * 60 * 24  # 24 hours
+ANILIST_RATE_LIMIT = (5, 1.0)  # tokens capacity, refill per sec
 ANILIST_TIMEOUT = 10
 MAX_MULTI_UPLOAD = 10
-LIKE_TOGGLE_COOLDOWN = 5  # seconds
-IMAGE_VALIDATION_TIMEOUT = 6  # seconds for HEAD/GET check
-FALLBACK_IMAGE = "https://anilist.co/img/icons/icon.svg"  # used when image URLs are invalid
+LIKE_TOGGLE_COOLDOWN = 5
+IMAGE_VALIDATION_TIMEOUT = 6
+FALLBACK_IMAGE = "https://anilist.co/img/icons/icon.svg"
 
 Path("data").mkdir(parents=True, exist_ok=True)
+
 
 def get_color() -> discord.Color:
     return discord.Color.from_rgb(245, 245, 245)
 
-# --- Utilities: rate-limiter (token bucket) and file-backed cache ---
+
+# ---------------------------
+# Database Methods: execute, fetchone, fetchall, commit used internally
+# ---------------------------
+class DB:
+    def __init__(self, path: str = DB_PATH):
+        self.path = path
+        self.helper = database if HAS_DATABASE_HELPER else None
+
+    async def _execute(self, sql: str, params: Tuple = ()):
+        if self.helper:
+            # attempt to use helper (we try several possible helper interfaces)
+            try:
+                if hasattr(self.helper, "execute"):
+                    # generic execute(sql, params)
+                    return await asyncio.get_event_loop().run_in_executor(None, lambda: self.helper.execute(sql, params))
+            except Exception:
+                logger.debug("database.execute failed, falling back to aiosqlite", exc_info=True)
+        # fallback to aiosqlite
+        async with aiosqlite.connect(self.path) as conn:
+            cur = await conn.execute(sql, params)
+            await conn.commit()
+            return cur
+
+    async def fetchone(self, sql: str, params: Tuple = ()):
+        if self.helper:
+            try:
+                if hasattr(self.helper, "fetchone"):
+                    return await asyncio.get_event_loop().run_in_executor(None, lambda: self.helper.fetchone(sql, params))
+            except Exception:
+                logger.debug("database.fetchone failed, falling back to aiosqlite", exc_info=True)
+        async with aiosqlite.connect(self.path) as conn:
+            async with conn.execute(sql, params) as cur:
+                return await cur.fetchone()
+
+    async def fetchall(self, sql: str, params: Tuple = ()):
+        if self.helper:
+            try:
+                if hasattr(self.helper, "fetchall"):
+                    return await asyncio.get_event_loop().run_in_executor(None, lambda: self.helper.fetchall(sql, params))
+            except Exception:
+                logger.debug("database.fetchall failed, falling back to aiosqlite", exc_info=True)
+        async with aiosqlite.connect(self.path) as conn:
+            async with conn.execute(sql, params) as cur:
+                return await cur.fetchall()
+
+    async def executescript(self, sql_script: str):
+        # used for running CREATE TABLE scripts
+        if self.helper:
+            try:
+                if hasattr(self.helper, "executescript"):
+                    return await asyncio.get_event_loop().run_in_executor(None, lambda: self.helper.executescript(sql_script))
+            except Exception:
+                logger.debug("database.executescript failed, falling back to aiosqlite", exc_info=True)
+        async with aiosqlite.connect(self.path) as conn:
+            await conn.executescript(sql_script)
+            await conn.commit()
+
+
+# ---------------------------
+# Token bucket and cache
+# ---------------------------
 class TokenBucket:
     def __init__(self, capacity: int, refill_per_sec: float):
         self.capacity = capacity
         self.tokens = capacity
-        self.refill_per_sec = refill_per_sec
+        self.refill = refill_per_sec
         self.last = time.monotonic()
-        self.lock = asyncio.Lock()
+        self._lock = asyncio.Lock()
 
     async def acquire(self):
-        async with self.lock:
+        async with self._lock:
             now = time.monotonic()
             elapsed = now - self.last
             self.last = now
-            self.tokens = min(self.capacity, self.tokens + elapsed * self.refill_per_sec)
+            self.tokens = min(self.capacity, self.tokens + elapsed * self.refill)
             if self.tokens >= 1:
                 self.tokens -= 1
                 return
             needed = 1 - self.tokens
-            wait = needed / self.refill_per_sec
+            wait = needed / self.refill
         await asyncio.sleep(wait)
-        async with self.lock:
+        async with self._lock:
             self.tokens = max(0, self.tokens - 1)
             return
+
 
 class FileCache:
     def __init__(self, path: str = CACHE_PATH, ttl: int = ANILIST_CACHE_TTL):
         self.path = Path(path)
         self.ttl = ttl
         self._data: Dict[str, Any] = {}
-        self.lock = asyncio.Lock()
+        self._lock = asyncio.Lock()
         self._load()
 
     def _load(self):
@@ -132,7 +210,7 @@ class FileCache:
             self._data = {}
 
     async def get(self, key: str) -> Optional[Dict[str, Any]]:
-        async with self.lock:
+        async with self._lock:
             rec = self._data.get(key)
             if not rec:
                 return None
@@ -142,7 +220,7 @@ class FileCache:
             return rec.get("value")
 
     async def set(self, key: str, value: Dict[str, Any]):
-        async with self.lock:
+        async with self._lock:
             self._data[key] = {"_ts": time.time(), "value": value}
             try:
                 with open(self.path, "w", encoding="utf-8") as f:
@@ -150,30 +228,27 @@ class FileCache:
             except Exception:
                 logger.exception("Failed to persist AniList cache")
 
-# --- The Cog ---
+
+# ---------------------------
+# Main Cog
+# ---------------------------
 class ALFiles(commands.Cog):
-    """AL Files cog — robust, auto-migrating, likes, search, AniList integration."""
+    """ALFiles cog."""
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.db_path = DB_PATH
+        self.dbw = DB(DB_PATH)
         self.anilist_cache = FileCache()
         self.anilist_rl = TokenBucket(ANILIST_RATE_LIMIT[0], ANILIST_RATE_LIMIT[1])
         self.like_count_cache: Dict[int, int] = {}
-        self.user_likes_cache: Dict[int, set] = {}  # optional per-user liked file ids (ephemeral)
+        self.user_likes_cache: Dict[int, set] = {}
         self.like_cooldowns: Dict[int, float] = {}
         Path("data").mkdir(parents=True, exist_ok=True)
-        # Start background startup tasks after cog is loaded (we will call them in cog_load)
-        logger.info("ALFiles cog initialized")
+        logger.info("ALFiles initialized")
 
-    # ------------------------------
-    # DB migration and validation
-    # ------------------------------
+    # ---------------------------
+    # DB migrations / setup
+    # ---------------------------
     async def setup_db(self):
-        """
-        Create required tables and add missing columns safely (idempotent).
-        Tables:
-            files, images, likes
-        """
         create_files = """
         CREATE TABLE IF NOT EXISTS files (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -189,15 +264,15 @@ class ALFiles(commands.Cog):
             description TEXT,
             finalized BOOLEAN DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
+        );
         """
         create_images = """
         CREATE TABLE IF NOT EXISTS images (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             file_id INTEGER,
             image_url TEXT,
-            FOREIGN KEY(file_id) REFERENCES files(id) ON DELETE CASCADE
-        )
+            FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+        );
         """
         create_likes = """
         CREATE TABLE IF NOT EXISTS likes (
@@ -206,48 +281,33 @@ class ALFiles(commands.Cog):
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (file_id, user_id),
             FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
-        )
+        );
         """
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(create_files)
-            await db.execute(create_images)
-            await db.execute(create_likes)
-            await db.commit()
+        # Execute scripts
+        await self.dbw.executescript(create_files + "\n" + create_images + "\n" + create_likes)
+        # Indexes
+        try:
+            await self.dbw._execute("CREATE INDEX IF NOT EXISTS idx_files_guild ON files(guild_id)")
+            await self.dbw._execute("CREATE INDEX IF NOT EXISTS idx_images_file ON images(file_id)")
+            await self.dbw._execute("CREATE INDEX IF NOT EXISTS idx_likes_file ON likes(file_id)")
+        except Exception:
+            logger.exception("Failed to create indexes (non-fatal)")
 
-            # Ensure indexes for performance
-            try:
-                await db.execute("CREATE INDEX IF NOT EXISTS idx_files_guild ON files(guild_id)")
-                await db.execute("CREATE INDEX IF NOT EXISTS idx_images_file ON images(file_id)")
-                await db.execute("CREATE INDEX IF NOT EXISTS idx_likes_file ON likes(file_id)")
-                await db.commit()
-            except Exception:
-                logger.exception("Failed creating indexes")
-
-            # Check and add missing columns if older DB lacks them
-            required_cols = {
-                "anilist_username": "TEXT",
-                "anilist_id": "INTEGER",
-                "title": "TEXT",
-                "description": "TEXT",
-                "owner_id": "INTEGER",
-                "owner_name": "TEXT",
-                "contributor_name": "TEXT"
-            }
-            async with db.execute("PRAGMA table_info(files)") as cur:
-                rows = await cur.fetchall()
-                existing = {r[1] for r in rows}
-            for col, coltype in required_cols.items():
+        # Ensure columns exist (idempotent)
+        try:
+            rows = await self.dbw.fetchall("PRAGMA table_info(files)")
+            existing = {r[1] for r in rows}
+            required_cols = {"anilist_username", "anilist_id", "title", "description", "owner_id", "owner_name", "contributor_name"}
+            for col in required_cols:
                 if col not in existing:
-                    try:
-                        await db.execute(f"ALTER TABLE files ADD COLUMN {col} {coltype}")
-                        logger.info("[DB] Added missing column: %s", col)
-                    except Exception:
-                        logger.exception("Failed to add column %s", col)
-            await db.commit()
+                    await self.dbw._execute(f"ALTER TABLE files ADD COLUMN {col} TEXT")
+                    logger.info("Added missing column to files: %s", col)
+        except Exception:
+            logger.exception("Failed to check/add missing columns")
 
-    # ------------------------------
-    # AniList helper (live fetch, cache, rate-limit)
-    # ------------------------------
+    # ---------------------------
+    # AniList fetch
+    # ---------------------------
     async def _fetch_anilist_live(self, username: Optional[str] = None, anilist_id: Optional[int] = None) -> Tuple[Optional[int], Optional[str], Optional[str], Optional[str]]:
         if not username and not anilist_id:
             return None, None, None, None
@@ -255,7 +315,6 @@ class ALFiles(commands.Cog):
         cached = await self.anilist_cache.get(key)
         if cached:
             return cached.get("id"), cached.get("name"), cached.get("avatar"), cached.get("siteUrl")
-        # rate-limit
         await self.anilist_rl.acquire()
         variables = {}
         if anilist_id:
@@ -263,7 +322,7 @@ class ALFiles(commands.Cog):
         else:
             variables["name"] = username
         payload = {"query": ANILIST_USER_QUERY, "variables": variables}
-        # try helper
+        # try helper make_http_request if present
         try:
             resp = await make_http_request(ANILIST_API, method="POST", json_data=payload, timeout=ANILIST_TIMEOUT)
             if resp and resp.get("data", {}).get("User"):
@@ -272,11 +331,11 @@ class ALFiles(commands.Cog):
                 await self.anilist_cache.set(key, value)
                 return value["id"], value["name"], value["avatar"], value["siteUrl"]
         except Exception:
-            logger.debug("make_http_request for AniList failed; falling back to aiohttp", exc_info=True)
+            logger.debug("make_http_request failed; falling back to aiohttp", exc_info=True)
         # fallback to aiohttp
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=ANILIST_TIMEOUT)) as session:
-                async with session.post(ANILIST_API, json=payload) as resp:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=ANILIST_TIMEOUT)) as s:
+                async with s.post(ANILIST_API, json=payload) as resp:
                     if resp.status == 200:
                         j = await resp.json()
                         u = j.get("data", {}).get("User")
@@ -284,47 +343,33 @@ class ALFiles(commands.Cog):
                             value = {"id": u.get("id"), "name": u.get("name"), "avatar": (u.get("avatar") or {}).get("large"), "siteUrl": u.get("siteUrl")}
                             await self.anilist_cache.set(key, value)
                             return value["id"], value["name"], value["avatar"], value["siteUrl"]
-                    else:
-                        logger.debug("AniList returned status %s", resp.status)
         except Exception:
             logger.exception("AniList aiohttp fallback failed")
         return None, None, None, None
 
-    # ------------------------------
-    # Image validation
-    # ------------------------------
+    # ---------------------------
+    # Image validation helpers
+    # ---------------------------
     async def _validate_image_url(self, url: str) -> bool:
-        """
-        HEAD (or GET if HEAD not allowed) the URL and ensure status 200 and content-type image.
-        Timeout ~ IMAGE_VALIDATION_TIMEOUT.
-        """
-        if not url:
-            return False
-        if not is_valid_url(url):
+        if not url or not is_valid_url(url):
             return False
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=IMAGE_VALIDATION_TIMEOUT)) as session:
-                # prefer HEAD
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=IMAGE_VALIDATION_TIMEOUT)) as s:
                 try:
-                    async with session.head(url) as resp:
+                    async with s.head(url) as resp:
                         if resp.status == 200:
-                            ctype = resp.headers.get("Content-Type", "")
-                            return ctype.startswith("image/")
+                            c = resp.headers.get("Content-Type", "")
+                            return c.startswith("image/")
                 except Exception:
-                    # fallback to GET small request
-                    async with session.get(url) as resp:
-                        if resp.status == 200:
-                            ctype = resp.headers.get("Content-Type", "")
-                            return ctype.startswith("image/")
+                    async with s.get(url) as resp2:
+                        if resp2.status == 200:
+                            c = resp2.headers.get("Content-Type", "")
+                            return c.startswith("image/")
         except Exception:
             return False
         return False
 
     async def _validate_and_fix_images_for_file(self, file_id: int) -> List[str]:
-        """
-        Validate each image for a file. Return list of valid URLs. If none valid, return [FALLBACK_IMAGE].
-        Also log invalid/expired URLs to console.
-        """
         images = await self.get_file_images(file_id)
         valid = []
         for url in images:
@@ -332,21 +377,36 @@ class ALFiles(commands.Cog):
             if ok:
                 valid.append(url)
             else:
-                logger.warning("[ALFiles] File #%s image invalid or unreachable: %s", file_id, url)
+                logger.warning("File #%s image invalid or unreachable: %s", file_id, url)
         if not valid:
-            logger.warning("[ALFiles] File #%s has zero valid images; using fallback", file_id)
+            logger.warning("File #%s has no valid images; using fallback", file_id)
             return [FALLBACK_IMAGE]
         return valid
 
-    # ------------------------------
-    # DB CRUD helpers (files/images)
-    # ------------------------------
+    async def _validate_all_images_on_startup(self):
+        logger.info("Background image validation started")
+        try:
+            rows = await self.dbw.fetchall("SELECT id FROM files")
+            for r in rows:
+                fid = r[0]
+                images = await self.get_file_images(fid)
+                for url in images:
+                    ok = await self._validate_image_url(url)
+                    if not ok:
+                        logger.warning("Startup check: File #%s image invalid/expired: %s", fid, url)
+                await asyncio.sleep(0.01)
+        except Exception:
+            logger.exception("Error during startup image validation")
+        logger.info("Background image validation complete")
+
+    # ---------------------------
+    # DB CRUD for files/images
+    # ---------------------------
     async def create_draft(self, guild_id: int, owner: discord.abc.User, contributor: Optional[discord.User] = None) -> int:
         contributor_id = contributor.id if contributor else owner.id
         contributor_name = str(contributor) if contributor else str(owner)
         owner_id = owner.id
         owner_name = str(owner)
-
         anilist_username = None
         anilist_id = None
         al_link = None
@@ -356,219 +416,159 @@ class ALFiles(commands.Cog):
                 anilist_username = possible
                 al_link = f"https://anilist.co/user/{anilist_username}"
         except Exception:
-            logger.debug("get_user_display_name failed or not present", exc_info=True)
-
-        async with aiosqlite.connect(self.db_path) as db:
-            cur = await db.execute(
-                "INSERT INTO files (guild_id, contributor_id, owner_id, owner_name, contributor_name, anilist_username, anilist_id, al_link, finalized) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)",
-                (guild_id, contributor_id, owner_id, owner_name, contributor_name, anilist_username, anilist_id, al_link)
-            )
-            await db.commit()
-            fid = cur.lastrowid
-            logger.info("[ALFiles] Created draft #%s (owner=%s, contributor=%s)", fid, owner_id, contributor_id)
-            return fid
+            logger.debug("get_user_display_name not available", exc_info=True)
+        await self.dbw._execute(
+            "INSERT INTO files (guild_id, contributor_id, owner_id, owner_name, contributor_name, anilist_username, anilist_id, al_link, finalized) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)",
+            (guild_id, contributor_id, owner_id, owner_name, contributor_name, anilist_username, anilist_id, al_link)
+        )
+        # fetch lastrowid via sqlite if helper is not present
+        row = await self.dbw.fetchone("SELECT last_insert_rowid()")
+        fid = row[0] if row else None
+        logger.info("Created draft #%s (owner=%s, contributor=%s)", fid, owner_id, contributor_id)
+        return fid
 
     async def get_draft(self, guild_id: int, owner_id: int) -> Optional[Tuple[int]]:
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute("SELECT id FROM files WHERE guild_id = ? AND owner_id = ? AND finalized = 0", (guild_id, owner_id)) as cur:
-                return await cur.fetchone()
+        return await self.dbw.fetchone("SELECT id FROM files WHERE guild_id = ? AND owner_id = ? AND finalized = 0", (guild_id, owner_id))
 
     async def add_image_to_draft(self, file_id: int, url: str) -> bool:
         if not is_valid_url(url):
-            logger.debug("[ALFiles] rejected invalid URL when adding image: %s", url)
+            logger.debug("Rejected invalid URL for draft %s: %s", file_id, url)
             return False
-        async with aiosqlite.connect(self.db_path) as db:
-            try:
-                await db.execute("INSERT INTO images (file_id, image_url) VALUES (?, ?)", (file_id, url))
-                await db.commit()
-                # invalidate cache
-                self.like_count_cache.pop(file_id, None)
-                return True
-            except Exception:
-                logger.exception("Failed to insert image into DB")
-                return False
+        try:
+            await self.dbw._execute("INSERT INTO images (file_id, image_url) VALUES (?, ?)", (file_id, url))
+            self.like_count_cache.pop(file_id, None)
+            return True
+        except Exception:
+            logger.exception("Failed to add image to draft")
+            return False
 
     async def update_draft_meta(self, file_id: int, title: Optional[str], description: Optional[str]):
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("UPDATE files SET title = ?, description = ? WHERE id = ?", (title, description, file_id))
-            await db.commit()
+        await self.dbw._execute("UPDATE files SET title = ?, description = ? WHERE id = ?", (title, description, file_id))
 
     async def finalize_file(self, file_id: int) -> bool:
-        """
-        Mark file as finalized. Returns True if successful.
-        """
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("UPDATE files SET finalized = 1 WHERE id = ?", (file_id,))
-            await db.commit()
-        logger.info("[ALFiles] Finalized file #%s", file_id)
-        return True
+        try:
+            await self.dbw._execute("UPDATE files SET finalized = 1 WHERE id = ?", (file_id,))
+            logger.info("Finalized file #%s", file_id)
+            return True
+        except Exception:
+            logger.exception("Failed to finalize file")
+            return False
 
     async def delete_file(self, file_id: int):
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("DELETE FROM images WHERE file_id = ?", (file_id,))
-            await db.execute("DELETE FROM likes WHERE file_id = ?", (file_id,))
-            await db.execute("DELETE FROM files WHERE id = ?", (file_id,))
-            await db.commit()
-        self.like_count_cache.pop(file_id, None)
-        logger.info("[ALFiles] Deleted file #%s", file_id)
+        try:
+            await self.dbw._execute("DELETE FROM images WHERE file_id = ?", (file_id,))
+            await self.dbw._execute("DELETE FROM likes WHERE file_id = ?", (file_id,))
+            await self.dbw._execute("DELETE FROM files WHERE id = ?", (file_id,))
+            self.like_count_cache.pop(file_id, None)
+            logger.info("Deleted file #%s", file_id)
+        except Exception:
+            logger.exception("Failed to delete file")
 
     async def list_user_files(self, guild_id: int, user_id: int) -> List[Tuple[int, bool, str, int]]:
+        rows = await self.dbw.fetchall("SELECT id, finalized, created_at FROM files WHERE guild_id = ? AND contributor_id = ? ORDER BY created_at DESC", (guild_id, user_id))
         out = []
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute("SELECT id, finalized, created_at FROM files WHERE guild_id = ? AND contributor_id = ? ORDER BY created_at DESC", (guild_id, user_id)) as cur:
-                rows = await cur.fetchall()
-            for fid, finalized, created_at in rows:
-                async with aiosqlite.connect(self.db_path) as db2:
-                    async with db2.execute("SELECT COUNT(*) FROM images WHERE file_id = ?", (fid,)) as c2:
-                        cnt = await c2.fetchone()
-                        image_count = cnt[0] if cnt else 0
-                out.append((fid, bool(finalized), created_at, image_count))
+        for fid, finalized, created_at in rows:
+            cnt_row = await self.dbw.fetchone("SELECT COUNT(*) FROM images WHERE file_id = ?", (fid,))
+            image_count = cnt_row[0] if cnt_row else 0
+            out.append((fid, bool(finalized), created_at, image_count))
         return out
 
     async def get_file_images(self, file_id: int) -> List[str]:
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute("SELECT image_url FROM images WHERE file_id = ?", (file_id,)) as cur:
-                rows = await cur.fetchall()
-            return [r[0] for r in rows] if rows else []
+        rows = await self.dbw.fetchall("SELECT image_url FROM images WHERE file_id = ?", (file_id,))
+        return [r[0] for r in rows] if rows else []
 
     async def get_file_info(self, file_id: int):
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute("SELECT contributor_name, anilist_username, anilist_id, al_link, title, description, created_at, contributor_id, owner_id, owner_name, finalized, guild_id FROM files WHERE id = ?", (file_id,)) as cur:
-                return await cur.fetchone()
+        return await self.dbw.fetchone("SELECT contributor_name, anilist_username, anilist_id, al_link, title, description, created_at, contributor_id, owner_id, owner_name, finalized, guild_id FROM files WHERE id = ?", (file_id,))
 
     async def get_random_file(self, guild_id: int, exclude_id: Optional[int] = None) -> Optional[int]:
-        async with aiosqlite.connect(self.db_path) as db:
-            if exclude_id:
-                async with db.execute("SELECT id FROM files WHERE guild_id = ? AND finalized = 1 AND id != ?", (guild_id, exclude_id)) as cur:
-                    rows = await cur.fetchall()
-            else:
-                async with db.execute("SELECT id FROM files WHERE guild_id = ? AND finalized = 1", (guild_id,)) as cur:
-                    rows = await cur.fetchall()
+        if exclude_id:
+            rows = await self.dbw.fetchall("SELECT id FROM files WHERE guild_id = ? AND finalized = 1 AND id != ?", (guild_id, exclude_id))
+        else:
+            rows = await self.dbw.fetchall("SELECT id FROM files WHERE guild_id = ? AND finalized = 1", (guild_id,))
         if not rows:
             return None
         return random.choice(rows)[0]
 
-    # ------------------------------
-    # Likes system
-    # ------------------------------
+    # ---------------------------
+    # Likes
+    # ---------------------------
     async def has_liked(self, file_id: int, user_id: int) -> bool:
-        # check in-memory user cache if present
-        try:
-            if user_id in self.user_likes_cache:
-                return file_id in self.user_likes_cache[user_id]
-        except Exception:
-            pass
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute("SELECT 1 FROM likes WHERE file_id = ? AND user_id = ?", (file_id, user_id)) as cur:
-                r = await cur.fetchone()
-                return bool(r)
+        if user_id in self.user_likes_cache:
+            return file_id in self.user_likes_cache[user_id]
+        row = await self.dbw.fetchone("SELECT 1 FROM likes WHERE file_id = ? AND user_id = ?", (file_id, user_id))
+        return bool(row)
 
     async def get_like_count(self, file_id: int) -> int:
         if file_id in self.like_count_cache:
             return self.like_count_cache[file_id]
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute("SELECT COUNT(*) FROM likes WHERE file_id = ?", (file_id,)) as cur:
-                r = await cur.fetchone()
-                count = r[0] if r else 0
+        row = await self.dbw.fetchone("SELECT COUNT(*) FROM likes WHERE file_id = ?", (file_id,))
+        count = row[0] if row else 0
         self.like_count_cache[file_id] = count
         return count
 
     async def toggle_like(self, file_id: int, user_id: int) -> Tuple[bool, int]:
-        """
-        Toggle like for a user on a file.
-        Returns (is_now_liked, new_count)
-        Uses transaction to avoid race conditions.
-        """
-        async with aiosqlite.connect(self.db_path) as db:
-            try:
-                async with db.execute("SELECT 1 FROM likes WHERE file_id = ? AND user_id = ?", (file_id, user_id)) as cur:
-                    exists = await cur.fetchone()
-                if exists:
-                    await db.execute("DELETE FROM likes WHERE file_id = ? AND user_id = ?", (file_id, user_id))
-                    await db.commit()
-                    # update caches
-                    self.like_count_cache[file_id] = max(0, self.like_count_cache.get(file_id, 1) - 1)
-                    if user_id in self.user_likes_cache:
-                        self.user_likes_cache[user_id].discard(file_id)
-                    logger.info("[ALFiles] User %s unliked File #%s", user_id, file_id)
-                    return False, self.like_count_cache[file_id]
-                else:
-                    await db.execute("INSERT INTO likes (file_id, user_id) VALUES (?, ?)", (file_id, user_id))
-                    await db.commit()
-                    self.like_count_cache[file_id] = self.like_count_cache.get(file_id, 0) + 1
-                    if user_id not in self.user_likes_cache:
-                        self.user_likes_cache[user_id] = set()
-                    self.user_likes_cache[user_id].add(file_id)
-                    logger.info("[ALFiles] User %s liked File #%s", user_id, file_id)
-                    return True, self.like_count_cache[file_id]
-            except Exception:
-                logger.exception("toggle_like DB error")
-                # fallback count query
-                count = await self.get_like_count(file_id)
-                return False, count
+        # transaction-safe toggle
+        try:
+            exists = await self.dbw.fetchone("SELECT 1 FROM likes WHERE file_id = ? AND user_id = ?", (file_id, user_id))
+            if exists:
+                await self.dbw._execute("DELETE FROM likes WHERE file_id = ? AND user_id = ?", (file_id, user_id))
+                self.like_count_cache[file_id] = max(0, self.like_count_cache.get(file_id, 1) - 1)
+                if user_id in self.user_likes_cache:
+                    self.user_likes_cache[user_id].discard(file_id)
+                logger.info("User %s unliked File #%s", user_id, file_id)
+                return False, self.like_count_cache[file_id]
+            else:
+                await self.dbw._execute("INSERT INTO likes (file_id, user_id) VALUES (?, ?)", (file_id, user_id))
+                self.like_count_cache[file_id] = self.like_count_cache.get(file_id, 0) + 1
+                self.user_likes_cache.setdefault(user_id, set()).add(file_id)
+                logger.info("User %s liked File #%s", user_id, file_id)
+                return True, self.like_count_cache[file_id]
+        except Exception:
+            logger.exception("toggle_like failed")
+            cnt = await self.get_like_count(file_id)
+            return False, cnt
 
     async def get_top_liked(self, guild_id: Optional[int], limit: int = 10) -> List[Tuple[int, int]]:
-        async with aiosqlite.connect(self.db_path) as db:
-            if guild_id:
-                query = """
-                SELECT l.file_id, COUNT(l.user_id) as cnt
-                FROM likes l JOIN files f ON f.id = l.file_id
-                WHERE f.guild_id = ?
-                GROUP BY l.file_id
-                ORDER BY cnt DESC
-                LIMIT ?
-                """
-                async with db.execute(query, (guild_id, limit)) as cur:
-                    rows = await cur.fetchall()
-            else:
-                query = """
-                SELECT file_id, COUNT(user_id) as cnt
-                FROM likes
-                GROUP BY file_id
-                ORDER BY cnt DESC
-                LIMIT ?
-                """
-                async with db.execute(query, (limit,)) as cur:
-                    rows = await cur.fetchall()
+        if guild_id:
+            rows = await self.dbw.fetchall(
+                "SELECT l.file_id, COUNT(l.user_id) as cnt FROM likes l JOIN files f ON f.id = l.file_id WHERE f.guild_id = ? GROUP BY l.file_id ORDER BY cnt DESC LIMIT ?", (guild_id, limit)
+            )
+        else:
+            rows = await self.dbw.fetchall("SELECT file_id, COUNT(user_id) as cnt FROM likes GROUP BY file_id ORDER BY cnt DESC LIMIT ?", (limit,))
         return [(r[0], r[1]) for r in rows] if rows else []
 
     async def get_files_liked_by_user(self, user_id: int) -> List[Tuple[int, int]]:
-        """
-        Return list of (file_id, like_count) for files the user liked, ordered newest liked first.
-        """
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute("""
-                SELECT l.file_id, COUNT(x.user_id) as total
-                FROM likes l
-                LEFT JOIN likes x ON x.file_id = l.file_id
-                WHERE l.user_id = ?
-                GROUP BY l.file_id
-                ORDER BY l.created_at DESC
-                LIMIT 100
-            """, (user_id,)) as cur:
-                rows = await cur.fetchall()
+        rows = await self.dbw.fetchall("""
+            SELECT l.file_id, COUNT(x.user_id) as total
+            FROM likes l
+            LEFT JOIN likes x ON x.file_id = l.file_id
+            WHERE l.user_id = ?
+            GROUP BY l.file_id
+            ORDER BY l.created_at DESC
+            LIMIT 100
+        """, (user_id,))
         return [(r[0], r[1]) for r in rows] if rows else []
 
-    # ------------------------------
-    # Guided upload: accept up to 10 attachments or URLs in a single message
-    # ------------------------------
+    # ---------------------------
+    # Upload prompt & helper UI classes
+    # ---------------------------
     async def prompt_for_attachments(self, interaction: discord.Interaction, timeout: int = 60) -> Optional[List[str]]:
         user = interaction.user
         channel = interaction.channel
         try:
-            await interaction.followup.send(f"📤 Please upload up to {MAX_MULTI_UPLOAD} images in one message (attach them), or paste direct image URLs. You have {timeout}s.", ephemeral=True)
+            await interaction.followup.send(f"📤 Upload up to {MAX_MULTI_UPLOAD} images in one message (attach them) or paste image URLs. You have {timeout}s.", ephemeral=True)
         except Exception:
-            await interaction.response.send_message(f"📤 Please upload up to {MAX_MULTI_UPLOAD} images in one message (attach them), or paste direct image URLs. You have {timeout}s.", ephemeral=True)
+            await interaction.response.send_message(f"📤 Upload up to {MAX_MULTI_UPLOAD} images in one message (attach them) or paste image URLs. You have {timeout}s.", ephemeral=True)
 
-        def check(msg: discord.Message):
-            return msg.author.id == user.id and msg.channel.id == (channel.id if channel else None)
+        def check(m: discord.Message):
+            return m.author.id == user.id and m.channel.id == (channel.id if channel else None)
 
         try:
             msg = await self.bot.wait_for("message", timeout=timeout, check=check)
         except asyncio.TimeoutError:
             return None
 
-        urls: List[str] = []
+        urls = []
         for att in (msg.attachments or [])[:MAX_MULTI_UPLOAD]:
             try:
                 if att.content_type and att.content_type.startswith("image/"):
@@ -578,13 +578,12 @@ class ALFiles(commands.Cog):
             except Exception:
                 if is_valid_url(att.url):
                     urls.append(att.url)
-        tokens = (msg.content or "").split()
-        for t in tokens:
+        for t in (msg.content or "").split():
             if len(urls) >= MAX_MULTI_UPLOAD:
                 break
             if is_valid_url(t):
                 urls.append(t)
-        # dedupe and limit
+        # dedupe
         seen = set()
         out = []
         for u in urls:
@@ -595,23 +594,20 @@ class ALFiles(commands.Cog):
                 break
         return out if out else None
 
-    # ------------------------------
-    # Helper to fetch contributor avatar (discord)
-    # ------------------------------
     async def _get_discord_avatar(self, user_id: int) -> Optional[str]:
         try:
             user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
             if user:
                 return str(user.display_avatar.url)
         except Exception:
-            logger.debug("Failed to fetch avatar for user %s", user_id, exc_info=True)
+            logger.debug("Failed to fetch discord avatar for %s", user_id, exc_info=True)
         return None
 
-    # ------------------------------
-    # UI: Modals & Views
-    # ------------------------------
+    # ---------------------------
+    # UI classes
+    # ---------------------------
     class AddImageModal(discord.ui.Modal, title="Add Image URL"):
-        image_url = discord.ui.TextInput(label="Image URL (direct link)", required=False, placeholder="https://...")
+        image_url = discord.ui.TextInput(label="Image URL (direct)", required=False, placeholder="https://...")
 
         def __init__(self, cog, file_id: int):
             super().__init__()
@@ -620,17 +616,14 @@ class ALFiles(commands.Cog):
 
         async def on_submit(self, interaction: discord.Interaction):
             url = self.image_url.value.strip() if self.image_url.value else None
-            if not url:
-                await interaction.response.send_message("❌ No URL provided. Use the guided upload to attach files or paste a URL.", ephemeral=True)
-                return
-            if not is_valid_url(url):
-                await interaction.response.send_message("❌ That doesn't look like a valid URL.", ephemeral=True)
+            if not url or not is_valid_url(url):
+                await interaction.response.send_message("❌ Invalid or empty URL.", ephemeral=True)
                 return
             ok = await self.cog.add_image_to_draft(self.file_id, url)
             if ok:
-                await interaction.response.send_message("✅ Image added to your draft.", ephemeral=True)
+                await interaction.response.send_message("✅ Image added to draft.", ephemeral=True)
             else:
-                await interaction.response.send_message("❌ Failed to add image to draft.", ephemeral=True)
+                await interaction.response.send_message("❌ Failed to add image.", ephemeral=True)
 
     class EditMetaModal(discord.ui.Modal, title="Edit Title & Description"):
         title_input = discord.ui.TextInput(label="Title (optional)", required=False, max_length=200)
@@ -647,6 +640,37 @@ class ALFiles(commands.Cog):
             await self.cog.update_draft_meta(self.file_id, title, desc)
             await interaction.response.send_message("✅ Draft metadata updated.", ephemeral=True)
 
+    class AddMoreView(discord.ui.View):
+        def __init__(self, cog, file_id: int):
+            super().__init__(timeout=180)
+            self.cog = cog
+            self.file_id = file_id
+
+        @discord.ui.button(label="➕ Add (URL)", style=discord.ButtonStyle.primary)
+        async def add_url(self, inter: discord.Interaction, button: discord.ui.Button):
+            await inter.response.send_modal(ALFiles.AddImageModal(self.cog, self.file_id))
+
+        @discord.ui.button(label="📤 Upload Another (Guided)", style=discord.ButtonStyle.success)
+        async def guided_upload(self, inter: discord.Interaction, button: discord.ui.Button):
+            await inter.response.defer(ephemeral=True)
+            urls = await self.cog.prompt_for_attachments(inter)
+            if not urls:
+                await inter.followup.send("⌛ Timed out — no images received.", ephemeral=True)
+                return
+            added = 0
+            for url in urls:
+                if await self.cog.add_image_to_draft(self.file_id, url):
+                    added += 1
+            await inter.followup.send(f"✅ Added {added}/{len(urls)} image{'s' if added != 1 else ''} to your draft.", ephemeral=True)
+
+        @discord.ui.button(label="📝 Edit Title & Description", style=discord.ButtonStyle.secondary)
+        async def edit_meta(self, inter: discord.Interaction, button: discord.ui.Button):
+            await inter.response.send_modal(ALFiles.EditMetaModal(self.cog, self.file_id))
+
+        @discord.ui.button(label="Done", style=discord.ButtonStyle.success)
+        async def done(self, inter: discord.Interaction, button: discord.ui.Button):
+            await inter.response.send_message("Saved. Use `/al-release` to publish your draft when ready.", ephemeral=True)
+
     class ALReleaseConfirm(discord.ui.View):
         def __init__(self, cog, file_id: int):
             super().__init__(timeout=60)
@@ -655,43 +679,21 @@ class ALFiles(commands.Cog):
 
         @discord.ui.button(label="✅ Confirm Release", style=discord.ButtonStyle.success)
         async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-            # Only the owner should confirm
             info = await self.cog.get_file_info(self.file_id)
             if info:
                 _, _, _, _, _, _, _, _, owner_id, _, _, _ = info
                 if interaction.user.id != owner_id:
                     await interaction.response.send_message("❌ Only the draft owner can confirm release.", ephemeral=True)
                     return
-            await self.cog.finalize_file(self.file_id)
-            await interaction.response.edit_message(content=f"✅ File #{self.file_id} released successfully!", embed=None, view=None)
+            ok = await self.cog.finalize_file(self.file_id)
+            if ok:
+                await interaction.response.edit_message(content=f"✅ File #{self.file_id} released successfully!", embed=None, view=None)
+            else:
+                await interaction.response.send_message("❌ Failed to release file.", ephemeral=True)
 
         @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.danger)
         async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
             await interaction.response.edit_message(content="❌ Release cancelled.", embed=None, view=None)
-
-    class DeleteConfirmButton(discord.ui.Button):
-        def __init__(self, cog, file_id: int):
-            super().__init__(label="Delete File", style=discord.ButtonStyle.danger)
-            self.cog = cog
-            self.file_id = file_id
-
-        async def callback(self, interaction: discord.Interaction):
-            # verify owner or contributor
-            info = await self.cog.get_file_info(self.file_id)
-            if info:
-                _, _, _, _, _, _, _, contributor_id, owner_id, _, _, _ = info
-                if interaction.user.id not in (owner_id, contributor_id):
-                    await interaction.response.send_message("❌ Only the owner or contributor can delete this file.", ephemeral=True)
-                    return
-            await self.cog.delete_file(self.file_id)
-            await interaction.response.edit_message(content=f"🗑️ File #{self.file_id} has been deleted.", embed=None, view=None)
-
-    class CancelButton(discord.ui.Button):
-        def __init__(self):
-            super().__init__(label="Cancel", style=discord.ButtonStyle.secondary)
-
-        async def callback(self, interaction: discord.Interaction):
-            await interaction.response.edit_message(content="Cancelled.", embed=None, view=None)
 
     class DeleteSelect(discord.ui.Select):
         def __init__(self, cog, options: List[discord.SelectOption]):
@@ -714,11 +716,9 @@ class ALFiles(commands.Cog):
             anilist_name = display_name or anilist_username
             anilist_avatar = avatar_url
             anilist_url = siteUrl or al_link
+            valid_images = await self.cog._validate_and_fix_images_for_file(file_id)
             embed = discord.Embed(title=f"Delete Preview — File #{file_id}", description=desc or None, color=get_color())
-            if images:
-                # Validate first image to ensure visible
-                valid_images = await self.cog._validate_and_fix_images_for_file(file_id)
-                embed.set_image(url=valid_images[0])
+            embed.set_image(url=valid_images[0])
             if anilist_name and anilist_url:
                 embed.set_author(name=anilist_name, url=anilist_url, icon_url=anilist_avatar)
             else:
@@ -733,12 +733,23 @@ class ALFiles(commands.Cog):
             view.add_item(ALFiles.CancelButton())
             await interaction.response.edit_message(embed=embed, view=view)
 
-    class DeleteSelectView(discord.ui.View):
-        def __init__(self, cog, options: List[discord.SelectOption]):
-            super().__init__(timeout=120)
-            self.add_item(ALFiles.DeleteSelect(cog, options))
+    class DeleteConfirmButton(discord.ui.Button):
+        def __init__(self, cog, file_id: int):
+            super().__init__(label="Delete File", style=discord.ButtonStyle.danger)
+            self.cog = cog
+            self.file_id = file_id
 
-    # File Viewer with decorated buttons (Prev, Next, Random, Like)
+        async def callback(self, interaction: discord.Interaction):
+            info = await self.cog.get_file_info(self.file_id)
+            if info:
+                _, _, _, _, _, _, _, contributor_id, owner_id, owner_name, _, _ = info
+                if interaction.user.id not in (owner_id, contributor_id):
+                    await interaction.response.send_message("❌ Only the owner or contributor can delete this file.", ephemeral=True)
+                    return
+            await self.cog.delete_file(self.file_id)
+            await interaction.response.edit_message(content=f"🗑️ File #{self.file_id} has been deleted.", embed=None, view=None)
+
+    # FileView with decorated navigation + like
     class FileView(discord.ui.View):
         def __init__(self, cog, file_id: int, images: List[str], contributor_name: str, anilist_name: Optional[str], anilist_avatar: Optional[str], anilist_url: Optional[str], title: Optional[str], description: Optional[str], contributor_id: Optional[int], owner_id: Optional[int]):
             super().__init__(timeout=300)
@@ -754,10 +765,6 @@ class ALFiles(commands.Cog):
             self.description = description
             self.contributor_id = contributor_id
             self.owner_id = owner_id
-            # Like button will be added dynamically in on_timeout or when view constructed
-            # We'll create it here with placeholder label and replace/update later
-            self.like_btn = discord.ui.Button(label="💙 0", style=discord.ButtonStyle.blurple)
-            self.add_item(self.like_btn)
 
         async def _build_embed(self):
             embed = discord.Embed(title=self.title or f"📁 File #{self.file_id}", description=self.description or None, color=get_color())
@@ -777,20 +784,8 @@ class ALFiles(commands.Cog):
                 embed.set_footer(text=footer_text)
             return embed
 
-        async def on_timeout(self):
-            for i in self.children:
-                i.disabled = True
-            try:
-                # try edit the message to disable buttons
-                # Note: we cannot access the message object reliably from here; it's okay.
-                pass
-            except Exception:
-                pass
-
-        # We attach decorated buttons with callbacks below to have proper introspection
-
         @discord.ui.button(label="⬅️ Prev", style=discord.ButtonStyle.secondary)
-        async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def prev(self, interaction: discord.Interaction, button: discord.ui.Button):
             if not self.images:
                 await interaction.response.send_message("No images", ephemeral=True)
                 return
@@ -799,7 +794,7 @@ class ALFiles(commands.Cog):
             await interaction.response.edit_message(embed=embed, view=self)
 
         @discord.ui.button(label="➡️ Next", style=discord.ButtonStyle.secondary)
-        async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
             if not self.images:
                 await interaction.response.send_message("No images", ephemeral=True)
                 return
@@ -808,13 +803,13 @@ class ALFiles(commands.Cog):
             await interaction.response.edit_message(embed=embed, view=self)
 
         @discord.ui.button(label="🔀 Random", style=discord.ButtonStyle.primary)
-        async def random_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async def rand(self, interaction: discord.Interaction, button: discord.ui.Button):
             guild_id = interaction.guild.id if interaction.guild else 0
             new_id = await self.cog.get_random_file(guild_id=guild_id, exclude_id=self.file_id)
             if not new_id:
                 await interaction.response.send_message("No other files available!", ephemeral=True)
                 return
-            images = await self.cog._validate_and_fix_images_for_file(new_id)
+            valid_images = await self.cog._validate_and_fix_images_for_file(new_id)
             info = await self.cog.get_file_info(new_id)
             if not info:
                 await interaction.response.send_message("Failed to load file.", ephemeral=True)
@@ -824,111 +819,107 @@ class ALFiles(commands.Cog):
             anilist_name = display_name or anilist_username
             anilist_avatar = avatar_url
             anilist_url = siteUrl or al_link
-            new_view = ALFiles.FileView(self.cog, new_id, images, contributor_name, anilist_name, anilist_avatar, anilist_url, title, desc, contributor_id, owner_id)
-            # initialize like label and style for the invoking user
+            new_view = ALFiles.FileView(self.cog, new_id, valid_images, contributor_name, anilist_name, anilist_avatar, anilist_url, title, desc, contributor_id, owner_id)
             await new_view._refresh_like_button_for_user(interaction.user.id)
             embed = await new_view._build_embed()
             await interaction.response.edit_message(embed=embed, view=new_view)
 
-        # dynamic Like button handler/creator
+        # dynamic like button is added programmatically via method to allow per-user style
         async def _refresh_like_button_for_user(self, user_id: int):
-            """
-            Ensure like_btn label and style reflect current like count and whether 'user_id' has liked it.
-            """
+            # remove existing like button if present to avoid duplicates
+            for child in list(self.children):
+                if isinstance(child, discord.ui.Button) and child.label and child.label.startswith("💙"):
+                    try:
+                        self.remove_item(child)
+                    except Exception:
+                        pass
             count = await self.cog.get_like_count(self.file_id)
             liked = await self.cog.has_liked(self.file_id, user_id)
-            self.like_btn.label = f"💙 {count}"
-            # style: green if liked, blurple if neutral
-            if liked:
-                self.like_btn.style = discord.ButtonStyle.success  # green
-            else:
-                self.like_btn.style = discord.ButtonStyle.blurple  # blue-ish
-            # callback already bound to handler below (we assign via attribute)
-            # ensure callback set
-            self.like_btn.callback = self._on_like_pressed
-
-        async def _on_like_pressed(self, interaction: discord.Interaction):
-            user = interaction.user
-            last = self.cog.like_cooldowns.get(user.id, 0)
-            if time.time() - last < LIKE_TOGGLE_COOLDOWN:
-                await interaction.response.send_message(f"You're liking too fast — wait {LIKE_TOGGLE_COOLDOWN}s between toggles.", ephemeral=True)
-                return
-            self.cog.like_cooldowns[user.id] = time.time()
-            try:
-                is_now_liked, new_count = await self.cog.toggle_like(self.file_id, user.id)
-                # update button label & style
-                self.like_btn.label = f"💙 {new_count}"
-                if is_now_liked:
-                    self.like_btn.style = discord.ButtonStyle.success  # green
-                    await interaction.response.send_message("✅ You liked this file!", ephemeral=True)
-                else:
-                    # for unliked make it red briefly then neutral
-                    self.like_btn.style = discord.ButtonStyle.danger
-                    await interaction.response.send_message("💔 Like removed.", ephemeral=True)
-                    # set to blurple after small delay to indicate neutral
-                    await asyncio.sleep(0.25)
-                    self.like_btn.style = discord.ButtonStyle.blurple
-                # update displayed message
-                embed = await self._build_embed()
+            style = discord.ButtonStyle.success if liked else discord.ButtonStyle.blurple
+            like_btn = discord.ui.Button(label=f"💙 {count}", style=style)
+            async def like_callback(inter: discord.Interaction):
+                # cooldown
+                last = self.cog.like_cooldowns.get(inter.user.id, 0)
+                if time.time() - last < LIKE_TOGGLE_COOLDOWN:
+                    await inter.response.send_message(f"You're toggling too fast — wait {LIKE_TOGGLE_COOLDOWN}s.", ephemeral=True)
+                    return
+                self.cog.like_cooldowns[inter.user.id] = time.time()
                 try:
-                    await interaction.message.edit(embed=embed, view=self)
+                    now_liked, new_count = await self.cog.toggle_like(self.file_id, inter.user.id)
+                    like_btn.label = f"💙 {new_count}"
+                    if now_liked:
+                        like_btn.style = discord.ButtonStyle.success
+                        await inter.response.send_message("✅ You liked this file!", ephemeral=True)
+                    else:
+                        like_btn.style = discord.ButtonStyle.danger
+                        await inter.response.send_message("💔 Like removed.", ephemeral=True)
+                        await asyncio.sleep(0.2)
+                        like_btn.style = discord.ButtonStyle.blurple
+                    embed = await self._build_embed()
+                    try:
+                        await inter.message.edit(embed=embed, view=self)
+                    except Exception:
+                        pass
                 except Exception:
-                    # fallback: respond without editing
-                    pass
-            except Exception:
-                logger.exception("like toggle failed")
-                await interaction.response.send_message("❌ Failed to toggle like. Try again later.", ephemeral=True)
+                    logger.exception("Failed to toggle like")
+                    await inter.response.send_message("❌ Toggle failed.", ephemeral=True)
+            like_btn.callback = like_callback
+            # insert like button as first child
+            self.add_item(like_btn)
 
-    # ------------------------------
-    # Commands
-    # ------------------------------
-    # Scope choices for leaderboards and likes
+    # ---------------------------
+    # Slash commands
+    # ---------------------------
     SCOPE_CHOICES = [
         app_commands.Choice(name="🏠 Server", value="server"),
         app_commands.Choice(name="🌐 Global", value="global"),
     ]
 
     @app_commands.command(name="al-files", description="📁 View or contribute AL Files")
-    @app_commands.describe(upload="Attach an image (single). Use 'Upload Another (Guided)' to attach up to 10 images in the guided message.", as_user="(Optional) Credit this upload to another Discord user")
+    @app_commands.describe(upload="Attach an image (single). Use guided upload to add multiple.", as_user="(Optional) credit another Discord user as contributor")
     async def al_files(self, interaction: discord.Interaction, upload: Optional[discord.Attachment] = None, as_user: Optional[discord.User] = None):
         guild_id = interaction.guild.id if interaction.guild else 0
         owner = interaction.user
         contributor = as_user or owner
 
+
         if upload:
+            await interaction.response.defer(ephemeral=True, thinking=True)
+
             if not upload.content_type or not upload.content_type.startswith("image/"):
-                await interaction.response.send_message("❌ Please attach an image file (png/jpg/gif).", ephemeral=True)
+                await interaction.followup.send("❌ Please attach a valid image file.", ephemeral=True)
                 return
+
             draft = await self.get_draft(guild_id, owner.id)
             if not draft:
                 file_id = await self.create_draft(guild_id, owner, contributor)
             else:
                 file_id = draft[0]
-                # update contributor credit if it changed
-                async with aiosqlite.connect(self.db_path) as db:
-                    await db.execute("UPDATE files SET contributor_id = ?, contributor_name = ? WHERE id = ?", (contributor.id, str(contributor), file_id))
-                    await db.commit()
+                try:
+                    await self.dbw._execute("UPDATE files SET contributor_id = ?, contributor_name = ? WHERE id = ?", (contributor.id, str(contributor), file_id))
+                except Exception:
+                    logger.exception("Failed to update contributor info for draft")
+
             ok = await self.add_image_to_draft(file_id, upload.url)
             if not ok:
-                await interaction.response.send_message("❌ Failed to add image to draft.", ephemeral=True)
+                await interaction.followup.send("❌ Failed to add image to draft.", ephemeral=True)
                 return
+
             embed = discord.Embed(title=f"📁 Draft #{file_id}", description=f"Image added to draft (credited to {str(contributor)}).", color=get_color())
-            embed.add_field(name="Next", value="Use the buttons below to add more (URL) or attach multiple images in one message with 'Upload Another (Guided)'.", inline=False)
+            embed.add_field(name="Next", value="Use 'Add (URL)' to paste direct links or 'Upload Another (Guided)' to attach up to 10 images in one message.", inline=False)
             view = ALFiles.AddMoreView(self, file_id)
-            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
             return
 
-        # VIEW random finalized file
         await interaction.response.defer()
         rand_id = await self.get_random_file(guild_id=guild_id)
         if not rand_id:
             await interaction.followup.send("❌ No finalized files yet in this server.", ephemeral=True)
             return
-        # validate images to ensure they are still accessible
         images = await self._validate_and_fix_images_for_file(rand_id)
         info = await self.get_file_info(rand_id)
         if not info:
-            await interaction.followup.send("❌ Failed to load file metadata.", ephemeral=True)
+            await interaction.followup.send("❌ Failed to load file.", ephemeral=True)
             return
         contributor_name, anilist_username, anilist_id, al_link, title, desc, created_at, contributor_id, owner_id, owner_name, finalized, file_guild_id = info
         uid, display_name, avatar_url, siteUrl = await self._fetch_anilist_live(anilist_username, anilist_id)
@@ -936,8 +927,7 @@ class ALFiles(commands.Cog):
         anilist_avatar = avatar_url
         anilist_url = siteUrl or al_link
         embed = discord.Embed(title=title or f"📁 File #{rand_id}", description=desc or None, color=get_color())
-        if images:
-            embed.set_image(url=images[0])
+        embed.set_image(url=images[0])
         if anilist_name and anilist_url:
             embed.set_author(name=anilist_name, url=anilist_url, icon_url=anilist_avatar)
         else:
@@ -948,11 +938,10 @@ class ALFiles(commands.Cog):
         else:
             embed.set_footer(text=f"Contributed by {contributor_name}")
         view = ALFiles.FileView(self, rand_id, images, contributor_name, anilist_name, anilist_avatar, anilist_url, title, desc, contributor_id, owner_id)
-        # initialize like button label & style for the invoking user
         await view._refresh_like_button_for_user(interaction.user.id)
         await interaction.followup.send(embed=embed, view=view)
 
-    @app_commands.command(name="al-release", description="✅ Release your drafted AL file")
+    @app_commands.command(name="al-release", description="✅ Release your drafted AL file (confirm required)")
     async def al_release(self, interaction: discord.Interaction):
         guild_id = interaction.guild.id if interaction.guild else 0
         owner_id = interaction.user.id
@@ -965,7 +954,7 @@ class ALFiles(commands.Cog):
         if not images:
             await interaction.response.send_message("❌ Draft has no images!", ephemeral=True)
             return
-        # Attempt to refresh AniList info and persist
+        # refresh AniList info if possible
         try:
             info = await self.get_file_info(file_id)
             if info:
@@ -974,12 +963,9 @@ class ALFiles(commands.Cog):
                 uid, display_name, avatar_url, siteUrl = await self._fetch_anilist_live(anilist_username, anilist_id)
                 if uid or display_name or avatar_url or siteUrl:
                     al_link = siteUrl or (f"https://anilist.co/user/{anilist_username}" if anilist_username else None)
-                    async with aiosqlite.connect(self.db_path) as db:
-                        await db.execute("UPDATE files SET anilist_id = ?, anilist_username = ?, al_link = ? WHERE id = ?", (uid, display_name or anilist_username, al_link, file_id))
-                        await db.commit()
+                    await self.dbw._execute("UPDATE files SET anilist_id = ?, anilist_username = ?, al_link = ? WHERE id = ?", (uid, display_name or anilist_username, al_link, file_id))
         except Exception:
-            logger.debug("Non-fatal: failed to refresh AniList on release", exc_info=True)
-        # Validate images before asking for confirmation
+            logger.debug("Non-fatal: AniList refresh failed", exc_info=True)
         valid_images = await self._validate_and_fix_images_for_file(file_id)
         embed = discord.Embed(title=f"Confirm release — File #{file_id}", color=get_color())
         embed.set_image(url=valid_images[0])
@@ -999,7 +985,7 @@ class ALFiles(commands.Cog):
         for fid, finalized, created_at, image_count in files:
             options.append(discord.SelectOption(label=f"#{fid} • {image_count} img{'s' if image_count != 1 else ''}", value=str(fid), description="finalized" if finalized else "draft"))
         view = ALFiles.DeleteSelectView(self, options)
-        await interaction.followup.send("Select the file you want to delete:", view=view, ephemeral=True)
+        await interaction.followup.send("Select which file you want to delete:", view=view, ephemeral=True)
 
     @app_commands.command(name="al-lb", description="🏆 View contributors leaderboard (server/global)")
     @app_commands.choices(scope=SCOPE_CHOICES)
@@ -1007,28 +993,11 @@ class ALFiles(commands.Cog):
         await interaction.response.defer()
         guild_id = interaction.guild.id if interaction.guild else None
         if scope.value == "global":
-            query = """
-                SELECT contributor_name, COUNT(id) as total
-                FROM files WHERE finalized = 1
-                GROUP BY contributor_id
-                ORDER BY total DESC
-                LIMIT 25
-            """
+            rows = await self.dbw.fetchall("SELECT contributor_name, COUNT(id) as total FROM files WHERE finalized = 1 GROUP BY contributor_id ORDER BY total DESC LIMIT 25")
             title = "🏆 AL Contributors — Global"
-            params = ()
         else:
-            query = """
-                SELECT contributor_name, COUNT(id) as total
-                FROM files WHERE finalized = 1 AND guild_id = ?
-                GROUP BY contributor_id
-                ORDER BY total DESC
-                LIMIT 25
-            """
+            rows = await self.dbw.fetchall("SELECT contributor_name, COUNT(id) as total FROM files WHERE finalized = 1 AND guild_id = ? GROUP BY contributor_id ORDER BY total DESC LIMIT 25", (guild_id,))
             title = f"🏆 AL Contributors — Server: {interaction.guild.name if interaction.guild else 'DM'}"
-            params = (guild_id,)
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute(query, params) as cur:
-                rows = await cur.fetchall()
         if not rows:
             await interaction.followup.send("❌ No contributors yet for that scope.", ephemeral=True)
             return
@@ -1038,21 +1007,14 @@ class ALFiles(commands.Cog):
             medal = medals[i-1] if i <= 3 else f"#{i}"
             embed.add_field(name=f"{medal} {name}", value=f"📁 {count} file{'s' if count != 1 else ''}", inline=False)
         # totals
-        async with aiosqlite.connect(self.db_path) as db:
-            if scope.value == "global":
-                async with db.execute("SELECT COUNT(DISTINCT contributor_id) FROM files WHERE finalized = 1") as c:
-                    total_contrib = (await c.fetchone())[0]
-                async with db.execute("SELECT COUNT(id) FROM files WHERE finalized = 1") as c:
-                    total_files = (await c.fetchone())[0]
-                async with db.execute("SELECT COUNT(id) FROM images WHERE file_id IN (SELECT id FROM files WHERE finalized = 1)") as c:
-                    total_images = (await c.fetchone())[0]
-            else:
-                async with db.execute("SELECT COUNT(DISTINCT contributor_id) FROM files WHERE finalized = 1 AND guild_id = ?", (guild_id,)) as c:
-                    total_contrib = (await c.fetchone())[0]
-                async with db.execute("SELECT COUNT(id) FROM files WHERE finalized = 1 AND guild_id = ?", (guild_id,)) as c:
-                    total_files = (await c.fetchone())[0]
-                async with db.execute("SELECT COUNT(i.id) FROM images i JOIN files f ON f.id = i.file_id WHERE f.finalized = 1 AND f.guild_id = ?", (guild_id,)) as c:
-                    total_images = (await c.fetchone())[0]
+        if scope.value == "global":
+            total_contrib = (await self.dbw.fetchone("SELECT COUNT(DISTINCT contributor_id) FROM files"))[0]
+            total_files = (await self.dbw.fetchone("SELECT COUNT(id) FROM files"))[0]
+            total_images = (await self.dbw.fetchone("SELECT COUNT(id) FROM images WHERE file_id IN (SELECT id FROM files WHERE finalized = 1)"))[0]
+        else:
+            total_contrib = (await self.dbw.fetchone("SELECT COUNT(DISTINCT contributor_id) FROM files WHERE finalized = 1 AND guild_id = ?", (guild_id,)))[0]
+            total_files = (await self.dbw.fetchone("SELECT COUNT(id) FROM files WHERE finalized = 1 AND guild_id = ?", (guild_id,)))[0]
+            total_images = (await self.dbw.fetchone("SELECT COUNT(i.id) FROM images i JOIN files f ON f.id = i.file_id WHERE f.finalized = 1 AND f.guild_id = ?", (guild_id,)))[0]
         embed.set_footer(text=f"👥 {total_contrib} contributors • 📁 {total_files} files • 📸 {total_images} images")
         await interaction.followup.send(embed=embed)
 
@@ -1087,53 +1049,48 @@ class ALFiles(commands.Cog):
         if not liked:
             await interaction.followup.send("You haven't liked any files yet.", ephemeral=True)
             return
-        # paginate 5 per page if many
         per_page = 5
         pages = [liked[i:i+per_page] for i in range(0, len(liked), per_page)]
-        # show first page with buttons to navigate ephemeral (we'll supply simple navigation)
-        current_page = 0
+        current = 0
 
-        async def make_embed_for_page(page_idx: int):
-            page = pages[page_idx]
+        async def make_embed(page_idx: int):
             embed = discord.Embed(title=f"💾 Your liked files — page {page_idx+1}/{len(pages)}", color=get_color())
-            for fid, cnt in page:
+            for fid, cnt in pages[page_idx]:
                 info = await self.get_file_info(fid)
                 if not info:
                     embed.add_field(name=f"#{fid}", value=f"{cnt} likes — (metadata missing)", inline=False)
                     continue
                 contributor_name, anilist_username, anilist_id, al_link, title_text, description, created_at, contributor_id, owner_id, owner_name, finalized, file_guild_id = info
-                # small preview: embed field with title & contributor
                 embed.add_field(name=f"#{fid} — {title_text or '—'}", value=f"{contributor_name} • {cnt} like{'s' if cnt != 1 else ''}", inline=False)
             return embed
 
         view = discord.ui.View(timeout=120)
 
-        # nav buttons
         class Prev(discord.ui.Button):
             def __init__(self):
                 super().__init__(label="⬅️ Prev", style=discord.ButtonStyle.secondary)
             async def callback(_, inter: discord.Interaction):
-                nonlocal current_page
-                if current_page == 0:
+                nonlocal current
+                if current == 0:
                     await inter.response.send_message("You're on the first page.", ephemeral=True)
                     return
-                current_page -= 1
-                await inter.response.edit_message(embed=await make_embed_for_page(current_page), view=view)
+                current -= 1
+                await inter.response.edit_message(embed=await make_embed(current), view=view)
 
         class Next(discord.ui.Button):
             def __init__(self):
                 super().__init__(label="➡️ Next", style=discord.ButtonStyle.secondary)
             async def callback(_, inter: discord.Interaction):
-                nonlocal current_page
-                if current_page >= len(pages)-1:
+                nonlocal current
+                if current >= len(pages)-1:
                     await inter.response.send_message("You're on the last page.", ephemeral=True)
                     return
-                current_page += 1
-                await inter.response.edit_message(embed=await make_embed_for_page(current_page), view=view)
+                current += 1
+                await inter.response.edit_message(embed=await make_embed(current), view=view)
 
         view.add_item(Prev())
         view.add_item(Next())
-        await interaction.followup.send(embed=await make_embed_for_page(current_page), view=view, ephemeral=True)
+        await interaction.followup.send(embed=await make_embed(0), view=view, ephemeral=True)
 
     @app_commands.command(name="al-search", description="🔍 Search a file by number (ID)")
     @app_commands.describe(file_number="ID number of the file to search")
@@ -1143,7 +1100,6 @@ class ALFiles(commands.Cog):
         if not info:
             await interaction.followup.send(f"❌ No file found with ID #{file_number}.", ephemeral=True)
             return
-        # validate images
         images = await self._validate_and_fix_images_for_file(file_number)
         contributor_name, anilist_username, anilist_id, al_link, title, desc, created_at, contributor_id, owner_id, owner_name, finalized, file_guild_id = info
         uid, display_name, avatar_url, siteUrl = await self._fetch_anilist_live(anilist_username, anilist_id)
@@ -1151,8 +1107,7 @@ class ALFiles(commands.Cog):
         anilist_avatar = avatar_url
         anilist_url = siteUrl or al_link
         embed = discord.Embed(title=title or f"📁 File #{file_number}", description=desc or None, color=get_color())
-        if images:
-            embed.set_image(url=images[0])
+        embed.set_image(url=images[0])
         if anilist_name and anilist_url:
             embed.set_author(name=anilist_name, url=anilist_url, icon_url=anilist_avatar)
         else:
@@ -1179,52 +1134,28 @@ class ALFiles(commands.Cog):
         info = await self.get_file_info(file_id)
         title = info[4] if info else None
         desc = info[5] if info else None
-        embed = discord.Embed(title=f"📋 Draft #{file_id}", description=desc or "Your current draft", color=get_color())
+        embed = discord.Embed(title=f"📋 Draft #{file_id}", description=desc or "Your current draft file", color=get_color())
         embed.add_field(name="📸 Images", value=f"{len(images)} image{'s' if len(images) != 1 else ''}", inline=True)
         embed.add_field(name="✅ Status", value="Ready to release!" if images else "⚠️ No images yet", inline=True)
         if images:
             embed.set_thumbnail(url=images[0])
-            embed.add_field(name="📤 Next Step", value="Use `/al-release` to publish your file (confirm required).", inline=False)
+            embed.add_field(name="📤 Next Step", value="Use `/al-release` to publish your file! (You will be asked to confirm)", inline=False)
         else:
-            embed.add_field(name="📤 Next Step", value="Use `/al-files` with an attachment to add images!", inline=False)
+            embed.add_field(name="📤 Next Step", value="Use `/al-files upload:[image]` to add images!", inline=False)
         view = ALFiles.AddMoreView(self, file_id)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-    # ------------------------------
-    # Lifecycle hooks
-    # ------------------------------
+    # Lifecycle
     async def cog_load(self):
         await self.setup_db()
-        # Validate all images in DB on startup (non-blocking but we run in background)
         asyncio.create_task(self._validate_all_images_on_startup())
-        logger.info("[ALFiles] Cog loaded and DB ready")
+        logger.info("ALFiles cog loaded")
 
     async def cog_unload(self):
-        logger.info("[ALFiles] Cog unloading")
+        logger.info("ALFiles cog unloaded")
 
-    async def _validate_all_images_on_startup(self):
-        """
-        Validate images for all files at startup. This logs invalid images to console.
-        Runs asynchronously to avoid blocking startup for too long.
-        """
-        logger.info("[ALFiles] Starting image validation for existing files (background)...")
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                async with db.execute("SELECT id FROM files") as cur:
-                    rows = await cur.fetchall()
-                # Iterate but don't hog event loop
-                for (fid,) in rows:
-                    images = await self.get_file_images(fid)
-                    for url in images:
-                        ok = await self._validate_image_url(url)
-                        if not ok:
-                            logger.warning("[ALFiles] Startup check: File #%s image invalid/expired: %s", fid, url)
-                    await asyncio.sleep(0.01)  # small yield
-        except Exception:
-            logger.exception("[ALFiles] Error during startup image validation")
-        logger.info("[ALFiles] Image validation background task complete")
 
-# Entrypoint
+# setup
 async def setup(bot: commands.Bot):
     await bot.add_cog(ALFiles(bot))
     logger.info("ALFiles cog setup complete")
