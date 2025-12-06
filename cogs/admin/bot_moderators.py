@@ -377,21 +377,9 @@ class BotModerators(commands.Cog):
             if not await is_user_bot_moderator(ctx.author):
                 return
         except Exception:
-    @commands.command(name="adminmoderators")
-    async def moderators(self, ctx: commands.Context):
-        """Unified bot moderators management interface (prefix)
-        Usage: !adminmoderators
-        """
-        # Silent permission check A: only DB-listed users can run this
-        try:
-            if not await is_user_bot_moderator(ctx.author):
-                return
-        except Exception:
             return
 
-
         try:
-            logger.info(f"Bot moderators interface opened by {ctx.author.display_name} ({ctx.author.id})")
             logger.info(f"Bot moderators interface opened by {ctx.author.display_name} ({ctx.author.id})")
             
             embed = discord.Embed(
@@ -441,21 +429,10 @@ class BotModerators(commands.Cog):
                 await ctx.send(embed=embed)
             except Exception:
                 logger.exception("Failed to send error embed in channel")
-        
-            try:
-                await ctx.send(embed=embed)
-            except Exception:
-                logger.exception("Failed to send error embed in channel")
-        
+
 
 async def setup(bot):
     """Setup function for the cog"""
-    try:
-        await bot.add_cog(BotModerators(bot))
-        logger.info("BotModerators cog loaded successfully")
-    except Exception as e:
-        logger.error(f"BotModerators cog failed to load: {e}", exc_info=True)
-        raise
     try:
         await bot.add_cog(BotModerators(bot))
         logger.info("BotModerators cog loaded successfully")

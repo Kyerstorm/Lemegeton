@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Dict, Any
 
 # Project helpers 
-from cache_helper import load_json_cache, save_json_cache, is_json_cache_valid
+from helpers.cache_helper import load_json_cache, save_json_cache, is_json_cache_valid
 from database import execute_db_operation, is_user_bot_moderator
 try:
     import config
@@ -252,14 +252,14 @@ class LoliList(commands.Cog):
         self.session = aiohttp.ClientSession()
         self._active_sessions: Dict[int, Dict[str, Any]] = {}  # author_id -> session metadata
         asyncio.create_task(self._ensure_tables())
-        self.autobackup_task.start()
+        self.autobackup.start()
 
     def cog_unload(self):
         try:
             asyncio.create_task(self.session.close())
         except Exception:
             pass
-        self.autobackup_task.cancel()
+        self.autobackup.cancel()
 
     async def _ensure_tables(self):
         """

@@ -5,7 +5,7 @@ import re
 import logging
 import asyncio
 
-from anilist_helper import fetch_anilist_user_id
+from helpers.anilist_helper import fetch_anilist_user_id
 
 logger = logging.getLogger("ConvertLinks")
 
