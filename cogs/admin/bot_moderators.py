@@ -61,6 +61,10 @@ class BotModeratorsMainView(discord.ui.View):
         if not await is_user_bot_moderator(interaction.user):
             return
 
+        # Silent permission check (A): do nothing if user not in DB
+        if not await is_user_bot_moderator(interaction.user):
+            return
+
         await interaction.response.defer(ephemeral=True)
         
         try:
@@ -122,6 +126,10 @@ class BotModeratorsMainView(discord.ui.View):
         if not await is_user_bot_moderator(interaction.user):
             return
 
+        # Silent permission check
+        if not await is_user_bot_moderator(interaction.user):
+            return
+
         modal = AddBotModeratorModal(self.cog)
         await interaction.response.send_modal(modal)
     
@@ -132,12 +140,20 @@ class BotModeratorsMainView(discord.ui.View):
         if not await is_user_bot_moderator(interaction.user):
             return
 
+        # Silent permission check
+        if not await is_user_bot_moderator(interaction.user):
+            return
+
         modal = RemoveBotModeratorModal(self.cog)
         await interaction.response.send_modal(modal)
     
     @discord.ui.button(label="ℹ️ About Bot Moderators", style=discord.ButtonStyle.secondary, row=1)
     async def about_moderators(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Show information about bot moderators"""
+        # Silent permission check
+        if not await is_user_bot_moderator(interaction.user):
+            return
+
         # Silent permission check
         if not await is_user_bot_moderator(interaction.user):
             return
@@ -200,6 +216,10 @@ class AddBotModeratorModal(discord.ui.Modal):
     )
     
     async def on_submit(self, interaction: discord.Interaction):
+        # Silent permission check
+        if not await is_user_bot_moderator(interaction.user):
+            return
+
         # Silent permission check
         if not await is_user_bot_moderator(interaction.user):
             return
@@ -286,6 +306,10 @@ class RemoveBotModeratorModal(discord.ui.Modal):
         if not await is_user_bot_moderator(interaction.user):
             return
 
+        # Silent permission check
+        if not await is_user_bot_moderator(interaction.user):
+            return
+
         await interaction.response.defer(ephemeral=True)
         
         try:
@@ -337,6 +361,7 @@ class RemoveBotModeratorModal(discord.ui.Modal):
 
 class BotModerators(commands.Cog):
     """Unified bot moderators management interface (prefix)"""
+    """Unified bot moderators management interface (prefix)"""
     
     def __init__(self, bot):
         self.bot = bot
@@ -352,9 +377,21 @@ class BotModerators(commands.Cog):
             if not await is_user_bot_moderator(ctx.author):
                 return
         except Exception:
+    @commands.command(name="adminmoderators")
+    async def moderators(self, ctx: commands.Context):
+        """Unified bot moderators management interface (prefix)
+        Usage: !adminmoderators
+        """
+        # Silent permission check A: only DB-listed users can run this
+        try:
+            if not await is_user_bot_moderator(ctx.author):
+                return
+        except Exception:
             return
 
+
         try:
+            logger.info(f"Bot moderators interface opened by {ctx.author.display_name} ({ctx.author.id})")
             logger.info(f"Bot moderators interface opened by {ctx.author.display_name} ({ctx.author.id})")
             
             embed = discord.Embed(
@@ -405,9 +442,20 @@ class BotModerators(commands.Cog):
             except Exception:
                 logger.exception("Failed to send error embed in channel")
         
+            try:
+                await ctx.send(embed=embed)
+            except Exception:
+                logger.exception("Failed to send error embed in channel")
+        
 
 async def setup(bot):
     """Setup function for the cog"""
+    try:
+        await bot.add_cog(BotModerators(bot))
+        logger.info("BotModerators cog loaded successfully")
+    except Exception as e:
+        logger.error(f"BotModerators cog failed to load: {e}", exc_info=True)
+        raise
     try:
         await bot.add_cog(BotModerators(bot))
         logger.info("BotModerators cog loaded successfully")
