@@ -68,7 +68,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 BOT_ID = _int_env("BOT_ID")
 CLIENT_ID = _int_env("CLIENT_ID", BOT_ID)  # Application/Client ID (defaults to BOT_ID if not set)
 GUILD_ID = _int_env("GUILD_ID")
-CHANNEL_ID = _int_env("CHANNEL_ID")
+BOT_FEEDBACK_CHANNEL_ID = _int_env("BOT_FEEDBACK_CHANNEL_ID")
 ADMIN_DISCORD_ID = _int_env("ADMIN_DISCORD_ID")
 
 # Primary Guild ID for backwards compatibility
@@ -260,7 +260,7 @@ def get_config_summary():
 
 __all__ = [
     # Core
-    'TOKEN', 'BOT_ID', 'CLIENT_ID', 'GUILD_ID', 'CHANNEL_ID', 'ADMIN_DISCORD_ID',
+    'TOKEN', 'BOT_ID', 'CLIENT_ID', 'GUILD_ID', 'BOT_FEEDBACK_CHANNEL_ID', 'ADMIN_DISCORD_ID',
     'PRIMARY_GUILD_ID', 'MOD_ROLE_ID', 'BOT_UPDATE_ROLE_ID',
 
     # Monitoring

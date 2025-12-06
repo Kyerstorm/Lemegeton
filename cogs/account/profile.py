@@ -13,7 +13,7 @@ import json
 
 from database import (
     # Guild-aware functions (multi-guild support)
-    get_user_guild_aware, get_user_achievements_guild_aware,
+    get_user_guild_aware, get_user_any_guild, get_user_achievements_guild_aware,
     save_user_guild_aware, upsert_user_stats_guild_aware
 )
 from cogs_test.general_commands.dashboard import command_meta
@@ -596,15 +596,24 @@ class Profile(commands.Cog):
         # fetch AniList username from DB for this guild
         record = await get_user_guild_aware(target.id, guild_id)  # schema: (id, discord_id, guild_id, username, anilist_username, anilist_id, created_at, updated_at)
         if not record:
-            # Not registered → present registration
-            view = discord.ui.View()
-            view.add_item(RegisterButton(target.id, guild_id))
-            await interaction.followup.send(
-                f"❌ {target.mention} hasn’t registered an AniList username.\nClick below to register:",
-                view=view,
-                ephemeral=True if target.id == interaction.user.id else False
-            )
-            return
+            # Not registered in this guild - try finding in any guild (cross-server support)
+            logger.info(f"User {target.id} not found in guild {guild_id}, checking other guilds...")
+            record = await get_user_any_guild(target.id)
+            
+            if record:
+                # Found in another guild - use that registration
+                logger.info(f"Found user {target.id} in guild {record[2]}, using for profile display")
+            else:
+                # Not registered in any guild → present registration
+                logger.info(f"User {target.id} not found in any guild")
+                view = discord.ui.View()
+                view.add_item(RegisterButton(target.id, guild_id))
+                await interaction.followup.send(
+                    f"❌ {target.mention} hasn't registered an AniList username.\nClick below to register:",
+                    view=view,
+                    ephemeral=True if target.id == interaction.user.id else False
+                )
+                return
 
         username = record[4]  # anilist_username from guild-aware schema
 

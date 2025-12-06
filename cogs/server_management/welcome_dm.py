@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 
 from cogs_test.general_commands.dashboard import command_meta
+from helpers.embed_helper import build_error_embed, build_success_embed, build_info_embed
 
 logger = logging.getLogger("WelcomeDM")
 
@@ -32,7 +33,7 @@ class WelcomeDM(commands.Cog):
             else:
                 logger.info("Welcome DM JSON file already exists")
         except Exception as e:
-            logger.error(f"Failed to initialize welcome DM JSON file: {e}")
+            logger.error(f"Failed to initialize welcome DM JSON file: {e}", exc_info=True)
     
     def _load_data(self) -> Dict[str, Any]:
         """Load data from the JSON file."""
@@ -41,7 +42,7 @@ class WelcomeDM(commands.Cog):
                 return json.loads(self.data_file.read_text())
             return {}
         except Exception as e:
-            logger.error(f"Failed to load welcome DM data: {e}")
+            logger.error(f"Failed to load welcome DM data: {e}", exc_info=True)
             return {}
     
     def _save_data(self, data: Dict[str, Any]) -> bool:
@@ -50,7 +51,7 @@ class WelcomeDM(commands.Cog):
             self.data_file.write_text(json.dumps(data, indent=2))
             return True
         except Exception as e:
-            logger.error(f"Failed to save welcome DM data: {e}")
+            logger.error(f"Failed to save welcome DM data: {e}", exc_info=True)
             return False
     
     async def get_welcome_message(self, guild_id: int) -> Optional[str]:
@@ -62,7 +63,7 @@ class WelcomeDM(commands.Cog):
                 return guild_data.get("message_content")
             return None
         except Exception as e:
-            logger.error(f"Failed to get welcome message for guild {guild_id}: {e}")
+            logger.error(f"Failed to get welcome message for guild {guild_id}: {e}", exc_info=True)
             return None
     
     async def set_welcome_message(self, guild_id: int, message_content: str) -> bool:
@@ -88,7 +89,7 @@ class WelcomeDM(commands.Cog):
                 logger.info(f"Welcome message updated for guild {guild_id}")
             return success
         except Exception as e:
-            logger.error(f"Failed to set welcome message for guild {guild_id}: {e}")
+            logger.error(f"Failed to set welcome message for guild {guild_id}: {e}", exc_info=True)
             return False
     
     @commands.Cog.listener()
@@ -117,7 +118,7 @@ class WelcomeDM(commands.Cog):
         except discord.Forbidden:
             logger.warning(f"Could not send welcome DM to {member.display_name} - DMs disabled")
         except Exception as e:
-            logger.error(f"Failed to send welcome DM to {member.display_name}: {e}")
+            logger.error(f"Failed to send welcome DM to {member.display_name}: {e}", exc_info=True)
     
     @app_commands.command(
         name="set-welcome-dm",
@@ -133,7 +134,10 @@ class WelcomeDM(commands.Cog):
         # Check if user has administrator permissions
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message(
-                "❌ **Access Denied**\n\nYou need Administrator permissions to use this command.",
+                embed=build_error_embed(
+                    title="Access Denied",
+                    description="You need Administrator permissions to use this command."
+                ),
                 ephemeral=True
             )
             return
@@ -141,7 +145,10 @@ class WelcomeDM(commands.Cog):
         # Validate file type
         if not text_file.filename.lower().endswith('.txt'):
             await interaction.response.send_message(
-                "❌ **Invalid File Type**\n\nPlease upload a `.txt` file containing your welcome message.",
+                embed=build_error_embed(
+                    title="Invalid File Type",
+                    description="Please upload a `.txt` file containing your welcome message."
+                ),
                 ephemeral=True
             )
             return
@@ -149,7 +156,10 @@ class WelcomeDM(commands.Cog):
         # Check file size (limit to 1MB)
         if text_file.size > 1024 * 1024:  # 1MB
             await interaction.response.send_message(
-                "❌ **File Too Large**\n\nThe text file must be smaller than 1MB.",
+                embed=build_error_embed(
+                    title="File Too Large",
+                    description="The text file must be smaller than 1MB."
+                ),
                 ephemeral=True
             )
             return
@@ -164,7 +174,10 @@ class WelcomeDM(commands.Cog):
                         file_content = await response.text(encoding='utf-8')
                     else:
                         await interaction.followup.send(
-                            "❌ **Download Failed**\n\nCould not download the uploaded file.",
+                            embed=build_error_embed(
+                                title="Download Failed",
+                                description="Could not download the uploaded file."
+                            ),
                             ephemeral=True
                         )
                         return
@@ -172,14 +185,20 @@ class WelcomeDM(commands.Cog):
             # Validate content length
             if len(file_content.strip()) == 0:
                 await interaction.followup.send(
-                    "❌ **Empty File**\n\nThe uploaded text file is empty.",
+                    embed=build_error_embed(
+                        title="Empty File",
+                        description="The uploaded text file is empty."
+                    ),
                     ephemeral=True
                 )
                 return
             
             if len(file_content) > 2000:
                 await interaction.followup.send(
-                    "❌ **Message Too Long**\n\nThe welcome message must be 2000 characters or less for Discord DM limits.",
+                    embed=build_error_embed(
+                        title="Message Too Long",
+                        description="The welcome message must be 2000 characters or less for Discord DM limits."
+                    ),
                     ephemeral=True
                 )
                 return
@@ -194,34 +213,37 @@ class WelcomeDM(commands.Cog):
                 preview_content = preview_content.replace("{server}", interaction.guild.name)
                 preview_content = preview_content.replace("{mention}", "@NewUser")
                 
-                # Build the response message
-                response = (
-                    "✅ **Welcome DM Updated Successfully!**\n\n"
-                    "**Preview:**\n"
-                    f"{preview_content}\n\n"
-                    "**Available Placeholders:**\n"
-                    "• `{user}` - Member's display name\n"
-                    "• `{server}` - Server name\n"
-                    "• `{mention}` - Mention the user\n\n"
-                    "_New members will receive this message when they join the server._"
+                # Build the response embed
+                embed = build_success_embed(
+                    title="Welcome DM Updated Successfully",
+                    description=f"**Preview:**\n{preview_content}\n\n**Available Placeholders:**\n• `{{user}}` - Member's display name\n• `{{server}}` - Server name\n• `{{mention}}` - Mention the user\n\n_New members will receive this message when they join the server._"
                 )
                 
-                await interaction.followup.send(response, ephemeral=True)
+                await interaction.followup.send(embed=embed, ephemeral=True)
             else:
                 await interaction.followup.send(
-                    "❌ **Database Error**\n\nFailed to save the welcome message. Please try again.",
+                    embed=build_error_embed(
+                        title="Database Error",
+                        description="Failed to save the welcome message. Please try again."
+                    ),
                     ephemeral=True
                 )
                 
         except UnicodeDecodeError:
             await interaction.followup.send(
-                "❌ **Encoding Error**\n\nThe file must be a valid UTF-8 encoded text file.",
+                embed=build_error_embed(
+                    title="Encoding Error",
+                    description="The file must be a valid UTF-8 encoded text file."
+                ),
                 ephemeral=True
             )
         except Exception as e:
-            logger.error(f"Error processing welcome DM file upload: {e}")
+            logger.error(f"Error processing welcome DM file upload: {e}", exc_info=True)
             await interaction.followup.send(
-                "❌ **Unexpected Error**\n\nAn error occurred while processing your file. Please try again.",
+                embed=build_error_embed(
+                    title="Unexpected Error",
+                    description="An error occurred while processing your file. Please try again."
+                ),
                 ephemeral=True
             )
     
@@ -236,7 +258,10 @@ class WelcomeDM(commands.Cog):
         # Check if user has administrator permissions
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message(
-                "❌ **Access Denied**\n\nYou need Administrator permissions to use this command.",
+                embed=build_error_embed(
+                    title="Access Denied",
+                    description="You need Administrator permissions to use this command."
+                ),
                 ephemeral=True
             )
             return
@@ -250,26 +275,18 @@ class WelcomeDM(commands.Cog):
             preview_content = preview_content.replace("{server}", interaction.guild.name)
             preview_content = preview_content.replace("{mention}", "@NewUser")
             
-            # Build the response message
-            response = (
-                "📨 **Welcome DM Configuration**\n\n"
-                "Welcome DM is currently **enabled** for this server.\n\n"
-                "**Current Message:**\n"
-                f"{preview_content}\n\n"
-                "**Available Placeholders:**\n"
-                "• `{user}` - Member's display name\n"
-                "• `{server}` - Server name\n"
-                "• `{mention}` - Mention the user\n\n"
-                "_Use /set-welcome-dm to update the message._"
+            # Build the response embed
+            embed = build_info_embed(
+                title="Welcome DM Configuration",
+                description=f"Welcome DM is currently **enabled** for this server.\n\n**Current Message:**\n{preview_content}\n\n**Available Placeholders:**\n• `{{user}}` - Member's display name\n• `{{server}}` - Server name\n• `{{mention}}` - Mention the user\n\n_Use /set-welcome-dm to update the message._"
             )
         else:
-            response = (
-                "📨 **Welcome DM Configuration**\n\n"
-                "Welcome DM is currently **disabled** for this server.\n\n"
-                "Use `/set-welcome-dm` to configure a welcome message."
+            embed = build_info_embed(
+                title="Welcome DM Configuration",
+                description="Welcome DM is currently **disabled** for this server.\n\nUse `/set-welcome-dm` to configure a welcome message."
             )
         
-        await interaction.response.send_message(response, ephemeral=True)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

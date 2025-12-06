@@ -5,7 +5,6 @@ Consolidates bot moderator commands into a single interactive interface
 
 import discord
 from discord.ext import commands
-from discord import app_commands
 import logging
 from pathlib import Path
 
@@ -13,7 +12,6 @@ from database import (
     add_bot_moderator, remove_bot_moderator, get_all_bot_moderators,
     is_user_bot_moderator
 )
-from cogs_test.general_commands.dashboard import command_meta
 from helpers.text_helper import validate_discord_id, format_discord_timestamp
 from helpers.embed_helper import build_error_embed, build_success_embed, build_info_embed
 from helpers.utility_helper import fetch_user_safe
@@ -59,6 +57,10 @@ class BotModeratorsMainView(discord.ui.View):
     @discord.ui.button(label="👥 View Moderators", style=discord.ButtonStyle.primary, row=0)
     async def view_moderators(self, interaction: discord.Interaction, button: discord.ui.Button):
         """View all bot moderators"""
+        # Silent permission check (A): do nothing if user not in DB
+        if not await is_user_bot_moderator(interaction.user):
+            return
+
         await interaction.response.defer(ephemeral=True)
         
         try:
@@ -116,18 +118,30 @@ class BotModeratorsMainView(discord.ui.View):
     @discord.ui.button(label="➕ Add Moderator", style=discord.ButtonStyle.success, row=0)
     async def add_moderator(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Add a bot moderator"""
+        # Silent permission check
+        if not await is_user_bot_moderator(interaction.user):
+            return
+
         modal = AddBotModeratorModal(self.cog)
         await interaction.response.send_modal(modal)
     
     @discord.ui.button(label="➖ Remove Moderator", style=discord.ButtonStyle.danger, row=0)
     async def remove_moderator(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Remove a bot moderator"""
+        # Silent permission check
+        if not await is_user_bot_moderator(interaction.user):
+            return
+
         modal = RemoveBotModeratorModal(self.cog)
         await interaction.response.send_modal(modal)
     
     @discord.ui.button(label="ℹ️ About Bot Moderators", style=discord.ButtonStyle.secondary, row=1)
     async def about_moderators(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Show information about bot moderators"""
+        # Silent permission check
+        if not await is_user_bot_moderator(interaction.user):
+            return
+
         embed = build_info_embed(
             "About Bot Moderators",
             "Bot moderators have elevated permissions for bot-wide actions."
@@ -186,6 +200,10 @@ class AddBotModeratorModal(discord.ui.Modal):
     )
     
     async def on_submit(self, interaction: discord.Interaction):
+        # Silent permission check
+        if not await is_user_bot_moderator(interaction.user):
+            return
+
         await interaction.response.defer(ephemeral=True)
         
         try:
@@ -264,6 +282,10 @@ class RemoveBotModeratorModal(discord.ui.Modal):
     )
     
     async def on_submit(self, interaction: discord.Interaction):
+        # Silent permission check
+        if not await is_user_bot_moderator(interaction.user):
+            return
+
         await interaction.response.defer(ephemeral=True)
         
         try:
@@ -314,30 +336,26 @@ class RemoveBotModeratorModal(discord.ui.Modal):
 
 
 class BotModerators(commands.Cog):
-    """Unified bot moderators management interface"""
+    """Unified bot moderators management interface (prefix)"""
     
     def __init__(self, bot):
         self.bot = bot
         logger.info("BotModerators cog initialized")
     
-    @app_commands.command(name="admin-moderator-manage", description="👑 Manage bot moderators (bot-wide permissions)")
-    @command_meta(section="Admin", name="Moderator Management")
-    async def moderators(self, interaction: discord.Interaction):
-        """Unified bot moderators management interface"""
-        
-        # Check if user is admin or existing bot moderator
-        if not await is_user_bot_moderator(interaction.user):
-            await interaction.response.send_message(
-                "❌ **Access Denied**\n\n"
-                "Only bot administrators and existing moderators can manage bot moderators.\n\n"
-                "Bot moderators have **global permissions** across all servers. "
-                "If you need server-specific moderation, use `/server-config` instead.",
-                ephemeral=True
-            )
-            return
-        
+    @commands.command(name="adminmoderators")
+    async def moderators(self, ctx: commands.Context):
+        """Unified bot moderators management interface (prefix)
+        Usage: !adminmoderators
+        """
+        # Silent permission check A: only DB-listed users can run this
         try:
-            logger.info(f"Bot moderators interface opened by {interaction.user.display_name} ({interaction.user.id})")
+            if not await is_user_bot_moderator(ctx.author):
+                return
+        except Exception:
+            return
+
+        try:
+            logger.info(f"Bot moderators interface opened by {ctx.author.display_name} ({ctx.author.id})")
             
             embed = discord.Embed(
                 title="👑 Bot Moderators Management",
@@ -374,16 +392,25 @@ class BotModerators(commands.Cog):
             embed.set_footer(text="Bot Moderator System | Manage with care")
             
             view = BotModeratorsMainView(self)
-            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-            logger.info(f"Bot moderators main menu sent to {interaction.user.id}")
+            # send as ephemeral-like DM? Keep original behaviour: ephemeral if possible.
+            # Since prefix commands don't support ephemeral in channels, reply in-channel.
+            await ctx.send(embed=embed, view=view)
+            logger.info(f"Bot moderators main menu sent to {ctx.author.id}")
         
         except Exception as e:
             logger.error(f"Error in bot moderators command: {e}", exc_info=True)
             embed = build_error_embed("Error", "Failed to open bot moderators management. Please try again.")
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-
+            try:
+                await ctx.send(embed=embed)
+            except Exception:
+                logger.exception("Failed to send error embed in channel")
+        
 
 async def setup(bot):
     """Setup function for the cog"""
-    await bot.add_cog(BotModerators(bot))
-    logger.info("BotModerators cog loaded successfully")
+    try:
+        await bot.add_cog(BotModerators(bot))
+        logger.info("BotModerators cog loaded successfully")
+    except Exception as e:
+        logger.error(f"BotModerators cog failed to load: {e}", exc_info=True)
+        raise

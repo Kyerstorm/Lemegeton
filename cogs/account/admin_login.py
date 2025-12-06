@@ -1,10 +1,8 @@
 import discord
-from discord import app_commands
 from discord.ext import commands
 import logging
 from pathlib import Path
 from database import is_user_bot_moderator, get_user_guild_aware, register_user_guild_aware
-from cogs_test.general_commands.dashboard import command_meta
 from helpers.command_logger import log_command
 from helpers.anilist_helper import fetch_anilist_user_basic
 from helpers.text_helper import validate_anilist_username
@@ -42,28 +40,7 @@ logger.info("AdminLogin cog logging initialized")
 
 
 # ────────────────────────────────────────────────────────────────
-# Permission Check Function
-# ────────────────────────────────────────────────────────────────
-def mod_role_check():
-    """App command check that allows only bot moderators."""
-    async def predicate(interaction: discord.Interaction) -> bool:
-        # Only allow in a guild
-        if not interaction.guild:
-            return False
-
-        try:
-            # Only allow users registered as bot moderators via /admin-moderator-manage
-            is_bot_mod = await is_user_bot_moderator(interaction.user)
-            return bool(is_bot_mod)
-        except Exception:
-            logger.exception("Error checking bot moderator status")
-            return False
-
-    return app_commands.check(predicate)
-
-
-# ────────────────────────────────────────────────────────────────
-# Helper View for swapping AniList usernames
+# View for swapping AniList usernames
 # ────────────────────────────────────────────────────────────────
 class SwapAniListView(discord.ui.View):
     def __init__(self, cog, target_user: discord.Member, new_username: str, guild_id: int):
@@ -75,6 +52,10 @@ class SwapAniListView(discord.ui.View):
 
     @discord.ui.button(label="🔁 Swap AniList Username", style=discord.ButtonStyle.primary, emoji="🔁")
     async def swap_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Silent mod check
+        if not await is_user_bot_moderator(interaction.user):
+            return
+
         await interaction.response.defer(ephemeral=True)
         logger.info(f"Swap AniList username clicked by {interaction.user} for {self.target_user}")
 
@@ -110,31 +91,29 @@ class SwapAniListView(discord.ui.View):
 
 
 # ────────────────────────────────────────────────────────────────
-# Cog implementation
+# Cog Implementation
 # ────────────────────────────────────────────────────────────────
 class AdminLogin(commands.Cog):
-    """Aesthetic AniList login command (AniList only)."""
+    """Prefix-only AniList login command for bot moderators."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         logger.info("AdminLogin cog initialized")
 
+    # -------------------------
+    # Helpers
+    # -------------------------
     async def _is_valid_username(self, username: str) -> bool:
-        """Validate AniList username format."""
         return validate_anilist_username(username, max_length=MAX_USERNAME_LENGTH)
 
     async def _fetch_anilist_user(self, username: str):
-        """Fetch AniList user info using helper function."""
         logger.debug(f"Fetching AniList user data for {username}")
         return await fetch_anilist_user_basic(username)
 
     async def _get_existing_user(self, user_id: int, guild_id: int):
-        """Check if user is already registered in DB."""
         try:
             user = await get_user_guild_aware(user_id, guild_id)
             if user:
-                # Return (anilist_username, anilist_id) tuple for compatibility
-                # user tuple structure: (id, discord_id, guild_id, username, anilist_username, anilist_id, ...)
                 return (user[4], user[5]) if len(user) > 5 else (user[4], None)
             return None
         except Exception as e:
@@ -142,7 +121,6 @@ class AdminLogin(commands.Cog):
             return None
 
     async def _register_user(self, user_id: int, guild_id: int, discord_user: str, anilist_name: str, anilist_id: int):
-        """Register or update user info in the guild-aware DB."""
         try:
             await register_user_guild_aware(user_id, guild_id, discord_user, anilist_name, anilist_id)
             logger.info(f"Registered/updated AniList user {anilist_name} for {discord_user} ({user_id}) in guild {guild_id}")
@@ -150,100 +128,84 @@ class AdminLogin(commands.Cog):
             logger.error(f"Database error registering AniList user {discord_user}: {e}", exc_info=True)
             raise
 
-    @app_commands.command(
-        name="admin-login",
-        description="🔐 Link a Discord user with an AniList username."
-    )
-    @app_commands.describe(
-        discord_user="The Discord user to link.",
-        anilist_user="The AniList username to link."
-    )
-    @mod_role_check()
-    @command_meta(section="Account", name="Admin Login")
+    # ────────────────────────────────────────────────────────────────
+    # Admin Login Command
+    # ────────────────────────────────────────────────────────────────
+    @commands.command(name="adminlogin")
     @log_command
-    async def admin_login(self, interaction: discord.Interaction, discord_user: discord.Member, anilist_user: str):
-        """Link or update AniList account."""
-        try:
-            if not interaction.guild:
-                await interaction.response.send_message("❌ This command must be used in a server.", ephemeral=True)
-                return
+    async def admin_login_prefix(self, ctx: commands.Context, discord_user: discord.Member, *, anilist_user: str):
 
-            guild_id = interaction.guild.id
-            user_id = discord_user.id
-            anilist_user = anilist_user.strip()
+        # Silent mod check
+        if not await is_user_bot_moderator(ctx.author):
+            return
 
-            logger.info(f"Login command invoked by {interaction.user} → Target: {discord_user}, AniList: {anilist_user}")
+        guild = ctx.guild
+        if not guild:
+            await ctx.send("❌ This command must be used in a server.")
+            return
 
-            if not anilist_user or not await self._is_valid_username(anilist_user):
-                await interaction.response.send_message(
-                    "❌ Invalid AniList username. Only letters, numbers, underscores, and hyphens allowed.",
-                    ephemeral=True
-                )
-                return
+        guild_id = guild.id
+        user_id = discord_user.id
+        anilist_user = anilist_user.strip()
 
-            await interaction.response.defer(ephemeral=True)
+        logger.info(f"Prefix adminlogin invoked by {ctx.author} → Target: {discord_user}, AniList: {anilist_user}")
 
-            # Check if already registered
-            existing = await self._get_existing_user(user_id, guild_id)
-            if existing:
-                current_name = existing[0]
-                embed = discord.Embed(
-                    title="⚠️ AniList Already Linked",
-                    description=(
-                        f"**{discord_user.mention}** is already linked to AniList user **{current_name}**.\n\n"
-                        f"Would you like to swap to **{anilist_user}** instead?"
-                    ),
-                    color=discord.Color.gold()
-                )
-                embed.set_footer(text="You can update this connection safely.")
-                view = SwapAniListView(self, discord_user, anilist_user, guild_id)
-                await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-                return
+        # Validate username
+        if not anilist_user or not await self._is_valid_username(anilist_user):
+            await ctx.send("❌ Invalid AniList username. Only letters, numbers, underscores, and hyphens allowed.")
+            return
 
-            # Fetch AniList data
-            user_data = await self._fetch_anilist_user(anilist_user)
-            if not user_data:
-                embed = build_error_embed(
-                    "AniList Login Failed",
-                    f"Could not find AniList user **{anilist_user}**.\n\n"
-                    f"💡 Check the username is correct and exists on AniList."
-                )
-                await interaction.followup.send(embed=embed, ephemeral=True)
-                return
+        # Check existing
+        existing = await self._get_existing_user(user_id, guild_id)
+        if existing:
+            current_name = existing[0]
 
-            anilist_id = user_data["id"]
-            actual_name = user_data["name"]
-            avatar = user_data.get("avatar")
-
-            # Save or update DB record
-            await self._register_user(user_id, guild_id, str(discord_user), actual_name, anilist_id)
-
-            # Success embed — same aesthetic as login.py
             embed = discord.Embed(
-                title="🎉 AniList Login Successful",
+                title="⚠️ AniList Already Linked",
                 description=(
-                    f"Successfully linked **{discord_user.mention}** with AniList user "
-                    f"**{actual_name}** in **{interaction.guild.name}**!"
+                    f"**{discord_user.mention}** is already linked to AniList user **{current_name}**.\n\n"
+                    f"Would you like to swap to **{anilist_user}** instead?"
                 ),
-                color=discord.Color.blue()
+                color=discord.Color.gold()
             )
-            embed.add_field(name="Profile", value=f"[View AniList Profile](https://anilist.co/user/{actual_name})", inline=False)
-            embed.set_thumbnail(url=avatar)
-            embed.set_footer(text="Your AniList data is now connected. Enjoy the features!")
+            embed.set_footer(text="You can safely update this connection.")
 
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            view = SwapAniListView(self, discord_user, anilist_user, guild_id)
+            await ctx.send(embed=embed, view=view)
+            return
 
-        except discord.NotFound:
-            logger.error("Interaction expired before completion")
-        except Exception as e:
-            logger.error(f"Error during AniList login: {e}", exc_info=True)
-            try:
-                await interaction.followup.send(
-                    "❌ An unexpected error occurred. Please try again later.",
-                    ephemeral=True
-                )
-            except discord.NotFound:
-                pass  # Interaction already expired
+        # Fetch AniList data
+        user_data = await self._fetch_anilist_user(anilist_user)
+        if not user_data:
+            embed = build_error_embed(
+                "AniList Login Failed",
+                f"Could not find AniList user **{anilist_user}**."
+            )
+            await ctx.send(embed=embed)
+            return
+
+        anilist_id = user_data["id"]
+        actual_name = user_data["name"]
+        avatar = user_data.get("avatar")
+
+        # Register
+        await self._register_user(user_id, guild_id, str(discord_user), actual_name, anilist_id)
+
+        # Success embed
+        embed = discord.Embed(
+            title="🎉 AniList Login Successful",
+            description=(
+                f"Successfully linked **{discord_user.mention}** with AniList user "
+                f"**{actual_name}** in **{guild.name}**!"
+            ),
+            color=discord.Color.blue()
+        )
+
+        embed.add_field(name="Profile", value=f"[View AniList Profile](https://anilist.co/user/{actual_name})")
+        embed.set_thumbnail(url=avatar)
+        embed.set_footer(text="AniList account successfully connected!")
+
+        await ctx.send(embed=embed)
 
     async def cog_load(self):
         logger.info("AdminLogin cog loaded successfully")

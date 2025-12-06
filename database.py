@@ -406,6 +406,40 @@ async def get_user_guild_aware(discord_id: int, guild_id: int):
         logger.error(f"❌ Error retrieving user {discord_id}: {e}", exc_info=True)
         raise
 
+async def get_user_any_guild(discord_id: int):
+    """Get user by Discord ID from any guild (fallback for cross-server support).
+    
+    This is used when a user isn't registered in the current server but may be
+    registered in another server. Returns the first match found.
+    """
+    logger.debug(f"Retrieving user data for Discord ID: {discord_id} from any guild")
+    
+    try:
+        if not isinstance(discord_id, int) or discord_id <= 0:
+            raise ValueError(f"Invalid discord_id: {discord_id}")
+        
+        query = "SELECT * FROM users WHERE discord_id = ? LIMIT 1"
+        user = await execute_db_operation(
+            f"get user {discord_id} from any guild",
+            query,
+            (discord_id,),
+            fetch_type='one'
+        )
+        
+        if user:
+            logger.debug(f"✅ Found user: {user[3]} (ID: {user[0]}) in guild {user[2]}")  # username at index 3, guild_id at index 2
+        else:
+            logger.debug(f"No user found for Discord ID: {discord_id} in any guild")
+        
+        return user
+        
+    except ValueError as validation_error:
+        logger.error(f"Validation error getting user from any guild: {validation_error}")
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error getting user {discord_id} from any guild: {e}", exc_info=True)
+        raise
+
 async def get_all_users():
     """Get all users with comprehensive logging."""
     logger.debug("Retrieving all users from database")

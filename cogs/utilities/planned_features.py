@@ -1,11 +1,10 @@
 import discord
 from discord.ext import commands
-from discord import app_commands
 from typing import Optional, List
 import logging
 from datetime import datetime
 import database
-from cogs_test.general_commands.dashboard import command_meta
+from database import is_user_bot_moderator
 
 # Set up logging
 logger = logging.getLogger('planned_features')
@@ -210,22 +209,15 @@ class PlannedFeatures(commands.Cog):
             return False
     
     async def has_mod_permissions(self, interaction: discord.Interaction) -> bool:
-        """Check if user has moderator permissions"""
+        """
+        Unified permission check: DB-only bot moderators.
+        Returns True only if the user is present in the is_user_bot_moderator table.
+        """
         try:
-            from database import is_user_moderator
-            
-            if not interaction.guild:
-                return False
-                
-            # Check if user is guild owner
-            if interaction.user.id == interaction.guild.owner_id:
-                return True
-            
-            # Check using the database mod role system
-            return await is_user_moderator(interaction.user, interaction.guild.id)
-                
+            # Use the top-level import
+            return await is_user_bot_moderator(interaction.user)
         except Exception as e:
-            logger.error(f"Error checking mod permissions: {e}")
+            logger.error(f"Error checking mod permissions: {e}", exc_info=True)
             return False
     
     async def create_features_embed(self, page: int = 1, status_filter: Optional[str] = None, category_filter: Optional[str] = None) -> discord.Embed:
@@ -280,33 +272,15 @@ class PlannedFeatures(commands.Cog):
                     field_name = prefix + name[:max_name_length] + "..."
 
                 # Add status and category badges
-                metadata = f"\n{get_status_badge(status)} | {get_category_badge(category)}"
+                metadata = f"\n{get_status_badge(status)} • {get_category_badge(category)}"
 
-                # Format the date part
-                date_text = f"\n*Added: {added_date[:10] if len(added_date) >= 10 else added_date}*"
+                # Prepare field value with a short description
+                field_value = f"{description[:1000]}\n\n**Added:** {added_date}"
 
-                # Discord embed field value limit is 1024 characters
-                # Reserve space for metadata and date text
-                max_desc_length = 1024 - len(metadata) - len(date_text)
-
-                # Truncate description if needed
-                if len(description) > max_desc_length:
-                    description = description[:max_desc_length - 3] + "..."
-
-                embed.add_field(
-                    name=field_name,
-                    value=f"{description}{metadata}{date_text}",
-                    inline=False
-                )
-        else:
-            embed.add_field(
-                name="No Features",
-                value="No features match the selected filters.",
-                inline=False
-            )
+                embed.add_field(name=field_name, value=field_value + metadata, inline=False)
 
         # Add footer
-        embed.set_footer(text=f"Use /planned to view all features")
+        embed.set_footer(text=f"Use !planned to view all features")
 
         return embed
 
@@ -361,6 +335,9 @@ class PlannedFeatures(commands.Cog):
         @discord.ui.button(label="🔍 Filter", style=discord.ButtonStyle.blurple, row=1)
         async def filter_features(self, interaction: discord.Interaction, button: discord.ui.Button):
             """Show filter options"""
+            # Silent permission check
+            if not await is_user_bot_moderator(interaction.user):
+                return
             view = PlannedFeatures.FilterView(self.cog, self.current_page, self.status_filter, self.category_filter)
             await interaction.response.send_message(
                 "🔍 **Filter Features**\n\nSelect filters below:",
@@ -370,12 +347,8 @@ class PlannedFeatures(commands.Cog):
         
         @discord.ui.button(label="➕ Add Feature", style=discord.ButtonStyle.green, row=1)
         async def add_feature(self, interaction: discord.Interaction, button: discord.ui.Button):
-            # Check permissions
-            if not await self.cog.has_mod_permissions(interaction):
-                await interaction.response.send_message(
-                    "❌ **Permission Denied**\n\nYou need moderator permissions to add features.",
-                    ephemeral=True
-                )
+            # Silent permission check -> do nothing if user not in DB
+            if not await is_user_bot_moderator(interaction.user):
                 return
             
             # Show add feature modal
@@ -384,16 +357,13 @@ class PlannedFeatures(commands.Cog):
         
         @discord.ui.button(label="✏️ Edit Feature", style=discord.ButtonStyle.blurple, row=1)
         async def edit_feature(self, interaction: discord.Interaction, button: discord.ui.Button):
-            # Check permissions
-            if not await self.cog.has_mod_permissions(interaction):
-                await interaction.response.send_message(
-                    "❌ **Permission Denied**\n\nYou need moderator permissions to edit features.",
-                    ephemeral=True
-                )
+            # Silent permission check
+            if not await is_user_bot_moderator(interaction.user):
                 return
             
             features = await self.cog.get_planned_features('planned')
             if not features:
+                # No need to notify non-mods; but since the user is a mod (we passed above), we give ephemeral feedback
                 await interaction.response.send_message(
                     "❌ **No Features to Edit**\n\nThere are no planned features to edit.",
                     ephemeral=True
@@ -412,12 +382,8 @@ class PlannedFeatures(commands.Cog):
 
         @discord.ui.button(label="🗑️ Remove Feature", style=discord.ButtonStyle.red, row=1)
         async def remove_feature(self, interaction: discord.Interaction, button: discord.ui.Button):
-            # Check permissions
-            if not await self.cog.has_mod_permissions(interaction):
-                await interaction.response.send_message(
-                    "❌ **Permission Denied**\n\nYou need moderator permissions to remove features.",
-                    ephemeral=True
-                )
+            # Silent permission check
+            if not await is_user_bot_moderator(interaction.user):
                 return
             
             features = await self.cog.get_planned_features('planned')
@@ -428,7 +394,7 @@ class PlannedFeatures(commands.Cog):
                 )
                 return
             
-            # Show remove feature selection
+            # Show remove selection
             view = PlannedFeatures.RemoveFeatureView(self.cog, self.current_page)
             select = await view.create_and_add_select_menu()
             view.add_item(select)
@@ -440,97 +406,47 @@ class PlannedFeatures(commands.Cog):
 
     class FilterView(discord.ui.View):
         """View for filtering features by status and category"""
-
-        def __init__(self, cog, current_page: int, current_status_filter: Optional[str], current_category_filter: Optional[str]):
+        def __init__(self, cog, current_page: int = 1, status_filter: Optional[str] = None, category_filter: Optional[str] = None):
             super().__init__(timeout=300)
             self.cog = cog
             self.current_page = current_page
-            self.selected_status = current_status_filter
-            self.selected_category = current_category_filter
+            self.status_filter = status_filter
+            self.category_filter = category_filter
 
-            # Add status select menu
-            status_options = [discord.SelectOption(label="All Statuses", value="all", default=(current_status_filter is None))]
-            for status_key, config in STATUS_CONFIG.items():
-                status_options.append(
-                    discord.SelectOption(
-                        label=config['label'],
-                        value=status_key,
-                        emoji=config['emoji'],
-                        default=(current_status_filter == status_key)
-                    )
-                )
+            # Build selects now
+            status_options = [discord.SelectOption(label=v['label'], value=k) for k,v in STATUS_CONFIG.items()]
+            category_options = [discord.SelectOption(label=k, value=k) for k in CATEGORY_CONFIG.keys()]
 
-            self.status_select = discord.ui.Select(
-                placeholder="Filter by Status...",
-                options=status_options,
-                row=0
-            )
+            self.status_select = discord.ui.Select(placeholder="Status", min_values=1, max_values=1, options=status_options)
+            self.category_select = discord.ui.Select(placeholder="Category", min_values=1, max_values=1, options=category_options)
+
             self.status_select.callback = self.status_selected
-            self.add_item(self.status_select)
-
-            # Add category select menu
-            category_options = [discord.SelectOption(label="All Categories", value="all", default=(current_category_filter is None))]
-            for category, emoji in CATEGORY_CONFIG.items():
-                category_options.append(
-                    discord.SelectOption(
-                        label=category,
-                        value=category,
-                        emoji=emoji,
-                        default=(current_category_filter == category)
-                    )
-                )
-
-            self.category_select = discord.ui.Select(
-                placeholder="Filter by Category...",
-                options=category_options,
-                row=1
-            )
             self.category_select.callback = self.category_selected
+
+            self.add_item(self.status_select)
             self.add_item(self.category_select)
 
         async def status_selected(self, interaction: discord.Interaction):
-            """Handle status filter selection"""
-            selected = interaction.data['values'][0]
-            self.selected_status = None if selected == "all" else selected
-            await interaction.response.send_message(
-                f"✅ Status filter updated to: **{get_status_badge(self.selected_status) if self.selected_status else 'All Statuses'}**",
-                ephemeral=True
-            )
+            # Silent permission check (only mods can interact)
+            if not await is_user_bot_moderator(interaction.user):
+                return
+            selected = interaction.data.get('values', [None])[0]
+            self.status_filter = selected
+            embed = await self.cog.create_features_embed(self.current_page, status_filter=self.status_filter, category_filter=self.category_filter)
+            view = PlannedFeatures.FeatureView(self.cog, current_page=self.current_page, status_filter=self.status_filter, category_filter=self.category_filter)
+            await view.update_buttons()
+            await interaction.response.edit_message(embed=embed, view=view)
 
         async def category_selected(self, interaction: discord.Interaction):
-            """Handle category filter selection"""
-            selected = interaction.data['values'][0]
-            self.selected_category = None if selected == "all" else selected
-            await interaction.response.send_message(
-                f"✅ Category filter updated to: **{get_category_badge(self.selected_category) if self.selected_category else 'All Categories'}**",
-                ephemeral=True
-            )
-
-        @discord.ui.button(label="Apply Filters", style=discord.ButtonStyle.green, row=2)
-        async def apply_filters(self, interaction: discord.Interaction, button: discord.ui.Button):
-            """Apply the selected filters"""
-            # Create new embed with filters
-            embed = await self.cog.create_features_embed(1, self.selected_status, self.selected_category)
-            view = PlannedFeatures.FeatureView(self.cog, 1, self.selected_status, self.selected_category)
+            # Silent permission check
+            if not await is_user_bot_moderator(interaction.user):
+                return
+            selected = interaction.data.get('values', [None])[0]
+            self.category_filter = selected
+            embed = await self.cog.create_features_embed(self.current_page, status_filter=self.status_filter, category_filter=self.category_filter)
+            view = PlannedFeatures.FeatureView(self.cog, current_page=self.current_page, status_filter=self.status_filter, category_filter=self.category_filter)
             await view.update_buttons()
-
-            # Update the original message (need to get it from interaction)
-            await interaction.response.send_message(
-                "✅ Filters applied! Check the updated feature list.",
-                ephemeral=True
-            )
-
-        @discord.ui.button(label="Clear Filters", style=discord.ButtonStyle.secondary, row=2)
-        async def clear_filters(self, interaction: discord.Interaction, button: discord.ui.Button):
-            """Clear all filters"""
-            embed = await self.cog.create_features_embed(1, None, None)
-            view = PlannedFeatures.FeatureView(self.cog, 1, None, None)
-            await view.update_buttons()
-
-            await interaction.response.send_message(
-                "✅ All filters cleared!",
-                ephemeral=True
-            )
+            await interaction.response.edit_message(embed=embed, view=view)
 
     class AddFeatureModal(discord.ui.Modal):
         """Modal for adding a new planned feature"""
@@ -539,55 +455,45 @@ class PlannedFeatures(commands.Cog):
             super().__init__(title="Add Planned Feature")
             self.cog = cog
 
-        name = discord.ui.TextInput(
-            label="Feature Name",
-            placeholder="Enter the name of the planned feature...",
-            max_length=100,
-            required=True
-        )
+            self.name = discord.ui.TextInput(
+                label="Feature Name",
+                placeholder="Enter the name of the planned feature...",
+                max_length=100,
+                required=True
+            )
+            self.add_item(self.name)
 
-        description = discord.ui.TextInput(
-            label="Feature Description",
-            placeholder="Describe what this planned feature will do...",
-            style=discord.TextStyle.paragraph,
-            required=True
-        )
+            self.description = discord.ui.TextInput(
+                label="Feature Description",
+                placeholder="Describe what this planned feature will do...",
+                style=discord.TextStyle.paragraph,
+                required=True
+            )
+            self.add_item(self.description)
 
-        category = discord.ui.TextInput(
-            label="Category",
-            placeholder="Utilities | Anime/Manga | Gaming | Social | Server | Performance | Bug Fixes",
-            default="Utilities",
-            max_length=50,
-            required=False
-        )
+            self.category = discord.ui.TextInput(
+                label="Category",
+                placeholder="Utilities | Anime/Manga | Gaming | Social | Server | Performance | Bug Fixes",
+                max_length=50,
+                required=False
+            )
+            self.add_item(self.category)
 
-        status = discord.ui.TextInput(
-            label="Status",
-            placeholder="planned | in_progress | testing | completed | cancelled | on_hold",
-            default="planned",
-            max_length=20,
-            required=False
-        )
-        
+            self.status = discord.ui.TextInput(
+                label="Status",
+                placeholder="planned | in_progress | testing | completed | cancelled | on_hold",
+                max_length=20,
+                required=False
+            )
+            self.add_item(self.status)
+
         async def on_submit(self, interaction: discord.Interaction):
-            # Validate inputs
-            if len(self.name.value.strip()) == 0:
-                await interaction.response.send_message(
-                    "❌ **Invalid Name**\n\nFeature name cannot be empty.",
-                    ephemeral=True
-                )
+            # Silent permission check before processing modal submission
+            if not await is_user_bot_moderator(interaction.user):
                 return
 
-            if len(self.description.value.strip()) == 0:
-                await interaction.response.send_message(
-                    "❌ **Invalid Description**\n\nFeature description cannot be empty.",
-                    ephemeral=True
-                )
-                return
-
-            # Validate and normalize category
+            # Validate category
             category_input = self.category.value.strip() if self.category.value else "Utilities"
-            # Map common short forms to full category names
             category_map = {
                 'utilities': 'Utilities',
                 'anime': 'Anime/Manga Features',
@@ -599,8 +505,6 @@ class PlannedFeatures(commands.Cog):
                 'bug': 'Bug Fixes'
             }
             category = category_map.get(category_input.lower(), category_input)
-
-            # Validate category
             if category not in CATEGORY_CONFIG:
                 category = 'Utilities'  # Default to Utilities if invalid
 
@@ -694,12 +598,12 @@ class PlannedFeatures(commands.Cog):
                 name = feature.get('name', 'Unknown')
                 label = f"{i}. {name}"
                 if len(label) > 100:
-                    label = f"{i}. {name[:97 - len(str(i)) - 2]}..."
+                    label = f"{i}. {name[:97 - len(str(i)) - 2]}."
                 
                 # Safely truncate description to 100 chars (Discord limit)
                 desc = feature.get('description', '')
                 if len(desc) > 100:
-                    desc = desc[:97] + "..."
+                    desc = desc[:97] + "."
                 
                 options.append(
                     discord.SelectOption(
@@ -718,7 +622,7 @@ class PlannedFeatures(commands.Cog):
                 )
             
             select = discord.ui.Select(
-                placeholder="Select a feature to edit...",
+                placeholder="Select a feature to edit.",
                 min_values=1,
                 max_values=1,
                 options=options
@@ -728,6 +632,10 @@ class PlannedFeatures(commands.Cog):
         
         async def feature_selected(self, interaction: discord.Interaction):
             """Handle feature selection"""
+            # Silent permission check
+            if not await is_user_bot_moderator(interaction.user):
+                return
+
             feature_id = int(interaction.data['values'][0])
             
             # Get feature details
@@ -791,6 +699,10 @@ class PlannedFeatures(commands.Cog):
             self.add_item(self.status)
 
         async def on_submit(self, interaction: discord.Interaction):
+            # Silent permission check
+            if not await is_user_bot_moderator(interaction.user):
+                return
+
             # Validate and normalize category
             category_input = self.category.value.strip() if self.category.value else "Utilities"
             category_map = {
@@ -893,12 +805,12 @@ class PlannedFeatures(commands.Cog):
                 name = feature.get('name', 'Unknown')
                 label = f"{i}. {name}"
                 if len(label) > 100:
-                    label = f"{i}. {name[:97 - len(str(i)) - 2]}..."
+                    label = f"{i}. {name[:97 - len(str(i)) - 2]}."
                 
                 # Safely truncate description to 100 chars (Discord limit)
                 desc = feature.get('description', '')
                 if len(desc) > 100:
-                    desc = desc[:97] + "..."
+                    desc = desc[:97] + "."
                 
                 options.append(
                     discord.SelectOption(
@@ -917,7 +829,7 @@ class PlannedFeatures(commands.Cog):
                 )
             
             select = discord.ui.Select(
-                placeholder="Select a feature to remove...",
+                placeholder="Select a feature to remove.",
                 min_values=1,
                 max_values=1,
                 options=options
@@ -927,6 +839,10 @@ class PlannedFeatures(commands.Cog):
         
         async def feature_selected(self, interaction: discord.Interaction):
             """Handle feature selection"""
+            # Silent permission check
+            if not await is_user_bot_moderator(interaction.user):
+                return
+
             feature_id = int(interaction.data['values'][0])
             
             # Get feature details for confirmation
@@ -974,6 +890,10 @@ class PlannedFeatures(commands.Cog):
         
         @discord.ui.button(label="✅ Confirm Removal", style=discord.ButtonStyle.danger)
         async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+            # Silent permission check
+            if not await is_user_bot_moderator(interaction.user):
+                return
+
             # Remove from database
             success = await self.cog.delete_planned_feature(self.feature_id)
             
@@ -1010,38 +930,28 @@ class PlannedFeatures(commands.Cog):
                 view=None
             )
 
-    @app_commands.command(name="planned", description="View planned bot features")
-    @command_meta(section="Utilities", name="Planned Features")
-    async def planned(self, interaction: discord.Interaction):
-        """Display planned features"""
+    @commands.command(name="planned")
+    async def planned(self, ctx: commands.Context):
+        """
+        Prefix command version of the planned features viewer.
+        Only users listed in database.is_user_bot_moderator are allowed to use this command.
+        If the user is not a bot-moderator, the command silently returns (no message).
+        """
         try:
-            # Restrict viewing planned features to bot moderators only
+            # Permission gate: only bot moderators can use the command.
             try:
-                from database import is_user_bot_moderator
-                if not await is_user_bot_moderator(interaction.user):
-                    await interaction.response.send_message(
-                        "❌ **Access Denied**\n\nOnly bot moderators can view planned features.",
-                        ephemeral=True
-                    )
+                if not await is_user_bot_moderator(ctx.author):
+                    # Silent skip per your request
                     return
             except Exception:
-                # If the bot-moderator check fails for any reason, deny access conservatively
-                await interaction.response.send_message(
-                    "❌ **Access Denied**\n\nOnly bot moderators can view planned features.",
-                    ephemeral=True
-                )
+                # If the check fails for any reason, conservatively skip without message.
                 return
-            # Defer response first to prevent timeout
-            await interaction.response.defer()
 
             # Get all features (no filter by default, show everything)
             features = await self.get_planned_features()
 
             if not features:
-                await interaction.followup.send(
-                    "📝 **No Features**\n\nThere are currently no features in the system.",
-                    ephemeral=True
-                )
+                await ctx.send("📝 **No Features**\n\nThere are currently no features in the system.")
                 return
 
             # Create and send embed with view (no filters applied initially)
@@ -1049,23 +959,16 @@ class PlannedFeatures(commands.Cog):
             view = self.FeatureView(self, current_page=1, status_filter=None, category_filter=None)
             await view.update_buttons()
 
-            await interaction.followup.send(embed=embed, view=view)
-            logger.info(f"User {interaction.user.id} ({interaction.user.display_name}) viewed planned features")
+            await ctx.send(embed=embed, view=view)
+            logger.info(f"User {ctx.author.id} ({ctx.author.display_name}) viewed planned features (via prefix command)")
             
         except Exception as e:
-            logger.error(f"Error displaying planned features: {e}")
-            # Check if response was already deferred
-            if interaction.response.is_done():
-                await interaction.followup.send(
-                    "❌ **Error**\n\nFailed to load planned features. Please try again later.",
-                    ephemeral=True
-                )
-            else:
-                await interaction.response.send_message(
-                    "❌ **Error**\n\nFailed to load planned features. Please try again later.",
-                    ephemeral=True
-                )
-
+            logger.error(f"Error displaying planned features: {e}", exc_info=True)
+            try:
+                await ctx.send("❌ **Error**\n\nFailed to load planned features. Please try again later.")
+            except Exception:
+                # If sending fails, log and swallow
+                logger.exception("Failed to send error message to channel")
 
 async def setup(bot):
     await bot.add_cog(PlannedFeatures(bot))
