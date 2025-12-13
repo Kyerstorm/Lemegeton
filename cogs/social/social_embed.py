@@ -156,8 +156,8 @@ class EmbedCog(commands.Cog):
                 # Send the embed with interactive view
                 sent = await message.channel.send(embed=embed, view=game_view)
                 
-                # Optionally delete the original message to keep chat clean
-                # await message.delete()
+                # Delete the original message to keep chat clean
+                await message.delete()
                 
         except Exception as e:
             logger.error(f"Error processing Steam link {url}: {e}")
