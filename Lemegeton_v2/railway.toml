@@ -1,0 +1,10 @@
+[build]
+
+[deploy]
+startCommand = "python bot.py"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+[[deploy.volumes]]
+mountPath = "/app/data"
+name = "lemegeton-data"
