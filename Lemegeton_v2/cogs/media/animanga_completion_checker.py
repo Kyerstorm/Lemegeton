@@ -20,6 +20,7 @@ from database import (
 )
 from helpers.embed_helper import build_error_embed, build_success_embed, build_info_embed, build_warning_embed
 from helpers.anilist_helper import post_graphql
+from helpers.media_utils import media_error_handler
 
 # ---------------- Logging ----------------
 LOG_DIR = "logs"
@@ -366,6 +367,7 @@ class Finisher(commands.Cog):
     @mod_only()
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.command(name="set_animanga_completion_channel", description="Set channel to receive anime/manga updates (Mod only)")
+    @media_error_handler
     async def set_animanga_completion_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
         if interaction.guild is None:
             embed = build_info_embed(
@@ -418,6 +420,7 @@ class Finisher(commands.Cog):
     @mod_only()
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.command(name="show_manga_channel", description="Show currently configured manga update channel (Mod only)")
+    @media_error_handler
     async def show_manga_channel(self, interaction: discord.Interaction):
         if interaction.guild is None:
             embed = build_info_embed(

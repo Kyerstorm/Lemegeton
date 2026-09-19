@@ -8,10 +8,11 @@ import aiohttp
 from pathlib import Path
 from typing import List, Dict, Optional
 
-from helpers.media_helper import fetch_random_media
-from helpers.embed_helper import build_error_embed
+from helpers.media_helper import fetch_random_media, fetch_user_progress_and_rating
+from helpers.embed_helper import build_error_embed, build_media_search_result_embed
 from helpers.anilist_helper import post_graphql
-from database import get_all_users_guild_aware
+from helpers.media_utils import media_error_handler
+from database import get_all_users_guild_aware, get_anilist_username_from_row
 
 # ------------------------------------------------------
 # Logging Setup - Clears on each bot run
@@ -135,64 +136,6 @@ class Random(commands.Cog):
             logger.error(f"Error fetching detailed media info: {e}", exc_info=True)
             return None
 
-    async def fetch_user_anilist_progress(self, anilist_username: str, media_id: int, media_type: str) -> Optional[Dict]:
-        """Fetch AniList progress & rating for a user."""
-        if not anilist_username or not media_id:
-            return None
-
-        query = """
-        query($userName: String, $mediaId: Int, $type: MediaType) {
-            User(name: $userName) {
-                mediaListOptions {
-                    scoreFormat
-                }
-            }
-            MediaList(userName: $userName, mediaId: $mediaId, type: $type) {
-                progress
-                score
-            }
-        }
-        """
-        variables = {"userName": anilist_username, "mediaId": media_id, "type": media_type}
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                payload = await post_graphql(session, query, variables)
-                if payload is None:
-                    logger.warning(f"AniList fetch failed for {anilist_username=} {media_id=}")
-                    return None
-        except Exception as e:
-            logger.exception("Error requesting AniList user progress", exc_info=True)
-            return None
-
-        user_opts = payload.get("User", {}).get("mediaListOptions", {})
-        score_format = user_opts.get("scoreFormat", "POINT_100")
-
-        entry = payload.get("MediaList")
-        if not entry:
-            return None
-
-        progress = entry.get("progress")
-        score = entry.get("score")
-
-        # Normalize based on score format
-        rating10: Optional[float] = None
-        if score is not None:
-            try:
-                if score_format == "POINT_100":
-                    rating10 = round(score / 10.0, 1)
-                elif score_format in ("POINT_10", "POINT_10_DECIMAL"):
-                    rating10 = float(score)
-                elif score_format == "POINT_5":
-                    rating10 = round((score / 5) * 10, 1)
-                elif score_format == "POINT_3":
-                    mapping = {1: 3.0, 2: 6.0, 3: 9.0}
-                    rating10 = mapping.get(score, None)
-            except Exception:
-                rating10 = None
-
-        return {"progress": progress, "rating10": rating10}
-
     async def create_enhanced_embed(self, media_data: Dict, media_type: str) -> discord.Embed:
         """Create an enhanced embed with detailed media information."""
         # Format dates
@@ -214,45 +157,12 @@ class Random(commands.Cog):
                      media_data.get("title", {}).get("english") or 
                      media_data.get("title", {}).get("native") or "Unknown")
         
-        embed = discord.Embed(
-            title=f"{'🎬' if media_type=='ANIME' else '📖'} {title_name}",
-            url=media_data.get("siteUrl"),
-            description=description,
+        embed = build_media_search_result_embed(
+            media_data, media_type, description, genres, start_str, end_str,
+            title=title_name,
+            footer_text="🎲 Random suggestion from AniList",
             color=discord.Color(random.randint(0, 0xFFFFFF))
         )
-
-        # Set thumbnail and banner
-        cover_url = media_data.get("coverImage", {}).get("medium") or media_data.get("coverImage", {}).get("large")
-        if cover_url:
-            embed.set_thumbnail(url=cover_url)
-
-        banner_url = media_data.get("bannerImage")
-        if banner_url:
-            embed.set_image(url=banner_url)
-
-        # Add detailed fields
-        embed.add_field(name="⭐ Average Score", value=f"{media_data.get('averageScore', 'N/A')}%", inline=True)
-        embed.add_field(name="📌 Status", value=media_data.get("status", "Unknown"), inline=True)
-
-        if media_type == "ANIME":
-            embed.add_field(name="📺 Episodes", value=media_data.get("episodes", '?'), inline=True)
-        else:
-            embed.add_field(name="📖 Chapters", value=media_data.get("chapters", '?'), inline=True)
-            embed.add_field(name="📚 Volumes", value=media_data.get("volumes", '?'), inline=True)
-
-        embed.add_field(name="🎭 Genres", value=genres, inline=False)
-        embed.add_field(name="📅 Published", value=f"**Start:** {start_str}\n**End:** {end_str}", inline=False)
-
-        # Add MyAnimeList link if available
-        mal_link = None
-        for link in media_data.get("externalLinks", []):
-            if link.get("site") == "MyAnimeList":
-                mal_link = link.get("url")
-                break
-        if mal_link:
-            embed.add_field(name="🔗 MyAnimeList", value=f"[View on MAL]({mal_link})", inline=False)
-
-        embed.set_footer(text="🎲 Random suggestion from AniList")
         return embed
 
     async def create_progress_embed(self, media_data: Dict, media_type: str, guild_id: int) -> Optional[discord.Embed]:
@@ -266,27 +176,29 @@ class Random(commands.Cog):
         progress_lines.append("`{:-<20} {:-<10} {:-<7}`".format("", "", ""))
 
         has_progress = False
-        for user in users:
-            discord_name = user[1]  # Assuming: (discord_id, discord_name, anilist_username)
-            anilist_username = user[2] if len(user) > 2 else None
+        async with aiohttp.ClientSession() as session:
+            for user in users:
+                # Row shape: (id, discord_id, guild_id, username, anilist_username, anilist_id, ...)
+                discord_name = user[3] if len(user) >= 4 else str(user[1])
+                anilist_username = get_anilist_username_from_row(user)
 
-            if not anilist_username:
-                continue
+                if not anilist_username:
+                    continue
 
-            anilist_progress = await self.fetch_user_anilist_progress(
-                anilist_username, media_data.get("id", 0), media_type
-            )
+                anilist_progress = await fetch_user_progress_and_rating(
+                    session, anilist_username, media_data.get("id", 0), media_type
+                )
 
-            # Skip this user entirely if they don't have the anime/manga
-            if not anilist_progress:
-                continue
+                # Skip this user entirely if they don't have the anime/manga
+                if not anilist_progress:
+                    continue
 
-            has_progress = True
-            total = media_data.get("episodes") if media_type == "ANIME" else media_data.get("chapters")
-            progress_text = f"{anilist_progress['progress']}/{total or '?'}" if anilist_progress.get("progress") is not None else "—"
-            rating_text = f"{anilist_progress['rating10']}/10" if anilist_progress.get("rating10") is not None else "—"
+                has_progress = True
+                total = media_data.get("episodes") if media_type == "ANIME" else media_data.get("chapters")
+                progress_text = f"{anilist_progress['progress']}/{total or '?'}" if anilist_progress.get("progress") is not None else "—"
+                rating_text = f"{anilist_progress['rating10']}/10" if anilist_progress.get("rating10") is not None else "—"
 
-            progress_lines.append(f"`{discord_name:<20} {progress_text:<10} {rating_text:<7}`")
+                progress_lines.append(f"`{discord_name:<20} {progress_text:<10} {rating_text:<7}`")
 
         # Only build the embed if there's at least one valid user
         if not has_progress:
@@ -440,6 +352,7 @@ class Random(commands.Cog):
     )
     @app_commands.describe(media_type="Choose the type of media to get a random suggestion for")
     @app_commands.choices(media_type=MEDIA_TYPE_CHOICES)
+    @media_error_handler
     async def random_media(self, interaction: discord.Interaction, media_type: app_commands.Choice[str]) -> None:
         """Generate a random media suggestion from AniList.
         

@@ -7,9 +7,6 @@ python-dotenv==1.1.1
 PyYAML==6.0.2
 Pillow==12.1.1
 
-# Optional: Twitter/X scraping (snscrape). Install only if you plan to use cogs/news.py
-snscrape==0.7.0.20230622
-
 # Monitoring dependencies
 psutil==6.1.0
 

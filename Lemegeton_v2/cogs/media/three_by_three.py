@@ -15,6 +15,7 @@ import re
 from difflib import SequenceMatcher
 from helpers.embed_helper import build_error_embed, build_info_embed
 from helpers.anilist_helper import post_graphql
+from helpers.media_utils import media_error_handler
 
 # IGDB integration
 try:
@@ -545,7 +546,7 @@ class ThreeByThree(commands.Cog):
         if not PIL_AVAILABLE:
             logger.warning("PIL/Pillow not available - 3x3 generation will not work!")
     
-    async def fetch_media_by_id(self, session: aiohttp.ClientSession, media_id: int, media_type: str) -> Optional[Dict]:
+    async def fetch_media_cover_cached(self, session: aiohttp.ClientSession, media_id: int, media_type: str) -> Optional[Dict]:
         """
         Fetch media information and cover image from AniList using ID (with caching)
         
@@ -833,7 +834,7 @@ class ThreeByThree(commands.Cog):
             else:
                 # Fetch AniList covers
                 for media_id in media_ids:
-                    data = await self.fetch_media_by_id(session, media_id, media_type)
+                    data = await self.fetch_media_cover_cached(session, media_id, media_type)
                     media_data.append(data)
         
         # Check if we got at least some covers
@@ -883,7 +884,8 @@ class ThreeByThree(commands.Cog):
                         # Draw "Not Found" text
                         try:
                             font = ImageFont.truetype("arial.ttf", 20)
-                        except:
+                        except OSError:
+                            logger.debug("arial.ttf not available, using default font")
                             font = ImageFont.load_default()
                         
                         text = "Not Found"
@@ -902,7 +904,8 @@ class ThreeByThree(commands.Cog):
                     url_text = urls[idx][:30] if idx < len(urls) else "Unknown"
                     try:
                         font = ImageFont.truetype("arial.ttf", 16)
-                    except:
+                    except OSError:
+                        logger.debug("arial.ttf not available, using default font")
                         font = ImageFont.load_default()
                     
                     # Multi-line text for long URLs
@@ -952,6 +955,7 @@ class ThreeByThree(commands.Cog):
         app_commands.Choice(name="Character", value="character"),
         app_commands.Choice(name="Games", value="games")
     ])
+    @media_error_handler
     async def three_by_three(self, interaction: discord.Interaction, media_type: app_commands.Choice[str]):
         """Create a 3x3 grid of anime/manga covers or character images"""
         

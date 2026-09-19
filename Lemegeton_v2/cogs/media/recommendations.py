@@ -9,8 +9,10 @@ from typing import Dict, List, Optional, Tuple
 import json
 from datetime import datetime, timedelta
 import time
-from helpers.embed_helper import build_error_embed, build_warning_embed, build_info_embed, build_success_embed
+from helpers.embed_helper import build_error_embed, build_warning_embed, build_info_embed, build_success_embed, build_recommendation_result_embed
 from helpers.anilist_helper import post_graphql
+from helpers.media_utils import media_error_handler
+from database import get_user_guild_aware, get_anilist_username_from_row
 
 # ------------------------------------------------------
 # RECOMMENDATIONS COG LOGGING SETUP
@@ -301,77 +303,14 @@ class RecommendationsView(discord.ui.View):
         rec = current_recs[self.current_index]
         media = rec['media']
         vote_count = rec['vote_count']
-        
-        # Get title
-        title = media['title']['english'] or media['title']['romaji']
-        
-        # Create embed similar to browse.py
-        embed = discord.Embed(
-            title=f"📖 {title}",
-            url=f"https://anilist.co/manga/{media['id']}",
-            description=truncate_description(media.get('description', ''), 300),
-            color=discord.Color.blue()
-        )
-        
-        # Set thumbnail if available
-        cover_url = media.get('coverImage', {}).get('large')
-        if cover_url:
-            embed.set_thumbnail(url=cover_url)
-        
-        # Add fields similar to browse.py
-        embed.add_field(
-            name="⭐ Average Score", 
-            value=f"{media.get('averageScore', 'N/A')}%" if media.get('averageScore') else "N/A", 
-            inline=True
-        )
-        
-        embed.add_field(
-            name="📌 Status", 
-            value=media.get('status', 'Unknown').replace('_', ' ').title(), 
-            inline=True
-        )
-        
-        embed.add_field(
-            name="👥 Recommendation Votes", 
-            value=f"{vote_count} votes", 
-            inline=True
-        )
-        
-        # Chapters and volumes
-        if media.get('chapters'):
-            embed.add_field(name="📖 Chapters", value=media.get('chapters', '?'), inline=True)
-        if media.get('volumes'):
-            embed.add_field(name="📚 Volumes", value=media.get('volumes', '?'), inline=True)
-        
-        # Format
-        format_type = media.get('format', '').replace('_', ' ').title()
-        if format_type:
-            embed.add_field(name="📋 Format", value=format_type, inline=True)
-        
-        # Genres
-        genres = media.get('genres', [])
-        if genres:
-            genre_text = ', '.join(genres[:5])  # Limit to 5 genres
-            if len(genres) > 5:
-                genre_text += f" +{len(genres) - 5} more"
-            embed.add_field(name="� Genres", value=genre_text, inline=False)
-        
-        # Start date
-        start_date = media.get('startDate', {})
-        if start_date and start_date.get('year'):
-            embed.add_field(
-                name="📅 Start Date", 
-                value=f"{start_date.get('year', '?')}", 
-                inline=True
-            )
-        
-        # Footer with page info
         total_recs = len(current_recs)
-        embed.set_footer(
-            text=f"{self.current_category.title()} Recommendation {self.current_index + 1}/{total_recs} • Recommended for {self.username}",
-            icon_url="https://anilist.co/img/icons/android-chrome-512x512.png"
+
+        embed = build_recommendation_result_embed(
+            media, vote_count, self.current_category, self.current_index, total_recs, self.username,
+            description=truncate_description(media.get('description', ''), 300)
         )
-        
+
+        title = media['title']['english'] or media['title']['romaji']
         logger.info(f"Created embed for {title} (index {self.current_index}/{total_recs})")
         return embed
 
@@ -403,8 +342,10 @@ class RecommendationsView(discord.ui.View):
                     "An error occurred while switching categories. Please try again."
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
-            except:
-                pass
+            except discord.NotFound:
+                logger.error("Interaction expired while sending manga_button_callback error")
+            except Exception as followup_error:
+                logger.warning(f"Failed to send manga_button_callback error message: {followup_error}")
 
     async def manhwa_button_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id:
@@ -434,8 +375,10 @@ class RecommendationsView(discord.ui.View):
                     "An error occurred while switching categories. Please try again."
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
-            except:
-                pass
+            except discord.NotFound:
+                logger.error("Interaction expired while sending manhwa_button_callback error")
+            except Exception as followup_error:
+                logger.warning(f"Failed to send manhwa_button_callback error message: {followup_error}")
 
     async def manhua_button_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id:
@@ -465,8 +408,10 @@ class RecommendationsView(discord.ui.View):
                     "An error occurred while switching categories. Please try again."
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
-            except:
-                pass
+            except discord.NotFound:
+                logger.error("Interaction expired while sending manhua_button_callback error")
+            except Exception as followup_error:
+                logger.warning(f"Failed to send manhua_button_callback error message: {followup_error}")
 
     async def previous_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id:
@@ -496,8 +441,10 @@ class RecommendationsView(discord.ui.View):
                     "An error occurred while navigating. Please try again."
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
-            except:
-                pass
+            except discord.NotFound:
+                logger.error("Interaction expired while sending previous_callback error")
+            except Exception as followup_error:
+                logger.warning(f"Failed to send previous_callback error message: {followup_error}")
 
     async def next_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id:
@@ -528,8 +475,10 @@ class RecommendationsView(discord.ui.View):
                     "An error occurred while navigating. Please try again."
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
-            except:
-                pass
+            except discord.NotFound:
+                logger.error("Interaction expired while sending next_callback error")
+            except Exception as followup_error:
+                logger.warning(f"Failed to send next_callback error message: {followup_error}")
 
     async def on_timeout(self):
         """Handle view timeout."""
@@ -726,6 +675,7 @@ class RecommendationsCog(commands.Cog):
 
     @app_commands.command(name="recommendations", description="Get personalized manga recommendations based on your highly-rated library")
     @app_commands.describe(username="AniList username (optional, uses your linked account if not provided)")
+    @media_error_handler
     async def recommendations(self, interaction: discord.Interaction, username: Optional[str] = None):
         """Generate personalized manga recommendations."""
         logger.info(f"Recommendations command triggered by user {interaction.user.id}")
@@ -736,15 +686,10 @@ class RecommendationsCog(commands.Cog):
         try:
             # Get username
             if not username:
-                # Import database functions to get linked username
+                # Get linked username from the database
                 try:
-                    import sys
-                    import os
-                    sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-                    from database import get_user_guild_aware
-                    
                     user_data = await get_user_guild_aware(interaction.user.id, interaction.guild_id)
-                    db_username = user_data[4] if user_data else None  # anilist_username is at index 4
+                    db_username = get_anilist_username_from_row(user_data)
                     if not db_username:
                         embed = build_error_embed(
                             "No Username Found",

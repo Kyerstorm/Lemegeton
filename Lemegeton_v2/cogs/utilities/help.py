@@ -103,18 +103,6 @@ class HelpCog(commands.Cog):
                     "note": "Generate shareable 3x3 grids with custom selections. Supports anime, manga, characters, and games. Fetches covers/images from AniList automatically.",
                     "examples": ["/3x3 anime", "/3x3 manga", "/3x3 character", "/3x3 games"]
                 },
-                "news": {
-                    "desc": "Manage Twitter/X news monitoring for anime/manga updates",
-                    "usage": "/news",
-                    "note": "Monitor Twitter accounts for anime/manga news. Bot Moderator only.",
-                    "examples": ["/news"]
-                },
-                "test-twitter-scrape": {
-                    "desc": "Test Twitter scraping for debugging",
-                    "usage": "/test-twitter-scrape <username>",
-                    "note": "Debug command to test Twitter/X scraping functionality. Bot Moderator only.",
-                    "examples": ["/test-twitter-scrape username"]
-                },
                 "set_animanga_completion_channel": {
                     "desc": "Set channel to receive anime/manga completion updates (Mod only)",
                     "usage": "/set_animanga_completion_channel <channel>",
@@ -647,7 +635,6 @@ class HelpCog(commands.Cog):
                 "• Recommendations use advanced AI filtering for quality results\n"
                 "• Rate titles 8.0+ for best recommendation accuracy\n"
                 "• Browse supports advanced filtering by genre, year, format\n"
-                "• News monitoring tracks Twitter/X accounts for updates (Bot Moderator only)\n"
                 "• Use `/trailer` to watch official trailers before starting a series\n"
                 "• Try `/random all` to discover completely random suggestions\n"
                 "• Create shareable 3x3 grids with `/3x3`"

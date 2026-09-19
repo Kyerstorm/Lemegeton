@@ -117,7 +117,6 @@ class WelcomeMessage(commands.Cog):
 • **AI Recommendations**: Get personalized suggestions based on your tastes
 • **Steam Integration**: Game recommendations and free game notifications
 • **Challenge System**: Create reading challenges for your community
-• **News Monitoring**: Stay updated with anime/manga news
                 """,
                 inline=False
             )

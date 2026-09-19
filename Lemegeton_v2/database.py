@@ -406,6 +406,22 @@ async def get_user_guild_aware(discord_id: int, guild_id: int):
         logger.error(f"❌ Error retrieving user {discord_id}: {e}", exc_info=True)
         raise
 
+
+def get_anilist_username_from_row(user_row) -> Optional[str]:
+    """
+    Extract anilist_username from a raw `users` table row.
+
+    Both get_user_guild_aware() (SELECT *) and get_all_users_guild_aware()
+    (explicit column list) agree on column order:
+    (id, discord_id, guild_id, username, anilist_username, anilist_id, created_at, updated_at)
+    — anilist_username is always at index 4. Consolidated from three separate
+    magic-number `row[4]` call sites in cogs/media/.
+    """
+    if not user_row or len(user_row) < 5:
+        return None
+    return user_row[4]
+
+
 async def get_user_any_guild(discord_id: int):
     """Get user by Discord ID from any guild (fallback for cross-server support).
     

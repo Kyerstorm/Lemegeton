@@ -106,6 +106,95 @@ async def fetch_user_progress(session: aiohttp.ClientSession, username: str, med
     return None
 
 
+async def fetch_user_progress_and_rating(
+    session: aiohttp.ClientSession,
+    anilist_username: str,
+    media_id: int,
+    media_type: str,
+) -> Optional[Dict]:
+    """
+    Fetch a user's progress, status, and normalized 0-10 rating for a media entry.
+
+    Unlike fetch_user_progress() above (which only returns progress/status), this
+    also fetches the user's score and normalizes it to a 0-10 scale based on their
+    AniList scoreFormat setting. Consolidated from near-identical duplicate code
+    in browse.py and random.py.
+    """
+    if not anilist_username or not media_id:
+        return None
+
+    query = """
+    query($userName: String, $mediaId: Int, $type: MediaType) {
+        User(name: $userName) {
+            mediaListOptions {
+                scoreFormat
+            }
+        }
+        MediaList(userName: $userName, mediaId: $mediaId, type: $type) {
+            progress
+            score
+            status
+        }
+    }
+    """
+    variables = {"userName": anilist_username, "mediaId": media_id, "type": media_type}
+
+    try:
+        async with session.post(
+            ANILIST_API_URL,
+            json={"query": query, "variables": variables},
+            timeout=aiohttp.ClientTimeout(total=API_TIMEOUT)
+        ) as resp:
+            if resp.status != 200:
+                logger.warning(f"AniList fetch failed for {anilist_username=} {media_id=}: HTTP {resp.status}")
+                return None
+            data = await resp.json()
+            if "errors" in data:
+                logger.warning(f"GraphQL errors fetching progress/rating for {anilist_username=}: {data['errors']}")
+                return None
+            payload = data.get("data")
+    except aiohttp.ClientError as e:
+        logger.error(f"Network error fetching progress/rating for {anilist_username} (media {media_id}): {e}")
+        return None
+    except asyncio.TimeoutError:
+        logger.error(f"Timeout fetching progress/rating for {anilist_username} (media {media_id})")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error fetching progress/rating for {anilist_username} (media {media_id}): {e}", exc_info=True)
+        return None
+
+    if not payload:
+        return None
+
+    user_opts = payload.get("User", {}).get("mediaListOptions", {})
+    score_format = user_opts.get("scoreFormat", "POINT_100")
+
+    entry = payload.get("MediaList")
+    if not entry:
+        return None
+
+    progress = entry.get("progress")
+    score = entry.get("score")
+    status = entry.get("status")
+
+    rating10: Optional[float] = None
+    if score is not None:
+        try:
+            if score_format == "POINT_100":
+                rating10 = round(score / 10.0, 1)
+            elif score_format in ("POINT_10", "POINT_10_DECIMAL"):
+                rating10 = float(score)
+            elif score_format == "POINT_5":
+                rating10 = round((score / 5) * 10, 1)
+            elif score_format == "POINT_3":
+                mapping = {1: 3.0, 2: 6.0, 3: 9.0}
+                rating10 = mapping.get(score, None)
+        except Exception:
+            rating10 = None
+
+    return {"progress": progress, "rating10": rating10, "status": status}
+
+
 async def fetch_media(
     session: aiohttp.ClientSession,
     media_type: str,

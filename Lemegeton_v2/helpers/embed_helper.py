@@ -724,6 +724,159 @@ def build_info_embed(title: str, description: str, color: discord.Color = discor
     return embed
 
 
+def build_media_search_result_embed(
+    media: dict,
+    real_type: str,
+    description: str,
+    genres: str,
+    start_str: str,
+    end_str: str,
+    title: Optional[str] = None,
+    footer_text: str = "Fetched from AniList",
+    color: Optional[discord.Color] = None,
+) -> discord.Embed:
+    """
+    Build the main AniList search-result embed shared by browse.py's /browse
+    command and random.py's random-media result. Caller precomputes the
+    truncated description, genre string, formatted date strings, and title
+    text (the two cogs use different romaji/english precedence — pass yours
+    explicitly rather than relying on this function's fallback).
+    """
+    if title is None:
+        title = media['title']['english'] or media['title']['romaji']
+
+    embed = discord.Embed(
+        title=f"{'🎬' if real_type == 'ANIME' else '📖'} {title}",
+        url=media.get("siteUrl"),
+        description=description,
+        color=color or discord.Color.random()
+    )
+
+    cover_url = media.get("coverImage", {}).get("medium") or media.get("coverImage", {}).get("large")
+    if cover_url:
+        embed.set_thumbnail(url=cover_url)
+
+    banner_url = media.get("bannerImage")
+    if banner_url:
+        embed.set_image(url=banner_url)
+
+    embed.add_field(name="⭐ Average Score", value=f"{media.get('averageScore', 'N/A')}%", inline=True)
+    embed.add_field(name="📌 Status", value=media.get("status", "Unknown"), inline=True)
+
+    if real_type == "ANIME":
+        embed.add_field(name="📺 Episodes", value=media.get("episodes", '?'), inline=True)
+    else:
+        embed.add_field(name="📖 Chapters", value=media.get("chapters", '?'), inline=True)
+        embed.add_field(name="📚 Volumes", value=media.get("volumes", '?'), inline=True)
+
+    embed.add_field(name="🎭 Genres", value=genres, inline=False)
+    embed.add_field(name="📅 Published", value=f"**Start:** {start_str}\n**End:** {end_str}", inline=False)
+
+    mal_link = None
+    for link in media.get("externalLinks", []):
+        if link.get("site") == "MyAnimeList":
+            mal_link = link.get("url")
+            break
+    if mal_link:
+        embed.add_field(name="🔗 MyAnimeList", value=f"[View on MAL]({mal_link})", inline=False)
+
+    embed.set_footer(text=footer_text)
+    return embed
+
+
+def build_google_books_result_embed(book: dict) -> discord.Embed:
+    """Build the Google Books search-result embed used by browse.py's /browse command."""
+    embed = discord.Embed(
+        title=f"📚 {book.get('title', 'Unknown')}",
+        url=book.get("infoLink"),
+        description=book.get("description", "No description available."),
+        color=discord.Color.random()
+    )
+
+    if "imageLinks" in book:
+        embed.set_thumbnail(url=book["imageLinks"].get("thumbnail"))
+
+    authors = ", ".join(book.get("authors", [])) if "authors" in book else "Unknown"
+    embed.add_field(name="✍️ Authors", value=authors, inline=True)
+    embed.add_field(name="📅 Published", value=book.get("publishedDate", "Unknown"), inline=True)
+    embed.add_field(name="🏢 Publisher", value=book.get("publisher", "Unknown"), inline=True)
+    embed.add_field(name="📄 Pages", value=book.get("pageCount", "Unknown"), inline=True)
+    embed.add_field(name="⭐ Rating", value=str(book.get("averageRating", "?")) + "/5", inline=True)
+
+    embed.set_footer(text="Fetched from Google Books")
+    return embed
+
+
+def build_recommendation_result_embed(
+    media: dict,
+    vote_count: int,
+    category: str,
+    index: int,
+    total: int,
+    username: str,
+    description: str,
+) -> discord.Embed:
+    """
+    Build the manga-recommendation result embed used by recommendations.py's
+    create_embed(). Caller precomputes the truncated description (via its own
+    truncate_description() helper) just like browse.py/random.py do.
+    """
+    title = media['title']['english'] or media['title']['romaji']
+
+    embed = discord.Embed(
+        title=f"📖 {title}",
+        url=f"https://anilist.co/manga/{media['id']}",
+        description=description,
+        color=discord.Color.blue()
+    )
+
+    cover_url = media.get('coverImage', {}).get('large')
+    if cover_url:
+        embed.set_thumbnail(url=cover_url)
+
+    embed.add_field(
+        name="⭐ Average Score",
+        value=f"{media.get('averageScore', 'N/A')}%" if media.get('averageScore') else "N/A",
+        inline=True
+    )
+    embed.add_field(
+        name="📌 Status",
+        value=media.get('status', 'Unknown').replace('_', ' ').title(),
+        inline=True
+    )
+    embed.add_field(
+        name="👥 Recommendation Votes",
+        value=f"{vote_count} votes",
+        inline=True
+    )
+
+    if media.get('chapters'):
+        embed.add_field(name="📖 Chapters", value=media.get('chapters', '?'), inline=True)
+    if media.get('volumes'):
+        embed.add_field(name="📚 Volumes", value=media.get('volumes', '?'), inline=True)
+
+    format_type = (media.get('format') or '').replace('_', ' ').title()
+    if format_type:
+        embed.add_field(name="📋 Format", value=format_type, inline=True)
+
+    genres = media.get('genres', [])
+    if genres:
+        genre_text = ', '.join(genres[:5])
+        if len(genres) > 5:
+            genre_text += f" +{len(genres) - 5} more"
+        embed.add_field(name="🎭 Genres", value=genre_text, inline=False)
+
+    start_date = media.get('startDate', {})
+    if start_date and start_date.get('year'):
+        embed.add_field(name="📅 Start Date", value=f"{start_date.get('year', '?')}", inline=True)
+
+    embed.set_footer(
+        text=f"{category.title()} Recommendation {index + 1}/{total} • Recommended for {username}",
+        icon_url="https://anilist.co/img/icons/android-chrome-512x512.png"
+    )
+    return embed
+
+
 def build_trending_embed(media_list: List[Dict], title: str, description: str) -> discord.Embed:
     """Build embed for trending media lists."""
     embed = discord.Embed(

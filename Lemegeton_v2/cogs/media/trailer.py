@@ -12,6 +12,7 @@ import urllib.parse
 import re
 from helpers.embed_helper import build_error_embed, build_warning_embed, build_info_embed
 from helpers.anilist_helper import post_graphql
+from helpers.media_utils import media_error_handler
 
 # --- logger setup (prints to terminal, includes timestamps) ---
 logger = logging.getLogger("trailer_cog")
@@ -236,6 +237,7 @@ class TrailerCog(commands.Cog):
         app_commands.Choice(name="manga", value="MANGA"),
     ])
     @app_commands.autocomplete(title=autocomplete_titles)
+    @media_error_handler
     async def trailer(self, interaction: discord.Interaction, type: app_commands.Choice[str], title: str, debug: bool = False, allow_nsfw: bool = False):
         # note: we defer early so we can use followup.send later
         await interaction.response.defer(thinking=True)
