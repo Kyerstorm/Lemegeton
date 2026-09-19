@@ -877,6 +877,102 @@ def build_recommendation_result_embed(
     return embed
 
 
+def build_feedback_submission_embed(type_choice, description: str, user, image=None) -> discord.Embed:
+    """
+    Build the submission embed posted to the feedback channel by
+    feedback.py's /feedback command.
+    """
+    color = discord.Color.green() if type_choice.value == "ideas" else discord.Color.red()
+    embed = discord.Embed(
+        title=f"New {type_choice.name} Submitted",
+        description=description,
+        color=color
+    )
+    embed.set_author(
+        name=user.display_name,
+        icon_url=user.avatar.url if user.avatar else None
+    )
+    embed.set_footer(text=f"Submitted by {user}")
+
+    if image:
+        embed.set_image(url=image.url)
+
+    return embed
+
+
+def build_booster_welcome_embed(guild_name: str) -> discord.Embed:
+    """Build the DM sent to a member when they first start boosting the server."""
+    embed = discord.Embed(
+        title="🎉 Welcome, Server Booster!",
+        description="Thank you for boosting our server! As a token of appreciation, you now have access to special perks:",
+        color=discord.Color.gold()
+    )
+
+    embed.add_field(
+        name="🎨 Custom Role Creation",
+        value="Use `/nitro-role-set` to create a custom role with your chosen name and color!\n\n"
+              "**Example:** `/nitro-role-set role_name:My Cool Role hex_color:#FF6B6B`",
+        inline=False
+    )
+
+    embed.add_field(
+        name="💡 Tips",
+        value="• You can only have **one** booster role per server\n"
+              "• Update your role anytime by running the command again\n"
+              "• Choose any hex color you like!",
+        inline=False
+    )
+
+    embed.set_footer(text=f"Thank you for supporting {guild_name}!")
+    return embed
+
+
+def build_affinity_comparison_embed(
+    requester_name: str,
+    target_name: str,
+    score: float,
+    breakdown: dict,
+    cached: bool = False,
+) -> discord.Embed:
+    """
+    Build the single-user affinity comparison embed used by affinity.py's
+    /affinity command. Shared by the cached and freshly-calculated paths,
+    which previously built this embed with duplicated inline code.
+    """
+    if score >= 80:
+        color = discord.Color.gold()
+    elif score >= 60:
+        color = discord.Color.green()
+    elif score >= 40:
+        color = discord.Color.orange()
+    else:
+        color = discord.Color.red()
+
+    embed = discord.Embed(
+        title=f"💞 Affinity Between {requester_name} and {target_name}",
+        color=color
+    )
+    embed.add_field(name="🎯 Affinity Score", value=f"**{score}%**", inline=True)
+    embed.add_field(
+        name="📊 Breakdown",
+        value=(
+            f"**Favorites:** {breakdown.get('favorites', 0):.1f}%\n"
+            f"**Consumption:** {breakdown.get('consumption', 0):.1f}%\n"
+            f"**Scoring:** {breakdown.get('scoring', 0):.1f}%\n"
+            f"**Genres:** {breakdown.get('genres', 0):.1f}%\n"
+            f"**Formats:** {breakdown.get('formats', 0):.1f}%\n"
+            f"**Activity:** {breakdown.get('activity', 0):.1f}%\n"
+            f"**Balance:** {breakdown.get('balance', 0):.1f}%"
+        ),
+        inline=True
+    )
+    footer = "Higher scores indicate better compatibility!"
+    if cached:
+        footer += " (Cached data)"
+    embed.set_footer(text=footer)
+    return embed
+
+
 def build_trending_embed(media_list: List[Dict], title: str, description: str) -> discord.Embed:
     """Build embed for trending media lists."""
     embed = discord.Embed(

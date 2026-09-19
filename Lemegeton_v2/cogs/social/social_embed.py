@@ -3,17 +3,8 @@ from discord.ext import commands
 from discord.ui import View, Button
 import re
 import aiohttp
-from pathlib import Path
 
-# Import Steam helpers
-try:
-    from helpers.steam_helper import logger, EnhancedGameView
-except ModuleNotFoundError:
-    import sys
-    repo_root = Path(__file__).resolve().parents[2]
-    if str(repo_root) not in sys.path:
-        sys.path.insert(0, str(repo_root))
-    from helpers.steam_helper import logger, EnhancedGameView
+from helpers.steam_helper import logger, EnhancedGameView
 
 # ------------------------------
 # Platforms (rewrites)
@@ -67,8 +58,8 @@ class SimpleView(View):
         if self.message:
             try:
                 await self.message.edit(view=self)
-            except:
-                pass
+            except (discord.NotFound, discord.HTTPException) as e:
+                logger.warning(f"Failed to edit view on timeout (message likely deleted): {e}")
 
 
 # ------------------------------

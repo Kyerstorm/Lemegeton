@@ -15,7 +15,8 @@ from database import (
     get_all_paginator_states,
     set_paginator_state,
     delete_paginator_state,
-    get_paginator_state
+    get_paginator_state,
+    get_anilist_username_from_row
 )
 from datetime import datetime, timedelta
 from enum import Enum
@@ -118,7 +119,7 @@ class AniListCog(commands.Cog):
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
                 for user in users:
                     discord_name = user[3]  # Discord username (from username column)
-                    anilist_username = user[4] if len(user) > 4 else None  # AniList username
+                    anilist_username = get_anilist_username_from_row(user)
                     
                     if not anilist_username:
                         logger.debug(f"Skipping user {discord_name} - no AniList username")
@@ -176,7 +177,8 @@ class AniListCog(commands.Cog):
                         try:
                             updated_time = datetime.fromtimestamp(updated_at)
                             is_recent = (datetime.now() - updated_time) <= timedelta(days=30)
-                        except:
+                        except (ValueError, OSError, TypeError) as e:
+                            logger.warning(f"Failed to parse updatedAt timestamp {updated_at!r}: {e}")
                             is_recent = False
                     
                     # Create user data object for filtering
@@ -1465,8 +1467,8 @@ class AniListCog(commands.Cog):
                 try:
                     if not interaction.response.is_done():
                         await interaction.response.send_message(embed=build_warning_embed(description="This interaction has expired. Please try the command again."), ephemeral=True)
-                except:
-                    pass
+                except discord.HTTPException as e:
+                    logger.warning(f"Failed to send expiry notice (interaction already dead): {e}")
             except Exception as e:
                 logger.exception("Media select callback failed")
                 try:
@@ -1543,9 +1545,9 @@ class AniListCog(commands.Cog):
                             await interaction.response.send_message(embed=error_embed, ephemeral=True)
                         else:
                             await interaction.followup.send(embed=error_embed, ephemeral=True)
-                    except:
-                        pass
-            
+                    except discord.HTTPException as send_err:
+                        logger.warning(f"Failed to send filter-error notice (interaction already dead): {send_err}")
+
             async def back_to_media(self, interaction: discord.Interaction):
                 """Return to main media view"""
                 try:
@@ -1570,8 +1572,8 @@ class AniListCog(commands.Cog):
                             await interaction.response.send_message(embed=error_embed, ephemeral=True)
                         else:
                             await interaction.followup.send(embed=error_embed, ephemeral=True)
-                    except:
-                        pass
+                    except discord.HTTPException as send_err:
+                        logger.warning(f"Failed to send back-to-media error notice (interaction already dead): {send_err}")
 
 
 
@@ -2128,8 +2130,8 @@ class AniListCog(commands.Cog):
                 logger.exception("ReviewPaginator prev_cb failed")
                 try:
                     await interaction.response.send_message("Failed to change page.", ephemeral=True)
-                except:
-                    pass
+                except discord.HTTPException as send_err:
+                    logger.warning(f"Failed to send prev-page error notice (interaction already dead): {send_err}")
 
         async def next_cb(self, interaction: discord.Interaction):
             try:
@@ -2143,8 +2145,8 @@ class AniListCog(commands.Cog):
                 logger.exception("ReviewPaginator next_cb failed")
                 try:
                     await interaction.response.send_message("Failed to change page.", ephemeral=True)
-                except:
-                    pass
+                except discord.HTTPException as send_err:
+                    logger.warning(f"Failed to send next-page error notice (interaction already dead): {send_err}")
 
     # ---------------------
     # Cog setup

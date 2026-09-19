@@ -20,11 +20,13 @@ from helpers.cache_helper import (
 
 from database import (
     upsert_user_stats,
+    get_anilist_username_from_row,
     # Guild-aware functions
     get_guild_leaderboard_data, get_all_users_guild_aware,
     upsert_user_stats_guild_aware
 )
 from helpers.media_helper import fetch_user_stats
+from helpers.social_utils import social_error_handler
 from config import DB_PATH
 
 # ------------------------------------------------------
@@ -888,73 +890,6 @@ class Leaderboard(commands.Cog):
         
         return total_score, breakdown
 
-    async def _fetch_user_data(self, session: aiohttp.ClientSession, user: Tuple) -> Optional[Dict]:
-        """Fetch and process individual user's AniList data."""
-        try:
-            # Correct structure: (id, discord_id, username, anilist_username, anilist_id)
-            discord_id, username = user[1], user[3]  # discord_id is at index 1, anilist_username at index 3
-            
-            # Check persistent cache (per-user last fetch timestamp)
-            now = time.time()
-            cached_ts = get_cached_value(fetch_timestamps, str(discord_id), max_age_seconds=CACHE_TTL)
-            if cached_ts is not None:
-                logger.debug(f"Using cached data for user {username} (ID: {discord_id}) - last fetch within TTL")
-                return None
-            
-            logger.info(f"Fetching fresh data for user {username} (discord_id: {discord_id})")
-            data = await fetch_user_stats(username)
-            
-            if not data or "data" not in data or "User" not in data["data"]:
-                logger.warning(f"No valid data returned for user {username}")
-                return None
-
-            user_data = data["data"]["User"]
-            
-            # Extract manga statistics
-            manga_stats = user_data.get("statistics", {}).get("manga", {})
-            total_manga = manga_stats.get("count", 0)
-            total_chapters = manga_stats.get("chaptersRead", 0)
-            avg_manga_score = manga_stats.get("meanScore", 0)
-            
-            # Extract anime statistics
-            anime_stats = user_data.get("statistics", {}).get("anime", {})
-            total_anime = anime_stats.get("count", 0)
-            # Handle potential field name variations
-            total_episodes = anime_stats.get("episodesWatched", 0) or anime_stats.get("chaptersRead", 0)
-            avg_anime_score = anime_stats.get("meanScore", 0)
-
-            # Update database
-            await upsert_user_stats(
-                discord_id,
-                username,
-                total_manga,
-                total_anime,
-                avg_manga_score,
-                avg_anime_score,
-                total_chapters,
-                total_episodes
-            )
-            
-            # Persist last fetch timestamp for this user
-            set_cached_value(fetch_timestamps, str(discord_id), now)
-            # Save the fetch_timestamps cache to disk
-            try:
-                save_timestamped_cache(_FETCH_CACHE_NAME, fetch_timestamps)
-            except Exception:
-                logger.debug("Failed to persist fetch timestamps cache (non-fatal)")
-            logger.info(f"Successfully updated stats for {username}: {total_manga} manga, {total_anime} anime")
-            
-            return {
-                "discord_id": discord_id,
-                "username": username,
-                "manga": {"count": total_manga, "chapters": total_chapters, "score": avg_manga_score},
-                "anime": {"count": total_anime, "episodes": total_episodes, "score": avg_anime_score}
-            }
-            
-        except Exception as e:
-            logger.error(f"Error fetching data for user {username if 'username' in locals() else 'unknown'}: {e}", exc_info=True)
-            return None
-
     async def cleanup_duplicate_user_stats(self) -> None:
         """Clean up duplicate entries in user_stats table."""
         try:
@@ -1034,38 +969,6 @@ class Leaderboard(commands.Cog):
                 
         except Exception as e:
             logger.error(f"Error cleaning up duplicate user_stats: {e}", exc_info=True)
-
-    async def fetch_and_cache_stats(self) -> None:
-        """Fetch and cache statistics for all registered users."""
-        try:
-            users = await get_all_users()
-            if not users:
-                logger.warning("No registered users found")
-                return
-            
-            logger.info(f"Starting stats fetch for {len(users)} users")
-            
-            async with aiohttp.ClientSession() as session:
-                # Process users in batches to avoid overwhelming the API
-                batch_size = 5
-                for i in range(0, len(users), batch_size):
-                    batch = users[i:i + batch_size]
-                    tasks = [self._fetch_user_data(session, user) for user in batch]
-                    
-                    results = await asyncio.gather(*tasks, return_exceptions=True)
-                    
-                    # Count successful updates
-                    successful_updates = sum(1 for result in results if result and not isinstance(result, Exception))
-                    logger.info(f"Processed batch {i//batch_size + 1}: {successful_updates}/{len(batch)} successful updates")
-                    
-                    # Small delay between batches to be respectful to the API
-                    if i + batch_size < len(users):
-                        await asyncio.sleep(1)
-            
-            logger.info("Completed stats fetching for all users")
-            
-        except Exception as e:
-            logger.error(f"Error in fetch_and_cache_stats: {e}", exc_info=True)
 
     async def _get_leaderboard_data(self, medium: str) -> List[Tuple]:
         """Get leaderboard data from database for specified medium."""
@@ -1156,6 +1059,7 @@ class Leaderboard(commands.Cog):
         name="anilist_leaderboard",
         description="🏆 Show leaderboard ranked by manga, anime, or combined activity"
     )
+    @social_error_handler
     async def anilist_leaderboard(self, interaction: discord.Interaction, medium: app_commands.Choice[str]) -> None:
         """Display the leaderboard for the specified medium.
         
@@ -1411,7 +1315,7 @@ class Leaderboard(commands.Cog):
                 try:
                     # Extract user info from record (id, discord_id, guild_id, username, anilist_username, anilist_id, created_at, updated_at)
                     discord_id = user_record[1]
-                    anilist_username = user_record[4] 
+                    anilist_username = get_anilist_username_from_row(user_record)
                     
                     if not anilist_username:
                         logger.debug(f"User {discord_id} in guild {guild_id} has no AniList username, skipping")

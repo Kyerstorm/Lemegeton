@@ -9,6 +9,9 @@ import database
 import config
 import io
 
+from helpers.social_utils import social_error_handler
+from helpers.embed_helper import build_feedback_submission_embed
+
 # ------------------------------------------------------
 # Logging Setup - Safe handling
 # ------------------------------------------------------
@@ -120,6 +123,7 @@ class Feedback(commands.Cog):
         app_commands.Choice(name="Bugs", value="bugs")
     ])
     @app_commands.describe(description="Your idea or bug description", image="Optional image attachment")
+    @social_error_handler
     async def feedback(self, interaction: discord.Interaction, type: app_commands.Choice[str], description: str, image: discord.Attachment = None):
         """Handle feedback submission from users."""
         user_info = f"{interaction.user.display_name} (ID: {interaction.user.id})"
@@ -133,20 +137,9 @@ class Feedback(commands.Cog):
                 return
 
             # Create embed
-            color = discord.Color.green() if type.value == "ideas" else discord.Color.red()
-            embed = discord.Embed(
-                title=f"New {type.name} Submitted",
-                description=description,
-                color=color
-            )
-            embed.set_author(
-                name=interaction.user.display_name,
-                icon_url=interaction.user.avatar.url if interaction.user.avatar else None
-            )
-            embed.set_footer(text=f"Submitted by {interaction.user}")
+            embed = build_feedback_submission_embed(type, description, interaction.user, image)
 
             if image:
-                embed.set_image(url=image.url)
                 logger.info(f"Image attachment included in feedback from {user_info}")
 
             # Send embed + button in ONE message
