@@ -37,6 +37,14 @@ def _int_env(key, default=None):
         return default
 
 
+def _bool_env(key, default=False):
+    """Parse boolean environment variables (1/true/yes/on)."""
+    val = os.getenv(key)
+    if val is None or val == "":
+        return default
+    return val.strip().lower() in ("1", "true", "yes", "on")
+
+
 def _float_env(key, default=None):
     """
     Safely parse float environment variables.
@@ -100,6 +108,11 @@ WEBHOOK_RATE_LIMIT = _int_env("WEBHOOK_RATE_LIMIT", 5)  # Max 5 webhooks per min
 
 # Logging Configuration
 LOG_MAX_SIZE = _int_env("LOG_MAX_SIZE", 52428800)  # 50MB default
+# Truncate logs/*.log on process start when True (default True in non-production).
+CLEAR_LOGS_ON_STARTUP = _bool_env(
+    "CLEAR_LOGS_ON_STARTUP",
+    default=os.getenv("ENVIRONMENT", "development") != "production",
+)
 
 # Status Update Intervals (seconds)
 STATUS_UPDATE_INTERVAL = _int_env("STATUS_UPDATE_INTERVAL", 3600)  # 1 hour
@@ -251,6 +264,7 @@ def get_config_summary():
         'has_openrouter': bool(OPENROUTER_API_KEY),
         'db_path': DB_PATH,
         'environment': os.getenv('ENVIRONMENT', 'development'),
+        'clear_logs_on_startup': CLEAR_LOGS_ON_STARTUP,
     }
 
 
@@ -267,7 +281,7 @@ __all__ = [
     'DISCORD_WEBHOOK_URL', 'AURA_WEBHOOK_URL',
 
     # Behavior
-    'LOG_MAX_SIZE', 'STATUS_UPDATE_INTERVAL', 'TRENDING_REFRESH_INTERVAL',
+    'LOG_MAX_SIZE', 'CLEAR_LOGS_ON_STARTUP', 'STATUS_UPDATE_INTERVAL', 'TRENDING_REFRESH_INTERVAL',
     'COG_WATCH_INTERVAL_PROD', 'COG_WATCH_INTERVAL_DEV', 'USER_CLEANUP_INTERVAL',
 
     # AniList

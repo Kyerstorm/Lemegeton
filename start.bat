@@ -1,72 +1,86 @@
 @echo off
 setlocal EnableDelayedExpansion
-title Lemegeton Discord Bot Manager
+title Lemegeton Discord Bot
+REM ============================================================
+REM Lemegeton Discord Bot - Auto-Start Version
+REM Minimal startup script for PC boot automation
+REM ============================================================
 
-:MENU
-cls
 echo ============================================================
-echo           LEMEGETON DISCORD BOT MANAGER
+echo          LEMEGETON BOT - STARTING UP
 echo ============================================================
 echo.
-echo [1] Start Bot (Normal Mode)
-echo [2] Start Bot (Debug Mode)
-echo [3] Restart Bot
-echo [4] View Live Logs
-echo [5] View Recent Logs
-echo [6] Clear All Logs
-echo [7] Check Bot Status
-echo [8] Database Tools
-echo [9] Git Status
-echo [A] Run Tests
-echo [B] Update Dependencies
-echo [C] Environment Info
-echo [D] Backup Database
-echo [0] Exit
+
+REM Check for Python installation
+python --version >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    echo [!] ERROR: Python is not installed or not in PATH
+    echo [!] Please install Python 3.13+ and add it to PATH
+    pause
+    exit /b 1
+)
+echo [+] Python found
+
+REM Check for .env file
+if not exist ".env" (
+    echo [!] ERROR: .env file not found!
+    echo [!] Creating template .env file...
+    (
+        echo DISCORD_TOKEN=your_token_here
+        echo PRIMARY_GUILD_ID=your_guild_id
+        echo BOT_ID=844560439525638144
+        echo DATABASE_PATH=data/database.db
+        echo STEAM_API_KEY=your_steam_key_optional
+    ) > .env
+    echo [+] Template .env created at .env
+    echo [!] Please edit .env with your actual Discord token BEFORE running this script again
+    pause
+    exit /b 1
+)
+echo [+] .env file verified
+
+echo.
+echo [*] Starting Lemegeton Discord Bot...
+echo [*] Press Ctrl+C to stop the bot
 echo.
 echo ============================================================
-set /p choice="Enter your choice: "
-
-if "%choice%"=="1" goto START_NORMAL
-if "%choice%"=="2" goto START_DEBUG
-if "%choice%"=="3" goto RESTART_BOT
-if "%choice%"=="4" goto VIEW_LIVE_LOGS
-if "%choice%"=="5" goto VIEW_RECENT_LOGS
-if "%choice%"=="6" goto CLEAR_LOGS
-if "%choice%"=="7" goto CHECK_STATUS
-if "%choice%"=="8" goto DATABASE_TOOLS
-if "%choice%"=="9" goto GIT_STATUS
-if /i "%choice%"=="A" goto RUN_TESTS
-if /i "%choice%"=="B" goto UPDATE_DEPS
-if /i "%choice%"=="C" goto ENV_INFO
-if /i "%choice%"=="D" goto BACKUP_DB
-if "%choice%"=="0" goto EXIT
-
-echo Invalid choice. Please try again.
-timeout /t 2 >nul
-goto MENU
-
-:START_NORMAL
-cls
-echo ============================================================
-echo                   STARTING BOT (NORMAL)
-echo ============================================================
 echo.
-echo [*] Activating virtual environment...
-if exist ".venv\Scripts\activate.bat" (
-    call .venv\Scripts\activate.bat
-    echo [+] Virtual environment activated
-) else (
-    echo [!] Virtual environment not found at .venv\Scripts\
-    echo [!] Please ensure the virtual environment exists
+
+REM Run the bot
+python bot.py
+
+REM If bot crashes or exits, show the error
+echo.
+echo [!] Bot has stopped
+echo [!] Waiting 10 seconds before restart attempt...
+timeout /t 10 >nul
+goto :START
+
+:START
+python bot.py
+goto :EOF
+
+    echo [!] Please install Python 3.13+ and add it to PATH
     pause
     goto MENU
 )
+echo [+] Python found
 
 echo.
 echo [*] Checking for .env file...
 if not exist ".env" (
     echo [!] WARNING: .env file not found!
-    echo [!] Please create a .env file with your configuration
+    echo [!] The bot requires a .env file with your Discord token
+    echo [!] Creating template .env file...
+    (
+        echo DISCORD_TOKEN=your_token_here
+        echo PRIMARY_GUILD_ID=your_guild_id
+        echo BOT_ID=844560439525638144
+        echo DATABASE_PATH=data/database.db
+        echo STEAM_API_KEY=your_steam_key_optional
+    ) > .env
+    echo [+] Template .env created at .env
+    echo [!] Please edit .env with your actual Discord token
     pause
     goto MENU
 )
@@ -99,12 +113,19 @@ echo ============================================================
 echo                   STARTING BOT (DEBUG)
 echo ============================================================
 echo.
-echo [*] Activating virtual environment...
-if exist ".venv\Scripts\activate.bat" (
-    call .venv\Scripts\activate.bat
-    echo [+] Virtual environment activated
-) else (
-    echo [!] Virtual environment not found
+echo [*] Checking for Python installation...
+python --version >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    echo [!] Python is not installed or not in PATH
+    pause
+    goto MENU
+)
+echo [+] Python found
+
+echo.
+echo [*] Checking for .env file...
+if not exist ".env" (
+    echo [!] ERROR: .env file not found!
     pause
     goto MENU
 )
@@ -152,16 +173,14 @@ if "%ERRORLEVEL%"=="0" (
 )
 
 echo.
-echo [*] Activating virtual environment...
-if exist ".venv\Scripts\activate.bat" (
-    call .venv\Scripts\activate.bat
-    echo [+] Virtual environment activated
-) else (
-    echo [!] Virtual environment not found at .venv\Scripts\
-    echo [!] Please ensure the virtual environment exists
+echo [*] Checking for Python installation...
+python --version >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    echo [!] Python is not installed or not in PATH
     pause
     goto MENU
 )
+echo [+] Python found
 
 echo.
 echo [*] Restarting bot...
@@ -359,12 +378,6 @@ if exist ".env" (
     echo [!] .env file: NOT FOUND
 )
 
-if exist ".venv\Scripts\python.exe" (
-    echo [+] Virtual environment: Found
-) else (
-    echo [!] Virtual environment: NOT FOUND
-)
-
 if exist "data\database.db" (
     echo [+] Database: Found
     for %%A in ("data\database.db") do echo     Size: %%~zA bytes
@@ -417,7 +430,7 @@ echo ============================================================
 echo              DATABASE INTEGRITY CHECK
 echo ============================================================
 echo.
-call .venv\Scripts\activate.bat
+
 python tools\check_db.py
 echo.
 pause
@@ -429,7 +442,7 @@ echo ============================================================
 echo              DATABASE STRUCTURE ANALYSIS
 echo ============================================================
 echo.
-call .venv\Scripts\activate.bat
+
 python tools\analyze_db.py
 echo.
 pause
@@ -441,7 +454,7 @@ echo ============================================================
 echo                  DATABASE STATISTICS
 echo ============================================================
 echo.
-call .venv\Scripts\activate.bat
+
 python tools\analyze_db_usage.py
 echo.
 pause
@@ -453,7 +466,7 @@ echo ============================================================
 echo                  DATABASE CLEANUP
 echo ============================================================
 echo.
-call .venv\Scripts\activate.bat
+
 python tools\cleanup_database.py
 echo.
 pause
@@ -465,7 +478,7 @@ echo ============================================================
 echo              VERIFY GUILD ISOLATION
 echo ============================================================
 echo.
-call .venv\Scripts\activate.bat
+
 python tools\verify_guild_isolation.py
 echo.
 pause
@@ -515,7 +528,6 @@ echo [0] Back to Menu
 echo.
 set /p testchoice="Enter your choice: "
 
-call .venv\Scripts\activate.bat
 
 if "%testchoice%"=="1" (
     python tools\test_multi_guild.py
@@ -538,8 +550,13 @@ echo ============================================================
 echo                UPDATE DEPENDENCIES
 echo ============================================================
 echo.
-echo [*] Activating virtual environment...
-call .venv\Scripts\activate.bat
+echo [*] Checking for Python installation...
+python --version >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    echo [!] Python is not installed or not in PATH
+    pause
+    goto MENU
+)
 
 echo.
 echo [*] Updating pip...
@@ -561,8 +578,6 @@ echo ============================================================
 echo               ENVIRONMENT INFORMATION
 echo ============================================================
 echo.
-
-call .venv\Scripts\activate.bat
 
 echo [*] Python Version:
 python --version

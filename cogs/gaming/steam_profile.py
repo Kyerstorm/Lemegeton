@@ -19,6 +19,7 @@ try:
             logger, safe_json, fetch_text, chunk_list, random_color, human_hours,
             safe_text, make_friend_grid_image, STEAM_API_KEY, DB_PATH, PIL_AVAILABLE,
             get_library_stats, get_vac_ban_status, check_profile_privacy,
+            get_user_wishlist, WishlistView,
             GAMING_UTILS_AVAILABLE
         )
         from helpers.gaming_utils import gaming_error_handler, format_playtime
@@ -36,6 +37,7 @@ try:
             logger, safe_json, fetch_text, chunk_list, random_color, human_hours,
             safe_text, make_friend_grid_image, STEAM_API_KEY, DB_PATH, PIL_AVAILABLE,
             get_library_stats, get_vac_ban_status, check_profile_privacy,
+            get_user_wishlist, WishlistView,
             GAMING_UTILS_AVAILABLE
         )
         from helpers.gaming_utils import gaming_error_handler, format_playtime
@@ -56,6 +58,7 @@ except ModuleNotFoundError:
         logger, safe_json, fetch_text, chunk_list, random_color, human_hours,
         safe_text, make_friend_grid_image, STEAM_API_KEY, DB_PATH, PIL_AVAILABLE,
         get_library_stats, get_vac_ban_status, check_profile_privacy,
+        get_user_wishlist, WishlistView,
         GAMING_UTILS_AVAILABLE
     )
     from helpers.gaming_utils import gaming_error_handler, format_playtime
@@ -375,6 +378,7 @@ class SteamProfile(commands.Cog):
                 discord.SelectOption(label="📹 Videos", value="videos"),
                 discord.SelectOption(label="💬 Profile Comments", value="comments"),
                 discord.SelectOption(label="👪 Groups", value="groups"),
+                discord.SelectOption(label="💝 Wishlist", value="wishlist"),
             ],
             min_values=1, max_values=1
         )
@@ -410,12 +414,16 @@ class SteamProfile(commands.Cog):
                 elif choice == "groups":
                     await progress_msg.edit(content="🔎 Scraping groups...")
                     await self._send_groups(sel_inter, steamid, progress_msg=progress_msg)
+                elif choice == "wishlist":
+                    await progress_msg.edit(content="🔎 Fetching wishlist...")
+                    profile_name = player.get("personaname", "Unknown") if isinstance(player, dict) else "Unknown"
+                    await self._send_wishlist(sel_inter, steamid, profile_name=profile_name, progress_msg=progress_msg)
                 else:
                     embed = build_warning_embed(
-                    "Unknown Selection",
-                    "Unknown selection."
-                )
-                await progress_msg.edit(content=None, embed=embed)
+                        "Unknown Selection",
+                        "Unknown selection."
+                    )
+                    await progress_msg.edit(content=None, embed=embed)
             except Exception:
                 logger.exception("Error processing details selection")
                 try:
@@ -1016,6 +1024,176 @@ class SteamProfile(commands.Cog):
                 await interaction.followup.send(embed=embed, ephemeral=True)
             except Exception:
                 pass
+
+
+    # ------------------ Wishlist ------------------
+    async def _send_wishlist(
+        self,
+        interaction: discord.Interaction,
+        steamid: str,
+        profile_name: str = "Unknown",
+        progress_msg=None,
+    ):
+        """
+        Fetch and display the user's Steam wishlist as an interactive carousel.
+        Handles private wishlists, empty wishlists, and network failures gracefully.
+        """
+        async with aiohttp.ClientSession() as session:
+            wishlist = await get_user_wishlist(session, steamid)
+
+        # None → private / fetch error
+        if wishlist is None:
+            embed = build_warning_embed(
+                "Wishlist Unavailable",
+                f"{profile_name}'s wishlist is private or could not be fetched.\n"
+                "Steam wishlists must be set to **Public** in privacy settings to be visible.",
+            )
+            try:
+                if progress_msg:
+                    await progress_msg.edit(content=None, embed=embed)
+                else:
+                    await interaction.followup.send(embed=embed, ephemeral=True)
+            except Exception:
+                pass
+            return
+
+        # Empty wishlist
+        if not wishlist:
+            embed = discord.Embed(
+                title="💝 Wishlist",
+                description=f"{profile_name} has nothing on their wishlist yet.",
+                color=discord.Color.dark_gray(),
+            )
+            try:
+                if progress_msg:
+                    await progress_msg.edit(content=None, embed=embed)
+                else:
+                    await interaction.followup.send(embed=embed, ephemeral=True)
+            except Exception:
+                pass
+            return
+
+        # Build interactive view
+        view = WishlistView(wishlist, interaction.user.id, profile_name)
+        initial_embed = view.create_wishlist_embed(0)
+
+        try:
+            if progress_msg:
+                await progress_msg.edit(content=None, embed=initial_embed, view=view)
+            else:
+                await interaction.followup.send(embed=initial_embed, view=view, ephemeral=True)
+        except Exception:
+            try:
+                await interaction.followup.send(embed=initial_embed, view=view, ephemeral=True)
+            except Exception:
+                pass
+
+    # ------------------ Standalone /steam-wishlist command ------------------
+    @app_commands.command(
+        name="steam-wishlist",
+        description="View a Steam user's wishlist with live prices, discounts, and filters",
+    )
+    @command_meta(section="Gaming", name="Steam Wishlist")
+    @app_commands.describe(
+        user="Steam vanity URL or SteamID64 (leave blank for your own profile)"
+    )
+    @gaming_error_handler
+    @log_command
+    async def steam_wishlist(
+        self, interaction: discord.Interaction, user: Optional[str] = None
+    ):
+        logger.info(
+            f"/steam-wishlist invoked by user={interaction.user} "
+            f"arg_user={user} guild={getattr(interaction.guild, 'id', None)}"
+        )
+        await interaction.response.defer()
+
+        # ── 1. Resolve Steam ID ──────────────────────────────────────────────
+        steamid = None
+        profile_name = "Unknown"
+
+        if not user:
+            async with aiosqlite.connect(DB_PATH) as db:
+                cur = await db.execute(
+                    "SELECT steam_id, vanity_name FROM steam_users WHERE discord_id = ?",
+                    (interaction.user.id,),
+                )
+                row = await cur.fetchone()
+                await cur.close()
+
+            if not row:
+                embed = build_error_embed(
+                    "Account Not Registered",
+                    "You have not registered a Steam account. Use `/login` to link your profile.",
+                )
+                return await interaction.followup.send(embed=embed)
+
+            steamid, vanity = row
+            user = vanity
+
+        async with aiohttp.ClientSession() as session:
+            # Resolve vanity → SteamID64 if needed
+            if user and not str(user).isdigit():
+                res = await safe_json(
+                    session,
+                    "https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/",
+                    params={"key": STEAM_API_KEY, "vanityurl": user},
+                )
+                if not res or res.get("response", {}).get("success") != 1:
+                    embed = build_error_embed(
+                        "User Not Found",
+                        f"Could not resolve Steam user **{user}**. "
+                        "Check the spelling of their vanity URL or try their SteamID64.",
+                    )
+                    return await interaction.followup.send(embed=embed)
+                steamid = res["response"]["steamid"]
+            elif str(user).isdigit():
+                steamid = str(user)
+
+            # ── 2. Fetch display name for embed labels ───────────────────────
+            ps = await safe_json(
+                session,
+                "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/",
+                params={"key": STEAM_API_KEY, "steamids": steamid},
+            )
+            players = ps.get("response", {}).get("players", []) if ps else []
+            if players:
+                profile_name = players[0].get("personaname", "Unknown")
+
+                # ── 3. Privacy check ─────────────────────────────────────────
+                try:
+                    await check_profile_privacy(players[0])
+                except Exception:
+                    raise  # propagated to @gaming_error_handler
+
+            # ── 4. Fetch wishlist ────────────────────────────────────────────
+            wishlist = await get_user_wishlist(session, steamid)
+
+        # ── 5. Handle result states ──────────────────────────────────────────
+        if wishlist is None:
+            embed = build_warning_embed(
+                "Wishlist Private",
+                f"**{profile_name}**'s wishlist is private or could not be retrieved.\n"
+                "They must set their Steam wishlist to **Public** in their privacy settings.",
+            )
+            return await interaction.followup.send(embed=embed)
+
+        if not wishlist:
+            embed = discord.Embed(
+                title="💝 Wishlist",
+                description=f"**{profile_name}** has nothing on their wishlist yet.",
+                color=discord.Color.dark_gray(),
+            )
+            return await interaction.followup.send(embed=embed)
+
+        # ── 6. Build and send carousel ───────────────────────────────────────
+        view = WishlistView(wishlist, interaction.user.id, profile_name)
+        initial_embed = view.create_wishlist_embed(0)
+
+        try:
+            await interaction.followup.send(embed=initial_embed, view=view)
+        except Exception:
+            logger.exception("Failed to send wishlist carousel")
 
 
 async def setup(bot: commands.Bot):

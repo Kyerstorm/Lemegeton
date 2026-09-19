@@ -77,6 +77,53 @@ async def post_graphql(session: aiohttp.ClientSession, query: str, variables: Di
         return None
 
 
+TRENDING_ANIME_QUERY = """
+query {
+    Page(page: 1, perPage: 10) {
+        media(sort: TRENDING_DESC, type: ANIME) {
+            title {
+                romaji
+                english
+            }
+        }
+    }
+}
+"""
+
+
+async def fetch_trending_anime_titles(
+    session: aiohttp.ClientSession, timeout: int = API_TIMEOUT
+) -> Optional[List[str]]:
+    """
+    Fetch trending anime title strings from AniList (English preferred, then romaji).
+
+    Returns:
+        Non-empty list of titles, or None if the request failed or returned no usable titles.
+    """
+    data = await post_graphql(session, TRENDING_ANIME_QUERY, {}, timeout=timeout)
+    if not data or not isinstance(data, dict):
+        return None
+    if data.get("__http_status__") is not None:
+        return None
+    page = data.get("Page")
+    if not isinstance(page, dict):
+        return None
+    media = page.get("media")
+    if not isinstance(media, list):
+        return None
+    titles: List[str] = []
+    for anime in media:
+        if not isinstance(anime, dict):
+            continue
+        title_data = anime.get("title")
+        if not isinstance(title_data, dict):
+            continue
+        title = title_data.get("english") or title_data.get("romaji")
+        if title and isinstance(title, str) and title.strip():
+            titles.append(title.strip())
+    return titles if titles else None
+
+
 async def fetch_anilist_user_id(username: str) -> Optional[int]:
     """
     Fetch AniList user ID from username.

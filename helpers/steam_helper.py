@@ -210,6 +210,95 @@ async def get_recently_played_games(session: aiohttp.ClientSession, api_key: str
     return []
 
 
+async def get_user_wishlist(session: aiohttp.ClientSession, steamid: str):
+    """
+    Fetch Steam wishlist from store page.
+    """
+
+    # Try old JSON endpoint first
+    json_url = f"https://steamcommunity.com/profiles/{steamid}/wishlistdata/"
+
+    try:
+        async with session.get(json_url) as resp:
+            text = await resp.text()
+
+            if text.startswith("{"):
+                data = json.loads(text)
+
+                return [
+                    {
+                        "appid": int(appid),
+                        "name": game.get("name"),
+                        "price": game.get("price"),
+                        "discount": game.get("discount_percent", 0),
+                        "url": f"https://store.steampowered.com/app/{appid}"
+                    }
+                    for appid, game in data.items()
+                ]
+
+            logger.warning(
+                f"Wishlist JSON unavailable for {steamid}, falling back to HTML"
+            )
+
+    except Exception:
+        logger.exception("Wishlist JSON failed")
+
+
+    # HTML fallback
+    html_url = f"https://store.steampowered.com/wishlist/profiles/{steamid}/"
+
+    try:
+        html = await fetch_text(session, html_url)
+
+        if not html:
+            return None
+
+
+        soup = BeautifulSoup(html, "html.parser")
+
+        games = []
+
+
+        for item in soup.select(".wishlist_row"):
+
+            appid = item.get("data-app-id")
+
+            if not appid:
+                continue
+
+
+            name = item.select_one(".title")
+
+            price = item.select_one(".discount_final_price")
+
+            discount = item.select_one(".discount_pct")
+
+
+            games.append(
+                {
+                    "appid": int(appid),
+                    "name": name.text.strip() if name else "Unknown",
+                    "price": price.text.strip() if price else "Unknown",
+                    "discount": int(
+                        discount.text.replace("%","")
+                    )
+                    if discount else 0,
+                    "url":
+                    f"https://store.steampowered.com/app/{appid}"
+                }
+            )
+
+
+        return games
+
+
+    except Exception:
+        logger.exception(
+            f"Failed parsing wishlist HTML for {steamid}"
+        )
+        return None
+
+
 async def search_steam_apps(session: aiohttp.ClientSession, query: str, max_results: int = 10) -> List[Dict]:
     """
     Search Steam apps using Steam Community API (returns JSON).
@@ -1067,6 +1156,227 @@ class ScreenshotView(discord.ui.View):
         
         embed = self.create_screenshot_embed(self.current_index)
         await interaction.response.edit_message(embed=embed, view=self)
+
+
+class WishlistView(discord.ui.View):
+    """
+    Interactive paginated carousel for browsing a user's Steam wishlist.
+    Supports Prev/Next navigation, a 'Sale Only' toggle filter, and
+    three sort modes: Priority (wishlist order), Price, and Discount.
+    """
+
+    SORT_PRIORITY = "priority"
+    SORT_PRICE = "price"
+    SORT_DISCOUNT = "discount"
+
+    def __init__(self, wishlist_items: List[Dict], user_id: int, profile_name: str):
+        super().__init__(timeout=300)
+        self.all_items = wishlist_items          # full unfiltered list
+        self.user_id = user_id
+        self.profile_name = profile_name
+        self.current_index = 0
+        self.sale_only = False
+        self.sort_mode = self.SORT_PRIORITY
+
+        self._rebuild_display_list()
+        self._refresh_button_states()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _rebuild_display_list(self):
+        """Apply current filter + sort to produce self.items."""
+        items = self.all_items
+
+        if self.sale_only:
+            items = [i for i in items if i.get("discount", 0) > 0]
+
+        if self.sort_mode == self.SORT_PRICE:
+            def _price_key(i):
+                raw = i.get("price", "N/A")
+                if raw in ("Free", "N/A"):
+                    return 0.0
+                try:
+                    return float(raw.replace("£", "").replace("$", "").replace(",", ""))
+                except ValueError:
+                    return 0.0
+            items = sorted(items, key=_price_key)
+        elif self.sort_mode == self.SORT_DISCOUNT:
+            items = sorted(items, key=lambda x: x.get("discount", 0), reverse=True)
+        # SORT_PRIORITY: already sorted by the helper
+
+        self.items = items
+        # Guard index in range
+        if self.items:
+            self.current_index = min(self.current_index, len(self.items) - 1)
+        else:
+            self.current_index = 0
+
+    def _refresh_button_states(self):
+        """Update button labels/disabled states to reflect current position."""
+        total = len(self.items)
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                if child.custom_id == "wl_sale_toggle":
+                    child.style = discord.ButtonStyle.success if self.sale_only else discord.ButtonStyle.secondary
+                    child.label = "🏷️ Sale Only ✓" if self.sale_only else "🏷️ Sale Only"
+                elif child.custom_id == "wl_sort":
+                    labels = {
+                        self.SORT_PRIORITY: "📋 Sort: Priority",
+                        self.SORT_PRICE: "💰 Sort: Price",
+                        self.SORT_DISCOUNT: "📉 Sort: Discount",
+                    }
+                    child.label = labels.get(self.sort_mode, "Sort")
+
+    # ------------------------------------------------------------------
+    # Embed builder
+    # ------------------------------------------------------------------
+
+    def create_wishlist_embed(self, index: int) -> discord.Embed:
+        """Build the Discord embed for a single wishlist item."""
+        if not self.items:
+            embed = discord.Embed(
+                title="💝 Wishlist",
+                description=(
+                    "No items on sale right now." if self.sale_only
+                    else f"{self.profile_name} has an empty wishlist."
+                ),
+                color=discord.Color.dark_gray()
+            )
+            return embed
+
+        item = self.items[index]
+        total = len(self.items)
+
+        name = item.get("name", "Unknown")
+        price = item.get("price", "N/A")
+        original = item.get("original_price", "")
+        discount = item.get("discount", 0)
+        is_free = item.get("is_free", False)
+        store_url = item.get("store_url", "")
+        header_img = item.get("header_image", "")
+        release_date = item.get("release_date", "Unknown")
+        coming_soon = item.get("coming_soon", False)
+        priority = item.get("priority", 0)
+
+        # Pick colour: gold for sale, green for free, blue default
+        if is_free:
+            color = discord.Color.green()
+        elif discount > 0:
+            color = discord.Color.gold()
+        else:
+            color = discord.Color.blurple()
+
+        # Title badges
+        badges = []
+        if coming_soon:
+            badges.append("🔜 Coming Soon")
+        if discount > 0:
+            badges.append(f"🔥 {discount}% OFF")
+        badge_suffix = f"  {' · '.join(badges)}" if badges else ""
+
+        embed = discord.Embed(
+            title=f"💝 {name}{badge_suffix}",
+            url=store_url,
+            color=color,
+        )
+
+        if header_img:
+            embed.set_image(url=header_img)
+
+        # Price field
+        if is_free:
+            price_display = "**Free to Play**"
+        elif discount > 0 and original:
+            price_display = f"~~{original}~~ → **{price}**"
+        else:
+            price_display = f"**{price}**"
+
+        embed.add_field(name="💰 Price", value=price_display, inline=True)
+        embed.add_field(name="📅 Release", value=release_date, inline=True)
+
+        # Wishlist rank (1-indexed for readability)
+        embed.add_field(name="📋 Priority", value=f"#{priority + 1 if priority >= 0 else '—'}", inline=True)
+
+        # Stats footer row
+        on_sale_count = sum(1 for i in self.all_items if i.get("discount", 0) > 0)
+        filter_label = " · Sale filter ON" if self.sale_only else ""
+        sort_labels = {
+            self.SORT_PRIORITY: "priority order",
+            self.SORT_PRICE: "price ↑",
+            self.SORT_DISCOUNT: "discount ↓",
+        }
+        embed.set_footer(
+            text=(
+                f"Item {index + 1} of {total}{filter_label} · "
+                f"Sorted by {sort_labels.get(self.sort_mode, '')} · "
+                f"{on_sale_count} item(s) currently on sale · "
+                f"{self.profile_name}'s wishlist"
+            )
+        )
+
+        return embed
+
+    # ------------------------------------------------------------------
+    # Interaction guard
+    # ------------------------------------------------------------------
+
+    async def _guard(self, interaction: discord.Interaction) -> bool:
+        """Return True if the interaction belongs to the original invoker."""
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "❌ This isn't your wishlist view.", ephemeral=True
+            )
+            return False
+        return True
+
+    # ------------------------------------------------------------------
+    # Buttons
+    # ------------------------------------------------------------------
+
+    @discord.ui.button(label="⬅️ Prev", style=discord.ButtonStyle.secondary, row=0)
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self._guard(interaction):
+            return
+        if self.items:
+            self.current_index = (self.current_index - 1) % len(self.items)
+        await interaction.response.edit_message(embed=self.create_wishlist_embed(self.current_index), view=self)
+
+    @discord.ui.button(label="Next ➡️", style=discord.ButtonStyle.secondary, row=0)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self._guard(interaction):
+            return
+        if self.items:
+            self.current_index = (self.current_index + 1) % len(self.items)
+        await interaction.response.edit_message(embed=self.create_wishlist_embed(self.current_index), view=self)
+
+    @discord.ui.button(label="🏷️ Sale Only", style=discord.ButtonStyle.secondary, custom_id="wl_sale_toggle", row=1)
+    async def sale_toggle(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self._guard(interaction):
+            return
+        self.sale_only = not self.sale_only
+        self.current_index = 0
+        self._rebuild_display_list()
+        self._refresh_button_states()
+        await interaction.response.edit_message(embed=self.create_wishlist_embed(self.current_index), view=self)
+
+    @discord.ui.button(label="📋 Sort: Priority", style=discord.ButtonStyle.secondary, custom_id="wl_sort", row=1)
+    async def sort_cycle(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self._guard(interaction):
+            return
+        # Cycle: priority → price → discount → priority
+        cycle = [self.SORT_PRIORITY, self.SORT_PRICE, self.SORT_DISCOUNT]
+        next_idx = (cycle.index(self.sort_mode) + 1) % len(cycle)
+        self.sort_mode = cycle[next_idx]
+        self.current_index = 0
+        self._rebuild_display_list()
+        self._refresh_button_states()
+        await interaction.response.edit_message(embed=self.create_wishlist_embed(self.current_index), view=self)
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
 
 
 # ===== IMPORT GAMING UTILITIES =====

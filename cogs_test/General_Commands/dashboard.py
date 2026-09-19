@@ -624,7 +624,10 @@ class DashboardCog(commands.Cog):
             await self.db.open()
 
             # discover app_commands from bot.tree (auto mode)
-            for cmd in list(self.bot.tree.commands):
+            # Get all commands - use _commands dict which is the internal storage
+            commands_to_check = list(self.bot.tree._commands.values()) if hasattr(self.bot.tree, '_commands') else []
+            
+            for cmd in commands_to_check:
                 # top-level commands and groups
                 tried = []
                 def register_if_meta(c):

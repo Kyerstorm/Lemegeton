@@ -1,26 +1,31 @@
 # bot.py
 import sys
 import os
+
+_PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
 import asyncio
 import logging
 import time
 import warnings
 import aiohttp
 import discord
+from discord import app_commands
 from discord.ext import commands
+
 import config
 
 # Suppress deprecation warning from discord.py's internal WebSocket connection code
 # This is a known issue in discord.py 2.6.0 that will be fixed in future versions
 warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*parameter 'timeout' of type 'float' is deprecated.*")
 from database import init_db, get_all_users_guild_aware, remove_user, clear_guild_records, get_all_guild_ids_with_records
+from helpers.anilist_helper import fetch_trending_anime_titles
 import signal
 import random
-from typing import Optional, Dict, List
+from typing import Any, Optional, Dict, List, Sequence
 from datetime import datetime
-
-# Add project root to sys.path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import hashlib
 import json
@@ -38,9 +43,12 @@ COG_WATCH_INTERVAL = config.COG_WATCH_INTERVAL_PROD if os.getenv("ENVIRONMENT") 
 # Ensure logs directory exists
 os.makedirs(LOG_DIR, exist_ok=True)
 
-# Clear all log files on startup
+# Clear all log files on startup (gated by config.CLEAR_LOGS_ON_STARTUP)
 def clear_log_files():
-    """Clear all .log files in the logs directory on bot startup"""
+    """Clear all .log files in the logs directory on bot startup when enabled."""
+    if not config.CLEAR_LOGS_ON_STARTUP:
+        print("Skipping startup log truncation (CLEAR_LOGS_ON_STARTUP is false)")
+        return 0
     try:
         log_files_cleared = 0
         for filename in os.listdir(LOG_DIR):
@@ -354,63 +362,71 @@ class GracefulShutdownHandler:
         self.logger = logging.getLogger("GracefulShutdown")
         self.shutdown_event = asyncio.Event()
         self.shutdown_initiated = False
+        self._shutdown_lock = asyncio.Lock()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Bind the running asyncio loop (required before signal handlers are registered)."""
+        self._loop = loop
 
     def setup_signal_handlers(self):
-        """Register signal handlers for graceful shutdown"""
-        def signal_handler(sig, frame):
-            if not self.shutdown_initiated:
-                self.shutdown_initiated = True
-                signal_name = signal.Signals(sig).name
-                self.logger.info(f"🛑 Received signal {signal_name}, initiating graceful shutdown...")
-                asyncio.create_task(self.shutdown())
+        """Register signal handlers for graceful shutdown."""
+        if self._loop is None:
+            self.logger.warning("No event loop bound; signal handlers not registered")
+            return
 
-        # Register handlers for common shutdown signals
-        signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
-        signal.signal(signal.SIGTERM, signal_handler)  # Docker/systemd stop
+        def signal_handler(sig, frame):
+            if self.shutdown_initiated:
+                return
+            self.shutdown_initiated = True
+            signal_name = signal.Signals(sig).name
+            self.logger.info(f"🛑 Received signal {signal_name}, initiating graceful shutdown...")
+
+            def schedule_shutdown():
+                self._loop.create_task(self.shutdown())
+
+            try:
+                self._loop.call_soon_threadsafe(schedule_shutdown)
+            except RuntimeError as e:
+                self.logger.error(f"Could not schedule shutdown on event loop: {e}")
+
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
 
         self.logger.info("✅ Signal handlers registered for graceful shutdown")
 
     async def shutdown(self):
         """Perform graceful shutdown sequence"""
-        if self.shutdown_event.is_set():
-            return
+        async with self._shutdown_lock:
+            if self.shutdown_event.is_set():
+                return
 
-        self.logger.info("="*60)
-        self.logger.info("GRACEFUL SHUTDOWN SEQUENCE INITIATED")
-        self.logger.info("="*60)
-
-        try:
-            # Notify administrators
-            self.logger.info("📢 Notifying administrators of shutdown...")
-            await self.notify_shutdown()
-
-            # Stop accepting new commands
-            self.logger.info("🔒 Stopping command processing...")
-            # Note: discord.py automatically handles this during close()
-
-            # Wait for pending operations (with timeout)
-            self.logger.info("⏳ Waiting for pending operations (max 30s)...")
-            try:
-                await asyncio.wait_for(self.wait_for_pending_operations(), timeout=30)
-            except asyncio.TimeoutError:
-                self.logger.warning("⚠️ Timeout waiting for pending operations, forcing shutdown")
-
-            # Close database connections
-            self.logger.info("💾 Closing database connections...")
-            # Note: Database connections are handled by database.py
-
-            # Close bot connection
-            self.logger.info("🔌 Closing Discord connection...")
-            if not self.bot.is_closed():
-                await self.bot.close()
-
-            self.logger.info("✅ Graceful shutdown completed successfully")
-
-        except Exception as e:
-            self.logger.error(f"❌ Error during graceful shutdown: {e}", exc_info=True)
-        finally:
-            self.shutdown_event.set()
             self.logger.info("="*60)
+            self.logger.info("GRACEFUL SHUTDOWN SEQUENCE INITIATED")
+            self.logger.info("="*60)
+
+            try:
+                self.logger.info("📢 Notifying administrators of shutdown...")
+                await self.notify_shutdown()
+
+                self.logger.info("🔒 Stopping command processing...")
+                self.logger.info("⏳ Waiting for pending operations (max 30s)...")
+                try:
+                    await asyncio.wait_for(self.wait_for_pending_operations(), timeout=30)
+                except asyncio.TimeoutError:
+                    self.logger.warning("⚠️ Timeout waiting for pending operations, forcing shutdown")
+
+                self.logger.info("💾 Closing database connections...")
+                self.logger.info("🔌 Closing Discord connection...")
+                await close_bot_once()
+
+                self.logger.info("✅ Graceful shutdown completed successfully")
+
+            except Exception as e:
+                self.logger.error(f"❌ Error during graceful shutdown: {e}", exc_info=True)
+            finally:
+                self.shutdown_event.set()
+                self.logger.info("="*60)
 
     async def notify_shutdown(self):
         """Notify administrators of shutdown"""
@@ -449,6 +465,7 @@ anilist_circuit_breaker = CircuitBreaker(
 webhook_notifier = None  # Initialized later with config
 shutdown_handler = None  # Initialized after bot creation
 background_tasks: List[asyncio.Task] = []  # Track all background tasks for proper cleanup
+startup_background_tasks_done = asyncio.Event()
 
 # Uptime tracking
 bot_start_time = time.time()
@@ -470,20 +487,81 @@ def get_uptime() -> str:
 # ------------------------------------------------------
 # Command Sync Optimization Functions
 # ------------------------------------------------------
-def get_command_signature(command):
-    """Generate a signature for command comparison"""
-    return {
-        'name': command.name,
-        'description': command.description,
-        'type': str(type(command)),
-        'params': len(command.parameters) if hasattr(command, 'parameters') else 0
+def _serialize_option_for_hash(opt: Any) -> Dict[str, Any]:
+    d: Dict[str, Any] = {
+        "name": getattr(opt, "name", ""),
+        "description": getattr(opt, "description", "") or "",
+        "required": bool(getattr(opt, "required", True)),
+        "type": str(getattr(opt, "type", "")),
     }
+    if getattr(opt, "autocomplete", False):
+        d["autocomplete"] = True
+    choices = getattr(opt, "choices", None)
+    if choices:
+        d["choices"] = sorted(
+            (getattr(c, "name", str(c)), getattr(c, "value", None)) for c in choices
+        )
+    for key in ("min_value", "max_value", "min_length", "max_length"):
+        if hasattr(opt, key):
+            val = getattr(opt, key, None)
+            if val is not None:
+                d[key] = val
+    return d
 
-def commands_hash(commands):
-    """Generate hash of command signatures for fast comparison"""
+
+def _iter_command_options(command: Any) -> List[Any]:
+    params = getattr(command, "parameters", None)
+    if params:
+        if isinstance(params, dict):
+            return list(params.values())
+        return list(params)
+    return list(getattr(command, "options", None) or [])
+
+
+def get_command_signature(command: Any) -> Dict[str, Any]:
+    qualified = getattr(command, "qualified_name", None) or getattr(command, "name", "") or ""
+    sig: Dict[str, Any] = {
+        "qualified_name": qualified,
+        "name": getattr(command, "name", ""),
+        "description": getattr(command, "description", "") or "",
+        "type": type(command).__name__,
+    }
+    if hasattr(command, "default_member_permissions"):
+        p = command.default_member_permissions
+        if p is None:
+            sig["default_member_permissions"] = None
+        else:
+            sig["default_member_permissions"] = getattr(p, "value", str(p))
+    if hasattr(command, "nsfw"):
+        sig["nsfw"] = command.nsfw
+    if hasattr(command, "guild_only"):
+        sig["guild_only"] = command.guild_only
+    if hasattr(command, "dm_permission"):
+        sig["dm_permission"] = command.dm_permission
+    opts = [_serialize_option_for_hash(o) for o in _iter_command_options(command)]
+    opts.sort(key=lambda x: x.get("name", ""))
+    sig["options"] = opts
+    return sig
+
+
+def _flatten_fetched_commands(commands: Sequence[Any]) -> List[Any]:
+    out: List[Any] = []
+    for cmd in commands:
+        if isinstance(cmd, app_commands.Group):
+            out.extend(cmd.walk_commands())
+        else:
+            out.append(cmd)
+    return out
+
+
+def commands_hash(commands: Sequence[Any]) -> str:
+    """Generate hash of command signatures for fast comparison."""
+    if not commands:
+        return hashlib.md5(b"").hexdigest()
     signatures = [get_command_signature(cmd) for cmd in commands]
-    signatures.sort(key=lambda x: x['name'])  # Sort for consistent hash
-    return hashlib.md5(json.dumps(signatures, sort_keys=True).encode()).hexdigest()
+    signatures.sort(key=lambda x: (x.get("qualified_name") or x.get("name") or ""))
+    return hashlib.md5(json.dumps(signatures, sort_keys=True, default=str).encode()).hexdigest()
+
 
 # ------------------------------------------------------
 # Intents and Bot Setup
@@ -493,6 +571,19 @@ intents.message_content = True
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents, application_id=config.BOT_ID)
+
+_bot_close_lock: Optional[asyncio.Lock] = None
+
+
+async def close_bot_once() -> None:
+    """Idempotent bot close for signal handler and main() teardown."""
+    global _bot_close_lock
+    if _bot_close_lock is None:
+        _bot_close_lock = asyncio.Lock()
+    async with _bot_close_lock:
+        if bot.is_closed():
+            return
+        await bot.close()
 
 # Initialize webhook notifier with Discord webhook from config
 WEBHOOK_URLS = {
@@ -504,12 +595,8 @@ WEBHOOK_URLS = {
 } if config.DISCORD_WEBHOOK_URL else {}
 webhook_notifier = WebhookNotifier(WEBHOOK_URLS, rate_limit=config.WEBHOOK_RATE_LIMIT)
 
-# Initialize graceful shutdown handler
+# Initialize graceful shutdown handler (signal registration from main() when loop is running)
 shutdown_handler = GracefulShutdownHandler(bot)
-try:
-    shutdown_handler.setup_signal_handlers()
-except Exception as e:
-    logger.warning(f"Could not setup signal handlers (may not work on Windows): {e}")
 
 # Initialize monitoring system if available
 monitoring = None
@@ -536,110 +623,32 @@ async def _fetch_trending_anime_internal() -> List[str]:
     Returns:
         List of anime titles or fallback list if API fails
     """
-    # Check circuit breaker
     if not anilist_circuit_breaker.can_execute():
         logger.warning("AniList API circuit breaker is open, using fallback")
         return config.DEFAULT_TRENDING_FALLBACK
 
-    query = """
-    query {
-        Page(page: 1, perPage: 10) {
-            media(sort: TRENDING_DESC, type: ANIME) {
-                title {
-                    romaji
-                    english
-                }
-            }
-        }
-    }
-    """
-
     try:
-        logger.debug(f"Making request to AniList API: {config.ANILIST_API_URL}")
-
+        logger.debug("Making request to AniList API via anilist_helper")
         timeout = aiohttp.ClientTimeout(total=config.ANILIST_API_TIMEOUT)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            start_time = time.time()
-            
-            async with session.post(
-                config.ANILIST_API_URL,
-                json={"query": query},
-                headers={'Content-Type': 'application/json'}
-            ) as response:
+            titles = await fetch_trending_anime_titles(
+                session, timeout=config.ANILIST_API_TIMEOUT
+            )
 
-                response_time = time.time() - start_time
-                logger.debug(f"AniList API response received in {response_time:.2f}s - Status: {response.status}")
+        if titles:
+            logger.info(f"Successfully fetched {len(titles)} trending anime titles")
+            anilist_circuit_breaker.record_success()
+            return titles
 
-                if response.status != 200:
-                    logger.error(f"AniList API request failed with status {response.status}")
-                    logger.debug(f"Response headers: {dict(response.headers)}")
-                    anilist_circuit_breaker.record_failure()
-                    return config.DEFAULT_TRENDING_FALLBACK
-                
-                try:
-                    data = await response.json()
-                    logger.debug("Successfully parsed JSON response")
-                except Exception as json_error:
-                    logger.error(f"Failed to parse JSON response: {json_error}")
-                    anilist_circuit_breaker.record_failure()
-                    return config.DEFAULT_TRENDING_FALLBACK
-
-                # Validate response structure
-                if not isinstance(data, dict) or 'data' not in data:
-                    logger.error(f"Invalid response structure: missing 'data' field")
-                    anilist_circuit_breaker.record_failure()
-                    return config.DEFAULT_TRENDING_FALLBACK
-
-                if 'Page' not in data['data'] or 'media' not in data['data']['Page']:
-                    logger.error("Invalid response structure: missing Page.media")
-                    anilist_circuit_breaker.record_failure()
-                    return config.DEFAULT_TRENDING_FALLBACK
-                
-                anime_list = data["data"]["Page"]["media"]
-                logger.debug(f"Retrieved {len(anime_list)} anime entries from API")
-                
-                # Process anime titles with validation
-                processed_titles = []
-                for i, anime in enumerate(anime_list):
-                    try:
-                        if not isinstance(anime, dict) or 'title' not in anime:
-                            logger.warning(f"Anime entry {i} missing title field")
-                            continue
-                            
-                        title_data = anime['title']
-                        if not isinstance(title_data, dict):
-                            logger.warning(f"Anime entry {i} has invalid title data")
-                            continue
-                            
-                        # Prefer English title, fallback to Romaji
-                        title = title_data.get('english') or title_data.get('romaji')
-                        if title and isinstance(title, str) and title.strip():
-                            processed_titles.append(title.strip())
-                            logger.debug(f"Added anime title: {title}")
-                        else:
-                            logger.warning(f"Anime entry {i} has no valid title")
-                            
-                    except Exception as title_error:
-                        logger.warning(f"Error processing anime entry {i}: {title_error}")
-                        continue
-                
-                if processed_titles:
-                    logger.info(f"Successfully fetched {len(processed_titles)} trending anime titles")
-                    anilist_circuit_breaker.record_success()
-                    return processed_titles
-                else:
-                    logger.warning("No valid anime titles found, using fallback")
-                    anilist_circuit_breaker.record_failure()
-                    return config.DEFAULT_TRENDING_FALLBACK
+        logger.warning("AniList trending fetch returned no titles, using fallback")
+        raise aiohttp.ClientConnectionError("AniList trending fetch failed or empty response")
 
     except (aiohttp.ClientTimeout, aiohttp.ClientError) as e:
-        # Re-raise for retry handler
         anilist_circuit_breaker.record_failure()
         raise
     except Exception as e:
         logger.error(f"Unexpected error fetching trending anime: {e}", exc_info=True)
         anilist_circuit_breaker.record_failure()
-        # Don't retry unexpected errors
         return config.DEFAULT_TRENDING_FALLBACK
 
 
@@ -1127,18 +1136,7 @@ async def _load_cogs_impl():
                     
                     try:
                         logger.debug(f"About to load extension: {cog_name}")
-                        
-                        # Check if cog is already loaded before attempting to load
-                        cog_class_name = cog_name.split('.')[-1].capitalize()  # e.g., "steam" -> "Steam"
-                        existing_cog = bot.get_cog(cog_class_name)
-                        if existing_cog:
-                            logger.warning(f"Cog {cog_class_name} is already loaded, attempting to unload first")
-                            try:
-                                await bot.remove_cog(cog_class_name)
-                                logger.debug(f"Successfully unloaded existing cog: {cog_class_name}")
-                            except Exception as unload_error:
-                                logger.error(f"Failed to unload existing cog {cog_class_name}: {unload_error}")
-                        
+
                         await bot.load_extension(cog_name)
                         cog_timestamps[cog_name] = last_mod
                         logger.info(f"✅ Successfully loaded cog: {cog_name}")
@@ -1217,83 +1215,88 @@ async def watch_cogs():
 # ------------------------------------------------------
 # Server Logging Function
 # ------------------------------------------------------
+def _write_server_log_sync(server_log_path: str, content: str) -> None:
+    with open(server_log_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+
+
 async def log_server_information():
     """
     Log detailed information about all servers the bot is connected to.
     Creates a separate log file with server details for monitoring purposes.
     """
     try:
-        # Create server log file
         server_log_path = os.path.join(LOG_DIR, "servers.log")
-        
-        with open(server_log_path, 'w', encoding='utf-8') as server_log:
-            server_log.write("=" * 80 + "\n")
-            server_log.write(f"BOT SERVER INFORMATION - {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-            server_log.write("=" * 80 + "\n")
-            server_log.write(f"Bot User: {bot.user} (ID: {bot.user.id})\n")
-            server_log.write(f"Total Servers: {len(bot.guilds)}\n")
-            server_log.write(f"Bot Latency: {bot.latency*1000:.2f}ms\n")
-            server_log.write("-" * 80 + "\n\n")
-            
-            total_members = 0
-            
-            for i, guild in enumerate(bot.guilds, 1):
+        bot_user = bot.user
+        if bot_user is None:
+            return
+
+        lines: List[str] = []
+        lines.append("=" * 80 + "\n")
+        lines.append(f"BOT SERVER INFORMATION - {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        lines.append("=" * 80 + "\n")
+        lines.append(f"Bot User: {bot_user} (ID: {bot_user.id})\n")
+        lines.append(f"Total Servers: {len(bot.guilds)}\n")
+        lines.append(f"Bot Latency: {bot.latency*1000:.2f}ms\n")
+        lines.append("-" * 80 + "\n\n")
+
+        total_members = 0
+
+        for i, guild in enumerate(bot.guilds, 1):
+            try:
+                owner = guild.owner
+                owner_info = f"{owner} (ID: {owner.id})" if owner else "Unknown"
+                created_date = guild.created_at.strftime('%Y-%m-%d')
+
+                text_channels = len([c for c in guild.channels if isinstance(c, discord.TextChannel)])
+                voice_channels = len([c for c in guild.channels if isinstance(c, discord.VoiceChannel)])
+
+                role_count = len(guild.roles)
+                total_members += guild.member_count
+
+                lines.append(f"[{i}] SERVER: {guild.name}\n")
+                lines.append(f"     Guild ID: {guild.id}\n")
+                lines.append(f"     Owner: {owner_info}\n")
+                lines.append(f"     Members: {guild.member_count:,}\n")
+                lines.append(f"     Created: {created_date}\n")
+                lines.append(f"     Channels: {text_channels} text, {voice_channels} voice\n")
+                lines.append(f"     Roles: {role_count}\n")
+                lines.append(f"     Features: {', '.join(guild.features) if guild.features else 'None'}\n")
+
                 try:
-                    # Get guild information
-                    owner = guild.owner
-                    owner_info = f"{owner} (ID: {owner.id})" if owner else "Unknown"
-                    created_date = guild.created_at.strftime('%Y-%m-%d')
-                    
-                    # Count text and voice channels
-                    text_channels = len([c for c in guild.channels if isinstance(c, discord.TextChannel)])
-                    voice_channels = len([c for c in guild.channels if isinstance(c, discord.VoiceChannel)])
-                    
-                    # Count roles
-                    role_count = len(guild.roles)
-                    
-                    # Add to total members
-                    total_members += guild.member_count
-                    
-                    # Write server information
-                    server_log.write(f"[{i}] SERVER: {guild.name}\n")
-                    server_log.write(f"     Guild ID: {guild.id}\n")
-                    server_log.write(f"     Owner: {owner_info}\n")
-                    server_log.write(f"     Members: {guild.member_count:,}\n")
-                    server_log.write(f"     Created: {created_date}\n")
-                    server_log.write(f"     Channels: {text_channels} text, {voice_channels} voice\n")
-                    server_log.write(f"     Roles: {role_count}\n")
-                    server_log.write(f"     Features: {', '.join(guild.features) if guild.features else 'None'}\n")
-                    
-                    # Check bot permissions
-                    try:
-                        bot_member = guild.get_member(bot.user.id)
-                        if bot_member:
-                            permissions = bot_member.guild_permissions
-                            admin = permissions.administrator
-                            manage_server = permissions.manage_guild
-                            send_messages = permissions.send_messages
-                            
-                            server_log.write(f"     Bot Perms: Admin={admin}, Manage Server={manage_server}, Send Messages={send_messages}\n")
-                    except Exception as perm_error:
-                        server_log.write(f"     Bot Perms: Error retrieving - {perm_error}\n")
-                    
-                    server_log.write("\n")
-                    
-                except Exception as guild_error:
-                    server_log.write(f"[{i}] ERROR processing guild {guild.id}: {guild_error}\n\n")
-                    logger.warning(f"Error processing guild {guild.id}: {guild_error}")
-            
-            # Write summary
-            server_log.write("-" * 80 + "\n")
-            server_log.write("SUMMARY:\n")
-            server_log.write(f"Total Servers: {len(bot.guilds)}\n")
-            server_log.write(f"Total Members Across All Servers: {total_members:,}\n")
-            server_log.write(f"Average Members per Server: {total_members/len(bot.guilds):.1f}\n" if bot.guilds else "")
-            server_log.write("=" * 80 + "\n")
-        
+                    bot_member = guild.get_member(bot_user.id)
+                    if bot_member:
+                        permissions = bot_member.guild_permissions
+                        admin = permissions.administrator
+                        manage_server = permissions.manage_guild
+                        send_messages = permissions.send_messages
+                        lines.append(
+                            f"     Bot Perms: Admin={admin}, Manage Server={manage_server}, "
+                            f"Send Messages={send_messages}\n"
+                        )
+                except Exception as perm_error:
+                    lines.append(f"     Bot Perms: Error retrieving - {perm_error}\n")
+
+                lines.append("\n")
+
+            except Exception as guild_error:
+                lines.append(f"[{i}] ERROR processing guild {guild.id}: {guild_error}\n\n")
+                logger.warning(f"Error processing guild {guild.id}: {guild_error}")
+
+        lines.append("-" * 80 + "\n")
+        lines.append("SUMMARY:\n")
+        lines.append(f"Total Servers: {len(bot.guilds)}\n")
+        lines.append(f"Total Members Across All Servers: {total_members:,}\n")
+        if bot.guilds:
+            lines.append(f"Average Members per Server: {total_members/len(bot.guilds):.1f}\n")
+        lines.append("=" * 80 + "\n")
+
+        content = "".join(lines)
+        await asyncio.to_thread(_write_server_log_sync, server_log_path, content)
+
         logger.info(f"✅ Server information logged to: {server_log_path}")
         logger.info(f"Bot is connected to {len(bot.guilds)} servers with {total_members:,} total members")
-        
+
     except Exception as e:
         logger.error(f"Error logging server information: {e}", exc_info=True)
 
@@ -1313,107 +1316,103 @@ async def on_ready():
     logger.info("="*60)
     
     try:
-        # Log guild information with detailed server logging
         await log_server_information()
-        
+
+        if startup_background_tasks_done.is_set():
+            logger.info("on_ready reconnect: skipping duplicate startup (background tasks already running)")
+            return
+
         for guild in bot.guilds:
             logger.debug(f"Connected to guild: {guild.name} (ID: {guild.id}) - {guild.member_count} members")
-        
-        # Sync all global commands with smart optimization
+
         logger.info("Starting global command synchronization")
-        
+
         try:
-            # Get current commands from loaded cogs
-            current_commands = bot.tree.get_commands()
-            logger.debug(f"Found {len(current_commands)} local commands")
-            
-            if not current_commands:
-                logger.warning("No commands found to sync")
-                return
-            
-            # Ultra-fast sync detection using command hashing
-            needs_sync = True
-            current_hash = commands_hash(current_commands)
-            
-            try:
-                # Try to get existing commands for comparison
-                existing_commands = await bot.tree.fetch_commands()
-                if existing_commands:
-                    existing_hash = commands_hash(existing_commands)
-                    
-                    if current_hash == existing_hash:
-                        needs_sync = False
-                        logger.info(f"🚀 FAST SYNC: No changes detected - skipping sync ({len(current_commands)} commands)")
-                        logger.info("🌍 All commands already up-to-date globally!")
-                        
-                        # Still log available commands for verification
-                        for cmd in current_commands:
-                            logger.info(f"Global command available: {cmd.name}")
-                
-            except Exception as fetch_error:
-                logger.debug(f"Could not fetch existing commands for comparison: {fetch_error}")
-                # Fall back to full sync for safety
-            
-            if needs_sync:
-                logger.info("📤 Command changes detected - performing sync...")
-                start_time = asyncio.get_event_loop().time()
-                
-                global_synced = await bot.tree.sync()
-                
-                sync_time = asyncio.get_event_loop().time() - start_time
-                logger.info(f"✅ Successfully synced {len(global_synced)} global commands in {sync_time:.2f}s")
-                logger.info("🌍 ALL COMMANDS are now available in EVERY server the bot joins!")
-                
-                # Log each synced global command
-                for cmd in global_synced:
-                    logger.info(f"Global command available: {cmd.name}")
-            
+            top_level_commands = bot.tree.get_commands()
+            logger.debug(f"Found {len(top_level_commands)} top-level command(s)")
+
+            if not top_level_commands:
+                logger.warning("No commands found on tree; skipping global sync")
+            else:
+                walker = getattr(bot.tree, "walk_commands", None)
+                local_flat = list(walker()) if walker else list(top_level_commands)
+                needs_sync = True
+                current_hash = commands_hash(local_flat)
+
+                try:
+                    existing_commands = await bot.tree.fetch_commands()
+                    if existing_commands:
+                        flat_remote = _flatten_fetched_commands(existing_commands)
+                        existing_hash = commands_hash(flat_remote)
+
+                        if current_hash == existing_hash:
+                            needs_sync = False
+                            logger.info(
+                                f"FAST SYNC: No changes detected - skipping sync ({len(local_flat)} command(s))"
+                            )
+                            logger.info("All commands already up-to-date globally")
+                            for cmd in top_level_commands:
+                                logger.debug(f"Global command available: {cmd.name}")
+
+                except Exception as fetch_error:
+                    logger.debug(f"Could not fetch existing commands for comparison: {fetch_error}")
+
+                if needs_sync:
+                    logger.info("Command changes detected - performing sync...")
+                    start_time = asyncio.get_event_loop().time()
+
+                    global_synced = await bot.tree.sync()
+
+                    sync_time = asyncio.get_event_loop().time() - start_time
+                    logger.info(f"Successfully synced {len(global_synced)} global commands in {sync_time:.2f}s")
+
+                    for cmd in global_synced:
+                        logger.info(f"Global command available: {cmd.name}")
+
         except discord.HTTPException as http_error:
             logger.error(f"HTTP error syncing global commands: {http_error}")
-            if http_error.status == 429:  # Rate limited
-                logger.error("Rate limited! Consider using the smart sync to reduce API calls.")
+            if http_error.status == 429:
+                logger.error("Rate limited while syncing global commands.")
         except Exception as sync_error:
             logger.error(f"Error syncing global commands: {sync_error}", exc_info=True)
-        
-        # Start background tasks with tracking
+
         logger.info("Starting background tasks")
 
         try:
             logger.debug("Creating streaming status updater task")
             task = bot.loop.create_task(update_streaming_status())
             background_tasks.append(task)
-            logger.info("✅ Streaming status updater started")
-        except Exception as status_task_error:
-            logger.error(f"Failed to start streaming status updater: {status_task_error}")
+            logger.info("Streaming status updater started")
 
-        try:
             logger.debug("Running initial user cleanup on startup")
             startup_stats = await cleanup_stale_users()
             if startup_stats['removed'] > 0:
-                logger.info(f"✅ Initial user cleanup completed: removed {startup_stats['removed']} stale records")
+                logger.info(f"Initial user cleanup completed: removed {startup_stats['removed']} stale records")
             else:
-                logger.info("✅ Initial user cleanup completed: no stale records found")
+                logger.info("Initial user cleanup completed: no stale records found")
 
             logger.debug("Running initial guild cleanup")
             await cleanup_left_guilds()
-            logger.info("✅ Initial guild cleanup completed")
+            logger.info("Initial guild cleanup completed")
 
             logger.debug("Creating user cleanup scheduler task")
             task = bot.loop.create_task(schedule_user_cleanup())
             background_tasks.append(task)
-            logger.info("✅ User cleanup scheduler started")
+            logger.info("User cleanup scheduler started")
 
             logger.debug("Creating guild cleanup scheduler task")
             task = bot.loop.create_task(schedule_guild_cleanup())
             background_tasks.append(task)
-            logger.info("✅ Guild cleanup scheduler started")
+            logger.info("Guild cleanup scheduler started")
+
+            startup_background_tasks_done.set()
+
         except Exception as cleanup_task_error:
-            logger.error(f"Failed to start cleanup tasks: {cleanup_task_error}")
-        
+            logger.error(f"Failed to start background / cleanup tasks: {cleanup_task_error}", exc_info=True)
+
         logger.info("Bot initialization completed successfully")
         logger.info("="*60)
 
-        # Send webhook notification for bot ready
         await webhook_notifier.notify('bot_ready', {
             'bot_user': str(bot.user),
             'bot_id': bot.user.id,
@@ -1538,6 +1537,13 @@ async def main():
         config_summary = config.get_config_summary()
         logger.info(f"Configuration summary: {config_summary}")
 
+        loop = asyncio.get_running_loop()
+        shutdown_handler.bind_loop(loop)
+        try:
+            shutdown_handler.setup_signal_handlers()
+        except Exception as sig_e:
+            logger.warning(f"Could not setup signal handlers (may not work on Windows): {sig_e}")
+
         # Initialize database with logging
         logger.info("Initializing database...")
         try:
@@ -1612,10 +1618,11 @@ async def main():
             await asyncio.gather(*background_tasks, return_exceptions=True)
             logger.info("✅ All background tasks cancelled")
 
-        # Close bot connection
-        if not bot.is_closed():
-            logger.debug("Closing bot connection...")
-            await bot.close()
+        # Close bot connection (idempotent with signal-driven shutdown)
+        try:
+            await close_bot_once()
+        except Exception as close_err:
+            logger.warning(f"Error while closing bot: {close_err}")
 
         logger.info("Bot shutdown completed")
         logger.info("="*60)
