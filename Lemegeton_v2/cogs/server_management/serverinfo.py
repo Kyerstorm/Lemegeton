@@ -20,6 +20,7 @@ import asyncio
 from typing import List, Optional
 
 from helpers.embed_helper import build_warning_embed
+from helpers.server_management_utils import server_management_error_handler
 
 # ---------------------------
 # Palette & Embed helper
@@ -244,10 +245,7 @@ class ServerInfo(commands.Cog):
     async def before_cleanup(self):
         await self.bot.wait_until_ready()
 
-    async def build_guild_pages(self, guild: discord.Guild, requester: discord.User) -> List[discord.Embed]:
-        pages: List[discord.Embed] = []
-
-        # Page 1 — Hero / Basic
+    def _build_hero_page(self, guild: discord.Guild, members: List[discord.Member], requester: discord.User, humans: int, bots: int) -> discord.Embed:
         hero = create_darlux_embed(title=f"🖤 {guild.name} — Overview",
                                    description=guild.description or "No description set.",
                                    accent="royal_gold")
@@ -265,18 +263,14 @@ class ServerInfo(commands.Cog):
         hero.add_field(name="🆔 Server ID", value=f"`{guild.id}`", inline=True)
         hero.add_field(name="🕰️ Created", value=fmt_date(guild.created_at), inline=True)
 
-        # members breakdown
-        members = guild.members
-        humans = len([m for m in members if not m.bot])
-        bots = len([m for m in members if m.bot])
         hero.add_field(name="👥 Members", value=f"{short_number(guild.member_count)} total\n🧍 {humans} humans • 🤖 {bots} bots", inline=False)
         hero.add_field(name="🗨️ Channels", value=f"📝 {len(guild.text_channels)} • 🔊 {len(guild.voice_channels)}", inline=True)
         hero.add_field(name="💠 Roles", value=f"{len(guild.roles)}", inline=True)
         hero.add_field(name="⚜️ Boosts", value=f"Tier {getattr(guild, 'premium_tier', 0)} • {getattr(guild, 'premium_subscription_count', 0)} boosts", inline=True)
         hero.set_footer(text=f"Requested by {requester}", icon_url=requester.display_avatar.url)
-        pages.append(hero)
+        return hero
 
-        # Page 2 — Presence & Activities
+    def _build_presence_page(self, guild: discord.Guild, members: List[discord.Member]) -> discord.Embed:
         pres = create_darlux_embed(title=f"🖤 {guild.name} — Presence & Activity", accent="velvet_purple")
         pmap = presence_breakdown(members)
         pres.add_field(name="🟢 Online", value=str(pmap.get("online", 0)), inline=True)
@@ -284,7 +278,6 @@ class ServerInfo(commands.Cog):
         pres.add_field(name="⛔ DND", value=str(pmap.get("dnd", 0)), inline=True)
         pres.add_field(name="⚫ Offline", value=str(pmap.get("offline", 0)), inline=True)
 
-        # top activities sample
         activity_map = {}
         for m in members:
             try:
@@ -295,9 +288,9 @@ class ServerInfo(commands.Cog):
                 continue
         top_acts = sorted(activity_map.items(), key=lambda x: x[1], reverse=True)[:8]
         pres.add_field(name="🎭 Top Activities", value="\n".join([f"{a} — {c}" for a, c in top_acts]) if top_acts else "No notable activities", inline=False)
-        pages.append(pres)
+        return pres
 
-        # Page 3 — Emojis & Stickers
+    def _build_emoji_page(self, guild: discord.Guild) -> discord.Embed:
         emo = create_darlux_embed(title=f"🖤 {guild.name} — Emojis & Stickers", accent="midnight_blue")
         try:
             emo.add_field(name="😄 Emojis", value=str(len(guild.emojis)), inline=True)
@@ -306,9 +299,9 @@ class ServerInfo(commands.Cog):
             emo.add_field(name="Sample", value=sample, inline=False)
         except Exception:
             emo.add_field(name="Emojis", value="Could not retrieve emojis (permissions/API)", inline=False)
-        pages.append(emo)
+        return emo
 
-        # Page 4 — Roles & Top Members
+    def _build_roles_page(self, guild: discord.Guild, members: List[discord.Member]) -> discord.Embed:
         rolepage = create_darlux_embed(title=f"🖤 {guild.name} — Roles & Top Members", accent="accent")
         try:
             top_roles = [r for r in guild.roles if r != guild.default_role][-12:]
@@ -317,15 +310,14 @@ class ServerInfo(commands.Cog):
             rolepage.add_field(name="Top Roles (sample)", value=role_list, inline=False)
         except Exception:
             rolepage.add_field(name="Roles", value="Could not fetch roles", inline=False)
-        # oldest members sample
         try:
             oldest = sorted([m for m in members if not m.bot], key=lambda x: x.joined_at or datetime.utcnow())[:8]
             rolepage.add_field(name="Oldest Joins", value="\n".join([f"{m.display_name} — {fmt_date(m.joined_at)}" for m in oldest]) or "N/A", inline=False)
         except Exception:
             pass
-        pages.append(rolepage)
+        return rolepage
 
-        # Page 5 — Moderation & Safety
+    def _build_moderation_page(self, guild: discord.Guild) -> discord.Embed:
         safe = create_darlux_embed(title=f"🖤 {guild.name} — Moderation & Safety", accent="royal_gold")
         try:
             ver = str(guild.verification_level).replace("_", " ").title()
@@ -334,18 +326,31 @@ class ServerInfo(commands.Cog):
             safe.add_field(name="🧭 Locale", value=str(guild.preferred_locale), inline=True)
         except Exception:
             safe.add_field(name="Moderation", value="Could not fetch moderation settings", inline=False)
-        pages.append(safe)
+        return safe
 
-        # Page 6 — Summary
+    def _build_summary_page(self, guild: discord.Guild, humans: int, bots: int) -> discord.Embed:
         summ = create_darlux_embed(title=f"🖤 {guild.name} — Quick Summary", accent="velvet_purple")
         summ.add_field(name="Members (humans/bots)", value=f"{humans}/{bots}", inline=True)
         summ.add_field(name="Channels (text/voice)", value=f"{len(guild.text_channels)}/{len(guild.voice_channels)}", inline=True)
         summ.add_field(name="Roles / Emojis", value=f"{len(guild.roles)} roles • {len(guild.emojis)} emojis", inline=True)
-        pages.append(summ)
+        return summ
 
-        return pages
+    async def build_guild_pages(self, guild: discord.Guild, requester: discord.User) -> List[discord.Embed]:
+        members = guild.members
+        humans = len([m for m in members if not m.bot])
+        bots = len([m for m in members if m.bot])
+
+        return [
+            self._build_hero_page(guild, members, requester, humans, bots),
+            self._build_presence_page(guild, members),
+            self._build_emoji_page(guild),
+            self._build_roles_page(guild, members),
+            self._build_moderation_page(guild),
+            self._build_summary_page(guild, humans, bots),
+        ]
 
     @app_commands.command(name="server", description="Display refined server information (Dark Luxury).")
+    @server_management_error_handler
     async def server(self, interaction: discord.Interaction):
         await interaction.response.defer(thinking=True)
         # invoked in a guild

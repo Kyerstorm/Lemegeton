@@ -10,8 +10,9 @@ from datetime import datetime, timezone
 import random
 import json
 
-from database import DB_PATH, execute_db_operation
+from database import execute_db_operation, get_all_invite_channel_settings
 from helpers.embed_helper import build_error_embed, build_success_embed, build_info_embed
+from helpers.server_management_utils import server_management_error_handler
 
 # ------------------------------------------------------
 # Logging Setup - Clears on each bot run
@@ -154,12 +155,8 @@ class InviteTracker(commands.Cog):
     async def _load_channel_settings(self):
         """Load announcement channel settings from database"""
         try:
-            settings = await execute_db_operation(
-                "load channel settings",
-                "SELECT guild_id, announcement_channel_id FROM invite_tracker_settings",
-                fetch_type='all'
-            )
-            
+            settings = await get_all_invite_channel_settings()
+
             if settings:
                 for guild_id, channel_id in settings:
                     self.announcement_channels[guild_id] = channel_id
@@ -560,60 +557,10 @@ class InviteTracker(commands.Cog):
         self.invite_cache[invite.guild.id] = [inv for inv in guild_invites if inv.code != invite.code]
         logger.info(f"Removed deleted invite {invite.code} from cache")
     
-    # ============================================================================
-    # DEPRECATED COMMAND - USE /server-config INSTEAD
-    # This command has been consolidated into the unified /server-config interface
-    # Located in: cogs/server_management/server_config.py
-    # Kept here commented for reference only
-    # ============================================================================
-    
-    # @app_commands.command(
-    #     name="set_invite_channel",
-    #     description="⚠️ DEPRECATED - Use /server-config instead"
-    # )
-    # @app_commands.describe(
-    #     channel="The channel where invite join/leave messages will be sent"
-    # )
-    # @app_commands.default_permissions(manage_guild=True)
-    # async def set_invite_channel(
-    #     self,
-    #     interaction: discord.Interaction,
-    #     channel: discord.TextChannel
-    # ):
-    #     """DEPRECATED: Set the announcement channel for invite tracking. Use /server-config instead."""
-    #     await interaction.response.send_message(
-    #         "⚠️ **This command has been deprecated**\n\n"
-    #         "Please use `/server-config` for a unified configuration interface.\n"
-    #         "You can manage invite channels, moderator roles, and all server settings there.",
-    #         ephemeral=True
-    #     )
-    
-    # ============================================================================
-    # END DEPRECATED COMMAND
-    # Leftover code from deprecated command above - commented out
-    # ============================================================================
-    #         value="• New members joining will trigger themed messages\n• Members leaving will trigger departure messages\n• All messages will only be sent to this channel",
-    #         inline=False
-    #     )
-    #     
-    #     embed.set_footer(text="Use /invite_channel_info to view current settings • Messages will only appear in the configured channel")
-    #     
-    #     await interaction.followup.send(embed=embed)
-    #     logger.info(f"Set invite channel to #{channel.name} for guild {interaction.guild.name}")
-    #     
-    # except Exception as e:
-    #     logger.error(f"Error setting invite channel: {e}")
-    #     try:
-    #         await interaction.followup.send(
-    #             "❌ An error occurred while setting the invite channel.",
-    #             ephemeral=True
-    #         )
-    #     except:
-    #         logger.error("Failed to send error message - interaction may have expired")
-    
     @app_commands.command(name="invite-stats", description="View recruitment statistics for the server or a specific user")
     @app_commands.describe(user="Optional: View stats for a specific user")
     @app_commands.default_permissions(manage_guild=True)
+    @server_management_error_handler
     async def invite_stats(self, interaction: discord.Interaction, user: Optional[discord.User] = None):
         """Display recruitment statistics for the server or a specific user"""
         await interaction.response.defer()
@@ -847,6 +794,7 @@ class InviteTracker(commands.Cog):
 
     @app_commands.command(name="invite-leaderboard", description="View the top recruiters in the server")
     @app_commands.default_permissions(manage_guild=True)
+    @server_management_error_handler
     async def invite_leaderboard(self, interaction: discord.Interaction):
         """Display the top recruiters in the server with xianxia-themed presentation"""
         await interaction.response.defer()
@@ -930,6 +878,7 @@ class InviteTracker(commands.Cog):
 
     @app_commands.command(name="invite-theme", description="Customize join/leave messages and theme settings")
     @app_commands.default_permissions(manage_guild=True)
+    @server_management_error_handler
     async def invite_theme(self, interaction: discord.Interaction):
         """Display the theme customization menu"""
         await interaction.response.defer(ephemeral=True)

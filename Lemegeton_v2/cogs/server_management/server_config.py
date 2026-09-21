@@ -12,9 +12,11 @@ from datetime import datetime
 
 from database import (
     get_guild_bot_update_channel, remove_guild_bot_update_channel,
-    is_user_moderator, execute_db_operation
+    get_invite_channel_guild_aware, set_invite_channel_guild_aware,
+    delete_invite_channel_guild_aware, execute_db_operation
 )
 from helpers.embed_helper import build_error_embed, build_success_embed, build_info_embed, build_warning_embed
+from helpers.server_management_utils import server_management_error_handler
 
 # ------------------------------------------------------
 # Logging Setup
@@ -122,15 +124,8 @@ class ServerConfigMainView(discord.ui.View):
         
         try:
             # Get invite tracking channel from database
-            result = await execute_db_operation(
-                "get invite tracking channel",
-                "SELECT announcement_channel_id FROM invite_tracker_settings WHERE guild_id = ?",
-                (interaction.guild.id,),
-                fetch_type='one'
-            )
-            
-            channel_id = result[0] if result else None
-            
+            channel_id = await get_invite_channel_guild_aware(interaction.guild.id)
+
             if channel_id:
                 channel = self.cog.bot.get_channel(channel_id)
                 if channel:
@@ -210,16 +205,11 @@ class ServerConfigMainView(discord.ui.View):
             )
             
             # Invite tracking channel
-            invite_result = await execute_db_operation(
-                "get invite tracking channel",
-                "SELECT announcement_channel_id FROM invite_tracker_settings WHERE guild_id = ?",
-                (interaction.guild.id,),
-                fetch_type='one'
-            )
-            
-            if invite_result:
-                invite_channel = self.cog.bot.get_channel(invite_result[0])
-                invite_info = f"✅ {invite_channel.mention}" if invite_channel else f"⚠️ Channel ID {invite_result[0]} (not found)"
+            invite_channel_id = await get_invite_channel_guild_aware(interaction.guild.id)
+
+            if invite_channel_id:
+                invite_channel = self.cog.bot.get_channel(invite_channel_id)
+                invite_info = f"✅ {invite_channel.mention}" if invite_channel else f"⚠️ Channel ID {invite_channel_id} (not found)"
             else:
                 invite_info = "❌ Not configured"
             
@@ -313,12 +303,8 @@ class InviteChannelConfigView(discord.ui.View):
         await interaction.response.defer(ephemeral=True)
         
         try:
-            await execute_db_operation(
-                "remove invite tracking channel",
-                "DELETE FROM invite_tracker_settings WHERE guild_id = ?",
-                (interaction.guild.id,)
-            )
-            
+            await delete_invite_channel_guild_aware(interaction.guild.id)
+
             embed = build_success_embed(
                 title="Invite Tracking Channel Removed",
                 description="Invite tracking channel configuration has been cleared.\nJoin/leave messages are now disabled."
@@ -480,16 +466,8 @@ class SetInviteChannelModal(discord.ui.Modal):
                 return
             
             # Set the invite channel
-            await execute_db_operation(
-                "set invite channel",
-                """
-                INSERT OR REPLACE INTO invite_tracker_settings 
-                (guild_id, announcement_channel_id, updated_at)
-                VALUES (?, ?, CURRENT_TIMESTAMP)
-                """,
-                (interaction.guild.id, channel.id)
-            )
-            
+            await set_invite_channel_guild_aware(interaction.guild.id, channel.id)
+
             # Initialize invite cache for this guild
             try:
                 invites = await interaction.guild.invites()
@@ -536,6 +514,7 @@ class ServerConfig(commands.Cog):
     
     @app_commands.command(name="server-config", description="⚙️ Configure server settings - roles, channels, and notifications")
     @app_commands.default_permissions(manage_guild=True)
+    @server_management_error_handler
     async def server_config(self, interaction: discord.Interaction):
         """Unified server configuration interface"""
         

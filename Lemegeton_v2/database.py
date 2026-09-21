@@ -3249,6 +3249,72 @@ async def remove_guild_bot_update_channel(guild_id: int):
         raise
 
 
+async def get_invite_channel_guild_aware(guild_id: int) -> Optional[int]:
+    """Get the configured invite-tracking announcement channel ID for a guild."""
+    try:
+        result = await execute_db_operation(
+            "get invite channel",
+            "SELECT announcement_channel_id FROM invite_tracker_settings WHERE guild_id = ?",
+            (guild_id,),
+            fetch_type='one'
+        )
+        return result[0] if result else None
+    except Exception as e:
+        logger.error(f"❌ Error getting invite channel for guild {guild_id}: {e}", exc_info=True)
+        raise
+
+
+async def get_all_invite_channel_settings() -> list:
+    """Get invite-tracking announcement channel settings for every configured guild.
+
+    Returns a list of (guild_id, announcement_channel_id) tuples.
+    """
+    try:
+        result = await execute_db_operation(
+            "get all invite channel settings",
+            "SELECT guild_id, announcement_channel_id FROM invite_tracker_settings",
+            fetch_type='all'
+        )
+        return result or []
+    except Exception as e:
+        logger.error(f"❌ Error getting all invite channel settings: {e}", exc_info=True)
+        raise
+
+
+async def set_invite_channel_guild_aware(guild_id: int, channel_id: int):
+    """Set (insert or replace) the invite-tracking announcement channel for a guild."""
+    try:
+        result = await execute_db_operation(
+            "set invite channel",
+            """
+            INSERT OR REPLACE INTO invite_tracker_settings
+            (guild_id, announcement_channel_id, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            """,
+            (guild_id, channel_id)
+        )
+        logger.info(f"✅ Set invite channel {channel_id} for guild {guild_id}")
+        return result
+    except Exception as e:
+        logger.error(f"❌ Error setting invite channel for guild {guild_id}: {e}", exc_info=True)
+        raise
+
+
+async def delete_invite_channel_guild_aware(guild_id: int):
+    """Remove the invite-tracking announcement channel configuration for a guild."""
+    try:
+        result = await execute_db_operation(
+            "delete invite channel",
+            "DELETE FROM invite_tracker_settings WHERE guild_id = ?",
+            (guild_id,)
+        )
+        logger.info(f"✅ Removed invite channel configuration for guild {guild_id}")
+        return result
+    except Exception as e:
+        logger.error(f"❌ Error deleting invite channel for guild {guild_id}: {e}", exc_info=True)
+        raise
+
+
 async def get_challenge_role_ids_for_guild(guild_id: int) -> Dict[int, Dict[float, int]]:
     """
     Get challenge role IDs for a specific guild.

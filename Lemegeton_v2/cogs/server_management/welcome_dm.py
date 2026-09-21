@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 
 from helpers.embed_helper import build_error_embed, build_success_embed, build_info_embed
+from helpers.server_management_utils import server_management_error_handler
 
 logger = logging.getLogger("WelcomeDM")
 
@@ -126,6 +127,7 @@ class WelcomeDM(commands.Cog):
     @app_commands.describe(
         text_file="Upload a .txt file containing the welcome message"
     )
+    @server_management_error_handler
     async def set_welcome_dm(self, interaction: discord.Interaction, text_file: discord.Attachment):
         """Admin command to set welcome DM message from uploaded text file."""
         
@@ -249,6 +251,7 @@ class WelcomeDM(commands.Cog):
         name="welcome-dm-status",
         description="Check the current welcome DM configuration (Admin only)"
     )
+    @server_management_error_handler
     async def welcome_dm_status(self, interaction: discord.Interaction):
         """Admin command to check current welcome DM status."""
         

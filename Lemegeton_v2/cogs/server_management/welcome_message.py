@@ -7,6 +7,7 @@ import discord
 from discord.ext import commands
 import logging
 from pathlib import Path
+from typing import Optional
 from helpers.embed_helper import build_info_embed
 
 # ------------------------------------------------------
@@ -47,49 +48,38 @@ class WelcomeMessage(commands.Cog):
         self.bot = bot
         logger.info("WelcomeMessage cog initialized")
 
-    @commands.Cog.listener()
-    async def on_guild_join(self, guild: discord.Guild):
-        """Send a welcome message with setup guide when bot joins a server"""
-        try:
-            logger.info(f"Sending welcome message to {guild.name} (ID: {guild.id})")
+    def _find_welcome_channel(self, guild: discord.Guild) -> Optional[discord.TextChannel]:
+        """Resolve the best available channel to post the welcome message to.
 
-            # Try to send to system channel first, then general channels
-            welcome_channel = None
+        Priority: system channel -> a common general-purpose channel -> first
+        available text channel the bot can post in.
+        """
+        if guild.system_channel and guild.system_channel.permissions_for(guild.me).send_messages:
+            logger.info(f"Using system channel: #{guild.system_channel.name}")
+            return guild.system_channel
 
-            # Priority 1: System channel (where Discord sends system messages)
-            if guild.system_channel and guild.system_channel.permissions_for(guild.me).send_messages:
-                welcome_channel = guild.system_channel
-                logger.info(f"Using system channel: #{welcome_channel.name}")
+        for channel in guild.text_channels:
+            if channel.name.lower() in ['general', 'main', 'chat', 'lounge'] and channel.permissions_for(guild.me).send_messages:
+                logger.info(f"Using general channel: #{channel.name}")
+                return channel
 
-            # Priority 2: General channels
-            if not welcome_channel:
-                for channel in guild.text_channels:
-                    if channel.name.lower() in ['general', 'main', 'chat', 'lounge'] and channel.permissions_for(guild.me).send_messages:
-                        welcome_channel = channel
-                        logger.info(f"Using general channel: #{welcome_channel.name}")
-                        break
+        for channel in guild.text_channels:
+            if channel.permissions_for(guild.me).send_messages:
+                logger.info(f"Using first available channel: #{channel.name}")
+                return channel
 
-            # Priority 3: First available text channel
-            if not welcome_channel:
-                for channel in guild.text_channels:
-                    if channel.permissions_for(guild.me).send_messages:
-                        welcome_channel = channel
-                        logger.info(f"Using first available channel: #{welcome_channel.name}")
-                        break
+        return None
 
-            if not welcome_channel:
-                logger.warning(f"No suitable channel found to send welcome message in {guild.name}")
-                return
+    def _build_welcome_embed(self) -> discord.Embed:
+        """Build the setup-guide embed sent when the bot joins a new server."""
+        embed = build_info_embed(
+            title="Welcome to Lemegeton!",
+            description="Thank you for adding me to your server! I'm your anime/manga tracking companion with AniList integration, AI-powered recommendations, and much more."
+        )
 
-            # Create the welcome embed
-            embed = build_info_embed(
-                title="Welcome to Lemegeton!",
-                description="Thank you for adding me to your server! I'm your anime/manga tracking companion with AniList integration, AI-powered recommendations, and much more."
-            )
-
-            embed.add_field(
-                name="📋 Quick Setup Guide",
-                value="""
+        embed.add_field(
+            name="📋 Quick Setup Guide",
+            value="""
 **1. Server Configuration**
 • Use `/server-config` to set up channels and roles
 • Configure moderator permissions and notification channels
@@ -106,34 +96,48 @@ class WelcomeMessage(commands.Cog):
 **4. Bot Moderators**
 • Use `/admin-moderator-manage` to add server administrators
 • These users can access advanced configuration options
-                """,
-                inline=False
-            )
+            """,
+            inline=False
+        )
 
-            embed.add_field(
-                name="🚀 Popular Features",
-                value="""
+        embed.add_field(
+            name="🚀 Popular Features",
+            value="""
 • **Anime/Manga Tracking**: Browse, search, and get recommendations
 • **AI Recommendations**: Get personalized suggestions based on your tastes
 • **Steam Integration**: Game recommendations and free game notifications
 • **Challenge System**: Create reading challenges for your community
-                """,
-                inline=False
-            )
+            """,
+            inline=False
+        )
 
-            embed.add_field(
-                name="📚 Getting Started",
-                value="""
+        embed.add_field(
+            name="📚 Getting Started",
+            value="""
 • **Help Command**: `/help` for a full list of commands
 • **Profile Setup**: `/login` to connect your AniList account
 • **Browse Content**: `/browse` to explore anime and manga
 • **Get Recommendations**: `/recommendations` for personalized suggestions
-                """,
-                inline=False
-            )
+            """,
+            inline=False
+        )
 
-            embed.set_footer(text="Need help? Use /help or contact server administrators • Bot created by Kyerstorm")
-            embed.set_thumbnail(url=self.bot.user.avatar.url if self.bot.user.avatar else None)
+        embed.set_footer(text="Need help? Use /help or contact server administrators • Bot created by Kyerstorm")
+        embed.set_thumbnail(url=self.bot.user.avatar.url if self.bot.user.avatar else None)
+        return embed
+
+    @commands.Cog.listener()
+    async def on_guild_join(self, guild: discord.Guild):
+        """Send a welcome message with setup guide when bot joins a server"""
+        try:
+            logger.info(f"Sending welcome message to {guild.name} (ID: {guild.id})")
+
+            welcome_channel = self._find_welcome_channel(guild)
+            if not welcome_channel:
+                logger.warning(f"No suitable channel found to send welcome message in {guild.name}")
+                return
+
+            embed = self._build_welcome_embed()
 
             await welcome_channel.send(embed=embed)
             logger.info(f"Welcome message sent successfully to #{welcome_channel.name} in {guild.name}")
