@@ -94,10 +94,11 @@ class EmbedCog(commands.Cog):
 
     async def _process(self, message, url):
         rewritten = rewrite_url(url)
+        new_content = message.content.replace(url, rewritten)
         view = SimpleView(rewritten, message.author.id)
 
         try:
-            sent = await message.channel.send(content=rewritten, view=view)
+            sent = await message.channel.send(content=new_content, view=view)
             view.message = sent
             await message.delete()
         except Exception as e:
