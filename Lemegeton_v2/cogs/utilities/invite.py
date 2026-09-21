@@ -4,6 +4,8 @@ from discord.ext import commands
 import logging
 from pathlib import Path
 from config import BOT_ID
+from helpers.embed_helper import build_error_embed
+from helpers.utilities_utils import utilities_error_handler
 
 # ------------------------------------------------------
 # Logging Setup - Safe handling
@@ -48,6 +50,7 @@ class InviteCog(commands.Cog):
         logger.info("Invite cog loaded successfully")
 
     @app_commands.command(name="invite", description="Add Lemegeton bot to your server - your ultimate AniList companion!")
+    @utilities_error_handler
     async def invite(self, interaction: discord.Interaction):
         """Generate an invite link for the bot with appropriate permissions."""
         
@@ -137,13 +140,12 @@ class InviteCog(commands.Cog):
             
         except Exception as e:
             logger.error(f"Error generating invite link: {e}", exc_info=True)
-            
-            error_embed = discord.Embed(
-                title="❌ Error",
-                description="Failed to generate invite link. Please try again later.",
-                color=discord.Color.red()
+
+            error_embed = build_error_embed(
+                title="Error",
+                description="Failed to generate invite link. Please try again later."
             )
-            
+
             await interaction.response.send_message(
                 embed=error_embed,
                 ephemeral=True

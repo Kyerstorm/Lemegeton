@@ -15,6 +15,7 @@ from discord import app_commands
 from datetime import datetime, timezone
 from typing import Optional, List
 from database import execute_db_operation, init_userinfo_usage_table
+from helpers.utilities_utils import utilities_error_handler
 
 # ---------------------------
 # Palette & helpers
@@ -233,6 +234,7 @@ class UserInfo(commands.Cog):
 
     @app_commands.command(name="user", description="Display refined user information (Dark Luxury).")
     @app_commands.describe(user="Select a user (defaults to you)")
+    @utilities_error_handler
     async def user(self, interaction: discord.Interaction, user: Optional[discord.User] = None):
         await interaction.response.defer(thinking=True)
         target = user or interaction.user

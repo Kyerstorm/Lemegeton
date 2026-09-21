@@ -12,14 +12,8 @@ from datetime import datetime
 from typing import Optional
 import calendar
 
-# Import command logger
-import sys
-from pathlib import Path
-repo_root = Path(__file__).resolve().parents[2]
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
-
 from helpers.command_logger import log_command
+from helpers.utilities_utils import utilities_error_handler
 
 # Logging setup
 logger = logging.getLogger("Timestamp")
@@ -53,7 +47,7 @@ def validate_time_format(time_str: str) -> bool:
 
         # Hour must be 00-23, minute must be 00-59
         return 0 <= hour <= 23 and 0 <= minute <= 59
-    except:
+    except ValueError:
         return False
 
 
@@ -129,6 +123,7 @@ class TimestampConverter(commands.Cog):
         date="Date in YYYY-MM-DD format (e.g., 2025-12-25) - Optional, defaults to today"
     )
     @log_command
+    @utilities_error_handler
     async def timestamp(
         self,
         interaction: discord.Interaction,

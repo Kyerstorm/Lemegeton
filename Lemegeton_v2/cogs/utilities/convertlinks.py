@@ -4,8 +4,10 @@ from discord import app_commands
 import re
 import logging
 import asyncio
+from typing import List, Optional
 
 from helpers.anilist_helper import fetch_anilist_user_id
+from helpers.utilities_utils import utilities_error_handler
 
 logger = logging.getLogger("ConvertLinks")
 
@@ -79,40 +81,62 @@ class AddMoreView(discord.ui.View):
         if not self.session.links:
             return await interaction.followup.send("❌ No links to convert.", ephemeral=True)
 
-        # Remove duplicates
-        original_count = len(self.session.links)
-        self.session.links = list(dict.fromkeys(self.session.links))
-        removed = original_count - len(self.session.links)
-
-        # Notify user about deduplication
+        removed = self._deduplicate_links()
         if removed > 0:
-            try:
-                await interaction.user.send(f"♻ Removed **{removed}** duplicate link(s).")
-            except:
-                pass
+            await self._notify_deduplication(interaction.user, removed)
 
         total = len(self.session.links)
-        converted = []
         user = interaction.user
 
-        # DM progress
-        try:
-            progress_msg = await user.send(
-                f"🔄 **Converting {total} link(s)...**\n"
-                f"{progress_bar(0, total)} `0/{total}`"
-            )
-        except:
+        progress_msg = await self._send_initial_progress(user, total)
+        if progress_msg is None:
             return await interaction.followup.send(
                 "❌ I couldn't DM you. Turn on DMs.",
                 ephemeral=True
             )
 
-        # Convert each link
-        for i, link in enumerate(self.session.links, start=1):
+        converted = await self._convert_all_links(progress_msg, total)
 
+        sent = await self._send_results(user, converted)
+        if not sent:
+            return await interaction.followup.send("❌ Could not DM results.", ephemeral=True)
+
+        await interaction.followup.send("✅ All results have been DM’d!", ephemeral=True)
+        self.stop()
+
+    def _deduplicate_links(self) -> int:
+        """Remove duplicate links from the session. Returns the number removed."""
+        original_count = len(self.session.links)
+        self.session.links = list(dict.fromkeys(self.session.links))
+        return original_count - len(self.session.links)
+
+    @staticmethod
+    async def _notify_deduplication(user: discord.User, removed: int):
+        """Best-effort DM telling the user how many duplicate links were removed."""
+        try:
+            await user.send(f"♻ Removed **{removed}** duplicate link(s).")
+        except Exception as e:
+            logger.debug(f"Could not DM dedup notice to {user.id}: {e}")
+
+    @staticmethod
+    async def _send_initial_progress(user: discord.User, total: int) -> Optional[discord.Message]:
+        """Send the initial DM progress message. Returns None if the DM couldn't be sent."""
+        try:
+            return await user.send(
+                f"🔄 **Converting {total} link(s)...**\n"
+                f"{progress_bar(0, total)} `0/{total}`"
+            )
+        except Exception as e:
+            logger.warning(f"Could not DM progress message to {user.id}: {e}")
+            return None
+
+    async def _convert_all_links(self, progress_msg: discord.Message, total: int) -> List[str]:
+        """Convert every link in the session, updating the progress DM as it goes."""
+        converted = []
+
+        for i, link in enumerate(self.session.links, start=1):
             username, diagnostic = self.extract_username(link)
 
-            # Handle diagnostics for invalid URLs
             if username is None:
                 converted.append(f"{link} → ❌ Invalid ({diagnostic})")
             else:
@@ -138,7 +162,6 @@ class AddMoreView(discord.ui.View):
                     logger.error(f"Conversion error: {e}")
                     converted.append(f"{link} → ❌ Error fetching profile")
 
-            # Update progress bar
             try:
                 await progress_msg.edit(
                     content=(
@@ -146,18 +169,21 @@ class AddMoreView(discord.ui.View):
                         f"{progress_bar(i, total)} `{i}/{total}`"
                     )
                 )
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Could not update progress DM: {e}")
 
-        # Send final summary
+        return converted
+
+    @staticmethod
+    async def _send_results(user: discord.User, converted: List[str]) -> bool:
+        """DM the final converted-links summary. Returns False if the DM couldn't be sent."""
         final_text = "\n".join(converted)
         try:
             await user.send(f"📦 **Your Converted Links:**\n{final_text}")
-        except:
-            return await interaction.followup.send("❌ Could not DM results.", ephemeral=True)
-
-        await interaction.followup.send("✅ All results have been DM’d!", ephemeral=True)
-        self.stop()
+            return True
+        except Exception as e:
+            logger.warning(f"Could not DM results to {user.id}: {e}")
+            return False
 
     # =====================================================
     # Username extraction with diagnostics
@@ -197,6 +223,7 @@ class ConvertLinksCog(commands.Cog):
         name="convertlinks",
         description="Convert AniList profile URLs to numeric ID URLs. (Batch mode, DMs)"
     )
+    @utilities_error_handler
     async def convertlinks(self, interaction: discord.Interaction):
         user = interaction.user
 
@@ -210,7 +237,8 @@ class ConvertLinksCog(commands.Cog):
                 "I will store every link automatically.\n"
                 "Use the buttons after each message to add more, enable Speed Mode, or finish."
             )
-        except:
+        except Exception as e:
+            logger.warning(f"Could not DM session start to {user.id}: {e}")
             return await interaction.response.send_message(
                 "❌ Enable DMs so I can message you.",
                 ephemeral=True

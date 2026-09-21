@@ -45,6 +45,63 @@ def get_status_color(status: str) -> discord.Color:
     config = STATUS_CONFIG.get(status, STATUS_CONFIG['planned'])
     return config['color']
 
+CATEGORY_ALIASES = {
+    'utilities': 'Utilities',
+    'anime': 'Anime/Manga Features',
+    'manga': 'Anime/Manga Features',
+    'gaming': 'Gaming Features',
+    'social': 'Social Features',
+    'server': 'Server Management',
+    'performance': 'Performance Improvements',
+    'bug': 'Bug Fixes'
+}
+
+def normalize_category(raw: Optional[str]) -> str:
+    """Map a free-form category input (alias or exact name) to a valid CATEGORY_CONFIG key."""
+    category_input = raw.strip() if raw else "Utilities"
+    category = CATEGORY_ALIASES.get(category_input.lower(), category_input)
+    if category not in CATEGORY_CONFIG:
+        category = 'Utilities'
+    return category
+
+def normalize_status(raw: Optional[str]) -> str:
+    """Map a free-form status input to a valid STATUS_CONFIG key."""
+    status = (raw.strip() if raw else "planned").lower()
+    if status not in STATUS_CONFIG:
+        status = 'planned'
+    return status
+
+def build_feature_select_options(features: List[dict]) -> List[discord.SelectOption]:
+    """Build Discord select options for a list of features, truncating to Discord's limits."""
+    options = []
+    for i, feature in enumerate(features, 1):
+        name = feature.get('name', 'Unknown')
+        label = f"{i}. {name}"
+        if len(label) > 100:
+            label = f"{i}. {name[:97 - len(str(i)) - 2]}."
+
+        desc = feature.get('description', '')
+        if len(desc) > 100:
+            desc = desc[:97] + "."
+
+        options.append(
+            discord.SelectOption(
+                label=label,
+                description=desc,
+                value=str(feature.get('id'))
+            )
+        )
+
+    if not options:
+        options.append(
+            discord.SelectOption(
+                label="No features available",
+                value="none"
+            )
+        )
+
+    return options
+
 class PlannedFeatures(commands.Cog):
     """Planned features management system"""
 
@@ -492,29 +549,8 @@ class PlannedFeatures(commands.Cog):
             if not await is_user_bot_moderator(interaction.user):
                 return
 
-            # Validate category
-            category_input = self.category.value.strip() if self.category.value else "Utilities"
-            category_map = {
-                'utilities': 'Utilities',
-                'anime': 'Anime/Manga Features',
-                'manga': 'Anime/Manga Features',
-                'gaming': 'Gaming Features',
-                'social': 'Social Features',
-                'server': 'Server Management',
-                'performance': 'Performance Improvements',
-                'bug': 'Bug Fixes'
-            }
-            category = category_map.get(category_input.lower(), category_input)
-            if category not in CATEGORY_CONFIG:
-                category = 'Utilities'  # Default to Utilities if invalid
-
-            # Validate and normalize status
-            status_input = self.status.value.strip() if self.status.value else "planned"
-            status = status_input.lower()
-
-            # Validate status
-            if status not in STATUS_CONFIG:
-                status = 'planned'  # Default to planned if invalid
+            category = normalize_category(self.category.value)
+            status = normalize_status(self.status.value)
 
             # Add to database
             feature_id = await self.cog.add_planned_feature(
@@ -588,39 +624,11 @@ class PlannedFeatures(commands.Cog):
         async def create_and_add_select_menu(self):
             """Create select menu with features"""
             features = await self.cog.get_planned_features('planned')
-            
+
             # Limit to 25 options (Discord limit)
             features = features[:25]
-            
-            options = []
-            for i, feature in enumerate(features, 1):
-                # Safely truncate label to 100 chars (Discord limit)
-                name = feature.get('name', 'Unknown')
-                label = f"{i}. {name}"
-                if len(label) > 100:
-                    label = f"{i}. {name[:97 - len(str(i)) - 2]}."
-                
-                # Safely truncate description to 100 chars (Discord limit)
-                desc = feature.get('description', '')
-                if len(desc) > 100:
-                    desc = desc[:97] + "."
-                
-                options.append(
-                    discord.SelectOption(
-                        label=label,
-                        description=desc,
-                        value=str(feature.get('id'))
-                    )
-                )
-            
-            if not options:
-                options.append(
-                    discord.SelectOption(
-                        label="No features available",
-                        value="none"
-                    )
-                )
-            
+            options = build_feature_select_options(features)
+
             select = discord.ui.Select(
                 placeholder="Select a feature to edit.",
                 min_values=1,
@@ -703,27 +711,8 @@ class PlannedFeatures(commands.Cog):
             if not await is_user_bot_moderator(interaction.user):
                 return
 
-            # Validate and normalize category
-            category_input = self.category.value.strip() if self.category.value else "Utilities"
-            category_map = {
-                'utilities': 'Utilities',
-                'anime': 'Anime/Manga Features',
-                'manga': 'Anime/Manga Features',
-                'gaming': 'Gaming Features',
-                'social': 'Social Features',
-                'server': 'Server Management',
-                'performance': 'Performance Improvements',
-                'bug': 'Bug Fixes'
-            }
-            category = category_map.get(category_input.lower(), category_input)
-            if category not in CATEGORY_CONFIG:
-                category = 'Utilities'
-
-            # Validate and normalize status
-            status_input = self.status.value.strip() if self.status.value else "planned"
-            status = status_input.lower()
-            if status not in STATUS_CONFIG:
-                status = 'planned'
+            category = normalize_category(self.category.value)
+            status = normalize_status(self.status.value)
 
             # Update in database
             success = await self.cog.update_planned_feature(
@@ -795,39 +784,11 @@ class PlannedFeatures(commands.Cog):
         async def create_and_add_select_menu(self):
             """Create select menu with features"""
             features = await self.cog.get_planned_features('planned')
-            
+
             # Limit to 25 options (Discord limit)
             features = features[:25]
-            
-            options = []
-            for i, feature in enumerate(features, 1):
-                # Safely truncate label to 100 chars (Discord limit)
-                name = feature.get('name', 'Unknown')
-                label = f"{i}. {name}"
-                if len(label) > 100:
-                    label = f"{i}. {name[:97 - len(str(i)) - 2]}."
-                
-                # Safely truncate description to 100 chars (Discord limit)
-                desc = feature.get('description', '')
-                if len(desc) > 100:
-                    desc = desc[:97] + "."
-                
-                options.append(
-                    discord.SelectOption(
-                        label=label,
-                        description=desc,
-                        value=str(feature.get('id'))
-                    )
-                )
-            
-            if not options:
-                options.append(
-                    discord.SelectOption(
-                        label="No features available",
-                        value="none"
-                    )
-                )
-            
+            options = build_feature_select_options(features)
+
             select = discord.ui.Select(
                 placeholder="Select a feature to remove.",
                 min_values=1,

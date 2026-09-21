@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from config import BOT_ID
 from helpers.embed_helper import build_error_embed, build_warning_embed
+from helpers.utilities_utils import utilities_error_handler
 
 # ------------------------------------------------------
 # Logging Setup - Safe handling
@@ -466,6 +467,7 @@ class HelpCog(commands.Cog):
         app_commands.Choice(name="👥 Social", value="social"),
         app_commands.Choice(name="🛠️ Utilities", value="utilities"),
     ])
+    @utilities_error_handler
     async def help(self, interaction: discord.Interaction, category: app_commands.Choice[str] = None):
         """Display comprehensive help information for bot commands."""
         

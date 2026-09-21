@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional
 import config
+from helpers.embed_helper import build_error_embed
+from helpers.utilities_utils import utilities_error_handler
 
 # ------------------------------------------------------
 # Logging Setup
@@ -391,6 +393,7 @@ class NotificationsCog(commands.Cog):
         return subscriptions
 
     @app_commands.command(name="notifications", description="Manage your notification preferences for bot updates, events, and more")
+    @utilities_error_handler
     async def notifications(self, interaction: discord.Interaction):
         """Main command to manage notification subscriptions with multi-select interface"""
         try:
@@ -436,10 +439,9 @@ class NotificationsCog(commands.Cog):
             logger.info(f"User {interaction.user.id} opened notifications interface - {subscription_count}/{total_count} subscribed")
 
         except Exception as e:
-            embed = discord.Embed(
-                title="❌ An Error Occurred",
-                description="Something went wrong while loading the notifications interface. Please try again later.",
-                color=discord.Color.red()
+            embed = build_error_embed(
+                title="An Error Occurred",
+                description="Something went wrong while loading the notifications interface. Please try again later."
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
             logger.error(f"Error in notifications command for user {interaction.user.id}: {e}", exc_info=True)
