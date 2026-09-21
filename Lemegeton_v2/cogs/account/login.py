@@ -5,20 +5,22 @@ import logging
 import os
 import re
 import aiohttp
-import aiosqlite
 from pathlib import Path
 from typing import Optional
 
 from database import (
     # Guild-aware functions (multi-guild support)
     add_user_guild_aware, get_user_guild_aware, register_user_guild_aware,
-    is_user_registered_in_guild, update_username, remove_user
+    is_user_registered_in_guild, update_username, remove_user,
+    get_anilist_username_from_row,
+    get_steam_vanity_name, upsert_steam_user_guild_aware, delete_steam_user_guild_aware
 )
-from config import STEAM_API_KEY, DB_PATH
+from config import STEAM_API_KEY
 from helpers.anilist_helper import fetch_anilist_user_basic
 from helpers.text_helper import validate_anilist_username
-from helpers.embed_helper import build_error_embed, build_success_embed
-from helpers.steam_helper import resolve_vanity_url, get_player_summaries
+from helpers.embed_helper import build_error_embed, build_success_embed, build_login_status_embed
+from helpers.steam_helper import resolve_vanity_url, get_player_summaries, get_library_stats
+from helpers.account_utils import account_error_handler
 
 # Configuration constants
 LOG_DIR = Path("logs")
@@ -156,15 +158,6 @@ class LoginView(discord.ui.View):
             # Fetch detailed Steam stats
             if steamid and STEAM_API_KEY:
                 try:
-                    # Import gaming helpers
-                    import sys
-                    from pathlib import Path
-                    repo_root = Path(__file__).resolve().parents[2]
-                    if str(repo_root) not in sys.path:
-                        sys.path.insert(0, str(repo_root))
-
-                    from helpers.steam_helper import get_library_stats
-
                     # Get library statistics
                     library_stats = await get_library_stats(STEAM_API_KEY, steamid)
 
@@ -555,8 +548,6 @@ class Login(commands.Cog):
             logger.error(f"Database error during registration for {discord_user} (ID: {user_id}) in guild {guild_id}: {e}", exc_info=True)
             return "❌ An error occurred while registering you. Please try again later."
 
-    # Deprecated method removed - use _update_existing_user_guild_aware instead
-
     async def _update_existing_user_guild_aware(self, user_id: int, guild_id: int, discord_user: str, anilist_username: str, anilist_id: int):
         """Update existing user's AniList information for a specific guild."""
         try:
@@ -566,8 +557,6 @@ class Login(commands.Cog):
         except Exception as e:
             logger.error(f"Failed to update existing user {discord_user} (ID: {user_id}) in guild {guild_id}: {e}")
             raise
-
-    # Deprecated method removed - use _register_new_user_guild_aware instead
 
     async def _register_new_user_guild_aware(self, user_id: int, guild_id: int, discord_user: str, anilist_username: str, anilist_id: int):
         """Register a completely new user in a specific guild."""
@@ -587,25 +576,24 @@ class Login(commands.Cog):
         # Remove any URL parts if user provided full URL
         vanity_name = vanity_name.strip().split('/')[-1]
         
-        # Check if it's already a Steam ID
-        if vanity_name.isdigit() and len(vanity_name) >= 17:
-            steam_id = vanity_name
-        else:
-            # Resolve vanity URL to Steam ID using helper
-            try:
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+            # Check if it's already a Steam ID
+            if vanity_name.isdigit() and len(vanity_name) >= 17:
+                steam_id = vanity_name
+            else:
+                # Resolve vanity URL to Steam ID using helper
+                try:
                     steam_id = await resolve_vanity_url(session, STEAM_API_KEY, vanity_name)
                     if not steam_id:
                         logger.warning(f"Steam vanity name not found: {vanity_name}")
                         return {"error": "not_found", "message": f"Steam user **{vanity_name}** not found. Please check the vanity name and try again.\n\n💡 **Tip:** Your vanity URL is the part after `/id/` in your Steam profile URL."}
                     logger.info(f"Successfully resolved Steam vanity '{vanity_name}' to ID: {steam_id}")
-            except Exception as e:
-                logger.error(f"Error resolving Steam vanity name '{vanity_name}': {e}")
-                return {"error": "network", "message": "Network error while connecting to Steam. Please try again."}
-        
-        # Fetch player summary for avatar using helper
-        try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+                except Exception as e:
+                    logger.error(f"Error resolving Steam vanity name '{vanity_name}': {e}")
+                    return {"error": "network", "message": "Network error while connecting to Steam. Please try again."}
+
+            # Fetch player summary for avatar using helper
+            try:
                 players = await get_player_summaries(session, STEAM_API_KEY, steam_id)
                 if players:
                     player = players[0]
@@ -615,16 +603,16 @@ class Login(commands.Cog):
                         "avatar": player.get("avatarfull") or player.get("avatarmedium"),
                         "profile_url": player.get("profileurl")
                     }
-        except Exception as e:
-            logger.warning(f"Could not fetch Steam avatar for {steam_id}: {e}")
-        
-        # Return without avatar if fetch failed
-        return {
-            "steam_id": steam_id,
-            "vanity_name": vanity_name,
-            "avatar": None,
-            "profile_url": f"https://steamcommunity.com/profiles/{steam_id}"
-        }
+            except Exception as e:
+                logger.warning(f"Could not fetch Steam avatar for {steam_id}: {e}")
+
+            # Return without avatar if fetch failed
+            return {
+                "steam_id": steam_id,
+                "vanity_name": vanity_name,
+                "avatar": None,
+                "profile_url": f"https://steamcommunity.com/profiles/{steam_id}"
+            }
 
     async def handle_steam_register(self, user_id: int, discord_user: str, vanity_name: str, guild_id: Optional[int] = None) -> str:
         """Handle Steam user registration with guild-aware support.
@@ -658,81 +646,37 @@ class Login(commands.Cog):
 
         # Database operations with guild-aware support
         try:
-            import aiosqlite
-            
-            async with aiosqlite.connect(DB_PATH) as db:
-                # Check if user already exists (guild-aware if guild_id provided)
-                existing_user = None
-                if guild_id is not None:
-                    cursor = await db.execute(
-                        "SELECT * FROM steam_users WHERE discord_id = ? AND guild_id = ?",
-                        (user_id, guild_id)
-                    )
-                    existing_user = await cursor.fetchone()
-                    await cursor.close()
-                
-                if not existing_user:
-                    # Fallback to global check
-                    cursor = await db.execute(
-                        "SELECT * FROM steam_users WHERE discord_id = ?",
-                        (user_id,)
-                    )
-                    existing_user = await cursor.fetchone()
-                    await cursor.close()
+            was_update = await upsert_steam_user_guild_aware(user_id, steam_id, vanity_name, guild_id)
 
-                if existing_user:
-                    # Update existing user
-                    if guild_id is not None:
-                        await db.execute(
-                            "UPDATE steam_users SET steam_id = ?, vanity_name = ? WHERE discord_id = ? AND guild_id = ?",
-                            (steam_id, vanity_name, user_id, guild_id)
-                        )
-                    else:
-                        await db.execute(
-                            "UPDATE steam_users SET steam_id = ?, vanity_name = ? WHERE discord_id = ?",
-                            (steam_id, vanity_name, user_id)
-                        )
-                    await db.commit()
-                    logger.info(f"Updated Steam registration for {discord_user} (ID: {user_id}) -> Steam: {vanity_name}")
-                    
-                    # Create rich embed with avatar
-                    embed = build_success_embed(
-                        "Steam Updated",
-                        f"Your Steam profile has been updated to **{vanity_name}**!"
-                    )
-                    if avatar_url:
-                        embed.set_thumbnail(url=avatar_url)
-                    if profile_url:
-                        embed.add_field(name="Profile", value=profile_url, inline=False)
-                    return embed
-                else:
-                    # Register new user
-                    if guild_id is not None:
-                        await db.execute(
-                            "INSERT INTO steam_users (discord_id, steam_id, vanity_name, guild_id) VALUES (?, ?, ?, ?)",
-                            (user_id, steam_id, vanity_name, guild_id)
-                        )
-                    else:
-                        await db.execute(
-                            "INSERT INTO steam_users (discord_id, steam_id, vanity_name) VALUES (?, ?, ?)",
-                            (user_id, steam_id, vanity_name)
-                        )
-                    await db.commit()
-                    logger.info(f"Successfully registered Steam user {discord_user} (ID: {user_id}) -> Steam: {vanity_name}")
-                    
-                    # Create rich embed with avatar
-                    embed = build_success_embed(
-                        "Steam Registration Successful",
-                        f"Successfully registered with Steam profile **{vanity_name}**!"
-                    )
-                    if avatar_url:
-                        embed.set_thumbnail(url=avatar_url)
-                    if profile_url:
-                        embed.add_field(name="Profile", value=profile_url, inline=False)
-                    embed.set_footer(text="You can now use all Steam features!")
-                    embed.color = discord.Color.blue()  # Keep blue for registration
-                    return embed
-                
+            if was_update:
+                logger.info(f"Updated Steam registration for {discord_user} (ID: {user_id}) -> Steam: {vanity_name}")
+
+                # Create rich embed with avatar
+                embed = build_success_embed(
+                    "Steam Updated",
+                    f"Your Steam profile has been updated to **{vanity_name}**!"
+                )
+                if avatar_url:
+                    embed.set_thumbnail(url=avatar_url)
+                if profile_url:
+                    embed.add_field(name="Profile", value=profile_url, inline=False)
+                return embed
+            else:
+                logger.info(f"Successfully registered Steam user {discord_user} (ID: {user_id}) -> Steam: {vanity_name}")
+
+                # Create rich embed with avatar
+                embed = build_success_embed(
+                    "Steam Registration Successful",
+                    f"Successfully registered with Steam profile **{vanity_name}**!"
+                )
+                if avatar_url:
+                    embed.set_thumbnail(url=avatar_url)
+                if profile_url:
+                    embed.add_field(name="Profile", value=profile_url, inline=False)
+                embed.set_footer(text="You can now use all Steam features!")
+                embed.color = discord.Color.blue()  # Keep blue for registration
+                return embed
+
         except Exception as e:
             logger.error(f"Database error during Steam registration for {discord_user} (ID: {user_id}): {e}", exc_info=True)
             return "❌ An error occurred while registering your Steam profile. Please try again later."
@@ -752,23 +696,19 @@ class Login(commands.Cog):
             anilist_user = await get_user_guild_aware(user_id, guild_id)
             if anilist_user:
                 user_data['anilist_connected'] = True
-                user_data['anilist_username'] = anilist_user[4]  # anilist_username is at index 4
+                user_data['anilist_username'] = get_anilist_username_from_row(anilist_user)
         except Exception as e:
             logger.error(f"Error checking AniList user data for {user_id}: {e}")
         
         # Check Steam connection
         try:
-            import aiosqlite
-            async with aiosqlite.connect(DB_PATH) as db:
-                cursor = await db.execute("SELECT vanity_name FROM steam_users WHERE discord_id = ?", (user_id,))
-                steam_user = await cursor.fetchone()
-                
-                if steam_user:
-                    user_data['steam_connected'] = True
-                    user_data['steam_vanity'] = steam_user[0]
+            steam_vanity = await get_steam_vanity_name(user_id)
+            if steam_vanity:
+                user_data['steam_connected'] = True
+                user_data['steam_vanity'] = steam_vanity
         except Exception as e:
             logger.error(f"Error checking Steam user data for {user_id}: {e}")
-        
+
         return user_data
 
     async def unregister_user(self, user_id: int, service_type: str, guild_id: Optional[int] = None) -> bool:
@@ -794,23 +734,11 @@ class Login(commands.Cog):
                 return True
                 
             elif service_type == "steam":
-                import aiosqlite
-                async with aiosqlite.connect(DB_PATH) as db:
-                    if guild_id is not None:
-                        # Guild-scoped deletion
-                        await db.execute(
-                            "DELETE FROM steam_users WHERE discord_id = ? AND guild_id = ?",
-                            (user_id, guild_id)
-                        )
-                        logger.info(f"Successfully unregistered user {user_id} from Steam in guild {guild_id}")
-                    else:
-                        # Global deletion
-                        await db.execute(
-                            "DELETE FROM steam_users WHERE discord_id = ?",
-                            (user_id,)
-                        )
-                        logger.info(f"Successfully unregistered user {user_id} from Steam (global)")
-                    await db.commit()
+                await delete_steam_user_guild_aware(user_id, guild_id)
+                if guild_id is not None:
+                    logger.info(f"Successfully unregistered user {user_id} from Steam in guild {guild_id}")
+                else:
+                    logger.info(f"Successfully unregistered user {user_id} from Steam (global)")
                 return True
                 
             else:
@@ -825,6 +753,7 @@ class Login(commands.Cog):
         name="login",
         description="🔐 Manage your account - register with AniList and/or Steam"
     )
+    @account_error_handler
     async def login(self, interaction: discord.Interaction):
         """Smart login command that manages both AniList and Steam connections."""
         try:
@@ -846,63 +775,8 @@ class Login(commands.Cog):
             logger.debug(f"User {interaction.user.display_name} data: {user_data}")
             
             # Create embed based on connection status
-            if user_data['anilist_connected'] or user_data['steam_connected']:
-                # User has at least one connection
-                embed = discord.Embed(
-                    title="🔐 Account Management",
-                    description=f"Welcome back, **{interaction.user.display_name}**!\n\n"
-                               f"Here's your connection status in **{interaction.guild.name}**:",
-                    color=discord.Color.green()
-                )
-                
-                # Add connection status
-                status_lines = []
-                if user_data['anilist_connected']:
-                    status_lines.append(f"� **AniList**: {user_data['anilist_username']}")
-                else:
-                    status_lines.append(f"📝 **AniList**: Not connected")
-                    
-                if user_data['steam_connected']:
-                    status_lines.append(f"🎮 **Steam**: {user_data['steam_vanity']}")
-                else:
-                    status_lines.append(f"🎮 **Steam**: Not connected")
-                
-                embed.add_field(
-                    name="Connection Status",
-                    value="\n".join(status_lines),
-                    inline=False
-                )
-                
-                embed.add_field(
-                    name="Available Actions",
-                    value="📝 **AniList** - Register or update your AniList username\n"
-                          "🎮 **Steam** - Register or update your Steam profile\n"
-                          "🗑️ **Unregister** - Remove specific service connections\n"
-                          "ℹ️ **Status** - View detailed account information",
-                    inline=False
-                )
-            else:
-                # User has no connections
-                embed = discord.Embed(
-                    title="🔐 Welcome to the Bot!",
-                    description=f"Hello **{interaction.user.display_name}**!\n\n"
-                               f"❌ **Status**: Not Connected in **{interaction.guild.name}**\n\n"
-                               f"To use this bot's features, you can connect your accounts:\n"
-                               f"• **AniList** - For anime/manga tracking features\n"
-                               f"• **Steam** - For gaming features\n\n"
-                               f"Use the buttons below to get started:",
-                    color=discord.Color.orange()
-                )
-                embed.add_field(
-                    name="Available Actions",
-                    value="📝 **AniList** - Connect your AniList account\n"
-                          "🎮 **Steam** - Connect your Steam profile\n"
-                          "ℹ️ **Status** - View account information",
-                    inline=False
-                )
-            
-            embed.set_footer(text="Your data is secure and can be removed anytime")
-            
+            embed = build_login_status_embed(user_data, interaction.user.display_name, interaction.guild.name)
+
             # Create interactive view with user data
             # Format steam_data properly for LoginView
             steam_data_formatted = None
@@ -957,7 +831,7 @@ class Login(commands.Cog):
             anilist_user = await get_user_guild_aware(user_id, guild_id)
             if anilist_user:
                 health_status["anilist"]["connected"] = True
-                anilist_username = anilist_user[4]  # anilist_username at index 4
+                anilist_username = get_anilist_username_from_row(anilist_user)
                 
                 # Verify account still exists
                 anilist_data = await self._fetch_anilist_id(anilist_username)
@@ -972,26 +846,18 @@ class Login(commands.Cog):
         
         # Check Steam connection
         try:
-            import aiosqlite
-            async with aiosqlite.connect(DB_PATH) as db:
-                cursor = await db.execute(
-                    "SELECT vanity_name FROM steam_users WHERE discord_id = ?",
-                    (user_id,)
-                )
-                steam_user = await cursor.fetchone()
-                await cursor.close()
-                
-                if steam_user:
-                    health_status["steam"]["connected"] = True
-                    vanity_name = steam_user[0]
-                    
-                    # Verify Steam account still exists
-                    steam_data = await self._resolve_steam_vanity(vanity_name)
-                    if steam_data and "error" not in steam_data:
-                        health_status["steam"]["healthy"] = True
-                        health_status["steam"]["message"] = "Connection verified"
-                    else:
-                        health_status["steam"]["message"] = steam_data.get("message", "Could not verify account") if steam_data else "Could not verify account"
+            vanity_name = await get_steam_vanity_name(user_id)
+
+            if vanity_name:
+                health_status["steam"]["connected"] = True
+
+                # Verify Steam account still exists
+                steam_data = await self._resolve_steam_vanity(vanity_name)
+                if steam_data and "error" not in steam_data:
+                    health_status["steam"]["healthy"] = True
+                    health_status["steam"]["message"] = "Connection verified"
+                else:
+                    health_status["steam"]["message"] = steam_data.get("message", "Could not verify account") if steam_data else "Could not verify account"
         except Exception as e:
             logger.error(f"Error checking Steam health for user {user_id}: {e}")
             health_status["steam"]["message"] = "Health check failed"

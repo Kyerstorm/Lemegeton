@@ -995,6 +995,70 @@ def build_trending_embed(media_list: List[Dict], title: str, description: str) -
             value=value,
             inline=False
         )
-    
+
     embed.set_footer(text="Fetched from AniList")
+    return embed
+
+
+def build_login_status_embed(user_data: dict, display_name: str, guild_name: str) -> discord.Embed:
+    """Build the /login command's account-status embed.
+
+    Renders one of two layouts depending on whether the user has any
+    connection at all: a green "connection status + available actions"
+    embed when at least one service is connected, or an orange
+    "welcome, here's how to connect" embed otherwise.
+    """
+    if user_data['anilist_connected'] or user_data['steam_connected']:
+        embed = discord.Embed(
+            title="🔐 Account Management",
+            description=f"Welcome back, **{display_name}**!\n\n"
+                       f"Here's your connection status in **{guild_name}**:",
+            color=discord.Color.green()
+        )
+
+        status_lines = []
+        if user_data['anilist_connected']:
+            status_lines.append(f"📝 **AniList**: {user_data['anilist_username']}")
+        else:
+            status_lines.append("📝 **AniList**: Not connected")
+
+        if user_data['steam_connected']:
+            status_lines.append(f"🎮 **Steam**: {user_data['steam_vanity']}")
+        else:
+            status_lines.append("🎮 **Steam**: Not connected")
+
+        embed.add_field(
+            name="Connection Status",
+            value="\n".join(status_lines),
+            inline=False
+        )
+
+        embed.add_field(
+            name="Available Actions",
+            value="📝 **AniList** - Register or update your AniList username\n"
+                  "🎮 **Steam** - Register or update your Steam profile\n"
+                  "🗑️ **Unregister** - Remove specific service connections\n"
+                  "ℹ️ **Status** - View detailed account information",
+            inline=False
+        )
+    else:
+        embed = discord.Embed(
+            title="🔐 Welcome to the Bot!",
+            description=f"Hello **{display_name}**!\n\n"
+                       f"❌ **Status**: Not Connected in **{guild_name}**\n\n"
+                       f"To use this bot's features, you can connect your accounts:\n"
+                       f"• **AniList** - For anime/manga tracking features\n"
+                       f"• **Steam** - For gaming features\n\n"
+                       f"Use the buttons below to get started:",
+            color=discord.Color.orange()
+        )
+        embed.add_field(
+            name="Available Actions",
+            value="📝 **AniList** - Connect your AniList account\n"
+                  "🎮 **Steam** - Connect your Steam profile\n"
+                  "ℹ️ **Status** - View account information",
+            inline=False
+        )
+
+    embed.set_footer(text="Your data is secure and can be removed anytime")
     return embed

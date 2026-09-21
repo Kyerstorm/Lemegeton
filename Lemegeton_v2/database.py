@@ -1472,6 +1472,108 @@ async def init_steam_users_table():
         logger.info("Steam users table ready.")
 
 
+async def get_steam_user_guild_aware(discord_id: int, guild_id: Optional[int] = None):
+    """
+    Look up a steam_users row, guild-scoped with fallback to a global (no-guild)
+    match. Mirrors cogs/account/login.py's handle_steam_register() existing-user
+    check: tries (discord_id, guild_id) first when guild_id is given, then falls
+    back to a discord_id-only match.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        row = None
+        if guild_id is not None:
+            cursor = await db.execute(
+                "SELECT * FROM steam_users WHERE discord_id = ? AND guild_id = ?",
+                (discord_id, guild_id)
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+
+        if not row:
+            cursor = await db.execute(
+                "SELECT * FROM steam_users WHERE discord_id = ?",
+                (discord_id,)
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+
+        return row
+
+
+async def get_steam_vanity_name(discord_id: int) -> Optional[str]:
+    """
+    Global (non-guild-scoped) vanity_name lookup by discord_id only. Mirrors
+    cogs/account/login.py's get_user_data() and check_connection_health(), which
+    intentionally do not filter by guild_id for the Steam side.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT vanity_name FROM steam_users WHERE discord_id = ?",
+            (discord_id,)
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
+        return row[0] if row else None
+
+
+async def upsert_steam_user_guild_aware(discord_id: int, steam_id: str, vanity_name: str, guild_id: Optional[int] = None) -> bool:
+    """
+    Insert or update a steam_users row. Guild-scoped (matches/writes guild_id)
+    when guild_id is given, global otherwise. Mirrors cogs/account/login.py's
+    handle_steam_register() insert/update branching exactly.
+
+    Returns True if an existing row was updated, False if a new row was inserted.
+    """
+    existing = await get_steam_user_guild_aware(discord_id, guild_id)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        if existing:
+            if guild_id is not None:
+                await db.execute(
+                    "UPDATE steam_users SET steam_id = ?, vanity_name = ? WHERE discord_id = ? AND guild_id = ?",
+                    (steam_id, vanity_name, discord_id, guild_id)
+                )
+            else:
+                await db.execute(
+                    "UPDATE steam_users SET steam_id = ?, vanity_name = ? WHERE discord_id = ?",
+                    (steam_id, vanity_name, discord_id)
+                )
+            await db.commit()
+            return True
+        else:
+            if guild_id is not None:
+                await db.execute(
+                    "INSERT INTO steam_users (discord_id, steam_id, vanity_name, guild_id) VALUES (?, ?, ?, ?)",
+                    (discord_id, steam_id, vanity_name, guild_id)
+                )
+            else:
+                await db.execute(
+                    "INSERT INTO steam_users (discord_id, steam_id, vanity_name) VALUES (?, ?, ?)",
+                    (discord_id, steam_id, vanity_name)
+                )
+            await db.commit()
+            return False
+
+
+async def delete_steam_user_guild_aware(discord_id: int, guild_id: Optional[int] = None) -> None:
+    """
+    Delete a steam_users row. Guild-scoped when guild_id is given, global (all
+    guilds) otherwise. Mirrors cogs/account/login.py's unregister_user().
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        if guild_id is not None:
+            await db.execute(
+                "DELETE FROM steam_users WHERE discord_id = ? AND guild_id = ?",
+                (discord_id, guild_id)
+            )
+        else:
+            await db.execute(
+                "DELETE FROM steam_users WHERE discord_id = ?",
+                (discord_id,)
+            )
+        await db.commit()
+
+
 async def init_guild_challenge_roles_table():
     """Initialize the guild challenge roles table for multi-guild support."""
     logger.info("🔧 Initializing guild challenge roles table...")

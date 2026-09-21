@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 import logging
 from pathlib import Path
-from database import is_user_bot_moderator, get_user_guild_aware, register_user_guild_aware
+from database import is_user_bot_moderator, get_user_guild_aware, register_user_guild_aware, get_anilist_username_from_row
 from helpers.command_logger import log_command
 from helpers.anilist_helper import fetch_anilist_user_basic
 from helpers.text_helper import validate_anilist_username
@@ -114,7 +114,8 @@ class AdminLogin(commands.Cog):
         try:
             user = await get_user_guild_aware(user_id, guild_id)
             if user:
-                return (user[4], user[5]) if len(user) > 5 else (user[4], None)
+                anilist_id = user[5] if len(user) > 5 else None
+                return (get_anilist_username_from_row(user), anilist_id)
             return None
         except Exception as e:
             logger.error(f"Error checking existing AniList user: {e}", exc_info=True)
@@ -192,13 +193,11 @@ class AdminLogin(commands.Cog):
         await self._register_user(user_id, guild_id, str(discord_user), actual_name, anilist_id)
 
         # Success embed
-        embed = discord.Embed(
-            title="🎉 AniList Login Successful",
-            description=(
-                f"Successfully linked **{discord_user.mention}** with AniList user "
-                f"**{actual_name}** in **{guild.name}**!"
-            ),
-            color=discord.Color.blue()
+        embed = build_success_embed(
+            "AniList Login Successful",
+            f"Successfully linked **{discord_user.mention}** with AniList user "
+            f"**{actual_name}** in **{guild.name}**!",
+            color=discord.Color.blue()  # Keep blue for registration, matching login.py's convention
         )
 
         embed.add_field(name="Profile", value=f"[View AniList Profile](https://anilist.co/user/{actual_name})")
