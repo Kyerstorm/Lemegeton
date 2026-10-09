@@ -205,7 +205,6 @@ class DashboardWebServer:
             "response_type": "code",
             "scope": "identify guilds",
             "state": state,
-            "prompt": "none",
         }
         raise web.HTTPFound("https://discord.com/oauth2/authorize?" + urlencode(params))
 
@@ -256,12 +255,44 @@ class DashboardWebServer:
                 "avatar": user.get("avatar"),
             },
             "access_token": access_token,
+            "refresh_token": tokens.get("refresh_token"),
+            "access_expires_at": time.time() + max(60, int(tokens.get("expires_in", 3600)) - 60),
             "guilds": [str(g["id"]) for g in manageable],
             "expires_at": time.time() + max(300, config.DASHBOARD_SESSION_TTL),
         }
         response = web.HTTPFound("/")
         self._cookie(response, session_id)
         raise response
+
+    async def _refresh_access_token(self, session: dict[str, Any]) -> str | None:
+        token = session.get("access_token")
+        if not token:
+            return None
+        if session.get("access_expires_at", 0) > time.time():
+            return token
+        refresh_token = session.get("refresh_token")
+        if not refresh_token or not self._http:
+            return None
+        payload = {
+            "client_id": str(config.DASHBOARD_CLIENT_ID),
+            "client_secret": config.DASHBOARD_CLIENT_SECRET,
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        }
+        async with self._http.post(
+            f"{DISCORD_API}/oauth2/token",
+            data=payload,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        ) as response:
+            refreshed = await response.json()
+            if response.status >= 400 or not refreshed.get("access_token"):
+                logger.info("Discord OAuth refresh expired; user must sign in again.")
+                session["access_token"] = None
+                return None
+        session["access_token"] = refreshed["access_token"]
+        session["refresh_token"] = refreshed.get("refresh_token", refresh_token)
+        session["access_expires_at"] = time.time() + max(60, int(refreshed.get("expires_in", 3600)) - 60)
+        return session["access_token"]
 
     def _manageable_guilds(self, oauth_guilds: list[dict[str, Any]]) -> list[dict[str, Any]]:
         bot_guilds = {str(g.id): g for g in self.bot.guilds}
@@ -327,7 +358,7 @@ class DashboardWebServer:
 
     async def _api_bootstrap(self, request: web.Request) -> web.Response:
         session = await self._require_session(request)
-        token = session.get("access_token")
+        token = await self._refresh_access_token(session)
         if not token:
             raise web.HTTPUnauthorized()
         oauth_guilds = await self._discord_request(
