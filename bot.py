@@ -9,6 +9,7 @@ import aiohttp
 import discord
 from discord.ext import commands
 import config
+from web.dashboard import DashboardWebServer
 
 # Suppress deprecation warning from discord.py's internal WebSocket connection code
 # This is a known issue in discord.py 2.6.0 that will be fixed in future versions
@@ -1522,6 +1523,7 @@ async def main():
     """
     Main bot initialization function with comprehensive logging and error handling.
     """
+    dashboard_server = DashboardWebServer(bot)
     logger.info("="*60)
     logger.info("STARTING BOT INITIALIZATION")
     logger.info("="*60)
@@ -1565,6 +1567,12 @@ async def main():
         except Exception as watcher_error:
             logger.error(f"❌ Cog watcher failed to start: {watcher_error}", exc_info=True)
             # Continue without watcher
+
+        # Start the optional authenticated web management console.
+        try:
+            await dashboard_server.start()
+        except Exception as dashboard_error:
+            logger.error("Web dashboard failed to start: %s", dashboard_error, exc_info=True)
 
         # Start the bot with comprehensive logging
         logger.info("Starting Discord bot connection...")
@@ -1611,6 +1619,12 @@ async def main():
         if background_tasks:
             await asyncio.gather(*background_tasks, return_exceptions=True)
             logger.info("✅ All background tasks cancelled")
+
+        # Stop the web management console before closing the bot.
+        try:
+            await dashboard_server.stop()
+        except Exception as dashboard_error:
+            logger.warning("Web dashboard shutdown failed: %s", dashboard_error, exc_info=True)
 
         # Close bot connection
         if not bot.is_closed():
