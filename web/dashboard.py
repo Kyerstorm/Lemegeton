@@ -35,6 +35,8 @@ class DashboardWebServer:
 
     def __init__(self, bot):
         self.bot = bot
+        if not hasattr(bot, "dashboard_started_at"):
+            bot.dashboard_started_at = time.time()
         self.runner: web.AppRunner | None = None
         self.site: web.TCPSite | None = None
         self.sessions: dict[str, dict[str, Any]] = {}
@@ -77,6 +79,7 @@ class DashboardWebServer:
         app.router.add_post("/api/guilds/{guild_id}/sync", self._api_sync)
         app.router.add_post("/api/guilds/{guild_id}/reset", self._api_reset)
         app.router.add_get("/api/guilds/{guild_id}/audit", self._api_audit)
+        app.router.add_get("/api/guilds/{guild_id}/database", self._api_database)
         app.router.add_get("/api/logs", self._api_logs)
         app.router.add_get("/static/{filename}", self._static_file)
         self.runner = web.AppRunner(app, access_log=logger)
@@ -454,6 +457,36 @@ class DashboardWebServer:
         cog = self._dashboard_cog()
         entries = await cog.db.last_audit_entries(guild.id, limit=75)
         return web.json_response({"entries": entries})
+
+    async def _api_database(self, request: web.Request) -> web.Response:
+        session, guild = await self._authorized_guild(request)
+        cog = self._dashboard_cog()
+        config_data = await cog.db.get_guild_config(guild.id)
+        audit_entries = await cog.db.last_audit_entries(guild.id, limit=1)
+        command_overrides = len(config_data.get("commands", {}))
+        section_overrides = len(config_data.get("sections", {}))
+        return web.json_response({
+            "resources": [
+                {
+                    "name": "Guild command configuration",
+                    "purpose": "Per-server command enablement",
+                    "state": "Available",
+                    "detail": f"{command_overrides} command overrides",
+                },
+                {
+                    "name": "Guild section configuration",
+                    "purpose": "Per-server section settings",
+                    "state": "Available",
+                    "detail": f"{section_overrides} section overrides",
+                },
+                {
+                    "name": "Audit trail",
+                    "purpose": "Recorded management actions",
+                    "state": "Available" if audit_entries else "No entries yet",
+                    "detail": "Audit storage initialized",
+                },
+            ],
+        })
 
     async def _api_system(self, request: web.Request) -> web.Response:
         await self._require_session(request)
