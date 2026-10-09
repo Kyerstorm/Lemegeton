@@ -221,3 +221,13 @@ td code { font:10px 'DM Mono',monospace; color:#c9c3ef; }
 }
 @media (max-width:380px) { .metric-grid { grid-template-columns:1fr 1fr; } .metric-card { padding:11px; } .metric-value { font-size:21px; } .guild-picker { max-width:125px; font-size:10px; } .user-menu { padding-left:1px; } }
 @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; animation-duration:.01ms!important; animation-iteration-count:1!important; transition-duration:.01ms!important; } }
+
+.availability-visual { padding:12px 0 5px; }
+.availability-track { height:14px; border:1px solid #ffffff0b; border-radius:99px; background:#b0a4ff20; overflow:hidden; }
+.availability-track span { display:block; width:0; height:100%; border-radius:99px; background:linear-gradient(90deg,#86d9c5,#b3e8d4); box-shadow:0 0 18px #86d9c522; transition:width .8s cubic-bezier(.2,.8,.2,1); }
+.availability-detail { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; padding-top:16px; }
+.availability-detail div { display:grid; gap:2px; }
+.availability-detail strong { color:var(--paper); font:500 22px Manrope,sans-serif; letter-spacing:-.05em; }
+.availability-detail span { color:#7f8c97; font-size:10px; }
+.availability-detail .availability-total { text-align:right; }
+.availability-detail .availability-total strong { font-size:15px; }
