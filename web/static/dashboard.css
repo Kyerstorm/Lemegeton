@@ -231,3 +231,13 @@ td code { font:10px 'DM Mono',monospace; color:#c9c3ef; }
 .availability-detail span { color:#7f8c97; font-size:10px; }
 .availability-detail .availability-total { text-align:right; }
 .availability-detail .availability-total strong { font-size:15px; }
+
+.mobile-menu-button { display:none; }
+@media (max-width:760px) {
+  .mobile-menu-button { display:grid; flex:none; }
+  .sidebar.mobile-open { display:flex; position:fixed; inset:0 auto 0 0; width:min(285px,86vw); height:100dvh; z-index:25; box-shadow:24px 0 70px #0008; animation:drawer-in .24s cubic-bezier(.2,.8,.2,1) both; }
+  .mobile-overlay.active { display:block; position:fixed; inset:0; z-index:22; background:rgba(0,0,0,.58); backdrop-filter:blur(3px); animation:page-enter .18s ease both; }
+  .topbar { gap:9px; }
+  .mobile-brand { margin-right:auto; }
+}
+@keyframes drawer-in { from { transform:translateX(-18px); opacity:.65; } to { transform:none; opacity:1; } }
