@@ -200,6 +200,8 @@ class DashboardWebServer:
     async def _login(self, request: web.Request) -> web.StreamResponse:
         if self._session(request):
             raise web.HTTPFound("/")
+        if request.query.get("start") != "1":
+            return await self._static_file(request, "login.html")
         state = secrets.token_urlsafe(32)
         self.oauth_states[state] = time.time() + 600
         params = {
@@ -347,7 +349,7 @@ class DashboardWebServer:
 
     async def _static_file(self, request: web.Request, filename: str | None = None) -> web.Response:
         name = filename or request.match_info.get("filename", "")
-        if name not in {"dashboard.html", "dashboard.css", "dashboard.js"}:
+        if name not in {"dashboard.html", "dashboard.css", "dashboard.js", "login.html"}:
             raise web.HTTPNotFound()
         path = STATIC_DIR / name
         if not path.is_file():
