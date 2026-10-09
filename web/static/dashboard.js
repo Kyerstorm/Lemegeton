@@ -30,6 +30,7 @@
   }
   function switchPage(name) {
     if (!titles[name]) return;
+    closeMobileNav();
     state.page = name;
     $$("[data-view]").forEach(node => node.classList.toggle("hidden", node.dataset.view !== name));
     $$(".nav-item").forEach(node => node.classList.toggle("active", node.dataset.page === name));
@@ -201,7 +202,18 @@
       await refreshAll(); toast("Command configuration reset.");
     } catch (error) { toast(error.message, true); }
   }
+  function closeMobileNav() {
+    $("#sidebar").classList.remove("mobile-open");
+    $("#mobileOverlay").classList.remove("active");
+    $("#mobileMenuButton").setAttribute("aria-expanded", "false");
+  }
   function bind() {
+    $("#mobileMenuButton").addEventListener("click", () => {
+      const open = $("#sidebar").classList.toggle("mobile-open");
+      $("#mobileOverlay").classList.toggle("active", open);
+      $("#mobileMenuButton").setAttribute("aria-expanded", String(open));
+    });
+    $("#mobileOverlay").addEventListener("click", closeMobileNav);
     $("#mainNav").addEventListener("click", e => { const button = e.target.closest("[data-page]"); if (button) switchPage(button.dataset.page); });
     $$("[data-jump]").forEach(button => button.addEventListener("click", () => switchPage(button.dataset.jump)));
     $("#commandFilters").addEventListener("click", e => { const button = e.target.closest("[data-filter]"); if (!button) return; state.filter = button.dataset.filter; $$("#commandFilters button").forEach(b => b.classList.toggle("active", b === button)); renderCommands(); });
