@@ -355,9 +355,9 @@ class DashboardWebServer:
         if not path.is_file():
             raise web.HTTPNotFound()
         content_type = {
-            ".html": "text/html; charset=utf-8",
-            ".css": "text/css; charset=utf-8",
-            ".js": "application/javascript; charset=utf-8",
+            ".html": "text/html",
+            ".css": "text/css",
+            ".js": "application/javascript",
         }.get(path.suffix, "application/octet-stream")
         return web.Response(text=path.read_text(encoding="utf-8"), content_type=content_type)
 
