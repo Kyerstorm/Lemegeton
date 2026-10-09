@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0d1116"><title>Lemegeton — Control room</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+<div class="app-shell" id="appShell">
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="/" aria-label="Lemegeton home"><span class="brand-mark">L</span><span class="brand-copy"><strong>Lemegeton</strong><span>Guild control room</span></span></a>
+    <div class="nav-label">WORKSPACE</div>
+    <nav id="mainNav" aria-label="Dashboard sections">
+      <button class="nav-item active" data-page="overview"><span class="nav-icon">⌂</span>Overview</button>
+      <button class="nav-item" data-page="commands"><span class="nav-icon">⌘</span>Commands <span class="nav-pill" id="commandCount">—</span></button>
+      <button class="nav-item" data-page="audit"><span class="nav-icon">◷</span>Audit trail</button>
+      <button class="nav-item" data-page="system"><span class="nav-icon">◉</span>System health</button>
+      <button class="nav-item" data-page="logs"><span class="nav-icon">≡</span>Runtime logs</button>
+      <button class="nav-item" data-page="database"><span class="nav-icon">▦</span>Data overview</button>
+    </nav>
+    <div class="sidebar-spacer"></div>
+    <div class="sidebar-note"><span class="mini-label">A QUIETER KIND OF CONTROL</span><p>One considered place to manage every server your bot calls home.</p></div>
+    <div class="sidebar-bottom"><span class="presence-dot"></span><span id="connectionLabel">Connecting to bot</span><a href="/logout" id="logoutLink">Sign out ↗</a></div>
+  </aside>
+  <main class="main">
+    <header class="topbar">
+      <div class="crumb"><span>LEMEGETON</span><span class="slash">/</span><b id="breadcrumb">Overview</b></div>
+      <div class="mobile-brand"><span class="brand-mark">L</span>Lemegeton</div>
+      <div class="topbar-actions">
+        <select class="guild-picker" id="guildPicker" aria-label="Select Discord server"><option value="">Loading your servers…</option></select>
+        <button class="icon-button" id="refreshButton" title="Refresh data" aria-label="Refresh data">↻</button>
+        <div class="user-menu"><span class="avatar" id="userAvatar">·</span><span class="user-meta"><strong id="userName">Loading</strong><span>Discord account</span></span></div>
+      </div>
+    </header>
+
+    <section class="page" data-view="overview">
+      <div class="page-heading"><div><div class="eyebrow">SERVER OVERVIEW</div><h1>Good to have you <span class="serif-italic" id="welcomeName">back.</span></h1><p>A clear view of the bot’s presence, command configuration, and recent changes across this server.</p></div><div class="heading-actions"><button class="button" id="openAudit"><span class="button-icon">◷</span> Activity</button><button class="button primary" id="syncButton"><span class="button-icon">↗</span> Sync commands</button></div></div>
+      <div class="metric-grid">
+        <article class="metric-card" style="--metric-accent:var(--lilac);--metric-glow:var(--lilac)"><div class="metric-top"><span>Available commands</span><span class="metric-symbol">⌘</span></div><div class="metric-value" id="metricCommands">—</div><div class="metric-foot"><span class="metric-change neutral" id="metricCommandEnabled">— enabled</span><span>for this server</span></div></article>
+        <article class="metric-card" style="--metric-accent:var(--mint);--metric-glow:var(--mint)"><div class="metric-top"><span>Guild members</span><span class="metric-symbol">♧</span></div><div class="metric-value" id="metricMembers">—</div><div class="metric-foot"><span>Current Discord member count</span></div></article>
+        <article class="metric-card" style="--metric-accent:var(--gold);--metric-glow:var(--gold)"><div class="metric-top"><span>Connected servers</span><span class="metric-symbol">⌘</span></div><div class="metric-value" id="metricGuilds">—</div><div class="metric-foot"><span>Servers visible to your account</span></div></article>
+        <article class="metric-card" style="--metric-accent:var(--mint);--metric-glow:var(--mint)"><div class="metric-top"><span>Gateway latency</span><span class="metric-symbol">⌁</span></div><div class="metric-value" id="metricLatency">— <em>ms</em></div><div class="metric-foot"><span class="metric-change" id="gatewayState">Checking gateway</span></div></article>
+      </div>
+      <div class="dashboard-grid">
+        <article class="panel panel-pad"><div class="panel-header"><div><div class="eyebrow">CONNECTION</div><h2>Runtime at a glance</h2><p>Live status from the running bot process.</p></div><span class="live-indicator" id="runtimePill">CHECKING</span></div>
+          <div class="health-head"><div class="health-emblem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 3.5 19 7v5.1c0 4.2-3 7.1-7 8.4-4-1.3-7-4.2-7-8.4V7l7-3.5Z"/><path d="m8.8 12.2 2.1 2.1 4.5-4.7"/></svg></div><div class="health-copy"><h3 id="runtimeTitle">Waiting for the bot</h3><p id="runtimeDescription">The dashboard will show live status when the Discord connection is ready.</p></div></div>
+          <div class="health-stats"><div><span>Guilds joined</span><strong id="healthGuilds">—</strong></div><div><span>Loaded extensions</span><strong id="healthCogs">—</strong></div><div><span>Last refresh</span><strong id="lastRefresh">—</strong></div></div>
+        </article>
+        <article class="panel panel-pad"><div class="panel-header"><div><div class="eyebrow">RECENT CHANGES</div><h2>Audit trail</h2></div><button class="text-link" data-jump="audit">See all ↗</button></div><div class="activity-list" id="overviewActivity"><div class="empty-state">Loading recent activity…</div></div></article>
+        <article class="panel panel-pad"><div class="panel-header"><div><div class="eyebrow">COMMAND ACCESS</div><h2>Configuration snapshot</h2></div><button class="text-link" data-jump="commands">Manage ↗</button></div><div class="chart-wrap"><svg class="chart-area" viewBox="0 0 500 155" role="img" aria-label="Enabled and disabled command overview"><defs><linearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#86d9c5" stop-opacity=".35"/><stop offset="100%" stop-color="#86d9c5" stop-opacity="0"/></linearGradient></defs><g class="chart-grid-line"><path d="M40 25H480M40 60H480M40 95H480M40 130H480"/></g><g class="chart-text"><text x="3" y="28">100%</text><text x="12" y="63">75%</text><text x="12" y="98">50%</text><text x="12" y="133">25%</text></g><path id="chartFillPath" class="chart-fill" fill="url(#chartFill)" d="M40 120L110 104L180 85L250 94L320 62L390 50L480 34V130H40Z"/><path id="chartLinePath" class="chart-line" d="M40 120L110 104L180 85L250 94L320 62L390 50L480 34"/><g id="chartDots"><circle class="chart-dot" cx="110" cy="104" r="3.5"/><circle class="chart-dot" cx="250" cy="94" r="3.5"/><circle class="chart-dot" cx="390" cy="50" r="3.5"/></g></svg><div class="chart-tooltip" id="chartTooltip">Current command configuration</div></div><div class="chart-legend"><span class="legend-item"><i class="legend-swatch"></i><span id="chartEnabledLabel">Enabled commands —</span></span><span class="legend-item"><i class="legend-swatch" style="background:var(--lilac)"></i><span id="chartDisabledLabel">Disabled commands —</span></span></div></article>
+        <article class="panel panel-pad"><div class="panel-header"><div><div class="eyebrow">SERVER CONTEXT</div><h2>Selected guild</h2></div><span class="metric-symbol">⌂</span></div><div class="key-value-list"><div class="key-value-row"><span>Server name</span><strong id="guildNameValue">—</strong></div><div class="key-value-row"><span>Server ID</span><strong id="guildIdValue">—</strong></div><div class="key-value-row"><span>Your permission</span><strong id="guildPermissionValue">—</strong></div><div class="key-value-row"><span>Bot membership</span><strong class="state-ok">Connected</strong></div></div></article>
+      </div>
+    </section>
+
+    <section class="page hidden" data-view="commands">
+      <div class="page-heading"><div><div class="eyebrow">COMMAND CONFIGURATION</div><h1>Every command, <span class="serif-italic">considered.</span></h1><p>Enable only what this server needs. Protected system commands remain available to keep administration safe.</p></div><div class="heading-actions"><button class="button" id="resetButton">Reset defaults</button><button class="button primary" id="syncButtonCommands">↗ Publish changes</button></div></div>
+      <div class="toolbar"><label class="search-field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg><input id="commandSearch" type="search" placeholder="Find a command or description…" autocomplete="off"></label><div class="segment-control" id="commandFilters"><button class="active" data-filter="All">All</button><button data-filter="General">General</button><button data-filter="Media">Media</button><button data-filter="Administration">Admin</button><button data-filter="Other">Other</button></div></div>
+      <div class="command-list" id="commandList"><div class="empty-state">Loading commands from the bot…</div></div>
+      <p class="preview-note" id="commandHint">Changes are saved per guild. Publish to synchronize this server’s application commands.</p>
+    </section>
+
+    <section class="page hidden" data-view="audit">
+      <div class="page-heading"><div><div class="eyebrow">ACCOUNTABILITY</div><h1>What changed, <span class="serif-italic">and when.</span></h1><p>Actions recorded for the selected server. This view never fabricates events.</p></div><button class="button" id="refreshAudit">↻ Refresh log</button></div>
+      <article class="panel panel-pad"><div class="activity-list" id="auditList"><div class="empty-state">Loading audit entries…</div></div></article>
+    </section>
+
+    <section class="page hidden" data-view="system">
+      <div class="page-heading"><div><div class="eyebrow">PROCESS HEALTH</div><h1>Under the <span class="serif-italic">surface.</span></h1><p>Live details reported by this bot instance.</p></div><button class="button" id="refreshSystem">↻ Refresh status</button></div>
+      <div class="dashboard-grid"><article class="panel panel-pad"><div class="panel-header"><div><div class="eyebrow">RUNTIME</div><h2>System details</h2></div><span class="live-indicator" id="systemState">CHECKING</span></div><div class="key-value-list" id="systemValues"></div></article><article class="panel panel-pad"><div class="panel-header"><div><div class="eyebrow">EXTENSIONS</div><h2>Loaded cogs</h2></div><span class="panel-caption" id="extensionCount">—</span></div><div class="extension-list" id="extensionList"><div class="empty-state">Loading extensions…</div></div></article></div>
+    </section>
+
+    <section class="page hidden" data-view="logs">
+      <div class="page-heading"><div><div class="eyebrow">DIAGNOSTICS</div><h1>Logs, without the <span class="serif-italic">guesswork.</span></h1><p>Recent log lines from files available to the bot process.</p></div><button class="button" id="refreshLogs">↻ Refresh logs</button></div>
+      <article class="panel log-panel"><div class="log-toolbar"><span id="logFilename">bot.log</span><select id="logPicker" class="guild-picker" aria-label="Select log file"><option value="bot.log">bot.log</option><option value="dashboard.log">dashboard.log</option></select></div><pre id="logText">Fetching log entries…</pre></article><p class="preview-note">Log access is restricted to users authorized for this guild dashboard.</p>
+    </section>
+
+    <section class="page hidden" data-view="database">
+      <div class="page-heading"><div><div class="eyebrow">PERSISTENCE</div><h1>Data, <span class="serif-italic">at a glance.</span></h1><p>Dashboard configuration and audit records for the selected guild.</p></div></div>
+      <article class="panel panel-pad"><div class="panel-header"><div><div class="eyebrow">GUILD STORAGE</div><h2>Available tables</h2><p>Only values returned by the application are shown.</p></div></div><div class="table-wrap"><table><thead><tr><th>Resource</th><th>Purpose</th><th>State</th></tr></thead><tbody id="databaseRows"><tr><td>Guild configuration</td><td>Command and section settings</td><td class="state-ok">Connected</td></tr><tr><td>Audit log</td><td>Recorded management actions</td><td class="state-ok">Connected</td></tr></tbody></table></div></article>
+    </section>
+  </main>
+</div>
+<div class="toast-stack" id="toastStack" aria-live="polite"></div>
+<script src="/static/dashboard.js" defer></script>
+</body></html>
