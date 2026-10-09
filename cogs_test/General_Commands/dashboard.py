@@ -155,7 +155,7 @@ class ConfigDB:
 
     async def log_action(self, guild_id: int, actor_id: int, action: str, details: str = ""):
         await self.open()
-        ts = datetime.datetime.datetime.utcnow().isoformat() + "Z"
+        ts = datetime.datetime.utcnow().isoformat() + "Z"
         async with self._lock:
             await self._conn.execute(
                 "INSERT INTO audit_log (guild_id, ts, actor_id, action, details) VALUES (?, ?, ?, ?, ?)",
@@ -178,8 +178,8 @@ class ConfigDB:
 
 # ---------- Utilities ----------
 def format_commit_message(actor: discord.User, action: str, details: str = "") -> str:
-    ts = datetime.datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-    commit = f"commit {datetime.datetime.datetime.utcnow().timestamp():.0f}\nAuthor: {actor} <{actor.id}>\nDate:   {ts}\n\n    {action}\n\n{details}"
+    ts = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    commit = f"commit {datetime.datetime.utcnow().timestamp():.0f}\nAuthor: {actor} <{actor.id}>\nDate:   {ts}\n\n    {action}\n\n{details}"
     return commit
 
 # ---------- Confirm modal ----------
