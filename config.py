@@ -179,6 +179,22 @@ CIRCUIT_BREAKER_TIMEOUT = _int_env("CIRCUIT_BREAKER_TIMEOUT", 60)  # 60 seconds 
 CIRCUIT_BREAKER_SUCCESS_THRESHOLD = _int_env("CIRCUIT_BREAKER_SUCCESS_THRESHOLD", 2)  # Close circuit after 2 successes
 
 # ==============================================================================
+# WEB MANAGEMENT DASHBOARD
+# ==============================================================================
+DASHBOARD_CLIENT_ID = _int_env("DASHBOARD_CLIENT_ID", CLIENT_ID)
+DASHBOARD_CLIENT_SECRET = os.getenv("DASHBOARD_CLIENT_SECRET")
+DASHBOARD_SECRET_KEY = os.getenv("DASHBOARD_SECRET_KEY")
+DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "0.0.0.0")
+DASHBOARD_PORT = _int_env("DASHBOARD_PORT", 8080)
+DASHBOARD_REDIRECT_URI = os.getenv(
+    "DASHBOARD_REDIRECT_URI",
+    f"http://localhost:{DASHBOARD_PORT}/oauth/callback",
+)
+DASHBOARD_COOKIE_SECURE = os.getenv("DASHBOARD_COOKIE_SECURE", "false").strip().lower() in {
+    "1", "true", "yes", "on",
+}
+DASHBOARD_SESSION_TTL = _int_env("DASHBOARD_SESSION_TTL", 28800)
+
 # DATABASE CONFIGURATION
 # ==============================================================================
 
