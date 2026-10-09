@@ -99,17 +99,11 @@
     setText("#chartDisabledLabel", `Disabled commands ${Math.max(0, total - enabled)}`);
     setText("#commandCount", fmt(total));
     setText("#guildHeading", selectedGuild()?.name);
-    const pct = total ? enabled / total : 0;
-    const points = Array.from({ length: 7 }, (_, i) => {
-      const x = 40 + i * (440 / 6);
-      const y = 130 - pct * 100 * (0.74 + 0.26 * (i / 6));
-      return [x, y];
-    });
-    const path = points.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join("");
-    $("#chartLinePath").setAttribute("d", path);
-    $("#chartFillPath").setAttribute("d", path + "L480 130H40Z");
-    $("#chartDots").innerHTML = points.filter((_, i) => i % 2 === 1).map(p => `<circle class="chart-dot" cx="${p[0]}" cy="${p[1]}" r="3.5"/>`).join("");
-    $("#chartTooltip").textContent = `${enabled} enabled · ${total - enabled} disabled`;
+    const pct = total ? (enabled / total) * 100 : 0;
+    $("#enabledBar").style.width = pct + "%";
+    setText("#availabilityPercent", Math.round(pct) + "%");
+    setText("#availabilityTotal", fmt(total));
+    $("#chartTooltip")?.replaceChildren(document.createTextNode(`${enabled} enabled · ${total - enabled} disabled`));
   }
   function renderCommands() {
     const list = $("#commandList"); if (!list) return;
