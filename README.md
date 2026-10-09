@@ -791,3 +791,34 @@ Made with ❤️ for the anime community by [Kyerstorm](https://github.com/Kyers
 **Bot Version**: Multi-Guild with Dashboard System  
 **Python Version**: 3.13+  
 **Discord.py Version**: 2.6.0
+
+
+## Web management dashboard
+
+The multi-guild dashboard is an optional authenticated web interface that runs in the same process as the Discord bot. Its responsive UI assets are kept separately in `web/static/dashboard.html`, `web/static/dashboard.css`, and `web/static/dashboard.js`. The web API reuses the dashboard cog's per-guild configuration database; the Discord UI and web UI therefore work from the same settings.
+
+### Configure Discord OAuth2
+
+1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and select the application used by Lemegeton.
+2. In **OAuth2 → General**, add the exact callback URL to **Redirects**. For a local install this is `http://localhost:8080/oauth/callback`; for production, use your public HTTPS hostname.
+3. Set the following variables in your local `.env` file (do not commit real secrets):
+   - `DASHBOARD_CLIENT_ID` — the OAuth application ID; defaults to `CLIENT_ID` if left empty.
+   - `DASHBOARD_CLIENT_SECRET` — OAuth2 client secret from the Developer Portal.
+   - `DASHBOARD_SECRET_KEY` — a long, unique random secret value.
+   - `DASHBOARD_HOST` and `DASHBOARD_PORT` — bind address and port (defaults `0.0.0.0:8080`).
+   - `DASHBOARD_REDIRECT_URI` — must exactly match the URL registered in Discord.
+   - `DASHBOARD_COOKIE_SECURE=true` when served over HTTPS.
+4. Start the bot normally and open the configured dashboard URL. Sign in with Discord. Only servers where the bot is present and your Discord account has **Manage Server** or **Administrator** access are listed.
+
+The web server is skipped when OAuth credentials are not configured, so existing bot-only deployments can continue without dashboard setup. Keep the dashboard behind HTTPS in production, and do not expose it publicly without configuring OAuth.
+
+### Dashboard sections
+
+- **Overview:** live bot readiness, latency, guild member count, command counts, and recent audit activity.
+- **Commands:** search and filter registered dashboard commands, toggle per-guild command state, and publish the selection to Discord. Protected commands remain locked.
+- **Audit trail:** recent per-guild configuration actions.
+- **System health:** process runtime, loaded extensions, guild count, and gateway state.
+- **Runtime logs:** restricted access to the bot and dashboard log files.
+- **Data overview:** explains the dashboard's persisted resources.
+
+The UI uses a dark ink palette with warm paper, muted lilac, mint, and antique-gold accents; premium typography; subtle SVG chart drawing, orbit details, hover transitions, and reduced-motion support. The CSS and JavaScript are separate from the page markup for easier design review and maintenance.
