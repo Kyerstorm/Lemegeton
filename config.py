@@ -195,6 +195,7 @@ DASHBOARD_COOKIE_SECURE = os.getenv("DASHBOARD_COOKIE_SECURE", "false").strip().
 }
 DASHBOARD_SESSION_TTL = _int_env("DASHBOARD_SESSION_TTL", 28800)
 
+# ==============================================================================
 # DATABASE CONFIGURATION
 # ==============================================================================
 
