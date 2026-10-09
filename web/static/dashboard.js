@@ -38,6 +38,7 @@
     if (name === "audit") loadAudit();
     if (name === "system") loadSystem();
     if (name === "logs") loadLogs();
+    if (name === "database") loadDatabase();
   }
   function selectedGuild() { return state.guilds.find(g => String(g.id) === String(state.guild)); }
   async function loadBootstrap() {
@@ -164,6 +165,15 @@
       setText("#extensionCount", `${(data.extensions || []).length} loaded`);
       $("#extensionList").innerHTML = (data.extensions || []).length ? data.extensions.map(name => `<div class="extension-row"><code>${safe(name)}</code><span class="state-ok">Loaded</span></div>`).join("") : '<div class="empty-state">No loaded extensions were reported.</div>';
     } catch (error) { toast(error.message, true); }
+  }
+  async function loadDatabase() {
+    try {
+      const data = await api(`/api/guilds/${state.guild}/database`);
+      const rows = data.resources || [];
+      $("#databaseRows").innerHTML = rows.length ? rows.map(row => `<tr><td>${safe(row.name)}</td><td>${safe(row.purpose)}<div class="preview-note">${safe(row.detail || "")}</div></td><td class="state-ok">${safe(row.state)}</td></tr>`).join("") : '<tr><td colspan="3">No resources were returned.</td></tr>';
+    } catch (error) {
+      $("#databaseRows").innerHTML = `<tr><td colspan="3">${safe(error.message)}</td></tr>`;
+    }
   }
   async function loadLogs() {
     try {
