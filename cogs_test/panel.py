@@ -147,7 +147,7 @@ async def _panel_ids(allow_mature: bool, user_id: int | None = None, tags: list[
     if tags:
         args.append(tags)
         clauses.append(
-            f"(SELECT COUNT(DISTINCT pt.tag) FROM panel_tags pt WHERE pt.panel_id=p.id AND pt.tag=ANY(${len(args)}::text[]))=${len(args)}"
+            f"(SELECT COUNT(DISTINCT pt.tag) FROM panel_tags pt WHERE pt.panel_id=p.id AND pt.tag=ANY(${len(args)}::text[]))=cardinality(${len(args)}::text[])"
         )
     sql = "SELECT p.id FROM panels p WHERE " + " AND ".join(clauses) + " ORDER BY p.created_at DESC"
     pool = await _pool()
