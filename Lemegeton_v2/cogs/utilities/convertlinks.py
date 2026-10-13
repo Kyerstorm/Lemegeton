@@ -7,7 +7,7 @@ import asyncio
 from typing import List, Optional
 
 from helpers.anilist_helper import fetch_anilist_user_id
-from helpers.utilities_utils import utilities_error_handler
+from helpers.error_utils import utilities_error_handler
 
 logger = logging.getLogger("ConvertLinks")
 

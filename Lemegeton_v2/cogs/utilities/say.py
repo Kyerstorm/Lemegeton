@@ -6,7 +6,7 @@ import logging
 from typing import Optional
 from datetime import datetime
 from database import is_user_bot_moderator, execute_db_operation, init_say_command_logs_table
-from helpers.utilities_utils import utilities_error_handler
+from helpers.error_utils import utilities_error_handler
 
 logger = logging.getLogger("say")
 

@@ -20,7 +20,7 @@ from helpers.anilist_helper import fetch_anilist_user_basic
 from helpers.text_helper import validate_anilist_username
 from helpers.embed_helper import build_error_embed, build_success_embed, build_login_status_embed
 from helpers.steam_helper import resolve_vanity_url, get_player_summaries, get_library_stats
-from helpers.account_utils import account_error_handler
+from helpers.error_utils import account_error_handler
 
 # Configuration constants
 LOG_DIR = Path("logs")

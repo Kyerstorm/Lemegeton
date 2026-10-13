@@ -9,7 +9,7 @@ import database
 import config
 import io
 
-from helpers.social_utils import social_error_handler
+from helpers.error_utils import social_error_handler
 from helpers.embed_helper import build_feedback_submission_embed
 
 # ------------------------------------------------------

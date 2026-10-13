@@ -12,7 +12,7 @@ import json
 
 from database import execute_db_operation, get_all_invite_channel_settings
 from helpers.embed_helper import build_error_embed, build_success_embed, build_info_embed
-from helpers.server_management_utils import server_management_error_handler
+from helpers.error_utils import server_management_error_handler
 
 # ------------------------------------------------------
 # Logging Setup - Clears on each bot run

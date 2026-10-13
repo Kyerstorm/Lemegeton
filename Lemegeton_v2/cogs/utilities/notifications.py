@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 import config
 from helpers.embed_helper import build_error_embed
-from helpers.utilities_utils import utilities_error_handler
+from helpers.error_utils import utilities_error_handler
 
 # ------------------------------------------------------
 # Logging Setup

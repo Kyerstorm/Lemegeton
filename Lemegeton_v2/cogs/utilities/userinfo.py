@@ -15,7 +15,7 @@ from discord import app_commands
 from datetime import datetime, timezone
 from typing import Optional, List
 from database import execute_db_operation, init_userinfo_usage_table
-from helpers.utilities_utils import utilities_error_handler
+from helpers.error_utils import utilities_error_handler
 
 # ---------------------------
 # Palette & helpers

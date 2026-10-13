@@ -5,7 +5,7 @@ Centralized functions for building Discord embeds for various content types
 
 import discord
 import logging
-from typing import Dict, List, Optional, Any
+from typing import List, Optional, Any
 from pathlib import Path
 
 # Configuration constants
@@ -40,97 +40,6 @@ logger.info("Embed Helper logging system initialized")
 
 
 # ===== ANILIST ACTIVITY EMBEDS =====
-
-def build_activity_embed(activity: dict, activity_type: str, user: dict, text: str, 
-                        media_links: list, likes: int, comments: int = 0) -> discord.Embed:
-    """
-    Build embed for AniList activities (TextActivity, MessageActivity, ListActivity, Reply).
-    """
-    from helpers.anilist_helper import clean_anilist_text
-    
-    embed = discord.Embed(color=discord.Color.blurple())
-    clean = clean_anilist_text(text)
-
-    # TextActivity
-    if activity_type == "TextActivity":
-        embed.set_author(
-            name=(user or {}).get("name", "Unknown"),
-            url=(user or {}).get("siteUrl", ""),
-            icon_url=((user or {}).get("avatar") or {}).get("large")
-        )
-        embed.description = clean or "*No content*"
-
-    # MessageActivity
-    elif activity_type == "MessageActivity":
-        recipient = activity.get("recipient") or {}
-        rec_name = (recipient or {}).get("name", "Unknown")
-        embed.set_author(
-            name=(user or {}).get("name", "Unknown"),
-            url=(user or {}).get("siteUrl", ""),
-            icon_url=((user or {}).get("avatar") or {}).get("large")
-        )
-        embed.description = f"To **{rec_name}**\n\n{clean or '*No message text*'}"
-
-    # ListActivity
-    elif activity_type == "ListActivity":
-        media = activity.get("media") or {}
-        progress = activity.get("progress") or activity.get("status") or ""
-        title = (media.get("title") or {}).get("romaji", "Unknown")
-        cover = (media.get("coverImage") or {}).get("large")
-        url = media.get("siteUrl")
-        embed.set_author(
-            name=(user or {}).get("name", "Unknown"),
-            url=(user or {}).get("siteUrl", ""),
-            icon_url=((user or {}).get("avatar") or {}).get("large")
-        )
-        if progress:
-            embed.title = f"Read Chapter {progress} of {title}"
-        else:
-            embed.title = f"{title}"
-        if url:
-            embed.url = url
-        if clean:
-            embed.description = clean
-        else:
-            embed.description = f"Read Chapter {progress} {title}" if progress else title
-        if cover:
-            embed.set_thumbnail(url=cover)
-
-    # Reply
-    elif activity_type == "Reply":
-        embed.set_author(
-            name=f"💬 {(user or {}).get('name', 'Unknown')}",
-            url=(user or {}).get("siteUrl", ""),
-            icon_url=((user or {}).get("avatar") or {}).get("large")
-        )
-        embed.description = clean or "*No reply text*"
-
-    else:
-        embed.set_author(
-            name=(user or {}).get("name", "Unknown"),
-            url=(user or {}).get("siteUrl", ""),
-            icon_url=((user or {}).get("avatar") or {}).get("large")
-        )
-        embed.description = clean or "*No content*"
-
-    # Stats
-    stats = f"❤️ {likes or 0}"
-    if comments:
-        stats += f" | 💬 {comments}"
-    embed.add_field(name="Stats", value=stats, inline=True)
-
-    # Media attachments
-    if media_links:
-        first = media_links[0]
-        if any(first.lower().endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".gif", ".webp")):
-            embed.set_image(url=first)
-        else:
-            embed.add_field(name="🔗 Media", value=f"[Click here]({first})", inline=False)
-        for extra in media_links[1:]:
-            embed.add_field(name="🔗 Media", value=f"[Click here]({extra})", inline=False)
-
-    embed.set_footer(text="Powered by AniList")
-    return embed
 
 
 # ===== ANILIST MEDIA EMBEDS =====
@@ -396,76 +305,6 @@ def build_tags_embed(media: dict) -> discord.Embed:
 
 
 # ===== USER PROFILE EMBEDS =====
-
-def build_user_profile_embed(user_data: dict, anime_stats: dict, manga_stats: dict) -> discord.Embed:
-    """Build main user profile embed."""
-    username = user_data.get("name", "Unknown User")
-    avatar_url = (user_data.get("avatar") or {}).get("large", "")
-    profile_url = user_data.get("siteUrl", "")
-    banner_url = user_data.get("bannerImage", "")
-
-    embed = discord.Embed(
-        title=f"📊 {username}'s AniList Profile",
-        url=profile_url,
-        color=discord.Color.blue()
-    )
-
-    if avatar_url:
-        embed.set_thumbnail(url=avatar_url)
-    if banner_url:
-        embed.set_image(url=banner_url)
-
-    # Anime stats
-    anime_count = anime_stats.get("count", 0)
-    anime_score = anime_stats.get("meanScore", 0)
-    episodes_watched = anime_stats.get("episodesWatched", 0)
-    minutes_watched = anime_stats.get("minutesWatched", 0)
-    
-    anime_text = f"**Count:** {anime_count:,}\n**Mean Score:** {anime_score}/100\n**Episodes:** {episodes_watched:,}\n**Minutes:** {minutes_watched:,}"
-    embed.add_field(name="🎬 Anime", value=anime_text, inline=True)
-
-    # Manga stats
-    manga_count = manga_stats.get("count", 0)
-    manga_score = manga_stats.get("meanScore", 0)
-    chapters_read = manga_stats.get("chaptersRead", 0)
-    volumes_read = manga_stats.get("volumesRead", 0)
-    
-    manga_text = f"**Count:** {manga_count:,}\n**Mean Score:** {manga_score}/100\n**Chapters:** {chapters_read:,}\n**Volumes:** {volumes_read:,}"
-    embed.add_field(name="📖 Manga", value=manga_text, inline=True)
-
-    embed.set_footer(text="Fetched from AniList")
-    return embed
-
-
-def build_favorites_embed(user_data: dict, avatar_url: str, profile_url: str) -> discord.Embed:
-    """Build favorites overview embed."""
-    username = user_data.get("name", "Unknown User")
-    favourites = user_data.get("favourites", {})
-
-    embed = discord.Embed(
-        title=f"❤️ {username}'s Favorites",
-        url=profile_url,
-        color=discord.Color.red()
-    )
-
-    if avatar_url:
-        embed.set_thumbnail(url=avatar_url)
-
-    # Count favorites
-    anime_count = len(favourites.get("anime", {}).get("nodes", []))
-    manga_count = len(favourites.get("manga", {}).get("nodes", []))
-    character_count = len(favourites.get("characters", {}).get("nodes", []))
-    staff_count = len(favourites.get("staff", {}).get("nodes", []))
-    studio_count = len(favourites.get("studios", {}).get("nodes", []))
-
-    embed.add_field(name="🎬 Anime", value=f"{anime_count} favorites", inline=True)
-    embed.add_field(name="📖 Manga", value=f"{manga_count} favorites", inline=True)
-    embed.add_field(name="👤 Characters", value=f"{character_count} favorites", inline=True)
-    embed.add_field(name="🎭 Staff", value=f"{staff_count} favorites", inline=True)
-    embed.add_field(name="🏢 Studios", value=f"{studio_count} favorites", inline=True)
-
-    embed.set_footer(text="Use the buttons below to view specific categories")
-    return embed
 
 
 def build_steam_profile_embed(
@@ -900,33 +739,6 @@ def build_feedback_submission_embed(type_choice, description: str, user, image=N
     return embed
 
 
-def build_booster_welcome_embed(guild_name: str) -> discord.Embed:
-    """Build the DM sent to a member when they first start boosting the server."""
-    embed = discord.Embed(
-        title="🎉 Welcome, Server Booster!",
-        description="Thank you for boosting our server! As a token of appreciation, you now have access to special perks:",
-        color=discord.Color.gold()
-    )
-
-    embed.add_field(
-        name="🎨 Custom Role Creation",
-        value="Use `/nitro-role-set` to create a custom role with your chosen name and color!\n\n"
-              "**Example:** `/nitro-role-set role_name:My Cool Role hex_color:#FF6B6B`",
-        inline=False
-    )
-
-    embed.add_field(
-        name="💡 Tips",
-        value="• You can only have **one** booster role per server\n"
-              "• Update your role anytime by running the command again\n"
-              "• Choose any hex color you like!",
-        inline=False
-    )
-
-    embed.set_footer(text=f"Thank you for supporting {guild_name}!")
-    return embed
-
-
 def build_affinity_comparison_embed(
     requester_name: str,
     target_name: str,
@@ -970,33 +782,6 @@ def build_affinity_comparison_embed(
     if cached:
         footer += " (Cached data)"
     embed.set_footer(text=footer)
-    return embed
-
-
-def build_trending_embed(media_list: List[Dict], title: str, description: str) -> discord.Embed:
-    """Build embed for trending media lists."""
-    embed = discord.Embed(
-        title=title,
-        description=description,
-        color=discord.Color.gold()
-    )
-    
-    for i, media in enumerate(media_list[:10], 1):
-        media_title = (media.get("title") or {}).get("romaji") or (media.get("title") or {}).get("english") or "Unknown"
-        score = media.get("averageScore", "N/A")
-        url = media.get("siteUrl", "")
-        
-        value = f"Score: {score}%"
-        if url:
-            value = f"[{value}]({url})"
-            
-        embed.add_field(
-            name=f"{i}. {media_title}",
-            value=value,
-            inline=False
-        )
-
-    embed.set_footer(text="Fetched from AniList")
     return embed
 
 

@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 from helpers.embed_helper import build_error_embed, build_warning_embed
 from helpers.anilist_helper import post_graphql
-from helpers.media_utils import media_error_handler
+from helpers.error_utils import media_error_handler
 
 # ------------------------------------------------------
 # Logging Setup - Clears on each bot run

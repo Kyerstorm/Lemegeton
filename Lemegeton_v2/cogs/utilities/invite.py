@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from config import BOT_ID
 from helpers.embed_helper import build_error_embed
-from helpers.utilities_utils import utilities_error_handler
+from helpers.error_utils import utilities_error_handler
 
 # ------------------------------------------------------
 # Logging Setup - Safe handling

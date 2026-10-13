@@ -58,8 +58,6 @@ A production-ready Discord bot that combines anime/manga tracking with AI-powere
   - Similar title discovery
 - **Trending Lists** - Stay updated with currently popular series
 - **Random Discovery** - Get random anime/manga suggestions
-- **Trailer Viewing** - Watch trailers directly through AniList integration
-- **3x3 Favorite Grids** - Generate beautiful 3x3 grids of favorite media
 - **Twitter/X News Monitoring** - Track anime/manga news from Twitter accounts
 - **AniList Site Embeds** - Direct links and embeds to AniList pages
 - **Library Backup** - Export and backup your AniList library
@@ -70,11 +68,6 @@ A production-ready Discord bot that combines anime/manga tracking with AI-powere
 - **Steam Profile Display** - View Steam profiles with library statistics
 - **Steam Game Recommendations** - Personalized game suggestions based on your Steam library
 - **Steam Game Search** - Search and view detailed information about Steam games
-- **Free Games Tracker** - Automatic notifications for free games from:
-  - Epic Games Store
-  - Steam
-  - GOG
-  - Other platforms
 - **Cross-Platform Discovery** - Connect your anime/manga and gaming interests
 
 ### 👥 Social Features
@@ -104,7 +97,6 @@ A production-ready Discord bot that combines anime/manga tracking with AI-powere
 - **Guild-Wide Themes** - Server moderators can set server-wide default themes
 - **User-Specific Themes** - Individual preferences override guild settings
 - **Theme Preview** - Preview themes before applying
-- **Nitro Booster Custom Roles** - Automatic role color customization for Nitro boosters
 
 ### 🏰 Server Management
 
@@ -115,7 +107,6 @@ A production-ready Discord bot that combines anime/manga tracking with AI-powere
   - Real-time status indicators
 - **Server Configuration** - Centralized server settings (`/server-config`)
 - **Invite Analytics** - Track invite usage and recruitment statistics
-- **Welcome DM System** - Automated welcome messages for new members
 - **Moderator Role Management** - Configure moderator roles per server
 - **Bot Updates Channel** - Configure channels for bot update notifications
 - **Completion Channels** - Set channels for anime/manga completion notifications
@@ -126,7 +117,6 @@ A production-ready Discord bot that combines anime/manga tracking with AI-powere
 - **Reminder System** - Natural language parsing for reminders (under maintenance)
 - **Multi-Type Notifications** - Subscribe to various update types
 - **Planned Features** - View upcoming features and vote on priorities
-- **Timestamp Generator** - Create Discord timestamps
 - **User Information Display** - View detailed Discord user information
 - **Say Command** - Moderators can make the bot send messages
 - **Invite Link** - Share the bot with other servers
@@ -239,7 +229,7 @@ STEAM_API_KEY=your_steam_api_key_here
 
 > All commands are slash commands. Type `/` in Discord to see available commands.
 
-### Total: **43 Commands** across **8 Sections**
+### Total: **35 Commands** across **8 Sections**
 
 ### 🔐 Account Management (3 commands)
 
@@ -247,43 +237,36 @@ STEAM_API_KEY=your_steam_api_key_here
 - `/profile [user]` - View comprehensive AniList profile with gallery, achievements, and favorites
 - `/admin-login` - Admin login management for troubleshooting (Bot Moderator only)
 
-### 📺 Media (11 commands)
+### 📺 Media (9 commands)
 
 - `/browse` - Interactive browsing with advanced filtering and sorting
 - `/recommendations [member]` - AI-powered personalized recommendations
 - `/trending` - View currently trending anime and manga
 - `/random` - Get random anime/manga suggestions
-- `/trailer <media>` - Watch trailers for anime/manga
-- `/three-by-three [user]` - Generate 3x3 favorite grids
 - `/news` - Manage Twitter/X news monitoring (Bot Moderator)
 - `/test-twitter-scrape` - Test Twitter scraping functionality (Bot Moderator)
 - `/set-manga-completion-channel` - Configure completion notifications (Admin)
 - `/show-manga-completion-channel` - View configured completion channel (Admin)
 - `/library-backup` - Export and backup your AniList library
 
-### 🎮 Gaming (5 commands)
+### 🎮 Gaming (3 commands)
 
 - `/steam-profile <username>` - Show Steam profile and library stats
 - `/steam-recommendation <username>` - Get personalized game recommendations
 - `/steam-game <query>` - Search and view Steam game information
-- `/free-games` - Check free games and manage notifications
-- `/check-free-games` - Manually trigger free games check (Bot Moderator)
 
-### 🎨 Customization (3 commands)
+### 🎨 Customization (2 commands)
 
 - `/theme` - Browse, preview, and apply custom themes
 - `/admin-guild-theme` - Manage server-wide theme settings (Bot Moderator)
-- `/nitrorole-set` - Configure Nitro booster custom role colors (Admin)
 
-### 🏰 Server Management (8 commands)
+### 🏰 Server Management (6 commands)
 
 - `/serverinfo` - Display comprehensive server information
 - `/server-config` - Centralized server configuration interface
 - `/invite-stats` - View invite usage statistics
 - `/invite-leaderboard` - View recruitment leaderboard
 - `/invite-theme` - Customize invite embed theme
-- `/set-welcome-dm` - Configure welcome DM messages (Admin)
-- `/welcome-dm-status` - View welcome DM configuration (Admin)
 - `/dashboard` - Interactive command management dashboard (Admin)
 
 ### 👥 Social (3 commands)
@@ -292,13 +275,12 @@ STEAM_API_KEY=your_steam_api_key_here
 - `/affinity [member]` - Calculate AniList compatibility with friends
 - `/feedback` - Submit ideas or report bugs
 
-### 🛠️ Utilities (7 commands)
+### 🛠️ Utilities (6 commands)
 
 - `/help [category]` - Interactive help system with category browsing
 - `/notifications` - Manage your notification preferences
 - `/say <message>` - Make the bot send a message (Moderator)
 - `/userinfo [user]` - View detailed Discord user information
-- `/timestamp` - Generate Discord timestamps
 - `/invite` - Get bot invite link
 - `/planned-features` - View planned bot features and vote
 
@@ -337,14 +319,14 @@ The **Interactive Dashboard** (`/dashboard`) is a powerful command management sy
 
 - **Account** (3 commands)
 - **Admin** (3 commands)
-- **Customization** (3 commands)
-- **Gaming** (5 commands)
-- **Media** (11 commands)
-- **Server Management** (8 commands)
+- **Customization** (2 commands)
+- **Gaming** (3 commands)
+- **Media** (9 commands)
+- **Server Management** (6 commands)
 - **Social** (3 commands)
-- **Utilities** (7 commands)
+- **Utilities** (6 commands)
 
-**Total: 43 commands** managed through the dashboard
+**Total: 35 commands** managed through the dashboard
 
 ### For Developers
 
@@ -381,7 +363,7 @@ Lemegeton/
 │   ├── customization/              # Themes, server boost, nitro roles
 │   ├── gaming/                     # Steam integration, free games
 │   ├── media/                      # Browse, recommendations, trending, news
-│   ├── server_management/          # Server info, config, invites, welcome DMs
+│   ├── server_management/          # Server info, config, invites
 │   ├── social/                     # Leaderboards, affinity, feedback
 │   └── utilities/                  # Help, notifications, say, userinfo, etc.
 │

@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from config import BOT_ID
 from helpers.embed_helper import build_error_embed, build_warning_embed
-from helpers.utilities_utils import utilities_error_handler
+from helpers.error_utils import utilities_error_handler
 
 # ------------------------------------------------------
 # Logging Setup - Safe handling
@@ -92,18 +92,6 @@ class HelpCog(commands.Cog):
                     "note": "For when you can't decide what to watch/read - supports Anime, Manga, Light Novel, or All",
                     "examples": ["/random anime", "/random manga", "/random light_novel", "/random all"]
                 },
-                "trailer": {
-                    "desc": "🎬 Get the trailer for an anime/manga from AniList",
-                    "usage": "/trailer <type> <title>",
-                    "note": "Fetches official trailers with autocomplete support. Supports both anime and manga.",
-                    "examples": ["/trailer anime Demon Slayer", "/trailer manga Chainsaw Man"]
-                },
-                "3x3": {
-                    "desc": "🎨 Create a 3x3 grid of your favorite anime, manga, or characters",
-                    "usage": "/3x3 <media_type>",
-                    "note": "Generate shareable 3x3 grids with custom selections. Supports anime, manga, characters, and games. Fetches covers/images from AniList automatically.",
-                    "examples": ["/3x3 anime", "/3x3 manga", "/3x3 character", "/3x3 games"]
-                },
                 "set_animanga_completion_channel": {
                     "desc": "Set channel to receive anime/manga completion updates (Mod only)",
                     "usage": "/set_animanga_completion_channel <channel>",
@@ -136,18 +124,6 @@ class HelpCog(commands.Cog):
                     "note": "Search Steam store with fuzzy matching. View game details, prices, and reviews.",
                     "examples": ["/steam-game Elden Ring", "/steam-game god of war"]
                 },
-                "free-games": {
-                    "desc": "Manage free games notifications and check current deals",
-                    "usage": "/free-games",
-                    "note": "Check current free games and setup automatic notifications (Epic, GOG, Steam). Checks every 6 hours.",
-                    "examples": ["/free-games"]
-                },
-                "check-free-games": {
-                    "desc": "🎮 Test command: Check current free games from all platforms",
-                    "usage": "/check-free-games",
-                    "note": "Immediately check for free games from Epic, GOG, and Steam. Useful for testing.",
-                    "examples": ["/check-free-games"]
-                }
             },
             "🎨 Customization": {
                 "theme": {
@@ -155,12 +131,6 @@ class HelpCog(commands.Cog):
                     "usage": "/theme",
                     "note": "Customize your bot experience with themes",
                     "examples": ["/theme"]
-                },
-                "nitro-role-set": {
-                    "desc": "Create and apply a custom role with your chosen color (Server Boosters only)",
-                    "usage": "/nitro-role-set <role_name> <hex_color>",
-                    "note": "Server boosters can create custom roles with any name and hex color. Multiple roles allowed.",
-                    "examples": ["/nitro-role-set \"My Cool Role\" #FF6B6B", "/nitro-role-set \"Gamer\" #00FF00"]
                 },
                 "admin-guild-theme": {
                     "desc": "Manage guild-wide theme settings (Bot Moderator only)",
@@ -200,18 +170,6 @@ class HelpCog(commands.Cog):
                     "note": "Set the visual theme for invite leaderboards. Requires 'Manage Server' permission.",
                     "examples": ["/invite-theme"]
                 },
-                "set-welcome-dm": {
-                    "desc": "Set the welcome DM message by uploading a text file (Admin only)",
-                    "usage": "/set-welcome-dm <text_file>",
-                    "note": "Configure automated welcome messages sent to new server boosters. Requires admin permissions.",
-                    "examples": ["/set-welcome-dm"]
-                },
-                "welcome-dm-status": {
-                    "desc": "Check the current welcome DM configuration (Admin only)",
-                    "usage": "/welcome-dm-status",
-                    "note": "View current welcome DM settings and status. Requires admin permissions.",
-                    "examples": ["/welcome-dm-status"]
-                }
             },
             "👑 Admin": {
                 "admin-moderator-manage": {
@@ -277,12 +235,6 @@ class HelpCog(commands.Cog):
                     "usage": "/userinfo [user]",
                     "note": "Display comprehensive user stats, badges, security info, and account details. Defaults to your own info.",
                     "examples": ["/userinfo", "/userinfo @user"]
-                },
-                "timestamp": {
-                    "desc": "Convert a date and time to Discord's universal timestamp format",
-                    "usage": "/timestamp <time> [date]",
-                    "note": "Create Discord timestamps that display in each user's local timezone. Time in HH:MM format (24-hour).",
-                    "examples": ["/timestamp 18:00", "/timestamp 12:30 2025-12-25"]
                 },
                 "invite": {
                     "desc": "Get an invite link to add this bot to your server",
@@ -637,22 +589,17 @@ class HelpCog(commands.Cog):
                 "• Recommendations use advanced AI filtering for quality results\n"
                 "• Rate titles 8.0+ for best recommendation accuracy\n"
                 "• Browse supports advanced filtering by genre, year, format\n"
-                "• Use `/trailer` to watch official trailers before starting a series\n"
-                "• Try `/random all` to discover completely random suggestions\n"
-                "• Create shareable 3x3 grids with `/3x3`"
+                "• Try `/random all` to discover completely random suggestions"
             ),
             "gaming": (
                 "• Steam integration provides game recommendations\n"
                 "• Based on your gaming preferences and activity\n"
                 "• Discover new games similar to ones you enjoy\n"
-                "• Use `/steam-game` to search for specific games\n"
-                "• Free games checker monitors Epic, GOG, and Steam automatically\n"
-                "• Set up notifications for free game alerts"
+                "• Use `/steam-game` to search for specific games"
             ),
             "customization": (
                 "• Themes personalize your bot experience\n"
                 "• Preview themes before applying them\n"
-                "• Server boosters can create custom roles with `/nitro-role-set`\n"
                 "• Bot moderators can set guild-wide themes\n"
                 "• Individual user preferences override guild themes"
             ),
@@ -660,7 +607,6 @@ class HelpCog(commands.Cog):
                 "• Server-config provides centralized server management\n"
                 "• Configure roles, channels, and notification settings\n"
                 "• Track invite statistics and recruitment data\n"
-                "• Set up welcome DMs for new server boosters\n"
                 "• Requires 'Manage Server' permission for most commands"
             ),
             "admin": (
@@ -680,7 +626,6 @@ class HelpCog(commands.Cog):
                 "• Manage your notification preferences\n"
                 "• View planned features and vote on upcoming updates\n"
                 "• Use `/say` to send messages as the bot (Moderators only)\n"
-                "• Generate Discord timestamps with `/timestamp`\n"
                 "• View detailed user information with `/userinfo`\n"
                 "• All `/say` command usage is logged for accountability"
             )

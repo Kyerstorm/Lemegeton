@@ -20,7 +20,7 @@ from database import (
 )
 from helpers.embed_helper import build_error_embed, build_success_embed, build_info_embed, build_warning_embed
 from helpers.anilist_helper import post_graphql
-from helpers.media_utils import media_error_handler
+from helpers.error_utils import media_error_handler
 
 # ---------------- Logging ----------------
 LOG_DIR = "logs"

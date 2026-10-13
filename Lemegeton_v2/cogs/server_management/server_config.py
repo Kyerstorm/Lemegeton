@@ -16,7 +16,7 @@ from database import (
     delete_invite_channel_guild_aware, execute_db_operation
 )
 from helpers.embed_helper import build_error_embed, build_success_embed, build_info_embed, build_warning_embed
-from helpers.server_management_utils import server_management_error_handler
+from helpers.error_utils import server_management_error_handler
 
 # ------------------------------------------------------
 # Logging Setup

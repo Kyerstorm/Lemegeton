@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 import time
 from helpers.embed_helper import build_error_embed, build_warning_embed, build_info_embed, build_success_embed, build_recommendation_result_embed
 from helpers.anilist_helper import post_graphql
-from helpers.media_utils import media_error_handler
+from helpers.error_utils import media_error_handler
 from database import get_user_guild_aware, get_anilist_username_from_row
 
 # ------------------------------------------------------

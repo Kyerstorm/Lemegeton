@@ -20,7 +20,7 @@ import asyncio
 from typing import List, Optional
 
 from helpers.embed_helper import build_warning_embed
-from helpers.server_management_utils import server_management_error_handler
+from helpers.error_utils import server_management_error_handler
 
 # ---------------------------
 # Palette & Embed helper

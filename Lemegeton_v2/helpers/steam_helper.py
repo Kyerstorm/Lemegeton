@@ -3,8 +3,8 @@ Steam API Helper Functions
 Centralized functions for Steam API interactions, data processing, and image generation
 """
 
-import asyncio
 import io
+import json
 import logging
 import math
 import os
@@ -104,23 +104,6 @@ async def fetch_text(session: aiohttp.ClientSession, url: str, timeout: int = 15
         return None
 
 
-async def fetch_steam_avatar(session: aiohttp.ClientSession, avatar_url: str) -> Optional[bytes]:
-    """
-    Fetch Steam avatar image as bytes.
-    """
-    if not avatar_url:
-        return None
-    
-    try:
-        async with session.get(avatar_url) as resp:
-            if resp.status == 200:
-                return await resp.read()
-    except Exception as e:
-        logger.debug(f"Failed to fetch avatar {avatar_url}: {e}")
-    
-    return None
-
-
 # ===== STEAM API HELPERS =====
 
 async def resolve_vanity_url(session: aiohttp.ClientSession, api_key: str, vanity_name: str) -> Optional[str]:
@@ -151,22 +134,6 @@ async def get_player_summaries(session: aiohttp.ClientSession, api_key: str, ste
     
     if data:
         return data.get("response", {}).get("players", [])
-    
-    return []
-
-
-async def get_user_friends(session: aiohttp.ClientSession, api_key: str, steamid: str) -> List[Dict]:
-    """
-    Get user's friends list from Steam API.
-    """
-    data = await safe_json(
-        session,
-        "https://api.steampowered.com/ISteamUser/GetFriendList/v1/",
-        params={"key": api_key, "steamid": steamid}
-    )
-    
-    if data:
-        return data.get("friendslist", {}).get("friends", [])
     
     return []
 
@@ -233,22 +200,6 @@ async def get_linked_steamid(discord_id: int, guild_id: Optional[int] = None) ->
         if len(row) == 1:
             return (row[0], None)
         return (row[0], row[1])
-
-
-async def get_recently_played_games(session: aiohttp.ClientSession, api_key: str, steamid: str) -> List[Dict]:
-    """
-    Get user's recently played games from Steam API.
-    """
-    data = await safe_json(
-        session,
-        "https://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames/v1/",
-        params={"key": api_key, "steamid": steamid}
-    )
-    
-    if data:
-        return data.get("response", {}).get("games", [])
-    
-    return []
 
 
 async def get_user_wishlist(session: aiohttp.ClientSession, steamid: str):
@@ -426,36 +377,11 @@ def format_playtime(minutes: int) -> str:
         return f"{hours:,.1f} hours"
 
 
-def get_steam_app_url(app_id: int) -> str:
-    """
-    Generate Steam store URL for app.
-    """
-    return f"https://store.steampowered.com/app/{app_id}/"
-
-
 def get_steam_profile_url(steamid: str) -> str:
     """
     Generate Steam profile URL.
     """
     return f"https://steamcommunity.com/profiles/{steamid}/"
-
-
-def get_steam_avatar_url(avatar_hash: str, size: str = "full") -> str:
-    """
-    Generate Steam avatar URL from hash.
-    """
-    if not avatar_hash:
-        return ""
-    
-    size_suffix = ""
-    if size == "small":
-        size_suffix = ""
-    elif size == "medium":
-        size_suffix = "_medium"
-    elif size == "full":
-        size_suffix = "_full"
-    
-    return f"https://steamcdn-a.akamaihd.net/steamcommunity/public/images/avatars/{avatar_hash[:2]}/{avatar_hash}{size_suffix}.jpg"
 
 
 # ===== DISCORD UTILITIES =====
@@ -470,86 +396,6 @@ def random_color() -> discord.Color:
         discord.Color.dark_blue(), discord.Color.dark_teal()
     ]
     return random.choice(palette)
-
-
-def create_steam_profile_embed(player_data: Dict, games_count: int = 0, playtime_total: int = 0) -> discord.Embed:
-    """
-    Create Discord embed for Steam profile.
-    """
-    name = player_data.get("personaname", "Unknown")
-    steamid = player_data.get("steamid", "")
-    avatar = player_data.get("avatarfull", "")
-    profile_url = player_data.get("profileurl", "")
-    
-    # Parse persona state
-    state = player_data.get("personastate", 0)
-    status_map = {
-        0: "Offline",
-        1: "Online",
-        2: "Busy",
-        3: "Away",
-        4: "Snooze",
-        5: "Looking to trade",
-        6: "Looking to play"
-    }
-    status = status_map.get(state, "Unknown")
-    
-    # Create embed
-    embed = discord.Embed(
-        title=f"Steam Profile: {name}",
-        url=profile_url,
-        color=random_color()
-    )
-    
-    if avatar:
-        embed.set_thumbnail(url=avatar)
-    
-    embed.add_field(name="Status", value=status, inline=True)
-    embed.add_field(name="SteamID", value=steamid, inline=True)
-    
-    if games_count > 0:
-        embed.add_field(name="Games Owned", value=f"{games_count:,}", inline=True)
-    
-    if playtime_total > 0:
-        embed.add_field(name="Total Playtime", value=format_playtime(playtime_total), inline=True)
-    
-    # Add profile creation date if available
-    if "timecreated" in player_data:
-        import datetime
-        created = datetime.datetime.fromtimestamp(player_data["timecreated"])
-        embed.add_field(name="Member Since", value=created.strftime("%B %Y"), inline=True)
-    
-    return embed
-
-
-def create_game_search_embed(games: List[Dict], query: str) -> discord.Embed:
-    """
-    Create Discord embed for game search results.
-    """
-    embed = discord.Embed(
-        title=f"Steam Search: {query}",
-        color=random_color()
-    )
-    
-    if not games:
-        embed.description = "No games found."
-        return embed
-    
-    results = []
-    for game in games[:10]:  # Limit to 10 results
-        name = game.get("name", "Unknown")
-        app_id = game.get("appid", "")
-        url = get_steam_app_url(app_id) if app_id else ""
-        
-        if url:
-            results.append(f"[{name}]({url})")
-        else:
-            results.append(name)
-    
-    embed.description = "\n".join(results)
-    embed.set_footer(text=f"Showing {len(results)} of {len(games)} results")
-    
-    return embed
 
 
 # ===== IMAGE GENERATION HELPERS =====
@@ -631,82 +477,16 @@ def make_friend_grid_image(friends_slice: List[Dict], thumb_size: int = 96, per_
 
 # ===== VALIDATION HELPERS =====
 
-def is_valid_steamid64(steamid: str) -> bool:
-    """
-    Validate SteamID64 format.
-    """
-    if not steamid or not steamid.isdigit():
-        return False
-    
-    # SteamID64 should be 17 digits and start with 765
-    return len(steamid) == 17 and steamid.startswith("765")
-
-
-def is_valid_vanity_name(vanity: str) -> bool:
-    """
-    Validate Steam vanity name format.
-    """
-    if not vanity or len(vanity) < 3 or len(vanity) > 32:
-        return False
-    
-    # Basic alphanumeric check (Steam allows some special chars but this is a safe subset)
-    import re
-    return bool(re.match(r'^[a-zA-Z0-9_-]+$', vanity))
-
 
 # ===== CACHE HELPERS =====
 
-def get_app_icon_url(app_id: int, icon_hash: str) -> str:
-    """
-    Generate Steam app icon URL.
-    """
-    if not icon_hash:
-        return ""
-    
-    return f"https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/{app_id}/{icon_hash}.jpg"
-
-
-def get_app_header_url(app_id: int) -> str:
-    """
-    Generate Steam app header image URL.
-    """
-    return f"https://steamcdn-a.akamaihd.net/steam/apps/{app_id}/header.jpg"
-
 
 # ===== ASYNC UTILITIES =====
-
-async def batch_fetch_player_data(
-    session: aiohttp.ClientSession,
-    api_key: str,
-    steamids: List[str],
-    batch_size: int = 100
-) -> List[Dict]:
-    """
-    Fetch player data for multiple SteamIDs in batches.
-    """
-    all_players = []
-    
-    for i in range(0, len(steamids), batch_size):
-        batch = steamids[i:i + batch_size]
-        steamids_str = ",".join(batch)
-        
-        players = await get_player_summaries(session, api_key, steamids_str)
-        all_players.extend(players)
-        
-        # Small delay between batches to be nice to Steam API
-        if i + batch_size < len(steamids):
-            await asyncio.sleep(0.1)
-    
-    return all_players
 
 
 # ===== UI COMPONENTS AND HELPERS =====
 # Minimal stub implementations of View classes needed by steam.py
 
-class ComparisonView(discord.ui.View):
-    """Minimal stub for steam game comparison view."""
-    def __init__(self):
-        super().__init__(timeout=300)
 
 class RecommendationView(discord.ui.View):
     """Interactive view for browsing game recommendations."""
@@ -1438,45 +1218,6 @@ except ImportError as e:
 
 # ===== ENHANCED BATCH API OPERATIONS =====
 
-async def batch_get_player_summaries(api_key: str, steamids: List[str]) -> Dict[str, Dict]:
-    """
-    Batch fetch player summaries for multiple Steam IDs
-    Returns dict mapping steamid -> player data
-    """
-    if not GAMING_UTILS_AVAILABLE:
-        # Fallback to individual requests
-        result = {}
-        session = await connection_pool.get_session() if GAMING_UTILS_AVAILABLE else aiohttp.ClientSession()
-        try:
-            for steamid in steamids:
-                players = await get_player_summaries(session, api_key, steamid)
-                if players:
-                    result[steamid] = players[0]
-        finally:
-            if not GAMING_UTILS_AVAILABLE:
-                await session.close()
-        return result
-
-    # Use batched requests with caching
-    requests = []
-    for steamid in steamids:
-        requests.append({
-            'url': "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/",
-            'params': {"key": api_key, "steamids": steamid},
-            'cache_ttl': 3600,  # 1 hour cache
-            'cache_key': f"player_summary_{steamid}"
-        })
-
-    responses = await batch_api_requests(requests)
-
-    result = {}
-    for steamid, response in zip(steamids, responses):
-        if response and response.get("response", {}).get("players"):
-            result[steamid] = response["response"]["players"][0]
-
-    logger.info(f"Batch fetched {len(result)} player summaries")
-    return result
-
 
 async def get_library_stats(api_key: str, steamid: str) -> Dict[str, Any]:
     """
@@ -1585,33 +1326,3 @@ async def check_profile_privacy(player_data: Dict) -> bool:
     else:
         return False
 
-
-# Helper functions needed by steam.py
-def create_comparison_embed(*args, **kwargs):
-    """Minimal stub for comparison embed creation."""
-    embed = discord.Embed(title="Steam Game Comparison", color=0x1b2838)
-    embed.description = "Comparison functionality temporarily unavailable."
-    return embed
-
-def get_price_string(price_info):
-    """Extract price string from Steam price info."""
-    if not price_info:
-        return "Free"
-    
-    if price_info.get("is_free"):
-        return "Free"
-    
-    initial = price_info.get("initial", 0)
-    final = price_info.get("final", 0)
-    currency = price_info.get("currency", "USD")
-    
-    if initial == final:
-        return f"${final/100:.2f} {currency}"
-    else:
-        return f"~~${initial/100:.2f}~~ ${final/100:.2f} {currency}"
-
-def create_recommendation_embed(*args, **kwargs):
-    """Minimal stub for recommendation embed creation."""
-    embed = discord.Embed(title="Steam Game Recommendations", color=0x1b2838)
-    embed.description = "Recommendation functionality temporarily unavailable."
-    return embed

@@ -26,7 +26,7 @@ from database import (
     upsert_user_stats_guild_aware
 )
 from helpers.media_helper import fetch_user_stats
-from helpers.social_utils import social_error_handler
+from helpers.error_utils import social_error_handler
 from config import DB_PATH
 
 # ------------------------------------------------------

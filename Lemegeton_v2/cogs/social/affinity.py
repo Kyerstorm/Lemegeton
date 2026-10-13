@@ -13,7 +13,7 @@ import json
 from datetime import datetime, timedelta
 from config import DB_PATH
 
-from helpers.social_utils import social_error_handler
+from helpers.error_utils import social_error_handler
 from helpers.embed_helper import build_affinity_comparison_embed
 
 # ------------------------------------------------------

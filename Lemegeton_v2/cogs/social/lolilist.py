@@ -27,7 +27,7 @@ from typing import List, Optional, Tuple, Dict, Any
 
 # Project helpers
 from helpers.cache_helper import load_json_cache, save_json_cache, is_json_cache_valid
-from helpers.social_utils import social_error_handler
+from helpers.error_utils import social_error_handler
 from database import execute_db_operation, is_user_bot_moderator
 try:
     import config

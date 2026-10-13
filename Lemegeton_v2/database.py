@@ -1,12 +1,11 @@
 import aiosqlite
 from pathlib import Path
 import aiohttp
-import asyncio
 import logging
 import os
 import time
 from typing import List, Dict, Optional
-from datetime import datetime, timedelta
+from datetime import datetime
 import config
 
 # ------------------------------------------------------
@@ -78,33 +77,6 @@ if DB_PATH.exists():
     file_size = DB_PATH.stat().st_size
     logger.info(f"Database file size: {file_size:,} bytes ({file_size / (1024*1024):.2f} MB)")
 
-async def get_db_connection():
-    """
-    Get database connection with comprehensive logging and retry logic.
-    """
-    for attempt in range(CONNECTION_RETRIES):
-        try:
-            logger.debug(f"Attempting database connection (attempt {attempt + 1}/{CONNECTION_RETRIES})")
-            
-            # Create a new connection each time to avoid thread reuse issues
-            connection = aiosqlite.connect(
-                DB_PATH, 
-                timeout=DB_TIMEOUT,
-                check_same_thread=False
-            )
-            
-            # Don't await here - let the caller handle the async context
-            logger.debug(f"Database connection object created successfully")
-            return connection
-            
-        except Exception as e:
-            logger.error(f"Database connection attempt {attempt + 1} failed: {e}")
-            if attempt < CONNECTION_RETRIES - 1:
-                logger.debug(f"Retrying in {RETRY_DELAY} seconds...")
-                await asyncio.sleep(RETRY_DELAY)
-            else:
-                logger.error(f"All database connection attempts failed")
-                raise
 
 async def execute_db_operation(operation_name: str, query: str, params=None, fetch_type=None):
     """
@@ -747,48 +719,6 @@ async def check_user_related_records(discord_id: int, guild_id: int = None):
         logger.error(f"Error checking related records for user {discord_id}: {e}")
         return {}
 
-async def update_anilist_info(discord_id: int, anilist_username: str, anilist_id: int):
-    """Update AniList information with comprehensive logging and validation."""
-    logger.info(f"Updating AniList info for Discord ID {discord_id}")
-    logger.debug(f"AniList data - Username: {anilist_username}, ID: {anilist_id}")
-    
-    try:
-        # Validate input
-        if not isinstance(discord_id, int) or discord_id <= 0:
-            raise ValueError(f"Invalid discord_id: {discord_id}")
-        if not isinstance(anilist_username, str) or not anilist_username.strip():
-            raise ValueError(f"Invalid anilist_username: {anilist_username}")
-        if not isinstance(anilist_id, int) or anilist_id <= 0:
-            raise ValueError(f"Invalid anilist_id: {anilist_id}")
-        
-        # Check if user exists (use default guild for backward compatibility)
-        default_guild_id = int(os.getenv("PRIMARY_GUILD_ID", "897814031346319382"))
-        existing_user = await get_user_guild_aware(discord_id, default_guild_id)
-        if not existing_user:
-            logger.error(f"Cannot update AniList info - user {discord_id} not found in default guild")
-            return False
-        
-        query = """
-            UPDATE users
-            SET anilist_username = ?, anilist_id = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE discord_id = ? AND guild_id = ?
-        """
-        
-        await execute_db_operation(
-            f"update AniList info for {discord_id}",
-            query,
-            (anilist_username.strip(), anilist_id, discord_id, default_guild_id)
-        )
-        
-        logger.info(f"✅ Updated AniList info for {discord_id}: {anilist_username} (ID: {anilist_id})")
-        return True
-        
-    except ValueError as validation_error:
-        logger.error(f"Validation error updating AniList info: {validation_error}")
-        raise
-    except Exception as e:
-        logger.error(f"❌ Error updating AniList info for {discord_id}: {e}", exc_info=True)
-        raise
 
 # ------------------------------------------------------
 # CHALLENGE RULES TABLE FUNCTIONS with Enhanced Logging
@@ -830,53 +760,6 @@ async def init_challenge_rules_table():
         logger.error(f"❌ Failed to initialize challenge rules table: {e}", exc_info=True)
         raise
 
-async def set_challenge_rules(rules: str):
-    """Set challenge rules with comprehensive logging and validation."""
-    logger.info("Setting challenge rules")
-    
-    try:
-        if not isinstance(rules, str) or not rules.strip():
-            raise ValueError("Rules must be a non-empty string")
-        
-        logger.debug(f"Rules length: {len(rules)} characters")
-        
-        query = """
-            INSERT INTO challenge_rules (id, rules, updated_at)
-            VALUES (1, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(id) DO UPDATE SET 
-                rules=excluded.rules,
-                updated_at=CURRENT_TIMESTAMP
-        """
-        
-        await execute_db_operation("set challenge rules", query, (rules.strip(),))
-        logger.info("✅ Challenge rules updated successfully")
-        
-    except ValueError as validation_error:
-        logger.error(f"Validation error setting challenge rules: {validation_error}")
-        raise
-    except Exception as e:
-        logger.error(f"❌ Error setting challenge rules: {e}", exc_info=True)
-        raise
-
-async def get_challenge_rules() -> Optional[str]:
-    """Get challenge rules with comprehensive logging."""
-    logger.debug("Retrieving challenge rules")
-    
-    try:
-        query = "SELECT rules FROM challenge_rules WHERE id = 1"
-        result = await execute_db_operation("get challenge rules", query, fetch_type='one')
-        
-        if result:
-            rules = result[0]
-            logger.debug(f"Retrieved challenge rules ({len(rules)} characters)")
-            return rules
-        else:
-            logger.debug("No challenge rules found")
-            return None
-            
-    except Exception as e:
-        logger.error(f"❌ Error retrieving challenge rules: {e}", exc_info=True)
-        raise
 
 # ------------------------------------------------------
 # MANGA RECOMMENDATION VOTES TABLE
@@ -1020,154 +903,6 @@ async def init_user_manga_progress_table():
         logger.info("User manga progress table ready (with started_at, repeat, and updated_at).")
 
 
-
-async def set_user_manga_progress(discord_id: int, guild_id: int, manga_id: int, chapter: int, rating: float):
-    """Set user manga progress with comprehensive logging and validation (GUILD-AWARE)."""
-    logger.info(f"Setting manga progress for user {discord_id} in guild {guild_id}, manga {manga_id}")
-
-    try:
-        # Validate input
-        if not isinstance(discord_id, int) or discord_id <= 0:
-            raise ValueError(f"Invalid discord_id: {discord_id}")
-        if not isinstance(guild_id, int) or guild_id <= 0:
-            raise ValueError(f"Invalid guild_id: {guild_id}")
-        if not isinstance(manga_id, int) or manga_id <= 0:
-            raise ValueError(f"Invalid manga_id: {manga_id}")
-        if not isinstance(chapter, int) or chapter < 0:
-            raise ValueError(f"Invalid chapter: {chapter}")
-        if not isinstance(rating, (int, float)) or not (0 <= rating <= 10):
-            logger.warning(f"Invalid rating {rating}, clamping to 0-10 range")
-            rating = max(0, min(10, float(rating)))
-
-        logger.debug(f"Progress data - Chapter: {chapter}, Rating: {rating}")
-
-        query = """
-            INSERT INTO user_manga_progress (discord_id, guild_id, manga_id, current_chapter, rating, updated_at)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(discord_id, guild_id, manga_id) DO UPDATE SET
-                current_chapter=excluded.current_chapter,
-                rating=excluded.rating,
-                updated_at=CURRENT_TIMESTAMP
-        """
-
-        await execute_db_operation(
-            f"set manga progress for user {discord_id} in guild {guild_id}",
-            query,
-            (discord_id, guild_id, manga_id, chapter, rating)
-        )
-
-        logger.info(f"✅ Set manga {manga_id} progress for user {discord_id} in guild {guild_id}: Chapter {chapter}, Rating {rating}")
-
-    except ValueError as validation_error:
-        logger.error(f"Validation error setting manga progress: {validation_error}")
-        raise
-    except Exception as e:
-        logger.error(f"❌ Error setting manga progress for user {discord_id} in guild {guild_id}: {e}", exc_info=True)
-        raise
-
-async def get_user_manga_progress(discord_id: int, guild_id: int, manga_id: int):
-    """Get user manga progress with comprehensive logging and validation (GUILD-AWARE)."""
-    logger.debug(f"Getting manga progress for user {discord_id} in guild {guild_id}, manga {manga_id}")
-
-    try:
-        # Validate input
-        if not isinstance(discord_id, int) or discord_id <= 0:
-            raise ValueError(f"Invalid discord_id: {discord_id}")
-        if not isinstance(guild_id, int) or guild_id <= 0:
-            raise ValueError(f"Invalid guild_id: {guild_id}")
-        if not isinstance(manga_id, int) or manga_id <= 0:
-            raise ValueError(f"Invalid manga_id: {manga_id}")
-
-        query = """
-            SELECT current_chapter, rating, status, repeat FROM user_manga_progress
-            WHERE discord_id = ? AND guild_id = ? AND manga_id = ?
-        """
-
-        result = await execute_db_operation(
-            f"get manga progress for user {discord_id} in guild {guild_id}",
-            query,
-            (discord_id, guild_id, manga_id),
-            fetch_type='one'
-        )
-
-        if result:
-            progress_data = {
-                "current_chapter": result[0],
-                "rating": result[1],
-                "status": result[2],
-                "repeat": result[3]
-            }
-            logger.debug(f"✅ Retrieved manga progress: {progress_data}")
-            return progress_data
-        else:
-            logger.debug(f"No progress found for user {discord_id} in guild {guild_id}, manga {manga_id}")
-            return None
-
-    except ValueError as validation_error:
-        logger.error(f"Validation error getting manga progress: {validation_error}")
-        raise
-    except Exception as e:
-        logger.error(f"❌ Error getting manga progress for user {discord_id} in guild {guild_id}: {e}", exc_info=True)
-        raise
-
-async def upsert_user_manga_progress(discord_id, guild_id, manga_id, title, chapters, points, status, repeat=0, started_at=None):
-    """Upsert user manga progress with comprehensive logging and validation (GUILD-AWARE)."""
-    logger.info(f"Upserting manga progress for user {discord_id} in guild {guild_id}: {title}")
-
-    try:
-        # Validate input
-        if not isinstance(discord_id, int) or discord_id <= 0:
-            raise ValueError(f"Invalid discord_id: {discord_id}")
-        if not isinstance(guild_id, int) or guild_id <= 0:
-            raise ValueError(f"Invalid guild_id: {guild_id}")
-        if not isinstance(manga_id, int) or manga_id <= 0:
-            raise ValueError(f"Invalid manga_id: {manga_id}")
-        if not isinstance(title, str) or not title.strip():
-            raise ValueError(f"Invalid title: {title}")
-        if not isinstance(chapters, int) or chapters < 0:
-            logger.warning(f"Invalid chapters {chapters}, setting to 0")
-            chapters = 0
-        if not isinstance(points, int) or points < 0:
-            logger.warning(f"Invalid points {points}, setting to 0")
-            points = 0
-        if not isinstance(repeat, int) or repeat < 0:
-            logger.warning(f"Invalid repeat {repeat}, setting to 0")
-            repeat = 0
-
-        logger.debug(f"Manga progress - Title: {title}, Chapters: {chapters}, Points: {points}, Status: {status}, Repeat: {repeat}")
-
-        now = datetime.utcnow().isoformat()
-
-        query = """
-            INSERT INTO user_manga_progress(
-                discord_id, guild_id, manga_id, title, current_chapter, points, status, repeat, started_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(discord_id, guild_id, manga_id) DO UPDATE SET
-                title=excluded.title,
-                current_chapter=excluded.current_chapter,
-                points=excluded.points,
-                status=excluded.status,
-                repeat=excluded.repeat,
-                started_at=excluded.started_at,
-                updated_at=excluded.updated_at
-        """
-
-        await execute_db_operation(
-            f"upsert manga progress for user {discord_id} in guild {guild_id}",
-            query,
-            (discord_id, guild_id, manga_id, title.strip(), chapters, points, status, repeat, started_at, now)
-        )
-
-        logger.info(f"✅ Upserted manga progress for user {discord_id} in guild {guild_id}: {title} ({status})")
-
-    except ValueError as validation_error:
-        logger.error(f"Validation error upserting manga progress: {validation_error}")
-        raise
-    except Exception as e:
-        logger.error(f"❌ Error upserting manga progress for user {discord_id} in guild {guild_id}: {e}", exc_info=True)
-        raise
-        
 async def upsert_user_stats(
     discord_id: int,
     guild_id: int,
@@ -1319,29 +1054,6 @@ async def init_user_progress_table():
         """)
         await db.commit()
 
-async def add_global_challenge(manga_id: int, title: str, total_chapters: int, start_date: datetime = None):
-    if start_date is None:
-        start_date = datetime.utcnow()  # Use UTC for consistency
-
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            """
-            INSERT INTO global_challenges (manga_id, title, total_chapters, start_date)
-            VALUES (?, ?, ?, ?)
-            """,
-            (manga_id, title, total_chapters, start_date)
-        )
-        challenge_id = cursor.lastrowid
-
-        users = await db.execute_fetchall("SELECT id FROM users")
-        for (user_id,) in users:
-            await db.execute(
-                "INSERT INTO user_progress (user_id, challenge_id) VALUES (?, ?)",
-                (user_id, challenge_id)
-            )
-
-        await db.commit()
-        return challenge_id
     
 async def init_challenge_manga_table():
     async with aiosqlite.connect(DB_PATH) as db:
@@ -1740,74 +1452,6 @@ async def init_userinfo_usage_table():
         logger.info("✅ Userinfo usage table ready.")
 
 
-async def init_booster_roles_table():
-    """Initialize the booster roles table for tracking server booster custom roles."""
-    logger.info("🔧 Initializing booster roles table...")
-    
-    try:
-        async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS booster_roles (
-                    discord_id INTEGER NOT NULL,
-                    guild_id INTEGER NOT NULL,
-                    role_id INTEGER NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (discord_id, guild_id)
-                )
-            """)
-            await db.commit()
-            logger.info("✅ Booster roles table ready.")
-    except Exception as e:
-        logger.error(f"❌ Failed to initialize booster roles table: {e}", exc_info=True)
-        raise
-
-async def get_booster_role(discord_id: int, guild_id: int) -> Optional[int]:
-    """Get the booster role ID for a user in a guild."""
-    try:
-        role = await execute_db_operation(
-            "get booster role",
-            "SELECT role_id FROM booster_roles WHERE discord_id = ? AND guild_id = ?",
-            (discord_id, guild_id),
-            fetch_type='one'
-        )
-        return role[0] if role else None
-    except Exception as e:
-        logger.error(f"Error getting booster role for {discord_id} in guild {guild_id}: {e}", exc_info=True)
-        return None
-
-async def set_booster_role(discord_id: int, guild_id: int, role_id: int) -> bool:
-    """Set or update the booster role for a user in a guild."""
-    try:
-        await execute_db_operation(
-            "set booster role",
-            """INSERT INTO booster_roles (discord_id, guild_id, role_id, updated_at)
-               VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-               ON CONFLICT(discord_id, guild_id) DO UPDATE SET
-                   role_id = excluded.role_id,
-                   updated_at = CURRENT_TIMESTAMP""",
-            (discord_id, guild_id, role_id)
-        )
-        logger.info(f"✅ Set booster role {role_id} for user {discord_id} in guild {guild_id}")
-        return True
-    except Exception as e:
-        logger.error(f"Error setting booster role for {discord_id} in guild {guild_id}: {e}", exc_info=True)
-        return False
-
-async def remove_booster_role(discord_id: int, guild_id: int) -> bool:
-    """Remove the booster role tracking for a user in a guild."""
-    try:
-        await execute_db_operation(
-            "remove booster role",
-            "DELETE FROM booster_roles WHERE discord_id = ? AND guild_id = ?",
-            (discord_id, guild_id)
-        )
-        logger.info(f"✅ Removed booster role tracking for user {discord_id} in guild {guild_id}")
-        return True
-    except Exception as e:
-        logger.error(f"Error removing booster role for {discord_id} in guild {guild_id}: {e}", exc_info=True)
-        return False
-
 async def init_say_command_logs_table():
     """Initialize the say command logs table for moderation accountability."""
     logger.info("🔧 Initializing say command logs table...")
@@ -1926,24 +1570,6 @@ async def is_user_bot_moderator(user):
         return False
 
 
-async def set_guild_mod_role(guild_id: int, role_id: int):
-    """Set the moderator role for a guild."""
-    try:
-        async with aiosqlite.connect(config.DB_PATH, timeout=DB_TIMEOUT) as db:
-            await db.execute("""
-                INSERT OR REPLACE INTO guild_mod_roles (guild_id, role_id, updated_at)
-                VALUES (?, ?, CURRENT_TIMESTAMP)
-            """, (guild_id, role_id))
-            await db.commit()
-            
-        logger.info(f"Set mod role {role_id} for guild {guild_id}")
-        return True
-        
-    except Exception as e:
-        logger.error(f"Error setting mod role for guild {guild_id}: {e}")
-        return False
-
-
 async def get_guild_mod_role(guild_id: int):
     """Get the moderator role for a guild."""
     try:
@@ -1957,37 +1583,6 @@ async def get_guild_mod_role(guild_id: int):
     except Exception as e:
         logger.error(f"Error getting mod role for guild {guild_id}: {e}")
         return None
-
-
-async def remove_guild_mod_role(guild_id: int):
-    """Remove the moderator role configuration for a guild."""
-    try:
-        async with aiosqlite.connect(config.DB_PATH, timeout=DB_TIMEOUT) as db:
-            await db.execute("""
-                DELETE FROM guild_mod_roles WHERE guild_id = ?
-            """, (guild_id,))
-            await db.commit()
-            
-        logger.info(f"Removed mod role configuration for guild {guild_id}")
-        return True
-        
-    except Exception as e:
-        logger.error(f"Error removing mod role for guild {guild_id}: {e}")
-        return False
-
-
-async def get_all_guild_mod_roles():
-    """Get all guild mod role configurations."""
-    try:
-        async with aiosqlite.connect(config.DB_PATH, timeout=DB_TIMEOUT) as db:
-            async with db.execute("""
-                SELECT guild_id, role_id FROM guild_mod_roles ORDER BY guild_id
-            """) as cursor:
-                return await cursor.fetchall()
-                
-    except Exception as e:
-        logger.error(f"Error getting all mod roles: {e}")
-        return []
 
 
 async def is_user_moderator(user, guild_id: int):
@@ -2220,7 +1815,6 @@ async def init_db():
         ("Steam Users", init_steam_users_table),
         ("Challenge Manga", init_challenge_manga_table),
         ("News Tables", init_news_tables),
-        ("Booster Roles", init_booster_roles_table),
     ]
     
     start_time = time.time()
@@ -2280,88 +1874,6 @@ async def init_db():
 # MULTI-GUILD HELPER FUNCTIONS
 # ------------------------------------------------------
 
-async def get_user_progress_guild_aware(discord_id: int, guild_id: int):
-    """Get user challenge progress for a specific guild."""
-    logger.debug(f"Getting progress for user {discord_id} in guild {guild_id}")
-    
-    try:
-        if not isinstance(discord_id, int) or discord_id <= 0:
-            raise ValueError(f"Invalid discord_id: {discord_id}")
-        if not isinstance(guild_id, int) or guild_id <= 0:
-            raise ValueError(f"Invalid guild_id: {guild_id}")
-        
-        query = """
-            SELECT up.*, gc.title as challenge_title
-            FROM user_progress up
-            LEFT JOIN global_challenges gc ON up.challenge_manga_id = gc.challenge_id
-            WHERE up.user_id = ? AND up.guild_id = ?
-        """
-        
-        progress = await execute_db_operation(
-            f"get user progress for {discord_id} in guild {guild_id}",
-            query,
-            (discord_id, guild_id),
-            fetch_type='all'
-        )
-        
-        if progress:
-            logger.debug(f"✅ Found {len(progress)} progress records for user {discord_id} in guild {guild_id}")
-        else:
-            logger.debug(f"No progress found for user {discord_id} in guild {guild_id}")
-        
-        return progress
-        
-    except ValueError as validation_error:
-        logger.error(f"Validation error getting user progress: {validation_error}")
-        raise
-    except Exception as e:
-        logger.error(f"❌ Unexpected error getting user progress for {discord_id} in guild {guild_id}: {e}", exc_info=True)
-        raise
-
-
-async def get_guild_leaderboard(guild_id: int, limit: int = 10):
-    """Get leaderboard for a specific guild."""
-    logger.debug(f"Getting leaderboard for guild {guild_id} (limit: {limit})")
-    
-    try:
-        if not isinstance(guild_id, int) or guild_id <= 0:
-            raise ValueError(f"Invalid guild_id: {guild_id}")
-        if not isinstance(limit, int) or limit <= 0:
-            raise ValueError(f"Invalid limit: {limit}")
-        
-        query = """
-            SELECT u.username, 
-                   COUNT(up.id) as completed_challenges,
-                   SUM(CASE WHEN up.status = 'completed' THEN 1 ELSE 0 END) as total_points
-            FROM users u
-            LEFT JOIN user_progress up ON u.discord_id = up.user_id AND u.guild_id = up.guild_id
-            WHERE u.guild_id = ?
-            GROUP BY u.discord_id, u.username
-            ORDER BY total_points DESC, completed_challenges DESC
-            LIMIT ?
-        """
-        
-        leaderboard = await execute_db_operation(
-            f"get leaderboard for guild {guild_id}",
-            query,
-            (guild_id, limit),
-            fetch_type='all'
-        )
-        
-        if leaderboard:
-            logger.debug(f"✅ Found {len(leaderboard)} users in leaderboard for guild {guild_id}")
-        else:
-            logger.debug(f"No users found in leaderboard for guild {guild_id}")
-        
-        return leaderboard
-        
-    except ValueError as validation_error:
-        logger.error(f"Validation error getting guild leaderboard: {validation_error}")
-        raise
-    except Exception as e:
-        logger.error(f"❌ Unexpected error getting leaderboard for guild {guild_id}: {e}", exc_info=True)
-        raise
-
 
 async def get_user_achievements_guild_aware(discord_id: int, guild_id: int):
     """Get user achievements for a specific guild."""
@@ -2402,57 +1914,6 @@ async def get_user_achievements_guild_aware(discord_id: int, guild_id: int):
         raise
 
 
-async def get_user_manga_progress_guild_aware(discord_id: int, guild_id: int, manga_id: int = None):
-    """Get user manga progress for a specific guild."""
-    logger.debug(f"Getting manga progress for user {discord_id} in guild {guild_id}")
-    
-    try:
-        if not isinstance(discord_id, int) or discord_id <= 0:
-            raise ValueError(f"Invalid discord_id: {discord_id}")
-        if not isinstance(guild_id, int) or guild_id <= 0:
-            raise ValueError(f"Invalid guild_id: {guild_id}")
-        
-        if manga_id:
-            query = """
-                SELECT * FROM user_manga_progress
-                WHERE discord_id = ? AND guild_id = ? AND manga_id = ?
-            """
-            params = (discord_id, guild_id, manga_id)
-            fetch_type = 'one'
-        else:
-            query = """
-                SELECT * FROM user_manga_progress
-                WHERE discord_id = ? AND guild_id = ?
-                ORDER BY updated_at DESC
-            """
-            params = (discord_id, guild_id)
-            fetch_type = 'all'
-        
-        progress = await execute_db_operation(
-            f"get manga progress for user {discord_id} in guild {guild_id}",
-            query,
-            params,
-            fetch_type=fetch_type
-        )
-        
-        if progress:
-            if manga_id:
-                logger.debug(f"✅ Found manga progress for user {discord_id}, manga {manga_id} in guild {guild_id}")
-            else:
-                logger.debug(f"✅ Found {len(progress)} manga progress records for user {discord_id} in guild {guild_id}")
-        else:
-            logger.debug(f"No manga progress found for user {discord_id} in guild {guild_id}")
-        
-        return progress
-        
-    except ValueError as validation_error:
-        logger.error(f"Validation error getting manga progress: {validation_error}")
-        raise
-    except Exception as e:
-        logger.error(f"❌ Unexpected error getting manga progress for {discord_id} in guild {guild_id}: {e}", exc_info=True)
-        raise
-
-
 async def register_user_guild_aware(discord_id: int, guild_id: int, username: str, anilist_username: str = None, anilist_id: int = None):
     """Register a user in a specific guild (alias for add_user_guild_aware)."""
     logger.info(f"Registering user {username} (ID: {discord_id}) in guild {guild_id}")
@@ -2481,34 +1942,6 @@ async def is_user_registered_in_guild(discord_id: int, guild_id: int):
     except Exception as e:
         logger.error(f"❌ Error checking user registration for {discord_id} in guild {guild_id}: {e}")
         return False
-
-
-async def get_guild_user_count(guild_id: int):
-    """Get the number of registered users in a guild."""
-    logger.debug(f"Getting user count for guild {guild_id}")
-    
-    try:
-        if not isinstance(guild_id, int) or guild_id <= 0:
-            raise ValueError(f"Invalid guild_id: {guild_id}")
-        
-        query = "SELECT COUNT(*) FROM users WHERE guild_id = ?"
-        result = await execute_db_operation(
-            f"get user count for guild {guild_id}",
-            query,
-            (guild_id,),
-            fetch_type='one'
-        )
-        
-        count = result[0] if result else 0
-        logger.debug(f"✅ Found {count} users in guild {guild_id}")
-        return count
-        
-    except ValueError as validation_error:
-        logger.error(f"Validation error getting guild user count: {validation_error}")
-        raise
-    except Exception as e:
-        logger.error(f"❌ Unexpected error getting user count for guild {guild_id}: {e}", exc_info=True)
-        raise
 
 
 # ------------------------------------------------------
@@ -2746,144 +2179,6 @@ async def get_all_users_guild_aware(guild_id: int):
         raise
 
 
-async def set_user_manga_progress_guild_aware(discord_id: int, guild_id: int, manga_id: int, chapter: int, rating: float):
-    """Set user manga progress with guild context - guild-aware version."""
-    logger.info(f"Setting manga progress (guild-aware) for user {discord_id}, manga {manga_id}, guild {guild_id}")
-    
-    try:
-        # Validate input
-        if not isinstance(discord_id, int) or discord_id <= 0:
-            raise ValueError(f"Invalid discord_id: {discord_id}")
-        if not isinstance(guild_id, int) or guild_id <= 0:
-            raise ValueError(f"Invalid guild_id: {guild_id}")
-        if not isinstance(manga_id, int) or manga_id <= 0:
-            raise ValueError(f"Invalid manga_id: {manga_id}")
-        if not isinstance(chapter, int) or chapter < 0:
-            raise ValueError(f"Invalid chapter: {chapter}")
-        if not isinstance(rating, (int, float)) or not (0 <= rating <= 10):
-            logger.warning(f"Invalid rating {rating}, clamping to 0-10 range")
-            rating = max(0, min(10, float(rating)))
-        
-        logger.debug(f"Progress data - Chapter: {chapter}, Rating: {rating}")
-        
-        query = """
-            INSERT INTO user_manga_progress (discord_id, guild_id, manga_id, current_chapter, rating, updated_at)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(discord_id, guild_id, manga_id) DO UPDATE SET
-                current_chapter=excluded.current_chapter,
-                rating=excluded.rating,
-                updated_at=CURRENT_TIMESTAMP
-        """
-        
-        await execute_db_operation(
-            f"set manga progress for user {discord_id} in guild {guild_id}",
-            query,
-            (discord_id, guild_id, manga_id, chapter, rating)
-        )
-        
-        logger.info(f"✅ Set manga {manga_id} progress for user {discord_id} in guild {guild_id}: Chapter {chapter}, Rating {rating}")
-        
-    except ValueError as validation_error:
-        logger.error(f"Validation error setting manga progress: {validation_error}")
-        raise
-    except Exception as e:
-        logger.error(f"❌ Error setting manga progress for user {discord_id} in guild {guild_id}: {e}", exc_info=True)
-        raise
-
-
-async def upsert_user_manga_progress_guild_aware(discord_id, guild_id, manga_id, title, chapters, points, status, repeat=0, started_at=None):
-    """Upsert user manga progress with guild context - guild-aware version."""
-    logger.info(f"Upserting manga progress (guild-aware) for user {discord_id}, manga {manga_id}, guild {guild_id}")
-    
-    try:
-        # Validate input
-        if not isinstance(discord_id, int) or discord_id <= 0:
-            raise ValueError(f"Invalid discord_id: {discord_id}")
-        if not isinstance(guild_id, int) or guild_id <= 0:
-            raise ValueError(f"Invalid guild_id: {guild_id}")
-        if not isinstance(manga_id, int) or manga_id <= 0:
-            raise ValueError(f"Invalid manga_id: {manga_id}")
-        if not isinstance(title, str) or not title.strip():
-            raise ValueError(f"Invalid title: {title}")
-        if not isinstance(chapters, int) or chapters < 0:
-            raise ValueError(f"Invalid chapters: {chapters}")
-        if not isinstance(points, (int, float)) or points < 0:
-            raise ValueError(f"Invalid points: {points}")
-        if not isinstance(status, str) or not status.strip():
-            raise ValueError(f"Invalid status: {status}")
-        if not isinstance(repeat, int) or repeat < 0:
-            repeat = 0
-        
-        logger.debug(f"Manga progress data - Title: {title}, Chapters: {chapters}, Points: {points}, Status: {status}")
-        
-        query = """
-            INSERT INTO user_manga_progress (
-                discord_id, guild_id, manga_id, current_chapter, title, 
-                points, status, repeat, started_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(discord_id, guild_id, manga_id) DO UPDATE SET
-                current_chapter=excluded.current_chapter,
-                title=excluded.title,
-                points=excluded.points,
-                status=excluded.status,
-                repeat=excluded.repeat,
-                started_at=COALESCE(excluded.started_at, user_manga_progress.started_at),
-                updated_at=CURRENT_TIMESTAMP
-        """
-        
-        await execute_db_operation(
-            f"upsert manga progress for user {discord_id} in guild {guild_id}",
-            query,
-            (discord_id, guild_id, manga_id, chapters, title, points, status, repeat, started_at)
-        )
-        
-        logger.info(f"✅ Upserted manga {manga_id} progress for user {discord_id} in guild {guild_id}: {chapters} chapters, {points} points")
-        
-    except ValueError as validation_error:
-        logger.error(f"Validation error upserting manga progress: {validation_error}")
-        raise
-    except Exception as e:
-        logger.error(f"❌ Error upserting manga progress for user {discord_id} in guild {guild_id}: {e}", exc_info=True)
-        raise
-
-
-async def get_guild_challenge_leaderboard_data(guild_id: int):
-    """Get challenge leaderboard data for a specific guild"""
-    logger.info(f"Getting challenge leaderboard data for guild {guild_id}")
-    
-    try:
-        if not isinstance(guild_id, int) or guild_id <= 0:
-            raise ValueError(f"Invalid guild_id: {guild_id}")
-        
-        query = """
-            SELECT u.discord_id, COALESCE(SUM(ump.points), 0) AS total_points
-            FROM users u
-            LEFT JOIN user_manga_progress ump ON u.discord_id = ump.discord_id AND u.guild_id = ump.guild_id
-            WHERE u.guild_id = ?
-            GROUP BY u.discord_id
-            HAVING total_points > 0
-            ORDER BY total_points DESC
-        """
-        
-        leaderboard_data = await execute_db_operation(
-            f"get challenge leaderboard for guild {guild_id}",
-            query,
-            (guild_id,),
-            fetch_type='all'
-        )
-        
-        logger.info(f"✅ Retrieved {len(leaderboard_data) if leaderboard_data else 0} challenge leaderboard entries for guild {guild_id}")
-        return leaderboard_data or []
-        
-    except ValueError as validation_error:
-        logger.error(f"Validation error getting guild challenge leaderboard: {validation_error}")
-        raise
-    except Exception as e:
-        logger.error(f"❌ Error getting challenge leaderboard for guild {guild_id}: {e}", exc_info=True)
-        raise
-
-
 # ------------------------------------------------------
 # Guild Challenge Roles Management Functions
 # ------------------------------------------------------
@@ -2962,41 +2257,6 @@ async def get_guild_challenge_roles(guild_id: int) -> Dict[int, Dict[float, int]
         raise
     except Exception as e:
         logger.error(f"❌ Error getting challenge roles for guild {guild_id}: {e}", exc_info=True)
-        raise
-
-
-async def remove_guild_challenge_role(guild_id: int, challenge_id: int, threshold: float = None):
-    """Remove challenge role(s) for a specific guild."""
-    logger.info(f"Removing challenge role for guild {guild_id}, challenge {challenge_id}, threshold {threshold}")
-    
-    try:
-        if not isinstance(guild_id, int) or guild_id <= 0:
-            raise ValueError(f"Invalid guild_id: {guild_id}")
-        if not isinstance(challenge_id, int) or challenge_id <= 0:
-            raise ValueError(f"Invalid challenge_id: {challenge_id}")
-        
-        if threshold is not None:
-            # Remove specific threshold
-            query = "DELETE FROM guild_challenge_roles WHERE guild_id = ? AND challenge_id = ? AND threshold = ?"
-            params = (guild_id, challenge_id, threshold)
-        else:
-            # Remove all thresholds for this challenge
-            query = "DELETE FROM guild_challenge_roles WHERE guild_id = ? AND challenge_id = ?"
-            params = (guild_id, challenge_id)
-        
-        await execute_db_operation(
-            f"remove challenge role for guild {guild_id}",
-            query,
-            params
-        )
-        
-        logger.info(f"✅ Removed challenge role for guild {guild_id}, challenge {challenge_id}")
-        
-    except ValueError as validation_error:
-        logger.error(f"Validation error removing guild challenge role: {validation_error}")
-        raise
-    except Exception as e:
-        logger.error(f"❌ Error removing challenge role for guild {guild_id}: {e}", exc_info=True)
         raise
 
 
@@ -3277,35 +2537,6 @@ async def delete_invite_channel_guild_aware(guild_id: int):
         raise
 
 
-async def get_challenge_role_ids_for_guild(guild_id: int) -> Dict[int, Dict[float, int]]:
-    """
-    Get challenge role IDs for a specific guild.
-    Falls back to config.CHALLENGE_ROLE_IDS if guild has no custom configuration.
-    """
-    try:
-        # Try to get guild-specific roles from database
-        guild_roles = await get_guild_challenge_roles(guild_id)
-        
-        if guild_roles:
-            logger.debug(f"Using database challenge roles for guild {guild_id}")
-            return guild_roles
-        
-        # Check if this is the primary guild - use config as fallback
-        primary_guild_id = int(os.getenv("GUILD_ID"))
-        if guild_id == primary_guild_id:
-            logger.debug(f"Using config fallback challenge roles for primary guild {guild_id}")
-            return config.CHALLENGE_ROLE_IDS
-        
-        # For other guilds, return empty dict (no roles configured)
-        logger.info(f"No challenge roles configured for guild {guild_id}")
-        return {}
-        
-    except Exception as e:
-        logger.error(f"Error getting challenge role IDs for guild {guild_id}: {e}", exc_info=True)
-        # Return config as ultimate fallback
-        return config.CHALLENGE_ROLE_IDS
-
-
 # =====================================================
 # NEWS COG DATABASE FUNCTIONS
 # =====================================================
@@ -3352,38 +2583,6 @@ async def init_news_tables():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (handle) REFERENCES news_accounts (handle) ON DELETE CASCADE,
                     UNIQUE (handle, keyword)
-                )
-            """)
-            
-            # Create free_games_channels table
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS free_games_channels (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    guild_id INTEGER NOT NULL UNIQUE,
-                    channel_id INTEGER NOT NULL,
-                    created_at TEXT,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Create free_games_metadata table for tracking last check times
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS free_games_metadata (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Create free_games_posted table for tracking which games have been announced
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS free_games_posted (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    game_title TEXT NOT NULL,
-                    game_url TEXT NOT NULL,
-                    store TEXT NOT NULL,
-                    posted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(game_url, store)
                 )
             """)
             
@@ -3446,380 +2645,6 @@ async def migrate_news_data():
                 
     except Exception as e:
         logger.error(f"Error migrating news data: {e}", exc_info=True)
-
-
-async def get_news_accounts():
-    """Get all monitored news accounts."""
-    try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute("SELECT handle, channel_id, last_tweet_id FROM news_accounts") as cursor:
-                rows = await cursor.fetchall()
-                return [{"handle": row[0], "channel_id": row[1], "last_tweet_id": row[2]} for row in rows]
-    except Exception as e:
-        logger.error(f"Error getting news accounts: {e}", exc_info=True)
-        return []
-
-
-async def add_news_account(handle: str, channel_id: int) -> bool:
-    """Add a new monitored news account."""
-    try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute(
-                "INSERT INTO news_accounts (handle, channel_id) VALUES (?, ?)",
-                (handle, channel_id)
-            )
-            await db.commit()
-            logger.info(f"Added news account: {handle} -> channel {channel_id}")
-            return True
-    except Exception as e:
-        logger.error(f"Error adding news account {handle}: {e}", exc_info=True)
-        return False
-
-
-async def remove_news_account(handle: str) -> bool:
-    """Remove a monitored news account."""
-    try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            cursor = await db.execute("DELETE FROM news_accounts WHERE handle = ?", (handle,))
-            await db.commit()
-            if cursor.rowcount > 0:
-                logger.info(f"Removed news account: {handle}")
-                return True
-            else:
-                logger.warning(f"News account not found: {handle}")
-                return False
-    except Exception as e:
-        logger.error(f"Error removing news account {handle}: {e}", exc_info=True)
-        return False
-
-
-async def update_last_tweet_id(handle: str, tweet_id: str) -> bool:
-    """Update the last tweet ID for a monitored account."""
-    try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute(
-                "UPDATE news_accounts SET last_tweet_id = ? WHERE handle = ?",
-                (tweet_id, handle)
-            )
-            await db.commit()
-            return True
-    except Exception as e:
-        logger.error(f"Error updating last tweet ID for {handle}: {e}", exc_info=True)
-        return False
-
-
-async def get_news_whitelist():
-    """Get all news whitelist keywords."""
-    try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute("SELECT word FROM news_filters") as cursor:
-                rows = await cursor.fetchall()
-                return [row[0] for row in rows]
-    except Exception as e:
-        logger.error(f"Error getting news whitelist: {e}", exc_info=True)
-        return []
-
-
-async def add_news_whitelist(word: str) -> bool:
-    """Add a new news whitelist keyword."""
-    try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute(
-                "INSERT INTO news_filters (word) VALUES (?)",
-                (word.lower(),)
-            )
-            await db.commit()
-            logger.info(f"Added news whitelist keyword: {word}")
-            return True
-    except Exception as e:
-        logger.error(f"Error adding news whitelist keyword {word}: {e}", exc_info=True)
-        return False
-
-
-async def remove_news_whitelist(word: str) -> bool:
-    """Remove a news whitelist keyword."""
-    try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            cursor = await db.execute("DELETE FROM news_filters WHERE word = ?", (word.lower(),))
-            await db.commit()
-            if cursor.rowcount > 0:
-                logger.info(f"Removed news whitelist keyword: {word}")
-                return True
-            else:
-                logger.warning(f"News whitelist keyword not found: {word}")
-                return False
-    except Exception as e:
-        logger.error(f"Error removing news whitelist keyword {word}: {e}", exc_info=True)
-        return False
-
-
-async def get_news_last_check() -> Optional[datetime]:
-    """Get the last news check timestamp."""
-    try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute("SELECT value FROM news_metadata WHERE key = 'last_check'") as cursor:
-                row = await cursor.fetchone()
-                if row:
-                    # Parse the ISO format datetime
-                    return datetime.fromisoformat(row[0])
-                return None
-    except Exception as e:
-        logger.error(f"Error getting news last check time: {e}", exc_info=True)
-        return None
-
-
-async def set_news_last_check(check_time: datetime) -> bool:
-    """Set the last news check timestamp."""
-    try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute(
-                "INSERT OR REPLACE INTO news_metadata (key, value, updated_at) VALUES ('last_check', ?, CURRENT_TIMESTAMP)",
-                (check_time.isoformat(),)
-            )
-            await db.commit()
-            return True
-    except Exception as e:
-        logger.error(f"Error setting news last check time: {e}", exc_info=True)
-        return False
-
-
-# Account-specific whitelist functions
-async def get_account_whitelist(handle: str) -> List[str]:
-    """Get whitelist keywords for a specific account."""
-    try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute("SELECT keyword FROM account_whitelist WHERE handle = ?", (handle,)) as cursor:
-                rows = await cursor.fetchall()
-                return [row[0] for row in rows]
-    except Exception as e:
-        logger.error(f"Error getting account whitelist for {handle}: {e}", exc_info=True)
-        return []
-
-
-async def add_account_whitelist(handle: str, keyword: str) -> bool:
-    """Add a whitelist keyword for a specific account."""
-    try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute(
-                "INSERT INTO account_whitelist (handle, keyword) VALUES (?, ?)",
-                (handle, keyword.lower())
-            )
-            await db.commit()
-            logger.info(f"Added whitelist keyword '{keyword}' for account {handle}")
-            return True
-    except Exception as e:
-        logger.error(f"Error adding whitelist keyword '{keyword}' for {handle}: {e}", exc_info=True)
-        return False
-
-
-async def remove_account_whitelist(handle: str, keyword: str) -> bool:
-    """Remove a whitelist keyword for a specific account."""
-    try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            cursor = await db.execute(
-                "DELETE FROM account_whitelist WHERE handle = ? AND keyword = ?",
-                (handle, keyword.lower())
-            )
-            await db.commit()
-            if cursor.rowcount > 0:
-                logger.info(f"Removed whitelist keyword '{keyword}' for account {handle}")
-                return True
-            else:
-                logger.warning(f"Whitelist keyword '{keyword}' not found for account {handle}")
-                return False
-    except Exception as e:
-        logger.error(f"Error removing whitelist keyword '{keyword}' for {handle}: {e}", exc_info=True)
-        return False
-
-
-async def get_all_account_whitelists() -> Dict[str, List[str]]:
-    """Get all account-specific whitelists as a dictionary."""
-    try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute("SELECT handle, keyword FROM account_whitelist ORDER BY handle, keyword") as cursor:
-                rows = await cursor.fetchall()
-                whitelists = {}
-                for handle, keyword in rows:
-                    if handle not in whitelists:
-                        whitelists[handle] = []
-                    whitelists[handle].append(keyword)
-                return whitelists
-    except Exception as e:
-        logger.error(f"Error getting all account whitelists: {e}", exc_info=True)
-        return {}
-
-
-# ============================================================
-# FREE GAMES NOTIFICATION FUNCTIONS
-# ============================================================
-
-async def set_free_games_channel(guild_id: int, channel_id: int) -> bool:
-    """Set the free games notification channel for a guild."""
-    try:
-        await execute_db_operation(
-            "set free games channel",
-            """INSERT INTO free_games_channels (guild_id, channel_id, created_at)
-               VALUES (?, ?, ?)
-               ON CONFLICT(guild_id) DO UPDATE SET
-                   channel_id = excluded.channel_id,
-                   updated_at = CURRENT_TIMESTAMP""",
-            (guild_id, channel_id, datetime.utcnow())
-        )
-        return True  # If no exception, operation succeeded
-    except Exception as e:
-        logger.error(f"Error setting free games channel: {e}", exc_info=True)
-        return False
-
-
-async def get_free_games_channel(guild_id: int) -> Optional[int]:
-    """Get the free games notification channel for a guild."""
-    try:
-        result = await execute_db_operation(
-            "get free games channel",
-            "SELECT channel_id FROM free_games_channels WHERE guild_id = ?",
-            (guild_id,),
-            fetch_type='one'
-        )
-        return result[0] if result else None
-    except Exception as e:
-        logger.error(f"Error getting free games channel: {e}", exc_info=True)
-        return None
-
-
-async def get_all_free_games_channels() -> List[tuple]:
-    """Get all guilds with free games notifications enabled."""
-    try:
-        results = await execute_db_operation(
-            "get all free games channels",
-            "SELECT guild_id, channel_id FROM free_games_channels",
-            fetch_type='all'
-        )
-        return results if results else []
-    except Exception as e:
-        logger.error(f"Error getting all free games channels: {e}", exc_info=True)
-        return []
-
-
-async def remove_free_games_channel(guild_id: int) -> bool:
-    """Remove free games notification channel for a guild."""
-    try:
-        await execute_db_operation(
-            "remove free games channel",
-            "DELETE FROM free_games_channels WHERE guild_id = ?",
-            (guild_id,)
-        )
-        return True  # If no exception, operation succeeded
-    except Exception as e:
-        logger.error(f"Error removing free games channel: {e}", exc_info=True)
-        return False
-
-
-async def get_free_games_last_check() -> Optional[datetime]:
-    """Get the last free games check timestamp."""
-    try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute("SELECT value FROM free_games_metadata WHERE key = 'last_check'") as cursor:
-                row = await cursor.fetchone()
-                if row:
-                    # Parse the ISO format datetime
-                    return datetime.fromisoformat(row[0])
-                return None
-    except Exception as e:
-        logger.error(f"Error getting free games last check time: {e}", exc_info=True)
-        return None
-
-
-async def set_free_games_last_check(check_time: datetime) -> bool:
-    """Set the last free games check timestamp."""
-    try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute(
-                "INSERT OR REPLACE INTO free_games_metadata (key, value, updated_at) VALUES ('last_check', ?, CURRENT_TIMESTAMP)",
-                (check_time.isoformat(),)
-            )
-            await db.commit()
-            return True
-    except Exception as e:
-        logger.error(f"Error setting free games last check time: {e}", exc_info=True)
-        return False
-
-
-async def add_posted_game(game_title: str, game_url: str, store: str) -> bool:
-    """Mark a game as posted to avoid duplicate announcements."""
-    try:
-        await execute_db_operation(
-            "add posted game",
-            "INSERT OR IGNORE INTO free_games_posted (game_title, game_url, store, posted_at) VALUES (?, ?, ?, ?)",
-            (game_title, game_url, store, datetime.utcnow())
-        )
-        return True
-    except Exception as e:
-        logger.error(f"Error adding posted game: {e}", exc_info=True)
-        return False
-
-
-async def is_game_already_posted(game_url: str, store: str) -> bool:
-    """Check if a game has already been posted."""
-    try:
-        result = await execute_db_operation(
-            "check if game posted",
-            "SELECT id FROM free_games_posted WHERE game_url = ? AND store = ?",
-            (game_url, store),
-            fetch_type='one'
-        )
-        return result is not None
-    except Exception as e:
-        logger.error(f"Error checking if game posted: {e}", exc_info=True)
-        return False
-
-
-async def get_all_posted_games() -> List[tuple]:
-    """Get all posted games (for debugging)."""
-    try:
-        results = await execute_db_operation(
-            "get all posted games",
-            "SELECT game_title, game_url, store, posted_at FROM free_games_posted ORDER BY posted_at DESC",
-            fetch_type='all'
-        )
-        return results if results else []
-    except Exception as e:
-        logger.error(f"Error getting posted games: {e}", exc_info=True)
-        return []
-
-
-async def cleanup_old_posted_games(days: int = 30) -> int:
-    """Remove posted game entries older than specified days.
-    
-    Args:
-        days: Number of days to keep posted game records (default 30)
-        
-    Returns:
-        Number of entries removed
-    """
-    try:
-        cutoff_date = datetime.utcnow() - timedelta(days=days)
-        
-        # Get count before deletion
-        count_result = await execute_db_operation(
-            "count old posted games",
-            "SELECT COUNT(*) FROM free_games_posted WHERE posted_at < ?",
-            (cutoff_date,),
-            fetch_type='one'
-        )
-        count = count_result[0] if count_result else 0
-        
-        # Delete old entries
-        await execute_db_operation(
-            "cleanup old posted games",
-            "DELETE FROM free_games_posted WHERE posted_at < ?",
-            (cutoff_date,)
-        )
-        
-        logger.info(f"Cleaned up {count} posted game entries older than {days} days")
-        return count
-    except Exception as e:
-        logger.error(f"Error cleaning up old posted games: {e}", exc_info=True)
-        return 0
 
 
 # ============================================================
@@ -3953,35 +2778,6 @@ async def get_all_paginator_states() -> dict:
 # SCANNED MEDIA FUNCTIONS (migrated from anime_scan.json and manga_scan.json)
 # ============================================================
 
-async def is_media_scanned(media_id: int, media_type: str) -> bool:
-    """Check if a media ID has been scanned."""
-    try:
-        result = await execute_db_operation(
-            "check if media scanned",
-            "SELECT 1 FROM scanned_media WHERE media_id = ? AND media_type = ?",
-            (media_id, media_type),
-            fetch_type='one'
-        )
-        return result is not None
-    except Exception as e:
-        logger.error(f"Error checking if media {media_id} ({media_type}) is scanned: {e}")
-        return False
-
-
-async def add_scanned_media(media_id: int, media_type: str) -> bool:
-    """Add a scanned media ID."""
-    try:
-        await execute_db_operation(
-            "add scanned media",
-            "INSERT OR IGNORE INTO scanned_media (media_id, media_type) VALUES (?, ?)",
-            (media_id, media_type)
-        )
-        logger.debug(f"Added scanned media: {media_id} ({media_type})")
-        return True
-    except Exception as e:
-        logger.error(f"Error adding scanned media {media_id} ({media_type}): {e}")
-        return False
-
 
 async def get_scanned_media(media_type: str) -> List[int]:
     """Get all scanned media IDs for a specific type (ANIME or MANGA)."""
@@ -4068,159 +2864,10 @@ async def set_scan_metadata(scan_type: str, last_run: str) -> bool:
 # BOT CONFIG FUNCTIONS (migrated from changelog_channel.json and other configs)
 # ============================================================
 
-async def get_bot_config(config_key: str, guild_id: str) -> Optional[str]:
-    """Get a bot configuration value for a specific guild."""
-    try:
-        result = await execute_db_operation(
-            f"get bot config {config_key}",
-            "SELECT config_value FROM bot_config WHERE config_key = ? AND guild_id = ?",
-            (config_key, guild_id),
-            fetch_type='one'
-        )
-        
-        if result:
-            return result['config_value'] if isinstance(result, dict) else result[0]
-        return None
-    except Exception as e:
-        logger.error(f"Error getting bot config {config_key} for guild {guild_id}: {e}")
-        return None
-
-
-async def set_bot_config(config_key: str, guild_id: str, config_value: str) -> bool:
-    """Set a bot configuration value for a specific guild."""
-    try:
-        await execute_db_operation(
-            f"set bot config {config_key}",
-            """INSERT OR REPLACE INTO bot_config (config_key, guild_id, config_value, updated_at)
-               VALUES (?, ?, ?, CURRENT_TIMESTAMP)""",
-            (config_key, guild_id, config_value)
-        )
-        logger.debug(f"Set bot config {config_key}={config_value} for guild {guild_id}")
-        return True
-    except Exception as e:
-        logger.error(f"Error setting bot config {config_key} for guild {guild_id}: {e}")
-        return False
-
 
 # ============================================================
 # MEDIA CACHE FUNCTIONS (migrated from popular_titles_cache.json and recommendation_cache.json)
 # ============================================================
-
-async def get_media_cache(cache_key: str) -> List[int]:
-    """Get all media IDs for a specific cache key."""
-    try:
-        results = await execute_db_operation(
-            f"get media cache {cache_key}",
-            "SELECT media_id FROM media_cache WHERE cache_key = ? ORDER BY media_id",
-            (cache_key,),
-            fetch_type='all'
-        )
-        
-        if results:
-            return [row['media_id'] if isinstance(row, dict) else row[0] for row in results]
-        return []
-    except Exception as e:
-        logger.error(f"Error getting media cache for {cache_key}: {e}")
-        return []
-
-
-async def set_media_cache(cache_key: str, media_ids: List[int], expires_hours: Optional[int] = None) -> bool:
-    """Set media cache (replaces entire list for that cache key)."""
-    try:
-        from datetime import datetime, timedelta
-        
-        cached_at = datetime.now().isoformat()
-        expires_at = None
-        if expires_hours:
-            expires_at = (datetime.now() + timedelta(hours=expires_hours)).isoformat()
-        
-        async with aiosqlite.connect(DB_PATH) as db:
-            # Delete existing entries for this cache key
-            await db.execute("DELETE FROM media_cache WHERE cache_key = ?", (cache_key,))
-            
-            # Insert new entries
-            await db.executemany(
-                """INSERT INTO media_cache (cache_key, media_id, cached_at, expires_at)
-                   VALUES (?, ?, ?, ?)""",
-                [(cache_key, media_id, cached_at, expires_at) for media_id in media_ids]
-            )
-            
-            await db.commit()
-            logger.debug(f"Set media cache {cache_key} with {len(media_ids)} IDs")
-            return True
-    except Exception as e:
-        logger.error(f"Error setting media cache {cache_key}: {e}")
-        return False
-
-
-async def get_recommendation_count(media_id: int) -> Optional[int]:
-    """Get cached recommendation count for a media ID."""
-    try:
-        result = await execute_db_operation(
-            "get recommendation count",
-            """SELECT cache_value, expires_at FROM media_cache 
-               WHERE cache_key = 'recommendation_count' AND media_id = ?""",
-            (media_id,),
-            fetch_type='one'
-        )
-        
-        if result:
-            import json
-            from datetime import datetime
-            
-            expires_at = result['expires_at'] if isinstance(result, dict) else result[1]
-            
-            # Check if expired
-            if expires_at:
-                try:
-                    expiry_time = datetime.fromisoformat(expires_at)
-                    if datetime.now() > expiry_time:
-                        # Expired, delete and return None
-                        await execute_db_operation(
-                            "delete expired recommendation",
-                            """DELETE FROM media_cache 
-                               WHERE cache_key = 'recommendation_count' AND media_id = ?""",
-                            (media_id,)
-                        )
-                        return None
-                except:
-                    pass
-            
-            # Parse the cache_value JSON
-            cache_value = result['cache_value'] if isinstance(result, dict) else result[0]
-            if cache_value:
-                data = json.loads(cache_value)
-                return data.get('count')
-        
-        return None
-    except Exception as e:
-        logger.error(f"Error getting recommendation count for media {media_id}: {e}")
-        return None
-
-
-async def set_recommendation_count(media_id: int, count: int, expires_hours: int = 24) -> bool:
-    """Set cached recommendation count for a media ID."""
-    try:
-        import json
-        from datetime import datetime, timedelta
-        
-        cache_value = json.dumps({"count": count})
-        cached_at = datetime.now().isoformat()
-        expires_at = (datetime.now() + timedelta(hours=expires_hours)).isoformat()
-        
-        await execute_db_operation(
-            "set recommendation count",
-            """INSERT OR REPLACE INTO media_cache 
-               (cache_key, media_id, cache_value, cached_at, expires_at)
-               VALUES ('recommendation_count', ?, ?, ?, ?)""",
-            (media_id, cache_value, cached_at, expires_at)
-        )
-        
-        logger.debug(f"Set recommendation count for media {media_id}: {count}")
-        return True
-    except Exception as e:
-        logger.error(f"Error setting recommendation count for media {media_id}: {e}")
-        return False
 
 
 async def clean_expired_cache() -> int:
@@ -4393,51 +3040,6 @@ async def delete_planned_feature(feature_id: int) -> bool:
 # BOT METRICS FUNCTIONS (migrated from monitoring_metrics.json)
 # ============================================================
 
-async def get_bot_metric(metric_key: str) -> Optional[dict]:
-    """Get a bot metric value."""
-    try:
-        import json
-        
-        result = await execute_db_operation(
-            f"get bot metric {metric_key}",
-            "SELECT metric_value, updated_at FROM bot_metrics WHERE metric_key = ?",
-            (metric_key,),
-            fetch_type='one'
-        )
-        
-        if result:
-            metric_value = result['metric_value'] if isinstance(result, dict) else result[0]
-            updated_at = result['updated_at'] if isinstance(result, dict) else result[1]
-            
-            return {
-                'value': json.loads(metric_value) if metric_value else None,
-                'updated_at': updated_at
-            }
-        return None
-    except Exception as e:
-        logger.error(f"Error getting bot metric {metric_key}: {e}")
-        return None
-
-
-async def set_bot_metric(metric_key: str, metric_value: any) -> bool:
-    """Set a bot metric value."""
-    try:
-        import json
-        
-        value_json = json.dumps(metric_value)
-        
-        await execute_db_operation(
-            f"set bot metric {metric_key}",
-            """INSERT OR REPLACE INTO bot_metrics (metric_key, metric_value, updated_at)
-               VALUES (?, ?, CURRENT_TIMESTAMP)""",
-            (metric_key, value_json)
-        )
-        
-        logger.debug(f"Set bot metric {metric_key}")
-        return True
-    except Exception as e:
-        logger.error(f"Error setting bot metric {metric_key}: {e}")
-        return False
 
 # ------------------------------------------------------
 # Guild Cleanup Functions
@@ -4479,7 +3081,6 @@ async def clear_guild_records(guild_id: int):
                     ("recruitment_stats", "guild_id"),
                     ("user_leaves", "guild_id"),
                     ("invite_tracker_settings", "guild_id"),
-                    ("free_games_channels", "guild_id"),
                     ("user_progress", "guild_id"),
                     ("user_progress_checkpoint", "guild_id"),
                     ("user_manga_progress", "guild_id"),
@@ -4489,7 +3090,6 @@ async def clear_guild_records(guild_id: int):
                     ("bot_config", "guild_id"),
                     ("challenge_manga", "guild_id"),
                     ("challenge_rules", "guild_id"),
-                    ("welcome_dm", "guild_id"),
                     ("paginator_state", "guild_id"),
                     # Phase 2 consolidated tables
                     ("birthdays", "guild_id"),
@@ -4546,10 +3146,10 @@ async def get_all_guild_ids_with_records():
             "guild_challenges", "guild_challenge_manga", "guild_manga_channels",
             "guild_bot_update_channels", "guild_mod_roles", "guild_config",
             "invites", "invite_uses", "recruitment_stats", "user_leaves",
-            "invite_tracker_settings", "free_games_channels", "user_progress",
+            "invite_tracker_settings", "user_progress",
             "user_progress_checkpoint", "user_manga_progress",
             "cached_stats", "manga_recommendations_votes", "steam_users",
-            "bot_config", "challenge_manga", "challenge_rules", "welcome_dm",
+            "bot_config", "challenge_manga", "challenge_rules",
             "paginator_state",
             "birthdays", "birthday_guild_config",
             "mute_roles", "mutes", "mute_logs",

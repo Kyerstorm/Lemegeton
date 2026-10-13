@@ -11,7 +11,7 @@ from typing import List, Dict, Optional
 from helpers.media_helper import fetch_random_media, fetch_user_progress_and_rating
 from helpers.embed_helper import build_error_embed, build_media_search_result_embed
 from helpers.anilist_helper import post_graphql
-from helpers.media_utils import media_error_handler
+from helpers.error_utils import media_error_handler
 from database import get_all_users_guild_aware, get_anilist_username_from_row
 
 # ------------------------------------------------------

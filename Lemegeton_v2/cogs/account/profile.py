@@ -18,7 +18,7 @@ from database import (
 )
 from helpers.anilist_helper import post_graphql
 from helpers.text_helper import sanitize_url
-from helpers.account_utils import account_error_handler
+from helpers.error_utils import account_error_handler
 from helpers.profile_helper import (
     generate_progress_bar,
     check_milestone_achievements,
