@@ -1999,17 +1999,16 @@ class AniListCog(commands.Cog):
         # convert AniList markup to Discord
         cleaned_full = self.clean_text(text_raw)
 
-        # Extract explicit media links (image placeholders) and remove them from text
+        # Extract image links and placeholders, removing them from visible text.
         media_links, cleaned_removed = self.extract_media(text_raw)
-        # If fallback provided images, add them
-        if not media_links and r.get("images"):
-            media_links = r.get("images", [])
+        if r.get("images"):
+            media_links.extend(r.get("images", []))
 
-        # deduplicate media links while maintaining order
+        # Deduplicate media URLs in order; query strings are valid image URL suffixes.
         seen = set()
         media_links_unique = []
         for u in media_links:
-            if u not in seen:
+            if isinstance(u, str) and u.startswith(("https://", "http://")) and u not in seen:
                 media_links_unique.append(u)
                 seen.add(u)
         media_links = media_links_unique
@@ -2148,7 +2147,8 @@ class AniListCog(commands.Cog):
             if p < len(media_links):
                 img = media_links[p]
                 # check if it's an image extension
-                if any(img.lower().endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".gif", ".webp")):
+                image_path = img.lower().split("?", 1)[0].split("#", 1)[0]
+                if any(image_path.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".gif", ".webp")) or "anilist.co" in image_path:
                     try:
                         em.set_image(url=img)
                     except Exception:
