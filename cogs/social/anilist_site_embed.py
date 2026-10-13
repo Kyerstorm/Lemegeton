@@ -885,6 +885,28 @@ class AniListCog(commands.Cog):
         except Exception:
             logger.debug("Best-effort HTML entity/stat parsing failed", exc_info=True)
 
+        # The dedicated /stats route may contain distributions omitted from the main page.
+        if not stats.get("scoreDistribution") and not stats.get("statusDistribution"):
+            try:
+                async with self.session.get(f"{url.rstrip('/')}/stats", timeout=HTML_TIMEOUT,
+                                            headers={"User-Agent": "Mozilla/5.0 (compatible; AniListBot/1.0)"}) as stats_resp:
+                    if stats_resp.status == 200:
+                        stats_html = await stats_resp.text()
+                        for key in ("scoreDistribution", "statusDistribution"):
+                            match = re.search(r'["\']' + key + r'["\']\s*:\s*', stats_html)
+                            if not match:
+                                continue
+                            array_start = stats_html.find("[", match.end())
+                            if array_start >= 0:
+                                try:
+                                    value, _ = json.JSONDecoder().raw_decode(stats_html[array_start:])
+                                    if isinstance(value, list):
+                                        stats[key] = value
+                                except (ValueError, TypeError):
+                                    pass
+            except (aiohttp.ClientError, asyncio.TimeoutError):
+                logger.debug("Could not fetch AniList stats HTML for %s", url)
+
         progress = 95
         logger.info("Parsing mode: %d%% — parsed %d studios, %d characters, %d staff", progress, len(studios), len(character_edges), len(staff_edges))
 
