@@ -259,14 +259,10 @@ async def _can_manage(interaction: discord.Interaction, panel: dict[str, Any]) -
 
 
 async def _audit_delete(interaction: discord.Interaction, panel: dict[str, Any]) -> None:
+    # The audit row is written in the same transaction as the delete; this helper
+    # only delivers the optional guild-local notification.
     if interaction.guild_id is None:
         return
-    pool = await _pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO mod_log(guild_id,moderator_id,panel_id,panel_title,uploader_id) VALUES($1,$2,$3,$4,$5)",
-            interaction.guild_id, interaction.user.id, panel["id"], panel["title"], panel["uploader_id"],
-        )
     settings = await _settings(interaction.guild_id)
     channel = interaction.guild.get_channel(int(settings["panel_log_channel_id"])) if settings.get("panel_log_channel_id") and interaction.guild else None
     if channel:
@@ -781,7 +777,7 @@ class PanelHomeView(discord.ui.View):
 
 
 class PanelAttachmentPicker(discord.ui.View):
-    def __init__(self, cog: "PanelCog", message: discord.Message, attachments: list[discord.Attachment):
+    def __init__(self, cog: "PanelCog", message: discord.Message, attachments: list[discord.Attachment]):
         super().__init__(timeout=120)
         self.cog, self.message, self.attachments = cog, message, attachments
         options = [discord.SelectOption(label=(a.filename[:90] or f"Image {i+1}"), value=str(i),
