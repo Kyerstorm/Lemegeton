@@ -457,6 +457,20 @@ class PanelHomeView(discord.ui.View):
             return
         await interaction.response.send_modal(PanelAddModal(self.cog, interaction.user.id, interaction.guild_id))
 
+    @discord.ui.button(label="Configure", style=discord.ButtonStyle.secondary, row=1)
+    async def configure(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.guild_id is None or not interaction.permissions.manage_guild:
+            await interaction.response.send_message("Manage Server permission is required in a server.", ephemeral=True)
+            return
+        await interaction.response.send_modal(PanelConfigureModal(self.cog))
+
+    @discord.ui.button(label="Moderation Log", style=discord.ButtonStyle.secondary, row=1)
+    async def moderation_log(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.guild_id is None or not await self.cog._is_mod(interaction):
+            await interaction.response.send_message("Moderator permissions are required.", ephemeral=True)
+            return
+        await self.cog._show_mod_log(interaction)
+
 
 class PanelCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -466,6 +480,37 @@ class PanelCog(commands.Cog):
         await _ensure_schema()
         # Register a stable persistent home-independent browser dispatcher.
         self.bot.add_view(PanelHomeView(self))
+
+    async def _is_mod(self, interaction: discord.Interaction) -> bool:
+        if interaction.guild is None:
+            return False
+        if interaction.permissions.manage_messages:
+            return True
+        settings = await _settings(interaction.guild.id)
+        role_id = settings.get("panel_mod_role_id")
+        return bool(role_id and isinstance(interaction.user, discord.Member)
+                    and any(role.id == int(role_id) for role in interaction.user.roles))
+
+    async def _show_mod_log(self, interaction: discord.Interaction):
+        pool = await _pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT moderator_id,panel_id,panel_title,uploader_id,created_at FROM mod_log WHERE guild_id=$1 ORDER BY created_at DESC LIMIT 15",
+                interaction.guild_id,
+            )
+        embed = discord.Embed(title="Panel Moderation Log", colour=discord.Colour.orange())
+        if not rows:
+            embed.description = "No moderation actions have been logged for this server."
+        else:
+            embed.description = "\\n".join(
+                f"• <t:{int(row['created_at'].timestamp())}:R> — <@{row['moderator_id']}> deleted panel "
+                f"**{discord.utils.escape_markdown(row['panel_title'] or 'Untitled')}** (#{row['panel_id']})"
+                for row in rows
+            )
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
 
     async def _open_browser(self, interaction: discord.Interaction, ids: list[int], public: bool):
         if not ids:
@@ -536,14 +581,6 @@ class PanelCog(commands.Cog):
                 await interaction.followup.send("Something went wrong.", ephemeral=True)
             else:
                 await interaction.response.send_message("Something went wrong.", ephemeral=True)
-
-    @app_commands.command(name="save-panel-config", description="Configure this server's Manga Panel Archive")
-    @app_commands.default_permissions(manage_guild=True)
-    async def configure(self, interaction: discord.Interaction):
-        if interaction.guild_id is None or not interaction.permissions.manage_guild:
-            await interaction.response.send_message("Manage Server permission is required.", ephemeral=True)
-            return
-        await interaction.response.send_modal(PanelConfigureModal(self))
 
     @app_commands.context_menu(name="Save to Panels")
     async def save_message(self, interaction: discord.Interaction, message: discord.Message):
