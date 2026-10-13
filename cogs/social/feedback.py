@@ -300,42 +300,6 @@ class Feedback(commands.Cog):
                 ephemeral=True,
             )
 
-posted message ID back to the submitting user so the
-            # persistent view (which is re-registered with user=None on load)
-            # can still determine who the original submitter was when a
-            # moderator clicks the 'Open Thread' button.
-            try:
-                feedback_cog = self.bot.get_cog("Feedback")
-                if feedback_cog:
-                    feedback_cog.message_user_map[message.id] = interaction.user.id
-                    # Persist mapping to DB so it survives restarts
-                    try:
-                        await database.execute_db_operation(
-                            "insert feedback mapping",
-                            "INSERT OR REPLACE INTO feedback_messages (message_id, user_id) VALUES (?, ?)",
-                            (message.id, interaction.user.id)
-                        )
-                    except Exception:
-                        logger.exception("Failed to persist feedback message mapping to DB")
-            except Exception:
-                logger.exception("Failed to record message->user mapping for feedback message")
-
-            # Track user as pending
-            self.pending_users.add(interaction.user.id)
-            logger.info(f"Feedback submitted successfully by {user_info} in message {message.id}")
-
-            await interaction.response.send_message(
-                "✅ Thanks for the submission! We will review it soon.",
-                ephemeral=True
-            )
-            
-        except Exception as e:
-            logger.error(f"Error in feedback submission by {user_info}: {e}")
-            await interaction.response.send_message(
-                "❌ An error occurred while submitting your feedback. Please try again later.",
-                ephemeral=True
-            )
-
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         """Handle DM communication between mods and users."""
