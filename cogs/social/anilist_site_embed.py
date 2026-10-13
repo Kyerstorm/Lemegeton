@@ -1139,27 +1139,51 @@ class AniListCog(commands.Cog):
             embeds.append(em)
         return embeds
 
+    def build_studios_embed(self, media: dict) -> discord.Embed:
+        studios = (media.get("studios") or {}).get("nodes") or []
+        em = discord.Embed(title="Studios & Production", url=media.get("siteUrl"), color=discord.Color.from_rgb(42, 132, 122))
+        if not studios:
+            em.description = "No studio information was found in the API response or page HTML."
+            return em
+        for studio in studios[:20]:
+            name = studio.get("name") or "Unknown studio"
+            sid = studio.get("id")
+            url = studio.get("siteUrl") or (f"https://anilist.co/studio/{sid}" if sid else None)
+            em.add_field(name=name, value=f"[View on AniList]({url})" if url else "Studio details unavailable", inline=True)
+        em.set_footer(text="AniList • Studios")
+        return em
+
     def build_stats_embed(self, media: dict) -> discord.Embed:
         stats = media.get("stats") or {}
-        em = discord.Embed(title="Stats Distribution", color=discord.Color.green())
+        media_title = (media.get("title") or {}).get("romaji") or (media.get("title") or {}).get("english") or "Media"
+        media_url = media.get("siteUrl")
+        em = discord.Embed(title=f"{media_title} — Statistics", url=media_url, color=discord.Color.from_rgb(72, 111, 190))
         status_dist = stats.get("statusDistribution") or []
         if status_dist:
+            max_amount = max((int(item.get("amount") or 0) for item in status_dist), default=1) or 1
             lines = []
-            for s in status_dist:
-                st = s.get("status") or "Unknown"
-                amt = s.get("amount") or 0
-                lines.append(f"**{st.title()}** — {amt} users")
-            em.add_field(name="Status Distribution", value="\n".join(lines), inline=False)
+            for item in sorted(status_dist, key=lambda x: int(x.get("amount") or 0), reverse=True):
+                status = str(item.get("status") or "Unknown").replace("_", " ").title()
+                amount = int(item.get("amount") or 0)
+                bar = "▰" * max(1, round(12 * amount / max_amount)) if amount else "·"
+                lines.append(f"`{status[:12]:<12}` {bar} **{amount:,}**")
+            em.add_field(name="Watching / Reading Status", value="\n".join(lines)[:1024], inline=False)
         score_dist = stats.get("scoreDistribution") or []
         if score_dist:
-            sd_lines = []
-            for s in sorted(score_dist, key=lambda x: int(x.get("score", 0))):
-                sc = s.get("score")
-                amt = s.get("amount")
-                sd_lines.append(f"{sc}: {amt}")
-            em.add_field(name="Score Distribution", value=" | ".join(sd_lines), inline=False)
+            max_amount = max((int(item.get("amount") or 0) for item in score_dist), default=1) or 1
+            lines = []
+            for item in sorted(score_dist, key=lambda x: int(x.get("score") or 0)):
+                score = item.get("score", "?")
+                amount = int(item.get("amount") or 0)
+                bar = "▰" * max(1, round(12 * amount / max_amount)) if amount else "·"
+                lines.append(f"`{str(score):>2}/100` {bar} **{amount:,}**")
+            for idx in range(0, len(lines), 20):
+                name = "Score Distribution" if idx == 0 else "Score Distribution (continued)"
+                em.add_field(name=name, value="\n".join(lines[idx:idx + 20])[:1024], inline=False)
         if not em.fields:
-            em.description = "No statistical distribution data available."
+            stats_url = f"{media_url.rstrip('/')}/stats" if media_url else "https://anilist.co"
+            em.description = f"No statistics were exposed by the API or page HTML. [Open AniList statistics]({stats_url})"
+        em.set_footer(text="AniList • Statistics | Bars scaled to the largest value in each chart")
         return em
 
     def build_recommendations_embed(self, media: dict, max_items: int = 5) -> discord.Embed:
@@ -1253,6 +1277,7 @@ class AniListCog(commands.Cog):
                 discord.SelectOption(label="🎭 Characters (Main)", value="characters_main", description="Main characters"),
                 discord.SelectOption(label="🌟 Support Cast", value="characters_support", description="Support characters"),
                 discord.SelectOption(label="🛡️ Staff", value="staff", description="All staff"),
+                discord.SelectOption(label="🏢 Studios", value="studios", description="Studios and production"),
                 discord.SelectOption(label="📊 Stats Distribution", value="stats", description="Status & score distribution"),
                 discord.SelectOption(label="🎯 Recommendations", value="recommendations", description="Top recommendations"),
                 discord.SelectOption(label="🗂️ Tags", value="tags", description="All tags"),
@@ -1429,6 +1454,8 @@ class AniListCog(commands.Cog):
                     embeds = self.cog.build_characters_embed(media, support=True)
                 elif value == "staff":
                     embeds = self.cog.build_staff_embed(media)
+                elif value == "studios":
+                    embed = self.cog.build_studios_embed(media)
                 elif value == "stats":
                     embed = self.cog.build_stats_embed(media)
                 elif value == "recommendations":
