@@ -1,6 +1,8 @@
 # anilist.py
 
 import re
+import json
+import html as html_lib
 import aiohttp
 import asyncio
 import discord
@@ -807,6 +809,7 @@ class AniListCog(commands.Cog):
         popularity = None
         favourites = None
         source = None
+        stats = {}
         try:
             # simple heuristics: look for "Episodes" label nearby numbers
             m_eps = re.search(r'Episodes</dt>\s*<dd[^>]*>\s*([0-9,]+)\s*</dd>', html)
@@ -845,18 +848,45 @@ class AniListCog(commands.Cog):
         progress = 85
         logger.info("Parsing mode: %d%% — stats extracted (episodes/chapters/status/popularity)", progress)
 
-        # Step 5: attempt to find studios or author
-        studios = []
+        # Step 5: recover linked entities and hydrated statistics from HTML.
+        studios, character_edges, staff_edges = [], [], []
         try:
-            for m in re.finditer(r'<a[^>]+href=["\']https?://anilist.co/[^"\']*studio/[^"\']+["\'][^>]*>([^<]+)</a>', html):
-                name = m.group(1).strip()
-                if name and name not in studios:
-                    studios.append({"name": name})
+            for kind, destination in (("studio", studios), ("character", character_edges), ("staff", staff_edges)):
+                pattern = r'<a\b[^>]+href=["\']https?://anilist\.co/' + kind + r'/(\d+)(?:/[^"\']*)?["\'][^>]*>(.*?)</a>'
+                for match in re.finditer(pattern, html, re.I | re.S):
+                    fragment = match.group(2)
+                    raw_name = re.sub(r'<[^>]+>', '', fragment)
+                    name = html_lib.unescape(raw_name).strip()
+                    entity_id = int(match.group(1))
+                    if not name or len(name) > 100:
+                        continue
+                    if kind == "studio":
+                        if not any(item.get("id") == entity_id for item in destination):
+                            destination.append({"id": entity_id, "name": name, "siteUrl": f"https://anilist.co/studio/{entity_id}"})
+                    else:
+                        if any((item.get("node") or {}).get("id") == entity_id for item in destination):
+                            continue
+                        image_match = re.search(r'<img[^>]+(?:src|data-src)=["\']([^"\']+)["\']', fragment, re.I)
+                        node = {"id": entity_id, "name": {"full": name}, "siteUrl": f"https://anilist.co/{kind}/{entity_id}"}
+                        if image_match:
+                            node["image"] = {"large": image_match.group(1)}
+                        destination.append({"role": "MAIN" if kind == "character" else "Staff", "node": node})
+            for key in ("scoreDistribution", "statusDistribution"):
+                match = re.search(r'["\']' + key + r'["\']\s*:\s*', html)
+                if match:
+                    array_start = html.find("[", match.end())
+                    if array_start >= 0:
+                        try:
+                            value, _ = json.JSONDecoder().raw_decode(html[array_start:])
+                            if isinstance(value, list):
+                                stats[key] = value
+                        except (ValueError, TypeError):
+                            pass
         except Exception:
-            pass
+            logger.debug("Best-effort HTML entity/stat parsing failed", exc_info=True)
 
         progress = 95
-        logger.info("Parsing mode: %d%% — studios parsed (%d found)", progress, len(studios))
+        logger.info("Parsing mode: %d%% — parsed %d studios, %d characters, %d staff", progress, len(studios), len(character_edges), len(staff_edges))
 
         # Build fallback media dict with fields similar to API
         media = {
@@ -879,9 +909,9 @@ class AniListCog(commands.Cog):
             # minimal empty placeholders for other fields used by UI
             "tags": [],
             "relations": {"edges": []},
-            "characters": {"edges": []},
-            "staff": {"edges": []},
-            "stats": {},
+            "characters": {"edges": character_edges},
+            "staff": {"edges": staff_edges},
+            "stats": stats,
             "recommendations": {"edges": []},
         }
 
@@ -2030,7 +2060,7 @@ class AniListCog(commands.Cog):
         # discord embed description limit is 4096 but the full embed character limit is 6000, be conservative.
         SAFE_CHUNK = 1500  # conservative chunk size for body text per page
         # Use cleaned_full as the user-facing text (converted), but if extract_media removed some parts, prefer cleaned_full
-        text_for_chunks = cleaned_full or cleaned_removed or ""
+        text_for_chunks = self.clean_text(cleaned_removed) or cleaned_full or ""
         text_chunks = [text_for_chunks[i:i + SAFE_CHUNK] for i in range(0, len(text_for_chunks), SAFE_CHUNK)] if text_for_chunks else []
 
         embeds: List[discord.Embed] = []
