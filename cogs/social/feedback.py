@@ -118,11 +118,23 @@ class Feedback(commands.Cog):
                 "create feedback_messages table",
                 """
                 CREATE TABLE IF NOT EXISTS feedback_messages (
-                    message_id INTEGER PRIMARY KEY,
-                    user_id INTEGER NOT NULL,
-                    thread_id INTEGER,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    message_id BIGINT PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    thread_id BIGINT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
+                """
+            )
+
+            # Discord snowflake IDs exceed PostgreSQL's 32-bit INTEGER range.
+            # Widen legacy columns as well as the CREATE TABLE definition.
+            await database.execute_db_operation(
+                "migrate feedback mapping ID columns to BIGINT",
+                """
+                ALTER TABLE feedback_messages
+                    ALTER COLUMN message_id TYPE BIGINT,
+                    ALTER COLUMN user_id TYPE BIGINT,
+                    ALTER COLUMN thread_id TYPE BIGINT
                 """
             )
 
