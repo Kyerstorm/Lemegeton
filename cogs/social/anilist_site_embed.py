@@ -1385,14 +1385,10 @@ class AniListCog(commands.Cog):
             self.add_item(self.main_button)
             self.add_item(self.rec_button)
             self.add_item(self.review_button)
-            await interaction.response.edit_message(embeds=[embeds[0]], view=self)
-            if len(embeds) > 1:
-                view = self.cog.ReviewPaginator(embeds=embeds, cog=self.cog)
-                try:
-                    # Keep the review paginator alive for message id
-                    self.cog.bot.add_view(view, message_id=interaction.message.id)
-                except Exception:
-                    logger.exception("Failed to add ReviewPaginator view to bot (non-fatal).")
+            # Attach the actual review paginator to the message. bot.add_view() only
+            # registers callbacks; it does not update the components shown to users.
+            view = self.cog.ReviewPaginator(embeds=embeds, cog=self.cog)
+            await interaction.response.edit_message(embeds=[embeds[0]], view=view)
 
         async def select_callback(self, interaction: discord.Interaction):
             try:
