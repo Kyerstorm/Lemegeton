@@ -43,6 +43,55 @@ else:
     logger.info("Feedback cog logging reinitialized - using existing handler")
 
 
+class FeedbackModal(discord.ui.Modal, title="Submit Feedback"):
+    """Collect feedback details in Discord's native modal."""
+
+    category = discord.ui.TextInput(
+        label="Feedback type",
+        placeholder="Ideas or Bugs",
+        min_length=4,
+        max_length=10,
+        required=True,
+    )
+    description = discord.ui.TextInput(
+        label="What would you like to share?",
+        placeholder="Describe your idea or the bug, including steps to reproduce if relevant.",
+        style=discord.TextStyle.paragraph,
+        min_length=10,
+        max_length=4000,
+        required=True,
+    )
+    image_url = discord.ui.TextInput(
+        label="Image URL (optional)",
+        placeholder="https://…",
+        max_length=500,
+        required=False,
+    )
+
+    def __init__(self, cog):
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await self.cog._submit_feedback(
+            interaction,
+            category=str(self.category.value),
+            description=str(self.description.value).strip(),
+            image_url=str(self.image_url.value).strip() if self.image_url.value else None,
+        )
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception):
+        logger.exception("Unhandled error in feedback modal", exc_info=error)
+        message = "Something went wrong while submitting feedback. Please try again later."
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except discord.HTTPException:
+            logger.exception("Could not send feedback modal error response")
+
+
 class Feedback(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -117,45 +166,141 @@ class Feedback(commands.Cog):
 
     @app_commands.command(name="feedback", description="Submit an idea or report a bug")
     @command_meta(section="Social", name="Feedback")
-    @app_commands.choices(type=[
-        app_commands.Choice(name="Ideas", value="ideas"),
-        app_commands.Choice(name="Bugs", value="bugs")
-    ])
-    @app_commands.describe(description="Your idea or bug description", image="Optional image attachment")
-    async def feedback(self, interaction: discord.Interaction, type: app_commands.Choice[str], description: str, image: discord.Attachment = None):
-        """Handle feedback submission from users."""
-        user_info = f"{interaction.user.display_name} (ID: {interaction.user.id})"
-        logger.info(f"Feedback submission started by {user_info} - Type: {type.name}")
-        
+    async def feedback(self, interaction: discord.Interaction):
+        """Open the feedback submission modal."""
         try:
-            channel = self.bot.get_channel(BOT_FEEDBACK_CHANNEL_ID)
-            if not channel:
-                logger.error(f"Target channel {BOT_FEEDBACK_CHANNEL_ID} not found")
-                await interaction.response.send_message("❌ Target channel not found.", ephemeral=True)
+            await interaction.response.send_modal(FeedbackModal(self))
+        except discord.HTTPException:
+            logger.exception("Failed to open feedback modal for user %s", interaction.user.id)
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send(
+                        "The feedback form could not be opened. Please try again.",
+                        ephemeral=True,
+                    )
+                else:
+                    await interaction.response.send_message(
+                        "The feedback form could not be opened. Please try again.",
+                        ephemeral=True,
+                    )
+            except discord.HTTPException:
+                logger.exception("Failed to report feedback modal opening error")
+
+    async def _submit_feedback(
+        self,
+        interaction: discord.Interaction,
+        *,
+        category: str,
+        description: str,
+        image_url: str | None = None,
+    ):
+        """Validate and publish a modal submission to the configured feedback channel."""
+        user = interaction.user
+        user_info = f"{user.display_name} (ID: {user.id})"
+        normalized_category = category.strip().casefold()
+        category_aliases = {
+            "idea": ("ideas", discord.Color.green()),
+            "ideas": ("ideas", discord.Color.green()),
+            "bug": ("bugs", discord.Color.red()),
+            "bugs": ("bugs", discord.Color.red()),
+        }
+
+        if normalized_category not in category_aliases:
+            await interaction.response.send_message(
+                "Feedback type must be **Ideas** or **Bugs**. Please run `/feedback` and try again.",
+                ephemeral=True,
+            )
+            return
+
+        if not description:
+            await interaction.response.send_message(
+                "Please include a description before submitting.",
+                ephemeral=True,
+            )
+            return
+
+        if image_url:
+            from urllib.parse import urlparse
+            parsed_url = urlparse(image_url)
+            if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+                await interaction.response.send_message(
+                    "The image URL must be a valid link beginning with https:// or http://.",
+                    ephemeral=True,
+                )
                 return
 
-            # Create embed
-            color = discord.Color.green() if type.value == "ideas" else discord.Color.red()
+        type_name, color = category_aliases[normalized_category]
+        logger.info("Feedback submission started by %s - Type: %s", user_info, type_name)
+
+        # Acknowledge promptly; channel sends and DB writes may take time.
+        try:
+            await interaction.response.defer(ephemeral=True, thinking=True)
+        except discord.HTTPException:
+            logger.exception("Could not defer feedback modal submission for user %s", user.id)
+            return
+
+        try:
+            channel = self.bot.get_channel(BOT_FEEDBACK_CHANNEL_ID)
+            if channel is None:
+                try:
+                    channel = await self.bot.fetch_channel(BOT_FEEDBACK_CHANNEL_ID)
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    channel = None
+
+            if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+                logger.error("Configured feedback channel %s is missing or is not a text channel", BOT_FEEDBACK_CHANNEL_ID)
+                await interaction.followup.send(
+                    "The feedback channel is not available right now. Please contact a server moderator.",
+                    ephemeral=True,
+                )
+                return
+
             embed = discord.Embed(
-                title=f"New {type.name} Submitted",
+                title=f"New {'Idea' if type_name == 'ideas' else 'Bug'} Submitted",
                 description=description,
-                color=color
+                color=color,
+                timestamp=discord.utils.utcnow(),
             )
-            embed.set_author(
-                name=interaction.user.display_name,
-                icon_url=interaction.user.avatar.url if interaction.user.avatar else None
+            avatar = user.display_avatar.url if user.display_avatar else None
+            embed.set_author(name=user.display_name, icon_url=avatar)
+            embed.set_footer(text=f"Submitted by {user} • User ID: {user.id}")
+            if image_url:
+                embed.set_image(url=image_url)
+
+            message = await channel.send(embed=embed, view=FeedbackView(self.bot, user))
+
+            self.message_user_map[message.id] = user.id
+            try:
+                await database.execute_db_operation(
+                    "insert feedback mapping",
+                    "INSERT OR REPLACE INTO feedback_messages (message_id, user_id) VALUES (?, ?)",
+                    (message.id, user.id),
+                )
+            except Exception:
+                # The in-memory mapping still supports this process; record the
+                # failure so it can be diagnosed without losing the submission.
+                logger.exception("Failed to persist feedback mapping for message %s", message.id)
+
+            self.pending_users.add(user.id)
+            logger.info("Feedback submitted successfully by %s in message %s", user_info, message.id)
+            await interaction.followup.send(
+                "Thanks for your feedback! The team will review it soon.",
+                ephemeral=True,
             )
-            embed.set_footer(text=f"Submitted by {interaction.user}")
+        except discord.Forbidden:
+            logger.exception("Permission denied while publishing feedback from %s", user_info)
+            await interaction.followup.send(
+                "I don't have permission to post feedback right now. Please contact a server moderator.",
+                ephemeral=True,
+            )
+        except Exception:
+            logger.exception("Error in feedback submission by %s", user_info)
+            await interaction.followup.send(
+                "An error occurred while submitting your feedback. Please try again later.",
+                ephemeral=True,
+            )
 
-            if image:
-                embed.set_image(url=image.url)
-                logger.info(f"Image attachment included in feedback from {user_info}")
-
-            # Send embed + button in ONE message
-            view = FeedbackView(self.bot, interaction.user)
-            message = await channel.send(embed=embed, view=view)
-
-            # Map the posted message ID back to the submitting user so the
+posted message ID back to the submitting user so the
             # persistent view (which is re-registered with user=None on load)
             # can still determine who the original submitter was when a
             # moderator clicks the 'Open Thread' button.
