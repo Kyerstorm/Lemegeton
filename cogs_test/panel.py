@@ -512,13 +512,34 @@ class PanelTagFilter(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         try:
             chosen = list(self.values)
-            self.browser.tags = chosen if "other" not in chosen else self.browser.tags
-            self.browser.panel_ids = await _panel_ids(_nsfw(interaction), tags=self.browser.tags, keyword=self.browser.keyword)
+            if "other" in chosen:
+                await interaction.response.send_modal(PanelSearchModal(self.browser.cog))
+                return
+            self.browser.tags = chosen
+            self.browser.panel_ids = await _panel_ids(
+                _nsfw(interaction), user_id=self.browser.user_id,
+                tags=self.browser.tags, keyword=self.browser.keyword
+            )
             self.browser.page = 0
-            await self.browser.cog._render(interaction, self.browser)
+            if self.browser.message is not None:
+                if self.browser.panel_ids:
+                    panel = await _get_panel(self.browser.panel_ids[0], _nsfw(interaction))
+                    embed = await self.browser.cog._resolved_embed(panel, 1, len(self.browser.panel_ids)) if panel else None
+                    self.browser._build()
+                    await self.browser.message.edit(content=None, embed=embed, view=self.browser)
+                else:
+                    self.browser._build()
+                    await self.browser.message.edit(
+                        content="No panels match this filter. Some panels may be hidden in this channel (age-restricted).",
+                        embed=None, view=self.browser
+                    )
+            await interaction.response.send_message("Filter applied to the public browser.", ephemeral=True)
         except Exception:
             log.exception("Panel filter failed")
-            await interaction.response.send_message("Something went wrong applying the filter.", ephemeral=True)
+            if interaction.response.is_done():
+                await interaction.followup.send("Something went wrong applying the filter.", ephemeral=True)
+            else:
+                await interaction.response.send_message("Something went wrong applying the filter.", ephemeral=True)
 
 
 class PanelBrowserView(discord.ui.View):
@@ -527,6 +548,7 @@ class PanelBrowserView(discord.ui.View):
                  keyword: str | None = None, user_id: int | None = None, fixed_ids: bool = False):
         super().__init__(timeout=BROWSER_TIMEOUT)
         self.cog, self.panel_ids = cog, ids
+        self.message = None
         self.tags, self.keyword = list(tags or []), keyword
         self.user_id, self.fixed_ids = user_id, fixed_ids
         self.page = 0
@@ -842,7 +864,7 @@ class PanelCog(commands.Cog):
             panel = await _get_panel(ids[0], _nsfw(interaction))
             if panel is None:
                 raise RuntimeError("First panel is no longer visible")
-            await channel.send(embed=await self._resolved_embed(panel, 1, len(ids)), view=view)
+            view.message = await channel.send(embed=await self._resolved_embed(panel, 1, len(ids)), view=view)
             msg = "Public panel browser posted in this channel."
             if interaction.response.is_done(): await interaction.followup.send(msg, ephemeral=True)
             else: await interaction.response.send_message(msg, ephemeral=True)
