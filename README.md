@@ -822,3 +822,30 @@ The web server is skipped when OAuth credentials are not configured, so existing
 - **Data overview:** explains the dashboard's persisted resources.
 
 The UI uses a dark ink palette with warm paper, muted lilac, mint, and antique-gold accents; premium typography; subtle SVG chart drawing, orbit details, hover transitions, and reduced-motion support. The CSS and JavaScript are separate from the page markup for easier design review and maintenance.
+
+
+## Shared Manga Panel Archive
+
+The optional `cogs_test.panel` extension adds a cross-guild Manga Panel Archive.
+Panel rows and tags are global: a panel uploaded in one server is searchable from
+other servers. Only storage/log/moderator-role settings and moderation audit rows
+are scoped to a guild.
+
+- Run `/panels` to open the ephemeral home menu.
+- A Manage Server member can use **Configure** to select the storage channel,
+  optional moderation-log channel, and optional moderator role.
+- Use **Add Panel** to upload an image (PNG/JPEG/GIF/WebP/AVIF, up to 8 MB),
+  set the manga title, tags, caption, and content rating.
+- The **Save to Panels** message context menu opens the add flow for image messages.
+- Browsing and search results are posted publicly in the current channel; mature
+  panels are excluded unless that channel is marked NSFW by Discord.
+- Uploaders can edit/delete their own panels. Moderators (configured role or
+  Manage Messages in the server where they act) can moderate any panel. Moderator
+  deletions are recorded against the guild where the action occurred.
+
+The cog creates its archive tables and indexes idempotently on load using the
+existing PostgreSQL pool from `database.py`. Before production rollout, verify
+the bot has View Channel, Send Messages, and Attach Files in the configured
+storage channel, and test the modal component APIs against the installed Discord
+client/library version. The archive requires the PostgreSQL pool to be initialized
+before the cog loads.
