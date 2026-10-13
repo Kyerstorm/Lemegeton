@@ -523,10 +523,12 @@ class PanelTagFilter(discord.ui.Select):
 
 class PanelBrowserView(discord.ui.View):
     """Public single-message browser. Navigation re-queries against current channel NSFW status."""
-    def __init__(self, cog: "PanelCog", ids: list[int], *, tags: list[str] | None = None, keyword: str | None = None):
+    def __init__(self, cog: "PanelCog", ids: list[int], *, tags: list[str] | None = None,
+                 keyword: str | None = None, user_id: int | None = None, fixed_ids: bool = False):
         super().__init__(timeout=BROWSER_TIMEOUT)
         self.cog, self.panel_ids = cog, ids
         self.tags, self.keyword = list(tags or []), keyword
+        self.user_id, self.fixed_ids = user_id, fixed_ids
         self.page = 0
         self.token = secrets.token_hex(3)
         self._build()
@@ -821,7 +823,7 @@ class PanelCog(commands.Cog):
         await self._delete_message(channel, int(panel["storage_message_id"]))
 
     async def _post_browser(self, interaction: discord.Interaction, ids: list[int], tags: list[str] | None = None,
-                            keyword: str | None = None):
+                            keyword: str | None = None, user_id: int | None = None, fixed_ids: bool = False):
         try:
             if not ids:
                 msg = "No panels match this filter."
@@ -835,7 +837,7 @@ class PanelCog(commands.Cog):
                 if interaction.response.is_done(): await interaction.followup.send("Open the archive in a server text channel to browse publicly.", ephemeral=True)
                 else: await interaction.response.send_message("Open the archive in a server text channel to browse publicly.", ephemeral=True)
                 return
-            view = PanelBrowserView(self, ids, tags=tags, keyword=keyword)
+            view = PanelBrowserView(self, ids, tags=tags, keyword=keyword, user_id=user_id, fixed_ids=fixed_ids)
             await self._render_data(interaction, view)
             panel = await _get_panel(ids[0], _nsfw(interaction))
             if panel is None:
@@ -867,11 +869,10 @@ class PanelCog(commands.Cog):
     async def _render(self, interaction: discord.Interaction, browser: PanelBrowserView):
         try:
             # Re-query each time, so mature content is never leaked if the view is used in an SFW channel.
-            ids = await _panel_ids(_nsfw(interaction), tags=browser.tags, keyword=browser.keyword)
-            if browser.tags or browser.keyword:
-                browser.panel_ids = ids
-            else:
-                browser.panel_ids = ids
+            ids = browser.panel_ids if browser.fixed_ids else await _panel_ids(
+                _nsfw(interaction), user_id=browser.user_id, tags=browser.tags, keyword=browser.keyword
+            )
+            browser.panel_ids = ids
             browser.page = max(0, min(browser.page, max(0, len(ids)-1)))
             browser._build()
             if not ids:
@@ -896,7 +897,10 @@ class PanelCog(commands.Cog):
                 ids = await _panel_ids(_nsfw(interaction))
             if action == "random" and ids:
                 ids = [random.choice(ids)]
-            await self._post_browser(interaction, ids)
+            await self._post_browser(
+                interaction, ids, user_id=interaction.user.id if action == "mine" else None,
+                fixed_ids=(action == "random"),
+            )
         except Exception:
             log.exception("Panel home action failed")
             if interaction.response.is_done(): await interaction.followup.send("Something went wrong.", ephemeral=True)
