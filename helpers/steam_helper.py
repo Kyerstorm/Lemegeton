@@ -332,12 +332,8 @@ def get_steam_avatar_url(avatar_hash: str, size: str = "full") -> str:
 # ===== DISCORD UTILITIES =====
 
 def random_color() -> discord.Color:
-    """
-    Get random Discord color from predefined palette.
-    """
+    """Return a stable brand color from Lemegeton's shared palette."""
     palette = [PALETTE.PRIMARY, PALETTE.SECONDARY, PALETTE.SUCCESS, PALETTE.WARNING]
-        PALETTE.PRIMARY, discord.Color.dark_teal()
-    ]
     return random.choice(palette)
 
 
