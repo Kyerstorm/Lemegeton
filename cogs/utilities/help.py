@@ -317,8 +317,7 @@ class HelpCog(commands.Cog):
         # descriptions source while ensuring /help reflects current functionality.
 
     def _get_registered_command_names(self) -> set:
-        """Return a set of registered command names from app commands (bot.tree)
-        and legacy text commands (bot.commands)."""
+        """Return registered application-command names; prefix commands have a private owner section."""
         names = set()
 
         # App commands (slash commands, groups, etc.)
@@ -550,7 +549,13 @@ class HelpCog(commands.Cog):
                 description="Failed to load help information. Please try again later."
             )
             
-            await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send(embed=error_embed, ephemeral=True)
+                else:
+                    await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            except discord.HTTPException:
+                logger.debug("Could not send help error response", exc_info=True)
 
     async def _create_overview_embed(
         self,
