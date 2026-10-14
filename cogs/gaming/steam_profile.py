@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -188,9 +189,9 @@ class SteamProfile(commands.Cog):
         # format status color
         pstate = player.get("personastate", 0)
         if pstate == 1:
-            color = discord.Color.green()
+            color = PALETTE.SUCCESS
         elif pstate == 0:
-            color = discord.Color.red()
+            color = PALETTE.DANGER
         else:
             color = random_color()
 
@@ -455,7 +456,7 @@ class SteamProfile(commands.Cog):
     async def _send_paginated_games(self, interaction: discord.Interaction, games_list: list, title: str = "Games", per_page: int = 5, progress_msg=None):
         if not games_list:
             try:
-                await interaction.followup.send(embed=discord.Embed(title=title, description="No games found or profile is private.", color=discord.Color.dark_gray()), ephemeral=True)
+                await interaction.followup.send(embed=discord.Embed(title=title, description="No games found or profile is private.", color=PALETTE.SECONDARY), ephemeral=True)
             except Exception:
                 pass
             return
@@ -464,7 +465,7 @@ class SteamProfile(commands.Cog):
         page_idx = 0
 
         def make_embed_for_page(page, idx):
-            e = discord.Embed(title=f"{title} — page {idx + 1}/{len(pages)}", color=discord.Color.blurple())
+            e = discord.Embed(title=f"{title} — page {idx + 1}/{len(pages)}", color=PALETTE.PRIMARY)
             for i, g in enumerate(page, start=1):
                 name = g.get("name", "Unknown")
                 hours = g.get("playtime_forever", 0) // 60
@@ -526,9 +527,9 @@ class SteamProfile(commands.Cog):
         if not friend_ids:
             try:
                 if progress_msg:
-                    await progress_msg.edit(content=None, embed=discord.Embed(title="Friends", description="No friends visible or profile private.", color=discord.Color.dark_gray()))
+                    await progress_msg.edit(content=None, embed=discord.Embed(title="Friends", description="No friends visible or profile private.", color=PALETTE.SECONDARY))
                 else:
-                    await interaction.followup.send(embed=discord.Embed(title="Friends", description="No friends visible or profile private.", color=discord.Color.dark_gray()), ephemeral=True)
+                    await interaction.followup.send(embed=discord.Embed(title="Friends", description="No friends visible or profile private.", color=PALETTE.SECONDARY), ephemeral=True)
             except Exception:
                 pass
             return
@@ -576,7 +577,7 @@ class SteamProfile(commands.Cog):
                 image_io = make_friend_grid_image(to_draw, thumb_size=96, per_row=5)
                 if image_io:
                     file = discord.File(fp=image_io, filename="friends_grid.png")
-                    em = discord.Embed(title=f"👥 Friends — page {idx+1}/{len(pages)}", color=discord.Color.green())
+                    em = discord.Embed(title=f"👥 Friends — page {idx+1}/{len(pages)}", color=PALETTE.SUCCESS)
                     try:
                         await msg_interaction.edit_original_response(content=None, embed=em, attachments=[file])  # if called via progress_msg
                     except Exception:
@@ -591,7 +592,7 @@ class SteamProfile(commands.Cog):
                 # fallback to embed-list below if image couldn't be built
 
             # Fallback: build a single embed with fields listing friends, and show avatars as separate small embeds (or in author of multiple embeds)
-            embed = discord.Embed(title=f"👥 Friends — page {idx+1}/{len(pages)}", color=discord.Color.green())
+            embed = discord.Embed(title=f"👥 Friends — page {idx+1}/{len(pages)}", color=PALETTE.SUCCESS)
             # build numbered list with clickable names and small avatar URLs shown
             lines = []
             for i, fr in enumerate(slice_, start=1 + idx * per_page):
@@ -670,7 +671,7 @@ class SteamProfile(commands.Cog):
             else:
                 # send new message with first page and view
                 # create a placeholder embed to be replaced by send_page's content
-                placeholder = discord.Embed(title="👥 Friends", description="Loading...", color=discord.Color.green())
+                placeholder = discord.Embed(title="👥 Friends", description="Loading...", color=PALETTE.SUCCESS)
                 await interaction.followup.send(embed=placeholder, view=view, ephemeral=True)
                 # get original response to edit
                 orig = await interaction.original_response()
@@ -724,7 +725,7 @@ class SteamProfile(commands.Cog):
         page_idx = 0
 
         def make_embed_for(idx):
-            e = discord.Embed(title=f"📷 Screenshots — {idx+1}/{len(pages)}", color=discord.Color.dark_gray())
+            e = discord.Embed(title=f"📷 Screenshots — {idx+1}/{len(pages)}", color=PALETTE.SECONDARY)
             e.set_image(url=pages[idx][0])
             return e
 
@@ -809,7 +810,7 @@ class SteamProfile(commands.Cog):
             return
 
         # present videos as a list embed
-        embed = discord.Embed(title="📹 Videos", description="\n".join(f"[Video]({v})" for v in videos[:25]), color=discord.Color.dark_red())
+        embed = discord.Embed(title="📹 Videos", description="\n".join(f"[Video]({v})" for v in videos[:25]), color=PALETTE.DANGER)
         try:
             if progress_msg:
                 await progress_msg.edit(content=None, embed=embed)
@@ -895,7 +896,7 @@ class SteamProfile(commands.Cog):
         # Build embeds: each comment -> its own small embed so we can set_author (avatar on the left)
         embeds = []
         for cm in parsed[:8]:
-            e = discord.Embed(color=discord.Color.blurple())
+            e = discord.Embed(color=PALETTE.PRIMARY)
             author_name = cm.get("author") or "Unknown"
             author_link = cm.get("link")
             avatar = cm.get("avatar")
