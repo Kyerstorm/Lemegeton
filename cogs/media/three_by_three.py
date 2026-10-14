@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -500,7 +501,7 @@ class ThreeByThreeModalPart2(discord.ui.Modal):
                 embed = discord.Embed(
                     title=f"🎨 {interaction.user.display_name}'s 3x3 {self.media_type.title()} Grid",
                     description=f"Your favorite {self.media_type}{'s' if self.media_type == 'character' else ''}!",
-                    color=discord.Color.purple()  # Contextual color for grid display
+                    color=PALETTE.PRIMARY  # Contextual color for grid display
                 )
                 embed.set_image(url=f"attachment://3x3_{self.media_type}.png")
                 embed.set_footer(text="Generated from AniList URLs" + (" character images" if self.media_type == "character" else " covers" if self.media_type != "games" else " IGDB game covers"))
