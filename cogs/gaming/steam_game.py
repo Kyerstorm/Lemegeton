@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 """
 Steam Game Search Cog
 Allows users to search for Steam games by name and view detailed information
@@ -134,20 +135,20 @@ class GameSearchView(discord.ui.View):
         is_free = current_game.get("is_free", False)
         if is_free:
             price = "Free to Play"
-            color = discord.Color.green()
+            color = PALETTE.SUCCESS
         elif price_info:
             final_price = price_info.get("final_formatted", "N/A")
             discount = price_info.get("discount_percent", 0)
             if discount > 0:
                 original = price_info.get("initial_formatted")
                 price = f"~~{original}~~ **{final_price}** (-{discount}%)"
-                color = discord.Color.gold()
+                color = PALETTE.WARNING
             else:
                 price = final_price
-                color = discord.Color.blue()
+                color = PALETTE.PRIMARY
         else:
             price = "Price N/A"
-            color = discord.Color.dark_gray()
+            color = PALETTE.SECONDARY
 
         # Release date & genres
         release_data = current_game.get("release_date", {})
