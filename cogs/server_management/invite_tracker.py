@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -886,7 +887,7 @@ class InviteTracker(commands.Cog):
                 title="Sect Recruitment Leaderboard",
                 description="*The most distinguished cultivators who have brought disciples to our sect*"
             )
-            embed.color = discord.Color.gold()  # Keep gold color for leaderboard theme
+            embed.color = PALETTE.WARNING  # Keep gold color for leaderboard theme
 
             # Rank titles for top 3
             rank_titles = {
@@ -1096,7 +1097,7 @@ class InviteThemeView(discord.ui.View):
             title="Invite Theme Customization",
             description="Customize how join and leave messages appear in your server"
         )
-        embed.color = discord.Color.purple()  # Keep purple color for theme customization
+        embed.color = PALETTE.PRIMARY  # Keep purple color for theme customization
 
         # Theme status
         theme_status = "✅ Enabled (Xianxia cultivation theme)" if self.xianxia_enabled else "❌ Disabled"
