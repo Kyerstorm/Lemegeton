@@ -93,7 +93,6 @@ class SteamProfile(commands.Cog):
                     (interaction.user.id, interaction.guild_id),
                     fetch_type="one",
                 )
-                await cur.close()
 
                 if not row:
                     embed = build_error_embed(

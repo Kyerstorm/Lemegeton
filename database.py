@@ -1736,6 +1736,369 @@ async def init_steam_users_table():
     )
 
 
+# ------------------------------------------------------
+# CHALLENGE TABLES
+# ------------------------------------------------------
+# Statements keep the legacy SQLite spelling; execute_db_operation() runs them
+# through _normalize_sql(), which maps AUTOINCREMENT to identity columns,
+# INTEGER to BIGINT, REAL to DOUBLE PRECISION and makes ADD COLUMN idempotent.
+async def init_global_challenges_table():
+    await execute_db_operation(
+        "create global challenges table",
+        """
+        CREATE TABLE IF NOT EXISTS global_challenges (
+            challenge_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            total_chapters INTEGER DEFAULT 0
+        )
+        """,
+    )
+    await execute_db_operation(
+        "add global challenges difficulty column",
+        "ALTER TABLE global_challenges ADD COLUMN difficulty TEXT DEFAULT 'Medium'",
+    )
+    await execute_db_operation(
+        "add global challenges start_date column",
+        "ALTER TABLE global_challenges ADD COLUMN start_date TEXT DEFAULT NULL",
+    )
+    logger.info("Global challenges table ready with difficulty column.")
+
+
+async def init_challenge_manga_table():
+    await execute_db_operation(
+        "create challenge manga table",
+        """
+        CREATE TABLE IF NOT EXISTS challenge_manga (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            challenge_id INTEGER NOT NULL,
+            manga_id INTEGER NOT NULL UNIQUE,
+            title TEXT NOT NULL,
+            total_chapters INTEGER NOT NULL,
+            medium_type TEXT DEFAULT 'manga',
+            FOREIGN KEY(challenge_id) REFERENCES global_challenges(challenge_id)
+        )
+        """,
+    )
+    await execute_db_operation(
+        "add challenge manga medium_type column",
+        "ALTER TABLE challenge_manga ADD COLUMN medium_type TEXT DEFAULT 'manga'",
+    )
+
+
+async def init_manga_challenges_table():
+    await execute_db_operation(
+        "create manga challenges table",
+        """
+        CREATE TABLE IF NOT EXISTS manga_challenges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            manga_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            total_chapters INTEGER NOT NULL,
+            chapters_read INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'in_progress',
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+        """,
+    )
+
+
+async def init_user_progress_table():
+    await execute_db_operation(
+        "create user progress table",
+        """
+        CREATE TABLE IF NOT EXISTS user_progress (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            challenge_manga_id INTEGER NOT NULL,
+            chapters_read INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'in_progress',
+            FOREIGN KEY(user_id) REFERENCES users(id),
+            FOREIGN KEY(challenge_manga_id) REFERENCES challenge_manga(id)
+        )
+        """,
+    )
+
+
+async def init_guild_challenges_table():
+    """Initialize the guild challenges table for guild-specific challenge management."""
+    logger.info("🔧 Initializing guild challenges table...")
+    # UNIQUE(guild_id, challenge_id) is redundant with the primary key but
+    # PostgreSQL requires it as the target of guild_challenge_manga's composite FK.
+    await execute_db_operation(
+        "create guild challenges table",
+        """
+        CREATE TABLE IF NOT EXISTS guild_challenges (
+            challenge_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            difficulty TEXT DEFAULT 'Medium',
+            start_date TEXT DEFAULT NULL,
+            end_date TEXT DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(guild_id, title),
+            UNIQUE(guild_id, challenge_id)
+        )
+        """,
+    )
+    logger.info("✅ Guild challenges table ready.")
+
+
+async def init_guild_challenge_manga_table():
+    """Initialize the guild challenge manga table for guild-specific challenge manga management."""
+    logger.info("🔧 Initializing guild challenge manga table...")
+    await execute_db_operation(
+        "create guild challenge manga table",
+        """
+        CREATE TABLE IF NOT EXISTS guild_challenge_manga (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            challenge_id INTEGER NOT NULL,
+            manga_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            total_chapters INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(guild_id, challenge_id, manga_id),
+            FOREIGN KEY(guild_id, challenge_id) REFERENCES guild_challenges(guild_id, challenge_id) ON DELETE CASCADE
+        )
+        """,
+    )
+    logger.info("✅ Guild challenge manga table ready.")
+
+
+async def init_guild_challenge_roles_table():
+    """Initialize the guild challenge roles table for multi-guild support."""
+    logger.info("🔧 Initializing guild challenge roles table...")
+    await execute_db_operation(
+        "create guild challenge roles table",
+        """
+        CREATE TABLE IF NOT EXISTS guild_challenge_roles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            challenge_id INTEGER NOT NULL,
+            threshold REAL NOT NULL,
+            role_id INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(guild_id, challenge_id, threshold)
+        )
+        """,
+    )
+    # The one-time global -> guild challenge migration from the SQLite era is
+    # not repeated here; PostgreSQL data arrives already guild-scoped.
+    await migrate_default_challenge_roles()
+    logger.info("✅ Guild challenge roles table ready.")
+
+
+async def migrate_default_challenge_roles():
+    """Seed default challenge roles from config.py for the primary guild."""
+    try:
+        primary_guild_id = int(
+            os.getenv("GUILD_ID") or os.getenv("PRIMARY_GUILD_ID") or "897814031346319382"
+        )
+
+        existing_roles = await get_guild_challenge_roles(primary_guild_id)
+        if existing_roles:
+            logger.info(f"Default challenge roles already exist for primary guild {primary_guild_id}")
+            return
+
+        logger.info(f"Migrating default challenge roles for primary guild {primary_guild_id}")
+        for challenge_id, thresholds in config.CHALLENGE_ROLE_IDS.items():
+            for threshold, role_id in thresholds.items():
+                await set_guild_challenge_role(primary_guild_id, challenge_id, threshold, role_id)
+                logger.info(f"Migrated: Challenge {challenge_id}, threshold {threshold} -> role {role_id}")
+
+        logger.info(f"✅ Successfully migrated {len(config.CHALLENGE_ROLE_IDS)} default challenge roles")
+
+    except Exception as e:
+        logger.error(f"Error migrating default challenge roles: {e}", exc_info=True)
+
+
+# ------------------------------------------------------
+# GUILD CONFIGURATION TABLES
+# ------------------------------------------------------
+async def init_guild_manga_channels_table():
+    """Initialize the guild manga channels table for multi-guild animanga completion support."""
+    logger.info("🔧 Initializing guild manga channels table...")
+    await execute_db_operation(
+        "create guild manga channels table",
+        """
+        CREATE TABLE IF NOT EXISTS guild_manga_channels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL UNIQUE,
+            channel_id INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+    )
+    logger.info("✅ Guild manga channels table ready.")
+
+
+async def init_guild_bot_update_channels_table():
+    """Initialize the guild bot update channels table."""
+    logger.info("🔧 Initializing guild bot update channels table...")
+    await execute_db_operation(
+        "create guild bot update channels table",
+        """
+        CREATE TABLE IF NOT EXISTS guild_bot_update_channels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL UNIQUE,
+            channel_id INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+    )
+    logger.info("✅ Guild bot update channels table ready.")
+
+
+async def init_guild_mod_roles_table():
+    """Initialize the guild mod roles table."""
+    logger.info("🔧 Initializing guild mod roles table...")
+    await execute_db_operation(
+        "create guild mod roles table",
+        """
+        CREATE TABLE IF NOT EXISTS guild_mod_roles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL UNIQUE,
+            role_id INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+    )
+    logger.info("✅ Guild mod roles table ready.")
+
+
+async def init_bot_moderators_table():
+    """Initialize the bot moderators table for bot-wide moderation."""
+    logger.info("🔧 Initializing bot moderators table...")
+    await execute_db_operation(
+        "create bot moderators table",
+        """
+        CREATE TABLE IF NOT EXISTS bot_moderators (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            discord_id INTEGER NOT NULL UNIQUE,
+            username TEXT NOT NULL,
+            added_by INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+    )
+    logger.info("✅ Bot moderators table ready.")
+
+
+async def init_booster_roles_table():
+    """Initialize the booster roles table for tracking server booster custom roles."""
+    logger.info("🔧 Initializing booster roles table...")
+    await execute_db_operation(
+        "create booster roles table",
+        """
+        CREATE TABLE IF NOT EXISTS booster_roles (
+            discord_id INTEGER NOT NULL,
+            guild_id INTEGER NOT NULL,
+            role_id INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (discord_id, guild_id)
+        )
+        """,
+    )
+    logger.info("✅ Booster roles table ready.")
+
+
+# ------------------------------------------------------
+# INVITE TRACKER TABLES
+# ------------------------------------------------------
+_INVITE_TRACKER_TABLES = {
+    # Every invite seen in each guild
+    "invites": """
+        CREATE TABLE IF NOT EXISTS invites (
+            invite_code TEXT PRIMARY KEY,
+            guild_id INTEGER NOT NULL,
+            inviter_id INTEGER NOT NULL,
+            inviter_name TEXT NOT NULL,
+            channel_id INTEGER,
+            max_uses INTEGER,
+            uses INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """,
+    # Who joined through which invite
+    "invite_uses": """
+        CREATE TABLE IF NOT EXISTS invite_uses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            invite_code TEXT NOT NULL,
+            inviter_id INTEGER NOT NULL,
+            inviter_name TEXT NOT NULL,
+            joiner_id INTEGER NOT NULL,
+            joiner_name TEXT NOT NULL,
+            joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (invite_code) REFERENCES invites (invite_code)
+        )
+    """,
+    # Total recruits per user per guild
+    "recruitment_stats": """
+        CREATE TABLE IF NOT EXISTS recruitment_stats (
+            user_id INTEGER NOT NULL,
+            guild_id INTEGER NOT NULL,
+            username TEXT NOT NULL,
+            total_recruits INTEGER DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, guild_id)
+        )
+    """,
+    # Members leaving, with who invited them
+    "user_leaves": """
+        CREATE TABLE IF NOT EXISTS user_leaves (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            username TEXT NOT NULL,
+            left_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            was_invited_by INTEGER,
+            days_in_server INTEGER DEFAULT 0
+        )
+    """,
+    # Announcement channel per guild
+    "invite_tracker_settings": """
+        CREATE TABLE IF NOT EXISTS invite_tracker_settings (
+            guild_id INTEGER PRIMARY KEY,
+            announcement_channel_id INTEGER NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """,
+    # Custom join/leave messages and theme toggle per guild
+    "invite_theme_settings": """
+        CREATE TABLE IF NOT EXISTS invite_theme_settings (
+            guild_id INTEGER PRIMARY KEY,
+            xianxia_theme_enabled INTEGER DEFAULT 1,
+            custom_join_messages TEXT,
+            custom_leave_messages TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """,
+}
+
+
+async def init_invite_tracker_tables():
+    """Initialize all invite tracker tables in the main database"""
+    logger.info("Initializing invite tracker tables")
+    try:
+        for table_name, create_sql in _INVITE_TRACKER_TABLES.items():
+            await execute_db_operation(f"create {table_name} table", create_sql)
+        logger.info("✅ Invite tracker tables initialized successfully")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize invite tracker tables: {e}", exc_info=True)
+        raise
+
+
 async def init_db():
     """Initialize the PostgreSQL database schema."""
     logger.info("=" * 60)
@@ -1749,9 +2112,11 @@ async def init_db():
         ("User Stats", init_user_stats_table),
         ("Achievements", init_achievements_table),
         ("User Manga Progress", init_user_manga_progress_table),
+        # Referenced tables first: PostgreSQL rejects FKs to missing tables.
+        ("Global Challenges", init_global_challenges_table),
+        ("Challenge Manga", init_challenge_manga_table),
         ("Manga Challenges", init_manga_challenges_table),
         ("User Progress", init_user_progress_table),
-        ("Global Challenges", init_global_challenges_table),
         ("Guild Challenges", init_guild_challenges_table),
         ("Guild Challenge Manga", init_guild_challenge_manga_table),
         ("Guild Challenge Roles", init_guild_challenge_roles_table),
@@ -1761,7 +2126,6 @@ async def init_db():
         ("Bot Moderators", init_bot_moderators_table),
         ("Invite Tracker", init_invite_tracker_tables),
         ("Steam Users", init_steam_users_table),
-        ("Challenge Manga", init_challenge_manga_table),
         ("News Tables", init_news_tables),
         ("Booster Roles", init_booster_roles_table),
     ]
@@ -2086,6 +2450,98 @@ async def save_user_guild_aware(discord_id: int, guild_id: int, username: str):
         raise
     except Exception as e:
         logger.error(f"❌ Error saving user {discord_id} in guild {guild_id}: {e}", exc_info=True)
+        raise
+
+
+async def upsert_user_stats(
+    discord_id: int,
+    guild_id: int,
+    username: str,
+    total_manga: int,
+    total_anime: int,
+    avg_manga_score: float,
+    avg_anime_score: float,
+    total_chapters: int = 0,
+    total_episodes: int = 0,
+    manga_completed: int = 0,
+    anime_completed: int = 0
+):
+    """Upsert user stats with comprehensive logging and validation (GUILD-AWARE)."""
+    logger.info(f"Upserting stats for user {username} (Discord ID: {discord_id}) in guild {guild_id}")
+
+    try:
+        # Validate input data
+        if not isinstance(discord_id, int) or discord_id <= 0:
+            raise ValueError(f"Invalid discord_id: {discord_id}")
+        if not isinstance(guild_id, int) or guild_id <= 0:
+            raise ValueError(f"Invalid guild_id: {guild_id}")
+        if not isinstance(username, str) or not username.strip():
+            raise ValueError(f"Invalid username: {username}")
+
+        # Validate numeric fields
+        numeric_fields = {
+            'total_manga': total_manga,
+            'total_anime': total_anime,
+            'avg_manga_score': avg_manga_score,
+            'avg_anime_score': avg_anime_score,
+            'total_chapters': total_chapters,
+            'total_episodes': total_episodes,
+            'manga_completed': manga_completed,
+            'anime_completed': anime_completed
+        }
+
+        for field_name, value in numeric_fields.items():
+            if not isinstance(value, (int, float)) or value < 0:
+                logger.warning(f"Invalid {field_name}: {value}, setting to 0")
+                numeric_fields[field_name] = 0
+
+        logger.debug(f"User stats - Manga: {total_manga}, Anime: {total_anime}, Chapters: {total_chapters}, Episodes: {total_episodes}")
+        logger.debug(f"Average scores - Manga: {avg_manga_score:.2f}, Anime: {avg_anime_score:.2f}")
+
+        # Upsert with guild_id for proper multi-guild support
+        query = """
+            INSERT INTO user_stats (
+                discord_id, guild_id, username, total_manga, total_anime,
+                avg_manga_score, avg_anime_score, total_chapters, total_episodes, manga_completed, anime_completed
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(discord_id, guild_id) DO UPDATE SET
+                username=excluded.username,
+                total_manga=excluded.total_manga,
+                total_anime=excluded.total_anime,
+                avg_manga_score=excluded.avg_manga_score,
+                avg_anime_score=excluded.avg_anime_score,
+                total_chapters=excluded.total_chapters,
+                total_episodes=excluded.total_episodes,
+                manga_completed=excluded.manga_completed,
+                anime_completed=excluded.anime_completed
+        """
+
+        await execute_db_operation(
+            f"upsert user stats for {username} in guild {guild_id}",
+            query,
+            (
+                discord_id,
+                guild_id,
+                username.strip(),
+                numeric_fields['total_manga'],
+                numeric_fields['total_anime'],
+                numeric_fields['avg_manga_score'],
+                numeric_fields['avg_anime_score'],
+                numeric_fields['total_chapters'],
+                numeric_fields['total_episodes'],
+                numeric_fields.get('manga_completed', 0),
+                numeric_fields.get('anime_completed', 0)
+            )
+        )
+
+        logger.info(f"✅ Successfully upserted stats for {username} in guild {guild_id}")
+
+    except ValueError as validation_error:
+        logger.error(f"Validation error upserting user stats: {validation_error}")
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error upserting stats for {discord_id} in guild {guild_id}: {e}", exc_info=True)
         raise
 
 

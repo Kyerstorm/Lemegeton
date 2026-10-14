@@ -378,7 +378,7 @@ class LoliList(commands.Cog):
                 prompt_msg = await ctx.send(embed=prompt, view=confirm)
                 await confirm.wait()
                 try:
-                    await msg.delete()
+                    await prompt_msg.delete()
                 except Exception:
                     pass
             except Exception:
