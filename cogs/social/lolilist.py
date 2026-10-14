@@ -624,17 +624,16 @@ class LoliList(commands.Cog):
                     await send_temp(ctx, discord.Embed(description="Cancelled final.", color=PALETTE.DANGER))
                     return
 
-                # perform deletion
+                # Snapshot the PostgreSQL data before the irreversible deletion.
+                try:
+                    await self._backup_postgres_tables("before_delete_all")
+                except Exception:
+                    logger.exception("Could not snapshot LoliList before delete-all")
                 try:
                     await execute_db_operation("delete_all", "DELETE FROM lolilist_entries", ())
                     await execute_db_operation("insert_audit", "INSERT INTO loli_audit (mod_id, action, batch_size, details) VALUES (?, ?, ?, ?)",
                                               (ctx.author.id, "delete_all", 0, "deleted all entries"))
                     await send_temp(ctx, discord.Embed(description="✅ All entries deleted globally.", color=PALETTE.SUCCESS))
-                    # backup
-                    try:
-                        await self._backup_postgres_tables("before_delete_all")
-                    except Exception:
-                        pass
                 except Exception as e:
                     logger.error(f"delete_all error: {e}")
                     await send_temp(ctx, discord.Embed(description="❌ Failed to delete all entries (DB error).", color=PALETTE.DANGER))
