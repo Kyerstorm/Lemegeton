@@ -523,61 +523,6 @@ class NewsCog(commands.Cog):
             self.check_tweets.cancel()
             self._task_started = False
 
-    # ---------------------- JSON Storage Methods ----------------------
-
-    def _load_news_accounts(self) -> List[Dict]:
-        """Load news accounts from JSON file."""
-        try:
-            with open('data/news_accounts.json', 'r') as f:
-                data = json.load(f)
-                return data.get('accounts', [])
-        except (FileNotFoundError, json.JSONDecodeError):
-            return []
-
-    def _save_news_accounts(self, accounts: List[Dict]):
-        """Save news accounts to JSON file."""
-        try:
-            os.makedirs('data', exist_ok=True)
-            with open('data/news_accounts.json', 'w') as f:
-                json.dump({'accounts': accounts}, f, indent=2)
-        except Exception as e:
-            logger.error(f"Error saving news accounts: {e}", exc_info=True)
-
-    def _load_news_metadata(self) -> Dict:
-        """Load news metadata from JSON file."""
-        try:
-            with open('data/news_metadata.json', 'r') as f:
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            return {}
-
-    def _save_news_metadata(self, metadata: Dict):
-        """Save news metadata to JSON file."""
-        try:
-            os.makedirs('data', exist_ok=True)
-            with open('data/news_metadata.json', 'w') as f:
-                json.dump(metadata, f, indent=2)
-        except Exception as e:
-            logger.error(f"Error saving news metadata: {e}", exc_info=True)
-
-    def _load_news_filters(self) -> List[str]:
-        """Load news filters from JSON file."""
-        try:
-            with open('data/news_filters.json', 'r') as f:
-                data = json.load(f)
-                return data.get('filters', [])
-        except (FileNotFoundError, json.JSONDecodeError):
-            return []
-
-    def _save_news_filters(self, filters: List[str]):
-        """Save news filters to JSON file."""
-        try:
-            os.makedirs('data', exist_ok=True)
-            with open('data/news_filters.json', 'w') as f:
-                json.dump({'filters': filters}, f, indent=2)
-        except Exception as e:
-            logger.error(f"Error saving news filters: {e}", exc_info=True)
-
     # ---------------------- PostgreSQL-backed settings ----------------------
 
     async def get_news_accounts_json(self) -> List[Dict]:
