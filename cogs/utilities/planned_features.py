@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 import discord
 from discord.ext import commands
 from typing import Optional, List
@@ -11,11 +12,11 @@ logger = logging.getLogger('planned_features')
 
 # Status types with colors and emojis
 STATUS_CONFIG = {
-    'planned': {'emoji': '📋', 'color': discord.Color.blue(), 'label': 'Planned'},
-    'in_progress': {'emoji': '🔄', 'color': discord.Color.orange(), 'label': 'In Progress'},
-    'testing': {'emoji': '🧪', 'color': discord.Color.yellow(), 'label': 'Testing'},
-    'completed': {'emoji': '✅', 'color': discord.Color.green(), 'label': 'Completed'},
-    'cancelled': {'emoji': '❌', 'color': discord.Color.red(), 'label': 'Cancelled'},
+    'planned': {'emoji': '📋', 'color': PALETTE.PRIMARY, 'label': 'Planned'},
+    'in_progress': {'emoji': '🔄', 'color': PALETTE.WARNING, 'label': 'In Progress'},
+    'testing': {'emoji': '🧪', 'color': PALETTE.WARNING, 'label': 'Testing'},
+    'completed': {'emoji': '✅', 'color': PALETTE.SUCCESS, 'label': 'Completed'},
+    'cancelled': {'emoji': '❌', 'color': PALETTE.DANGER, 'label': 'Cancelled'},
     'on_hold': {'emoji': '⏸️', 'color': discord.Color.light_gray(), 'label': 'On Hold'}
 }
 
@@ -243,7 +244,7 @@ class PlannedFeatures(commands.Cog):
             title += f" ({', '.join(filters_text)})"
 
         # Determine embed color based on status filter or use default
-        embed_color = get_status_color(status_filter) if status_filter else discord.Color.blue()
+        embed_color = get_status_color(status_filter) if status_filter else PALETTE.PRIMARY
 
         # Create embed
         embed = discord.Embed(
@@ -862,7 +863,7 @@ class PlannedFeatures(commands.Cog):
             embed = discord.Embed(
                 title="⚠️ Confirm Feature Removal",
                 description=f"Are you sure you want to remove this feature?",
-                color=discord.Color.orange()
+                color=PALETTE.WARNING
             )
             
             embed.add_field(
@@ -901,7 +902,7 @@ class PlannedFeatures(commands.Cog):
                 embed = discord.Embed(
                     title="✅ Feature Removed Successfully",
                     description=f"Removed: **{self.feature_name}**",
-                    color=discord.Color.green(),
+                    color=PALETTE.SUCCESS,
                     timestamp=datetime.now()
                 )
                 
