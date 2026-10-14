@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -530,7 +531,7 @@ class BrowseCog(commands.Cog):
                 progress_embed = discord.Embed(
                     title="👥 Registered Users' Progress",
                     description=description_text,
-                    color=discord.Color.blue()
+                    color=PALETTE.PRIMARY
                 )
                 media_title = self.media_data['title']['english'] or self.media_data['title']['romaji']
                 emoji = '🎬' if self.real_type == 'ANIME' else '📖'
@@ -578,7 +579,7 @@ class BrowseCog(commands.Cog):
                         loading_embed = discord.Embed(
                             title="👥 Registered Users' Progress",
                             description="Loading user progress... This may take ~7 seconds.",
-                            color=discord.Color.blue()
+                            color=PALETTE.PRIMARY
                         )
                         try:
                             await interaction.edit_original_response(embed=loading_embed, view=self)
@@ -634,7 +635,7 @@ class BrowseCog(commands.Cog):
                         loading_embed = discord.Embed(
                             title="👥 Registered Users' Progress",
                             description="Loading more users... This may take ~7 seconds.",
-                            color=discord.Color.blue()
+                            color=PALETTE.PRIMARY
                         )
                         try:
                             await interaction.edit_original_response(embed=loading_embed, view=self)
