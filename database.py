@@ -2011,6 +2011,236 @@ async def init_booster_roles_table():
     logger.info("✅ Booster roles table ready.")
 
 
+async def get_booster_role(discord_id: int, guild_id: int) -> Optional[int]:
+    """Get the booster role ID for a user in a guild."""
+    try:
+        role = await execute_db_operation(
+            "get booster role",
+            "SELECT role_id FROM booster_roles WHERE discord_id = ? AND guild_id = ?",
+            (discord_id, guild_id),
+            fetch_type='one'
+        )
+        return role[0] if role else None
+    except Exception as e:
+        logger.error(f"Error getting booster role for {discord_id} in guild {guild_id}: {e}", exc_info=True)
+        return None
+
+
+async def set_booster_role(discord_id: int, guild_id: int, role_id: int) -> bool:
+    """Set or update the booster role for a user in a guild."""
+    try:
+        await execute_db_operation(
+            "set booster role",
+            """INSERT INTO booster_roles (discord_id, guild_id, role_id, updated_at)
+               VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+               ON CONFLICT(discord_id, guild_id) DO UPDATE SET
+                   role_id = excluded.role_id,
+                   updated_at = CURRENT_TIMESTAMP""",
+            (discord_id, guild_id, role_id)
+        )
+        logger.info(f"✅ Set booster role {role_id} for user {discord_id} in guild {guild_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Error setting booster role for {discord_id} in guild {guild_id}: {e}", exc_info=True)
+        return False
+
+
+async def remove_booster_role(discord_id: int, guild_id: int) -> bool:
+    """Remove the booster role tracking for a user in a guild."""
+    try:
+        await execute_db_operation(
+            "remove booster role",
+            "DELETE FROM booster_roles WHERE discord_id = ? AND guild_id = ?",
+            (discord_id, guild_id)
+        )
+        logger.info(f"✅ Removed booster role tracking for user {discord_id} in guild {guild_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Error removing booster role for {discord_id} in guild {guild_id}: {e}", exc_info=True)
+        return False
+
+
+# ------------------------------------------------------
+# SAY COMMAND LOGS
+# ------------------------------------------------------
+async def init_say_command_logs_table():
+    """Initialize the say command logs table for moderation accountability."""
+    logger.info("🔧 Initializing say command logs table...")
+    await execute_db_operation(
+        "create say command logs table",
+        """
+        CREATE TABLE IF NOT EXISTS say_command_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            guild_id INTEGER NOT NULL,
+            channel_id INTEGER NOT NULL,
+            message_content TEXT NOT NULL,
+            is_embed INTEGER DEFAULT 0,
+            reply_to_message_id INTEGER,
+            sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+    )
+    await execute_db_operation(
+        "index say logs by guild",
+        "CREATE INDEX IF NOT EXISTS idx_say_logs_guild ON say_command_logs(guild_id)",
+    )
+    await execute_db_operation(
+        "index say logs by user",
+        "CREATE INDEX IF NOT EXISTS idx_say_logs_user ON say_command_logs(user_id)",
+    )
+    logger.info("✅ Say command logs table ready.")
+
+
+# ------------------------------------------------------
+# BOT MODERATORS
+# ------------------------------------------------------
+async def add_bot_moderator(discord_id: int, username: str, added_by: int):
+    """Add a bot moderator."""
+    try:
+        # Explicit upsert (the SQLite version used INSERT OR REPLACE) keeps the row id.
+        await execute_db_operation(
+            "add bot moderator",
+            """
+            INSERT INTO bot_moderators (discord_id, username, added_by, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT (discord_id) DO UPDATE SET
+                username = excluded.username,
+                added_by = excluded.added_by,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (discord_id, username, added_by),
+        )
+        logger.info(f"Added bot moderator: {username} (Discord ID: {discord_id})")
+        return True
+
+    except Exception as e:
+        logger.error(f"Error adding bot moderator {discord_id}: {e}")
+        return False
+
+
+async def remove_bot_moderator(discord_id: int):
+    """Remove a bot moderator."""
+    try:
+        await execute_db_operation(
+            "remove bot moderator",
+            "DELETE FROM bot_moderators WHERE discord_id = ?",
+            (discord_id,),
+        )
+        logger.info(f"Removed bot moderator: Discord ID {discord_id}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Error removing bot moderator {discord_id}: {e}")
+        return False
+
+
+async def is_bot_moderator(discord_id: int):
+    """Check if a user is a bot moderator."""
+    try:
+        result = await execute_db_operation(
+            "check bot moderator",
+            "SELECT discord_id FROM bot_moderators WHERE discord_id = ?",
+            (discord_id,),
+            fetch_type="one",
+        )
+        return result is not None
+
+    except Exception as e:
+        logger.error(f"Error checking if user {discord_id} is bot moderator: {e}")
+        return False
+
+
+async def get_all_bot_moderators():
+    """Get all bot moderators."""
+    try:
+        return await execute_db_operation(
+            "get all bot moderators",
+            "SELECT discord_id, username, added_by, created_at FROM bot_moderators ORDER BY username",
+            fetch_type="all",
+        ) or []
+
+    except Exception as e:
+        logger.error(f"Error getting all bot moderators: {e}")
+        return []
+
+
+async def is_user_bot_moderator(user):
+    """
+    Check if a user is a bot moderator or admin.
+    Bot moderators can perform bot-wide actions like publishing changelogs.
+    """
+    try:
+        # Check if user is the admin
+        if hasattr(user, 'id') and user.id == config.ADMIN_DISCORD_ID:
+            return True
+
+        # Check if user is in bot moderators table
+        if hasattr(user, 'id'):
+            return await is_bot_moderator(user.id)
+
+        return False
+
+    except Exception as e:
+        logger.error(f"Error checking if user is bot moderator: {e}")
+        return False
+
+
+# ------------------------------------------------------
+# GUILD MODERATOR ROLES
+# ------------------------------------------------------
+async def get_guild_mod_role(guild_id: int):
+    """Get the moderator role for a guild."""
+    try:
+        result = await execute_db_operation(
+            "get guild mod role",
+            "SELECT role_id FROM guild_mod_roles WHERE guild_id = ?",
+            (guild_id,),
+            fetch_type="one",
+        )
+        return result[0] if result else None
+
+    except Exception as e:
+        logger.error(f"Error getting mod role for guild {guild_id}: {e}")
+        return None
+
+
+async def is_user_moderator(user, guild_id: int):
+    """
+    Check if a user is a moderator based on guild mod role configuration.
+    Falls back to config.MOD_ROLE_ID if no guild-specific role is set.
+    """
+    try:
+        # First check guild-specific mod role
+        guild_mod_role_id = await get_guild_mod_role(guild_id)
+
+        if guild_mod_role_id:
+            # Check if user has the guild-specific mod role
+            if hasattr(user, 'roles'):
+                for role in user.roles:
+                    if getattr(role, 'id', None) == guild_mod_role_id:
+                        return True
+        else:
+            # Fall back to global config MOD_ROLE_ID if no guild-specific role
+            if config.MOD_ROLE_ID and hasattr(user, 'roles'):
+                for role in user.roles:
+                    if getattr(role, 'id', None) == config.MOD_ROLE_ID:
+                        return True
+
+        # Final fallback to permission checks
+        if hasattr(user, 'guild_permissions'):
+            return user.guild_permissions.manage_messages or user.guild_permissions.administrator
+
+        return False
+
+    except Exception as e:
+        logger.error(f"Error checking if user is moderator: {e}")
+        # Fallback to permission check on error
+        if hasattr(user, 'guild_permissions'):
+            return user.guild_permissions.manage_messages or user.guild_permissions.administrator
+        return False
+
+
 # ------------------------------------------------------
 # INVITE TRACKER TABLES
 # ------------------------------------------------------
