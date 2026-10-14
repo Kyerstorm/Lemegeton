@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 import discord
 from discord.ext import commands
 import logging
@@ -166,7 +167,7 @@ class AdminLogin(commands.Cog):
                     f"**{discord_user.mention}** is already linked to AniList user **{current_name}**.\n\n"
                     f"Would you like to swap to **{anilist_user}** instead?"
                 ),
-                color=discord.Color.gold()
+                color=PALETTE.WARNING
             )
             embed.set_footer(text="You can safely update this connection.")
 
@@ -198,7 +199,7 @@ class AdminLogin(commands.Cog):
                 f"Successfully linked **{discord_user.mention}** with AniList user "
                 f"**{actual_name}** in **{guild.name}**!"
             ),
-            color=discord.Color.blue()
+            color=PALETTE.PRIMARY
         )
 
         embed.add_field(name="Profile", value=f"[View AniList Profile](https://anilist.co/user/{actual_name})")
