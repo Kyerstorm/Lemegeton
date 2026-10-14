@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 """
 Discord Timestamp Converter Cog
 Converts dates and times to Discord's universal timestamp format
@@ -208,7 +209,7 @@ class TimestampConverter(commands.Cog):
         embed = discord.Embed(
             title="📅 Discord Timestamp",
             description=f"**Copy this:**\n```\n{discord_syntax}\n```",
-            color=discord.Color.blue()
+            color=PALETTE.PRIMARY
         )
 
         # Add preview field
