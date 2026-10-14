@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -142,7 +143,7 @@ class Say(commands.Cog):
                 # Send as embed
                 embed_obj = discord.Embed(
                     description=message,
-                    color=discord.Color.blue(),
+                    color=PALETTE.PRIMARY,
                     timestamp=datetime.utcnow()
                 )
                 embed_obj.set_footer(
