@@ -17,7 +17,7 @@ try:
     try:
         from helpers.steam_helper import (
             logger, safe_json, fetch_text, chunk_list, random_color, human_hours,
-            safe_text, make_friend_grid_image, STEAM_API_KEY, DB_PATH, PIL_AVAILABLE,
+            safe_text, make_friend_grid_image, STEAM_API_KEY, PIL_AVAILABLE,
             get_library_stats, get_vac_ban_status, check_profile_privacy,
             GAMING_UTILS_AVAILABLE
         )
@@ -34,7 +34,7 @@ try:
         # Retry import; capture missing-name errors and provide safe fallbacks
         from helpers.steam_helper import (
             logger, safe_json, fetch_text, chunk_list, random_color, human_hours,
-            safe_text, make_friend_grid_image, STEAM_API_KEY, DB_PATH, PIL_AVAILABLE,
+            safe_text, make_friend_grid_image, STEAM_API_KEY, PIL_AVAILABLE,
             get_library_stats, get_vac_ban_status, check_profile_privacy,
             GAMING_UTILS_AVAILABLE
         )
@@ -54,7 +54,7 @@ except ModuleNotFoundError:
     # real problem (missing package, typo, etc.).
     from helpers.steam_helper import (
         logger, safe_json, fetch_text, chunk_list, random_color, human_hours,
-        safe_text, make_friend_grid_image, STEAM_API_KEY, DB_PATH, PIL_AVAILABLE,
+        safe_text, make_friend_grid_image, STEAM_API_KEY, PIL_AVAILABLE,
         get_library_stats, get_vac_ban_status, check_profile_privacy,
         GAMING_UTILS_AVAILABLE
     )
