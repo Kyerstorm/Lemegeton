@@ -14,7 +14,7 @@ try:
     # absolute import first, then add the repository root to sys.path and retry.
     try:
         from helpers.steam_helper import (
-            logger, safe_json, STEAM_API_KEY, DB_PATH,
+            logger, safe_json, STEAM_API_KEY,
             RecommendationView, create_recommendation_embed
         )
         from helpers.embed_helper import build_error_embed, build_info_embed
@@ -27,7 +27,7 @@ try:
 
         # Retry import; capture missing-name errors and provide safe fallbacks
         from helpers.steam_helper import (
-            logger, safe_json, STEAM_API_KEY, DB_PATH,
+            logger, safe_json, STEAM_API_KEY,
             RecommendationView, create_recommendation_embed
         )
         from helpers.embed_helper import build_error_embed, build_info_embed
@@ -44,7 +44,7 @@ except ModuleNotFoundError:
     # Retry import; let any remaining ImportError bubble up to surface the
     # real problem (missing package, typo, etc.).
     from helpers.steam_helper import (
-        logger, safe_json, STEAM_API_KEY, DB_PATH,
+        logger, safe_json, STEAM_API_KEY,
         RecommendationView, create_recommendation_embed
     )
     from helpers.embed_helper import build_error_embed, build_info_embed
