@@ -1819,7 +1819,7 @@ async def init_steam_users_table():
     await execute_db_operation(
         "ensure Steam registrations have a composite primary key",
         """
-        DO $
+        DO $do$
         DECLARE existing_pk TEXT;
         BEGIN
             SELECT constraint_name INTO existing_pk
@@ -1833,7 +1833,7 @@ async def init_steam_users_table():
             END IF;
             ALTER TABLE steam_users
                 ADD CONSTRAINT steam_users_discord_guild_pk PRIMARY KEY (discord_id, guild_id);
-        END $;
+        END $do$;
         """,
     )
     await execute_db_operation(
