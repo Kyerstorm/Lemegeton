@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 """
 Unified Bot Moderators Management Interface
 Consolidates bot moderator commands into a single interactive interface
@@ -83,7 +84,7 @@ class BotModeratorsMainView(discord.ui.View):
             embed = discord.Embed(
                 title="👑 Bot Moderators",
                 description="Users who can perform bot-wide actions (changelog publishing, bot management, etc.)",
-                color=discord.Color.purple()
+                color=PALETTE.PRIMARY
             )
             
             moderator_list = []
@@ -389,7 +390,7 @@ class BotModerators(commands.Cog):
                     "⚠️ **Important:** Bot moderators have elevated permissions across **all servers**. "
                     "Only grant this role to highly trusted users."
                 ),
-                color=discord.Color.purple()
+                color=PALETTE.PRIMARY
             )
             
             embed.add_field(
