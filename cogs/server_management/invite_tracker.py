@@ -5,13 +5,12 @@ from discord import app_commands
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-import aiosqlite
 import asyncio
 from datetime import datetime, timezone
 import random
 import json
 
-from database import DB_PATH, execute_db_operation
+from database import execute_db_operation
 from cogs_test.general_commands.dashboard import command_meta
 from helpers.embed_helper import build_error_embed, build_success_embed, build_info_embed
 
