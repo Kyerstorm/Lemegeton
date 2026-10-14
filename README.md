@@ -217,7 +217,7 @@ PRIMARY_GUILD_ID=123456789012345678
 
 # Optional
 BOT_ID=your_bot_user_id
-DATABASE_PATH=data/database.db
+DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DATABASE
 ENVIRONMENT=development
 STEAM_API_KEY=your_steam_api_key_here
 ```
@@ -229,7 +229,7 @@ STEAM_API_KEY=your_steam_api_key_here
 | `DISCORD_TOKEN` | ✅ Yes | Your Discord bot token from the Developer Portal |
 | `PRIMARY_GUILD_ID` | ✅ Yes | Primary guild ID for backward compatibility |
 | `BOT_ID` | ❌ No | Your bot's user ID (auto-detected if not set) |
-| `DATABASE_PATH` | ❌ No | Path to SQLite database (default: `data/database.db`) |
+| `DATABASE_URL` | ❌ No | PostgreSQL connection URL (preferred) |
 | `ENVIRONMENT` | ❌ No | `development` or `production` (affects cog watch interval) |
 | `STEAM_API_KEY` | ❌ No | Steam API key for gaming features (get from [Steam Web API](https://steamcommunity.com/dev/apikey)) |
 
@@ -452,7 +452,7 @@ In the Railway dashboard, add these environment variables:
 DISCORD_TOKEN=your_discord_bot_token
 PRIMARY_GUILD_ID=123456789012345678
 BOT_ID=your_bot_user_id
-DATABASE_PATH=/data/database.db
+DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DATABASE
 ENVIRONMENT=production
 STEAM_API_KEY=your_steam_api_key (optional)
 ```
