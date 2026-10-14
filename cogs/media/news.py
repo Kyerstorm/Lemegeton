@@ -13,12 +13,6 @@ from discord.ext import commands, tasks
 from discord import app_commands
 import aiohttp
 
-try:
-    import aiosqlite
-    _AIOSQLITE_AVAILABLE = True
-except ImportError:
-    _AIOSQLITE_AVAILABLE = False
-    aiosqlite = None
 
 import database
 from helpers.command_logger import log_command
@@ -427,14 +421,11 @@ class NewsCog(commands.Cog):
 
     async def initialize(self):
         """Initialize the news cog and start background task."""
-        if not _AIOSQLITE_AVAILABLE:
-            print("❌ aiosqlite not available - news cog disabled")
-            logger.error("aiosqlite not available - news cog disabled", exc_info=True)
-            return
-
         try:
-            print("✅ News cog initialized using main database")
-            logger.info("News cog initialized using main database")
+            import database
+            await database.init_news_tables()
+            print("✅ News cog initialized using PostgreSQL")
+            logger.info("News cog initialized using PostgreSQL")
 
             # Ensure task starts - it will run immediately after bot is ready
             # thanks to the before_loop decorator
@@ -587,119 +578,44 @@ class NewsCog(commands.Cog):
         except Exception as e:
             logger.error(f"Error saving news filters: {e}", exc_info=True)
 
-    # JSON-based replacements for database functions
+    # ---------------------- PostgreSQL-backed settings ----------------------
+
     async def get_news_accounts_json(self) -> List[Dict]:
-        """Get all monitored news accounts from JSON."""
-        return self._load_news_accounts()
+        """Load monitored accounts from the shared PostgreSQL database."""
+        import database
+        return await database.get_news_accounts()
 
     async def add_news_account_json(self, handle: str, channel_id: int) -> bool:
-        """Add a new monitored news account to JSON."""
-        try:
-            accounts = self._load_news_accounts()
-            # Check if account already exists
-            if any(acc['handle'] == handle for acc in accounts):
-                return False
-            
-            accounts.append({
-                'handle': handle,
-                'channel_id': channel_id,
-                'last_tweet_id': None
-            })
-            self._save_news_accounts(accounts)
-            logger.info(f"Added news account: {handle} -> channel {channel_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Error adding news account {handle}: {e}", exc_info=True)
-            return False
+        import database
+        return await database.add_news_account(handle, channel_id)
 
     async def remove_news_account_json(self, handle: str) -> bool:
-        """Remove a monitored news account from JSON."""
-        try:
-            accounts = self._load_news_accounts()
-            original_length = len(accounts)
-            accounts = [acc for acc in accounts if acc['handle'] != handle]
-            
-            if len(accounts) < original_length:
-                self._save_news_accounts(accounts)
-                logger.info(f"Removed news account: {handle}")
-                return True
-            else:
-                logger.warning(f"News account not found: {handle}")
-                return False
-        except Exception as e:
-            logger.error(f"Error removing news account {handle}: {e}", exc_info=True)
-            return False
+        import database
+        return await database.remove_news_account(handle)
 
     async def update_last_tweet_id_json(self, handle: str, tweet_id: str) -> bool:
-        """Update the last tweet ID for a monitored account in JSON."""
-        try:
-            accounts = self._load_news_accounts()
-            for account in accounts:
-                if account['handle'] == handle:
-                    account['last_tweet_id'] = tweet_id
-                    self._save_news_accounts(accounts)
-                    return True
-            return False
-        except Exception as e:
-            logger.error(f"Error updating last tweet ID for {handle}: {e}", exc_info=True)
-            return False
+        import database
+        return await database.update_last_tweet_id(handle, tweet_id)
 
     async def get_news_last_check_json(self) -> Optional[datetime]:
-        """Get the last news check timestamp from JSON."""
-        try:
-            metadata = self._load_news_metadata()
-            last_check_str = metadata.get('last_check')
-            if last_check_str:
-                return datetime.fromisoformat(last_check_str)
-            return None
-        except Exception as e:
-            logger.error(f"Error getting news last check time: {e}", exc_info=True)
-            return None
+        import database
+        return await database.get_news_last_check()
 
     async def set_news_last_check_json(self, check_time: datetime) -> bool:
-        """Set the last news check timestamp in JSON."""
-        try:
-            metadata = self._load_news_metadata()
-            metadata['last_check'] = check_time.isoformat()
-            self._save_news_metadata(metadata)
-            return True
-        except Exception as e:
-            logger.error(f"Error setting news last check time: {e}", exc_info=True)
-            return False
+        import database
+        return await database.set_news_last_check(check_time)
 
     async def get_news_filters_json(self) -> List[str]:
-        """Get all news filter keywords from JSON."""
-        return self._load_news_filters()
+        import database
+        return await database.get_news_whitelist()
 
     async def add_news_filter_json(self, word: str) -> bool:
-        """Add a new news filter keyword to JSON."""
-        try:
-            filters = self._load_news_filters()
-            word_lower = word.lower()
-            if word_lower not in filters:
-                filters.append(word_lower)
-                self._save_news_filters(filters)
-                logger.info(f"Added news filter keyword: {word}")
-                return True
-            return False
-        except Exception as e:
-            logger.error(f"Error adding news filter keyword {word}: {e}", exc_info=True)
-            return False
+        import database
+        return await database.add_news_whitelist(word)
 
     async def remove_news_filter_json(self, word: str) -> bool:
-        """Remove a news filter keyword from JSON."""
-        try:
-            filters = self._load_news_filters()
-            word_lower = word.lower()
-            if word_lower in filters:
-                filters.remove(word_lower)
-                self._save_news_filters(filters)
-                logger.info(f"Removed news filter keyword: {word}")
-                return True
-            return False
-        except Exception as e:
-            logger.error(f"Error removing news filter keyword {word}: {e}", exc_info=True)
-            return False
+        import database
+        return await database.remove_news_whitelist(word)
 
     # Account-specific whitelist JSON methods
     def _load_account_whitelists(self) -> Dict[str, List[str]]:
