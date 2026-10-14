@@ -566,7 +566,7 @@ async def setup(bot: commands.Bot):
 ### Critical Conventions
 
 1. ✅ **Always use guild-aware database functions** - Pass `interaction.guild_id`
-2. ✅ **Async-first** - Use `aiohttp`, `aiosqlite` (never `requests`, `sqlite3`)
+2. ✅ **Async-first** - Use `aiohttp` for HTTP and the shared PostgreSQL layer in `database.py` for persistence (never open SQLite databases from cogs)
 3. ✅ **Defer long operations** - Always `await interaction.response.defer()` for operations >3 seconds
 4. ✅ **Error handling** - Wrap responses in try/except for `discord.NotFound`
 5. ✅ **Command logging** - Use `@log_command` decorator
@@ -583,6 +583,11 @@ async def setup(bot: commands.Bot):
 - **Dashboard Database:** `data/dashboard_guilds.db` (guild configurations)
 - **Connection Pooling:** Automatic retry logic (3 attempts, 1s delay)
 - **Multi-Guild Isolation:** All tables use `(discord_id, guild_id)` composite keys
+
+### Shared Visual System
+
+- `helpers/color_palette.py` defines Lemegeton's shared violet/navy brand colors and semantic success, warning, danger, info, and neutral tokens.
+- Standard command embeds should use `PALETTE` rather than hard-coded colors; user-selected theme colors and role colors are intentional exceptions.
 
 ### Key Tables
 
