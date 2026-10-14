@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 """
 Steam API Helper Functions
 Centralized functions for Steam API interactions, data processing, and image generation
@@ -334,10 +335,8 @@ def random_color() -> discord.Color:
     """
     Get random Discord color from predefined palette.
     """
-    palette = [
-        discord.Color.blurple(), discord.Color.blue(), discord.Color.teal(),
-        discord.Color.green(), discord.Color.gold(), discord.Color.purple(),
-        discord.Color.dark_blue(), discord.Color.dark_teal()
+    palette = [PALETTE.PRIMARY, PALETTE.SECONDARY, PALETTE.SUCCESS, PALETTE.WARNING]
+        PALETTE.PRIMARY, discord.Color.dark_teal()
     ]
     return random.choice(palette)
 
@@ -638,7 +637,7 @@ class RecommendationView(discord.ui.View):
             title=f"🎮 {name}",
             url=f"https://store.steampowered.com/app/{app_id}",
             description=description,
-            color=discord.Color.blue()
+            color=PALETTE.PRIMARY
         )
 
         # Header image
@@ -652,14 +651,14 @@ class RecommendationView(discord.ui.View):
 
         if is_free:
             price_str = "Free to Play"
-            embed.color = discord.Color.green()
+            embed.color = PALETTE.SUCCESS
         elif price_info:
             price_str = price_info.get("final_formatted", "Unknown")
             discount = price_info.get("discount_percent", 0)
             if discount > 0:
                 original = price_info.get("initial_formatted", "")
                 price_str = f"~~{original}~~ **{price_str}** (-{discount}%)"
-                embed.color = discord.Color.gold()
+                embed.color = PALETTE.WARNING
         else:
             price_str = "Price Unknown"
 
@@ -719,19 +718,19 @@ class EnhancedGameView(discord.ui.View):
         # Format price
         if is_free:
             price_str = "Free to Play"
-            color = discord.Color.green()
+            color = PALETTE.SUCCESS
         elif price_info:
             price_str = price_info.get("final_formatted", "Price unknown")
             discount = price_info.get("discount_percent", 0)
             if discount > 0:
                 original = price_info.get("initial_formatted", "")
                 price_str = f"~~{original}~~ → **{price_str}** ({discount}% off)"
-                color = discord.Color.gold()
+                color = PALETTE.WARNING
             else:
-                color = discord.Color.blue()
+                color = PALETTE.PRIMARY
         else:
             price_str = "Price not available"
-            color = discord.Color.dark_gray()
+            color = PALETTE.SECONDARY
         
         embed = discord.Embed(
             title=name,
@@ -1026,13 +1025,13 @@ class ScreenshotView(discord.ui.View):
     def create_screenshot_embed(self, index):
         """Create embed for a specific screenshot"""
         if not self.screenshots or index >= len(self.screenshots):
-            embed = discord.Embed(title="📷 No Screenshots", description="No screenshots available.", color=discord.Color.dark_gray())
+            embed = discord.Embed(title="📷 No Screenshots", description="No screenshots available.", color=PALETTE.SECONDARY)
             return embed
         
         screenshot = self.screenshots[index]
         embed = discord.Embed(
             title=f"📷 {self.game_name} - Screenshots",
-            color=discord.Color.blue()
+            color=PALETTE.PRIMARY
         )
         
         if isinstance(screenshot, dict):
