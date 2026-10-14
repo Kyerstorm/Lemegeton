@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -211,10 +212,10 @@ class Feedback(commands.Cog):
         user_info = f"{user.display_name} (ID: {user.id})"
         normalized_category = category.strip().casefold()
         category_aliases = {
-            "idea": ("ideas", discord.Color.green()),
-            "ideas": ("ideas", discord.Color.green()),
-            "bug": ("bugs", discord.Color.red()),
-            "bugs": ("bugs", discord.Color.red()),
+            "idea": ("ideas", PALETTE.SUCCESS),
+            "ideas": ("ideas", PALETTE.SUCCESS),
+            "bug": ("bugs", PALETTE.DANGER),
+            "bugs": ("bugs", PALETTE.DANGER),
         }
 
         if normalized_category not in category_aliases:
