@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -420,19 +421,19 @@ class SteamRecommendation(commands.Cog):
         # Format price
         if is_free:
             price_str = "Free to Play"
-            color = discord.Color.green()
+            color = PALETTE.SUCCESS
         elif price_info:
             price_str = price_info.get("final_formatted", "Price unknown")
             discount = price_info.get("discount_percent", 0)
             if discount > 0:
                 original = price_info.get("initial_formatted", "")
                 price_str = f"~~{original}~~ → **{price_str}** ({discount}% off)"
-                color = discord.Color.gold()
+                color = PALETTE.WARNING
             else:
-                color = discord.Color.blue()
+                color = PALETTE.PRIMARY
         else:
             price_str = "Price not available"
-            color = discord.Color.dark_gray()
+            color = PALETTE.SECONDARY
         
         embed = discord.Embed(
             title=name,
