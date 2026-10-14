@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -526,7 +527,7 @@ class HelpCog(commands.Cog):
                 "4. Use `/feedback` to suggest improvements\n\n"
                 "**📋 Command Categories:**"
             ),
-            color=discord.Color.blue()
+            color=PALETTE.PRIMARY
         )
         
         # Add category overview
@@ -590,7 +591,7 @@ class HelpCog(commands.Cog):
         embed = discord.Embed(
             title=f"{category_name}",
             description=f"Detailed information for **{len(commands)} commands** in this category:",
-            color=discord.Color.green()
+            color=PALETTE.SUCCESS
         )
         
         # Add each command in the category
