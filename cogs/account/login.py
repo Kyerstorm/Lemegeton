@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -137,7 +138,7 @@ class LoginView(discord.ui.View):
 
         await interaction.response.defer(ephemeral=True)
 
-        embed = discord.Embed(title="📊 Your Account Status", color=discord.Color.blue())
+        embed = discord.Embed(title="📊 Your Account Status", color=PALETTE.PRIMARY)
 
         status_lines = []
 
@@ -194,13 +195,13 @@ class LoginView(discord.ui.View):
 
         if not self.is_registered and not self.steam_data:
             embed.description += "\n\n💡 Connect your accounts to use the bot's features!"
-            embed.color = discord.Color.orange()
+            embed.color = PALETTE.WARNING
         elif self.is_registered and self.steam_data:
             embed.description += "\n\n🎉 All services connected! You have access to all features."
-            embed.color = discord.Color.green()
+            embed.color = PALETTE.SUCCESS
         else:
             embed.description += "\n\n⚡ Consider connecting both services for the full experience!"
-            embed.color = discord.Color.gold()
+            embed.color = PALETTE.WARNING
 
         embed.set_footer(text="Use /steam-profile for detailed gaming stats • Use buttons above to manage connections")
         await interaction.followup.send(embed=embed, ephemeral=True)
@@ -549,7 +550,7 @@ class Login(commands.Cog):
                     embed.set_thumbnail(url=avatar_url)
                 embed.add_field(name="Profile", value=f"https://anilist.co/user/{actual_name}", inline=False)
                 embed.set_footer(text="You can now use all AniList features!")
-                embed.color = discord.Color.blue()  # Keep blue for registration
+                embed.color = PALETTE.PRIMARY  # Keep blue for registration
                 return embed
                 
         except Exception as e:
@@ -731,7 +732,7 @@ class Login(commands.Cog):
                     if profile_url:
                         embed.add_field(name="Profile", value=profile_url, inline=False)
                     embed.set_footer(text="You can now use all Steam features!")
-                    embed.color = discord.Color.blue()  # Keep blue for registration
+                    embed.color = PALETTE.PRIMARY  # Keep blue for registration
                     return embed
                 
         except Exception as e:
@@ -854,7 +855,7 @@ class Login(commands.Cog):
                     title="🔐 Account Management",
                     description=f"Welcome back, **{interaction.user.display_name}**!\n\n"
                                f"Here's your connection status in **{interaction.guild.name}**:",
-                    color=discord.Color.green()
+                    color=PALETTE.SUCCESS
                 )
                 
                 # Add connection status
@@ -893,7 +894,7 @@ class Login(commands.Cog):
                                f"• **AniList** - For anime/manga tracking features\n"
                                f"• **Steam** - For gaming features\n\n"
                                f"Use the buttons below to get started:",
-                    color=discord.Color.orange()
+                    color=PALETTE.WARNING
                 )
                 embed.add_field(
                     name="Available Actions",
