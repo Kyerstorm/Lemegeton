@@ -14,7 +14,7 @@ from database import (
     add_user_guild_aware, get_user_guild_aware, register_user_guild_aware,
     is_user_registered_in_guild, update_username, remove_user
 )
-from config import STEAM_API_KEY, DB_PATH
+from config import STEAM_API_KEY
 from cogs_test.general_commands.dashboard import command_meta
 from helpers.anilist_helper import fetch_anilist_user_basic
 from helpers.text_helper import validate_anilist_username
@@ -723,16 +723,18 @@ class Login(commands.Cog):
         except Exception as e:
             logger.error(f"Error checking AniList user data for {user_id}: {e}")
         
-        # Check Steam connection
+        # Check Steam connection within the requested guild.
         try:
-            import aiosqlite
-            async with aiosqlite.connect(DB_PATH) as db:
-                cursor = await db.execute("SELECT vanity_name FROM steam_users WHERE discord_id = ?", (user_id,))
-                steam_user = await cursor.fetchone()
-                
-                if steam_user:
-                    user_data['steam_connected'] = True
-                    user_data['steam_vanity'] = steam_user[0]
+            import database
+            steam_user = await database.execute_db_operation(
+                "load guild Steam account status",
+                "SELECT vanity_name FROM steam_users WHERE discord_id = ? AND guild_id = ?",
+                (user_id, guild_id),
+                fetch_type="one",
+            )
+            if steam_user:
+                user_data['steam_connected'] = True
+                user_data['steam_vanity'] = steam_user[0]
         except Exception as e:
             logger.error(f"Error checking Steam user data for {user_id}: {e}")
         
@@ -761,23 +763,16 @@ class Login(commands.Cog):
                 return True
                 
             elif service_type == "steam":
-                import aiosqlite
-                async with aiosqlite.connect(DB_PATH) as db:
-                    if guild_id is not None:
-                        # Guild-scoped deletion
-                        await db.execute(
-                            "DELETE FROM steam_users WHERE discord_id = ? AND guild_id = ?",
-                            (user_id, guild_id)
-                        )
-                        logger.info(f"Successfully unregistered user {user_id} from Steam in guild {guild_id}")
-                    else:
-                        # Global deletion
-                        await db.execute(
-                            "DELETE FROM steam_users WHERE discord_id = ?",
-                            (user_id,)
-                        )
-                        logger.info(f"Successfully unregistered user {user_id} from Steam (global)")
-                    await db.commit()
+                if guild_id is None:
+                    logger.warning("Refusing unscoped Steam unregistration for user %s", user_id)
+                    return False
+                import database
+                await database.execute_db_operation(
+                    "delete guild Steam registration",
+                    "DELETE FROM steam_users WHERE discord_id = ? AND guild_id = ?",
+                    (user_id, guild_id),
+                )
+                logger.info("Successfully unregistered user %s from Steam in guild %s", user_id, guild_id)
                 return True
                 
             else:
@@ -938,20 +933,18 @@ class Login(commands.Cog):
             logger.error(f"Error checking AniList health for user {user_id}: {e}")
             health_status["anilist"]["message"] = "Health check failed"
         
-        # Check Steam connection
+        # Check Steam connection within the requested guild.
         try:
-            import aiosqlite
-            async with aiosqlite.connect(DB_PATH) as db:
-                cursor = await db.execute(
-                    "SELECT vanity_name FROM steam_users WHERE discord_id = ?",
-                    (user_id,)
-                )
-                steam_user = await cursor.fetchone()
-                await cursor.close()
-                
-                if steam_user:
-                    health_status["steam"]["connected"] = True
-                    vanity_name = steam_user[0]
+            import database
+            steam_user = await database.execute_db_operation(
+                "load guild Steam account health",
+                "SELECT vanity_name FROM steam_users WHERE discord_id = ? AND guild_id = ?",
+                (user_id, guild_id),
+                fetch_type="one",
+            )
+            if steam_user:
+                health_status["steam"]["connected"] = True
+                vanity_name = steam_user[0]
                     
                     # Verify Steam account still exists
                     steam_data = await self._resolve_steam_vanity(vanity_name)
