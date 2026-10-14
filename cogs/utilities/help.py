@@ -4,7 +4,7 @@ from discord import app_commands
 from discord.ext import commands
 import logging
 from pathlib import Path
-from config import BOT_ID
+from config import ADMIN_DISCORD_ID, BOT_ID
 from cogs_test.general_commands.dashboard import command_meta
 from helpers.embed_helper import build_error_embed, build_warning_embed
 
@@ -344,16 +344,6 @@ class HelpCog(commands.Cog):
         except Exception:
             logger.debug("Failed to enumerate app commands from bot.tree", exc_info=True)
 
-        # Also include legacy commands (prefix commands)
-        try:
-            for cmd in getattr(self.bot, "commands", []):
-                try:
-                    names.add(cmd.name)
-                except Exception:
-                    continue
-        except Exception:
-            logger.debug("Failed to enumerate legacy commands", exc_info=True)
-
         return names
 
     def _get_filtered_command_categories(self) -> dict:
@@ -397,6 +387,52 @@ class HelpCog(commands.Cog):
                 filtered[category] = kept
 
         return filtered
+
+    async def _is_bot_owner(self, user: discord.abc.User) -> bool:
+        """Resolve owner access using the configured owner ID and application ownership."""
+        if ADMIN_DISCORD_ID and user.id == ADMIN_DISCORD_ID:
+            return True
+        try:
+            return bool(await self.bot.is_owner(user))
+        except Exception:
+            logger.debug("Unable to resolve bot owner for user %s", getattr(user, "id", "unknown"), exc_info=True)
+            return False
+
+    def _get_owner_prefix_commands(self) -> dict:
+        """Build prefix-command metadata for the owner-only help category."""
+        result = {}
+        try:
+            commands_iter = self.bot.walk_commands()
+        except Exception:
+            commands_iter = getattr(self.bot, "commands", [])
+
+        for command in commands_iter:
+            try:
+                name = getattr(command, "qualified_name", None) or getattr(command, "name", None)
+                if not name:
+                    continue
+                signature = (getattr(command, "signature", "") or "").strip()
+                usage = "!" + name + ((" " + signature) if signature else "")
+                description = (
+                    getattr(command, "help", None)
+                    or getattr(command, "description", None)
+                    or getattr(command, "short_doc", None)
+                    or "Prefix command."
+                )
+                aliases = list(getattr(command, "aliases", []) or [])
+                note = "Prefix command."
+                if aliases:
+                    note += " Aliases: " + ", ".join("!" + alias for alias in aliases[:8]) + "."
+                result[name] = {
+                    "desc": str(description)[:500],
+                    "usage": usage[:200],
+                    "note": note[:500],
+                    "examples": [usage[:200]],
+                }
+            except Exception:
+                logger.debug("Skipping an unreadable prefix command in owner help", exc_info=True)
+
+        return result
 
     def _get_runtime_command_info(self) -> dict:
         """Return runtime info for commands: {name: {'desc':..., 'usage':...}}.
@@ -487,18 +523,21 @@ class HelpCog(commands.Cog):
         try:
             logger.info(f"Help command requested by {interaction.user.display_name} (ID: {interaction.user.id}) - Category: {category.value if category else 'overview'}")
             
-            # Filter categories/commands at runtime to only show registered commands
-            self._filtered_command_categories = self._get_filtered_command_categories()
+            # Keep user-specific help data local to this invocation to avoid cross-user leakage.
+            filtered_categories = self._get_filtered_command_categories()
+            is_owner = await self._is_bot_owner(interaction.user)
+            if is_owner:
+                prefix_commands = self._get_owner_prefix_commands()
+                if prefix_commands:
+                    filtered_categories["🔒 Bot Owner — Prefix Commands"] = prefix_commands
 
             if category is None:
-                # Show overview of all categories
-                embed = await self._create_overview_embed(interaction)
+                embed = await self._create_overview_embed(interaction, filtered_categories)
             else:
-                # Show detailed category information
-                embed = await self._create_category_embed(category.value, interaction)
-            
-            # Create navigation view
-            view = HelpNavigationView(self, interaction.user)
+                embed = await self._create_category_embed(category.value, interaction, filtered_categories)
+
+            # Ephemeral response plus user-bound navigation keeps this help private.
+            view = HelpNavigationView(self, interaction.user, filtered_categories, is_owner=is_owner)
             
             await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
             logger.info(f"Help information sent successfully to {interaction.user.display_name}")
@@ -513,9 +552,15 @@ class HelpCog(commands.Cog):
             
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
-    async def _create_overview_embed(self, interaction: discord.Interaction) -> discord.Embed:
-        """Create the main overview embed showing all categories."""
-        
+    async def _create_overview_embed(
+        self,
+        interaction: discord.Interaction,
+        categories: dict = None,
+    ) -> discord.Embed:
+        """Create an overview using only the categories visible to this requester."""
+        categories = categories if categories is not None else self.command_categories
+        total_commands = sum(len(items) for items in categories.values())
+
         embed = discord.Embed(
             title="🤖 Lemegeton Bot - Command Help",
             description=(
@@ -532,7 +577,7 @@ class HelpCog(commands.Cog):
         
         # Add category overview
         category_overview = []
-        for category_name, commands in getattr(self, "_filtered_command_categories", self.command_categories).items():
+        for category_name, commands in categories.items():
             command_count = len(commands)
             category_overview.append(f"{category_name} • **{command_count} commands**")
         
@@ -565,15 +610,26 @@ class HelpCog(commands.Cog):
         )
         
         embed.set_footer(
-            text=f"Total Commands: {sum(len(cmds) for cmds in self.command_categories.values())} | Use the dropdown to explore categories",
-            icon_url=self.bot.user.avatar.url if self.bot.user.avatar else None
+            text=f"{total_commands} available commands • Select a category to explore",
+            icon_url=getattr(getattr(self.bot, "user", None), "display_avatar", None).url if getattr(getattr(self.bot, "user", None), "display_avatar", None) else None
         )
         
         return embed
 
-    async def _create_category_embed(self, category_key: str, interaction: discord.Interaction) -> discord.Embed:
-        """Create a detailed embed for a specific category."""
-        
+    async def _create_category_embed(
+        self,
+        category_key: str,
+        interaction: discord.Interaction,
+        categories: dict = None,
+    ) -> discord.Embed:
+        """Create a category page using only commands visible to this requester."""
+        categories = categories if categories is not None else self.command_categories
+        if category_key == "owner" and not await self._is_bot_owner(interaction.user):
+            return build_warning_embed(
+                title="Owner Commands",
+                description="This help category is available only to the bot owner.",
+            )
+
         category_mapping = {
             "account": "🔐 Account Management",
             "anime": "📺 Anime & Manga",
@@ -582,56 +638,47 @@ class HelpCog(commands.Cog):
             "server": "⚙️ Server Management",
             "admin": "👑 Admin",
             "social": "👥 Social",
-            "utilities": "🛠️ Utilities"
+            "utilities": "🛠️ Utilities",
+            "owner": "🔒 Bot Owner — Prefix Commands",
         }
-        
         category_name = category_mapping.get(category_key, "Unknown Category")
-        commands = self.command_categories.get(category_name, {})
-        
-        embed = discord.Embed(
-            title=f"{category_name}",
-            description=f"Detailed information for **{len(commands)} commands** in this category:",
-            color=PALETTE.SUCCESS
-        )
-        
-        # Add each command in the category
-        # Use the filtered mapping if available
-        commands = getattr(self, "_filtered_command_categories", self.command_categories).get(category_name, {})
+        command_items = categories.get(category_name, {})
 
-        for cmd_name, cmd_info in commands.items():
-            # Build the field value with optional examples
+        embed = discord.Embed(
+            title=category_name,
+            description=f"**{len(command_items)} commands** in this category.",
+            color=PALETTE.PRIMARY if category_key == "owner" else PALETTE.SECONDARY,
+        )
+
+        for cmd_name, cmd_info in command_items.items():
             field_value = (
-                f"**Description:** {cmd_info['desc']}\n"
-                f"**Usage:** `{cmd_info['usage']}`\n"
+                f"**Description:** {cmd_info.get('desc', 'No description available.')}"
+                f"\n**Usage:** `{cmd_info.get('usage', 'Not available')}`\n"
             )
-            
-            # Add examples if available
-            if 'examples' in cmd_info and cmd_info['examples']:
-                examples_text = '\n'.join([f"  • `{ex}`" for ex in cmd_info['examples']])
-                field_value += f"**Examples:**\n{examples_text}\n"
-            
-            field_value += f"💡 *{cmd_info['note']}*"
-            
+            examples = cmd_info.get("examples") or []
+            if examples:
+                field_value += "**Examples:**\n" + "\n".join(f"  • `{example}`" for example in examples[:3]) + "\n"
+            if cmd_info.get("note"):
+                field_value += f"\n*{cmd_info['note']}*"
+            if len(field_value) > 1000:
+                field_value = field_value[:997] + "..."
+
+            command_prefix = "!" if category_key == "owner" else "/"
             embed.add_field(
-                name=f"/{cmd_name}",
+                name=(command_prefix + cmd_name)[:256],
                 value=field_value,
-                inline=False
+                inline=False,
             )
-        
-        # Add category-specific tips
+
         tips = self._get_category_tips(category_key)
         if tips:
-            embed.add_field(
-                name="💡 Category Tips",
-                value=tips,
-                inline=False
-            )
-        
+            embed.add_field(name="Category Tips", value=tips[:1000], inline=False)
+
+        avatar = getattr(getattr(self.bot, "user", None), "display_avatar", None)
         embed.set_footer(
-            text="Use the dropdown menu to explore other categories",
-            icon_url=self.bot.user.avatar.url if self.bot.user.avatar else None
+            text="Use the category menu to continue exploring",
+            icon_url=avatar.url if avatar else None,
         )
-        
         return embed
 
     def _get_category_tips(self, category_key: str) -> str:
@@ -706,13 +753,20 @@ class HelpCog(commands.Cog):
 class HelpNavigationView(discord.ui.View):
     """Navigation view for help command with dropdown menu."""
     
-    def __init__(self, help_cog: HelpCog, user: discord.User):
-        super().__init__(timeout=300)  # 5 minute timeout
+    def __init__(
+        self,
+        help_cog: HelpCog,
+        user: discord.abc.User,
+        categories: dict,
+        *,
+        is_owner: bool = False,
+    ):
+        super().__init__(timeout=300)
         self.help_cog = help_cog
         self.user = user
-        
-        # Add the dropdown select menu
-        self.add_item(CategorySelect(help_cog))
+        self.categories = categories
+        self.is_owner = is_owner
+        self.add_item(CategorySelect(help_cog, is_owner=is_owner))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """Only allow the original user to interact with the view."""
@@ -735,9 +789,9 @@ class HelpNavigationView(discord.ui.View):
 class CategorySelect(discord.ui.Select):
     """Dropdown select menu for choosing help categories."""
     
-    def __init__(self, help_cog: HelpCog):
+    def __init__(self, help_cog: HelpCog, *, is_owner: bool = False):
         self.help_cog = help_cog
-        
+
         options = [
             discord.SelectOption(
                 label="📋 Overview",
@@ -794,9 +848,18 @@ class CategorySelect(discord.ui.Select):
                 emoji="🛠️"
             )
         ]
-        
+        if is_owner:
+            options.append(
+                discord.SelectOption(
+                    label="Bot Owner Prefix Commands",
+                    value="owner",
+                    description="Private list of prefix commands for the bot owner",
+                    emoji="🔒",
+                )
+            )
+
         super().__init__(
-            placeholder="📖 Choose a category to explore...",
+            placeholder="Choose a help category...",
             min_values=1,
             max_values=1,
             options=options
@@ -809,9 +872,9 @@ class CategorySelect(discord.ui.Select):
         
         try:
             if selected_value == "overview":
-                embed = await self.help_cog._create_overview_embed(interaction)
+                embed = await self.help_cog._create_overview_embed(interaction, self.view.categories)
             else:
-                embed = await self.help_cog._create_category_embed(selected_value, interaction)
+                embed = await self.help_cog._create_category_embed(selected_value, interaction, self.view.categories)
             
             await interaction.response.edit_message(embed=embed, view=self.view)
             
