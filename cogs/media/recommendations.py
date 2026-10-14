@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -311,7 +312,7 @@ class RecommendationsView(discord.ui.View):
             title=f"📖 {title}",
             url=f"https://anilist.co/manga/{media['id']}",
             description=truncate_description(media.get('description', ''), 300),
-            color=discord.Color.blue()
+            color=PALETTE.PRIMARY
         )
         
         # Set thumbnail if available
@@ -774,7 +775,7 @@ class RecommendationsCog(commands.Cog):
                 cache_embed = discord.Embed(
                     title="⚡ Loading Cached Recommendations...",
                     description=f"Found recent recommendations for {cached_username} (cached within 24 hours)",
-                    color=discord.Color.green()
+                    color=PALETTE.SUCCESS
                 )
                 await interaction.followup.send(embed=cache_embed)
                 
@@ -790,7 +791,7 @@ class RecommendationsCog(commands.Cog):
             loading_embed = discord.Embed(
                 title="🔍 Generating Recommendations...",
                 description=f"Analyzing {username}'s manga library to find personalized recommendations...",
-                color=discord.Color.blue()
+                color=PALETTE.PRIMARY
             )
             await interaction.followup.send(embed=loading_embed)
             
