@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 # library_backup.py
 import discord
 from discord import app_commands
@@ -578,7 +579,7 @@ class LibraryBackup(commands.Cog):
         initial_embed = discord.Embed(
             title="📚✨ Generating Library Backup...",
             description="⏳ Fetching data from AniList...\n\nProgress: `░░░░░░░░░░░░░░░░░░░░ 0%`",
-            color=discord.Color.blurple()
+            color=PALETTE.PRIMARY
         )
         await interaction.response.send_message(embed=initial_embed, ephemeral=True)
         try:
@@ -600,7 +601,7 @@ class LibraryBackup(commands.Cog):
             filled = int(bar_len * pct / 100)
             bar = "▓" * filled + "░" * (bar_len - filled)
             desc = f"{sub_msg or 'Working...'}\n\nProgress: `{bar} {pct}%`"
-            embed = discord.Embed(title="📚✨ Generating Library Backup...", description=desc, color=discord.Color.blurple())
+            embed = discord.Embed(title="📚✨ Generating Library Backup...", description=desc, color=PALETTE.PRIMARY)
             embed.set_footer(text="Every story you’ve tracked, now archived in your hands ✨")
             try:
                 await progress_msg.edit(embed=embed)
