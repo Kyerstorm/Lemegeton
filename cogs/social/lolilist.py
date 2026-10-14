@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 # cogs/social/lolilist.py
 """
 LoliList — Global cross-guild leaderboard cog
@@ -160,13 +161,13 @@ class ConfirmView(discord.ui.View):
     @discord.ui.button(label="✅ Confirm", style=discord.ButtonStyle.green)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.value = True
-        await interaction.response.edit_message(embed=discord.Embed(description="Confirmed.", color=discord.Color.green()), view=None)
+        await interaction.response.edit_message(embed=discord.Embed(description="Confirmed.", color=PALETTE.SUCCESS), view=None)
         self.stop()
 
     @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.red)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.value = False
-        await interaction.response.edit_message(embed=discord.Embed(description="Cancelled.", color=discord.Color.red()), view=None)
+        await interaction.response.edit_message(embed=discord.Embed(description="Cancelled.", color=PALETTE.DANGER), view=None)
         self.stop()
 
 
@@ -331,7 +332,7 @@ class LoliList(commands.Cog):
                 pass
 
             if not first_link:
-                await send_temp(ctx, discord.Embed(description="Usage: `!loliadd <AniList URL | username | id>`", color=discord.Color.orange()))
+                await send_temp(ctx, discord.Embed(description="Usage: `!loliadd <AniList URL | username | id>`", color=PALETTE.WARNING))
                 return
 
             if not await self._is_mod(ctx.author):
@@ -340,7 +341,7 @@ class LoliList(commands.Cog):
 
             author_id = ctx.author.id
             if self._active_sessions.get(author_id):
-                await send_temp(ctx, discord.Embed(description="You already have an active add session. Finish it first.", color=discord.Color.orange()))
+                await send_temp(ctx, discord.Embed(description="You already have an active add session. Finish it first.", color=PALETTE.WARNING))
                 return
 
             # create session metadata and flag
@@ -373,7 +374,7 @@ class LoliList(commands.Cog):
                     return
 
             if not confirm.value:
-                await send_temp(ctx, discord.Embed(description="Cancelled.", color=discord.Color.red()))
+                await send_temp(ctx, discord.Embed(description="Cancelled.", color=PALETTE.DANGER))
                 self._active_sessions.pop(author_id, None)
                 return
 
@@ -381,7 +382,7 @@ class LoliList(commands.Cog):
             collected_links = [first_link]
 
             # Start continuous intake: inform user
-            start_embed = discord.Embed(title="🟢 Add Session Started", description=f"Paste AniList links/usernames/IDs in chat. Type `finish` to end. Session times out after {ADD_SESSION_TIMEOUT}s of inactivity.", color=discord.Color.green())
+            start_embed = discord.Embed(title="🟢 Add Session Started", description=f"Paste AniList links/usernames/IDs in chat. Type `finish` to end. Session times out after {ADD_SESSION_TIMEOUT}s of inactivity.", color=PALETTE.SUCCESS)
             try:
                 notice = await ctx.send(embed=start_embed)
                 # auto-delete notice after a few seconds so channel isn't spammy
@@ -420,7 +421,7 @@ class LoliList(commands.Cog):
                         continue
                     # If user typed finish (case-insensitive), stop the session
                     if content.lower() in ("finish", "done", "stop"):
-                        await send_temp(ctx, discord.Embed(description="Add session finished by user.", color=discord.Color.green()))
+                        await send_temp(ctx, discord.Embed(description="Add session finished by user.", color=PALETTE.SUCCESS))
                         break
 
                     # Otherwise, treat the message content as 1..N links/names separated by whitespace/comma
@@ -430,13 +431,13 @@ class LoliList(commands.Cog):
                     a2, s2, f2 = await self._process_links_batch(raw_links, ctx, ctx.author.id)
                     total_added += a2
                     # notify quickly
-                    await send_temp(ctx, discord.Embed(description=f"Batch processed — Added: {a2}, Skipped: {s2}, Failed: {f2}", color=discord.Color.green()))
+                    await send_temp(ctx, discord.Embed(description=f"Batch processed — Added: {a2}, Skipped: {s2}, Failed: {f2}", color=PALETTE.SUCCESS))
                     # continue waiting until timeout or finish
                     continue
 
                 except asyncio.TimeoutError:
                     # no new message in ADD_SESSION_TIMEOUT -> session ends due to inactivity
-                    await send_temp(ctx, discord.Embed(description="Session timed out due to inactivity.", color=discord.Color.orange()))
+                    await send_temp(ctx, discord.Embed(description="Session timed out due to inactivity.", color=PALETTE.WARNING))
                     break
 
             # session finished: audit + backup
@@ -451,14 +452,14 @@ class LoliList(commands.Cog):
             except Exception:
                 pass
 
-            await send_temp(ctx, discord.Embed(description=f"Finished session. Total added this session: {total_added}", color=discord.Color.green()))
+            await send_temp(ctx, discord.Embed(description=f"Finished session. Total added this session: {total_added}", color=PALETTE.SUCCESS))
             # cleanup session
             self._active_sessions.pop(author_id, None)
 
         except Exception as e:
             logger.error(f"loliadd exception: {e}\n{traceback.format_exc()}")
             try:
-                await send_temp(ctx, discord.Embed(description="Internal error (logged).", color=discord.Color.red()))
+                await send_temp(ctx, discord.Embed(description="Internal error (logged).", color=PALETTE.DANGER))
             except Exception:
                 pass
             self._active_sessions.pop(ctx.author.id, None)
@@ -503,7 +504,7 @@ class LoliList(commands.Cog):
             raw, uname, info = res
             if not info:
                 skipped += 1
-                await send_temp(ctx, discord.Embed(description=f"Invalid or not found: `{raw}`", color=discord.Color.red()))
+                await send_temp(ctx, discord.Embed(description=f"Invalid or not found: `{raw}`", color=PALETTE.DANGER))
                 continue
             anilist_id = info.get("id")
             try:
@@ -513,7 +514,7 @@ class LoliList(commands.Cog):
                 exists = None
             if exists:
                 skipped += 1
-                await send_temp(ctx, discord.Embed(description=f"Already exists globally: {info.get('name')}", color=discord.Color.orange()))
+                await send_temp(ctx, discord.Embed(description=f"Already exists globally: {info.get('name')}", color=PALETTE.WARNING))
                 continue
             try:
                 await execute_db_operation("insert_entry",
@@ -525,11 +526,11 @@ class LoliList(commands.Cog):
                     save_json_cache(cache_key(uname), info)
                 except Exception:
                     pass
-                await send_temp(ctx, discord.Embed(description=f"Added globally: **{info.get('name') or uname}**", color=discord.Color.green()))
+                await send_temp(ctx, discord.Embed(description=f"Added globally: **{info.get('name') or uname}**", color=PALETTE.SUCCESS))
             except Exception as e:
                 failed += 1
                 logger.error(f"DB insert error: {e}")
-                await send_temp(ctx, discord.Embed(description=f"Failed to add {uname} (DB error).", color=discord.Color.red()))
+                await send_temp(ctx, discord.Embed(description=f"Failed to add {uname} (DB error).", color=PALETTE.DANGER))
         return added, skipped, failed
 
     async def _fetch_user_task(self, raw_link: str, username: str):
@@ -570,42 +571,42 @@ class LoliList(commands.Cog):
                 return
 
             if not target:
-                await send_temp(ctx, discord.Embed(description="Usage: `!loli delete <username|id|url|all>`", color=discord.Color.orange()))
+                await send_temp(ctx, discord.Embed(description="Usage: `!loli delete <username|id|url|all>`", color=PALETTE.WARNING))
                 return
 
             if target.strip().lower() in ("all", "everything", "wipe"):
                 # double-confirm destructive action
                 confirm1 = ConfirmView()
                 try:
-                    m1 = await ctx.send(embed=discord.Embed(title="⚠️ Confirm Delete ALL", description="This will **PERMANENTLY DELETE ALL** global entries. Proceed to 1st confirmation?", color=discord.Color.red()), view=confirm1)
+                    m1 = await ctx.send(embed=discord.Embed(title="⚠️ Confirm Delete ALL", description="This will **PERMANENTLY DELETE ALL** global entries. Proceed to 1st confirmation?", color=PALETTE.DANGER), view=confirm1)
                     await confirm1.wait()
                     try:
                         await m1.delete()
                     except Exception:
                         pass
                 except Exception:
-                    await ctx.author.send(embed=discord.Embed(title="⚠️ Confirm Delete ALL", description="This will **PERMANENTLY DELETE ALL** global entries. Proceed to 1st confirmation?", color=discord.Color.red()), view=confirm1)
+                    await ctx.author.send(embed=discord.Embed(title="⚠️ Confirm Delete ALL", description="This will **PERMANENTLY DELETE ALL** global entries. Proceed to 1st confirmation?", color=PALETTE.DANGER), view=confirm1)
                     await confirm1.wait()
 
                 if not confirm1.value:
-                    await send_temp(ctx, discord.Embed(description="Cancelled.", color=discord.Color.red()))
+                    await send_temp(ctx, discord.Embed(description="Cancelled.", color=PALETTE.DANGER))
                     return
 
                 # second confirm (extra safety) — require pressing Confirm again
                 confirm2 = ConfirmView()
                 try:
-                    m2 = await ctx.send(embed=discord.Embed(title="⚠️ FINAL Confirm Delete ALL", description="This is the FINAL confirmation. This action is irreversible. Confirm to delete ALL entries.", color=discord.Color.red()), view=confirm2)
+                    m2 = await ctx.send(embed=discord.Embed(title="⚠️ FINAL Confirm Delete ALL", description="This is the FINAL confirmation. This action is irreversible. Confirm to delete ALL entries.", color=PALETTE.DANGER), view=confirm2)
                     await confirm2.wait()
                     try:
                         await m2.delete()
                     except Exception:
                         pass
                 except Exception:
-                    await ctx.author.send(embed=discord.Embed(title="⚠️ FINAL Confirm Delete ALL", description="This is the FINAL confirmation. This action is irreversible. Confirm to delete ALL entries.", color=discord.Color.red()), view=confirm2)
+                    await ctx.author.send(embed=discord.Embed(title="⚠️ FINAL Confirm Delete ALL", description="This is the FINAL confirmation. This action is irreversible. Confirm to delete ALL entries.", color=PALETTE.DANGER), view=confirm2)
                     await confirm2.wait()
 
                 if not confirm2.value:
-                    await send_temp(ctx, discord.Embed(description="Cancelled final.", color=discord.Color.red()))
+                    await send_temp(ctx, discord.Embed(description="Cancelled final.", color=PALETTE.DANGER))
                     return
 
                 # perform deletion
@@ -613,7 +614,7 @@ class LoliList(commands.Cog):
                     await execute_db_operation("delete_all", "DELETE FROM lolilist_entries", ())
                     await execute_db_operation("insert_audit", "INSERT INTO loli_audit (mod_id, action, batch_size, details) VALUES (?, ?, ?, ?)",
                                               (ctx.author.id, "delete_all", 0, "deleted all entries"))
-                    await send_temp(ctx, discord.Embed(description="✅ All entries deleted globally.", color=discord.Color.green()))
+                    await send_temp(ctx, discord.Embed(description="✅ All entries deleted globally.", color=PALETTE.SUCCESS))
                     # backup
                     try:
                         ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -623,7 +624,7 @@ class LoliList(commands.Cog):
                         pass
                 except Exception as e:
                     logger.error(f"delete_all error: {e}")
-                    await send_temp(ctx, discord.Embed(description="❌ Failed to delete all entries (DB error).", color=discord.Color.red()))
+                    await send_temp(ctx, discord.Embed(description="❌ Failed to delete all entries (DB error).", color=PALETTE.DANGER))
                 return
 
             # single delete flow
@@ -642,7 +643,7 @@ class LoliList(commands.Cog):
                 info = await fetch_anilist_graphql(uname, self.session)
 
             if not info:
-                await send_temp(ctx, discord.Embed(description=f"AniList user not found: `{target}`", color=discord.Color.red()))
+                await send_temp(ctx, discord.Embed(description=f"AniList user not found: `{target}`", color=PALETTE.DANGER))
                 return
             # find entry global
             try:
@@ -651,37 +652,37 @@ class LoliList(commands.Cog):
                 logger.error(f"DB find err: {e}")
                 existing = None
             if not existing:
-                await send_temp(ctx, discord.Embed(description=f"Entry not found for {info.get('name')}", color=discord.Color.orange()))
+                await send_temp(ctx, discord.Embed(description=f"Entry not found for {info.get('name')}", color=PALETTE.WARNING))
                 return
 
             confirm = ConfirmView()
             try:
-                m = await ctx.send(embed=discord.Embed(title="⚠️ Confirm Deletion", description=f"Delete global entry for **{existing[1]}**?", color=discord.Color.yellow()), view=confirm)
+                m = await ctx.send(embed=discord.Embed(title="⚠️ Confirm Deletion", description=f"Delete global entry for **{existing[1]}**?", color=PALETTE.WARNING), view=confirm)
                 await confirm.wait()
                 try:
                     await m.delete()
                 except Exception:
                     pass
             except Exception:
-                await ctx.author.send(embed=discord.Embed(title="⚠️ Confirm Deletion", description=f"Delete global entry for **{existing[1]}**?", color=discord.Color.yellow()), view=confirm)
+                await ctx.author.send(embed=discord.Embed(title="⚠️ Confirm Deletion", description=f"Delete global entry for **{existing[1]}**?", color=PALETTE.WARNING), view=confirm)
                 await confirm.wait()
 
             if not confirm.value:
-                await send_temp(ctx, discord.Embed(description="Cancelled.", color=discord.Color.red()))
+                await send_temp(ctx, discord.Embed(description="Cancelled.", color=PALETTE.DANGER))
                 return
             try:
                 await execute_db_operation("delete_entry", "DELETE FROM lolilist_entries WHERE id = ?", (existing[0],))
                 await execute_db_operation("insert_audit", "INSERT INTO loli_audit (mod_id, action, batch_size, details) VALUES (?, ?, ?, ?)",
                                           (ctx.author.id, "delete_single", 1, existing[1]))
-                await send_temp(ctx, discord.Embed(description=f"✅ Deleted {existing[1]}.", color=discord.Color.green()))
+                await send_temp(ctx, discord.Embed(description=f"✅ Deleted {existing[1]}.", color=PALETTE.SUCCESS))
             except Exception as e:
                 logger.error(f"delete single err: {e}")
-                await send_temp(ctx, discord.Embed(description="❌ Failed to delete (DB error).", color=discord.Color.red()))
+                await send_temp(ctx, discord.Embed(description="❌ Failed to delete (DB error).", color=PALETTE.DANGER))
 
         except Exception as e:
             logger.error(f"_handle_delete exception: {e}\n{traceback.format_exc()}")
             try:
-                await send_temp(ctx, discord.Embed(description="Internal error (logged).", color=discord.Color.red()))
+                await send_temp(ctx, discord.Embed(description="Internal error (logged).", color=PALETTE.DANGER))
             except Exception:
                pass
 
