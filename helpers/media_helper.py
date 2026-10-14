@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 import random
 import discord
 import aiohttp
@@ -180,7 +181,7 @@ async def fetch_media(
                 title=title_name,
                 url=media.get("siteUrl"),
                 description=f"{description}\n\n**Source:** {media.get('source', 'Unknown')}",
-                color=discord.Color.blue()
+                color=PALETTE.PRIMARY
             )
 
             # Add media-specific fields
@@ -654,7 +655,7 @@ async def fetch_random_media(media_type: str = "ANIME") -> Optional[discord.Embe
                             title=title_name,
                             url=media.get("siteUrl"),
                             description=description,
-                            color=discord.Color.purple()  # Different color for LNs
+                            color=PALETTE.PRIMARY  # Different color for LNs
                         )
                         
                         embed.add_field(name="Type", value="Light Novel", inline=True)
