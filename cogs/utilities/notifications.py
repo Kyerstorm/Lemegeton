@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -42,42 +43,42 @@ NOTIFICATION_TYPES = {
         "name": "Bot Updates",
         "role_name": "bot-updates",
         "emoji": "🤖",
-        "color": discord.Color.blue(),
+        "color": PALETTE.PRIMARY,
         "description": "New features, important updates, bug fixes"
     },
     "maintenance": {
         "name": "Maintenance Alerts",
         "role_name": "maintenance-alerts",
         "emoji": "🔧",
-        "color": discord.Color.orange(),
+        "color": PALETTE.WARNING,
         "description": "Scheduled downtime, maintenance windows"
     },
     "features": {
         "name": "Feature Releases",
         "role_name": "feature-releases",
         "emoji": "✨",
-        "color": discord.Color.purple(),
+        "color": PALETTE.PRIMARY,
         "description": "Major new features and capabilities"
     },
     "events": {
         "name": "Community Events",
         "role_name": "community-events",
         "emoji": "🎉",
-        "color": discord.Color.green(),
+        "color": PALETTE.SUCCESS,
         "description": "Server events, contests, activities"
     },
     "challenges": {
         "name": "Challenge Notifications",
         "role_name": "challenge-notifications",
         "emoji": "🏆",
-        "color": discord.Color.gold(),
+        "color": PALETTE.WARNING,
         "description": "Reading challenges, leaderboard updates"
     },
     "news": {
         "name": "Anime News",
         "role_name": "anime-news",
         "emoji": "📰",
-        "color": discord.Color.red(),
+        "color": PALETTE.DANGER,
         "description": "Anime/manga news from monitored sources"
     }
 }
@@ -154,7 +155,7 @@ class NotificationTypeSelect(Select):
         # Create result embed
         embed = discord.Embed(
             title="✅ Notification Preferences Updated",
-            color=discord.Color.green()
+            color=PALETTE.SUCCESS
         )
 
         if added_count > 0:
@@ -234,7 +235,7 @@ class NotificationTypeView(View):
             embed = discord.Embed(
                 title="ℹ️ Already Subscribed",
                 description="You're already subscribed to all notification types!",
-                color=discord.Color.blue()
+                color=PALETTE.PRIMARY
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
             return
@@ -255,7 +256,7 @@ class NotificationTypeView(View):
         embed = discord.Embed(
             title="✅ Subscribed to All Notifications",
             description=f"Successfully subscribed to **{added_count}** notification type(s)!",
-            color=discord.Color.green()
+            color=PALETTE.SUCCESS
         )
 
         if errors:
@@ -279,7 +280,7 @@ class NotificationTypeView(View):
             embed = discord.Embed(
                 title="ℹ️ No Subscriptions",
                 description="You're not subscribed to any notification types!",
-                color=discord.Color.blue()
+                color=PALETTE.PRIMARY
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
             return
@@ -300,7 +301,7 @@ class NotificationTypeView(View):
         embed = discord.Embed(
             title="✅ Unsubscribed from All Notifications",
             description=f"Successfully unsubscribed from **{removed_count}** notification type(s).",
-            color=discord.Color.green()
+            color=PALETTE.SUCCESS
         )
 
         embed.add_field(
@@ -403,7 +404,7 @@ class NotificationsCog(commands.Cog):
             embed = discord.Embed(
                 title="📢 Notification Preferences",
                 description="Choose which types of notifications you want to receive using the dropdown menu below.",
-                color=discord.Color.blue()
+                color=PALETTE.PRIMARY
             )
 
             # Show available notification types
@@ -441,7 +442,7 @@ class NotificationsCog(commands.Cog):
             embed = discord.Embed(
                 title="❌ An Error Occurred",
                 description="Something went wrong while loading the notifications interface. Please try again later.",
-                color=discord.Color.red()
+                color=PALETTE.DANGER
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
             logger.error(f"Error in notifications command for user {interaction.user.id}: {e}", exc_info=True)
