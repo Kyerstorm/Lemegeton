@@ -288,7 +288,7 @@ class BrowseCog(commands.Cog):
                 title=f"📚 {book.get('title', 'Unknown')}",
                 url=book.get("infoLink"),
                 description=book.get("description", "No description available."),
-                color=discord.Color.random()
+                color=PALETTE.PRIMARY
             )
 
             if "imageLinks" in book:
@@ -354,7 +354,7 @@ class BrowseCog(commands.Cog):
             title=f"{'🎬' if real_type=='ANIME' else '📖'} {media['title']['english'] or media['title']['romaji']}",
             url=media["siteUrl"],
             description=description,
-            color=discord.Color.random()
+            color=PALETTE.PRIMARY
         )
 
         cover_url = media.get("coverImage", {}).get("medium") or media.get("coverImage", {}).get("large")
