@@ -3,7 +3,6 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import aiohttp
-import aiosqlite
 import asyncio
 import textwrap
 import re
@@ -84,9 +83,16 @@ class SteamProfile(commands.Cog):
         steamid = None
         vanity = None
         if not user:
-            async with aiosqlite.connect(DB_PATH) as db:
-                cur = await db.execute("SELECT steam_id, vanity_name FROM steam_users WHERE discord_id = ?", (interaction.user.id,))
-                row = await cur.fetchone()
+            import database
+            if interaction.guild_id is None:
+                row = None
+            else:
+                row = await database.execute_db_operation(
+                    "load guild Steam profile",
+                    "SELECT steam_id, vanity_name FROM steam_users WHERE discord_id = ? AND guild_id = ?",
+                    (interaction.user.id, interaction.guild_id),
+                    fetch_type="one",
+                )
                 await cur.close()
 
                 if not row:
