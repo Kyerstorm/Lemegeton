@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 """
 Discord Embed Helper Functions
 Centralized functions for building Discord embeds for various content types
@@ -48,7 +49,7 @@ def build_activity_embed(activity: dict, activity_type: str, user: dict, text: s
     """
     from helpers.anilist_helper import clean_anilist_text
     
-    embed = discord.Embed(color=discord.Color.blurple())
+    embed = discord.Embed(color=PALETTE.PRIMARY)
     clean = clean_anilist_text(text)
 
     # TextActivity
@@ -162,7 +163,7 @@ def build_media_embed(media: dict) -> discord.Embed:
         title=title_line, 
         url=media.get("siteUrl"), 
         description=short_desc or "*No synopsis available*", 
-        color=discord.Color.blurple()
+        color=PALETTE.PRIMARY
     )
 
     # Cover and banner
@@ -232,13 +233,13 @@ def build_relations_embed(media: dict) -> List[discord.Embed]:
     """Build embeds for media relations."""
     relations = (media.get("relations") or {}).get("edges") or []
     if not relations:
-        return [discord.Embed(description="No relations found.", color=discord.Color.greyple())]
+        return [discord.Embed(description="No relations found.", color=PALETTE.NEUTRAL)]
 
     embeds = []
     chunk_size = 6
     for i in range(0, len(relations), chunk_size):
         chunk = relations[i:i + chunk_size]
-        em = discord.Embed(title="Relations", color=discord.Color.dark_blue())
+        em = discord.Embed(title="Relations", color=PALETTE.PRIMARY)
         for edge in chunk:
             rel_type = edge.get("relationType") or ""
             node = edge.get("node") or {}
@@ -260,7 +261,7 @@ def build_characters_embed(media: dict, support: bool = False) -> List[discord.E
     """Build embeds for characters (main or support)."""
     char_edges = (media.get("characters") or {}).get("edges") or []
     if not char_edges:
-        return [discord.Embed(description="No characters found.", color=discord.Color.greyple())]
+        return [discord.Embed(description="No characters found.", color=PALETTE.NEUTRAL)]
 
     if support:
         selected = [e for e in char_edges if (e.get("role") or "").upper() != "MAIN"]
@@ -276,7 +277,7 @@ def build_characters_embed(media: dict, support: bool = False) -> List[discord.E
     chunk_size = 6
     for i in range(0, len(selected), chunk_size):
         chunk = selected[i:i + chunk_size]
-        em = discord.Embed(title=title, color=discord.Color.blurple())
+        em = discord.Embed(title=title, color=PALETTE.PRIMARY)
         for e in chunk:
             node = e.get("node") or {}
             name = (node.get("name") or {}).get("full") or "Unknown"
@@ -297,13 +298,13 @@ def build_staff_embed(media: dict) -> List[discord.Embed]:
     """Build embeds for staff."""
     staff_edges = (media.get("staff") or {}).get("edges") or []
     if not staff_edges:
-        return [discord.Embed(description="No staff info found.", color=discord.Color.greyple())]
+        return [discord.Embed(description="No staff info found.", color=PALETTE.NEUTRAL)]
     
     embeds = []
     chunk_size = 8
     for i in range(0, len(staff_edges), chunk_size):
         chunk = staff_edges[i:i + chunk_size]
-        em = discord.Embed(title="Staff", color=discord.Color.dark_teal())
+        em = discord.Embed(title="Staff", color=PALETTE.SECONDARY)
         for edge in chunk:
             role = edge.get("role") or "Staff"
             node = edge.get("node") or {}
@@ -323,7 +324,7 @@ def build_staff_embed(media: dict) -> List[discord.Embed]:
 def build_stats_embed(media: dict) -> discord.Embed:
     """Build embed for stats distribution."""
     stats = media.get("stats") or {}
-    em = discord.Embed(title="Stats Distribution", color=discord.Color.green())
+    em = discord.Embed(title="Stats Distribution", color=PALETTE.SUCCESS)
     
     # Status distribution
     status_dist = stats.get("statusDistribution") or []
@@ -353,7 +354,7 @@ def build_stats_embed(media: dict) -> discord.Embed:
 def build_recommendations_embed(media: dict, max_items: int = 5) -> discord.Embed:
     """Build embed for recommendations."""
     recs = (media.get("recommendations") or {}).get("edges") or []
-    em = discord.Embed(title="🎯 Recommendations", description="Top recommendations from AniList", color=discord.Color.gold())
+    em = discord.Embed(title="🎯 Recommendations", description="Top recommendations from AniList", color=PALETTE.WARNING)
     
     count = 0
     for e in recs:
@@ -380,9 +381,9 @@ def build_tags_embed(media: dict) -> discord.Embed:
     """Build embed for tags."""
     tags = media.get("tags") or []
     if not tags:
-        return discord.Embed(description="No tags found.", color=discord.Color.greyple())
+        return discord.Embed(description="No tags found.", color=PALETTE.NEUTRAL)
     
-    em = discord.Embed(title="Tags", color=discord.Color.dark_purple())
+    em = discord.Embed(title="Tags", color=PALETTE.PRIMARY)
     lines = []
     for t in tags:
         name = t.get("name") or "Unknown"
@@ -407,7 +408,7 @@ def build_user_profile_embed(user_data: dict, anime_stats: dict, manga_stats: di
     embed = discord.Embed(
         title=f"📊 {username}'s AniList Profile",
         url=profile_url,
-        color=discord.Color.blue()
+        color=PALETTE.PRIMARY
     )
 
     if avatar_url:
@@ -445,7 +446,7 @@ def build_favorites_embed(user_data: dict, avatar_url: str, profile_url: str) ->
     embed = discord.Embed(
         title=f"❤️ {username}'s Favorites",
         url=profile_url,
-        color=discord.Color.red()
+        color=PALETTE.DANGER
     )
 
     if avatar_url:
@@ -470,7 +471,7 @@ def build_favorites_embed(user_data: dict, avatar_url: str, profile_url: str) ->
 
 # ===== GENERAL UTILITY EMBEDS =====
 
-def build_error_embed(title: str, description: str, color: discord.Color = discord.Color.red()) -> discord.Embed:
+def build_error_embed(title: str, description: str, color: discord.Color = PALETTE.DANGER) -> discord.Embed:
     """Build a standardized error embed."""
     embed = discord.Embed(
         title=f"❌ {title}",
@@ -480,7 +481,7 @@ def build_error_embed(title: str, description: str, color: discord.Color = disco
     return embed
 
 
-def build_success_embed(title: str, description: str, color: discord.Color = discord.Color.green()) -> discord.Embed:
+def build_success_embed(title: str, description: str, color: discord.Color = PALETTE.SUCCESS) -> discord.Embed:
     """Build a standardized success embed."""
     embed = discord.Embed(
         title=f"✅ {title}",
@@ -490,7 +491,7 @@ def build_success_embed(title: str, description: str, color: discord.Color = dis
     return embed
 
 
-def build_warning_embed(title: str, description: str, color: discord.Color = discord.Color.orange()) -> discord.Embed:
+def build_warning_embed(title: str, description: str, color: discord.Color = PALETTE.WARNING) -> discord.Embed:
     """Build a standardized warning embed."""
     embed = discord.Embed(
         title=f"⚠️ {title}",
@@ -500,7 +501,7 @@ def build_warning_embed(title: str, description: str, color: discord.Color = dis
     return embed
 
 
-def build_info_embed(title: str, description: str, color: discord.Color = discord.Color.blue()) -> discord.Embed:
+def build_info_embed(title: str, description: str, color: discord.Color = PALETTE.PRIMARY) -> discord.Embed:
     """Build a standardized info embed."""
     embed = discord.Embed(
         title=f"ℹ️ {title}",
@@ -515,7 +516,7 @@ def build_trending_embed(media_list: List[Dict], title: str, description: str) -
     embed = discord.Embed(
         title=title,
         description=description,
-        color=discord.Color.gold()
+        color=PALETTE.WARNING
     )
     
     for i, media in enumerate(media_list[:10], 1):
