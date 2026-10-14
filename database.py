@@ -1778,6 +1778,70 @@ column_names = await get_table_columns("global_challenges")
 # ------------------------------------------------------
 # INITIALIZE ALL DATABASE TABLES with Enhanced Logging
 # ------------------------------------------------------
+async def init_steam_users_table():
+    """Create/migrate guild-scoped Steam registrations in PostgreSQL."""
+    await execute_db_operation(
+        "create guild-scoped Steam users table",
+        """
+        CREATE TABLE IF NOT EXISTS steam_users (
+            discord_id BIGINT NOT NULL,
+            guild_id BIGINT NOT NULL,
+            steam_id TEXT NOT NULL,
+            vanity_name TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+    )
+    # Older deployments used a single-column primary key (or had no guild_id).
+    # Migrate null legacy rows to the configured primary guild, then enforce a
+    # composite key so one Discord account can link Steam separately per guild.
+    default_guild_id = int(
+        os.getenv("GUILD_ID") or os.getenv("PRIMARY_GUILD_ID") or "897814031346319382"
+    )
+    await execute_db_operation(
+        "add Steam guild column if missing",
+        "ALTER TABLE steam_users ADD COLUMN IF NOT EXISTS guild_id BIGINT",
+    )
+    await execute_db_operation(
+        "backfill legacy Steam guild IDs",
+        "UPDATE steam_users SET guild_id = ? WHERE guild_id IS NULL",
+        (default_guild_id,),
+    )
+    await execute_db_operation(
+        "widen Steam Discord IDs",
+        "ALTER TABLE steam_users ALTER COLUMN discord_id TYPE BIGINT",
+    )
+    await execute_db_operation(
+        "widen Steam guild IDs",
+        "ALTER TABLE steam_users ALTER COLUMN guild_id TYPE BIGINT",
+    )
+    await execute_db_operation(
+        "ensure Steam registrations have a composite primary key",
+        """
+        DO $
+        DECLARE existing_pk TEXT;
+        BEGIN
+            SELECT constraint_name INTO existing_pk
+            FROM information_schema.table_constraints
+            WHERE table_name = 'steam_users'
+              AND table_schema = current_schema()
+              AND constraint_type = 'PRIMARY KEY'
+            LIMIT 1;
+            IF existing_pk IS NOT NULL THEN
+                EXECUTE format('ALTER TABLE steam_users DROP CONSTRAINT %I', existing_pk);
+            END IF;
+            ALTER TABLE steam_users
+                ADD CONSTRAINT steam_users_discord_guild_pk PRIMARY KEY (discord_id, guild_id);
+        END $;
+        """,
+    )
+    await execute_db_operation(
+        "index Steam guild lookup",
+        "CREATE INDEX IF NOT EXISTS steam_users_guild_lookup_idx ON steam_users (guild_id, discord_id)",
+    )
+
+
 async def init_db():
     """Initialize the PostgreSQL database schema."""
     logger.info("=" * 60)
