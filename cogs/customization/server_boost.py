@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -223,7 +224,7 @@ class ServerBoost(commands.Cog):
                 embed = discord.Embed(
                     title="🎉 Welcome, Server Booster!",
                     description="Thank you for boosting our server! As a token of appreciation, you now have access to special perks:",
-                    color=discord.Color.gold()
+                    color=PALETTE.WARNING
                 )
 
                 embed.add_field(
