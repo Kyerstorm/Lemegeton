@@ -408,7 +408,7 @@ def build_favorites_embed(user_data: dict, avatar_url: str, profile_url: str) ->
     embed = discord.Embed(
         title=f"⭐ {user_data['name']}'s Favorites",
         url=profile_url,
-        color=discord.Color.from_rgb(255, 182, 193)  # Light pink
+        color=PALETTE.PRIMARY  # Light pink
     )
     
     if avatar_url:
