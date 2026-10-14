@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -296,7 +297,7 @@ class Random(commands.Cog):
         progress_embed = discord.Embed(
             title="👥 Registered Users' Progress",
             description="\n".join(progress_lines),
-            color=discord.Color.blue()
+            color=PALETTE.PRIMARY
         )
         progress_embed.set_footer(text="🎲 Random suggestion from AniList")
         return progress_embed
