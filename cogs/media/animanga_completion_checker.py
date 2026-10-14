@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
@@ -505,7 +506,7 @@ class Finisher(commands.Cog):
             desc = (m.get("description") or "").strip() if m.get("description") else ""
 
             # prefer a colored embed but keep status color for visibility
-            color = discord.Color.green() if m.get("status") == "FINISHED" else discord.Color.red()
+            color = PALETTE.SUCCESS if m.get("status") == "FINISHED" else PALETTE.DANGER
 
             embed = discord.Embed(
                 title=f"{emoji} {title}",
