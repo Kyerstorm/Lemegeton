@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -575,15 +576,15 @@ class Affinity(commands.Cog):
             if current_entries:
                 avg_score = sum(score for _, _, score in current_entries) / len(current_entries)
                 if avg_score >= 80:
-                    color = discord.Color.gold()
+                    color = PALETTE.WARNING
                 elif avg_score >= 60:
-                    color = discord.Color.green()
+                    color = PALETTE.SUCCESS
                 elif avg_score >= 40:
-                    color = discord.Color.orange()
+                    color = PALETTE.WARNING
                 else:
-                    color = discord.Color.red()
+                    color = PALETTE.DANGER
             else:
-                color = discord.Color.blurple()
+                color = PALETTE.PRIMARY
 
             embed = discord.Embed(
                 title=embed_title,
@@ -722,10 +723,10 @@ class Affinity(commands.Cog):
                         
                         embed = discord.Embed(
                             title=f"💞 Affinity Between {user_display} and {user.display_name}",
-                            color=discord.Color.gold() if score >= 80 else 
-                                  discord.Color.green() if score >= 60 else 
-                                  discord.Color.orange() if score >= 40 else 
-                                  discord.Color.red()
+                            color=PALETTE.WARNING if score >= 80 else 
+                                  PALETTE.SUCCESS if score >= 60 else 
+                                  PALETTE.WARNING if score >= 40 else 
+                                  PALETTE.DANGER
                         )
                         
                         embed.add_field(
@@ -848,10 +849,10 @@ class Affinity(commands.Cog):
                     # Create single comparison embed
                     embed = discord.Embed(
                         title=f"💞 Affinity Between {user_display} and {user.display_name}",
-                        color=discord.Color.gold() if score >= 80 else 
-                              discord.Color.green() if score >= 60 else 
-                              discord.Color.orange() if score >= 40 else 
-                              discord.Color.red()
+                        color=PALETTE.WARNING if score >= 80 else 
+                              PALETTE.SUCCESS if score >= 60 else 
+                              PALETTE.WARNING if score >= 40 else 
+                              PALETTE.DANGER
                     )
                     
                     embed.add_field(
