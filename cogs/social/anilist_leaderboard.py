@@ -2,7 +2,6 @@ from helpers.color_palette import PALETTE
 import discord
 from discord.ext import commands
 from discord import app_commands
-import aiosqlite
 import aiohttp
 import asyncio
 import time
@@ -26,7 +25,6 @@ from database import (
     upsert_user_stats_guild_aware
 )
 from helpers.media_helper import fetch_user_stats
-from config import DB_PATH
 from cogs_test.general_commands.dashboard import command_meta
 
 # ------------------------------------------------------
@@ -958,84 +956,13 @@ class Leaderboard(commands.Cog):
             return None
 
     async def cleanup_duplicate_user_stats(self) -> None:
-        """Clean up duplicate entries in user_stats table."""
-        try:
-            logger.info("Starting cleanup of duplicate user_stats entries")
-            
-            async with aiosqlite.connect(DB_PATH) as db:
-                # Find all duplicated usernames
-                cursor = await db.execute("""
-                    SELECT username, COUNT(*) as count 
-                    FROM user_stats 
-                    GROUP BY username 
-                    HAVING count > 1
-                """)
-                duplicates = await cursor.fetchall()
-                await cursor.close()
-                
-                if not duplicates:
-                    logger.info("No duplicate user_stats entries found")
-                    return
-                
-                logger.info(f"Found {len(duplicates)} users with duplicate entries")
-                
-                # For each duplicated username, keep only the entry with the correct discord_id from users table
-                for username, count in duplicates:
-                    logger.info(f"Cleaning up {count} duplicate entries for {username}")
-                    
-                    # Get the correct discord_id from the users table
-                    cursor = await db.execute("""
-                        SELECT discord_id FROM users WHERE anilist_username = ? OR username = ?
-                    """, (username, username))
-                    correct_user = await cursor.fetchone()
-                    await cursor.close()
-                    
-                    if not correct_user:
-                        logger.warning(f"No user found in users table for {username}, skipping cleanup")
-                        continue
-                    
-                    correct_discord_id = correct_user[0]
-                    logger.info(f"Correct discord_id for {username}: {correct_discord_id}")
-                    
-                    # Get all entries for this username, prioritizing the one with correct discord_id
-                    cursor = await db.execute("""
-                        SELECT discord_id, username, total_manga, total_anime, 
-                               avg_manga_score, avg_anime_score, total_chapters, total_episodes
-                        FROM user_stats 
-                        WHERE username = ?
-                        ORDER BY 
-                            CASE WHEN discord_id = ? THEN 0 ELSE 1 END,  -- Prioritize correct discord_id
-                            (total_manga + total_anime + COALESCE(total_chapters, 0) + COALESCE(total_episodes, 0)) DESC,
-                            discord_id DESC
-                    """, (username, correct_discord_id))
-                    entries = await cursor.fetchall()
-                    await cursor.close()
-                    
-                    if entries:
-                        # Keep the first (most preferred) entry, but update discord_id to be correct
-                        keep_entry = list(entries[0])
-                        keep_entry[0] = correct_discord_id  # Ensure discord_id is correct
-                        
-                        logger.info(f"Keeping entry for {username} with discord_id={correct_discord_id}")
-                        
-                        # Delete all entries for this username
-                        await db.execute("DELETE FROM user_stats WHERE username = ?", (username,))
-                        
-                        # Re-insert the corrected entry
-                        await db.execute("""
-                            INSERT INTO user_stats (
-                                discord_id, username, total_manga, total_anime,
-                                avg_manga_score, avg_anime_score, total_chapters, total_episodes
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """, keep_entry)
-                        
-                        logger.info(f"Successfully cleaned up duplicates for {username}")
-                
-                await db.commit()
-                logger.info("Successfully cleaned up duplicate user_stats entries")
-                
-        except Exception as e:
-            logger.error(f"Error cleaning up duplicate user_stats: {e}", exc_info=True)
+        """Retired legacy global cleanup.
+
+        Leaderboard data is now guild-scoped in PostgreSQL. The old cleanup
+        operated on a global SQLite user_stats table and could merge or delete
+        records belonging to different guilds, so it is intentionally disabled.
+        """
+        logger.info("Skipping legacy global user_stats cleanup; PostgreSQL guild-aware data is authoritative.")
 
     async def fetch_and_cache_stats(self) -> None:
         """Fetch and cache statistics for all registered users."""
@@ -1070,95 +997,10 @@ class Leaderboard(commands.Cog):
             logger.error(f"Error in fetch_and_cache_stats: {e}", exc_info=True)
 
     async def _get_leaderboard_data(self, medium: str) -> List[Tuple]:
-        """Get leaderboard data from database for specified medium."""
-        try:
-            media_config = MEDIA_TYPES.get(medium, MEDIA_TYPES["manga"])
-            sql = media_config["sql"]
-            
-            async with aiosqlite.connect(DB_PATH) as db:
-                cursor = await db.execute(sql)
-                rows = await cursor.fetchall()
-                await cursor.close()
+        """Disabled legacy unscoped loader; use _get_leaderboard_data_guild_aware."""
+        logger.warning("Refusing legacy unscoped leaderboard query for medium %s", medium)
+        return []
 
-            if not rows:
-                logger.warning(f"No database rows found for {medium} leaderboard")
-                return []
-
-            leaderboard_data = []
-            
-            if medium == "combined":
-                # Combined leaderboard: calculate origin-weighted activity score
-                for username, total_manga, total_chapters, total_anime, total_episodes in rows:
-                    # Guard against None values
-                    total_manga = total_manga or 0
-                    total_chapters = total_chapters or 0
-                    total_anime = total_anime or 0
-                    total_episodes = total_episodes or 0
-                    
-                    # Calculate origin-weighted activity score
-                    # This enhanced scoring system accounts for different media origins:
-                    # - Japanese manga/anime (baseline weighting)
-                    # - Korean manhwa/animation (higher weight due to longer content/rarity)
-                    # - Chinese manhua/donghua (moderate weighting)
-                    # - Estimated distribution based on consumption patterns
-                    # - Scores typically range from 0-15,000+ points with better distinction
-                    
-                    activity_score, breakdown = self._calculate_origin_weighted_score(
-                        total_manga, total_anime, total_chapters, total_episodes
-                    )
-                    
-                    if activity_score > 0:  # Only include users with activity
-                        # Store breakdown data for enhanced display
-                        leaderboard_data.append((
-                            username, total_manga, total_chapters, 
-                            total_anime, total_episodes, activity_score, breakdown
-                        ))
-                
-                # Sort by activity score in descending order
-                leaderboard_data.sort(key=lambda x: x[5], reverse=True)
-                
-            else:
-                # Standard manga/anime leaderboard
-                # Some media queries (two-column: username, total_units)
-                if medium in ("chapters", "episodes", "manga_completed", "anime_completed"):
-                    for username, total_units in rows:
-                        total_units = int(total_units or 0)
-                        # For two-column queries we don't have a total_media count; use 0 for that field
-                        leaderboard_data.append((username, 0, total_units, float(total_units)))
-                else:
-                    for username, total_media, total_units in rows:
-                        # Guard against zero/None divisions
-                        total_media = total_media or 0
-                        total_units = total_units if total_units is not None else 0
-                        
-                        if total_media and total_units is not None:
-                            avg_units = total_units / total_media if total_media > 0 else 0
-                            leaderboard_data.append((username, total_media, total_units, avg_units))
-
-                # Sort by average units per media in descending order
-                leaderboard_data.sort(key=lambda x: x[3], reverse=True)
-            
-            logger.info(f"Generated {medium} leaderboard with {len(leaderboard_data)} valid entries")
-            return leaderboard_data
-            
-        except Exception as e:
-            logger.error(f"Error generating {medium} leaderboard data: {e}", exc_info=True)
-            return []
-
-    @app_commands.choices(medium=[
-        app_commands.Choice(name="📖 Best Manga Average", value="manga"),
-        app_commands.Choice(name="🎬 Best Anime Average", value="anime"),
-        app_commands.Choice(name="🌟 Combined Animanga Average", value="combined"),
-    app_commands.Choice(name="📚 Most Chapters Read", value="chapters"),
-    app_commands.Choice(name="📺 Most Episodes Watched", value="episodes"),
-    app_commands.Choice(name="📚 Most Manga Completed", value="manga_completed"),
-    app_commands.Choice(name="📺 Most Anime Completed", value="anime_completed"),
-    ])
-    @app_commands.command(
-        name="anilist_leaderboard",
-        description="🏆 Show leaderboard ranked by manga, anime, or combined activity"
-    )
-    @command_meta(section="Social", name="AniList Leaderboard")
     async def anilist_leaderboard(self, interaction: discord.Interaction, medium: app_commands.Choice[str]) -> None:
         """Display the leaderboard for the specified medium.
         
