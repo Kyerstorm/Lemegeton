@@ -1,1 +1,1 @@
-"""Compatibility package for legacy lowercase dashboard imports."""
+# General Commands package

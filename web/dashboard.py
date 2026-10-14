@@ -396,7 +396,7 @@ class DashboardWebServer:
         })
 
     def _command_rows(self, config_data: dict[str, Any]) -> list[dict[str, Any]]:
-        from cogs_test.General_Commands.dashboard import COMMAND_REGISTRY
+        from cogs_test.general_commands.dashboard import COMMAND_REGISTRY
         commands = []
         command_state = config_data.get("commands", {})
         for fullname, meta in COMMAND_REGISTRY.all_commands():
@@ -426,7 +426,7 @@ class DashboardWebServer:
         if not isinstance(data.get("enabled"), bool):
             raise web.HTTPBadRequest(text=json.dumps({"error": "enabled must be a boolean."}), content_type="application/json")
         cog = self._dashboard_cog()
-        from cogs_test.General_Commands.dashboard import COMMAND_REGISTRY, PROTECTED_CMD_NAMES
+        from cogs_test.general_commands.dashboard import COMMAND_REGISTRY, PROTECTED_CMD_NAMES
         meta = COMMAND_REGISTRY.get_meta(fullname)
         if not meta:
             raise web.HTTPNotFound(text=json.dumps({"error": "Command not found."}), content_type="application/json")
@@ -440,7 +440,7 @@ class DashboardWebServer:
         session, guild = await self._authorized_guild(request)
         await self._json_body(request)
         self._dashboard_cog()
-        from cogs_test.General_Commands.dashboard import attempt_sync_for_guild
+        from cogs_test.general_commands.dashboard import attempt_sync_for_guild
         await attempt_sync_for_guild(self.bot, guild)
         return web.json_response({"synced": len(guild.app_commands) if hasattr(guild, "app_commands") else "enabled"})
 
@@ -450,7 +450,7 @@ class DashboardWebServer:
         cog = self._dashboard_cog()
         await cog.db.reset_guild(guild.id)
         await cog.db.log_action(guild.id, int(session["user"]["id"]), "reset_dashboard", "Reset from web dashboard")
-        from cogs_test.General_Commands.dashboard import attempt_sync_for_guild
+        from cogs_test.general_commands.dashboard import attempt_sync_for_guild
         await attempt_sync_for_guild(self.bot, guild)
         return web.json_response({"ok": True})
 
