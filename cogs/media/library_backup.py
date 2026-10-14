@@ -10,11 +10,9 @@ import datetime
 import yaml
 import asyncio
 import aiohttp
-import aiosqlite
 import logging
 from pathlib import Path
 from typing import Optional, Callable, Awaitable, List, Dict
-from config import DB_PATH
 from helpers.embed_helper import build_error_embed, build_success_embed, build_warning_embed, build_info_embed
 from helpers.anilist_helper import post_graphql
 
@@ -60,25 +58,19 @@ async def get_anilist_username_from_db(discord_id: int, guild_id: Optional[int] 
     Checks guild-specific then global fallback.
     """
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            if guild_id:
-                cur = await db.execute(
-                    "SELECT anilist_username FROM users WHERE discord_id = ? AND guild_id = ? AND anilist_username IS NOT NULL",
-                    (discord_id, guild_id)
-                )
-                row = await cur.fetchone()
-                if row:
-                    logger.debug(f"Found guild-specific AniList username for {discord_id} in {guild_id}: {row[0]}")
-                    return row[0]
-
-            cur = await db.execute(
-                "SELECT anilist_username FROM users WHERE discord_id = ? AND anilist_username IS NOT NULL LIMIT 1",
-                (discord_id,)
-            )
-            row = await cur.fetchone()
-            if row:
-                logger.debug(f"Found AniList username for {discord_id}: {row[0]}")
-                return row[0]
+        import database
+        if guild_id is None:
+            logger.debug("No guild context available for AniList lookup for %s", discord_id)
+            return None
+        row = await database.execute_db_operation(
+            "load guild AniList username for library backup",
+            "SELECT anilist_username FROM users WHERE discord_id = ? AND guild_id = ? AND anilist_username IS NOT NULL LIMIT 1",
+            (discord_id, guild_id),
+            fetch_type="one",
+        )
+        if row:
+            logger.debug("Found guild-specific AniList username for %s in %s", discord_id, guild_id)
+            return row[0]
 
         logger.debug(f"No AniList username found for {discord_id}")
         return None
