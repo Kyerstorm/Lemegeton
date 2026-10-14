@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -85,7 +86,7 @@ class Changelog(commands.Cog):
                 name=role_name,
                 mentionable=True,
                 reason="Auto-created for changelog notifications",
-                color=discord.Color.blue()
+                color=PALETTE.PRIMARY
             )
             logger.info(f"Created notification role '{role.name}' in guild {guild.id} for changelog")
             return role
@@ -125,30 +126,30 @@ class Changelog(commands.Cog):
                     pass
             # Handle named colors
             color_map = {
-                'red': discord.Color.red(),
-                'green': discord.Color.green(),
-                'blue': discord.Color.blue(),
-                'yellow': discord.Color.yellow(),
-                'orange': discord.Color.orange(),
-                'purple': discord.Color.purple(),
-                'gold': discord.Color.gold(),
-                'dark_red': discord.Color.dark_red(),
-                'dark_green': discord.Color.dark_green(),
-                'dark_blue': discord.Color.dark_blue(),
+                'red': PALETTE.DANGER,
+                'green': PALETTE.SUCCESS,
+                'blue': PALETTE.PRIMARY,
+                'yellow': PALETTE.WARNING,
+                'orange': PALETTE.WARNING,
+                'purple': PALETTE.PRIMARY,
+                'gold': PALETTE.WARNING,
+                'dark_red': PALETTE.DANGER,
+                'dark_green': PALETTE.SUCCESS,
+                'dark_blue': PALETTE.PRIMARY,
             }
             if color_input.lower() in color_map:
                 return color_map[color_input.lower()]
         
         # Default colors based on type
         type_colors = {
-            'bugfix': discord.Color.red(),
-            'feature': discord.Color.green(),
-            'update': discord.Color.blue(),
-            'announcement': discord.Color.gold(),
-            'maintenance': discord.Color.orange(),
-            'general': discord.Color.blurple(),
+            'bugfix': PALETTE.DANGER,
+            'feature': PALETTE.SUCCESS,
+            'update': PALETTE.PRIMARY,
+            'announcement': PALETTE.WARNING,
+            'maintenance': PALETTE.WARNING,
+            'general': PALETTE.PRIMARY,
         }
-        return type_colors.get(changelog_type, discord.Color.blurple())
+        return type_colors.get(changelog_type, PALETTE.PRIMARY)
 
     def _get_type_config(self, changelog_type: str) -> dict:
         """Get configuration for different changelog types."""
