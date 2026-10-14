@@ -617,72 +617,23 @@ class NewsCog(commands.Cog):
         import database
         return await database.remove_news_whitelist(word)
 
-    # Account-specific whitelist JSON methods
-    def _load_account_whitelists(self) -> Dict[str, List[str]]:
-        """Load account-specific whitelists from JSON file."""
-        try:
-            with open('data/account_whitelists.json', 'r') as f:
-                data = json.load(f)
-                return data.get('whitelists', {})
-        except (FileNotFoundError, json.JSONDecodeError):
-            return {}
+    # ---------------------- PostgreSQL account whitelist methods ----------------------
 
-    def _save_account_whitelists(self, whitelists: Dict[str, List[str]]):
-        """Save account-specific whitelists to JSON file."""
-        try:
-            os.makedirs('data', exist_ok=True)
-            with open('data/account_whitelists.json', 'w') as f:
-                json.dump({'whitelists': whitelists}, f, indent=2)
-        except Exception as e:
-            logger.error(f"Error saving account whitelists: {e}", exc_info=True)
-
-    # JSON-based replacements for account whitelist database functions
     async def get_account_whitelists_json(self) -> Dict[str, List[str]]:
-        """Get all account-specific whitelists from JSON."""
-        return self._load_account_whitelists()
+        import database
+        return await database.get_account_whitelists()
 
     async def add_account_whitelist_json(self, handle: str, keyword: str) -> bool:
-        """Add a whitelist keyword for a specific account to JSON."""
-        try:
-            whitelists = self._load_account_whitelists()
-            keyword_lower = keyword.lower()
-
-            if handle not in whitelists:
-                whitelists[handle] = []
-
-            if keyword_lower not in whitelists[handle]:
-                whitelists[handle].append(keyword_lower)
-                self._save_account_whitelists(whitelists)
-                logger.info(f"Added whitelist keyword '{keyword}' for account {handle}")
-                return True
-            return False
-        except Exception as e:
-            logger.error(f"Error adding whitelist keyword '{keyword}' for {handle}: {e}", exc_info=True)
-            return False
+        import database
+        return await database.add_account_whitelist(handle, keyword)
 
     async def remove_account_whitelist_json(self, handle: str, keyword: str) -> bool:
-        """Remove a whitelist keyword for a specific account from JSON."""
-        try:
-            whitelists = self._load_account_whitelists()
-            keyword_lower = keyword.lower()
-
-            if handle in whitelists and keyword_lower in whitelists[handle]:
-                whitelists[handle].remove(keyword_lower)
-                # Remove empty lists
-                if not whitelists[handle]:
-                    del whitelists[handle]
-                self._save_account_whitelists(whitelists)
-                logger.info(f"Removed whitelist keyword '{keyword}' for account {handle}")
-                return True
-            return False
-        except Exception as e:
-            logger.error(f"Error removing whitelist keyword '{keyword}' for {handle}: {e}", exc_info=True)
-            return False
+        import database
+        return await database.remove_account_whitelist(handle, keyword)
 
     async def get_account_whitelist_json(self, handle: str) -> List[str]:
-        """Get whitelist keywords for a specific account from JSON."""
-        whitelists = self._load_account_whitelists()
-        return whitelists.get(handle, [])
+        import database
+        return await database.get_account_whitelist(handle)
 
     # Replace individual commands with single admin interface
     @bot_moderator_only()
