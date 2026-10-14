@@ -6,7 +6,6 @@ import logging
 import os
 import re
 import aiohttp
-import aiosqlite
 from pathlib import Path
 from typing import Optional
 
@@ -658,83 +657,49 @@ class Login(commands.Cog):
         avatar_url = steam_data.get("avatar")
         profile_url = steam_data.get("profile_url")
 
-        # Database operations with guild-aware support
+        # Persist Steam registration through the shared PostgreSQL database layer.
         try:
-            import aiosqlite
-            
-            async with aiosqlite.connect(DB_PATH) as db:
-                # Check if user already exists (guild-aware if guild_id provided)
-                existing_user = None
-                if guild_id is not None:
-                    cursor = await db.execute(
-                        "SELECT * FROM steam_users WHERE discord_id = ? AND guild_id = ?",
-                        (user_id, guild_id)
-                    )
-                    existing_user = await cursor.fetchone()
-                    await cursor.close()
-                
-                if not existing_user:
-                    # Fallback to global check
-                    cursor = await db.execute(
-                        "SELECT * FROM steam_users WHERE discord_id = ?",
-                        (user_id,)
-                    )
-                    existing_user = await cursor.fetchone()
-                    await cursor.close()
+            import database
+            if guild_id is None:
+                return "❌ Steam registration must be performed inside a server."
 
-                if existing_user:
-                    # Update existing user
-                    if guild_id is not None:
-                        await db.execute(
-                            "UPDATE steam_users SET steam_id = ?, vanity_name = ? WHERE discord_id = ? AND guild_id = ?",
-                            (steam_id, vanity_name, user_id, guild_id)
-                        )
-                    else:
-                        await db.execute(
-                            "UPDATE steam_users SET steam_id = ?, vanity_name = ? WHERE discord_id = ?",
-                            (steam_id, vanity_name, user_id)
-                        )
-                    await db.commit()
-                    logger.info(f"Updated Steam registration for {discord_user} (ID: {user_id}) -> Steam: {vanity_name}")
-                    
-                    # Create rich embed with avatar
-                    embed = build_success_embed(
-                        "Steam Updated",
-                        f"Your Steam profile has been updated to **{vanity_name}**!"
-                    )
-                    if avatar_url:
-                        embed.set_thumbnail(url=avatar_url)
-                    if profile_url:
-                        embed.add_field(name="Profile", value=profile_url, inline=False)
-                    return embed
-                else:
-                    # Register new user
-                    if guild_id is not None:
-                        await db.execute(
-                            "INSERT INTO steam_users (discord_id, steam_id, vanity_name, guild_id) VALUES (?, ?, ?, ?)",
-                            (user_id, steam_id, vanity_name, guild_id)
-                        )
-                    else:
-                        await db.execute(
-                            "INSERT INTO steam_users (discord_id, steam_id, vanity_name) VALUES (?, ?, ?)",
-                            (user_id, steam_id, vanity_name)
-                        )
-                    await db.commit()
-                    logger.info(f"Successfully registered Steam user {discord_user} (ID: {user_id}) -> Steam: {vanity_name}")
-                    
-                    # Create rich embed with avatar
-                    embed = build_success_embed(
-                        "Steam Registration Successful",
-                        f"Successfully registered with Steam profile **{vanity_name}**!"
-                    )
-                    if avatar_url:
-                        embed.set_thumbnail(url=avatar_url)
-                    if profile_url:
-                        embed.add_field(name="Profile", value=profile_url, inline=False)
-                    embed.set_footer(text="You can now use all Steam features!")
-                    embed.color = PALETTE.PRIMARY  # Keep blue for registration
-                    return embed
-                
+            existing_user = await database.execute_db_operation(
+                "check guild Steam registration",
+                "SELECT discord_id FROM steam_users WHERE discord_id = ? AND guild_id = ?",
+                (user_id, guild_id),
+                fetch_type="one",
+            )
+            if existing_user:
+                await database.execute_db_operation(
+                    "update guild Steam registration",
+                    "UPDATE steam_users SET steam_id = ?, vanity_name = ? WHERE discord_id = ? AND guild_id = ?",
+                    (steam_id, vanity_name, user_id, guild_id),
+                )
+                logger.info("Updated Steam registration for %s (ID: %s) in guild %s", discord_user, user_id, guild_id)
+                embed = build_success_embed(
+                    "Steam Updated",
+                    f"Your Steam profile has been updated to **{vanity_name}**!",
+                )
+            else:
+                await database.execute_db_operation(
+                    "insert guild Steam registration",
+                    "INSERT INTO steam_users (discord_id, steam_id, vanity_name, guild_id) VALUES (?, ?, ?, ?)",
+                    (user_id, steam_id, vanity_name, guild_id),
+                )
+                logger.info("Registered Steam user %s (ID: %s) in guild %s", discord_user, user_id, guild_id)
+                embed = build_success_embed(
+                    "Steam Registration Successful",
+                    f"Successfully registered with Steam profile **{vanity_name}**!",
+                )
+                embed.set_footer(text="You can now use all Steam features!")
+
+            if avatar_url:
+                embed.set_thumbnail(url=avatar_url)
+            if profile_url:
+                embed.add_field(name="Profile", value=profile_url, inline=False)
+            embed.color = PALETTE.PRIMARY
+            return embed
+
         except Exception as e:
             logger.error(f"Database error during Steam registration for {discord_user} (ID: {user_id}): {e}", exc_info=True)
             return "❌ An error occurred while registering your Steam profile. Please try again later."
