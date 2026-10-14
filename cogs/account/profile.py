@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 # cogs/profile.py
 import discord
 from discord.ext import commands
@@ -734,7 +735,7 @@ class Profile(commands.Cog):
         profile_embed = discord.Embed(
             title=f"🌸 {user_data['name']}'s AniList Profile",
             url=profile_url,
-            color=discord.Color.blurple()
+            color=PALETTE.PRIMARY
         )
         if avatar_url: profile_embed.set_thumbnail(url=avatar_url)
         
@@ -978,7 +979,7 @@ class AchievementsView(discord.ui.View):
         embed = discord.Embed(
             title=f"🏅 Achievements — {self.user_data['name']}",
             url=self.profile_url,
-            color=discord.Color.gold()
+            color=PALETTE.WARNING
         )
         
         if achieved:
@@ -998,7 +999,7 @@ class AchievementsView(discord.ui.View):
         embed = discord.Embed(
             title=f"📈 Progress — {self.user_data['name']}",
             url=self.profile_url,
-            color=discord.Color.blue()
+            color=PALETTE.PRIMARY
         )
         
         if progress:
@@ -1024,7 +1025,7 @@ class AchievementsView(discord.ui.View):
         embed = discord.Embed(
             title=f"📊 Achievement Stats — {self.user_data['name']}",
             url=self.profile_url,
-            color=discord.Color.purple()
+            color=PALETTE.PRIMARY
         )
         
         embed.add_field(
@@ -1197,7 +1198,7 @@ class FavoritesView(discord.ui.View):
         embed = discord.Embed(
             title=f"🎬 {self.user_data['name']}'s Favorite Anime",
             url=self.profile_url,
-            color=discord.Color.blue()
+            color=PALETTE.PRIMARY
         )
         if self.avatar_url:
             embed.set_thumbnail(url=self.avatar_url)
@@ -1222,7 +1223,7 @@ class FavoritesView(discord.ui.View):
         embed = discord.Embed(
             title=f"📚 {self.user_data['name']}'s Favorite Manga",
             url=self.profile_url,
-            color=discord.Color.green()
+            color=PALETTE.SUCCESS
         )
         if self.avatar_url:
             embed.set_thumbnail(url=self.avatar_url)
@@ -1247,7 +1248,7 @@ class FavoritesView(discord.ui.View):
         embed = discord.Embed(
             title=f"👥 {self.user_data['name']}'s Favorite Characters",
             url=self.profile_url,
-            color=discord.Color.purple()
+            color=PALETTE.PRIMARY
         )
         if self.avatar_url:
             embed.set_thumbnail(url=self.avatar_url)
@@ -1271,7 +1272,7 @@ class FavoritesView(discord.ui.View):
         embed = discord.Embed(
             title=f"🎭 {self.user_data['name']}'s Favorite Studios",
             url=self.profile_url,
-            color=discord.Color.gold()
+            color=PALETTE.WARNING
         )
         if self.avatar_url:
             embed.set_thumbnail(url=self.avatar_url)
@@ -1295,7 +1296,7 @@ class FavoritesView(discord.ui.View):
         embed = discord.Embed(
             title=f"👨‍💼 {self.user_data['name']}'s Favorite Staff",
             url=self.profile_url,
-            color=discord.Color.orange()
+            color=PALETTE.WARNING
         )
         if self.avatar_url:
             embed.set_thumbnail(url=self.avatar_url)
@@ -1386,7 +1387,7 @@ class GalleryView(discord.ui.View):
         embed = discord.Embed(
             title=f"🖼️ {self.user_name}'s Gallery",
             description=f"Image {self.current_index + 1} of {len(self.images)}",
-            color=discord.Color.purple()
+            color=PALETTE.PRIMARY
         )
         
         if self.avatar_url:
