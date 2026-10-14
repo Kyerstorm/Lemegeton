@@ -3,7 +3,6 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import aiohttp
-import aiosqlite
 import asyncio
 import logging
 import os
@@ -12,7 +11,6 @@ from pathlib import Path
 from typing import Optional
 import json
 from datetime import datetime, timedelta
-from config import DB_PATH
 from cogs_test.general_commands.dashboard import command_meta
 
 # ------------------------------------------------------
@@ -692,12 +690,13 @@ class Affinity(commands.Cog):
         
         try:
             # Get user's AniList username (guild-aware)
-            async with aiosqlite.connect(DB_PATH) as db:
-                cursor = await db.execute(
-                    "SELECT anilist_username FROM users WHERE discord_id = ? AND guild_id = ?", 
-                    (discord_id, guild_id)
-                )
-                row = await cursor.fetchone()
+            import database
+            row = await database.execute_db_operation(
+                "load guild AniList account for affinity",
+                "SELECT anilist_username FROM users WHERE discord_id = ? AND guild_id = ?",
+                (discord_id, guild_id),
+                fetch_type="one",
+            )
                 
                 if not row:
                     logger.warning(f"User {user_display} (ID: {discord_id}) not registered in guild {guild_id}")
@@ -763,13 +762,13 @@ class Affinity(commands.Cog):
                             for discord_id, score in results:
                                 # Look up AniList username for this Discord ID
                                 try:
-                                    async with aiosqlite.connect(DB_PATH) as db:
-                                        cursor = await db.execute(
-                                            "SELECT anilist_username FROM users WHERE discord_id = ? AND guild_id = ?",
-                                            (discord_id, guild_id)
-                                        )
-                                        row = await cursor.fetchone()
-                                        anilist_username = row[0] if row else f"User_{discord_id}"
+                                    row = await database.execute_db_operation(
+                                        "load guild AniList username for affinity result",
+                                        "SELECT anilist_username FROM users WHERE discord_id = ? AND guild_id = ?",
+                                        (discord_id, guild_id),
+                                        fetch_type="one",
+                                    )
+                                    anilist_username = row[0] if row else f"User_{discord_id}"
                                 except Exception:
                                     anilist_username = f"User_{discord_id}"
                                 
