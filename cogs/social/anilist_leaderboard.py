@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -383,7 +384,7 @@ class LeaderboardView(discord.ui.View):
         embed = discord.Embed(
             title=f"🏆 {self.media_config['title']}",
             description=f"{self.media_config['description']} (Page {self.current_page + 1}/{self.max_page + 1})",
-            color=discord.Color.gold()
+            color=PALETTE.WARNING
         )
 
         if not page_data:
@@ -1197,7 +1198,7 @@ class Leaderboard(commands.Cog):
                 loading_embed = discord.Embed(
                     title="🔄 Loading Cached Leaderboard...",
                     description=f"Generating {media_config['title']} (from cache)",
-                    color=discord.Color.blue()
+                    color=PALETTE.PRIMARY
                 )
                 
                 message = await interaction.followup.send(embed=loading_embed, view=view)
@@ -1228,7 +1229,7 @@ class Leaderboard(commands.Cog):
                 error_embed = discord.Embed(
                     title="⚠️ No Data Found",
                     description=f"No progress data found for {media_config['media_label'].lower()}. Users need to have their AniList profiles linked and have consumed some {media_config['media_label'].lower()}!",
-                    color=discord.Color.orange()
+                    color=PALETTE.WARNING
                 )
                 await interaction.followup.send(embed=error_embed, ephemeral=True)
                 logger.warning(f"No leaderboard data found for {chosen_medium}")
@@ -1245,7 +1246,7 @@ class Leaderboard(commands.Cog):
             loading_embed = discord.Embed(
                 title="🔄 Loading Leaderboard...",
                 description=f"Generating {media_config['title']}",
-                color=discord.Color.blue()
+                color=PALETTE.PRIMARY
             )
             
             message = await interaction.followup.send(embed=loading_embed, view=view)
@@ -1261,7 +1262,7 @@ class Leaderboard(commands.Cog):
             error_embed = discord.Embed(
                 title="❌ Something Went Wrong",
                 description="An error occurred while generating the leaderboard. Please try again later!",
-                color=discord.Color.red()
+                color=PALETTE.DANGER
             )
             
             if not interaction.response.is_done():
