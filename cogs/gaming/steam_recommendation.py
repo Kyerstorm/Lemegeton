@@ -3,7 +3,6 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import aiohttp
-import aiosqlite
 import asyncio
 import math
 from typing import Optional
@@ -97,31 +96,24 @@ class SteamRecommendation(commands.Cog):
             'multiplayer_only': multiplayer_only
         }
 
-        # Get user's Steam ID
-        steamid = None
-        async with aiosqlite.connect(DB_PATH) as db:
-            # Prefer guild-scoped lookup when in a guild
-            guild_id = getattr(interaction.guild, 'id', None)
-            row = None
-            if guild_id is not None:
-                try:
-                    cur = await db.execute("SELECT steam_id FROM steam_users WHERE discord_id = ? AND guild_id = ?", (interaction.user.id, guild_id))
-                    row = await cur.fetchone()
-                    await cur.close()
-                except Exception:
-                    row = None
-
-            if not row:
-                cur = await db.execute("SELECT steam_id FROM steam_users WHERE discord_id = ?", (interaction.user.id,))
-                row = await cur.fetchone()
-                await cur.close()
-            if not row:
-                embed = build_error_embed(
-                    "Account Not Registered",
-                    "You have not registered a Steam account. Use `/login` to register your Steam account."
-                )
-                return await interaction.followup.send(embed=embed, ephemeral=True)
-            steamid = row[0]
+        # Get the Steam ID only from this guild's PostgreSQL record.
+        import database
+        guild_id = interaction.guild_id
+        row = None
+        if guild_id is not None:
+            row = await database.execute_db_operation(
+                "load guild Steam ID for recommendations",
+                "SELECT steam_id FROM steam_users WHERE discord_id = ? AND guild_id = ?",
+                (interaction.user.id, guild_id),
+                fetch_type="one",
+            )
+        if not row:
+            embed = build_error_embed(
+                "Account Not Registered",
+                "You have not registered a Steam account in this server. Use `/login` to register your Steam account."
+            )
+            return await interaction.followup.send(embed=embed, ephemeral=True)
+        steamid = row[0]
 
         async with aiohttp.ClientSession() as session:
             # Get user's owned games with detailed info
