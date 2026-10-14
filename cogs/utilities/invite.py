@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -82,7 +83,7 @@ class InviteCog(commands.Cog):
             embed = discord.Embed(
                 title="🤖 Invite Lemegeton Bot",
                 description="Click the link below to add this bot to your server!",
-                color=discord.Color.blue()
+                color=PALETTE.PRIMARY
             )
             
             embed.add_field(
@@ -143,7 +144,7 @@ class InviteCog(commands.Cog):
             error_embed = discord.Embed(
                 title="❌ Error",
                 description="Failed to generate invite link. Please try again later.",
-                color=discord.Color.red()
+                color=PALETTE.DANGER
             )
             
             await interaction.response.send_message(
