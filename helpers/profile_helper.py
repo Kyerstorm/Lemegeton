@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 """
 Profile Helper Functions
 Centralized functions for user profile management, statistics, and AniList profile processing
@@ -310,7 +311,7 @@ def create_profile_overview_embed(user_data: Dict, statistics: Dict) -> discord.
     embed = discord.Embed(
         title=f"AniList Profile: {username}",
         url=f"https://anilist.co/user/{username}",
-        color=discord.Color.blue()
+        color=PALETTE.PRIMARY
     )
     
     if avatar:
@@ -357,7 +358,7 @@ def create_statistics_embed(username: str, statistics: Dict, stat_type: str = "a
     
     embed = discord.Embed(
         title=title,
-        color=discord.Color.blue()
+        color=PALETTE.PRIMARY
     )
     
     stats = statistics.get(stat_type, {})
@@ -410,7 +411,7 @@ def create_favorites_embed(username: str, favorites: Dict, favorite_type: str = 
     
     embed = discord.Embed(
         title=title,
-        color=discord.Color.gold()
+        color=PALETTE.WARNING
     )
     
     items = favorites.get(favorite_type, [])
