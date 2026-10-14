@@ -20,7 +20,6 @@ import aiohttp
 import asyncio
 import logging
 import traceback
-import shutil
 import re
 from datetime import datetime
 from pathlib import Path
@@ -28,12 +27,8 @@ from typing import List, Optional, Tuple, Dict, Any
 
 # Project helpers 
 from helpers.cache_helper import load_json_cache, save_json_cache, is_json_cache_valid
-from database import execute_db_operation, is_user_bot_moderator
-try:
-    import config
-    DB_PATH = Path(config.DB_PATH)
-except Exception:
-    DB_PATH = Path("data/bot_database.db")
+from database import execute_db_operation, get_table_columns, is_user_bot_moderator
+import json
 
 # Constants
 LOGS_DIR = Path("logs")
@@ -291,14 +286,36 @@ class LoliList(commands.Cog):
         """
         await execute_db_operation("ensure_loli_audit", q_audit)
 
+    async def _backup_postgres_tables(self, reason: str) -> None:
+        """Write a portable JSON snapshot of LoliList PostgreSQL tables."""
+        try:
+            snapshot = {"created_at": datetime.utcnow().isoformat() + "Z", "reason": reason, "tables": {}}
+            for table_name in ("lolilist_entries", "loli_audit"):
+                columns = await get_table_columns(table_name)
+                if not columns:
+                    snapshot["tables"][table_name] = {"columns": [], "rows": []}
+                    continue
+                rows = await execute_db_operation(
+                    f"snapshot {table_name}",
+                    f"SELECT * FROM {table_name}",
+                    fetch_type="all",
+                )
+                snapshot["tables"][table_name] = {
+                    "columns": columns,
+                    "rows": [[str(value) if value is not None else None for value in row] for row in (rows or [])],
+                }
+            BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            destination = BACKUP_DIR / f"lolilist_postgres_backup_{stamp}.json"
+            destination.write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
+            logger.info("LoliList PostgreSQL snapshot written to %s", destination)
+        except Exception:
+            logger.exception("Failed to create LoliList PostgreSQL snapshot (%s)", reason)
+
     @tasks.loop(hours=24)
     async def autobackup(self):
         try:
-            ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-            if DB_PATH.exists():
-                dest = BACKUP_DIR / f"{DB_PATH.stem}_backup_{ts}.db"
-                shutil.copy2(DB_PATH, dest)
-                logger.info(f"LoliList DB backup created: {dest}")
+            await self._backup_postgres_tables("scheduled")
         except Exception as e:
             logger.error(f"autobackup error: {e}")
 
@@ -446,9 +463,7 @@ class LoliList(commands.Cog):
             except Exception:
                 pass
             try:
-                ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-                if DB_PATH.exists():
-                    shutil.copy2(DB_PATH, BACKUP_DIR / f"{DB_PATH.stem}_backup_{ts}.db")
+                await self._backup_postgres_tables("add_session")
             except Exception:
                 pass
 
@@ -617,9 +632,7 @@ class LoliList(commands.Cog):
                     await send_temp(ctx, discord.Embed(description="✅ All entries deleted globally.", color=PALETTE.SUCCESS))
                     # backup
                     try:
-                        ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-                        if DB_PATH.exists():
-                            shutil.copy2(DB_PATH, BACKUP_DIR / f"{DB_PATH.stem}_backup_{ts}.db")
+                        await self._backup_postgres_tables("before_delete_all")
                     except Exception:
                         pass
                 except Exception as e:
