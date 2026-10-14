@@ -945,14 +945,14 @@ class Login(commands.Cog):
             if steam_user:
                 health_status["steam"]["connected"] = True
                 vanity_name = steam_user[0]
-                    
-                    # Verify Steam account still exists
-                    steam_data = await self._resolve_steam_vanity(vanity_name)
-                    if steam_data and "error" not in steam_data:
-                        health_status["steam"]["healthy"] = True
-                        health_status["steam"]["message"] = "Connection verified"
-                    else:
-                        health_status["steam"]["message"] = steam_data.get("message", "Could not verify account") if steam_data else "Could not verify account"
+                
+                # Verify Steam account still exists
+                steam_data = await self._resolve_steam_vanity(vanity_name)
+                if steam_data and "error" not in steam_data:
+                    health_status["steam"]["healthy"] = True
+                    health_status["steam"]["message"] = "Connection verified"
+                else:
+                    health_status["steam"]["message"] = steam_data.get("message", "Could not verify account") if steam_data else "Could not verify account"
         except Exception as e:
             logger.error(f"Error checking Steam health for user {user_id}: {e}")
             health_status["steam"]["message"] = "Health check failed"

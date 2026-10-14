@@ -697,155 +697,29 @@ class Affinity(commands.Cog):
                 (discord_id, guild_id),
                 fetch_type="one",
             )
-                
-                if not row:
-                    logger.warning(f"User {user_display} (ID: {discord_id}) not registered in guild {guild_id}")
-                    await interaction.followup.send(
-                        "❌ You are not registered. Use `/login` to link your AniList account first.", 
-                        ephemeral=True
-                    )
-                    return
-                    
-                anilist_username = row[0]
-                logger.info(f"Found AniList username: {anilist_username} for {user_display} in guild {guild_id}")
-
-                # Check cache first
-                cache_key = get_cache_key(discord_id, guild_id, user.id if user else None)
-                cached_data = get_cached_affinity(cache_key)
-                
-                if cached_data:
-                    logger.info(f"Using cached affinity data for {user_display}")
-                    if user:
-                        # Single user comparison from cache
-                        score = cached_data["score"]
-                        breakdown = cached_data["breakdown"]
-                        
-                        embed = discord.Embed(
-                            title=f"💞 Affinity Between {user_display} and {user.display_name}",
-                            color=PALETTE.WARNING if score >= 80 else 
-                                  PALETTE.SUCCESS if score >= 60 else 
-                                  PALETTE.WARNING if score >= 40 else 
-                                  PALETTE.DANGER
-                        )
-                        
-                        embed.add_field(
-                            name="🎯 Affinity Score",
-                            value=f"**{score}%**",
-                            inline=True
-                        )
-                        
-                        embed.add_field(
-                            name="📊 Breakdown",
-                            value=f"""**Favorites:** {breakdown.get('favorites', 0):.1f}%
-**Consumption:** {breakdown.get('consumption', 0):.1f}%
-**Scoring:** {breakdown.get('scoring', 0):.1f}%
-**Genres:** {breakdown.get('genres', 0):.1f}%
-**Formats:** {breakdown.get('formats', 0):.1f}%
-**Activity:** {breakdown.get('activity', 0):.1f}%
-**Balance:** {breakdown.get('balance', 0):.1f}%""",
-                            inline=True
-                        )
-                        
-                        embed.set_footer(text="Higher scores indicate better compatibility! (Cached data)")
-                        await interaction.followup.send(embed=embed)
-                        logger.info(f"Sent cached single affinity comparison: {user_display} vs {user.display_name} = {score}%")
-                        return
-                    else:
-                        # All users comparison from cache
-                        results = cached_data["results"]
-                        detailed_data = cached_data["detailed_data"]
-                        
-                        # Convert old cache format (discord_id, score) to new format (discord_id, anilist_username, score)
-                        if results and len(results[0]) == 2:  # Old format
-                            logger.info("Converting old cache format to new format")
-                            converted_results = []
-                            for discord_id, score in results:
-                                # Look up AniList username for this Discord ID
-                                try:
-                                    row = await database.execute_db_operation(
-                                        "load guild AniList username for affinity result",
-                                        "SELECT anilist_username FROM users WHERE discord_id = ? AND guild_id = ?",
-                                        (discord_id, guild_id),
-                                        fetch_type="one",
-                                    )
-                                    anilist_username = row[0] if row else f"User_{discord_id}"
-                                except Exception:
-                                    anilist_username = f"User_{discord_id}"
-                                
-                                converted_results.append((discord_id, anilist_username, score))
-                            results = converted_results
-                        
-                        # Sort results by affinity score (highest first)
-                        results.sort(key=lambda x: x[2], reverse=True)
-                        
-                        logger.info(f"Using cached affinity results: {len(results)} comparisons")
-                        
-                        # Create and send enhanced paginated view with detailed breakdowns
-                        view = self.AffinityView(results, user_display, detailed_data, is_cached=True)
-                        await interaction.followup.send(embed=view.get_embed(), view=view)
-                        logger.info(f"Sent cached affinity results for {user_display}")
-                        return
-
-                # Send wait message for fresh calculations
+            
+            if not row:
+                logger.warning(f"User {user_display} (ID: {discord_id}) not registered in guild {guild_id}")
                 await interaction.followup.send(
-                    "⏳ Please wait up to 2 minutes for affinity calculation. You will only have to do this once a month due to caching.",
+                    "❌ You are not registered. Use `/login` to link your AniList account first.", 
                     ephemeral=True
                 )
+                return
+                
+            anilist_username = row[0]
+            logger.info(f"Found AniList username: {anilist_username} for {user_display} in guild {guild_id}")
 
-                # Handle specific user comparison
+            # Check cache first
+            cache_key = get_cache_key(discord_id, guild_id, user.id if user else None)
+            cached_data = get_cached_affinity(cache_key)
+            
+            if cached_data:
+                logger.info(f"Using cached affinity data for {user_display}")
                 if user:
-                    if user.id == discord_id:
-                        await interaction.followup.send(
-                            "❌ You cannot compare affinity with yourself!", 
-                            ephemeral=True
-                        )
-                        return
+                    # Single user comparison from cache
+                    score = cached_data["score"]
+                    breakdown = cached_data["breakdown"]
                     
-                    # Check if specified user is registered
-                    cursor = await db.execute(
-                        "SELECT anilist_username FROM users WHERE discord_id = ? AND guild_id = ?",
-                        (user.id, guild_id)
-                    )
-                    target_row = await cursor.fetchone()
-                    
-                    if not target_row:
-                        await interaction.followup.send(
-                            f"❌ {user.display_name} is not registered. They need to use `/login` first.", 
-                            ephemeral=True
-                        )
-                        return
-                    
-                    target_anilist = target_row[0]
-                    logger.info(f"Comparing {anilist_username} with specific user {target_anilist}")
-                    
-                    # Fetch both users' data
-                    me = await self.fetch_user(anilist_username)
-                    if not me:
-                        await interaction.followup.send(
-                            "❌ Could not fetch your AniList data. Make sure your profile is public and try again.", 
-                            ephemeral=True
-                        )
-                        return
-                    
-                    target_user = await self.fetch_user(target_anilist)
-                    if not target_user:
-                        await interaction.followup.send(
-                            f"❌ Could not fetch {user.display_name}'s AniList data. Make sure their profile is public and try again.", 
-                            ephemeral=True
-                        )
-                        return
-                    
-                    # Calculate affinity
-                    score, breakdown = self.calculate_affinity(me, target_user, return_breakdown=True)
-                    
-                    # Cache the result
-                    cache_data = {
-                        "score": score,
-                        "breakdown": breakdown
-                    }
-                    set_cached_affinity(cache_key, cache_data)
-                    
-                    # Create single comparison embed
                     embed = discord.Embed(
                         title=f"💞 Affinity Between {user_display} and {user.display_name}",
                         color=PALETTE.WARNING if score >= 80 else 
@@ -872,18 +746,146 @@ class Affinity(commands.Cog):
                         inline=True
                     )
                     
-                    embed.set_footer(text="Higher scores indicate better compatibility!")
+                    embed.set_footer(text="Higher scores indicate better compatibility! (Cached data)")
                     await interaction.followup.send(embed=embed)
-                    logger.info(f"Single affinity comparison sent: {user_display} vs {user.display_name} = {score}%")
+                    logger.info(f"Sent cached single affinity comparison: {user_display} vs {user.display_name} = {score}%")
+                    return
+                else:
+                    # All users comparison from cache
+                    results = cached_data["results"]
+                    detailed_data = cached_data["detailed_data"]
+                    
+                    # Convert old cache format (discord_id, score) to new format (discord_id, anilist_username, score)
+                    if results and len(results[0]) == 2:  # Old format
+                        logger.info("Converting old cache format to new format")
+                        converted_results = []
+                        for discord_id, score in results:
+                            # Look up AniList username for this Discord ID
+                            try:
+                                row = await database.execute_db_operation(
+                                    "load guild AniList username for affinity result",
+                                    "SELECT anilist_username FROM users WHERE discord_id = ? AND guild_id = ?",
+                                    (discord_id, guild_id),
+                                    fetch_type="one",
+                                )
+                                anilist_username = row[0] if row else f"User_{discord_id}"
+                            except Exception:
+                                anilist_username = f"User_{discord_id}"
+                            
+                            converted_results.append((discord_id, anilist_username, score))
+                        results = converted_results
+                    
+                    # Sort results by affinity score (highest first)
+                    results.sort(key=lambda x: x[2], reverse=True)
+                    
+                    logger.info(f"Using cached affinity results: {len(results)} comparisons")
+                    
+                    # Create and send enhanced paginated view with detailed breakdowns
+                    view = self.AffinityView(results, user_display, detailed_data, is_cached=True)
+                    await interaction.followup.send(embed=view.get_embed(), view=view)
+                    logger.info(f"Sent cached affinity results for {user_display}")
                     return
 
-                # Get all other users in the same guild (guild-aware)
-                cursor = await db.execute(
-                    "SELECT discord_id, anilist_username FROM users WHERE discord_id != ? AND guild_id = ? AND anilist_username IS NOT NULL",
-                    (discord_id, guild_id)
-                )
-                all_users = await cursor.fetchall()
+            # Send wait message for fresh calculations
+            await interaction.followup.send(
+                "⏳ Please wait up to 2 minutes for affinity calculation. You will only have to do this once a month due to caching.",
+                ephemeral=True
+            )
+
+            # Handle specific user comparison
+            if user:
+                if user.id == discord_id:
+                    await interaction.followup.send(
+                        "❌ You cannot compare affinity with yourself!", 
+                        ephemeral=True
+                    )
+                    return
                 
+                # Check if specified user is registered
+                target_row = await database.execute_db_operation(
+                    "load guild AniList account for affinity target",
+                    "SELECT anilist_username FROM users WHERE discord_id = ? AND guild_id = ?",
+                    (user.id, guild_id),
+                    fetch_type="one",
+                )
+                
+                if not target_row:
+                    await interaction.followup.send(
+                        f"❌ {user.display_name} is not registered. They need to use `/login` first.", 
+                        ephemeral=True
+                    )
+                    return
+                
+                target_anilist = target_row[0]
+                logger.info(f"Comparing {anilist_username} with specific user {target_anilist}")
+                
+                # Fetch both users' data
+                me = await self.fetch_user(anilist_username)
+                if not me:
+                    await interaction.followup.send(
+                        "❌ Could not fetch your AniList data. Make sure your profile is public and try again.", 
+                        ephemeral=True
+                    )
+                    return
+                
+                target_user = await self.fetch_user(target_anilist)
+                if not target_user:
+                    await interaction.followup.send(
+                        f"❌ Could not fetch {user.display_name}'s AniList data. Make sure their profile is public and try again.", 
+                        ephemeral=True
+                    )
+                    return
+                
+                # Calculate affinity
+                score, breakdown = self.calculate_affinity(me, target_user, return_breakdown=True)
+                
+                # Cache the result
+                cache_data = {
+                    "score": score,
+                    "breakdown": breakdown
+                }
+                set_cached_affinity(cache_key, cache_data)
+                
+                # Create single comparison embed
+                embed = discord.Embed(
+                    title=f"💞 Affinity Between {user_display} and {user.display_name}",
+                    color=PALETTE.WARNING if score >= 80 else 
+                          PALETTE.SUCCESS if score >= 60 else 
+                          PALETTE.WARNING if score >= 40 else 
+                          PALETTE.DANGER
+                )
+                
+                embed.add_field(
+                    name="🎯 Affinity Score",
+                    value=f"**{score}%**",
+                    inline=True
+                )
+                
+                embed.add_field(
+                    name="📊 Breakdown",
+                    value=f"""**Favorites:** {breakdown.get('favorites', 0):.1f}%
+**Consumption:** {breakdown.get('consumption', 0):.1f}%
+**Scoring:** {breakdown.get('scoring', 0):.1f}%
+**Genres:** {breakdown.get('genres', 0):.1f}%
+**Formats:** {breakdown.get('formats', 0):.1f}%
+**Activity:** {breakdown.get('activity', 0):.1f}%
+**Balance:** {breakdown.get('balance', 0):.1f}%""",
+                    inline=True
+                )
+                
+                embed.set_footer(text="Higher scores indicate better compatibility!")
+                await interaction.followup.send(embed=embed)
+                logger.info(f"Single affinity comparison sent: {user_display} vs {user.display_name} = {score}%")
+                return
+
+            # Get all other users in the same guild (guild-aware)
+            all_users = await database.execute_db_operation(
+                "load guild AniList users for affinity",
+                "SELECT discord_id, anilist_username FROM users WHERE discord_id != ? AND guild_id = ? AND anilist_username IS NOT NULL",
+                (discord_id, guild_id),
+                fetch_type="all",
+            )
+            
             logger.info(f"Found {len(all_users)} other users to compare with in guild {guild_id}")
             
             if not all_users:
