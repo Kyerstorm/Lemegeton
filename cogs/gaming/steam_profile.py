@@ -1012,7 +1012,7 @@ class SteamProfile(commands.Cog):
         lines = []
         for i, g in enumerate(groups[:40], start=1):
             lines.append(f"**{i}. [{g['name']}]({g['url']})**")
-        embed = discord.Embed(title="👪 Groups", description="\n\n".join(lines), color=discord.Color.teal())
+        embed = discord.Embed(title="👪 Groups", description="\n\n".join(lines), color=PALETTE.SECONDARY)
         try:
             if progress_msg:
                 await progress_msg.edit(content=None, embed=embed)
