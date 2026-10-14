@@ -1,3 +1,4 @@
+from helpers.color_palette import PALETTE
 # anilist.py
 
 import re
@@ -292,7 +293,7 @@ class AniListCog(commands.Cog):
         embed = discord.Embed(
             title=f"{filter_info['emoji']} User Progress - {filter_info['label']}",
             description="\n".join(progress_lines[:25]),  # Limit to prevent embed overflow
-            color=discord.Color.blue()
+            color=PALETTE.PRIMARY
         )
         
         # Add insights footer
@@ -465,7 +466,7 @@ class AniListCog(commands.Cog):
 
     # Build embed for activity / replies
     def build_embed(self, activity: dict, activity_type: str, user: dict, text: str, media_links: list, likes: int, comments: int = 0):
-        embed = discord.Embed(color=discord.Color.blurple())
+        embed = discord.Embed(color=PALETTE.PRIMARY)
         clean = self.clean_text(text)
 
         if activity_type == "TextActivity":
@@ -1035,7 +1036,7 @@ class AniListCog(commands.Cog):
         desc = self.clean_text(desc_raw)
         short_desc = (desc[:800] + "...") if len(desc) > 800 else desc
 
-        embed = discord.Embed(title=title_line, url=media.get("siteUrl"), description=short_desc or "*No synopsis available*", color=discord.Color.blurple())
+        embed = discord.Embed(title=title_line, url=media.get("siteUrl"), description=short_desc or "*No synopsis available*", color=PALETTE.PRIMARY)
 
         cover = (media.get("coverImage") or {}).get("large")
         banner = media.get("bannerImage")
@@ -1110,7 +1111,7 @@ class AniListCog(commands.Cog):
             chunk_size = 1000
             chunks = [raw[i:i + chunk_size] for i in range(0, len(raw), chunk_size)]
             for idx, c in enumerate(chunks, start=1):
-                em = discord.Embed(title=f"{(media.get('title') or {}).get('romaji', 'Description')} — Part {idx}", description=c, url=media.get("siteUrl"), color=discord.Color.green())
+                em = discord.Embed(title=f"{(media.get('title') or {}).get('romaji', 'Description')} — Part {idx}", description=c, url=media.get("siteUrl"), color=PALETTE.SUCCESS)
                 embeds.append(em)
         return embeds
 
@@ -1123,7 +1124,7 @@ class AniListCog(commands.Cog):
         chunk_size = 6
         for i in range(0, len(relations), chunk_size):
             chunk = relations[i:i + chunk_size]
-            em = discord.Embed(title="Relations", color=discord.Color.dark_blue())
+            em = discord.Embed(title="Relations", color=PALETTE.PRIMARY)
             for edge in chunk:
                 rel_type = edge.get("relationType") or ""
                 node = edge.get("node") or {}
@@ -1154,7 +1155,7 @@ class AniListCog(commands.Cog):
         chunk_size = 6
         for i in range(0, len(selected), chunk_size):
             chunk = selected[i:i + chunk_size]
-            em = discord.Embed(title=title, color=discord.Color.blurple())
+            em = discord.Embed(title=title, color=PALETTE.PRIMARY)
             for e in chunk:
                 node = e.get("node") or {}
                 name = (node.get("name") or {}).get("full") or "Unknown"
@@ -1240,7 +1241,7 @@ class AniListCog(commands.Cog):
 
     def build_recommendations_embed(self, media: dict, max_items: int = 5) -> discord.Embed:
         recs = (media.get("recommendations") or {}).get("edges") or []
-        em = discord.Embed(title="🎯 Recommendations", description="Top recommendations from AniList", color=discord.Color.gold())
+        em = discord.Embed(title="🎯 Recommendations", description="Top recommendations from AniList", color=PALETTE.WARNING)
         count = 0
         for e in recs:
             node = e.get("node") or {}
@@ -1263,7 +1264,7 @@ class AniListCog(commands.Cog):
         tags = media.get("tags") or []
         if not tags:
             return build_info_embed(description="No tags found.")
-        em = discord.Embed(title="Tags", color=discord.Color.dark_purple())
+        em = discord.Embed(title="Tags", color=PALETTE.PRIMARY)
         lines = []
         for t in tags:
             name = t.get("name") or "Unknown"
