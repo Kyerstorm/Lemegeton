@@ -2061,6 +2061,101 @@ async def remove_booster_role(discord_id: int, guild_id: int) -> bool:
 
 
 # ------------------------------------------------------
+# LUNAR ROLES (custom booster roles)
+# Read/write helpers live in helpers/lunar_roles/storage.py.
+# ------------------------------------------------------
+
+async def init_lunar_roles_tables():
+    """Create the Lunar Roles tables and copy legacy booster_roles rows into them."""
+    logger.info("🔧 Initializing Lunar Roles tables...")
+    await execute_db_operation(
+        "create lunar custom roles table",
+        """
+        CREATE TABLE IF NOT EXISTS lunar_custom_roles (
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            role_id INTEGER,
+            status TEXT NOT NULL DEFAULT 'active',
+            name TEXT,
+            color_mode TEXT NOT NULL DEFAULT 'solid',
+            primary_color INTEGER,
+            secondary_color INTEGER,
+            icon_png BYTEA,
+            position_hint INTEGER,
+            last_changed_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (guild_id, user_id)
+        )
+        """,
+    )
+    # A Discord role can belong to at most one tracked record.
+    await execute_db_operation(
+        "create lunar custom roles role_id index",
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_lunar_custom_roles_role_id
+        ON lunar_custom_roles (role_id) WHERE role_id IS NOT NULL
+        """,
+    )
+    await execute_db_operation(
+        "create lunar guild settings table",
+        """
+        CREATE TABLE IF NOT EXISTS lunar_guild_settings (
+            guild_id INTEGER PRIMARY KEY,
+            enabled BOOLEAN NOT NULL DEFAULT FALSE,
+            anchor_role_id INTEGER,
+            command_channel_id INTEGER,
+            log_channel_id INTEGER,
+            cooldown_seconds INTEGER NOT NULL DEFAULT 0,
+            allowed_role_ids TEXT NOT NULL DEFAULT '[]',
+            blocked_words TEXT NOT NULL DEFAULT '[]',
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+    )
+
+    await execute_db_operation(
+        "create lunar meta table",
+        """
+        CREATE TABLE IF NOT EXISTS lunar_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+    )
+
+    # Legacy migration runs once (a marker row stops it re-adding records that
+    # were later removed). name stays NULL until the bot reads the role from
+    # Discord (see helpers/lunar_roles/service.py).
+    already_migrated = await execute_db_operation(
+        "check lunar booster roles migration",
+        "SELECT value FROM lunar_meta WHERE key = ?",
+        ("booster_roles_migrated",),
+        fetch_type="one",
+    )
+    if not already_migrated:
+        migrated = await execute_db_operation(
+            "migrate booster roles to lunar custom roles",
+            """
+            INSERT INTO lunar_custom_roles (guild_id, user_id, role_id, status, created_at, updated_at)
+            SELECT guild_id, discord_id, role_id, 'active', created_at, CURRENT_TIMESTAMP
+            FROM booster_roles
+            ON CONFLICT DO NOTHING
+            RETURNING user_id
+            """,
+            fetch_type="all",
+        )
+        await execute_db_operation(
+            "mark lunar booster roles migration",
+            "INSERT INTO lunar_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING",
+            ("booster_roles_migrated", str(len(migrated or []))),
+        )
+        logger.info("Migrated %s legacy booster role(s) into lunar_custom_roles.", len(migrated or []))
+    logger.info("✅ Lunar Roles tables ready.")
+
+
+# ------------------------------------------------------
 # SAY COMMAND LOGS
 # ------------------------------------------------------
 async def init_say_command_logs_table():
@@ -2358,6 +2453,8 @@ async def init_db():
         ("Steam Users", init_steam_users_table),
         ("News Tables", init_news_tables),
         ("Booster Roles", init_booster_roles_table),
+        # After Booster Roles: migrates its rows.
+        ("Lunar Roles", init_lunar_roles_tables),
     ]
 
     started = time.time()
