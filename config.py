@@ -196,6 +196,19 @@ DASHBOARD_COOKIE_SECURE = os.getenv("DASHBOARD_COOKIE_SECURE", "false").strip().
 DASHBOARD_SESSION_TTL = _int_env("DASHBOARD_SESSION_TTL", 28800)
 
 # ==============================================================================
+# LUNAR ROLES (custom booster roles)
+# ==============================================================================
+# Minutes between automatic reconcile runs (also runs once at startup).
+LUNAR_RECONCILE_MINUTES = max(1, _int_env("LUNAR_RECONCILE_MINUTES", 30))
+# Removing more than this many custom roles at once needs an admin to confirm.
+LUNAR_MASS_ARCHIVE_THRESHOLD = max(0, _int_env("LUNAR_MASS_ARCHIVE_THRESHOLD", 10))
+# TEST ONLY: pretend the member list can't be loaded so reconcile skips archiving.
+# Honoured only when ENVIRONMENT is "development" (which is also the default!).
+LUNAR_DEBUG_FAIL_MEMBER_FETCH = os.getenv("LUNAR_DEBUG_FAIL_MEMBER_FETCH", "false").strip().lower() in {
+    "1", "true", "yes", "on",
+}
+
+# ==============================================================================
 # DATABASE CONFIGURATION
 # ==============================================================================
 

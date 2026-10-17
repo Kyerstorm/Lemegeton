@@ -2123,6 +2123,36 @@ async def init_lunar_roles_tables():
         "ALTER TABLE lunar_guild_settings ADD COLUMN IF NOT EXISTS removed_default_words TEXT NOT NULL DEFAULT '[]'",
     )
 
+    # Automatic mass removals wait here until an admin confirms or cancels.
+    await execute_db_operation(
+        "create lunar pending removals table",
+        """
+        CREATE TABLE IF NOT EXISTS lunar_pending_removals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            user_ids TEXT NOT NULL DEFAULT '[]',
+            reason TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            log_channel_id INTEGER,
+            log_message_id INTEGER,
+            resolved_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            resolved_at TIMESTAMP
+        )
+        """,
+    )
+    # Members kept after a cancelled pending removal aren't asked about again until `until`.
+    await execute_db_operation(
+        "create lunar archive snoozes table",
+        """
+        CREATE TABLE IF NOT EXISTS lunar_archive_snoozes (
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            until TIMESTAMP NOT NULL,
+            PRIMARY KEY (guild_id, user_id)
+        )
+        """,
+    )
     await execute_db_operation(
         "create lunar meta table",
         """

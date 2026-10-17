@@ -270,3 +270,170 @@ async def count_roles_by_status(guild_id: int) -> Dict[str, int]:
     for status, count in rows or []:
         counts[status] = int(count)
     return counts
+
+
+async def list_roles(guild_id: int) -> List[CustomRole]:
+    """Every record in a guild (any status)."""
+    rows = await execute_db_operation(
+        "list lunar roles",
+        f"SELECT {_ROLE_SELECT} FROM lunar_custom_roles WHERE guild_id = ?",
+        (guild_id,),
+        fetch_type="all",
+    )
+    return [_row_to_role(row) for row in rows or []]
+
+
+async def list_guilds_with_records() -> List[int]:
+    rows = await execute_db_operation(
+        "list guilds with lunar records",
+        "SELECT DISTINCT guild_id FROM lunar_custom_roles",
+        fetch_type="all",
+    )
+    return [int(row[0]) for row in rows or []]
+
+
+# ------------------------------------------------------
+# Pending mass removals
+# ------------------------------------------------------
+
+PENDING = "pending"
+PENDING_CONFIRMED = "confirmed"
+PENDING_CANCELLED = "cancelled"
+
+
+@dataclass
+class PendingRemoval:
+    id: int
+    guild_id: int
+    user_ids: List[int]
+    reason: str
+    status: str
+    log_channel_id: Optional[int]
+    log_message_id: Optional[int]
+    created_at: Optional[datetime]
+
+
+_PENDING_SELECT = "id, guild_id, user_ids, reason, status, log_channel_id, log_message_id, created_at"
+
+
+def _row_to_pending(row) -> PendingRemoval:
+    return PendingRemoval(
+        id=int(row[0]), guild_id=int(row[1]), user_ids=[int(u) for u in _load_json_list(row[2])],
+        reason=row[3], status=row[4], log_channel_id=row[5], log_message_id=row[6], created_at=row[7],
+    )
+
+
+async def create_pending(guild_id: int, user_ids: List[int], reason: str) -> PendingRemoval:
+    row = await execute_db_operation(
+        "create lunar pending removal",
+        f"INSERT INTO lunar_pending_removals (guild_id, user_ids, reason) VALUES (?, ?, ?) RETURNING {_PENDING_SELECT}",
+        (guild_id, json.dumps(sorted(set(user_ids))), reason),
+        fetch_type="one",
+    )
+    return _row_to_pending(row)
+
+
+async def get_open_pending(guild_id: int) -> Optional[PendingRemoval]:
+    row = await execute_db_operation(
+        "get open lunar pending removal",
+        f"SELECT {_PENDING_SELECT} FROM lunar_pending_removals WHERE guild_id = ? AND status = ? ORDER BY id LIMIT 1",
+        (guild_id, PENDING),
+        fetch_type="one",
+    )
+    return _row_to_pending(row) if row else None
+
+
+async def get_pending(pending_id: int) -> Optional[PendingRemoval]:
+    row = await execute_db_operation(
+        "get lunar pending removal",
+        f"SELECT {_PENDING_SELECT} FROM lunar_pending_removals WHERE id = ?",
+        (pending_id,),
+        fetch_type="one",
+    )
+    return _row_to_pending(row) if row else None
+
+
+async def update_pending(pending_id: int, user_ids: Optional[List[int]] = None,
+                         reason: Optional[str] = None, log_channel_id: Optional[int] = None,
+                         log_message_id: Optional[int] = None) -> None:
+    fields = {}
+    if user_ids is not None:
+        fields["user_ids"] = json.dumps(sorted(set(user_ids)))
+    if reason is not None:
+        fields["reason"] = reason
+    if log_channel_id is not None:
+        fields["log_channel_id"] = log_channel_id
+    if log_message_id is not None:
+        fields["log_message_id"] = log_message_id
+    if not fields:
+        return
+    await execute_db_operation(
+        "update lunar pending removal",
+        f"UPDATE lunar_pending_removals SET {', '.join(f'{k} = ?' for k in fields)} WHERE id = ?",
+        (*fields.values(), pending_id),
+    )
+
+
+async def resolve_pending(pending_id: int, status: str, resolved_by: Optional[int]) -> bool:
+    """Close a pending removal. Returns False if it was already resolved (double click)."""
+    rows = await execute_db_operation(
+        "resolve lunar pending removal",
+        "UPDATE lunar_pending_removals SET status = ?, resolved_by = ?, resolved_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND status = ? RETURNING id",
+        (status, resolved_by, pending_id, PENDING),
+        fetch_type="all",
+    )
+    return bool(rows)
+
+
+async def pending_user_ids(guild_id: int) -> set:
+    pending = await get_open_pending(guild_id)
+    return set(pending.user_ids) if pending else set()
+
+
+# ------------------------------------------------------
+# Snoozes (members kept after a cancelled pending removal)
+# ------------------------------------------------------
+
+async def snooze_users(guild_id: int, user_ids: List[int], hours: int = 24) -> None:
+    for user_id in set(user_ids):
+        await execute_db_operation(
+            "snooze lunar archive",
+            """
+            INSERT INTO lunar_archive_snoozes (guild_id, user_id, until)
+            VALUES (?, ?, CURRENT_TIMESTAMP + make_interval(hours => ?))
+            ON CONFLICT (guild_id, user_id) DO UPDATE SET until = excluded.until
+            """,
+            (guild_id, user_id, hours),
+        )
+
+
+async def snoozed_user_ids(guild_id: int) -> set:
+    """Members whose snooze is still running."""
+    rows = await execute_db_operation(
+        "list active lunar snoozes",
+        "SELECT user_id FROM lunar_archive_snoozes WHERE guild_id = ? AND until > CURRENT_TIMESTAMP",
+        (guild_id,),
+        fetch_type="all",
+    )
+    return {int(r[0]) for r in rows or []}
+
+
+async def expired_snooze_user_ids(guild_id: int) -> set:
+    """Members whose snooze ran out: they get asked about once more, never removed silently."""
+    rows = await execute_db_operation(
+        "list expired lunar snoozes",
+        "SELECT user_id FROM lunar_archive_snoozes WHERE guild_id = ? AND until <= CURRENT_TIMESTAMP",
+        (guild_id,),
+        fetch_type="all",
+    )
+    return {int(r[0]) for r in rows or []}
+
+
+async def clear_snoozes(guild_id: int, user_ids) -> None:
+    for user_id in set(user_ids):
+        await execute_db_operation(
+            "clear lunar snooze",
+            "DELETE FROM lunar_archive_snoozes WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        )

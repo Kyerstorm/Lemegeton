@@ -7,11 +7,15 @@ here raises to the caller for them.
 from __future__ import annotations
 
 import asyncio
+import os
+import time
 from dataclasses import dataclass, field, replace
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import discord
 
+import config
+from helpers.color_palette import PALETTE
 from helpers.logging_helper import get_logger
 from helpers.lunar_roles import (
     ADMIN_GROUP,
@@ -313,15 +317,17 @@ async def remove_blocked_word(guild: discord.Guild, raw: str) -> Result:
 # Member role actions
 # ------------------------------------------------------
 
-async def _discord(action: str, coro) -> Tuple[Any, Optional[Result]]:
-    """Await a Discord call, turning expected failures into a Result."""
+async def _discord(guild: discord.Guild, action: str, coro) -> Tuple[Any, Optional[Result]]:
+    """Await a Discord call, turning expected failures into a Result (and a log-channel line)."""
     try:
         return await coro, None
     except discord.Forbidden:
         logger.warning("Forbidden while %s", action)
+        await log_event(guild, f"Missing permission while {action}. Check I have Manage Roles and my role is high enough.", "error")
         return None, Result(False, PERMISSION_MESSAGE)
-    except discord.HTTPException:
+    except discord.HTTPException as exc:
         logger.exception("Discord API error while %s", action)
+        await log_event(guild, f"Discord error while {action}: {validation.code(f'{exc.status} {exc.text[:150]}')}", "error")
         return None, Result(False, API_ERROR_MESSAGE)
 
 
@@ -422,6 +428,7 @@ async def _create_discord_role(
         return None, [], Result(False, PERMISSION_MESSAGE)
     if len(guild.roles) >= ROLE_LIMIT:
         logger.warning("Guild %s is at the %s-role limit; refused role for %s", guild.id, ROLE_LIMIT, member.id)
+        await log_event(guild, f"The server is at Discord's {ROLE_LIMIT}-role limit, so I couldn't create a role for {member.mention}.", "warning")
         return None, [], Result(
             False, f"This server has reached Discord's {ROLE_LIMIT}-role limit, so I can't create your role. "
                    "Please let an admin know."
@@ -438,6 +445,7 @@ async def _create_discord_role(
         style["display_icon"] = record.icon_png
 
     role, error = await _discord(
+        guild,
         f"creating role for {member.id} in {guild.id}",
         guild.create_role(
             name=record.name,
@@ -459,7 +467,7 @@ async def _create_discord_role(
         logger.exception("Couldn't place role %s %s anchor %s in guild %s", role.id, settings.anchor_place, anchor.id, guild.id)
         notes.append(f"I couldn't move it into place - an admin may need to drag it {settings.anchor_place} the anchor.")
 
-    _, error = await _discord(f"assigning role {role.id} to {member.id}", member.add_roles(role, reason="Lunar Roles"))
+    _, error = await _discord(guild, f"assigning role {role.id} to {member.id}", member.add_roles(role, reason="Lunar Roles"))
     if error:
         return role, notes, Result(False, f"Your role was created, but I couldn't give it to you. Try `/{COMMAND_GROUP} assign`.")
     # The cached positions may lag; use the ones we just set.
@@ -488,7 +496,7 @@ async def _ensure_live_role(
         return role, False, [], None
 
     if record.status == storage.STATUS_ACTIVE:
-        await _mark_missing(guild.id, member.id, record.role_id, "found deleted while changing it")
+        await _mark_missing(guild, member.id, record.role_id, "found deleted while changing it")
 
     desired = replace(record, **overrides)
     if not desired.name:
@@ -534,8 +542,10 @@ async def create_role(member: discord.Member, name: str) -> Result:
             return error
     if restoring:
         message = f"Your role **{role.name}** is back, with your saved colors."
+        await log_event(guild, f"{member.mention} recreated their role {role.mention} from saved settings.")
     else:
         message = f"Created **{role.name}** and gave it to you. Color it with `/{COMMAND_GROUP} color set`."
+        await log_event(guild, f"{member.mention} created their role {role.mention}.", "success")
     return Result(True, message, role, notes)
 
 
@@ -551,15 +561,18 @@ async def rename(member: discord.Member, new_name: str) -> Result:
         clean, reason = await _clean_name(guild, new_name, settings, own_role_id=record.role_id)
         if reason:
             return Result(False, reason)
+        old_name = record.name
         role, created, notes, error = await _ensure_live_role(member, record, settings, name=clean)
         if error:
             return error
         if not created:
-            _, error = await _discord(f"renaming role {role.id}", role.edit(name=clean, reason=f"Lunar Roles: renamed by {member}"))
+            old_name = role.name
+            _, error = await _discord(guild, f"renaming role {role.id}", role.edit(name=clean, reason=f"Lunar Roles: renamed by {member}"))
             if error:
                 return error
         await storage.update_custom_role(guild.id, member.id, changed=True, name=clean)
     logger.info("Renamed role %s for %s in guild %s", role.id, member.id, guild.id)
+    await log_event(guild, f"{member.mention} renamed their role {validation.code(old_name or '?')} → {role.mention}.")
     return Result(True, f"Your role is now called **{clean}**.", role, notes)
 
 
@@ -584,7 +597,7 @@ async def set_colors(
         if error:
             return error
         if not created:
-            _, error = await _discord(f"recoloring role {role.id}", role.edit(reason=f"Lunar Roles: recolored by {member}", **style))
+            _, error = await _discord(guild, f"recoloring role {role.id}", role.edit(reason=f"Lunar Roles: recolored by {member}", **style))
             if error:
                 return error
             hidden = hidden_colour_notice(member, role)
@@ -598,6 +611,11 @@ async def set_colors(
         message = f"Your role is now a gradient from `{validation.format_hex(primary)}` to `{validation.format_hex(secondary)}`."
     else:
         message = f"Your role color is now `{validation.format_hex(primary)}`."
+    style_text = {
+        MODE_HOLOGRAPHIC: "holographic",
+        MODE_GRADIENT: f"gradient `{validation.format_hex(primary)}` → `{validation.format_hex(secondary)}`",
+    }.get(mode, f"`{validation.format_hex(primary)}`")
+    await log_event(guild, f"{member.mention} recolored {role.mention}: {style_text}.")
     return Result(True, message, role, notes)
 
 
@@ -617,7 +635,7 @@ async def assign(member: discord.Member) -> Result:
             return Result(True, f"Your role **{role.name}** was missing, so I recreated it and put it on you.", role, notes)
         if role in member.roles:
             return Result(False, f"You're already wearing **{role.name}**.", role)
-        _, error = await _discord(f"assigning role {role.id}", member.add_roles(role, reason="Lunar Roles: assign"))
+        _, error = await _discord(guild, f"assigning role {role.id}", member.add_roles(role, reason="Lunar Roles: assign"))
         if error:
             return error
     return Result(True, f"Put **{role.name}** back on you.", role)
@@ -635,7 +653,7 @@ async def unassign(member: discord.Member) -> Result:
         role = guild.get_role(record.role_id) if record.role_id else None
         if role is None or role not in member.roles:
             return Result(False, "You're not wearing your Lunar role right now.")
-        _, error = await _discord(f"unassigning role {role.id}", member.remove_roles(role, reason="Lunar Roles: unassign"))
+        _, error = await _discord(guild, f"unassigning role {role.id}", member.remove_roles(role, reason="Lunar Roles: unassign"))
         if error:
             return error
     return Result(
@@ -655,14 +673,15 @@ async def get_info(viewer: discord.Member, target: discord.Member) -> Result:
         return Result(False, f"{target.mention} doesn't have a Lunar role.")
     role = viewer.guild.get_role(record.role_id) if record.role_id else None
     if role is None and record.status == storage.STATUS_ACTIVE:
-        await _mark_missing(viewer.guild.id, target.id, record.role_id, "found deleted by /info")
+        await _mark_missing(viewer.guild, target.id, record.role_id, "found deleted by /info")
         record = replace(record, status=storage.STATUS_MISSING, role_id=None)
     return Result(True, "ok", (record, role))
 
 
-async def _mark_missing(guild_id: int, user_id: int, role_id: Optional[int], why: str) -> None:
-    await storage.update_custom_role(guild_id, user_id, status=storage.STATUS_MISSING, role_id=None)
-    logger.info("Custom role %s of user %s in guild %s marked missing (%s)", role_id, user_id, guild_id, why)
+async def _mark_missing(guild: discord.Guild, user_id: int, role_id: Optional[int], why: str) -> None:
+    await storage.update_custom_role(guild.id, user_id, status=storage.STATUS_MISSING, role_id=None)
+    logger.info("Custom role %s of user %s in guild %s marked missing (%s)", role_id, user_id, guild.id, why)
+    await log_event(guild, f"<@{user_id}>'s custom role is missing ({why}). It'll be recreated from saved settings next time they change it.", "warning")
 
 
 async def handle_role_deleted(role: discord.Role) -> None:
@@ -674,11 +693,21 @@ async def handle_role_deleted(role: discord.Role) -> None:
             # Re-read under the lock: the bot itself may have just archived this role.
             current = await storage.get_custom_role(guild.id, record.user_id)
             if current and current.role_id == role.id and current.status == storage.STATUS_ACTIVE:
-                await _mark_missing(guild.id, record.user_id, role.id, f"role {role.name!r} deleted in Discord")
+                await _mark_missing(guild, record.user_id, role.id, f"role {role.name!r} deleted in Discord")
         return
     settings = await storage.get_guild_settings(guild.id)
     if settings.anchor_role_id == role.id:
         logger.warning("Lunar anchor role %s was deleted in guild %s; user commands are paused", role.id, guild.id)
+        await log_event(
+            guild, f"The Lunar anchor role **{role.name}** was deleted, so user commands are paused. "
+                   f"Run `/{ADMIN_GROUP} anchor` to pick a new one.", "error", settings,
+        )
+    if role.id in settings.allowed_role_ids:
+        settings = await storage.update_guild_settings(
+            guild.id, allowed_role_ids=[r for r in settings.allowed_role_ids if r != role.id]
+        )
+        await log_event(guild, f"Allowed role **{role.name}** was deleted. Checking who still qualifies.", "warning", settings)
+        await archive_ineligible(guild, f"allowed role {role.name!r} was deleted")
 
 
 # ------------------------------------------------------
@@ -775,6 +804,13 @@ async def enforce_name_rules(guild: discord.Guild, why: str) -> SweepResult:
                     pass  # DMs closed
     if result.failed:
         logger.warning("Name sweep in guild %s (%s): %s role(s) couldn't be renamed", guild.id, why, len(result.failed))
+    if result.renamed or result.failed:
+        lines = [f"<@{uid}>: {validation.code(old)} → {validation.code(new)}" for uid, old, new in result.renamed[:15]]
+        lines += [f"<@{uid}>: {validation.code(name)} - couldn't rename ({reason})" for uid, name, reason in result.failed[:10]]
+        await log_event(
+            guild, f"Name check ({why}): renamed {len(result.renamed)}, failed {len(result.failed)}.\n" + "\n".join(lines),
+            "warning" if result.failed else "info",
+        )
     return result
 
 
@@ -824,3 +860,489 @@ async def hydrate_migrated_roles(bot: discord.Client) -> int:
         except Exception:
             logger.exception("Failed to migrate role record %s/%s", record.guild_id, record.user_id)
     return updated
+
+
+# ------------------------------------------------------
+# Log channel
+# ------------------------------------------------------
+
+_LOG_COLOURS = {
+    "info": PALETTE.INFO,
+    "success": PALETTE.SUCCESS,
+    "warning": PALETTE.WARNING,
+    "error": PALETTE.DANGER,
+}
+
+
+async def log_event(
+    guild: discord.Guild,
+    message: str,
+    level: str = "info",
+    settings: Optional[GuildSettings] = None,
+    view: Optional[discord.ui.View] = None,
+) -> Optional[discord.Message]:
+    """Post a short line to the guild's Lunar log channel, if one is set. Never raises."""
+    try:
+        settings = settings or await storage.get_guild_settings(guild.id)
+        channel = guild.get_channel(settings.log_channel_id) if settings.log_channel_id else None
+        if channel is None:
+            return None
+        embed = discord.Embed(description=message[:4000], colour=_LOG_COLOURS.get(level, PALETTE.INFO),
+                              timestamp=discord.utils.utcnow())
+        embed.set_footer(text="Lunar Roles")
+        kwargs: Dict[str, Any] = {"embed": embed, "allowed_mentions": discord.AllowedMentions.none()}
+        if view is not None:
+            kwargs["view"] = view
+        return await channel.send(**kwargs)
+    except Exception:
+        logger.warning("Couldn't post to the Lunar log channel in guild %s", guild.id, exc_info=True)
+        return None
+
+
+# ------------------------------------------------------
+# Lifecycle: eligibility, archive (stop boosting) and restore (boost again)
+# ------------------------------------------------------
+
+ARCHIVE_BATCH_SIZE = 5       # roles removed per batch when many are processed
+ARCHIVE_BATCH_PAUSE = 2.0    # seconds between batches
+EVENT_BATCH_SECONDS = 10.0   # member events are collected this long, then handled together
+SNOOZE_HOURS = 24
+MEMBER_FETCH_TIMEOUT = 60.0
+
+RESTORE_DM = "Welcome back — your role **{name}** is back in **{guild}**."
+
+# archive() results that mean "left alone on purpose", not failures
+SKIP_STILL_QUALIFIES = "still qualifies"
+SKIP_NOTHING = "nothing to remove"
+SKIP_PENDING = "waiting for an admin to confirm"
+
+
+def mass_archive_threshold() -> int:
+    return config.LUNAR_MASS_ARCHIVE_THRESHOLD
+
+
+def debug_fetch_fail_active() -> bool:
+    """LUNAR_DEBUG_FAIL_MEMBER_FETCH is honoured only in development (the default ENVIRONMENT)."""
+    return config.LUNAR_DEBUG_FAIL_MEMBER_FETCH and os.getenv("ENVIRONMENT", "development") == "development"
+
+
+def is_eligible(member: discord.Member, settings: GuildSettings) -> bool:
+    return ensure_eligible(member, settings).ok
+
+
+def archive_blocker(guild: discord.Guild) -> Optional[str]:
+    """Why roles can't be removed in this guild right now, or None."""
+    if guild.unavailable:
+        return "the server is unavailable"
+    me = guild.me
+    if me is None or not me.guild_permissions.manage_roles:
+        return "I'm missing the Manage Roles permission"
+    return None
+
+
+async def member_data_problem(guild: discord.Guild) -> Optional[str]:
+    """Why the member list can't be trusted right now (so nobody may be treated as ineligible), or None."""
+    if guild.unavailable:
+        return "the server is unavailable"
+    if debug_fetch_fail_active():
+        return "the member list is incomplete (LUNAR_DEBUG_FAIL_MEMBER_FETCH is on)"
+    if not guild.chunked:
+        try:
+            await asyncio.wait_for(guild.chunk(cache=True), timeout=MEMBER_FETCH_TIMEOUT)
+        except asyncio.TimeoutError:
+            return "the member list timed out while loading"
+        except (discord.HTTPException, discord.ClientException) as exc:
+            return f"the member list couldn't be loaded ({type(exc).__name__})"
+    if not guild.chunked:
+        return "the member list is incomplete"
+    return None
+
+
+@dataclass
+class ArchiveReport:
+    archived: List[Tuple[int, str]] = field(default_factory=list)  # (user_id, role name)
+    skipped: List[Tuple[int, str]] = field(default_factory=list)   # (user_id, why)
+    failed: List[Tuple[int, str]] = field(default_factory=list)    # (user_id, why)
+
+    def summary(self) -> str:
+        return f"Removed {len(self.archived)}, skipped {len(self.skipped)}, failed {len(self.failed)}."
+
+
+async def archive(
+    guild: discord.Guild, user_id: int, reason: str, *,
+    respect_pending: bool = True, settings: Optional[GuildSettings] = None,
+) -> Result:
+    """Delete a member's custom role and keep its settings as 'saved'.
+
+    Re-checks eligibility first, so a member who qualifies again is never archived.
+    """
+    blocker = archive_blocker(guild)
+    if blocker:
+        return Result(False, blocker)
+    settings = settings or await storage.get_guild_settings(guild.id)
+    member = guild.get_member(user_id)
+    if member is not None and is_eligible(member, settings):
+        return Result(False, SKIP_STILL_QUALIFIES)
+    if respect_pending and user_id in await storage.pending_user_ids(guild.id):
+        return Result(False, SKIP_PENDING)
+
+    async with user_lock(guild.id, user_id):
+        record = await storage.get_custom_role(guild.id, user_id)
+        if record is None or record.status == storage.STATUS_SAVED:
+            return Result(False, SKIP_NOTHING)
+        role = guild.get_role(record.role_id) if record.role_id else None
+        fields: Dict[str, Any] = {"status": storage.STATUS_SAVED, "role_id": None}
+        name = record.name or (role.name if role else None)
+        if role is not None:
+            if role >= guild.me.top_role:
+                return Result(False, "their role is above my highest role")
+            fields["position_hint"] = role.position
+            fields["name"] = name = role.name
+            if record.icon_png is None and isinstance(role.display_icon, discord.Asset):
+                try:
+                    fields["icon_png"] = await role.display_icon.read()
+                except discord.HTTPException:
+                    logger.warning("Couldn't download icon of role %s before archiving", role.id)
+            _, error = await _discord(guild, f"removing role {role.id} of <@{user_id}>", role.delete(reason=f"Lunar Roles: {reason}"))
+            if error:
+                return Result(False, "Discord refused to delete it")
+        await storage.update_custom_role(guild.id, user_id, **fields)
+    logger.info("Archived role of user %s in guild %s (%s)", user_id, guild.id, reason)
+    return Result(True, name or "unnamed")
+
+
+async def restore(member: discord.Member, settings: Optional[GuildSettings] = None, dm: bool = True) -> Result:
+    """Recreate a saved role for a member who qualifies again. Only while the feature is set up."""
+    guild = member.guild
+    settings = settings or await storage.get_guild_settings(guild.id)
+    if not ensure_ready(guild, settings).ok:
+        return Result(False, "not set up")
+    if not is_eligible(member, settings):
+        return Result(False, "doesn't qualify")
+    async with user_lock(guild.id, member.id):
+        record = await storage.get_custom_role(guild.id, member.id)
+        if record is None or record.status != storage.STATUS_SAVED or not record.name:
+            return Result(False, "nothing saved")
+        role, notes, error = await _create_discord_role(
+            member, settings, replace(record, status=storage.STATUS_ACTIVE, role_id=None)
+        )
+        if error:
+            await log_event(guild, f"Couldn't restore {member.mention}'s role: {error.message}", "error", settings)
+            return error
+    logger.info("Restored role %s for %s in guild %s", role.id, member.id, guild.id)
+    await log_event(guild, f"Restored {member.mention}'s role {role.mention} from saved settings.", "success", settings)
+    if dm:
+        try:
+            await member.send(RESTORE_DM.format(name=role.name, guild=guild.name))
+        except discord.HTTPException:
+            pass  # DMs closed
+    return Result(True, f"Restored **{role.name}**.", role, notes)
+
+
+async def restore_saved(guild: discord.Guild) -> int:
+    """Restore every saved role whose member qualifies again (e.g. after enable or allow-role add)."""
+    settings = await storage.get_guild_settings(guild.id)
+    if not ensure_ready(guild, settings).ok or archive_blocker(guild):
+        return 0  # the blocker was already reported by the archive step
+    restored = 0
+    for record in await storage.list_roles(guild.id):
+        if record.status != storage.STATUS_SAVED:
+            continue
+        member = guild.get_member(record.user_id)
+        if member is not None and is_eligible(member, settings):
+            if (await restore(member, settings)).ok:
+                restored += 1
+    return restored
+
+
+ProgressCallback = Callable[[int, int, "ArchiveReport"], Awaitable[None]]
+
+
+async def process_archives(
+    guild: discord.Guild, reasons: Dict[int, str], *,
+    respect_pending: bool = True, progress: Optional[ProgressCallback] = None, log_title: str = "",
+) -> ArchiveReport:
+    """Archive members gradually (small batches with pauses) and post one summary to the log channel."""
+    report = ArchiveReport()
+    settings = await storage.get_guild_settings(guild.id)
+    user_ids = list(reasons)
+    total = len(user_ids)
+    for start in range(0, total, ARCHIVE_BATCH_SIZE):
+        for user_id in user_ids[start:start + ARCHIVE_BATCH_SIZE]:
+            result = await archive(guild, user_id, reasons[user_id], respect_pending=respect_pending, settings=settings)
+            if result.ok:
+                report.archived.append((user_id, result.message))
+            elif result.message in (SKIP_STILL_QUALIFIES, SKIP_NOTHING, SKIP_PENDING):
+                report.skipped.append((user_id, result.message))
+            else:
+                report.failed.append((user_id, result.message))
+        done = min(start + ARCHIVE_BATCH_SIZE, total)
+        if progress is not None:
+            await progress(done, total, report)
+        if done < total:
+            await asyncio.sleep(ARCHIVE_BATCH_PAUSE)
+
+    if report.archived or report.failed:
+        lines = [f"<@{uid}>: {validation.code(name)} ({reasons[uid]})" for uid, name in report.archived[:20]]
+        if len(report.archived) > 20:
+            lines.append(f"…and {len(report.archived) - 20} more")
+        lines += [f"<@{uid}>: couldn't remove ({why})" for uid, why in report.failed[:10]]
+        title = log_title or "Removed custom roles"
+        await log_event(guild, f"**{title}.** {report.summary()} Settings were saved.\n" + "\n".join(lines),
+                        "warning" if report.failed else "info", settings)
+    return report
+
+
+# ------------------------------------------------------
+# Mass-removal guard for automatic removals (events and reconcile)
+# ------------------------------------------------------
+
+# Set by the cog: builds the Confirm/Cancel view for a pending removal id.
+pending_view_factory: Optional[Callable[[int], discord.ui.View]] = None
+
+_skip_warned: Dict[int, str] = {}
+
+
+async def _warn_skip(guild: discord.Guild, problem: str, count: int) -> None:
+    logger.warning("Skipped archiving %s role(s) in guild %s: %s", count, guild.id, problem)
+    if _skip_warned.get(guild.id) != problem:  # tell the channel once per new problem, not every run
+        _skip_warned[guild.id] = problem
+        await log_event(
+            guild, f"Skipped removing {count} custom role(s) because {problem}. I'll try again on the next check.",
+            "warning",
+        )
+
+
+def pending_text(pending: storage.PendingRemoval, threshold: int) -> str:
+    members = ", ".join(f"<@{u}>" for u in pending.user_ids[:25])
+    if len(pending.user_ids) > 25:
+        members += f" and {len(pending.user_ids) - 25} more"
+    return (
+        f"⚠️ **{len(pending.user_ids)} custom role(s)** are waiting to be removed ({pending.reason}).\n"
+        f"That's more than the safety limit of {threshold}, so nothing has been removed yet.\n\n"
+        f"**Members:** {members}\n\n"
+        f"**Confirm** removes them (settings are saved, so they come back if they qualify again). "
+        f"**Cancel** keeps them and asks again in {SNOOZE_HOURS} hours if they still don't qualify. "
+        f"You can also use `/{ADMIN_GROUP} pending`."
+    )
+
+
+async def _open_or_extend_pending(guild: discord.Guild, user_ids: List[int], reason: str) -> storage.PendingRemoval:
+    existing = await storage.get_open_pending(guild.id)
+    threshold = mass_archive_threshold()
+    if existing is not None:
+        merged = sorted(set(existing.user_ids) | set(user_ids))
+        if merged != existing.user_ids:
+            await storage.update_pending(existing.id, user_ids=merged)
+            existing = await storage.get_pending(existing.id)
+            await _refresh_alert(guild, existing, pending_text(existing, threshold), keep_buttons=True)
+            logger.warning("Pending removal %s in guild %s now has %s member(s)", existing.id, guild.id, len(merged))
+        return existing
+
+    pending = await storage.create_pending(guild.id, user_ids, reason)
+    logger.warning("Holding %s removal(s) in guild %s for admin confirmation (pending %s): %s",
+                   len(pending.user_ids), guild.id, pending.id, reason)
+    view = pending_view_factory(pending.id) if pending_view_factory else None
+    message = await log_event(guild, pending_text(pending, threshold), "warning", view=view)
+    if message is not None:
+        await storage.update_pending(pending.id, log_channel_id=message.channel.id, log_message_id=message.id)
+    return pending
+
+
+async def _refresh_alert(guild: discord.Guild, pending: storage.PendingRemoval, text: str, keep_buttons: bool) -> None:
+    """Edit the log-channel alert of a pending removal (if it was posted)."""
+    if not pending.log_channel_id or not pending.log_message_id:
+        return
+    channel = guild.get_channel(pending.log_channel_id)
+    if channel is None:
+        return
+    embed = discord.Embed(description=text[:4000], colour=PALETTE.WARNING if keep_buttons else PALETTE.NEUTRAL,
+                          timestamp=discord.utils.utcnow())
+    embed.set_footer(text="Lunar Roles")
+    view = pending_view_factory(pending.id) if keep_buttons and pending_view_factory else None
+    try:
+        await channel.get_partial_message(pending.log_message_id).edit(embed=embed, view=view)
+    except discord.HTTPException:
+        logger.warning("Couldn't update pending alert %s in guild %s", pending.id, guild.id)
+
+
+async def archive_automatically(guild: discord.Guild, reasons: Dict[int, str], why: str) -> Optional[Any]:
+    """Archive members found by events or reconcile, holding mass removals for an admin.
+
+    Members in an open pending removal or a running snooze are left alone. Members
+    whose snooze ran out are always asked about again (never removed silently).
+    Returns the PendingRemoval, an ArchiveReport, or None if nothing was done.
+    """
+    blocker = archive_blocker(guild)
+    if blocker:
+        await _warn_skip(guild, blocker, len(reasons))
+        return None
+    _skip_warned.pop(guild.id, None)
+
+    open_pending = await storage.get_open_pending(guild.id)
+    held = set(open_pending.user_ids) if open_pending else set()
+    snoozed = await storage.snoozed_user_ids(guild.id)
+    expired = await storage.expired_snooze_user_ids(guild.id)
+    candidates = {u: r for u, r in reasons.items() if u not in held and u not in snoozed}
+    if not candidates:
+        return None
+
+    # Hold everything while a removal is already pending (an ongoing mass event), or when
+    # this batch plus recent automatic removals goes over the limit (catches slow strips).
+    recent = _recent_automatic(guild.id)
+    if open_pending is not None or recent + len(candidates) > mass_archive_threshold():
+        ask, now = list(candidates), {}
+    else:
+        ask = [u for u in candidates if u in expired]
+        now = {u: r for u, r in candidates.items() if u not in expired}
+
+    pending = None
+    if ask:
+        await storage.clear_snoozes(guild.id, ask)  # this is the "ask once more"
+        pending = await _open_or_extend_pending(guild, ask, why)
+    report = None
+    if now:
+        report = await process_archives(guild, now, log_title=f"Removed custom roles ({why})")
+        _note_automatic(guild.id, len(report.archived))
+    return pending or report
+
+
+RECENT_WINDOW_SECONDS = 600.0
+_recent_archives: Dict[int, List[float]] = {}
+
+
+def _recent_automatic(guild_id: int) -> int:
+    """Automatic removals in this guild during the last RECENT_WINDOW_SECONDS."""
+    cutoff = time.monotonic() - RECENT_WINDOW_SECONDS
+    stamps = [t for t in _recent_archives.get(guild_id, []) if t > cutoff]
+    _recent_archives[guild_id] = stamps
+    return len(stamps)
+
+
+def _note_automatic(guild_id: int, count: int) -> None:
+    now = time.monotonic()
+    _recent_archives.setdefault(guild_id, []).extend([now] * count)
+
+
+async def confirm_pending(guild: discord.Guild, pending_id: int, admin: discord.abc.User,
+                          progress: Optional[ProgressCallback] = None) -> Result:
+    pending = await storage.get_pending(pending_id)
+    if pending is None or pending.guild_id != guild.id:
+        return Result(False, "That pending removal doesn't exist.")
+    if not await storage.resolve_pending(pending_id, storage.PENDING_CONFIRMED, admin.id):
+        return Result(False, "That pending removal was already handled.")
+    logger.info("Pending removal %s in guild %s confirmed by %s", pending_id, guild.id, admin.id)
+    await _refresh_alert(guild, pending, f"✅ Confirmed by {admin.mention}. Removing {len(pending.user_ids)} role(s)…", False)
+    report = await process_archives(
+        guild, {u: pending.reason for u in pending.user_ids}, respect_pending=False, progress=progress,
+        log_title=f"Pending removal confirmed by {admin}",
+    )
+    await _refresh_alert(guild, pending, f"✅ Confirmed by {admin.mention}. {report.summary()}", False)
+    return Result(True, report.summary(), report)
+
+
+async def cancel_pending(guild: discord.Guild, pending_id: int, admin: discord.abc.User) -> Result:
+    pending = await storage.get_pending(pending_id)
+    if pending is None or pending.guild_id != guild.id:
+        return Result(False, "That pending removal doesn't exist.")
+    if not await storage.resolve_pending(pending_id, storage.PENDING_CANCELLED, admin.id):
+        return Result(False, "That pending removal was already handled.")
+    await storage.snooze_users(guild.id, pending.user_ids, SNOOZE_HOURS)
+    logger.info("Pending removal %s in guild %s cancelled by %s", pending_id, guild.id, admin.id)
+    text = (f"❎ Cancelled by {admin.mention}. Kept {len(pending.user_ids)} role(s); "
+            f"I'll ask again in {SNOOZE_HOURS} hours if they still don't qualify.")
+    await _refresh_alert(guild, pending, text, False)
+    await log_event(guild, text, "info")
+    return Result(True, f"Kept {len(pending.user_ids)} role(s). I'll ask again in {SNOOZE_HOURS} hours if they still don't qualify.")
+
+
+# ------------------------------------------------------
+# Member events are batched per guild so bursts hit the guard
+# ------------------------------------------------------
+
+_event_queue: Dict[int, Dict[int, str]] = {}
+_event_tasks: Dict[int, asyncio.Task] = {}
+
+
+def queue_archive(guild: discord.Guild, user_id: int, reason: str) -> None:
+    """Archive a member soon. Events within EVENT_BATCH_SECONDS are handled together."""
+    _event_queue.setdefault(guild.id, {})[user_id] = reason
+    task = _event_tasks.get(guild.id)
+    if task is None or task.done():
+        _event_tasks[guild.id] = asyncio.create_task(_flush_events_later(guild))
+
+
+def unqueue_archive(guild_id: int, user_id: int) -> None:
+    _event_queue.get(guild_id, {}).pop(user_id, None)
+
+
+async def _flush_events_later(guild: discord.Guild) -> None:
+    await asyncio.sleep(EVENT_BATCH_SECONDS)
+    reasons = _event_queue.pop(guild.id, {})
+    if not reasons:
+        return
+    why = "members stopped qualifying" if len(reasons) > 1 else next(iter(reasons.values()))
+    try:
+        await archive_automatically(guild, reasons, why)
+    except Exception:
+        logger.exception("Handling queued removals failed in guild %s", guild.id)
+
+
+# ------------------------------------------------------
+# Reconcile (startup + every LUNAR_RECONCILE_MINUTES)
+# ------------------------------------------------------
+
+def _ineligible_reasons(guild: discord.Guild, settings: GuildSettings, records: List[CustomRole]) -> Dict[int, str]:
+    reasons = {}
+    for record in records:
+        if record.status not in (storage.STATUS_ACTIVE, storage.STATUS_MISSING):
+            continue
+        member = guild.get_member(record.user_id)
+        if member is None:
+            reasons[record.user_id] = "left the server"
+        elif not is_eligible(member, settings):
+            reasons[record.user_id] = "no longer boosting or allowed"
+    return reasons
+
+
+async def archive_ineligible(guild: discord.Guild, why: str) -> Optional[Any]:
+    """Find members who no longer qualify and archive them (guarded). Skips on untrustworthy data."""
+    problem = await member_data_problem(guild)
+    settings = await storage.get_guild_settings(guild.id)
+    reasons = _ineligible_reasons(guild, settings, await storage.list_roles(guild.id))
+    if not reasons:
+        _skip_warned.pop(guild.id, None)
+        return None
+    if problem:
+        await _warn_skip(guild, problem, len(reasons))
+        return None
+    return await archive_automatically(guild, reasons, why)
+
+
+async def reconcile_guild(guild: discord.Guild) -> None:
+    """Fix anything missed while the bot was offline or events were lost."""
+    records = await storage.list_roles(guild.id)
+    if not records:
+        return
+    for record in records:
+        if record.status == storage.STATUS_ACTIVE and record.role_id and guild.get_role(record.role_id) is None:
+            async with user_lock(guild.id, record.user_id):
+                current = await storage.get_custom_role(guild.id, record.user_id)
+                if current and current.status == storage.STATUS_ACTIVE and current.role_id == record.role_id:
+                    await _mark_missing(guild, record.user_id, record.role_id, "deleted while I was offline")
+    await archive_ineligible(guild, "found during the regular check")
+    await restore_saved(guild)
+
+
+async def preview_allowed_role_removal(guild: discord.Guild, role: discord.Role) -> List[int]:
+    """Members whose custom role would be removed if `role` stopped granting access."""
+    settings = await storage.get_guild_settings(guild.id)
+    after = replace(settings, allowed_role_ids=[r for r in settings.allowed_role_ids if r != role.id])
+    affected = []
+    for record in await storage.list_roles(guild.id):
+        if record.status not in (storage.STATUS_ACTIVE, storage.STATUS_MISSING):
+            continue
+        member = guild.get_member(record.user_id)
+        if member is not None and is_eligible(member, settings) and not is_eligible(member, after):
+            affected.append(record.user_id)
+    return affected

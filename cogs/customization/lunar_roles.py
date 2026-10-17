@@ -1,16 +1,20 @@
 """Lunar Roles: custom booster roles (commands). Logic lives in helpers/lunar_roles."""
-import discord
-from discord import app_commands
-from discord.ext import commands
-
+import logging
 from typing import Optional
 
+import discord
+from discord import app_commands
+from discord.ext import commands, tasks
+
+import config
 from cogs_test.general_commands.dashboard import command_meta
-from helpers.embed_helper import build_error_embed, build_info_embed, build_success_embed
+from helpers.color_palette import PALETTE
+from helpers.embed_helper import build_error_embed, build_info_embed, build_success_embed, build_warning_embed
 from helpers.lunar_roles import ADMIN_GROUP, COMMAND_GROUP, ROLE_LIMIT
 from helpers.lunar_roles import service, storage, validation
 
-logger = service.logger
+logger = service.logger  # file log (logs/lunar_roles.log)
+console_logger = logging.getLogger("lunar_roles_console")  # propagates to the bot's console output
 
 MODE_LABELS = {
     service.MODE_SOLID: "Solid",
@@ -31,6 +35,118 @@ async def _reply(interaction: discord.Interaction, result: service.Result, succe
     if result.notes:
         embed.add_field(name="⚠️ Heads up", value="\n\n".join(result.notes)[:1024], inline=False)
     await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+def _embed(title: str, text: str, colour: discord.Colour) -> discord.Embed:
+    return discord.Embed(title=title, description=text[:4000], colour=colour)
+
+
+class PendingButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"lunar:pending:(?P<id>[0-9]+):(?P<action>confirm|cancel)",
+):
+    """Confirm/Cancel for a saved pending removal. Persistent: works after restarts."""
+
+    def __init__(self, pending_id: int, action: str):
+        confirm = action == "confirm"
+        super().__init__(discord.ui.Button(
+            label="Confirm removal" if confirm else "Cancel (keep roles)",
+            style=discord.ButtonStyle.danger if confirm else discord.ButtonStyle.secondary,
+            custom_id=f"lunar:pending:{pending_id}:{action}",
+        ))
+        self.pending_id = pending_id
+        self.action = action
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match):
+        return cls(int(match["id"]), match["action"])
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        perms = getattr(interaction.user, "guild_permissions", None)
+        if interaction.guild is None or perms is None or not perms.manage_roles:
+            await interaction.response.send_message("Only members with **Manage Roles** can do this.", ephemeral=True)
+            return False
+        return True
+
+    async def callback(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        if self.action == "cancel":
+            await interaction.response.edit_message(embed=_embed("Cancelling…", "One moment.", PALETTE.NEUTRAL), view=None)
+            result = await service.cancel_pending(guild, self.pending_id, interaction.user)
+            title = "Removal Cancelled" if result.ok else "Nothing To Do"
+            await interaction.edit_original_response(embed=_embed(title, result.message, PALETTE.NEUTRAL), view=None)
+            return
+
+        await interaction.response.edit_message(embed=_embed("Removing…", "Starting.", PALETTE.WARNING), view=None)
+
+        async def progress(done: int, total: int, report: service.ArchiveReport):
+            await interaction.edit_original_response(
+                embed=_embed("Removing…", f"{done}/{total} processed. {report.summary()}", PALETTE.WARNING)
+            )
+
+        result = await service.confirm_pending(guild, self.pending_id, interaction.user, progress=progress)
+        if not result.ok:
+            await interaction.edit_original_response(embed=_embed("Nothing To Do", result.message, PALETTE.NEUTRAL))
+            return
+        await interaction.edit_original_response(embed=_report_embed("Removal Confirmed", result.data))
+
+
+def _pending_view(pending_id: int) -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    view.add_item(PendingButton(pending_id, "confirm"))
+    view.add_item(PendingButton(pending_id, "cancel"))
+    return view
+
+
+def _report_embed(title: str, report: service.ArchiveReport, intro: str = "") -> discord.Embed:
+    lines = [intro] if intro else []
+    lines.append(report.summary())
+    if report.archived:
+        lines.append("**Removed:** " + ", ".join(f"<@{uid}>" for uid, _ in report.archived[:30]))
+    if report.skipped:
+        lines.append("**Skipped:** " + ", ".join(f"<@{uid}> ({why})" for uid, why in report.skipped[:15]))
+    if report.failed:
+        lines.append("**Failed:** " + ", ".join(f"<@{uid}> ({why})" for uid, why in report.failed[:15]))
+    colour = PALETTE.WARNING if report.failed else PALETTE.SUCCESS
+    return _embed(title, "\n".join(lines), colour)
+
+
+class ConfirmView(discord.ui.View):
+    """60-second Confirm/Cancel for an admin command; only the admin who ran it can press."""
+
+    def __init__(self, invoker_id: int, on_confirm, timeout: float = 60):
+        super().__init__(timeout=timeout)
+        self.invoker_id = invoker_id
+        self.on_confirm = on_confirm
+        self.message: Optional[discord.WebhookMessage] = None
+        self.finished = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.invoker_id:
+            await interaction.response.send_message("Only the admin who ran the command can answer this.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.finished = True
+        self.stop()
+        await interaction.response.edit_message(embed=_embed("Working…", "Starting.", PALETTE.WARNING), view=None)
+        await self.on_confirm(interaction)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.finished = True
+        self.stop()
+        await interaction.response.edit_message(embed=_embed("Cancelled", "Nothing was changed.", PALETTE.NEUTRAL), view=None)
+
+    async def on_timeout(self):
+        if self.finished or self.message is None:
+            return
+        try:
+            await self.message.edit(embed=_embed("Timed Out", "No answer within 60 seconds, so nothing was changed.", PALETTE.NEUTRAL), view=None)
+        except discord.HTTPException:
+            pass
 
 
 class LunarRoles(commands.Cog):
@@ -58,6 +174,175 @@ class LunarRoles(commands.Cog):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._first_reconcile = True
+        self._debug_warned = False
+
+    async def cog_load(self):
+        self.bot.add_dynamic_items(PendingButton)
+        service.pending_view_factory = _pending_view
+        self._warn_debug_switch_console()
+        # Hot reload (cog watcher) after the bot is ready: on_ready won't fire again.
+        if self.bot.user is not None and self.bot.is_ready() and not self.reconcile_loop.is_running():
+            self.reconcile_loop.start()
+
+    async def cog_unload(self):
+        self.reconcile_loop.cancel()
+        self.bot.remove_dynamic_items(PendingButton)
+        service.pending_view_factory = None
+
+    @staticmethod
+    def _warn_debug_switch_console():
+        if not config.LUNAR_DEBUG_FAIL_MEMBER_FETCH:
+            return
+        if service.debug_fetch_fail_active():
+            for line in (
+                "!" * 72,
+                "!!! LUNAR_DEBUG_FAIL_MEMBER_FETCH IS ON - TEST SWITCH",
+                "!!! Reconcile will NOT remove any custom roles while this is set.",
+                "!!! Remove it from .env outside testing.",
+                "!" * 72,
+            ):
+                console_logger.warning(line)
+                logger.warning(line)
+        else:
+            console_logger.warning("LUNAR_DEBUG_FAIL_MEMBER_FETCH is set but ignored (ENVIRONMENT isn't development).")
+
+    async def _warn_debug_switch_channels(self):
+        if self._debug_warned or not service.debug_fetch_fail_active():
+            return
+        self._debug_warned = True
+        for guild in self.bot.guilds:
+            await service.log_event(
+                guild, "🚧 **Test switch on:** `LUNAR_DEBUG_FAIL_MEMBER_FETCH` is set, so the regular check "
+                       "won't remove any custom roles. Remove it from `.env` outside testing.", "error",
+            )
+
+    # ============================================================================
+    # LIFECYCLE EVENTS
+    # ============================================================================
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        if after.bot or (before.premium_since == after.premium_since and before.roles == after.roles):
+            return
+        try:
+            await self._handle_member_change(before, after)
+        except Exception:
+            logger.exception("Handling member update for %s in guild %s failed", after.id, after.guild.id)
+
+    async def _handle_member_change(self, before: discord.Member, after: discord.Member):
+        guild = after.guild
+        settings = await storage.get_guild_settings(guild.id)
+        was = service.is_eligible(before, settings)
+        now = service.is_eligible(after, settings)
+        boost_started = before.premium_since is None and after.premium_since is not None
+
+        if was and not now:
+            stopped_boosting = before.premium_since is not None and after.premium_since is None
+            record = await storage.get_custom_role(guild.id, after.id)
+            if record and record.status != storage.STATUS_SAVED:
+                service.queue_archive(guild, after.id, "stopped boosting" if stopped_boosting else "lost their allowed role")
+            return
+
+        if now and not was:
+            service.unqueue_archive(guild.id, after.id)
+            if (await service.restore(after, settings)).ok:
+                return  # restore sends the "welcome back" DM
+            ready = service.ensure_ready(guild, settings).ok
+            if boost_started:
+                await self._send_boost_welcome(after, ready)
+            elif ready and await storage.get_custom_role(guild.id, after.id) is None:
+                await self._send_access_dm(after)
+            return
+
+        if boost_started:  # already allowed through a role; still thank them for boosting
+            await self._send_boost_welcome(after, service.ensure_ready(guild, settings).ok)
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member):
+        if member.bot:
+            return
+        try:
+            record = await storage.get_custom_role(member.guild.id, member.id)
+            if record and record.status != storage.STATUS_SAVED:
+                service.queue_archive(member.guild, member.id, "left the server")
+        except Exception:
+            logger.exception("Handling member leave for %s in guild %s failed", member.id, member.guild.id)
+
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member):
+        if member.bot:
+            return
+        try:
+            await service.restore(member)
+        except Exception:
+            logger.exception("Handling member join for %s in guild %s failed", member.id, member.guild.id)
+
+    async def _send_boost_welcome(self, member: discord.Member, ready: bool):
+        embed = discord.Embed(
+            title="🎉 Welcome, Server Booster!",
+            description=f"Thank you for boosting **{member.guild.name}**!",
+            color=PALETTE.WARNING,
+        )
+        if ready:
+            embed.add_field(
+                name="🎨 Your own custom role",
+                value=f"Use `/{COMMAND_GROUP} role <name>` to create it, then `/{COMMAND_GROUP} color set` to color it!\n\n"
+                      f"**Example:** `/{COMMAND_GROUP} role name:My Cool Role`",
+                inline=False,
+            )
+            embed.add_field(
+                name="💡 Tips",
+                value="• You get **one** custom role per server\n"
+                      f"• Rename or recolor it anytime with `/{COMMAND_GROUP} name` and `/{COMMAND_GROUP} color set`\n"
+                      "• If you stop boosting, your role is saved and comes back when you boost again",
+                inline=False,
+            )
+        embed.set_footer(text=f"Thank you for supporting {member.guild.name}!")
+        await self._dm(member, embed)
+
+    async def _send_access_dm(self, member: discord.Member):
+        embed = discord.Embed(
+            title="🎨 You can make a custom role",
+            description=f"You now have access to custom roles in **{member.guild.name}**.\n"
+                        f"Use `/{COMMAND_GROUP} role <name>` to create yours, then `/{COMMAND_GROUP} color set` to color it.",
+            color=PALETTE.PRIMARY,
+        )
+        await self._dm(member, embed)
+
+    @staticmethod
+    async def _dm(member: discord.Member, embed: discord.Embed):
+        try:
+            await member.send(embed=embed)
+            logger.info("Sent Lunar DM to %s in guild %s", member.id, member.guild.id)
+        except discord.HTTPException:
+            logger.info("Couldn't DM %s (DMs closed)", member.id)
+
+    # ============================================================================
+    # RECONCILE (startup + every LUNAR_RECONCILE_MINUTES)
+    # ============================================================================
+
+    @tasks.loop(minutes=config.LUNAR_RECONCILE_MINUTES)
+    async def reconcile_loop(self):
+        why = "startup check" if self._first_reconcile else "regular check"
+        self._first_reconcile = False
+        try:
+            guild_ids = await storage.list_guilds_with_records()
+        except Exception:
+            logger.exception("Couldn't list guilds for the Lunar reconcile")
+            return
+        for guild_id in guild_ids:
+            guild = self.bot.get_guild(guild_id)
+            if guild is None:
+                logger.warning("Reconcile skipped guild %s: not available to the bot", guild_id)
+                continue
+            try:
+                await service.reconcile_guild(guild)
+            except Exception:
+                logger.exception("Reconcile failed in guild %s", guild_id)
+            await self._sweep(guild, why)
+        logger.info("Reconcile (%s) finished for %s guild(s); next in %s min",
+                    why, len(guild_ids), config.LUNAR_RECONCILE_MINUTES)
 
     @commands.Cog.listener()
     async def on_guild_role_delete(self, role: discord.Role):
@@ -93,18 +378,10 @@ class LunarRoles(commands.Cog):
                 logger.info("Hydrated %s migrated booster role record(s)", updated)
         except Exception:
             logger.exception("Hydrating migrated booster roles failed")
-        try:
-            guild_ids = await storage.list_guilds_with_active_roles()
-        except Exception:
-            logger.exception("Couldn't list guilds for the startup name check")
-            return
-        for guild_id in guild_ids:
-            guild = self.bot.get_guild(guild_id)
-            if guild is not None:
-                result = await self._sweep(guild, "startup check")
-                if result.renamed or result.failed:
-                    logger.info("Startup name check in guild %s: %s renamed, %s failed",
-                                guild_id, len(result.renamed), len(result.failed))
+        await self._warn_debug_switch_channels()
+        # First run happens immediately (startup reconcile + name check), then every N minutes.
+        if not self.reconcile_loop.is_running():
+            self.reconcile_loop.start()
 
     async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         logger.error("Lunar command %s failed", getattr(interaction.command, "qualified_name", "?"),
@@ -291,6 +568,14 @@ class LunarRoles(commands.Cog):
             ),
             inline=False,
         )
+        pending = await storage.get_open_pending(guild.id)
+        if pending is not None:
+            embed.add_field(
+                name="⚠️ Removal waiting for approval",
+                value=f"{len(pending.user_ids)} custom role(s) ({pending.reason}). "
+                      f"Use `/{ADMIN_GROUP} pending` to confirm or cancel.",
+                inline=False,
+            )
         hiding = service.colored_roles_above_custom(guild, settings, await storage.list_active_role_ids(guild.id))
         if hiding:
             shown = ", ".join(r.mention for r in hiding[:10]) + (f" and {len(hiding) - 10} more" if len(hiding) > 10 else "")
@@ -340,6 +625,9 @@ class LunarRoles(commands.Cog):
             problems = service.setup_problems(interaction.guild, result.data)
             if problems:
                 embed.add_field(name="Heads up", value="\n".join(f"• {p}" for p in problems), inline=False)
+            restored = await service.restore_saved(interaction.guild)
+            if restored:
+                embed.add_field(name="Restored", value=f"{restored} saved role(s) for members who qualify again.", inline=False)
         else:
             embed = build_error_embed("Can't Enable Yet", result.message)
         await interaction.followup.send(embed=embed, ephemeral=True)
@@ -349,8 +637,48 @@ class LunarRoles(commands.Cog):
     async def admin_disable(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         result = await service.set_enabled(interaction.guild, False)
-        embed = build_success_embed("Lunar Roles Disabled", result.message + " Existing roles are kept.")
+        embed = build_success_embed(
+            "Lunar Roles Disabled",
+            result.message + " Existing roles are kept. Members who stop qualifying still lose their role; "
+                             "saved roles come back once you enable it again.",
+        )
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @admin.command(name="log-channel", description="Where Lunar Roles posts events and errors (empty = off)")
+    @command_meta(section="Customization", name="Lunar Admin Log Channel")
+    @app_commands.describe(channel="Channel for Lunar Roles logs; leave empty to turn logging off")
+    async def admin_log_channel(self, interaction: discord.Interaction, channel: Optional[discord.TextChannel] = None):
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        if channel is None:
+            await storage.update_guild_settings(guild.id, log_channel_id=None)
+            await interaction.followup.send(embed=build_success_embed("Logging Off", "Lunar Roles won't post logs anymore."), ephemeral=True)
+            return
+        perms = channel.permissions_for(guild.me)
+        missing = [name for name, ok in (("View Channel", perms.view_channel), ("Send Messages", perms.send_messages),
+                                         ("Embed Links", perms.embed_links)) if not ok]
+        if missing:
+            await interaction.followup.send(
+                embed=build_error_embed("Can't Post There", f"I need {', '.join(f'**{m}**' for m in missing)} in {channel.mention}."),
+                ephemeral=True,
+            )
+            return
+        settings = await storage.update_guild_settings(guild.id, log_channel_id=channel.id)
+        await service.log_event(guild, f"Lunar Roles will post events here (set by {interaction.user.mention}).", "success", settings)
+        await interaction.followup.send(embed=build_success_embed("Log Channel Set", f"Logging to {channel.mention}."), ephemeral=True)
+
+    @admin.command(name="pending", description="See and confirm or cancel a removal waiting for approval")
+    @command_meta(section="Customization", name="Lunar Admin Pending")
+    async def admin_pending(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        pending = await storage.get_open_pending(interaction.guild.id)
+        if pending is None:
+            await interaction.followup.send(embed=build_info_embed("Nothing Pending", "No removals are waiting for approval."), ephemeral=True)
+            return
+        text = service.pending_text(pending, service.mass_archive_threshold())
+        await interaction.followup.send(
+            embed=_embed("Removal Waiting For Approval", text, PALETTE.WARNING), view=_pending_view(pending.id), ephemeral=True
+        )
 
     @allow_role.command(name="add", description="Let members with this role use Lunar Roles (besides boosters)")
     @command_meta(section="Customization", name="Lunar Admin Allow Role Add")
@@ -358,6 +686,10 @@ class LunarRoles(commands.Cog):
     async def admin_allow_role_add(self, interaction: discord.Interaction, role: discord.Role):
         await interaction.response.defer(ephemeral=True)
         result = await service.add_allowed_role(interaction.guild, role)
+        if result.ok:
+            restored = await service.restore_saved(interaction.guild)
+            if restored:
+                result.message += f"\n\nRestored {restored} saved role(s) for members who qualify again."
         await _reply(interaction, result, "Role Allowed", "Couldn't Add That Role")
 
     @allow_role.command(name="remove", description="Stop a role from granting Lunar Roles access")
@@ -365,8 +697,58 @@ class LunarRoles(commands.Cog):
     @app_commands.describe(role="Role to remove from the allowed list")
     async def admin_allow_role_remove(self, interaction: discord.Interaction, role: discord.Role):
         await interaction.response.defer(ephemeral=True)
-        result = await service.remove_allowed_role(interaction.guild, role)
-        await _reply(interaction, result, "Role Removed", "Couldn't Remove That Role")
+        guild = interaction.guild
+        settings = await storage.get_guild_settings(guild.id)
+        if role.id not in settings.allowed_role_ids:
+            await _reply(interaction, await service.remove_allowed_role(guild, role), "Role Removed", "Couldn't Remove That Role")
+            return
+        affected = await service.preview_allowed_role_removal(guild, role)
+        threshold = service.mass_archive_threshold()
+        if len(affected) <= threshold:
+            await self._remove_allowed_role(interaction, role, affected, from_button=False)
+            return
+
+        async def on_confirm(button_interaction: discord.Interaction):
+            await self._remove_allowed_role(button_interaction, role, affected, from_button=True)
+
+        view = ConfirmView(interaction.user.id, on_confirm)
+        view.message = await interaction.followup.send(
+            embed=build_warning_embed(
+                "Confirm Mass Removal",
+                f"Removing {role.mention} from the allowed list will remove **{len(affected)} custom role(s)** "
+                f"(more than the safety limit of {threshold}). Their settings are saved, so the roles come back "
+                "if they qualify again.\n\nThis prompt expires in 60 seconds.",
+            ),
+            view=view, ephemeral=True, wait=True,
+        )
+
+    async def _remove_allowed_role(self, interaction: discord.Interaction, role: discord.Role,
+                                   affected: list, from_button: bool):
+        guild = interaction.guild
+        result = await service.remove_allowed_role(guild, role)
+        if not result.ok:
+            embed = build_error_embed("Couldn't Remove That Role", result.message)
+            if from_button:
+                await interaction.edit_original_response(embed=embed)
+            else:
+                await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+        async def progress(done: int, total: int, report: service.ArchiveReport):
+            if from_button:
+                await interaction.edit_original_response(
+                    embed=_embed("Removing…", f"{done}/{total} processed. {report.summary()}", PALETTE.WARNING)
+                )
+
+        report = await service.process_archives(
+            guild, {u: f"allowed role {role.name!r} removed" for u in affected},
+            progress=progress, log_title=f"Allowed role {role.name} removed by {interaction.user}",
+        )
+        embed = _report_embed("Role Removed", report, intro=result.message) if affected else build_success_embed("Role Removed", result.message)
+        if from_button:
+            await interaction.edit_original_response(embed=embed)
+        else:
+            await interaction.followup.send(embed=embed, ephemeral=True)
 
     @allow_role.command(name="list", description="Show roles allowed to use Lunar Roles besides boosters")
     @command_meta(section="Customization", name="Lunar Admin Allow Role List")
