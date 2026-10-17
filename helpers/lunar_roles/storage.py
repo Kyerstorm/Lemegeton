@@ -23,6 +23,8 @@ class GuildSettings:
     cooldown_seconds: int = 0
     allowed_role_ids: List[int] = field(default_factory=list)
     blocked_words: List[str] = field(default_factory=list)
+    anchor_place: str = "below"  # custom roles go "below" or "above" the anchor
+    removed_default_words: List[str] = field(default_factory=list)  # built-in protected words switched off
 
 
 @dataclass
@@ -50,8 +52,10 @@ _SETTINGS_COLUMNS = (
     "cooldown_seconds",
     "allowed_role_ids",
     "blocked_words",
+    "anchor_place",
+    "removed_default_words",
 )
-_JSON_SETTINGS = {"allowed_role_ids", "blocked_words"}
+_JSON_SETTINGS = {"allowed_role_ids", "blocked_words", "removed_default_words"}
 
 _ROLE_COLUMNS = (
     "guild_id",
@@ -110,6 +114,8 @@ async def get_guild_settings(guild_id: int) -> GuildSettings:
         cooldown_seconds=int(row[4] or 0),
         allowed_role_ids=[int(r) for r in _load_json_list(row[5])],
         blocked_words=[str(w) for w in _load_json_list(row[6])],
+        anchor_place=row[7] or "below",
+        removed_default_words=[str(w) for w in _load_json_list(row[8])],
     )
 
 
@@ -149,17 +155,93 @@ async def update_guild_settings(guild_id: int, **fields) -> GuildSettings:
 # Custom roles
 # ------------------------------------------------------
 
-async def update_custom_role(guild_id: int, user_id: int, **fields) -> None:
-    """Update columns on an existing record."""
+async def get_custom_role(guild_id: int, user_id: int) -> Optional[CustomRole]:
+    row = await execute_db_operation(
+        "get lunar custom role",
+        f"SELECT {_ROLE_SELECT} FROM lunar_custom_roles WHERE guild_id = ? AND user_id = ?",
+        (guild_id, user_id),
+        fetch_type="one",
+    )
+    return _row_to_role(row) if row else None
+
+
+async def get_custom_role_by_role_id(guild_id: int, role_id: int) -> Optional[CustomRole]:
+    row = await execute_db_operation(
+        "get lunar custom role by role id",
+        f"SELECT {_ROLE_SELECT} FROM lunar_custom_roles WHERE guild_id = ? AND role_id = ?",
+        (guild_id, role_id),
+        fetch_type="one",
+    )
+    return _row_to_role(row) if row else None
+
+
+async def upsert_custom_role(record: CustomRole) -> None:
+    """Insert or fully replace a member's record (keeps created_at on update).
+
+    Counts as a change, so last_changed_at is set to now.
+    """
+    columns = [c for c in _ROLE_COLUMNS if c not in {"created_at", "updated_at", "last_changed_at"}]
+    values = [getattr(record, c) for c in columns]
+    assignments = ", ".join(
+        f"{c} = excluded.{c}" for c in columns if c not in {"guild_id", "user_id"}
+    )
+    await execute_db_operation(
+        "upsert lunar custom role",
+        f"""
+        INSERT INTO lunar_custom_roles ({', '.join(columns)}, last_changed_at, created_at, updated_at)
+        VALUES ({', '.join('?' for _ in columns)}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT (guild_id, user_id) DO UPDATE SET {assignments},
+            last_changed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        """,
+        tuple(values),
+    )
+
+
+async def list_active_roles(guild_id: int) -> List[CustomRole]:
+    rows = await execute_db_operation(
+        "list lunar active roles",
+        f"SELECT {_ROLE_SELECT} FROM lunar_custom_roles "
+        "WHERE guild_id = ? AND status = ? AND role_id IS NOT NULL",
+        (guild_id, STATUS_ACTIVE),
+        fetch_type="all",
+    )
+    return [_row_to_role(row) for row in rows or []]
+
+
+async def list_guilds_with_active_roles() -> List[int]:
+    rows = await execute_db_operation(
+        "list guilds with lunar roles",
+        "SELECT DISTINCT guild_id FROM lunar_custom_roles WHERE status = ? AND role_id IS NOT NULL",
+        (STATUS_ACTIVE,),
+        fetch_type="all",
+    )
+    return [int(row[0]) for row in rows or []]
+
+
+async def list_active_role_ids(guild_id: int) -> set:
+    """Discord role IDs currently tracked as custom roles in a guild."""
+    rows = await execute_db_operation(
+        "list lunar active role ids",
+        "SELECT role_id FROM lunar_custom_roles WHERE guild_id = ? AND role_id IS NOT NULL",
+        (guild_id,),
+        fetch_type="all",
+    )
+    return {int(row[0]) for row in rows or []}
+
+
+async def update_custom_role(guild_id: int, user_id: int, changed: bool = False, **fields) -> None:
+    """Update columns on an existing record. changed=True also stamps last_changed_at."""
     unknown = set(fields) - _ROLE_UPDATABLE
     if unknown:
         raise ValueError(f"Unknown Lunar role columns: {', '.join(sorted(unknown))}")
-    if not fields:
+    if not fields and not changed:
         return
-    assignments = ", ".join(f"{column} = ?" for column in fields)
+    assignments = [f"{column} = ?" for column in fields]
+    if changed:
+        assignments.append("last_changed_at = CURRENT_TIMESTAMP")
     await execute_db_operation(
         "update lunar custom role",
-        f"UPDATE lunar_custom_roles SET {assignments}, updated_at = CURRENT_TIMESTAMP "
+        f"UPDATE lunar_custom_roles SET {', '.join(assignments)}, updated_at = CURRENT_TIMESTAMP "
         "WHERE guild_id = ? AND user_id = ?",
         (*fields.values(), guild_id, user_id),
     )

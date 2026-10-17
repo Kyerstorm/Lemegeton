@@ -2113,6 +2113,15 @@ async def init_lunar_roles_tables():
         )
         """,
     )
+    # Added after the first release of this table.
+    await execute_db_operation(
+        "add lunar anchor_place column",
+        "ALTER TABLE lunar_guild_settings ADD COLUMN IF NOT EXISTS anchor_place TEXT NOT NULL DEFAULT 'below'",
+    )
+    await execute_db_operation(
+        "add lunar removed_default_words column",
+        "ALTER TABLE lunar_guild_settings ADD COLUMN IF NOT EXISTS removed_default_words TEXT NOT NULL DEFAULT '[]'",
+    )
 
     await execute_db_operation(
         "create lunar meta table",
