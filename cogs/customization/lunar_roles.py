@@ -181,7 +181,7 @@ class PaletteView(discord.ui.View):
         secondary_options += [discord.SelectOption(label=f"#{c:06X}", value=f"{c:06X}") for c in colors[:24]]
         self.secondary_select = discord.ui.Select(
             placeholder="Secondary color — makes a gradient" if gradient_ok
-            else "Gradients need Discord's Enhanced Role Colors",
+            else "Gradients need 3 server boosts (Enhanced Role Styles)",
             options=secondary_options,
             disabled=not gradient_ok,
         )
@@ -396,7 +396,7 @@ class LunarRoles(commands.Cog):
              "the regular check won't remove any custom roles"),
             ("LUNAR_DEBUG_PREVIEW_ENHANCED_COLORS", config.LUNAR_DEBUG_PREVIEW_ENHANCED_COLORS,
              service.debug_preview_enhanced_active(),
-             "The color picker shows Gradient/Holographic even without Enhanced Role Colors (saving is still refused).",
+             "The color picker shows Gradient/Holographic even without Enhanced Role Styles (3 server boosts; saving is still refused).",
              "the color picker unlocks Gradient and Holographic for previewing (saving them is still refused)"),
             ("LUNAR_DEBUG_PREVIEW_ROLE_ICONS", config.LUNAR_DEBUG_PREVIEW_ROLE_ICONS,
              service.debug_preview_icons_active(),
@@ -908,8 +908,8 @@ class LunarRoles(commands.Cog):
         embed.add_field(
             name="Server features",
             value=(
-                f"Gradient / holographic: {_yes_no(features.gradient)}\n"
-                f"Role icons: {_yes_no(features.icons)}\n"
+                f"Gradient / holographic (3 boosts): {_yes_no(features.gradient)}\n"
+                f"Role icons (Boost Level 2): {_yes_no(features.icons)}\n"
                 f"Roles: {features.role_count} / {ROLE_LIMIT}"
             ),
             inline=True,

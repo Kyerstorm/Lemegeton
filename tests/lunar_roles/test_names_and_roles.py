@@ -229,9 +229,10 @@ async def main():
     r = await service.set_colors(booster, "solid", 0xFF66AA)
     check("solid color ok + same role", r.ok and role.colour.value == 0xFF66AA and r.data.id == first_id, r.message)
     r = await service.set_colors(booster, "gradient", 1, 2)
-    check("gradient refused without perk", not r.ok and "enhanced role colors" in r.message)
+    check("gradient refused without perk (says 3 server boosts)", not r.ok and "3 server boosts" in r.message
+          and "Enhanced Role Styles" in r.message, r.message)
     r = await service.set_colors(booster, "holographic")
-    check("holographic refused without perk", not r.ok and "enhanced role colors" in r.message)
+    check("holographic refused without perk", not r.ok and "3 server boosts" in r.message, r.message)
     check("no new roles created by edits", sum(1 for c in guild.calls if c[0] == "create") == creates_before)
 
     guild.features.append("ENHANCED_ROLE_COLORS")

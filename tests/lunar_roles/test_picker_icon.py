@@ -132,14 +132,61 @@ async def main():
     except images.ImageError as exc:
         check("over the (configurable) original limit refused", "1 MB" in exc.message, exc.message)
     config.LUNAR_ICON_SOURCE_MAX_BYTES = old_limit
-    for data, words, label in ((encode(Image.new("RGB", (5000, 10))), "too large in pixels", "5000 px wide"),
-                               (encode(Image.new("1", (12000, 12000))), "too large in pixels", "pixel bomb"),
+    for data, words, label in ((encode(Image.new("RGB", (9000, 10))), "9000 px wide", "9000 px wide"),
+                               (encode(Image.new("1", (20000, 20000))), "far too large in pixels", "pixel bomb"),
                                (b"GIF89a....", "PNG or JPEG", "GIF")):
         try:
             images.make_icon(data)
             check(f"still refused: {label}", False)
         except images.ImageError as exc:
             check(f"still refused: {label}", words in exc.message, exc.message)
+
+    # ================================================================== pixel limits (Milestone 9) and HEIC
+    check("limits: 8192 px a side, 16 million pixels", (images.MAX_ICON_SIDE, images.MAX_ICON_PIXELS) == (8192, 16_000_000))
+    check("8192 px wide is accepted", images.inspect_source(encode(Image.new("RGB", (8192, 100)))) == ("PNG", 8192, 100))
+    check("the Eiffel photo's size (2900x5367) is accepted now",
+          images.inspect_source(encode(Image.new("RGB", (2900, 5367)), "JPEG")) == ("JPEG", 2900, 5367))
+    check("12 MP phone photo size (4032x3024) is accepted", images.pixel_limit_error(4032, 3024) is None)
+    rotated_tall = Image.Exif()
+    rotated_tall[0x0112] = 6
+    for data, expected, label in (
+        (encode(Image.new("RGB", (9000, 50))), "This image is 9000 px wide; the limit is 8192 px per side.", "too wide"),
+        (encode(Image.new("RGB", (50, 9000))), "This image is 9000 px tall; the limit is 8192 px per side.", "too tall"),
+        (encode(Image.new("RGB", (9000, 100)), "JPEG", exif=rotated_tall.tobytes()),
+         "This image is 9000 px tall; the limit is 8192 px per side.", "phone photo turned upright is named as tall"),
+        (encode(Image.new("1", (9000, 9000))),
+         "This image is 9000x9000 px; the limit is 8192 px per side. Try a 12 MP photo or a screenshot.", "both sides"),
+        (encode(Image.new("1", (8064, 6048))),
+         "This image is 8064x6048 px (48.8 million pixels); the limit is 16 million pixels. Try a 12 MP photo or a screenshot.",
+         "48 MP photo"),
+        (encode(Image.new("1", (4000, 4001))),
+         "This image is 4000x4001 px (16.1 million pixels); the limit is 16 million pixels. Try a 12 MP photo or a screenshot.",
+         "just over 16 MP (rounded up, never '16.0')"),
+    ):
+        try:
+            images.inspect_source(data)
+            check(f"pixel limit message: {label}", False)
+        except images.ImageError as exc:
+            check(f"pixel limit message: {label}", exc.message == expected, exc.message)
+    heic = b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic" + os.urandom(200)
+    heif = b"\x00\x00\x00\x10ftypmif1\x00\x00\x00\x00" + os.urandom(200)
+    avif = b"\x00\x00\x00\x1cftypavif\x00\x00\x00\x00avifmif1miaf" + os.urandom(200)
+    check("HEIC/HEIF recognised by bytes, AVIF and PNG aren't",
+          images.is_heif(heic) and images.is_heif(heif) and not images.is_heif(avif) and not images.is_heif(PNG_OK))
+    for data, expected, label in ((heic, images.HEIC_MESSAGE, "HEIC"), (heif, images.HEIC_MESSAGE, "HEIF"),
+                                  (avif, images.TYPE_MESSAGE, "AVIF (not called HEIC)")):
+        try:
+            images.make_icon(data)
+            check(f"refused with the right message: {label}", False)
+        except images.ImageError as exc:
+            check(f"refused with the right message: {label}", exc.message == expected, exc.message)
+    check("HEIC message wording", images.HEIC_MESSAGE == "iPhone HEIC photos aren't supported. Save it as JPEG or PNG "
+          "(or take a screenshot) and try again.")
+    try:
+        images.check_attachment_metadata("image/heic", False)
+        check("/lunar icon: Discord's image/heic type gets the HEIC message", False)
+    except images.ImageError as exc:
+        check("/lunar icon: Discord's image/heic type gets the HEIC message", exc.message == images.HEIC_MESSAGE)
 
     # phone photo rotation: crop coordinates are in the picture as displayed
     rot = Image.new("RGB", (300, 200), (0, 0, 255))
@@ -260,10 +307,13 @@ async def main():
     async def missing(request):
         return web.Response(status=404, text="nope")
 
+    async def heic_photo(request):
+        return web.Response(body=b"\x00\x00\x00\x18ftypheic" + bytes(100), content_type="image/heic")
+
     site = web.Application()
     for path, handler in (("/ok.png", ok_png), ("/ok.jpg", ok_jpg), ("/redirect", redirect), ("/page", html),
                           ("/declared-big.png", declared_big), ("/chunked-big.png", chunked_big), ("/slow.png", slow),
-                          ("/fake.png", fake_png), ("/missing.png", missing)):
+                          ("/fake.png", fake_png), ("/missing.png", missing), ("/photo.heic", heic_photo)):
         site.router.add_get(path, handler)
     server = TestServer(site, host="127.0.0.1")
     await server.start_server()
@@ -283,7 +333,7 @@ async def main():
     for path, words, label in (("/redirect", "redirects", "redirect (302)"), ("/page", "isn't a PNG or JPEG", "web page"),
                                ("/declared-big.png", "larger than", "Content-Length over the limit"),
                                ("/chunked-big.png", "larger than", "no Content-Length, cut off while streaming"),
-                               ("/missing.png", "error (404)", "404")):
+                               ("/missing.png", "error (404)", "404"), ("/photo.heic", "iPhone HEIC photos", "HEIC photo")):
         try:
             await safe_fetch.fetch_image(f"{base}{path}", limit, **opts)
             check(f"fetch refused: {label}", False)
@@ -517,7 +567,12 @@ async def main():
     check("picker.js sends the original + crop, never re-encodes it", 'form.append("image", iconEdit.blob' in js
           and "toBlob" not in js)
     check("picker.js reads the size from the header BEFORE the browser decodes the image",
-          0 < js.index("headerSize(new Uint8Array") < js.index("URL.createObjectURL(blob)"))
+          0 < js.index("headerSize(head, isPng)") < js.index("URL.createObjectURL(blob)"))
+    check("picker.js uses the same limits and messages as the server",
+          "const MAX_SIDE = 8192;" in js and "const MAX_PIXELS = 16000000;" in js
+          and f'const PHOTO_HINT = "{images.PHOTO_HINT}";' in js and f'const HEIC_MESSAGE = "{images.HEIC_MESSAGE}";' in js)
+    check("the only canvas is the 128 px preview (far under iPhone Safari's ~16.7 MP canvas limit)",
+          js.count('createElement("canvas")') == 1 and "const PREVIEW_SIDE = 128;" in js)
     check("picker.js doesn't wait on decode() or animation frames (they stall in background tabs)",
           not re.search(r"\.decode\s*\(", js) and not re.search(r"requestAnimationFrame\s*\(", js))
 
@@ -529,36 +584,58 @@ async def main():
         work = tempfile.mkdtemp(prefix="lunar_header_")
         samples = {
             "bomb.png": encode(Image.new("1", (20000, 20000))),
-            "wide.png": encode(Image.new("RGB", (5000, 10))),
+            "wide.png": encode(Image.new("RGB", (9000, 10))),
             "ok.png": PNG_OK,
-            "ok.jpg": jpeg,
+            "ok.jpg": jpeg,  # 300x200 stored, shown turned upright (EXIF orientation 6)
+            "big-endian-exif.jpg": encode(Image.new("RGB", (300, 200)), "JPEG",
+                                          exif=b"Exif\x00\x00MM\x00\x2a\x00\x00\x00\x08\x00\x01\x01\x12\x00\x03"
+                                               b"\x00\x00\x00\x01\x00\x08\x00\x00\x00\x00\x00\x00"),
             "progressive.jpg": encode(quarters(320), "JPEG", progressive=True),
+            "photo.heic": heic,
+            "photo.avif": avif,
         }
         for name, data in samples.items():
             with open(os.path.join(work, name), "wb") as f:
                 f.write(data)
+        limit_cases = [(9000, 50), (50, 9000), (9000, 9000), (8064, 6048), (4000, 4001), (8192, 1953), (4032, 3024),
+                       (8192, 8192), (1, 16_000_000), (16_000_001, 1)]
+        with open(os.path.join(work, "cases.json"), "w", encoding="utf-8") as f:
+            json.dump(limit_cases, f)
         script = os.path.join(work, "run.js")
         with open(script, "w", encoding="utf-8") as f:
             f.write(
                 'const fs = require("fs");\n'
                 'const src = fs.readFileSync(process.argv[2], "utf8").split("\\r\\n").join("\\n");\n'
-                'const start = src.indexOf("  function headerSize(");\n'
-                'const end = src.indexOf("\\n  }\\n", start) + 4;\n'
-                'const headerSize = new Function(src.slice(start, end) + "\\nreturn headerSize;")();\n'
-                "const out = {};\n"
-                "for (const file of process.argv.slice(3)) {\n"
+                '// the image-checking block: constants, headerSize, exifOrientation, isHeif, pixelLimitError\n'
+                'const start = src.indexOf("  const PNG_SIGNATURE");\n'
+                'const last = src.indexOf("  function pixelLimitError(");\n'
+                'const end = src.indexOf("\\n  }\\n", last) + 4;\n'
+                'const lib = new Function(src.slice(start, end) + "\\nreturn { headerSize, isHeif, pixelLimitError };")();\n'
+                "const out = { sizes: {}, heif: {}, limits: [] };\n"
+                "for (const file of process.argv.slice(4)) {\n"
                 "  const b = fs.readFileSync(file);\n"
                 "  const bytes = new Uint8Array(b.buffer, b.byteOffset, Math.min(b.length, 262144));\n"
-                '  out[file.split(/[\\\\/]/).pop()] = headerSize(bytes, bytes[0] === 0x89);\n'
+                "  const name = file.split(/[\\\\/]/).pop();\n"
+                "  out.heif[name] = lib.isHeif(bytes);\n"
+                "  if (bytes[0] === 0x89 || bytes[0] === 0xFF) { out.sizes[name] = lib.headerSize(bytes, bytes[0] === 0x89); }\n"
                 "}\n"
+                'for (const [w, h] of JSON.parse(fs.readFileSync(process.argv[3], "utf8"))) { out.limits.push(lib.pixelLimitError(w, h)); }\n'
                 "console.log(JSON.stringify(out));\n"
             )
-        proc = subprocess.run([node, script, str(static / "picker.js"), *(os.path.join(work, n) for n in samples)],
+        proc = subprocess.run([node, script, str(static / "picker.js"), os.path.join(work, "cases.json"),
+                               *(os.path.join(work, n) for n in samples)],
                               capture_output=True, text=True, timeout=60)
-        sizes = json.loads(proc.stdout or "{}")
-        expected = {"bomb.png": {"w": 20000, "h": 20000}, "wide.png": {"w": 5000, "h": 10}, "ok.png": {"w": 600, "h": 600},
-                    "ok.jpg": {"w": 300, "h": 200}, "progressive.jpg": {"w": 320, "h": 320}}
-        check("header sizes read correctly in JS (PNG, JPEG, progressive JPEG, bomb)", sizes == expected, (sizes, proc.stderr[-300:]))
+        result = json.loads(proc.stdout or "{}")
+        expected = {"bomb.png": {"w": 20000, "h": 20000}, "wide.png": {"w": 9000, "h": 10}, "ok.png": {"w": 600, "h": 600},
+                    "ok.jpg": {"w": 200, "h": 300}, "big-endian-exif.jpg": {"w": 200, "h": 300},
+                    "progressive.jpg": {"w": 320, "h": 320}}
+        check("header sizes read correctly in JS (PNG, JPEG upright via EXIF in both byte orders, progressive, bomb)",
+              result.get("sizes") == expected, (result.get("sizes"), proc.stderr[-300:]))
+        check("JS spots HEIC by its bytes, not AVIF/PNG/JPEG",
+              result.get("heif") == {n: n == "photo.heic" for n in samples}, result.get("heif"))
+        python_limits = [images.pixel_limit_error(w, h) for w, h in limit_cases]
+        check("JS pixel-limit messages match the server's word for word", result.get("limits") == python_limits,
+              list(zip(result.get("limits") or [], python_limits)))
     else:
         print("SKIP node not installed: JS header-size check not run")
 

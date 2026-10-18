@@ -24,6 +24,7 @@ import aiohttp
 from aiohttp.abc import AbstractResolver, ResolveResult
 
 import config
+from helpers.lunar_roles.images import HEIC_MESSAGE, HEIF_CONTENT_TYPES
 
 LINK_TIMEOUT = 10.0
 MAX_URL_LENGTH = 2048
@@ -195,6 +196,8 @@ async def _fetch(url: str, host: str, max_bytes: int, timeout: float, resolve: R
             if response.status != 200:
                 raise FetchError(f"The website answered with an error ({response.status}).")
             kind = ALLOWED_TYPES.get(response.content_type.lower())
+            if response.content_type.lower() in HEIF_CONTENT_TYPES:
+                raise FetchError(HEIC_MESSAGE)
             if kind is None:
                 raise FetchError("That link isn't a PNG or JPEG image.")
             too_big = FetchError(f"That image is larger than {max_bytes // (1024 * 1024) or 1} MB.")

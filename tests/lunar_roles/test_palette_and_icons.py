@@ -75,8 +75,8 @@ async def main():
         ("WebP content", png_bytes(Image.new("RGB", (8, 8)), "WEBP"), "PNG or JPEG"),
         ("text", b"hello", "PNG or JPEG"),
         ("cut off", png_bytes(Image.new("RGB", (64, 64), (9, 9, 9)))[:40], "couldn't read"),
-        ("5000px wide", png_bytes(Image.new("RGB", (5000, 10))), "too large in pixels"),
-        ("4096x4096+ pixel bomb", png_bytes(Image.new("1", (12000, 12000))), "too large in pixels"),
+        ("9000px wide", png_bytes(Image.new("RGB", (9000, 10))), "9000 px wide; the limit is 8192 px per side"),
+        ("8192x8192+ pixel bomb", png_bytes(Image.new("1", (12000, 12000))), "the limit is 8192 px per side"),
     ]:
         try:
             images.prepare_icon(data)
@@ -277,7 +277,7 @@ async def main():
     await service.create_role(owner, "Glow Role")
     view = cog_mod.PaletteView(owner, [0xFF0000, 0x00FF00, 0x0000FF], gradient_ok=False)
     check("no perk: secondary menu disabled with gradient placeholder",
-          view.secondary_select.disabled and "Enhanced Role Colors" in view.secondary_select.placeholder)
+          view.secondary_select.disabled and "3 server boosts" in view.secondary_select.placeholder)
     check("menus: hex labels, 'Clear secondary' option",
           [o.label for o in view.primary_select.options] == ["#FF0000", "#00FF00", "#0000FF"]
           and view.secondary_select.options[0].label == "Clear secondary")

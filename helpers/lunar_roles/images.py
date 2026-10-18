@@ -5,6 +5,7 @@ Everything here is synchronous and CPU-bound; callers run it with asyncio.to_thr
 from __future__ import annotations
 
 import io
+import math
 import unicodedata
 import warnings
 from collections import OrderedDict
@@ -16,14 +17,20 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 import config
 
 MAX_ICON_BYTES = 256 * 1024     # Discord's limit for the final role icon
-MAX_ICON_SIDE = 4096            # refuse anything wider/taller before decoding pixels
-MAX_ICON_PIXELS = 16_000_000    # ...or with more pixels than this (decompression bombs)
+MAX_ICON_SIDE = 8192            # refuse anything wider/taller before decoding pixels
+MAX_ICON_PIXELS = 16_000_000    # ...or with more pixels than this (decompression bombs; ~64 MB decoded)
 ICON_SIZES = (256, 128, 64)     # final icon: the largest of these that fits under MAX_ICON_BYTES
 ICON_SIZE = ICON_SIZES[-1]      # Discord's documented minimum role-icon size
 MIN_CROP = 16                   # smallest square (in the original's pixels) that can be cut out
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 JPEG_SIGNATURE = b"\xff\xd8\xff"
+
+PHOTO_HINT = "Try a 12 MP photo or a screenshot."
+HEIC_MESSAGE = "iPhone HEIC photos aren't supported. Save it as JPEG or PNG (or take a screenshot) and try again."
+TYPE_MESSAGE = "Only PNG or JPEG images work as role icons (checked by the file's content, not its name)."
+_HEIF_BRANDS = {b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"hevm", b"hevs", b"mif1", b"msf1"}
+HEIF_CONTENT_TYPES = {"image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence"}
 
 
 class ImageError(Exception):
@@ -69,8 +76,10 @@ def check_attachment_metadata(content_type: Optional[str], animated: bool) -> No
     if animated:
         raise ImageError("Animated images can't be role icons. Use a still PNG or JPEG.")
     kind = (content_type or "").split(";")[0].strip().lower()
+    if kind in HEIF_CONTENT_TYPES:
+        raise ImageError(HEIC_MESSAGE)
     if kind.startswith("image/") and kind not in _ALLOWED_CONTENT_TYPES:
-        raise ImageError("Only PNG or JPEG images work as role icons (checked by the file's content, not its name).")
+        raise ImageError(TYPE_MESSAGE)
 
 
 def sniff_type(data: bytes) -> Optional[str]:
@@ -82,18 +91,48 @@ def sniff_type(data: bytes) -> Optional[str]:
     return None
 
 
+def is_heif(data: bytes) -> bool:
+    """True for HEIC/HEIF files (iPhone photos), recognised by their "ftyp" box, not their name.
+    AVIF uses the same container and isn't counted."""
+    if len(data) < 12 or data[4:8] != b"ftyp":
+        return False
+    box_end = min(max(int.from_bytes(data[:4], "big"), 16), 256, len(data))
+    brands = {data[8:12]} | {data[i:i + 4] for i in range(16, box_end - 3, 4)}  # major + compatible brands
+    return not brands & {b"avif", b"avis"} and bool(brands & _HEIF_BRANDS)
+
+
+def pixel_limit_error(width: int, height: int) -> Optional[str]:
+    """The refusal for an image too large in pixels (sizes as displayed), naming the limit hit; None if it's fine."""
+    over_total = width * height > MAX_ICON_PIXELS
+    if width > MAX_ICON_SIDE and height > MAX_ICON_SIDE:
+        message = f"This image is {width}x{height} px; the limit is {MAX_ICON_SIDE} px per side."
+    elif height > MAX_ICON_SIDE:
+        message = f"This image is {height} px tall; the limit is {MAX_ICON_SIDE} px per side."
+    elif width > MAX_ICON_SIDE:
+        message = f"This image is {width} px wide; the limit is {MAX_ICON_SIDE} px per side."
+    elif over_total:
+        millions = math.ceil(width * height / 100_000) / 10  # rounded up, so it never reads as "16.0"
+        message = (f"This image is {width}x{height} px ({millions:g} million pixels); "
+                   f"the limit is {MAX_ICON_PIXELS // 1_000_000} million pixels.")
+    else:
+        return None
+    return f"{message} {PHOTO_HINT}" if over_total else message
+
+
 def _open_checked(data: bytes) -> Tuple[Image.Image, str]:
     """Open and fully decode an original image after every safety check. Returns (image, "PNG"|"JPEG")."""
     check_declared_size(len(data))
     kind = sniff_type(data)
     if kind is None:
-        raise ImageError("Only PNG or JPEG images work as role icons (checked by the file's content, not its name).")
+        raise ImageError(HEIC_MESSAGE if is_heif(data) else TYPE_MESSAGE)
 
     with warnings.catch_warnings():
-        warnings.simplefilter("error", Image.DecompressionBombWarning)
+        # Opening reads the header only, so Pillow's own bomb warning is ignored here: our pixel
+        # check below refuses with the real size. Pillow still refuses absurd sizes outright.
+        warnings.simplefilter("ignore", Image.DecompressionBombWarning)
         try:
-            image = Image.open(io.BytesIO(data))  # reads the header only
-        except (Image.DecompressionBombError, Image.DecompressionBombWarning):
+            image = Image.open(io.BytesIO(data))
+        except Image.DecompressionBombError:
             raise ImageError(_too_many_pixels())
         except (OSError, ValueError, SyntaxError):
             raise ImageError("I couldn't read that image. It may be damaged.")
@@ -102,9 +141,11 @@ def _open_checked(data: bytes) -> Tuple[Image.Image, str]:
         detected = "JPEG" if image.format == "MPO" else image.format
         if detected != kind:
             raise ImageError("That file's content doesn't match a normal PNG or JPEG image.")
-        width, height = image.size
-        if width > MAX_ICON_SIDE or height > MAX_ICON_SIDE or width * height > MAX_ICON_PIXELS:
-            raise ImageError(_too_many_pixels())
+        width, height = _displayed_size(image)
+        error = pixel_limit_error(width, height)
+        if error:
+            raise ImageError(error)
+        warnings.simplefilter("error", Image.DecompressionBombWarning)
         if kind == "PNG" and (getattr(image, "is_animated", False) or getattr(image, "n_frames", 1) > 1):
             raise ImageError("Animated images can't be role icons. Use a still PNG or JPEG.")
         try:
@@ -120,10 +161,17 @@ def inspect_source(data: bytes) -> Tuple[str, int, int]:
     """Check an original image without making an icon. Returns (kind, width, height) as displayed
     (phone photos turned the right way up, matching what browsers show)."""
     image, kind = _open_checked(data)
+    return (kind, *_displayed_size(image))
+
+
+def _displayed_size(image: Image.Image) -> Tuple[int, int]:
+    """(width, height) as shown, with a phone photo's EXIF rotation applied (read from the header)."""
     width, height = image.size
-    if image.getexif().get(0x0112) in (5, 6, 7, 8):  # EXIF orientation: rotated a quarter turn
-        width, height = height, width
-    return kind, width, height
+    try:
+        turned = image.getexif().get(0x0112) in (5, 6, 7, 8)  # EXIF orientation: rotated a quarter turn
+    except Exception:
+        turned = False
+    return (height, width) if turned else (width, height)
 
 
 @dataclass
@@ -170,8 +218,9 @@ def prepare_icon(data: bytes) -> bytes:
 
 
 def _too_many_pixels() -> str:
-    return (f"That image is too large in pixels. Please use something no bigger than "
-            f"{MAX_ICON_SIDE}x{MAX_ICON_SIDE} ({MAX_ICON_PIXELS // 1_000_000} million pixels).")
+    """For images so large Pillow refuses them before their size can be read."""
+    return (f"This image is far too large in pixels; the limit is {MAX_ICON_SIDE} px per side and "
+            f"{MAX_ICON_PIXELS // 1_000_000} million pixels in total. {PHOTO_HINT}")
 
 
 # ------------------------------------------------------

@@ -514,20 +514,25 @@
   // ------------------------------------------------------------------ role icon: loading and cropping
 
   const PNG_SIGNATURE = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
-  const MAX_SIDE = 4096;          // same limits as the server
+  const MAX_SIDE = 8192;          // same limits and messages as the server (images.py)
   const MAX_PIXELS = 16000000;
+  const PHOTO_HINT = "Try a 12 MP photo or a screenshot.";
+  const HEIC_MESSAGE = "iPhone HEIC photos aren't supported. Save it as JPEG or PNG (or take a screenshot) and try again.";
+  const HEIF_BRANDS = ["heic", "heix", "hevc", "hevx", "heim", "heis", "hevm", "hevs", "mif1", "msf1"];
   const MIN_CROP = 16;
   const PREVIEW_SIDE = 128;       // canvas size for the live preview (shown smaller)
   let previewFrame = 0;
 
   // Width and height from the file's header, read BEFORE the browser decodes anything, so a
   // decompression bomb (a small file with huge dimensions) is refused without being opened.
+  // JPEG sizes are as displayed (a phone photo's EXIF rotation applied), like the server's.
   // Returns null if no size header was found in the bytes given.
   function headerSize(bytes, isPng) {
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     if (isPng) {
       return bytes.length >= 24 ? { w: view.getUint32(16), h: view.getUint32(20) } : null;
     }
+    let turned = false;
     let i = 2;  // JPEG: walk the markers to the first "start of frame"
     while (i + 9 < bytes.length) {
       if (bytes[i] !== 0xFF) { i += 1; continue; }
@@ -535,12 +540,62 @@
       if (marker === 0xFF) { i += 1; continue; }
       if (marker === 0xD8 || marker === 0x01 || (marker >= 0xD0 && marker <= 0xD7)) { i += 2; continue; }
       const length = view.getUint16(i + 2);
+      if (marker === 0xE1) {
+        turned = turned || [5, 6, 7, 8].includes(exifOrientation(bytes, view, i + 4, Math.min(i + 2 + length, bytes.length)));
+      }
       if (marker >= 0xC0 && marker <= 0xCF && marker !== 0xC4 && marker !== 0xC8 && marker !== 0xCC) {
-        return { h: view.getUint16(i + 5), w: view.getUint16(i + 7) };
+        const h = view.getUint16(i + 5);
+        const w = view.getUint16(i + 7);
+        return turned ? { w: h, h: w } : { w, h };
       }
       i += 2 + length;
     }
     return null;
+  }
+
+  // The EXIF orientation tag from an APP1 segment (bytes start..end), or 0 if there isn't one.
+  function exifOrientation(bytes, view, start, end) {
+    const exif = [0x45, 0x78, 0x69, 0x66, 0, 0];  // "Exif\0\0"
+    if (end - start < 16 || !exif.every((byte, k) => bytes[start + k] === byte)) { return 0; }
+    const tiff = start + 6;
+    const little = bytes[tiff] === 0x49;  // "II" = little-endian, "MM" = big-endian
+    const ifd = tiff + view.getUint32(tiff + 4, little);
+    if (ifd + 2 > end) { return 0; }
+    const count = view.getUint16(ifd, little);
+    for (let k = 0; k < count && ifd + 2 + (k + 1) * 12 <= end; k += 1) {
+      const entry = ifd + 2 + k * 12;
+      if (view.getUint16(entry, little) === 0x0112) { return view.getUint16(entry + 8, little); }
+    }
+    return 0;
+  }
+
+  // HEIC/HEIF (iPhone photos) by their "ftyp" box; AVIF uses the same container and isn't counted.
+  function isHeif(bytes) {
+    const text = (from, to) => String.fromCharCode(...bytes.subarray(from, to));
+    if (bytes.length < 12 || text(4, 8) !== "ftyp") { return false; }
+    const boxEnd = Math.min(Math.max(new DataView(bytes.buffer, bytes.byteOffset).getUint32(0), 16), 256, bytes.length);
+    const brands = [text(8, 12)];
+    for (let k = 16; k + 4 <= boxEnd; k += 4) { brands.push(text(k, k + 4)); }
+    return !brands.some((b) => b === "avif" || b === "avis") && brands.some((b) => HEIF_BRANDS.includes(b));
+  }
+
+  // The refusal for an image too large in pixels, naming the limit hit (same wording as the server).
+  function pixelLimitError(w, h) {
+    const overTotal = w * h > MAX_PIXELS;
+    let message;
+    if (w > MAX_SIDE && h > MAX_SIDE) {
+      message = `This image is ${w}x${h} px; the limit is ${MAX_SIDE} px per side.`;
+    } else if (h > MAX_SIDE) {
+      message = `This image is ${h} px tall; the limit is ${MAX_SIDE} px per side.`;
+    } else if (w > MAX_SIDE) {
+      message = `This image is ${w} px wide; the limit is ${MAX_SIDE} px per side.`;
+    } else if (overTotal) {
+      const millions = Math.ceil(w * h / 100000) / 10;  // rounded up, so it never reads as "16.0"
+      message = `This image is ${w}x${h} px (${millions} million pixels); the limit is ${MAX_PIXELS / 1000000} million pixels.`;
+    } else {
+      return null;
+    }
+    return overTotal ? `${message} ${PHOTO_HINT}` : message;
   }
 
   const validCrop = (crop, w, h) => crop && [crop.x, crop.y, crop.size].every(Number.isInteger)
@@ -561,18 +616,20 @@
     if (blob.size > max) {
       throw new Error(`That image is ${formatSize(blob.size)}. Images can be at most ${formatSize(max)}.`);
     }
-    const head = new Uint8Array(await blob.slice(0, 8).arrayBuffer());
+    const head = new Uint8Array(await blob.slice(0, 256 * 1024).arrayBuffer());
     const isPng = PNG_SIGNATURE.every((byte, i) => head[i] === byte);
     const isJpeg = head[0] === 0xFF && head[1] === 0xD8 && head[2] === 0xFF;
     if (!isPng && !isJpeg) {
-      throw new Error("Only PNG or JPEG images work as role icons (checked by the file's content, not its name).");
+      throw new Error(isHeif(head) ? HEIC_MESSAGE
+        : "Only PNG or JPEG images work as role icons (checked by the file's content, not its name).");
     }
-    const declared = headerSize(new Uint8Array(await blob.slice(0, 256 * 1024).arrayBuffer()), isPng);
+    const declared = headerSize(head, isPng);
     if (!declared) {
       throw new Error("I couldn't read that image. It may be damaged.");
     }
-    if (declared.w > MAX_SIDE || declared.h > MAX_SIDE || declared.w * declared.h > MAX_PIXELS) {
-      throw new Error(`That image is too large in pixels. Please use something no bigger than ${MAX_SIDE}x${MAX_SIDE}.`);
+    const tooBig = pixelLimitError(declared.w, declared.h);
+    if (tooBig) {
+      throw new Error(tooBig);
     }
     const url = URL.createObjectURL(blob);
     const probe = new Image();
@@ -589,9 +646,10 @@
     }
     const w = probe.naturalWidth;
     const h = probe.naturalHeight;
-    if (w > MAX_SIDE || h > MAX_SIDE || w * h > MAX_PIXELS) {
+    const decodedTooBig = pixelLimitError(w, h);
+    if (decodedTooBig) {
       URL.revokeObjectURL(url);
-      throw new Error(`That image is too large in pixels. Please use something no bigger than ${MAX_SIDE}x${MAX_SIDE}.`);
+      throw new Error(decodedTooBig);
     }
     clearIconImage();
     const side = Math.min(w, h);

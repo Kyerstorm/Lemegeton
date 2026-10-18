@@ -45,7 +45,7 @@ summary.
 | `test_admin_extras.py` | Command channel, cooldown, `/lunar position` (including gaps in Discord's position numbers), restoring near the old spot, `/lunar-admin list` and `remove` |
 | `test_picker_web.py` | Web server refactor (picker without the dashboard), picker link tokens, security headers, token-in-URL refusal, eligibility re-checks, rate limits, spoofed `X-Forwarded-For`, `/lunar color-picker` |
 | `test_picker_edit.py` | Picker write APIs (color, name), palette, cooldown on the web, the preview test switch, XSS safety (hostile names come back as plain data; `picker.js` never inserts HTML), theme rules (`picker.css` has no colors or lengths; every theme value has a comment) |
-| `test_picker_icon.py` | Role icon originals (up to 8 MB, stored byte for byte) and crops, the 256/128/64 output, the SSRF-safe link fetcher (URL rules, a 29-address allow-list, mixed DNS answers, pinning, redirects, size and time limits against a local test site), the icon APIs (upload, link, emoji, Edit current crop, remove), rate and concurrency limits, the test switch, the image CSP |
+| `test_picker_icon.py` | Role icon originals (up to 8 MB, stored byte for byte) and crops, the 256/128/64 output, the SSRF-safe link fetcher (URL rules, a 29-address allow-list, mixed DNS answers, pinning, redirects, size and time limits against a local test site), the icon APIs (upload, link, emoji, Edit current crop, remove), rate and concurrency limits, the test switch, the image CSP, the pixel limits (8192 px a side, 16 MP) with messages naming the limit hit, HEIC detection, and the page's checks matching the server's word for word (run through node when it's installed) |
 | `fakes.py` | Fake guilds, roles, members and channels |
 | `make_test_images.py` | Not a test. Generates `test_images/` for testing `/lunar icon` by hand in Discord |
 | `seed_lunar_lab.py` | Not a test. Adds or removes fake saved records in the test server, for testing `/lunar-admin list` pages |
@@ -71,8 +71,15 @@ This is the one script that writes to a real server's rows, so it has its own li
 .venv/Scripts/python.exe -I tests/lunar_roles/make_test_images.py test_images
 ```
 
-This writes twelve files into `test_images/`, which is gitignored. `04_too_big_over_8mb.png`
-(~8.5 MB) is refused; `12_ok_big_photo.jpg` (~4 MB) is a valid large original.
+This writes seventeen files into `test_images/`, which is gitignored. It also deletes files from
+older milestones whose result has changed. Files `01`–`03`, `12`, `13` and `17` are valid; the
+rest are refused, each with its own message.
+- `04_too_big_over_8mb.png` (~8.5 MB) is over the size limit; `12_ok_big_photo.jpg` (~4 MB) is a
+  valid large original.
+- Pixel limits: `10_too_wide_9000px.png`, `15_too_tall_9000px_rotated.jpg` (stored wide, shown
+  tall by its EXIF rotation) and `14_too_many_pixels_48mp.jpg` (8064×6048) are refused;
+  `13_ok_long_8000px.png` and `17_ok_12mp_phone_photo.jpg` (4032×3024) fit.
+- `16_iphone_photo.heic` only has a HEIC header, which is all the bot checks.
 **`11_BOMB_decompression_DO_NOT_OPEN.png.bin` is a decompression bomb: a 48 KB file that decodes
 to 400 million pixels.** Don't open it in an image viewer. It ends in `.bin` so Discord's upload
 dialog doesn't try to preview it; the bot still detects it as a PNG.

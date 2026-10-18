@@ -11,9 +11,11 @@ from PIL import Image, ImageDraw
 
 out = sys.argv[1]
 os.makedirs(out, exist_ok=True)
-# Over 256 KB used to be refused; since Milestone 8 originals up to 8 MB are fine.
-if os.path.exists(os.path.join(out, "04_too_big_over_256kb.png")):
-    os.remove(os.path.join(out, "04_too_big_over_256kb.png"))
+# Files from older milestones that would now be misleading: over 256 KB has been fine since
+# Milestone 8, and 5000 px wide since Milestone 9 (the limit is 8192 px a side).
+for old in ("04_too_big_over_256kb.png", "10_too_wide_5000px.png"):
+    if os.path.exists(os.path.join(out, old)):
+        os.remove(os.path.join(out, old))
 
 
 def path(name):
@@ -48,6 +50,18 @@ photo = Image.blend(gradient(600, 400).resize((3000, 2000)), Image.effect_noise(
 ImageDraw.Draw(photo).ellipse((1200, 700, 1800, 1300), fill=(250, 240, 120))
 photo.save(path("12_ok_big_photo.jpg"), quality=97)
 
+# Milestone 9: up to 8192 px a side is fine, as long as the total stays under 16 million pixels
+long = gradient(800, 40).resize((8000, 400))
+ImageDraw.Draw(long).ellipse((3800, 0, 4200, 400), fill=(250, 240, 120))
+long.save(path("13_ok_long_8000px.png"))
+
+# A typical 12 MP phone photo (4032x3024), saved upright with the camera's EXIF rotation
+phone = Image.blend(gradient(400, 300).resize((4032, 3024)), Image.effect_noise((4032, 3024), 40).convert("RGB"), 0.2)
+ImageDraw.Draw(phone).ellipse((1600, 1100, 2400, 1900), fill=(250, 240, 120))
+upright = Image.Exif()
+upright[0x0112] = 6
+phone.save(path("17_ok_12mp_phone_photo.jpg"), quality=85, exif=upright.tobytes())
+
 # Refused
 noise = Image.frombytes("RGB", (1700, 1700), os.urandom(1700 * 1700 * 3))  # ~8.7 MB, can't compress
 noise.save(path("04_too_big_over_8mb.png"))
@@ -69,7 +83,19 @@ sq.save(good, format="PNG")
 with open(path("09_damaged_cut_off.png"), "wb") as f:
     f.write(good.getvalue()[: len(good.getvalue()) // 2])
 
-Image.new("RGB", (5000, 50), (90, 90, 200)).save(path("10_too_wide_5000px.png"))
+Image.new("RGB", (9000, 50), (90, 90, 200)).save(path("10_too_wide_9000px.png"))
+
+# A 48 MP photo's size (8064x6048): "This image is 8064x6048 px (48.8 million pixels)... Try a 12 MP photo"
+gradient(160, 120).resize((8064, 6048)).save(path("14_too_many_pixels_48mp.jpg"), quality=60)
+
+# Stored 9000x200 but shown upright by its EXIF rotation, so it's refused as "9000 px tall"
+turned = Image.Exif()
+turned[0x0112] = 6
+Image.new("RGB", (9000, 200), (200, 90, 90)).save(path("15_too_tall_9000px_rotated.jpg"), exif=turned.tobytes())
+
+# Not a real photo: just the "ftyp heic" header an iPhone HEIC file starts with, which is all the bot checks
+with open(path("16_iphone_photo.heic"), "wb") as f:
+    f.write(b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic" + os.urandom(4096))
 
 # Decompression bomb: tiny file, 20000 x 20000 = 400 million pixels when decoded.
 # Saved as .png.bin so Discord's upload dialog (and file browsers) won't try to preview it;

@@ -131,7 +131,7 @@ async def main():
         check("gradient without a secondary refused", status == 400 and "Secondary" in body["message"])
         status, body = await call("POST", "/lunar/api/color", tok, {"mode": "gradient", "primary": "#FF0000", "secondary": "#0000FF"})
         check("gradient without Enhanced Role Colors: refused by the service, role unchanged",
-              status == 200 and not body["ok"] and "enhanced role colors" in body["message"].lower()
+              status == 200 and not body["ok"] and "3 server boosts" in body["message"].lower()
               and role.secondary_colour is None and body["state"]["role"]["mode"] == "solid", body)
         status, body = await call("POST", "/lunar/api/color", tok, {"mode": "holographic"})
         check("holographic without the feature refused too", status == 200 and not body["ok"])

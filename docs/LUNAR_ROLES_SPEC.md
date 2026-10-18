@@ -54,8 +54,9 @@ human can test it in Discord.
 7. **Assign / unassign** only toggles whether the member wears their role; the role itself stays.
 8. **Cooldown** between changes is an admin setting, **0 (off) by default**. discord.py already handles Discord rate limits.
 9. **Feature checks before applying:**
-   - Gradient/holographic requires guild feature `ENHANCED_ROLE_COLORS`. Without it, reject with a clear message (don't silently fall back).
+   - Gradient/holographic requires guild feature `ENHANCED_ROLE_COLORS` (Discord's "Enhanced Role Styles": **3 server boosts**, no Boost Level needed). Without it, reject with a clear message (don't silently fall back).
    - Role icons require guild feature `ROLE_ICONS` (Boost Level 2).
+   - Source for both: [Discord's article](https://support.discord.com/hc/en-us/articles/31444213087255). The bot checks the feature flags, not the boost count.
    - Holographic is a fixed Discord preset: primary `11127295`, secondary `16759788`, tertiary `16761760`. Users cannot pick holographic colors.
 10. **Role limit:** Discord allows at most **250 roles per server**. Before creating a role, check `len(guild.roles)`;
     if at the limit, refuse with a friendly message and log it to the log channel.
@@ -123,7 +124,7 @@ Same look and flow as the reference screenshots (dark page, centered column ~600
   The preview updates instantly as the user changes anything, **before** they press Set.
 - **Tabs:** `Color` | `Role Icon` | `Name`.
 - **Color tab:**
-  - Mode switch: `Solid` | `Gradient` | `Holographic` (Gradient/Holographic disabled with a tooltip if the server lacks `ENHANCED_ROLE_COLORS`).
+  - Mode switch: `Solid` | `Gradient` | `Holographic` (Gradient/Holographic disabled with a tooltip if the server lacks `ENHANCED_ROLE_COLORS`, i.e. has fewer than 3 boosts).
   - Solid: swatch + hex input + color picker popover (saturation/hue area + vertical slider) + `Set color`.
   - Gradient: gradient bar preview, Primary and Secondary (swatch + hex + picker popover each) + `Set gradient`.
   - Holographic: preview + `Set holographic`.

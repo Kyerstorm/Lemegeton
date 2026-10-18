@@ -44,8 +44,8 @@ PERMISSION_MESSAGE = (
 )
 API_ERROR_MESSAGE = "Discord didn't accept that change. Please try again in a moment."
 NO_GRADIENT_MESSAGE = (
-    "This server doesn't have Discord's enhanced role colors, so gradient and holographic "
-    "styles aren't available here. Solid colors still work."
+    "Gradient and holographic styles need **3 server boosts** (Discord's Enhanced Role Styles), "
+    "and this server doesn't have them yet. Solid colors still work."
 )
 
 MODE_SOLID = "solid"
