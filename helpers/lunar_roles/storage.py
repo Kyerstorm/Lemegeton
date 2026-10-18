@@ -42,6 +42,7 @@ class CustomRole:
     last_changed_at: Optional[datetime]
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
+    icon_emoji: Optional[str] = None  # a Unicode emoji icon; only one of icon_png / icon_emoji is set
 
 
 _SETTINGS_COLUMNS = (
@@ -71,6 +72,7 @@ _ROLE_COLUMNS = (
     "last_changed_at",
     "created_at",
     "updated_at",
+    "icon_emoji",
 )
 _ROLE_SELECT = ", ".join(_ROLE_COLUMNS)
 _ROLE_UPDATABLE = set(_ROLE_COLUMNS) - {"guild_id", "user_id", "created_at", "updated_at"}

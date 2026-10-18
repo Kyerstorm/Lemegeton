@@ -1,4 +1,7 @@
 """Lunar Roles: custom booster roles (commands). Logic lives in helpers/lunar_roles."""
+import asyncio
+import hashlib
+import io
 import logging
 from typing import Optional
 
@@ -11,7 +14,7 @@ from cogs_test.general_commands.dashboard import command_meta
 from helpers.color_palette import PALETTE
 from helpers.embed_helper import build_error_embed, build_info_embed, build_success_embed, build_warning_embed
 from helpers.lunar_roles import ADMIN_GROUP, COMMAND_GROUP, ROLE_LIMIT
-from helpers.lunar_roles import service, storage, validation
+from helpers.lunar_roles import images, service, storage, validation
 
 logger = service.logger  # file log (logs/lunar_roles.log)
 console_logger = logging.getLogger("lunar_roles_console")  # propagates to the bot's console output
@@ -147,6 +150,114 @@ class ConfirmView(discord.ui.View):
             await self.message.edit(embed=_embed("Timed Out", "No answer within 60 seconds, so nothing was changed.", PALETTE.NEUTRAL), view=None)
         except discord.HTTPException:
             pass
+
+
+PALETTE_TIMEOUT = 300  # seconds the palette menus stay usable
+CLEAR_SECONDARY = "clear"
+
+
+class PaletteView(discord.ui.View):
+    """Two select menus from /lunar palette. Only the member who ran it can use them."""
+
+    def __init__(self, owner: discord.Member, colors: list, gradient_ok: bool):
+        super().__init__(timeout=PALETTE_TIMEOUT)
+        self.owner_id = owner.id
+        self.colors = colors
+        self.primary: Optional[int] = None
+        self.secondary: Optional[int] = None
+        self.message: Optional[discord.WebhookMessage] = None
+        self.last_result: Optional[service.Result] = None
+
+        self.primary_select = discord.ui.Select(
+            placeholder="Primary color",
+            options=[discord.SelectOption(label=f"#{c:06X}", value=f"{c:06X}") for c in colors[:25]],
+        )
+        self.primary_select.callback = self._on_primary
+        self.add_item(self.primary_select)
+
+        secondary_options = [discord.SelectOption(label="Clear secondary", value=CLEAR_SECONDARY,
+                                                  description="Back to a solid color")]
+        secondary_options += [discord.SelectOption(label=f"#{c:06X}", value=f"{c:06X}") for c in colors[:24]]
+        self.secondary_select = discord.ui.Select(
+            placeholder="Secondary color — makes a gradient" if gradient_ok
+            else "Gradients need Discord's Enhanced Role Colors",
+            options=secondary_options,
+            disabled=not gradient_ok,
+        )
+        self.secondary_select.callback = self._on_secondary
+        self.add_item(self.secondary_select)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                f"This palette belongs to someone else. Run `/{COMMAND_GROUP} palette` to get your own.", ephemeral=True
+            )
+            return False
+        return True
+
+    async def _on_primary(self, interaction: discord.Interaction):
+        self.primary = int(self.primary_select.values[0], 16)
+        await self._apply(interaction)
+
+    async def _on_secondary(self, interaction: discord.Interaction):
+        value = self.secondary_select.values[0]
+        self.secondary = None if value == CLEAR_SECONDARY else int(value, 16)
+        await self._apply(interaction)
+
+    async def _apply(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        member = interaction.user
+        primary = self.primary
+        if primary is None:  # secondary picked first: build on the role's current colour
+            record = await storage.get_custom_role(member.guild.id, member.id)
+            primary = record.primary_color if record and record.color_mode != service.MODE_HOLOGRAPHIC else None
+        if primary is None:
+            self.last_result = service.Result(False, "Pick a **primary** color first.")
+        elif self.secondary is not None:
+            self.last_result = await service.set_colors(member, service.MODE_GRADIENT, primary, self.secondary)
+        else:
+            self.last_result = await service.set_colors(member, service.MODE_SOLID, primary)
+        self._show_selection()
+        await interaction.edit_original_response(embed=self.build_embed(), view=self)
+
+    def _show_selection(self):
+        """Keep the picked colours shown in the menus (Discord resets them to the placeholder otherwise)."""
+        primary = f"{self.primary:06X}" if self.primary is not None else None
+        secondary = f"{self.secondary:06X}" if self.secondary is not None else None
+        for option in self.primary_select.options:
+            option.default = option.value == primary
+        for option in self.secondary_select.options:
+            option.default = option.value == secondary
+
+    def build_embed(self, expired: bool = False) -> discord.Embed:
+        lines = [
+            "Pick a **primary** color for a solid color. Add a **secondary** color to make a gradient.",
+            "",
+            f"**Primary:** {validation.code(validation.format_hex(self.primary)) if self.primary is not None else 'not picked'}",
+            f"**Secondary:** {validation.code(validation.format_hex(self.secondary)) if self.secondary is not None else 'none'}",
+        ]
+        if expired:
+            lines += ["", f"⏱️ This palette expired. Run `/{COMMAND_GROUP} palette` again."]
+        colour = PALETTE.PRIMARY
+        if self.last_result is not None:
+            lines += ["", ("✅ " if self.last_result.ok else "❌ ") + self.last_result.message]
+            if self.last_result.ok and self.primary is not None:
+                colour = discord.Colour(self.primary)
+        embed = discord.Embed(title="Colors from your avatar", description="\n".join(lines), colour=colour)
+        embed.set_image(url="attachment://palette.png")
+        if self.last_result is not None and self.last_result.notes:
+            embed.add_field(name="⚠️ Heads up", value="\n\n".join(self.last_result.notes)[:1024], inline=False)
+        embed.set_footer(text=f"Only you can use these menus. They expire after {PALETTE_TIMEOUT // 60} minutes.")
+        return embed
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(embed=self.build_embed(expired=True), view=self)
+            except discord.HTTPException:
+                pass
 
 
 class LunarRoles(commands.Cog):
@@ -484,14 +595,92 @@ class LunarRoles(commands.Cog):
         embed.add_field(name="Name", value=discord.utils.escape_markdown(record.name or "Unnamed"), inline=True)
         embed.add_field(name="Style", value=MODE_LABELS.get(mode, mode), inline=True)
         embed.add_field(name="Colors", value=colors, inline=True)
-        has_icon = bool(role and role.display_icon) or bool(record.icon_png)
-        embed.add_field(name="Icon", value="Yes" if has_icon else "None", inline=True)
+        if record.icon_emoji or (role and isinstance(role.display_icon, str)):
+            icon_text = record.icon_emoji or role.display_icon
+        elif record.icon_png or (role and role.display_icon):
+            icon_text = "Image"
+        else:
+            icon_text = "None"
+        embed.add_field(name="Icon", value=icon_text, inline=True)
         embed.add_field(name="Status", value=status, inline=True)
         if record.created_at:
             embed.add_field(name="Created", value=record.created_at.strftime("%d %b %Y"), inline=True)
         if role and isinstance(role.display_icon, discord.Asset):
             embed.set_thumbnail(url=role.display_icon.url)
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @lunar.command(name="palette", description="Pick your role color from the colors in your avatar")
+    @command_meta(section="Customization", name="Lunar Palette")
+    async def lunar_palette(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        member = interaction.user
+        error = await service.precheck(member)
+        if error:
+            await interaction.followup.send(embed=build_error_embed("Can't Show Your Palette", error.message), ephemeral=True)
+            return
+        result = await service.get_palette(member)
+        if not result.ok:
+            await interaction.followup.send(embed=build_error_embed("Can't Show Your Palette", result.message), ephemeral=True)
+            return
+        colors = result.data
+        swatches = await asyncio.to_thread(images.render_swatches, colors)
+        view = PaletteView(member, colors, gradient_ok=service.feature_status(member.guild).gradient)
+        view.message = await interaction.followup.send(
+            embed=view.build_embed(), file=discord.File(io.BytesIO(swatches), filename="palette.png"),
+            view=view, ephemeral=True, wait=True,
+        )
+
+    @lunar.command(name="icon", description="Set your role icon from an image or an emoji (empty = remove it)")
+    @command_meta(section="Customization", name="Lunar Icon")
+    @app_commands.describe(
+        image="PNG or JPEG, up to 256 KB. It's cropped to the center square.",
+        emoji="A standard emoji like 🌙 (pick it from the emoji picker)",
+    )
+    async def lunar_icon(self, interaction: discord.Interaction,
+                         image: Optional[discord.Attachment] = None, emoji: Optional[str] = None):
+        await interaction.response.defer(ephemeral=True)
+        member = interaction.user
+        if image is not None and emoji:
+            await interaction.followup.send(
+                embed=build_error_embed("Pick One", "Send either an image **or** an emoji, not both."), ephemeral=True
+            )
+            return
+        if image is None and not emoji:
+            result = await service.remove_icon(member)
+            await _reply(interaction, result, "Icon Removed", "Couldn't Remove Your Icon")
+            return
+        if image is not None:
+            error = await service.precheck(member)
+            if error:
+                await interaction.followup.send(embed=build_error_embed("Couldn't Set Your Icon", error.message), ephemeral=True)
+                return
+            logger.info(
+                "Icon upload from %s: filename=%r content_type=%r size=%s %sx%s flags=%s url=%s",
+                member.id, image.filename, image.content_type, image.size, image.width, image.height,
+                image.flags.value, image.url.split("?")[0],
+            )
+            try:
+                images.check_declared_size(image.size)  # before downloading anything
+                images.check_attachment_metadata(image.content_type, image.flags.animated)
+                data = await image.read(use_cached=False)  # the original file, not the media proxy
+            except images.ImageError as exc:
+                await interaction.followup.send(embed=build_error_embed("Couldn't Set Your Icon", exc.message), ephemeral=True)
+                return
+            except discord.HTTPException:
+                await interaction.followup.send(
+                    embed=build_error_embed("Couldn't Set Your Icon", "I couldn't download that image. Please try again."),
+                    ephemeral=True,
+                )
+                return
+            logger.info("Icon upload from %s: downloaded %s bytes, first bytes %s, sha256 %s",
+                        member.id, len(data), data[:16].hex(" "), hashlib.sha256(data).hexdigest()[:16])
+            if len(data) != image.size:
+                logger.warning("Icon upload from %s: downloaded %s bytes but Discord reported %s - the file was changed",
+                               member.id, len(data), image.size)
+            result = await service.set_icon(member, image=data)
+        else:
+            result = await service.set_icon(member, emoji=emoji)
+        await _reply(interaction, result, "Icon Set", "Couldn't Set Your Icon")
 
     # ============================================================================
     # ADMIN COMMANDS

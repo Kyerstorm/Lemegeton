@@ -2089,6 +2089,11 @@ async def init_lunar_roles_tables():
         )
         """,
     )
+    # Added in Milestone 4: a standard Unicode emoji used as the role icon (instead of icon_png).
+    await execute_db_operation(
+        "add lunar icon_emoji column",
+        "ALTER TABLE lunar_custom_roles ADD COLUMN IF NOT EXISTS icon_emoji TEXT",
+    )
     # A Discord role can belong to at most one tracked record.
     await execute_db_operation(
         "create lunar custom roles role_id index",

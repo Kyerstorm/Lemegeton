@@ -25,7 +25,7 @@ from helpers.lunar_roles import (
     HOLOGRAPHIC_COLORS,
     ROLE_LIMIT,
 )
-from helpers.lunar_roles import storage, validation
+from helpers.lunar_roles import images, storage, validation
 from helpers.lunar_roles.storage import CustomRole, GuildSettings
 
 logger = get_logger("LunarRoles", logfile="lunar_roles.log")
@@ -189,6 +189,26 @@ def hidden_colour_notice(
     )
 
 
+def hidden_icon_notice(
+    member: discord.Member, role: discord.Role, positions: Optional[Dict[int, int]] = None
+) -> Optional[str]:
+    """Discord shows the icon of a member's highest role that has one; warn if that isn't their custom role."""
+    positions = positions or {}
+    pos = lambda r: positions.get(r.id, r.position)  # noqa: E731
+    mine = pos(role)
+    higher = [
+        r for r in member.roles
+        if r.id != role.id and not r.is_default() and pos(r) > mine and r.display_icon
+    ]
+    if not higher:
+        return None
+    top = max(higher, key=lambda r: r.position)
+    return (
+        f"Your **{top.name}** role is higher and has its own icon, so Discord shows that icon "
+        "instead of yours. Ask an admin if they can move Lunar roles higher."
+    )
+
+
 def setup_problems(guild: discord.Guild, settings: GuildSettings) -> List[str]:
     """Admin-facing list of things that would stop the feature from working."""
     problems = []
@@ -339,6 +359,16 @@ async def _check_member(member: discord.Member) -> Tuple[Optional[GuildSettings]
     return settings, None
 
 
+async def precheck(member: discord.Member, need_role: bool = True) -> Optional[Result]:
+    """The usual gates (set up, eligible, has a role) for commands that do their own work first."""
+    _, error = await _check_member(member)
+    if error:
+        return error
+    if need_role and await storage.get_custom_role(member.guild.id, member.id) is None:
+        return Result(False, NO_ROLE_MESSAGE)
+    return None
+
+
 async def _clean_name(
     guild: discord.Guild, raw: str, settings: GuildSettings, own_role_id: Optional[int],
     tracked: Optional[set] = None,
@@ -441,8 +471,8 @@ async def _create_discord_role(
 
     style, notice, _ = _style_kwargs(guild, record.color_mode, record.primary_color, record.secondary_color, strict=False)
     notes = [notice] if notice else []
-    if record.icon_png and FEATURE_ICONS in guild.features:
-        style["display_icon"] = record.icon_png
+    if FEATURE_ICONS in guild.features and (record.icon_png or record.icon_emoji):
+        style["display_icon"] = record.icon_png or record.icon_emoji  # bytes = image, str = Unicode emoji
 
     role, error = await _discord(
         guild,
@@ -455,7 +485,7 @@ async def _create_discord_role(
         ),
     )
     if error:
-        return None, None, error
+        return None, [], error
 
     # Save first so the role is never left untracked.
     await storage.upsert_custom_role(replace(record, role_id=role.id, status=storage.STATUS_ACTIVE))
@@ -473,6 +503,10 @@ async def _create_discord_role(
     # The cached positions may lag; use the ones we just set.
     if positions is not None and has_colour(role):
         hidden = hidden_colour_notice(member, role, positions)
+        if hidden:
+            notes.append(hidden)
+    if positions is not None and "display_icon" in style:
+        hidden = hidden_icon_notice(member, role, positions)
         if hidden:
             notes.append(hidden)
     logger.info("Created role %s for %s in guild %s", role.id, member.id, guild.id)
@@ -659,6 +693,126 @@ async def unassign(member: discord.Member) -> Result:
     return Result(
         True, f"Took **{role.name}** off you. It's still yours - use `/{COMMAND_GROUP} assign` to wear it again.", role
     )
+
+
+NO_ICONS_MESSAGE = (
+    "Role icons need **Boost Level 2** (Discord's Role Icons perk), and this server doesn't have it yet."
+)
+
+
+async def set_icon(member: discord.Member, image: Optional[bytes] = None, emoji: Optional[str] = None) -> Result:
+    """Set the role icon from an uploaded PNG/JPEG or a standard emoji (exactly one of them).
+
+    The image/emoji is checked before the server's Role Icons perk, so members learn
+    whether it's usable even where icons aren't available.
+    """
+    if (image is None) == (emoji is None):
+        return Result(False, "Send either an image or an emoji, not both.")
+    settings, error = await _check_member(member)
+    if error:
+        return error
+    guild = member.guild
+    if await storage.get_custom_role(guild.id, member.id) is None:
+        return Result(False, NO_ROLE_MESSAGE)
+
+    try:
+        if image is not None:
+            value: Any = await asyncio.to_thread(images.prepare_icon, image)
+            changes = {"icon_png": value, "icon_emoji": None}
+        else:
+            value = images.check_emoji(emoji)
+            changes = {"icon_png": None, "icon_emoji": value}
+    except images.ImageError as exc:
+        return Result(False, exc.message)
+    if FEATURE_ICONS not in guild.features:
+        what = "image" if image is not None else "emoji"
+        return Result(False, f"Your {what} is fine, but {NO_ICONS_MESSAGE[0].lower()}{NO_ICONS_MESSAGE[1:]}")
+
+    async with user_lock(guild.id, member.id):
+        record = await storage.get_custom_role(guild.id, member.id)
+        if record is None:
+            return Result(False, NO_ROLE_MESSAGE)
+        role, created, notes, error = await _ensure_live_role(member, record, settings, **changes)
+        if error:
+            return error
+        if not created:
+            _, error = await _discord(guild, f"setting the icon of role {role.id}",
+                                      role.edit(display_icon=value, reason=f"Lunar Roles: icon set by {member}"))
+            if error:
+                if emoji is not None and error.message == API_ERROR_MESSAGE:
+                    return Result(False, "Discord didn't accept that emoji as a role icon. Try a different one.")
+                return error
+            hidden = hidden_icon_notice(member, role)
+            if hidden:
+                notes.append(hidden)
+        await storage.update_custom_role(guild.id, member.id, changed=True, **changes)
+    logger.info("Set %s icon on role %s for %s in guild %s", "emoji" if emoji else "image", role.id, member.id, guild.id)
+    shown = value if emoji is not None else "an image"
+    await log_event(guild, f"{member.mention} set the icon of {role.mention} to {shown}.")
+    if emoji is not None:
+        return Result(True, f"Your role icon is now {value}.", role, notes)
+    return Result(True, "Your role icon is set. Images are cropped to the center square and resized to 64x64.", role, notes)
+
+
+async def remove_icon(member: discord.Member) -> Result:
+    settings, error = await _check_member(member)
+    if error:
+        return error
+    guild = member.guild
+    async with user_lock(guild.id, member.id):
+        record = await storage.get_custom_role(guild.id, member.id)
+        if record is None:
+            return Result(False, NO_ROLE_MESSAGE)
+        role = guild.get_role(record.role_id) if record.role_id else None
+        has_icon = bool(record.icon_png or record.icon_emoji or (role is not None and role.display_icon))
+        if not has_icon:
+            if FEATURE_ICONS not in guild.features:
+                return Result(False, NO_ICONS_MESSAGE)
+            return Result(False, "Your role doesn't have an icon to remove.")
+        if role is not None and role.display_icon:
+            _, error = await _discord(guild, f"removing the icon of role {role.id}",
+                                      role.edit(display_icon=None, reason=f"Lunar Roles: icon removed by {member}"))
+            if error:
+                return error
+        await storage.update_custom_role(guild.id, member.id, changed=True, icon_png=None, icon_emoji=None)
+    logger.info("Removed icon for %s in guild %s", member.id, guild.id)
+    await log_event(guild, f"{member.mention} removed their role icon.")
+    return Result(True, "Your role icon was removed.", role)
+
+
+# ------------------------------------------------------
+# Avatar palette (shared by /lunar palette and, later, the web picker)
+# ------------------------------------------------------
+
+def palette_avatar(member: discord.Member) -> discord.Asset:
+    """Server avatar if set, else main avatar, else Discord's default; animated ones as a still PNG."""
+    asset = member.guild_avatar or member.avatar or member.default_avatar
+    try:
+        return asset.replace(size=128, format="png")
+    except ValueError:
+        return asset  # default avatars can't be resized or reformatted
+
+
+async def get_palette(member: discord.Member) -> Result:
+    """Result.data = list of 0xRRGGBB colours from the member's avatar (most prominent first)."""
+    asset = palette_avatar(member)
+    key = asset.url
+    colors = images.cached_palette(key)
+    if colors is None:
+        try:
+            data = await asset.read()
+        except (discord.HTTPException, discord.DiscordException, ValueError):
+            logger.exception("Couldn't download avatar for palette (%s)", member.id)
+            return Result(False, "I couldn't download your avatar right now. Please try again in a moment.")
+        try:
+            colors = await asyncio.to_thread(images.extract_palette, data)
+        except Exception:
+            logger.exception("Palette extraction failed for %s", member.id)
+            return Result(False, "I couldn't read colors from your avatar.")
+        images.remember_palette(key, colors)
+    if not colors:
+        return Result(False, "I couldn't find any colors in your avatar.")
+    return Result(True, "ok", colors)
 
 
 async def get_info(viewer: discord.Member, target: discord.Member) -> Result:
@@ -998,11 +1152,15 @@ async def archive(
                 return Result(False, "their role is above my highest role")
             fields["position_hint"] = role.position
             fields["name"] = name = role.name
-            if record.icon_png is None and isinstance(role.display_icon, discord.Asset):
-                try:
-                    fields["icon_png"] = await role.display_icon.read()
-                except discord.HTTPException:
-                    logger.warning("Couldn't download icon of role %s before archiving", role.id)
+            if record.icon_png is None and record.icon_emoji is None:
+                # Keep an icon set outside the bot so restore can re-apply it.
+                if isinstance(role.display_icon, discord.Asset):
+                    try:
+                        fields["icon_png"] = await role.display_icon.read()
+                    except discord.HTTPException:
+                        logger.warning("Couldn't download icon of role %s before archiving", role.id)
+                elif isinstance(role.display_icon, str):
+                    fields["icon_emoji"] = role.display_icon
             _, error = await _discord(guild, f"removing role {role.id} of <@{user_id}>", role.delete(reason=f"Lunar Roles: {reason}"))
             if error:
                 return Result(False, "Discord refused to delete it")

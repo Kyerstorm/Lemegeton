@@ -1,0 +1,260 @@
+"""Image work for Lunar Roles: role icons, the emoji check and the avatar palette.
+
+Everything here is synchronous and CPU-bound; callers run it with asyncio.to_thread.
+"""
+from __future__ import annotations
+
+import io
+import unicodedata
+import warnings
+from collections import OrderedDict
+from typing import List, Optional
+
+from PIL import Image, ImageDraw, ImageFont, ImageOps
+
+MAX_ICON_BYTES = 256 * 1024     # input limit, and Discord's role-icon limit
+MAX_ICON_SIDE = 4096            # refuse anything wider/taller before decoding pixels
+MAX_ICON_PIXELS = 16_000_000    # ...or with more pixels than this (decompression bombs)
+ICON_SIZE = 64                  # Discord's documented role-icon size
+
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+JPEG_SIGNATURE = b"\xff\xd8\xff"
+
+
+class ImageError(Exception):
+    """A user-facing reason an image or emoji can't be used."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+
+# ------------------------------------------------------
+# Role icons
+# ------------------------------------------------------
+
+def check_declared_size(size: int) -> None:
+    """Refuse before downloading, using the size Discord reports for the attachment."""
+    if size > MAX_ICON_BYTES:
+        raise ImageError(f"That image is {size // 1024} KB. Role icons can be at most {MAX_ICON_BYTES // 1024} KB.")
+
+
+_ALLOWED_CONTENT_TYPES = {"image/png", "image/jpeg", "image/jpg"}
+
+
+def check_attachment_metadata(content_type: Optional[str], animated: bool) -> None:
+    """Extra refusals from what Discord reports about an upload (never a reason to accept).
+
+    Discord may re-process uploads (an animated PNG can arrive as a still frame, a GIF
+    named .png as a real PNG), so its flags and detected type are checked as well as
+    the downloaded content.
+    """
+    if animated:
+        raise ImageError("Animated images can't be role icons. Use a still PNG or JPEG.")
+    kind = (content_type or "").split(";")[0].strip().lower()
+    if kind.startswith("image/") and kind not in _ALLOWED_CONTENT_TYPES:
+        raise ImageError("Only PNG or JPEG images work as role icons (checked by the file's content, not its name).")
+
+
+def sniff_type(data: bytes) -> Optional[str]:
+    """Image type from the file's first bytes (never from its name)."""
+    if data.startswith(PNG_SIGNATURE):
+        return "PNG"
+    if data.startswith(JPEG_SIGNATURE):
+        return "JPEG"
+    return None
+
+
+def prepare_icon(data: bytes) -> bytes:
+    """Validate an uploaded PNG/JPEG and return a 64x64 PNG (center-cropped square)."""
+    if len(data) > MAX_ICON_BYTES:
+        raise ImageError(f"That image is {len(data) // 1024} KB. Role icons can be at most {MAX_ICON_BYTES // 1024} KB.")
+    kind = sniff_type(data)
+    if kind is None:
+        raise ImageError("Only PNG or JPEG images work as role icons (checked by the file's content, not its name).")
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", Image.DecompressionBombWarning)
+        try:
+            image = Image.open(io.BytesIO(data))  # reads the header only
+        except (Image.DecompressionBombError, Image.DecompressionBombWarning):
+            raise ImageError(_too_many_pixels())
+        except (OSError, ValueError, SyntaxError):
+            raise ImageError("I couldn't read that image. It may be damaged.")
+
+        # Phone cameras often save "MPO" (a JPEG with extra frames); its first frame is a normal JPEG.
+        detected = "JPEG" if image.format == "MPO" else image.format
+        if detected != kind:
+            raise ImageError("That file's content doesn't match a normal PNG or JPEG image.")
+        width, height = image.size
+        if width > MAX_ICON_SIDE or height > MAX_ICON_SIDE or width * height > MAX_ICON_PIXELS:
+            raise ImageError(_too_many_pixels())
+        if kind == "PNG" and (getattr(image, "is_animated", False) or getattr(image, "n_frames", 1) > 1):
+            raise ImageError("Animated images can't be role icons. Use a still PNG or JPEG.")
+
+        if kind == "JPEG":
+            image.draft("RGB", (ICON_SIZE * 4, ICON_SIZE * 4))  # decode JPEGs at a reduced size
+        try:
+            image.load()
+        except (Image.DecompressionBombError, Image.DecompressionBombWarning):
+            raise ImageError(_too_many_pixels())
+        except (OSError, ValueError, SyntaxError):
+            raise ImageError("I couldn't read that image. It may be damaged or cut off.")
+
+    image = ImageOps.exif_transpose(image).convert("RGBA")
+    side = min(image.size)
+    left = (image.width - side) // 2
+    top = (image.height - side) // 2
+    image = image.crop((left, top, left + side, top + side)).resize((ICON_SIZE, ICON_SIZE), Image.Resampling.LANCZOS)
+
+    out = io.BytesIO()
+    image.save(out, format="PNG", optimize=True)
+    result = out.getvalue()
+    if len(result) > MAX_ICON_BYTES:  # can't really happen at 64x64, but never send more than Discord allows
+        raise ImageError("That image is still too large after resizing.")
+    return result
+
+
+def _too_many_pixels() -> str:
+    return (f"That image is too large in pixels. Role icons are shown at {ICON_SIZE}x{ICON_SIZE}, "
+            f"so please use something no bigger than {MAX_ICON_SIDE}x{MAX_ICON_SIDE}.")
+
+
+# ------------------------------------------------------
+# Emoji icons
+# ------------------------------------------------------
+
+_EMOJI_JOINERS = {"‍", "️", "︎", "⃣"}
+
+
+def _is_emoji_char(ch: str) -> bool:
+    cp = ord(ch)
+    if ch in _EMOJI_JOINERS:
+        return True
+    if 0x1F3FB <= cp <= 0x1F3FF or 0x1F1E6 <= cp <= 0x1F1FF or 0xE0020 <= cp <= 0xE007F:
+        return True  # skin tones, flags, tag sequences
+    return unicodedata.category(ch) == "So" or 0x1F000 <= cp <= 0x1FAFF or 0x2600 <= cp <= 0x27BF
+
+
+def check_emoji(raw: str) -> str:
+    """Accept exactly one standard Unicode emoji (custom server emojis aren't allowed by Discord)."""
+    text = (raw or "").strip()
+    if not text:
+        raise ImageError("Send an emoji, for example 🌙.")
+    if text.startswith("<") and text.endswith(">"):
+        raise ImageError("Custom server emojis can't be role icons. Use a standard emoji like 🌙.")
+    if text.startswith(":") and text.endswith(":") and len(text) > 2:
+        raise ImageError("Pick the emoji from Discord's emoji picker so the emoji itself is sent, not its `:name:`.")
+    is_keycap = len(text) in (2, 3) and text[0] in "0123456789#*" and text.endswith("⃣")
+    if len(text) > 16 or not (is_keycap or all(_is_emoji_char(ch) for ch in text)):
+        raise ImageError("That isn't a single standard emoji. Send just one emoji, like 🌙.")
+    if not is_keycap and _emoji_units(text) != 1:
+        raise ImageError("Send just one emoji, like 🌙.")
+    return text
+
+
+def _emoji_units(text: str) -> int:
+    """How many emojis a string shows (ZWJ sequences, flags and skin tones count as one)."""
+    units, after_zwj, flag_halves = 0, False, 0
+    for ch in text:
+        cp = ord(ch)
+        if ch in ("️", "︎", "⃣") or 0x1F3FB <= cp <= 0x1F3FF or 0xE0020 <= cp <= 0xE007F:
+            continue  # variation selectors, keycap, skin tones, tag characters modify the previous emoji
+        if ch == "‍":
+            after_zwj = True
+            continue
+        if 0x1F1E6 <= cp <= 0x1F1FF:  # regional indicators pair up into one flag
+            flag_halves += 1
+            if flag_halves % 2 == 1:
+                units += 1
+            continue
+        if after_zwj:
+            after_zwj = False
+            continue
+        units += 1
+    return units
+
+
+# ------------------------------------------------------
+# Avatar palette
+# ------------------------------------------------------
+
+PALETTE_MAX = 25
+_MIN_DISTANCE = 30  # colours closer than this (RGB distance) count as duplicates
+_palette_cache: "OrderedDict[str, List[int]]" = OrderedDict()
+_PALETTE_CACHE_SIZE = 256
+
+
+def cached_palette(key: str) -> Optional[List[int]]:
+    colors = _palette_cache.get(key)
+    if colors is not None:
+        _palette_cache.move_to_end(key)
+    return colors
+
+
+def remember_palette(key: str, colors: List[int]) -> None:
+    _palette_cache[key] = colors
+    _palette_cache.move_to_end(key)
+    while len(_palette_cache) > _PALETTE_CACHE_SIZE:
+        _palette_cache.popitem(last=False)
+
+
+def extract_palette(data: bytes, max_colors: int = PALETTE_MAX) -> List[int]:
+    """Distinct colours of an avatar (most prominent first) as 0xRRGGBB ints."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", Image.DecompressionBombWarning)
+        image = Image.open(io.BytesIO(data))
+        image.draft("RGB", (128, 128))
+        image = image.convert("RGBA")
+    image.thumbnail((96, 96))
+    opaque = [px[:3] for px in image.getdata() if px[3] >= 128]
+    if not opaque:
+        return []
+    strip = Image.new("RGB", (len(opaque), 1))
+    strip.putdata(opaque)
+    quantized = strip.quantize(colors=32, method=Image.Quantize.MEDIANCUT)
+    raw_palette = quantized.getpalette() or []
+    counts = sorted(quantized.getcolors() or [], reverse=True)  # (count, index), most common first
+
+    kept: List[tuple] = []
+    for _, index in counts:
+        rgb = tuple(raw_palette[index * 3:index * 3 + 3])
+        if len(rgb) < 3:
+            continue
+        if all(_distance(rgb, other) >= _MIN_DISTANCE for other in kept):
+            kept.append(rgb)
+        if len(kept) >= max_colors:
+            break
+    return [(r << 16) | (g << 8) | b for r, g, b in kept]
+
+
+def _distance(a: tuple, b: tuple) -> float:
+    # "redmean" weighting: closer to how people see colour differences than plain RGB distance
+    rmean = (a[0] + b[0]) / 2
+    dr, dg, db = a[0] - b[0], a[1] - b[1], a[2] - b[2]
+    return ((2 + rmean / 256) * dr * dr + 4 * dg * dg + (2 + (255 - rmean) / 256) * db * db) ** 0.5
+
+
+def render_swatches(colors: List[int], columns: int = 5) -> bytes:
+    """A small PNG grid of the palette, each swatch labelled with its hex code."""
+    cell_w, cell_h, gap = 132, 56, 6
+    rows = max(1, -(-len(colors) // columns))
+    width = columns * cell_w + (columns + 1) * gap
+    height = rows * cell_h + (rows + 1) * gap
+    canvas = Image.new("RGB", (width, height), (30, 31, 34))
+    draw = ImageDraw.Draw(canvas)
+    try:
+        font = ImageFont.load_default(size=18)
+    except TypeError:  # very old Pillow
+        font = ImageFont.load_default()
+    for i, value in enumerate(colors):
+        r, g, b = (value >> 16) & 255, (value >> 8) & 255, value & 255
+        x = gap + (i % columns) * (cell_w + gap)
+        y = gap + (i // columns) * (cell_h + gap)
+        draw.rounded_rectangle((x, y, x + cell_w, y + cell_h), radius=8, fill=(r, g, b))
+        light = (0.299 * r + 0.587 * g + 0.114 * b) > 150
+        draw.text((x + cell_w / 2, y + cell_h / 2), f"#{value:06X}", fill=(20, 20, 20) if light else (245, 245, 245),
+                  font=font, anchor="mm")
+    out = io.BytesIO()
+    canvas.save(out, format="PNG", optimize=True)
+    return out.getvalue()
