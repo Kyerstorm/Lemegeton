@@ -180,7 +180,8 @@ async def get_custom_role_by_role_id(guild_id: int, role_id: int) -> Optional[Cu
 async def upsert_custom_role(record: CustomRole) -> None:
     """Insert or fully replace a member's record (keeps created_at on update).
 
-    Counts as a change, so last_changed_at is set to now.
+    Creating or restoring a role isn't a "change" for the cooldown, so
+    last_changed_at is left as it was (NULL for a new record).
     """
     columns = [c for c in _ROLE_COLUMNS if c not in {"created_at", "updated_at", "last_changed_at"}]
     values = [getattr(record, c) for c in columns]
@@ -190,13 +191,39 @@ async def upsert_custom_role(record: CustomRole) -> None:
     await execute_db_operation(
         "upsert lunar custom role",
         f"""
-        INSERT INTO lunar_custom_roles ({', '.join(columns)}, last_changed_at, created_at, updated_at)
-        VALUES ({', '.join('?' for _ in columns)}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        INSERT INTO lunar_custom_roles ({', '.join(columns)}, created_at, updated_at)
+        VALUES ({', '.join('?' for _ in columns)}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         ON CONFLICT (guild_id, user_id) DO UPDATE SET {assignments},
-            last_changed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            updated_at = CURRENT_TIMESTAMP
         """,
         tuple(values),
     )
+
+
+async def delete_custom_role(guild_id: int, user_id: int) -> None:
+    await execute_db_operation(
+        "delete lunar custom role",
+        "DELETE FROM lunar_custom_roles WHERE guild_id = ? AND user_id = ?",
+        (guild_id, user_id),
+    )
+
+
+async def seconds_since_change(guild_id: int, user_id: int) -> Optional[float]:
+    """Seconds since the member last changed their role, or None if never.
+
+    Worked out in the database: last_changed_at is a TIMESTAMP in the database's
+    own time zone, which may not match the bot's.
+    """
+    row = await execute_db_operation(
+        "lunar seconds since last change",
+        "SELECT EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - last_changed_at)) "
+        "FROM lunar_custom_roles WHERE guild_id = ? AND user_id = ?",
+        (guild_id, user_id),
+        fetch_type="one",
+    )
+    if not row or row[0] is None:
+        return None
+    return float(row[0])
 
 
 async def list_active_roles(guild_id: int) -> List[CustomRole]:
@@ -301,6 +328,7 @@ async def list_guilds_with_records() -> List[int]:
 PENDING = "pending"
 PENDING_CONFIRMED = "confirmed"
 PENDING_CANCELLED = "cancelled"
+PENDING_WITHDRAWN = "withdrawn"  # everyone in it was removed by /lunar-admin remove first
 
 
 @dataclass

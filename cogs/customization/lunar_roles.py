@@ -167,6 +167,7 @@ class PaletteView(discord.ui.View):
         self.secondary: Optional[int] = None
         self.message: Optional[discord.WebhookMessage] = None
         self.last_result: Optional[service.Result] = None
+        self.cooldown_passed = False  # only the first successful pick in this menu checks the cooldown
 
         self.primary_select = discord.ui.Select(
             placeholder="Primary color",
@@ -214,9 +215,13 @@ class PaletteView(discord.ui.View):
         if primary is None:
             self.last_result = service.Result(False, "Pick a **primary** color first.")
         elif self.secondary is not None:
-            self.last_result = await service.set_colors(member, service.MODE_GRADIENT, primary, self.secondary)
+            self.last_result = await service.set_colors(member, service.MODE_GRADIENT, primary, self.secondary,
+                                                        check_cooldown=not self.cooldown_passed)
         else:
-            self.last_result = await service.set_colors(member, service.MODE_SOLID, primary)
+            self.last_result = await service.set_colors(member, service.MODE_SOLID, primary,
+                                                        check_cooldown=not self.cooldown_passed)
+        if self.last_result.ok:
+            self.cooldown_passed = True
         self._show_selection()
         await interaction.edit_original_response(embed=self.build_embed(), view=self)
 
@@ -249,6 +254,87 @@ class PaletteView(discord.ui.View):
             embed.add_field(name="⚠️ Heads up", value="\n\n".join(self.last_result.notes)[:1024], inline=False)
         embed.set_footer(text=f"Only you can use these menus. They expire after {PALETTE_TIMEOUT // 60} minutes.")
         return embed
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(embed=self.build_embed(expired=True), view=self)
+            except discord.HTTPException:
+                pass
+
+
+LIST_PAGE_SIZE = 10
+LIST_TIMEOUT = 300  # seconds the list buttons stay usable
+
+STATUS_LABELS = {
+    storage.STATUS_ACTIVE: "Active",
+    storage.STATUS_SAVED: "Saved",
+    storage.STATUS_MISSING: "Missing",
+}
+
+
+def _list_line(entry: service.ListEntry) -> str:
+    record = entry.record
+    if entry.role is not None:
+        role_text = entry.role.mention
+    else:
+        role_text = f"**{discord.utils.escape_markdown(record.name or 'Unnamed')}**"
+    line = f"<@{record.user_id}> · {role_text} · {STATUS_LABELS.get(record.status, record.status)}"
+    if entry.pending:
+        line += " · ⏳ waiting for removal approval"
+    if entry.snoozed:
+        line += " · 💤 kept (asked again later)"
+    return line
+
+
+class ListView(discord.ui.View):
+    """Previous/Next pages for /lunar-admin list. Only the admin who ran it can use them."""
+
+    def __init__(self, invoker_id: int, entries: list, title: str):
+        super().__init__(timeout=LIST_TIMEOUT)
+        self.invoker_id = invoker_id
+        self.entries = entries
+        self.title = title
+        self.page = 0
+        self.pages = max(1, -(-len(entries) // LIST_PAGE_SIZE))
+        self.message: Optional[discord.WebhookMessage] = None
+        self._update_buttons()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.invoker_id:
+            await interaction.response.send_message(
+                f"Run `/{ADMIN_GROUP} list` to get your own list.", ephemeral=True
+            )
+            return False
+        return True
+
+    def _update_buttons(self):
+        self.previous.disabled = self.page == 0
+        self.next.disabled = self.page >= self.pages - 1
+
+    def build_embed(self, expired: bool = False) -> discord.Embed:
+        start = self.page * LIST_PAGE_SIZE
+        shown = self.entries[start:start + LIST_PAGE_SIZE]
+        body = "\n".join(_list_line(e) for e in shown) if shown else "No custom roles here yet."
+        if expired:
+            body += f"\n\n⏱️ These buttons expired. Run `/{ADMIN_GROUP} list` again."
+        embed = build_info_embed(self.title, body)
+        embed.set_footer(text=f"Page {self.page + 1} of {self.pages} · {len(self.entries)} role(s)")
+        return embed
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary)
+    async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = max(0, self.page - 1)
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
+    async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = min(self.pages - 1, self.page + 1)
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
 
     async def on_timeout(self):
         for item in self.children:
@@ -494,7 +580,22 @@ class LunarRoles(commands.Cog):
         if not self.reconcile_loop.is_running():
             self.reconcile_loop.start()
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Every /lunar command (not /lunar-admin) only works in the command channel, if one is set."""
+        command = interaction.command
+        root = getattr(command, "root_parent", None) if command else None
+        if root is None or root.name != COMMAND_GROUP or interaction.guild is None:
+            return True
+        settings = await storage.get_guild_settings(interaction.guild.id)
+        problem = service.command_channel_problem(interaction.channel, settings)
+        if problem is None:
+            return True
+        await interaction.response.send_message(embed=build_error_embed("Wrong Channel", problem), ephemeral=True)
+        return False
+
     async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.CheckFailure) and interaction.response.is_done():
+            return  # interaction_check already told them where to go
         logger.error("Lunar command %s failed", getattr(interaction.command, "qualified_name", "?"),
                      exc_info=error)
         embed = build_error_embed("Something went wrong", "That didn't work. Please try again in a moment.")
@@ -682,6 +783,21 @@ class LunarRoles(commands.Cog):
             result = await service.set_icon(member, emoji=emoji)
         await _reply(interaction, result, "Icon Set", "Couldn't Set Your Icon")
 
+    @lunar.command(name="position", description="Move your role directly above or below another member's Lunar role")
+    @command_meta(section="Customization", name="Lunar Position")
+    @app_commands.describe(
+        direction="Put your role directly above or below that role",
+        role="Another member's Lunar role",
+    )
+    @app_commands.choices(direction=[
+        app_commands.Choice(name="above", value=service.PLACE_ABOVE),
+        app_commands.Choice(name="below", value=service.PLACE_BELOW),
+    ])
+    async def lunar_position(self, interaction: discord.Interaction, direction: app_commands.Choice[str], role: discord.Role):
+        await interaction.response.defer(ephemeral=True)
+        result = await service.move(interaction.user, role, direction.value)
+        await _reply(interaction, result, "Role Moved", "Couldn't Move Your Role")
+
     # ============================================================================
     # ADMIN COMMANDS
     # ============================================================================
@@ -713,7 +829,7 @@ class LunarRoles(commands.Cog):
         if settings.anchor_role_id:
             anchor_text = f"Directly {settings.anchor_place} {anchor_text}"
         embed.add_field(name="Anchor role", value=anchor_text, inline=True)
-        embed.add_field(name="Cooldown", value=f"{settings.cooldown_seconds}s" if settings.cooldown_seconds else "Off", inline=True)
+        embed.add_field(name="Cooldown", value=service.format_duration(settings.cooldown_seconds) if settings.cooldown_seconds else "Off", inline=True)
         embed.add_field(name="Command channel", value=channel_text(settings.command_channel_id, "Anywhere"), inline=True)
         embed.add_field(name="Log channel", value=channel_text(settings.log_channel_id, "Not set"), inline=True)
         embed.add_field(
@@ -855,6 +971,77 @@ class LunarRoles(commands.Cog):
         settings = await storage.update_guild_settings(guild.id, log_channel_id=channel.id)
         await service.log_event(guild, f"Lunar Roles will post events here (set by {interaction.user.mention}).", "success", settings)
         await interaction.followup.send(embed=build_success_embed("Log Channel Set", f"Logging to {channel.mention}."), ephemeral=True)
+
+    @admin.command(name="channel", description="Only allow /lunar commands in one channel (empty = anywhere)")
+    @command_meta(section="Customization", name="Lunar Admin Channel")
+    @app_commands.describe(channel="Channel for /lunar commands (its threads work too); leave empty to allow anywhere")
+    async def admin_channel(self, interaction: discord.Interaction, channel: Optional[discord.TextChannel] = None):
+        await interaction.response.defer(ephemeral=True)
+        result = await service.set_command_channel(interaction.guild, channel)
+        await _reply(interaction, result, "Command Channel Set" if channel else "Command Channel Cleared", "Couldn't Set The Channel")
+
+    @admin.command(name="cooldown", description="How long members wait between role changes (0 = off)")
+    @command_meta(section="Customization", name="Lunar Admin Cooldown")
+    @app_commands.describe(seconds="Seconds between changes, 0 to 86400 (0 turns it off)")
+    async def admin_cooldown(self, interaction: discord.Interaction,
+                             seconds: app_commands.Range[int, 0, service.MAX_COOLDOWN_SECONDS]):
+        await interaction.response.defer(ephemeral=True)
+        result = await service.set_cooldown(interaction.guild, seconds)
+        await _reply(interaction, result, "Cooldown Set", "Couldn't Set The Cooldown")
+
+    @admin.command(name="list", description="List every custom role: owner, role and status")
+    @command_meta(section="Customization", name="Lunar Admin List")
+    @app_commands.describe(status="Only show roles with this status (default: all)")
+    @app_commands.choices(status=[
+        app_commands.Choice(name="active", value=storage.STATUS_ACTIVE),
+        app_commands.Choice(name="saved", value=storage.STATUS_SAVED),
+        app_commands.Choice(name="missing", value=storage.STATUS_MISSING),
+    ])
+    async def admin_list(self, interaction: discord.Interaction, status: Optional[app_commands.Choice[str]] = None):
+        await interaction.response.defer(ephemeral=True)
+        entries = await service.list_entries(interaction.guild, status.value if status else None)
+        title = f"Lunar Roles · {status.name}" if status else "Lunar Roles"
+        view = ListView(interaction.user.id, entries, title)
+        if view.pages == 1:
+            await interaction.followup.send(embed=view.build_embed(), ephemeral=True)
+            return
+        view.message = await interaction.followup.send(embed=view.build_embed(), view=view, ephemeral=True, wait=True)
+
+    @admin.command(name="remove", description="Delete a member's custom role and its saved settings (moderation)")
+    @command_meta(section="Customization", name="Lunar Admin Remove")
+    @app_commands.describe(
+        user="Whose custom role to delete (works for members who left, too)",
+        reason="Optional. If given, the member gets a DM with this reason; if not, they aren't told",
+    )
+    async def admin_remove(self, interaction: discord.Interaction, user: discord.User,
+                           reason: Optional[app_commands.Range[str, 1, 300]] = None):
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        record = await storage.get_custom_role(guild.id, user.id)
+        if record is None:
+            await interaction.followup.send(embed=build_error_embed("No Role", f"{user.mention} doesn't have a Lunar role."), ephemeral=True)
+            return
+        role = guild.get_role(record.role_id) if record.role_id else None
+        shown = role.mention if role else validation.code(record.name or "unnamed")
+        told = f"They'll get a DM with the reason:\n> {reason}" if reason else "No reason given, so they won't be told."
+
+        async def on_confirm(button_interaction: discord.Interaction):
+            result = await service.admin_remove(guild, user, interaction.user, reason)
+            embed = (build_success_embed("Role Removed", result.message) if result.ok
+                     else build_error_embed("Couldn't Remove That Role", result.message))
+            await button_interaction.edit_original_response(embed=embed)
+
+        view = ConfirmView(interaction.user.id, on_confirm)
+        view.message = await interaction.followup.send(
+            embed=build_warning_embed(
+                "Confirm Removal",
+                f"Delete {user.mention}'s custom role {shown} ({STATUS_LABELS.get(record.status, record.status).lower()})? "
+                "Its saved settings are deleted too, so this role won't come back if they qualify again "
+                f"(they could still make a new one).\n\n{told}\n\n"
+                "This prompt expires in 60 seconds.",
+            ),
+            view=view, ephemeral=True, wait=True,
+        )
 
     @admin.command(name="pending", description="See and confirm or cancel a removal waiting for approval")
     @command_meta(section="Customization", name="Lunar Admin Pending")

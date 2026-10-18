@@ -119,6 +119,49 @@ def ensure_eligible(member: discord.Member, settings: GuildSettings) -> Result:
     return Result(False, "Lunar Roles are for server boosters. Boost the server to unlock your own role!")
 
 
+def command_channel_problem(channel: Any, settings: GuildSettings) -> Optional[str]:
+    """Why /lunar commands can't be used in this channel, or None.
+
+    The set channel and its threads are allowed. A deleted channel lifts the restriction.
+    """
+    wanted_id = settings.command_channel_id
+    if not wanted_id or channel is None:
+        return None
+    guild = getattr(channel, "guild", None)
+    wanted = guild.get_channel(wanted_id) if guild is not None else None
+    if wanted is None:
+        return None
+    if channel.id == wanted_id or getattr(channel, "parent_id", None) == wanted_id:
+        return None
+    return f"Lunar commands can only be used in {wanted.mention}."
+
+
+def format_duration(seconds: int) -> str:
+    """90 -> "1m 30s", 3600 -> "1h"."""
+    seconds = int(seconds)
+    parts = []
+    for size, unit in ((86400, "d"), (3600, "h"), (60, "m"), (1, "s")):
+        if seconds >= size:
+            parts.append(f"{seconds // size}{unit}")
+            seconds %= size
+    return " ".join(parts) or "0s"
+
+
+async def cooldown_error(guild_id: int, user_id: int, settings: GuildSettings) -> Optional[Result]:
+    """Refuse a change while the member's cooldown is running (cooldown 0 = off)."""
+    if not settings.cooldown_seconds:
+        return None
+    elapsed = await storage.seconds_since_change(guild_id, user_id)
+    if elapsed is None or elapsed >= settings.cooldown_seconds:
+        return None
+    ready_at = int(time.time() + (settings.cooldown_seconds - elapsed)) + 1
+    return Result(
+        False,
+        f"You changed your role recently. Members can change it once every "
+        f"{format_duration(settings.cooldown_seconds)}, so you can change it again <t:{ready_at}:R>.",
+    )
+
+
 def validate_anchor(guild: discord.Guild, role: discord.Role) -> Result:
     """Custom roles go directly below the anchor, so it must sit below the bot's top role."""
     if role.is_default():
@@ -255,6 +298,30 @@ async def set_enabled(guild: discord.Guild, enabled: bool) -> Result:
     settings = await storage.update_guild_settings(guild.id, enabled=enabled)
     logger.info("Guild %s Lunar Roles %s", guild.id, "enabled" if enabled else "disabled")
     return Result(True, "Lunar Roles is now **on**." if enabled else "Lunar Roles is now **off**.", settings)
+
+
+MAX_COOLDOWN_SECONDS = 86400
+
+
+async def set_cooldown(guild: discord.Guild, seconds: int) -> Result:
+    if not 0 <= seconds <= MAX_COOLDOWN_SECONDS:
+        return Result(False, f"The cooldown must be between 0 and {MAX_COOLDOWN_SECONDS} seconds (1 day).")
+    settings = await storage.update_guild_settings(guild.id, cooldown_seconds=seconds)
+    logger.info("Guild %s cooldown set to %ss", guild.id, seconds)
+    if not seconds:
+        return Result(True, "Cooldown is **off**. Members can change their role as often as they like.", settings)
+    return Result(
+        True, f"Members can now change their role once every **{format_duration(seconds)}**. "
+              "Renames, colors, icons and position moves count; creating a role doesn't.", settings,
+    )
+
+
+async def set_command_channel(guild: discord.Guild, channel: Optional[discord.abc.GuildChannel]) -> Result:
+    settings = await storage.update_guild_settings(guild.id, command_channel_id=channel.id if channel else None)
+    logger.info("Guild %s command channel set to %s", guild.id, channel.id if channel else None)
+    if channel is None:
+        return Result(True, f"`/{COMMAND_GROUP}` commands work in any channel again.", settings)
+    return Result(True, f"`/{COMMAND_GROUP}` commands now only work in {channel.mention} and its threads.", settings)
 
 
 async def add_allowed_role(guild: discord.Guild, role: discord.Role) -> Result:
@@ -422,36 +489,67 @@ def _style_kwargs(
     return kwargs, notice, None
 
 
+async def _place_next_to(
+    guild: discord.Guild, role: discord.Role, target_id: int, place: str, reason: str
+) -> Optional[Dict[int, int]]:
+    """Move role directly below/above another role, using fresh positions from Discord.
+
+    Only the roles between the old and new spot move, and they swap among their own
+    position numbers, so nothing outside that span (like roles above the bot) is touched.
+    Returns every role's position afterwards ({role_id: position}), or None if the target is gone.
+    """
+    fresh = list(await guild.fetch_roles())
+    if not any(r.id == role.id for r in fresh):
+        fresh.append(role)  # just created and not listed yet
+    by_id = {r.id: r for r in fresh}
+    if target_id not in by_id:
+        return None
+    current = {r.id: r.position for r in fresh}
+    order = [r.id for r in sorted((r for r in fresh if not r.is_default()), key=lambda r: (r.position, r.id))]
+    old_index = order.index(role.id)
+    order.remove(role.id)
+    new_index = order.index(target_id) + (1 if place == PLACE_ABOVE else 0)
+    order.insert(new_index, role.id)
+    span = order[min(old_index, new_index): max(old_index, new_index) + 1]
+    moved = dict(zip(span, sorted(current[i] for i in span)))
+    changed = {by_id[i]: p for i, p in moved.items() if current[i] != p}
+    if changed:
+        await guild.edit_role_positions(positions=changed, reason=reason)
+    return {**current, **moved}
+
+
 async def _place_by_anchor(
     guild: discord.Guild, role: discord.Role, anchor_id: int, place: str
 ) -> Optional[Dict[int, int]]:
-    """Move role directly below/above the anchor using fresh positions.
+    """Move role directly below/above the anchor. None if the anchor is gone."""
+    return await _place_next_to(guild, role, anchor_id, place, f"Lunar Roles: place {place} anchor")
 
-    Returns every role's position afterwards ({role_id: position}), or None if the anchor is gone.
+
+def _restore_spot(guild: discord.Guild, hint: Optional[int], others: List[discord.Role]) -> Optional[Tuple[int, str]]:
+    """Where a restored role goes back to among the other custom roles: (target role id, place).
+
+    hint is the role's position when it was archived. Roles above it moved down by one
+    when it was deleted, so it goes directly below the lowest custom role now at or above
+    the hint, or above the highest if it was on top. None = no hint or no other custom
+    roles, so the anchor decides.
     """
-    fresh = await guild.fetch_roles()
-    anchor = next((r for r in fresh if r.id == anchor_id), None)
-    if anchor is None:
+    if hint is None or not others:
         return None
-    order = sorted(
-        (r for r in fresh if r.id != role.id and not r.is_default()),
-        key=lambda r: (r.position, r.id),
-    )
-    index = order.index(anchor) + (1 if place == PLACE_ABOVE else 0)
-    order.insert(index, role)
-    # Only roles up to the new one move; all of them are at or below the anchor's
-    # neighbour, which is below the bot's top role (checked by validate_anchor).
-    positions = {r: i for i, r in enumerate(order[: index + 1], start=1)}
-    current = {r.id: r.position for r in fresh}
-    if any(current.get(r.id) != p for r, p in positions.items()):
-        await guild.edit_role_positions(positions=positions, reason=f"Lunar Roles: place {place} anchor")
-    return {**current, **{r.id: p for r, p in positions.items()}}
+    others = sorted(others, key=lambda r: r.position)
+    above = next((r for r in others if r.position >= hint), None)
+    if above is not None:
+        return above.id, PLACE_BELOW
+    return others[-1].id, PLACE_ABOVE
 
 
 async def _create_discord_role(
-    member: discord.Member, settings: GuildSettings, record: CustomRole
+    member: discord.Member, settings: GuildSettings, record: CustomRole, use_hint: bool = False
 ) -> Tuple[Optional[discord.Role], List[str], Optional[Result]]:
-    """Create the member's role from record, save it, place it and assign it."""
+    """Create the member's role from record, save it, place it and assign it.
+
+    use_hint: put a restored role back near its old spot among the custom roles
+    (record.position_hint) instead of next to the anchor.
+    """
     guild = member.guild
     me = guild.me
     if not me.guild_permissions.manage_roles:
@@ -468,6 +566,16 @@ async def _create_discord_role(
         return None, [], Result(False, NOT_SET_UP_MESSAGE)
     if anchor >= me.top_role:
         return None, [], Result(False, PERMISSION_MESSAGE)
+
+    # Worked out before creating: the new role starts at the bottom and shifts every position up by one.
+    spot = None
+    if use_hint:
+        tracked = await storage.list_active_role_ids(guild.id)
+        others = [
+            r for r in (guild.get_role(i) for i in tracked if i != record.role_id)
+            if r is not None and not r >= me.top_role
+        ]
+        spot = _restore_spot(guild, record.position_hint, others)
 
     style, notice, _ = _style_kwargs(guild, record.color_mode, record.primary_color, record.secondary_color, strict=False)
     notes = [notice] if notice else []
@@ -490,11 +598,15 @@ async def _create_discord_role(
     # Save first so the role is never left untracked.
     await storage.upsert_custom_role(replace(record, role_id=role.id, status=storage.STATUS_ACTIVE))
 
+    target_id, place = spot or (anchor.id, settings.anchor_place)
     positions = None
     try:
-        positions = await _place_by_anchor(guild, role, anchor.id, settings.anchor_place)
+        positions = await _place_next_to(
+            guild, role, target_id, place,
+            "Lunar Roles: back to its old spot" if spot else f"Lunar Roles: place {place} anchor",
+        )
     except discord.HTTPException:
-        logger.exception("Couldn't place role %s %s anchor %s in guild %s", role.id, settings.anchor_place, anchor.id, guild.id)
+        logger.exception("Couldn't place role %s %s role %s in guild %s", role.id, place, target_id, guild.id)
         notes.append(f"I couldn't move it into place - an admin may need to drag it {settings.anchor_place} the anchor.")
 
     _, error = await _discord(guild, f"assigning role {role.id} to {member.id}", member.add_roles(role, reason="Lunar Roles"))
@@ -561,6 +673,7 @@ async def create_role(member: discord.Member, name: str) -> Result:
             return Result(False, reason)
 
         restoring = record is not None
+        use_hint = restoring and record.status == storage.STATUS_SAVED
         if restoring:
             if record.status == storage.STATUS_ACTIVE:
                 await storage.update_custom_role(guild.id, member.id, status=storage.STATUS_MISSING, role_id=None)
@@ -571,7 +684,7 @@ async def create_role(member: discord.Member, name: str) -> Result:
                 name=clean, color_mode=MODE_SOLID, primary_color=None, secondary_color=None,
                 icon_png=None, position_hint=None, last_changed_at=None, created_at=None, updated_at=None,
             )
-        role, notes, error = await _create_discord_role(member, settings, desired)
+        role, notes, error = await _create_discord_role(member, settings, desired, use_hint=use_hint)
         if error:
             return error
     if restoring:
@@ -592,6 +705,9 @@ async def rename(member: discord.Member, new_name: str) -> Result:
         record = await storage.get_custom_role(guild.id, member.id)
         if record is None:
             return Result(False, NO_ROLE_MESSAGE)
+        waiting = await cooldown_error(guild.id, member.id, settings)
+        if waiting:
+            return waiting
         clean, reason = await _clean_name(guild, new_name, settings, own_role_id=record.role_id)
         if reason:
             return Result(False, reason)
@@ -611,8 +727,10 @@ async def rename(member: discord.Member, new_name: str) -> Result:
 
 
 async def set_colors(
-    member: discord.Member, mode: str, primary: Optional[int] = None, secondary: Optional[int] = None
+    member: discord.Member, mode: str, primary: Optional[int] = None, secondary: Optional[int] = None,
+    check_cooldown: bool = True,
 ) -> Result:
+    """check_cooldown=False: a later pick in the same palette menu (only the first pick is checked)."""
     settings, error = await _check_member(member)
     if error:
         return error
@@ -626,6 +744,9 @@ async def set_colors(
         record = await storage.get_custom_role(guild.id, member.id)
         if record is None:
             return Result(False, NO_ROLE_MESSAGE)
+        waiting = await cooldown_error(guild.id, member.id, settings) if check_cooldown else None
+        if waiting:
+            return waiting
         changes = {"color_mode": mode, "primary_color": primary, "secondary_color": secondary}
         role, created, notes, error = await _ensure_live_role(member, record, settings, **changes)
         if error:
@@ -732,6 +853,9 @@ async def set_icon(member: discord.Member, image: Optional[bytes] = None, emoji:
         record = await storage.get_custom_role(guild.id, member.id)
         if record is None:
             return Result(False, NO_ROLE_MESSAGE)
+        waiting = await cooldown_error(guild.id, member.id, settings)
+        if waiting:
+            return waiting
         role, created, notes, error = await _ensure_live_role(member, record, settings, **changes)
         if error:
             return error
@@ -769,6 +893,9 @@ async def remove_icon(member: discord.Member) -> Result:
             if FEATURE_ICONS not in guild.features:
                 return Result(False, NO_ICONS_MESSAGE)
             return Result(False, "Your role doesn't have an icon to remove.")
+        waiting = await cooldown_error(guild.id, member.id, settings)
+        if waiting:
+            return waiting
         if role is not None and role.display_icon:
             _, error = await _discord(guild, f"removing the icon of role {role.id}",
                                       role.edit(display_icon=None, reason=f"Lunar Roles: icon removed by {member}"))
@@ -778,6 +905,53 @@ async def remove_icon(member: discord.Member) -> Result:
     logger.info("Removed icon for %s in guild %s", member.id, guild.id)
     await log_event(guild, f"{member.mention} removed their role icon.")
     return Result(True, "Your role icon was removed.", role)
+
+
+async def move(member: discord.Member, target: discord.Role, place: str) -> Result:
+    """Move the member's role directly above/below another member's custom role."""
+    if place not in (PLACE_BELOW, PLACE_ABOVE):
+        return Result(False, "Direction must be `above` or `below`.")
+    settings, error = await _check_member(member)
+    if error:
+        return error
+    guild = member.guild
+    async with user_lock(guild.id, member.id):
+        record = await storage.get_custom_role(guild.id, member.id)
+        if record is None:
+            return Result(False, NO_ROLE_MESSAGE)
+        if record.role_id == target.id:
+            return Result(False, "That's your own role. Pick another member's Lunar role.")
+        other = await storage.get_custom_role_by_role_id(guild.id, target.id)
+        if other is None or other.status != storage.STATUS_ACTIVE or guild.get_role(target.id) is None:
+            return Result(False, f"{target.mention} isn't a Lunar role. You can only move yours next to another member's Lunar role.")
+        if target >= guild.me.top_role:
+            return Result(False, f"{target.mention} is above my highest role, so I can't place roles next to it.")
+        waiting = await cooldown_error(guild.id, member.id, settings)
+        if waiting:
+            return waiting
+        role, _, notes, error = await _ensure_live_role(member, record, settings)
+        if error:
+            return error
+        positions, error = await _discord(
+            guild, f"moving role {role.id} {place} role {target.id}",
+            _place_next_to(guild, role, target.id, place, f"Lunar Roles: moved {place} {target.name} by {member}"),
+        )
+        if error:
+            return error
+        if positions is None:
+            return Result(False, f"{target.mention} was just deleted. Pick another Lunar role.")
+        await storage.update_custom_role(guild.id, member.id, changed=True)
+    if has_colour(role):
+        hidden = hidden_colour_notice(member, role, positions)
+        if hidden:
+            notes.append(hidden)
+    if role.display_icon:
+        hidden = hidden_icon_notice(member, role, positions)
+        if hidden:
+            notes.append(hidden)
+    logger.info("Moved role %s of %s %s role %s in guild %s", role.id, member.id, place, target.id, guild.id)
+    await log_event(guild, f"{member.mention} moved {role.mention} {place} {target.mention}.")
+    return Result(True, f"Your role **{role.name}** is now directly {place} **{target.name}**.", role, notes)
 
 
 # ------------------------------------------------------
@@ -1182,7 +1356,7 @@ async def restore(member: discord.Member, settings: Optional[GuildSettings] = No
         if record is None or record.status != storage.STATUS_SAVED or not record.name:
             return Result(False, "nothing saved")
         role, notes, error = await _create_discord_role(
-            member, settings, replace(record, status=storage.STATUS_ACTIVE, role_id=None)
+            member, settings, replace(record, status=storage.STATUS_ACTIVE, role_id=None), use_hint=True
         )
         if error:
             await log_event(guild, f"Couldn't restore {member.mention}'s role: {error.message}", "error", settings)
@@ -1504,3 +1678,106 @@ async def preview_allowed_role_removal(guild: discord.Guild, role: discord.Role)
         if member is not None and is_eligible(member, settings) and not is_eligible(member, after):
             affected.append(record.user_id)
     return affected
+
+
+# ------------------------------------------------------
+# Admin: list and remove custom roles
+# ------------------------------------------------------
+
+REMOVED_DM = "Your custom role **{name}** in **{guild}** was removed by a moderator.\n**Reason:** {reason}"
+
+
+@dataclass
+class ListEntry:
+    record: CustomRole
+    role: Optional[discord.Role]
+    pending: bool   # held in an open pending removal
+    snoozed: bool   # kept after a cancelled pending removal
+
+
+async def list_entries(guild: discord.Guild, status: Optional[str] = None) -> List[ListEntry]:
+    """Every custom role record, optionally one status: active (highest role first), then missing, then saved."""
+    records = await storage.list_roles(guild.id)
+    if status:
+        records = [r for r in records if r.status == status]
+    held = await storage.pending_user_ids(guild.id)
+    snoozed = await storage.snoozed_user_ids(guild.id)
+    entries = [
+        ListEntry(r, guild.get_role(r.role_id) if r.role_id else None, r.user_id in held, r.user_id in snoozed)
+        for r in records
+    ]
+    rank = {storage.STATUS_ACTIVE: 0, storage.STATUS_MISSING: 1, storage.STATUS_SAVED: 2}
+    entries.sort(key=lambda e: (
+        rank.get(e.record.status, 3),
+        -(e.role.position if e.role is not None else -1),
+        (e.record.name or "").lower(),
+        e.record.user_id,
+    ))
+    return entries
+
+
+async def _withdraw_from_pending(guild: discord.Guild, user_id: int, admin: discord.abc.User) -> None:
+    """Take a removed member out of the open pending removal (closing it if that empties it)."""
+    pending = await storage.get_open_pending(guild.id)
+    if pending is None or user_id not in pending.user_ids:
+        return
+    remaining = [u for u in pending.user_ids if u != user_id]
+    if remaining:
+        await storage.update_pending(pending.id, user_ids=remaining)
+        pending = await storage.get_pending(pending.id)
+        await _refresh_alert(guild, pending, pending_text(pending, mass_archive_threshold()), keep_buttons=True)
+        logger.info("Removed user %s from pending removal %s in guild %s", user_id, pending.id, guild.id)
+        return
+    if await storage.resolve_pending(pending.id, storage.PENDING_WITHDRAWN, admin.id):
+        await _refresh_alert(
+            guild, pending, f"❎ Nothing left to remove: {admin.mention} removed the last role in this list with "
+                            f"`/{ADMIN_GROUP} remove`.", keep_buttons=False,
+        )
+        logger.info("Pending removal %s in guild %s closed: its last member was removed", pending.id, guild.id)
+
+
+async def admin_remove(
+    guild: discord.Guild, user: discord.abc.User, admin: discord.abc.User, reason: Optional[str] = None
+) -> Result:
+    """Delete a member's custom role and its saved settings (moderation). Keeps nothing.
+
+    With a reason, the member is told why by DM. Result.data = (role name, dm_sent or None).
+    """
+    async with user_lock(guild.id, user.id):
+        record = await storage.get_custom_role(guild.id, user.id)
+        if record is None:
+            return Result(False, f"{user.mention} doesn't have a Lunar role.")
+        role = guild.get_role(record.role_id) if record.role_id else None
+        name = (role.name if role is not None else None) or record.name or "unnamed"
+        if role is not None:
+            if role >= guild.me.top_role:
+                return Result(False, f"{role.mention} is above my highest role, so I can't delete it. Nothing was changed.")
+            _, error = await _discord(
+                guild, f"deleting role {role.id} of {user.id} for /{ADMIN_GROUP} remove",
+                role.delete(reason=f"Lunar Roles: removed by {admin} ({admin.id})" + (f": {reason}" if reason else "")),
+            )
+            if error:
+                return Result(False, f"Discord refused to delete {role.mention}, so nothing was changed. {error.message}")
+        await storage.delete_custom_role(guild.id, user.id)
+        await storage.clear_snoozes(guild.id, [user.id])
+        unqueue_archive(guild.id, user.id)
+        await _withdraw_from_pending(guild, user.id, admin)
+    logger.info("Custom role of %s in guild %s removed by %s (reason given: %s)", user.id, guild.id, admin.id, bool(reason))
+
+    dm_sent = None
+    if reason:
+        try:
+            await user.send(REMOVED_DM.format(name=name, guild=guild.name, reason=reason))
+            dm_sent = True
+        except discord.HTTPException:
+            dm_sent = False  # DMs closed or no shared server
+    line = f"{admin.mention} removed {user.mention}'s custom role {validation.code(name)} and its saved settings."
+    if reason:
+        line += f"\n**Reason:** {reason}\n" + ("They were told by DM." if dm_sent else "I couldn't DM them (DMs closed).")
+    await log_event(guild, line, "warning")
+    message = f"Removed {user.mention}'s role {validation.code(name)}. Nothing was kept."
+    if reason:
+        message += " They were told the reason by DM." if dm_sent else " I couldn't DM them the reason (their DMs are closed)."
+    else:
+        message += " No reason was given, so they weren't told."
+    return Result(True, message, (name, dm_sent))

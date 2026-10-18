@@ -48,6 +48,21 @@ The full build spec is in [LUNAR_ROLES_SPEC.md](LUNAR_ROLES_SPEC.md).
   - Cancel keeps the roles and asks again after 24 hours.
 - **Untrusted data:** if the member list can't be fully loaded, the bot lacks Manage Roles, or the
   server is unavailable, reconcile removes nothing that run and tries again next time.
+- **Command channel:** `/lunar-admin channel` limits `/lunar` commands to one channel and its
+  threads (no channel = anywhere). `/lunar-admin` commands work everywhere. If that channel is
+  deleted, the limit lapses.
+- **Cooldown:** `/lunar-admin cooldown` (0 = off, the default; at most 1 day). Renames, colors,
+  icons and `/lunar position` moves count as changes. Creating or restoring a role doesn't, and
+  admins aren't exempt. In one `/lunar palette` menu only the first pick is checked.
+- **Moving roles:** members can put their role directly above or below another member's custom
+  role with `/lunar position`. A role that comes back after a member qualifies again returns near
+  its old spot among the custom roles; with no other custom roles it goes by the anchor.
+- **`/lunar-admin list`** shows every custom role (owner, role, status), 10 per page.
+- **`/lunar-admin remove`** deletes a member's custom role and its saved settings, so it won't
+  come back. With a `reason` the member gets a DM with it; without one they aren't told.
+  - It also takes them out of a pending removal.
+  - There's no way to block someone from making a new role. Mods use Discord's own tools
+    (timeouts, kicks, bans, removing the allowed role) for repeat offenders.
 - **Migration:** existing `booster_roles` rows were copied once into `lunar_custom_roles` (a marker
   row in `lunar_meta` stops it re-running). The old table is left in place.
 - `/nitro-role-set` and `cogs/customization/server_boost.py` are gone. The boost welcome DM now

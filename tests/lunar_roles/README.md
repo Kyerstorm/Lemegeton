@@ -29,8 +29,9 @@ summary.
   `ENVIRONMENT` isn't development.
 - **No Discord.** The bot token is never loaded, and any Discord API call raises an error.
   Everything Discord-side is faked.
-- **Fake servers only.** Tests only create and delete rows for the guild IDs 2–5. Real Discord
-  server IDs are 17–20 digit numbers, so real data can't be touched.
+- **Fake servers only.** Tests only create and delete rows for the guild IDs 2–6. Real Discord
+  server IDs are 17–20 digit numbers, so real data can't be touched. (`seed_lunar_lab.py` isn't
+  a test and has its own limits; see below.)
 - **Separate logs.** Logs go to a temporary folder, not the bot's `logs/`.
 
 ## Files
@@ -41,8 +42,25 @@ summary.
 | `test_names_and_roles.py` | Hex parsing, the name filter (protected words, leetspeak, moderation-role names, blocked words), create/rename/color/assign/unassign/info, anchor placement, hidden-color notes, the name sweep |
 | `test_lifecycle.py` | Archive/restore, events, reconcile, mass-removal guard, pending removals and snoozes, skipping on incomplete data, the debug switch |
 | `test_palette_and_icons.py` | Icon preparation (crop, EXIF, decompression bombs, file types), emoji check, avatar palette, palette menus, icon set/remove/restore, the `/lunar icon` upload path |
+| `test_admin_extras.py` | Command channel, cooldown, `/lunar position` (including gaps in Discord's position numbers), restoring near the old spot, `/lunar-admin list` and `remove` |
 | `fakes.py` | Fake guilds, roles, members and channels |
 | `make_test_images.py` | Not a test. Generates `test_images/` for testing `/lunar icon` by hand in Discord |
+| `seed_lunar_lab.py` | Not a test. Adds or removes fake saved records in the test server, for testing `/lunar-admin list` pages |
+
+## Fake records for `/lunar-admin list`
+
+```bash
+.venv/Scripts/python.exe tests/lunar_roles/seed_lunar_lab.py add 15
+.venv/Scripts/python.exe tests/lunar_roles/seed_lunar_lab.py status
+.venv/Scripts/python.exe tests/lunar_roles/seed_lunar_lab.py remove
+```
+
+This is the one script that writes to a real server's rows, so it has its own limits:
+- It only uses the server in `.env`'s `GUILD_ID`, and only if Lunar Roles has settings there.
+- It refuses to run when `ENVIRONMENT=production`, and `_safety.py` still applies (local
+  development database, no token, no Discord calls).
+- It only creates `saved` records with the fake user IDs 1000001–1000060, which can't be real
+  Discord users. `remove` deletes every record in that range, which is exactly what `add` made.
 
 ## Test images for Discord
 
