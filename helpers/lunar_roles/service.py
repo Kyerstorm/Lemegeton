@@ -7,6 +7,7 @@ here raises to the caller for them.
 from __future__ import annotations
 
 import asyncio
+import base64
 import os
 import time
 from dataclasses import dataclass, field, replace
@@ -25,7 +26,7 @@ from helpers.lunar_roles import (
     HOLOGRAPHIC_COLORS,
     ROLE_LIMIT,
 )
-from helpers.lunar_roles import images, storage, validation
+from helpers.lunar_roles import images, storage, tokens, validation
 from helpers.lunar_roles.storage import CustomRole, GuildSettings
 
 logger = get_logger("LunarRoles", logfile="lunar_roles.log")
@@ -1339,6 +1340,7 @@ async def archive(
             if error:
                 return Result(False, "Discord refused to delete it")
         await storage.update_custom_role(guild.id, user_id, **fields)
+        tokens.revoke(guild.id, user_id)
     logger.info("Archived role of user %s in guild %s (%s)", user_id, guild.id, reason)
     return Result(True, name or "unnamed")
 
@@ -1759,6 +1761,7 @@ async def admin_remove(
             if error:
                 return Result(False, f"Discord refused to delete {role.mention}, so nothing was changed. {error.message}")
         await storage.delete_custom_role(guild.id, user.id)
+        tokens.revoke(guild.id, user.id)
         await storage.clear_snoozes(guild.id, [user.id])
         unqueue_archive(guild.id, user.id)
         await _withdraw_from_pending(guild, user.id, admin)
@@ -1781,3 +1784,76 @@ async def admin_remove(
     else:
         message += " No reason was given, so they weren't told."
     return Result(True, message, (name, dm_sent))
+
+
+# ------------------------------------------------------
+# Color picker (web)
+# ------------------------------------------------------
+
+PICKER_UNAVAILABLE_MESSAGE = "The color picker isn't available right now. You can still use the `/lunar` commands."
+
+
+def picker_link_problem() -> Optional[str]:
+    """Why picker links can't be handed out (admin-facing), or None."""
+    if not config.LUNAR_PICKER_ENABLED:
+        return "the picker is turned off (LUNAR_PICKER_ENABLED=false)"
+    url = config.LUNAR_PUBLIC_URL
+    if not url.startswith(("http://", "https://")):
+        return "LUNAR_PUBLIC_URL must start with http:// or https://"
+    if os.getenv("ENVIRONMENT", "development") == "production" and not url.startswith("https://"):
+        return "LUNAR_PUBLIC_URL must use https:// in production"
+    return None
+
+
+def picker_url(token: str) -> str:
+    # The token goes after '#': browsers never send that part to any server,
+    # so it can't land in access logs, proxy logs or referrers.
+    return f"{config.LUNAR_PUBLIC_URL}/lunar#{token}"
+
+
+def _hex_or_none(value: Optional[int]) -> Optional[str]:
+    return validation.format_hex(value) if value is not None else None
+
+
+async def picker_state(member: discord.Member) -> Result:
+    """Everything the picker page shows. Re-runs the usual checks (set up, eligible, has a role)."""
+    error = await precheck(member)
+    if error:
+        return error
+    guild = member.guild
+    record = await storage.get_custom_role(guild.id, member.id)
+    role = guild.get_role(record.role_id) if record.role_id else None
+    if record.icon_emoji:
+        icon = {"type": "emoji", "value": record.icon_emoji}
+    elif record.icon_png:
+        icon = {"type": "image", "url": "data:image/png;base64," + base64.b64encode(record.icon_png).decode()}
+    elif role is not None and isinstance(role.display_icon, str):
+        icon = {"type": "emoji", "value": role.display_icon}
+    elif role is not None and isinstance(role.display_icon, discord.Asset):
+        icon = {"type": "image", "url": role.display_icon.url}
+    else:
+        icon = None
+    features = feature_status(guild)
+    settings = await storage.get_guild_settings(guild.id)
+    return Result(True, "ok", {
+        "user": {
+            "id": str(member.id),
+            "name": member.display_name,
+            "avatar_url": palette_avatar(member).url,
+        },
+        "guild": {
+            "id": str(guild.id),
+            "name": guild.name,
+            "gradient": features.gradient,
+            "icons": features.icons,
+        },
+        "role": {
+            "name": (role.name if role is not None else None) or record.name,
+            "status": record.status,
+            "mode": record.color_mode,
+            "primary": _hex_or_none(record.primary_color),
+            "secondary": _hex_or_none(record.secondary_color) if record.color_mode != MODE_SOLID else None,
+            "icon": icon,
+        },
+        "cooldown_seconds": settings.cooldown_seconds,
+    })

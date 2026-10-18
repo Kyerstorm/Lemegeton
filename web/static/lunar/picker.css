@@ -1,0 +1,84 @@
+/* Layout and components for the Lunar color picker. No colors here: see lunar-theme.css. */
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--lp-bg);
+  color: var(--lp-text);
+  font-family: var(--lp-font);
+  line-height: 1.45;
+}
+
+main {
+  max-width: var(--lp-width);
+  margin: 0 auto;
+  padding: calc(var(--lp-gap) * 2) var(--lp-gap);
+}
+
+h1 { font-size: 1.4rem; margin: 0 0 var(--lp-gap); }
+
+.card {
+  background: var(--lp-card);
+  border: 1px solid var(--lp-card-border);
+  border-radius: var(--lp-radius);
+  padding: var(--lp-gap);
+  margin-bottom: var(--lp-gap);
+}
+
+.hidden { display: none; }
+.muted { color: var(--lp-muted); font-size: 0.9rem; }
+
+.message {
+  display: flex;
+  gap: var(--lp-gap);
+  align-items: flex-start;
+}
+
+.avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.name-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.display-name { font-weight: 600; }
+.role-icon { width: 20px; height: 20px; object-fit: contain; }
+.role-icon-emoji { font-size: 1.1rem; }
+
+.gradient-text,
+.holo-text {
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.holo-text {
+  background-image: linear-gradient(90deg, var(--lp-holo-1), var(--lp-holo-2), var(--lp-holo-3), var(--lp-holo-1));
+  background-size: 300% 100%;
+  animation: holo 4s linear infinite;
+}
+
+@keyframes holo {
+  from { background-position: 0% 50%; }
+  to { background-position: 300% 50%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .holo-text { animation: none; }
+}
+
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px var(--lp-gap); margin: 0; }
+dt { color: var(--lp-muted); }
+dd { margin: 0; overflow-wrap: anywhere; }
+
+.error {
+  background: var(--lp-error-bg);
+  border-color: var(--lp-error);
+}
+.error h2 { color: var(--lp-error); font-size: 1.1rem; margin: 0 0 8px; }
+
+code {
+  font-family: var(--lp-font-mono);
+  font-size: 0.9em;
+}

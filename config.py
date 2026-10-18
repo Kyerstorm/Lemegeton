@@ -207,6 +207,14 @@ LUNAR_MASS_ARCHIVE_THRESHOLD = max(0, _int_env("LUNAR_MASS_ARCHIVE_THRESHOLD", 1
 LUNAR_DEBUG_FAIL_MEMBER_FETCH = os.getenv("LUNAR_DEBUG_FAIL_MEMBER_FETCH", "false").strip().lower() in {
     "1", "true", "yes", "on",
 }
+# Web color picker: serve it even when the dashboard isn't configured.
+LUNAR_PICKER_ENABLED = os.getenv("LUNAR_PICKER_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+# Base address used in picker links (no trailing slash). Production must use https://.
+LUNAR_PUBLIC_URL = (os.getenv("LUNAR_PUBLIC_URL") or "http://localhost:8080").strip().rstrip("/")
+# Picker link lifetime in seconds.
+LUNAR_PICKER_TTL = max(60, _int_env("LUNAR_PICKER_TTL", 900))
+# true only behind a proxy that appends the client address to X-Forwarded-For (Railway).
+LUNAR_TRUST_PROXY = os.getenv("LUNAR_TRUST_PROXY", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 # ==============================================================================
 # DATABASE CONFIGURATION

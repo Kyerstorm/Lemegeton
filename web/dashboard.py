@@ -19,6 +19,7 @@ import aiohttp
 from aiohttp import web
 
 import config
+from web.lunar_picker import LunarPicker, is_picker_path
 
 logger = logging.getLogger("web.dashboard")
 ROOT = Path(__file__).resolve().parent.parent
@@ -43,6 +44,7 @@ class DashboardWebServer:
         self.oauth_states: dict[str, float] = {}
         self._http: aiohttp.ClientSession | None = None
         self._lock = asyncio.Lock()
+        self.lunar_picker = LunarPicker(bot)
 
     @property
     def configured(self) -> bool:
@@ -53,20 +55,56 @@ class DashboardWebServer:
         )
 
     async def start(self) -> None:
+        """Start the web server if the dashboard is configured or the Lunar color picker is on.
+
+        Dashboard and OAuth routes are only added when the dashboard is configured.
+        """
+        picker = config.LUNAR_PICKER_ENABLED
         if not self.configured:
             logger.warning(
                 "Web dashboard disabled: set DASHBOARD_CLIENT_ID, "
                 "DASHBOARD_CLIENT_SECRET, and DASHBOARD_SECRET_KEY."
             )
-            return
+            if not picker:
+                return
         if self.runner:
             return
 
-        self._http = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=15, connect=5),
-            headers={"User-Agent": "Lemegeton-Dashboard/1.0"},
+        app = self.build_app()
+        self.runner = web.AppRunner(app, access_log=logger)
+        await self.runner.setup()
+        self.site = web.TCPSite(self.runner, config.DASHBOARD_HOST, config.DASHBOARD_PORT)
+        try:
+            await self.site.start()
+        except Exception:
+            await self.runner.cleanup()
+            self.runner = None
+            self.site = None
+            if self._http:
+                await self._http.close()
+            self._http = None
+            raise
+        self.bot.lunar_picker_ready = picker
+        logger.info(
+            "Web server listening on %s:%s (dashboard %s, Lunar color picker %s)",
+            config.DASHBOARD_HOST, config.DASHBOARD_PORT,
+            "on" if self.configured else "off", "on" if picker else "off",
         )
+
+    def build_app(self) -> web.Application:
+        """The aiohttp app: dashboard routes if configured, picker routes if enabled."""
         app = web.Application(middlewares=[self._security_headers])
+        if self.configured:
+            self._http = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=15, connect=5),
+                headers={"User-Agent": "Lemegeton-Dashboard/1.0"},
+            )
+            self._add_dashboard_routes(app)
+        if config.LUNAR_PICKER_ENABLED:
+            self.lunar_picker.register(app)
+        return app
+
+    def _add_dashboard_routes(self, app: web.Application) -> None:
         app.router.add_get("/", self._home)
         app.router.add_get("/login", self._login)
         app.router.add_get("/oauth/callback", self._oauth_callback)
@@ -82,21 +120,9 @@ class DashboardWebServer:
         app.router.add_get("/api/guilds/{guild_id}/database", self._api_database)
         app.router.add_get("/api/logs", self._api_logs)
         app.router.add_get("/static/{filename}", self._static_file)
-        self.runner = web.AppRunner(app, access_log=logger)
-        await self.runner.setup()
-        self.site = web.TCPSite(self.runner, config.DASHBOARD_HOST, config.DASHBOARD_PORT)
-        try:
-            await self.site.start()
-        except Exception:
-            await self.runner.cleanup()
-            self.runner = None
-            self.site = None
-            await self._http.close()
-            self._http = None
-            raise
-        logger.info("Web dashboard listening on %s:%s", config.DASHBOARD_HOST, config.DASHBOARD_PORT)
 
     async def stop(self) -> None:
+        self.bot.lunar_picker_ready = False
         if self.runner:
             await self.runner.cleanup()
             self.runner = None
@@ -109,6 +135,8 @@ class DashboardWebServer:
 
     @web.middleware
     async def _security_headers(self, request: web.Request, handler):
+        if is_picker_path(request.path):
+            return await handler(request)  # the picker sets its own (stricter) headers
         if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
             origin = request.headers.get("Origin")
             if origin:

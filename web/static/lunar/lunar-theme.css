@@ -1,0 +1,45 @@
+/* Lunar color picker theme. Every color, radius, font and spacing the picker uses is here;
+   picker.css only refers to these variables. To re-theme the page, edit this file only.
+
+   --lp-bg            page background
+   --lp-card          card background
+   --lp-card-border   card outline
+   --lp-text          main text
+   --lp-muted         secondary text (labels, hints)
+   --lp-accent        buttons and links (Discord blurple by default)
+   --lp-accent-text   text on accent buttons
+   --lp-error         error messages
+   --lp-error-bg      error message background
+   --lp-success       success messages
+   --lp-focus         keyboard focus outline
+   --lp-holo-1..3     the holographic preview colors (Discord's fixed preset)
+   --lp-radius        card corner radius
+   --lp-radius-small  avatar/button corner radius
+   --lp-font          font stack
+   --lp-font-mono     font for hex codes and commands
+   --lp-gap           standard spacing
+   --lp-width         page column width
+*/
+:root {
+  color-scheme: dark;
+  --lp-bg: #1E1F22;
+  --lp-card: #2B2D31;
+  --lp-card-border: #3F4147;
+  --lp-text: #F2F3F5;
+  --lp-muted: #B5BAC1;
+  --lp-accent: #5865F2;
+  --lp-accent-text: #FFFFFF;
+  --lp-error: #F23F43;
+  --lp-error-bg: #3B2224;
+  --lp-success: #23A55A;
+  --lp-focus: #00A8FC;
+  --lp-holo-1: #A9C9FF;
+  --lp-holo-2: #FFBBEC;
+  --lp-holo-3: #FFC3A0;
+  --lp-radius: 12px;
+  --lp-radius-small: 8px;
+  --lp-font: "gg sans", "Noto Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --lp-font-mono: ui-monospace, Consolas, monospace;
+  --lp-gap: 16px;
+  --lp-width: 600px;
+}

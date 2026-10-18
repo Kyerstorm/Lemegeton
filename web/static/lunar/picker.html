@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Lunar Color Picker</title>
+  <link rel="stylesheet" href="/lunar/static/lunar-theme.css">
+  <link rel="stylesheet" href="/lunar/static/picker.css">
+  <script src="/lunar/static/picker.js" defer></script>
+</head>
+<body>
+  <main>
+    <h1>Lunar Color Picker</h1>
+
+    <section id="loading" class="card" aria-live="polite">Loading your role…</section>
+
+    <section id="problem" class="card error hidden" role="alert">
+      <h2 id="problem-title">This link doesn't work</h2>
+      <p id="problem-text"></p>
+    </section>
+
+    <section id="ready" class="hidden">
+      <div class="card message">
+        <img id="avatar" class="avatar" alt="">
+        <div>
+          <div class="name-line">
+            <span id="display-name" class="display-name"></span>
+            <img id="role-icon-img" class="role-icon hidden" alt="Role icon">
+            <span id="role-icon-emoji" class="role-icon-emoji hidden"></span>
+          </div>
+          <div>This is how your name looks with your Lunar role.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <dl>
+          <dt>Server</dt><dd id="guild-name"></dd>
+          <dt>Role</dt><dd id="role-name"></dd>
+          <dt>Style</dt><dd id="role-style"></dd>
+          <dt>Link expires</dt><dd id="expires"></dd>
+        </dl>
+      </div>
+
+      <p class="muted">
+        The color editor is coming in the next update. For now, change your role with
+        <code>/lunar color set</code>, <code>/lunar name</code> and <code>/lunar icon</code>.
+        Don't share this link: anyone with it can change your role until it expires.
+      </p>
+    </section>
+  </main>
+</body>
+</html>

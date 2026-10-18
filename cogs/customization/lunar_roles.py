@@ -14,7 +14,7 @@ from cogs_test.general_commands.dashboard import command_meta
 from helpers.color_palette import PALETTE
 from helpers.embed_helper import build_error_embed, build_info_embed, build_success_embed, build_warning_embed
 from helpers.lunar_roles import ADMIN_GROUP, COMMAND_GROUP, ROLE_LIMIT
-from helpers.lunar_roles import images, service, storage, validation
+from helpers.lunar_roles import images, service, storage, tokens, validation
 
 logger = service.logger  # file log (logs/lunar_roles.log)
 console_logger = logging.getLogger("lunar_roles_console")  # propagates to the bot's console output
@@ -782,6 +782,47 @@ class LunarRoles(commands.Cog):
         else:
             result = await service.set_icon(member, emoji=emoji)
         await _reply(interaction, result, "Icon Set", "Couldn't Set Your Icon")
+
+    @lunar.command(name="color-picker", description="Get a private link to a web page for styling your role")
+    @command_meta(section="Customization", name="Lunar Color Picker")
+    async def lunar_color_picker(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        member = interaction.user
+        guild = member.guild
+        error = await service.precheck(member)
+        if error:
+            await interaction.followup.send(embed=build_error_embed("Can't Open The Picker", error.message), ephemeral=True)
+            return
+        problem = service.picker_link_problem()
+        if problem is None and not getattr(self.bot, "lunar_picker_ready", False):
+            problem = "the web server isn't running (check the bot log for why it didn't start)"
+        if problem:
+            logger.warning("Color picker link refused in guild %s: %s", guild.id, problem)
+            await service.log_event(guild, f"I couldn't give {member.mention} a color picker link: {problem}.", "error")
+            await interaction.followup.send(
+                embed=build_error_embed("Can't Open The Picker", service.PICKER_UNAVAILABLE_MESSAGE), ephemeral=True
+            )
+            return
+
+        token, expires_at = tokens.create(guild.id, member.id)
+        url = service.picker_url(token)
+        expires = int(expires_at)
+        embed = build_info_embed(
+            "Your Color Picker",
+            f"This private link works until <t:{expires}:t> (<t:{expires}:R>).\n\n"
+            f"Running `/{COMMAND_GROUP} color-picker` again gives you a new link and stops this one. "
+            "**Don't share it:** anyone with it can change your role until it expires.",
+        )
+        view = discord.ui.View()
+        view.add_item(discord.ui.Button(label="Open color picker", style=discord.ButtonStyle.link, url=url))
+        try:
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+        except discord.HTTPException:
+            # Discord can refuse link buttons for some addresses (like localhost); show the link as text.
+            logger.info("Discord refused the picker link button in guild %s; sending the link as text", guild.id)
+            embed.add_field(name="Open this link in your browser", value=url, inline=False)
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        logger.info("Color picker link created for %s in guild %s", member.id, guild.id)
 
     @lunar.command(name="position", description="Move your role directly above or below another member's Lunar role")
     @command_meta(section="Customization", name="Lunar Position")

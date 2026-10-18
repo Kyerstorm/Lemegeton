@@ -18,6 +18,54 @@ The full build spec is in [LUNAR_ROLES_SPEC.md](LUNAR_ROLES_SPEC.md).
 - The bot needs the **Server Members** and **Message Content** privileged intents enabled in the
   Discord Developer Portal, or it can't connect.
 
+## Color picker web page (public address)
+
+The picker (`/lunar color-picker`) is a small web page served by the bot itself, on
+`DASHBOARD_HOST:DASHBOARD_PORT`. It doesn't need the dashboard's OAuth settings.
+
+**Railway steps** (checked against Railway's docs on 2026-10-18; links below):
+1. In the bot's service: **Settings → Networking → Public Networking → Generate Domain**.
+   You get a `*.up.railway.app` address. If the service has a TCP Proxy, the button is hidden
+   until the proxy is removed.
+2. **Target port:** Railway detects the port when the app listens on only one, and you can change
+   it later with the edit icon next to the domain. Make sure it's the same as `DASHBOARD_PORT`
+   (8080 by default).
+3. Set these variables on the service:
+   - `LUNAR_PUBLIC_URL=https://<the domain>` (no trailing slash)
+   - `DASHBOARD_HOST=0.0.0.0`
+   - `DASHBOARD_PORT=8080`
+   - `LUNAR_PICKER_ENABLED=true`
+   - `LUNAR_TRUST_PROXY=true` (see the caveat below)
+   - `ENVIRONMENT=production`
+4. Redeploy, then open `https://<the domain>/lunar`. You should see the picker page saying no
+   link was found. Then run `/lunar color-picker` in Discord and open the link.
+
+**Custom domain (optional):** add it in the same Networking section. Railway shows a `CNAME`
+and a `TXT` record, and **both** are needed: without the TXT record the domain returns 404 even
+once the CNAME works. HTTPS certificates are automatic for both kinds of domain.
+
+**Things Railway's docs didn't confirm:**
+- **`PORT`:** the pages read don't say whether Railway sets a `PORT` variable or what happens if
+  you set one. The bot ignores `PORT` and listens on `DASHBOARD_PORT`, so just make sure the
+  domain's target port matches it.
+- **`0.0.0.0` vs `::`:** the docs don't say which address public networking needs. `0.0.0.0` is
+  the usual choice. If the domain says the application failed to respond, check the port first,
+  then try `DASHBOARD_HOST=::`.
+- **`X-Forwarded-For`:** Railway documents `X-Real-IP` as the header with the visitor's address
+  and `X-Forwarded-Proto: https`, but doesn't mention `X-Forwarded-For`.
+  - With `LUNAR_TRUST_PROXY=true`, the bot uses the **rightmost** `X-Forwarded-For` entry, the one
+    a proxy appends. The leftmost entries are ignored because visitors can make them up.
+  - If Railway doesn't append to `X-Forwarded-For`, the bot falls back to the proxy's own address,
+    so all visitors share one limit for *bad* links. That's safe: valid links are never blocked
+    by it, so the worst case is a weaker limit on link guessing.
+  - Check after the first deploy which headers actually arrive.
+
+**How links behave:**
+- Links are kept in memory, so run **one copy** of the bot only. Every restart or redeploy ends
+  all open links, and members just run `/lunar color-picker` again.
+- In production the bot only hands out `https://` links. With an `http://` `LUNAR_PUBLIC_URL` it
+  refuses and posts the reason in the Lunar log channel.
+
 ## Server setup (per server)
 
 - The feature is **off by default**. An admin runs `/lunar-admin anchor` and then
@@ -63,6 +111,15 @@ The full build spec is in [LUNAR_ROLES_SPEC.md](LUNAR_ROLES_SPEC.md).
   - It also takes them out of a pending removal.
   - There's no way to block someone from making a new role. Mods use Discord's own tools
     (timeouts, kicks, bans, removing the allowed role) for repeat offenders.
+- **Color picker links:**
+  - Each link is private, works for 15 minutes (`LUNAR_PICKER_TTL`), and a new one replaces the old.
+  - The token sits after `#` in the link, so it's never sent to a server in an address or logged.
+  - The page sends it only in an `Authorization` header and refuses it in a URL.
+  - Every request re-checks that the member is in the server, still qualifies and has a role.
+    Losing the role, an admin `remove` or disabling Lunar Roles ends access at once.
+  - Limits: 60 reads and 20 changes a minute per link, and 30 bad links per address per
+    10 minutes.
+  - This milestone's page only shows the role; the editor comes next.
 - **Migration:** existing `booster_roles` rows were copied once into `lunar_custom_roles` (a marker
   row in `lunar_meta` stops it re-running). The old table is left in place.
 - `/nitro-role-set` and `cogs/customization/server_boost.py` are gone. The boost welcome DM now
@@ -73,9 +130,20 @@ The full build spec is in [LUNAR_ROLES_SPEC.md](LUNAR_ROLES_SPEC.md).
 - Final icon and gradient check needs a boosted server. The test server (Lunar Lab) has neither
   `ENHANCED_ROLE_COLORS` (gradient/holographic) nor `ROLE_ICONS` (Boost Level 2), so only the
   "not available here" refusals were tested live; the success paths have offline tests only.
+- `/lunar position` moving a role next to another member's role: Lunar Lab has only one member,
+  so only the refusals were tested live.
+- Slash commands inside threads: they don't show up in threads in Lunar Lab, so "threads of the
+  command channel are allowed" is tested offline only.
+- On Railway: which forwarded headers arrive (see "Things Railway's docs didn't confirm").
 
 ## Pre-existing issues outside Lunar Roles (not fixed)
 
 - `cogs_test.panel` fails to load ("context menus cannot be defined inside a class").
 - The news and free-games tasks fail at startup with "Client has not been properly initialised"
   (they wait for "ready" before the bot has logged in).
+- **Dashboard writes behind Railway's proxy:** the dashboard's same-origin check builds the
+  expected address from the request's own scheme (`request.scheme`). Behind Railway's HTTPS proxy
+  that scheme is `http`, while the browser's `Origin` is `https://…`. So dashboard POST/PUT
+  requests (sync, reset, toggling commands) will probably be refused with "Cross-origin requests
+  are not allowed." The color picker doesn't have this problem: it checks against
+  `LUNAR_PUBLIC_URL`.
