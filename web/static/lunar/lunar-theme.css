@@ -46,6 +46,12 @@
   --lp-preview-light-muted: #5C5E66;/* light theme timestamp */
   --lp-chip-bg: #1E1F22;            /* role name chip under the preview */
 
+  /* ---- Role icon upload and crop ---- */
+  --lp-dropzone-border: #6D6F78;    /* dashed outline of the drop zone */
+  --lp-dropzone-bg: #232428;        /* drop zone background */
+  --lp-dropzone-active: #2E3035;    /* drop zone while a file is dragged over it */
+  --lp-stage-bg: #111214;           /* behind the image in the crop area */
+
   /* ---- Holographic preview (Discord's fixed preset colors) ---- */
   --lp-holo-1: #A9C9FF;             /* first holographic color */
   --lp-holo-2: #FFBBEC;             /* second holographic color */
@@ -95,5 +101,10 @@
   --lp-hue-width: 20px;             /* the hue slider */
   --lp-marker-size: 14px;           /* marker on the square */
   --lp-gradient-bar-height: 24px;   /* gradient preview bar */
+  --lp-stage-size: 240px;           /* the square crop area */
+  --lp-crop-preview-size: 64px;     /* the cropped icon preview next to it */
+  --lp-dropzone-height: 120px;      /* drop zone height */
+  --lp-emoji-input-width: 6rem;     /* emoji text box */
+  --lp-dash-width: 2px;             /* drop zone dashed outline thickness */
   --lp-hidden-size: 1px;            /* screen-reader-only helpers and hidden radios (keep at 1px) */
 }

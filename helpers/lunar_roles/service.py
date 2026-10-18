@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import os
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field, replace
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
@@ -833,9 +835,12 @@ NO_ICONS_MESSAGE = (
 )
 
 
-async def set_icon(member: discord.Member, image: Optional[bytes] = None, emoji: Optional[str] = None) -> Result:
-    """Set the role icon from an uploaded PNG/JPEG or a standard emoji (exactly one of them).
+async def set_icon(member: discord.Member, image: Optional[bytes] = None, emoji: Optional[str] = None,
+                   crop: Optional[Tuple[int, int, int]] = None) -> Result:
+    """Set the role icon from an original PNG/JPEG or a standard emoji (exactly one of them).
 
+    image is the original exactly as uploaded; it's kept (icon_source) with the square cut from
+    it (crop, (x, y, size) in its pixels; None = the centre square) so it can be re-cropped later.
     The image/emoji is checked before the server's Role Icons perk, so members learn
     whether it's usable even where icons aren't available.
     """
@@ -850,11 +855,14 @@ async def set_icon(member: discord.Member, image: Optional[bytes] = None, emoji:
 
     try:
         if image is not None:
-            value: Any = await asyncio.to_thread(images.prepare_icon, image)
-            changes = {"icon_png": value, "icon_emoji": None}
+            icon = await asyncio.to_thread(images.make_icon, image, crop)
+            value: Any = icon.png
+            x, y, size = icon.crop
+            changes = {"icon_png": value, "icon_emoji": None, "icon_source": image,
+                       "icon_crop": json.dumps({"x": x, "y": y, "size": size})}
         else:
             value = images.check_emoji(emoji)
-            changes = {"icon_png": None, "icon_emoji": value}
+            changes = {"icon_png": None, "icon_emoji": value, "icon_source": None, "icon_crop": None}
     except images.ImageError as exc:
         return Result(False, exc.message)
     if FEATURE_ICONS not in guild.features:
@@ -887,7 +895,7 @@ async def set_icon(member: discord.Member, image: Optional[bytes] = None, emoji:
     await log_event(guild, f"{member.mention} set the icon of {role_ref(role)} to {shown}.")
     if emoji is not None:
         return Result(True, f"Your role icon is now {value}.", role, notes)
-    return Result(True, "Your role icon is set. Images are cropped to the center square and resized to 64x64.", role, notes)
+    return Result(True, f"Your role icon is set ({icon.side}x{icon.side}).", role, notes)
 
 
 async def remove_icon(member: discord.Member) -> Result:
@@ -913,7 +921,8 @@ async def remove_icon(member: discord.Member) -> Result:
                                       role.edit(display_icon=None, reason=f"Lunar Roles: icon removed by {member}"))
             if error:
                 return error
-        await storage.update_custom_role(guild.id, member.id, changed=True, icon_png=None, icon_emoji=None)
+        await storage.update_custom_role(guild.id, member.id, changed=True, icon_png=None, icon_emoji=None,
+                                         icon_source=None, icon_crop=None)
     logger.info("Removed icon for %s in guild %s", member.id, guild.id)
     await log_event(guild, f"{member.mention} removed their role icon.")
     return Result(True, "Your role icon was removed.", role)
@@ -1272,6 +1281,11 @@ def mass_archive_threshold() -> int:
 def debug_fetch_fail_active() -> bool:
     """LUNAR_DEBUG_FAIL_MEMBER_FETCH is honoured only in development (the default ENVIRONMENT)."""
     return config.LUNAR_DEBUG_FAIL_MEMBER_FETCH and os.getenv("ENVIRONMENT", "development") == "development"
+
+
+def debug_preview_icons_active() -> bool:
+    """LUNAR_DEBUG_PREVIEW_ROLE_ICONS is honoured only in development (the default ENVIRONMENT)."""
+    return config.LUNAR_DEBUG_PREVIEW_ROLE_ICONS and os.getenv("ENVIRONMENT", "development") == "development"
 
 
 def debug_preview_enhanced_active() -> bool:
@@ -1850,20 +1864,28 @@ async def picker_state(member: discord.Member) -> Result:
     if record.icon_emoji:
         icon = {"type": "emoji", "value": record.icon_emoji}
     elif record.icon_png:
-        icon = {"type": "image", "url": "data:image/png;base64," + base64.b64encode(record.icon_png).decode()}
+        icon = {"type": "image", "url": _data_url(record.icon_png)}
     elif role is not None and isinstance(role.display_icon, str):
         icon = {"type": "emoji", "value": role.display_icon}
     elif role is not None and isinstance(role.display_icon, discord.Asset):
-        icon = {"type": "image", "url": role.display_icon.url}
+        url = await asset_data_url(role.display_icon)
+        icon = {"type": "image", "url": url} if url else None
     else:
         icon = None
+    if icon is not None and icon["type"] == "image":
+        icon["has_source"] = bool(record.icon_source or record.icon_png)
+        try:
+            crop = json.loads(record.icon_crop) if record.icon_crop and record.icon_source else None
+        except ValueError:
+            crop = None
+        icon["crop"] = crop
     features = feature_status(guild)
     settings = await storage.get_guild_settings(guild.id)
     return Result(True, "ok", {
         "user": {
             "id": str(member.id),
             "name": member.display_name,
-            "avatar_url": palette_avatar(member).url,
+            "avatar_url": await asset_data_url(palette_avatar(member)),
         },
         "guild": {
             "id": str(guild.id),
@@ -1872,6 +1894,7 @@ async def picker_state(member: discord.Member) -> Result:
             "icons": features.icons,
             # Test switch: the page unlocks Gradient/Holographic for previewing; saving is still refused.
             "preview_enhanced": debug_preview_enhanced_active() and not features.gradient,
+            "preview_icons": debug_preview_icons_active() and not features.icons,
         },
         "role": {
             "name": (role.name if role is not None else None) or record.name,
@@ -1884,4 +1907,53 @@ async def picker_state(member: discord.Member) -> Result:
         "cooldown_seconds": settings.cooldown_seconds,
         "next_change_at": await next_change_at(guild.id, member.id, settings),
         "name_max": validation.NAME_MAX,
+        "icon_source_max": images.source_max_bytes(),
     })
+
+
+def _data_url(data: bytes) -> str:
+    kind = "png" if images.sniff_type(data) == "PNG" else "jpeg"
+    return f"data:image/{kind};base64," + base64.b64encode(data).decode()
+
+
+_asset_cache: "OrderedDict[str, bytes]" = OrderedDict()
+ASSET_CACHE_SIZE = 256
+
+
+async def asset_data_url(asset: Any) -> Optional[str]:
+    """A Discord CDN image (avatar, role icon) as a data: URL, so the picker never loads remote images.
+
+    Cached by URL (avatar URLs change when the avatar does). None if it can't be downloaded.
+    """
+    key = getattr(asset, "url", None)
+    if not key:
+        return None
+    data = _asset_cache.get(key)
+    if data is None:
+        try:
+            data = await asset.read()
+        except Exception:
+            logger.warning("Couldn't download %s for the color picker", key.split("?")[0])
+            return None
+        if not isinstance(data, (bytes, bytearray)) or images.sniff_type(bytes(data)) is None:
+            return None  # only PNG/JPEG go into the page
+        data = bytes(data)
+        _asset_cache[key] = data
+        while len(_asset_cache) > ASSET_CACHE_SIZE:
+            _asset_cache.popitem(last=False)
+    else:
+        _asset_cache.move_to_end(key)
+    return _data_url(data)
+
+
+async def icon_source(member: discord.Member) -> Optional[bytes]:
+    """The original icon image for re-cropping (or the final icon if no original was kept)."""
+    record = await storage.get_custom_role(member.guild.id, member.id)
+    if record is None:
+        return None
+    return record.icon_source or record.icon_png
+
+
+def icons_usable(guild: discord.Guild) -> bool:
+    """The Role Icon tab works here: the server has Role Icons, or the test switch is on."""
+    return FEATURE_ICONS in guild.features or debug_preview_icons_active()

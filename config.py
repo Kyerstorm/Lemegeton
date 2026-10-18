@@ -212,6 +212,14 @@ LUNAR_DEBUG_FAIL_MEMBER_FETCH = os.getenv("LUNAR_DEBUG_FAIL_MEMBER_FETCH", "fals
 LUNAR_DEBUG_PREVIEW_ENHANCED_COLORS = os.getenv("LUNAR_DEBUG_PREVIEW_ENHANCED_COLORS", "false").strip().lower() in {
     "1", "true", "yes", "on",
 }
+# TEST ONLY: unlock the Role Icon tab of the color picker on a server without Role Icons
+# (Boost Level 2). Setting an icon is still refused. Honoured only in development.
+LUNAR_DEBUG_PREVIEW_ROLE_ICONS = os.getenv("LUNAR_DEBUG_PREVIEW_ROLE_ICONS", "false").strip().lower() in {
+    "1", "true", "yes", "on",
+}
+# Largest original image accepted for a role icon (upload or link). The original is kept as-is
+# so the icon can be re-cropped later; the icon sent to Discord is always under 256 KB.
+LUNAR_ICON_SOURCE_MAX_BYTES = max(256 * 1024, _int_env("LUNAR_ICON_SOURCE_MAX_BYTES", 8 * 1024 * 1024))
 # Web color picker: serve it even when the dashboard isn't configured.
 LUNAR_PICKER_ENABLED = os.getenv("LUNAR_PICKER_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 # Base address used in picker links (no trailing slash). Production must use https://.

@@ -43,6 +43,8 @@ class CustomRole:
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
     icon_emoji: Optional[str] = None  # a Unicode emoji icon; only one of icon_png / icon_emoji is set
+    icon_source: Optional[bytes] = None  # the original image as uploaded (icon_png is cut from it)
+    icon_crop: Optional[str] = None      # JSON {"x", "y", "size"}: the square cut from icon_source
 
 
 _SETTINGS_COLUMNS = (
@@ -73,8 +75,16 @@ _ROLE_COLUMNS = (
     "created_at",
     "updated_at",
     "icon_emoji",
+    "icon_source",
+    "icon_crop",
 )
 _ROLE_SELECT = ", ".join(_ROLE_COLUMNS)
+# Lists never need the images (an original can be several MB), so they read NULL instead.
+# Records from these lists must never be written back with upsert_custom_role.
+_IMAGE_COLUMNS = {"icon_png", "icon_source"}
+_ROLE_SELECT_LIGHT = ", ".join(f"NULL AS {c}" if c in _IMAGE_COLUMNS else c for c in _ROLE_COLUMNS)
+# Only update_custom_role writes these (upserts keep whatever is stored).
+_UPSERT_SKIP = {"created_at", "updated_at", "last_changed_at", "icon_source", "icon_crop"}
 _ROLE_UPDATABLE = set(_ROLE_COLUMNS) - {"guild_id", "user_id", "created_at", "updated_at"}
 
 
@@ -88,8 +98,9 @@ def _load_json_list(raw) -> list:
 
 def _row_to_role(row) -> CustomRole:
     values = {column: row[index] for index, column in enumerate(_ROLE_COLUMNS)}
-    if values["icon_png"] is not None:
-        values["icon_png"] = bytes(values["icon_png"])
+    for column in ("icon_png", "icon_source"):
+        if values[column] is not None:
+            values[column] = bytes(values[column])
     return CustomRole(**values)
 
 
@@ -170,7 +181,7 @@ async def get_custom_role(guild_id: int, user_id: int) -> Optional[CustomRole]:
 async def get_custom_role_by_role_id(guild_id: int, role_id: int) -> Optional[CustomRole]:
     row = await execute_db_operation(
         "get lunar custom role by role id",
-        f"SELECT {_ROLE_SELECT} FROM lunar_custom_roles WHERE guild_id = ? AND role_id = ?",
+        f"SELECT {_ROLE_SELECT_LIGHT} FROM lunar_custom_roles WHERE guild_id = ? AND role_id = ?",
         (guild_id, role_id),
         fetch_type="one",
     )
@@ -183,7 +194,7 @@ async def upsert_custom_role(record: CustomRole) -> None:
     Creating or restoring a role isn't a "change" for the cooldown, so
     last_changed_at is left as it was (NULL for a new record).
     """
-    columns = [c for c in _ROLE_COLUMNS if c not in {"created_at", "updated_at", "last_changed_at"}]
+    columns = [c for c in _ROLE_COLUMNS if c not in _UPSERT_SKIP]
     values = [getattr(record, c) for c in columns]
     assignments = ", ".join(
         f"{c} = excluded.{c}" for c in columns if c not in {"guild_id", "user_id"}
@@ -229,7 +240,7 @@ async def seconds_since_change(guild_id: int, user_id: int) -> Optional[float]:
 async def list_active_roles(guild_id: int) -> List[CustomRole]:
     rows = await execute_db_operation(
         "list lunar active roles",
-        f"SELECT {_ROLE_SELECT} FROM lunar_custom_roles "
+        f"SELECT {_ROLE_SELECT_LIGHT} FROM lunar_custom_roles "
         "WHERE guild_id = ? AND status = ? AND role_id IS NOT NULL",
         (guild_id, STATUS_ACTIVE),
         fetch_type="all",
@@ -280,7 +291,7 @@ async def list_unhydrated_roles() -> List[CustomRole]:
     """Records copied from booster_roles whose name/colors haven't been read from Discord yet."""
     rows = await execute_db_operation(
         "list unhydrated lunar roles",
-        f"SELECT {_ROLE_SELECT} FROM lunar_custom_roles "
+        f"SELECT {_ROLE_SELECT_LIGHT} FROM lunar_custom_roles "
         "WHERE status = ? AND name IS NULL AND role_id IS NOT NULL",
         (STATUS_ACTIVE,),
         fetch_type="all",
@@ -305,7 +316,7 @@ async def list_roles(guild_id: int) -> List[CustomRole]:
     """Every record in a guild (any status)."""
     rows = await execute_db_operation(
         "list lunar roles",
-        f"SELECT {_ROLE_SELECT} FROM lunar_custom_roles WHERE guild_id = ?",
+        f"SELECT {_ROLE_SELECT_LIGHT} FROM lunar_custom_roles WHERE guild_id = ?",
         (guild_id,),
         fetch_type="all",
     )

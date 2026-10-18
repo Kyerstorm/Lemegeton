@@ -6,8 +6,8 @@ The full build spec is in [LUNAR_ROLES_SPEC.md](LUNAR_ROLES_SPEC.md).
 ## Deployment (Railway)
 
 - Set `ENVIRONMENT=production` on Railway. When it's unset, the bot treats itself as development.
-- Never set `LUNAR_DEBUG_FAIL_MEMBER_FETCH`, `LUNAR_DEBUG_PREVIEW_ENHANCED_COLORS` or
-  `LUNAR_MASS_ARCHIVE_THRESHOLD=0` in production.
+- Never set `LUNAR_DEBUG_FAIL_MEMBER_FETCH`, `LUNAR_DEBUG_PREVIEW_ENHANCED_COLORS`,
+  `LUNAR_DEBUG_PREVIEW_ROLE_ICONS` or `LUNAR_MASS_ARCHIVE_THRESHOLD=0` in production.
   - `LUNAR_DEBUG_FAIL_MEMBER_FETCH` is a test switch that stops reconcile from removing any roles.
     It only takes effect when `ENVIRONMENT=development`, and it logs a loud warning at startup and
     in every log channel while it's on.
@@ -15,11 +15,24 @@ The full build spec is in [LUNAR_ROLES_SPEC.md](LUNAR_ROLES_SPEC.md).
     in the color picker page on a server without Enhanced Role Colors, so their design can be
     checked. Saving them is still refused. It only takes effect when `ENVIRONMENT=development`, and
     it logs the same loud warning at startup and in every log channel.
+  - `LUNAR_DEBUG_PREVIEW_ROLE_ICONS` is the same kind of test switch for the picker's Role Icon
+    tab on a server without Role Icons (Boost Level 2): upload, link and crop work, but setting
+    the icon is refused.
   - `LUNAR_MASS_ARCHIVE_THRESHOLD=0` makes every single removal wait for an admin to confirm.
 - Lunar Roles settings and their defaults (see `.env.example`):
   - `LUNAR_RECONCILE_MINUTES=30`: minutes between automatic checks; one also runs at startup.
   - `LUNAR_MASS_ARCHIVE_THRESHOLD=10`: removing more than this many custom roles at once needs an
     admin to confirm.
+  - `LUNAR_ICON_SOURCE_MAX_BYTES=8388608` (8 MB): the largest original image for a role icon,
+    by upload, link or `/lunar icon`.
+- **Database storage for icons:** each member's original icon image is kept exactly as uploaded
+  (up to 8 MB), so it can be re-cropped later without losing quality.
+  - The final icon sent to Discord is a separate small PNG (at most 256 KB).
+  - Worst case is about 8 MB per member with an image icon. A typical phone photo is 2–5 MB, and
+    most uploads are far smaller.
+  - Originals are kept for saved (archived) roles too, so they come back on restore.
+  - They're deleted when the icon is removed or replaced by an emoji, and by `/lunar-admin remove`.
+  - Lower `LUNAR_ICON_SOURCE_MAX_BYTES` to cap this.
 - The bot needs the **Server Members** and **Message Content** privileged intents enabled in the
   Discord Developer Portal, or it can't connect.
 
@@ -130,9 +143,32 @@ once the CNAME works. HTTPS certificates are automatic for both kinds of domain.
     Losing the role, an admin `remove` or disabling Lunar Roles ends access at once.
   - Limits: 60 reads and 20 changes a minute per link, and 30 bad links per address per
     10 minutes.
+- **Image links (Role Icon tab):** the bot downloads them itself, with these rules:
+  - **Allowed links:** `https://` on port 443 only, with no username or password in the link.
+  - **Public addresses only:** every address the name resolves to must be public (an
+    allow-list). Private, local, cloud-metadata and IPv6-wrapped private addresses
+    (6to4, NAT64, Teredo, IPv4-mapped) are refused.
+  - **Pinned connection:** the bot connects only to the addresses it checked.
+  - **Download limits:** no redirects, 10 seconds, 8 MB, PNG/JPEG only, checked again by content.
+  - **Rate limits:** 6 links a minute per member, and at most 3 fetches at once for the whole bot.
+  - **Logging:** only the domain and the outcome go to `logs/lunar_roles.log`, never the full link.
+  - **User-Agent:** `LemegetonLunarRoles/1.0 (+<LUNAR_PUBLIC_URL>/lunar; role icon fetch)`.
+    Some sites (Wikimedia) refuse requests without a contact address like this.
+  - The bot only fetches links on servers that have Role Icons (or with the test switch on).
 - **Color picker page:**
-  - It has a live preview of Discord's dark and light themes, plus Color and Name tabs. Icons
-    come in the next update; for now members use `/lunar icon`.
+  - It has a live preview of Discord's dark and light themes, plus Color, Role Icon and Name tabs.
+  - **Role Icon tab:**
+    - **Sources:** upload a PNG/JPEG, load one from a link, or type one emoji.
+    - **Cropping:** images are cropped in the page (drag, zoom, keyboard), and the server cuts the
+      square from the original.
+    - **The icon sent to Discord:** the largest of 256, 128 or 64 px that fits under 256 KB
+      (LANCZOS, PNG). `/lunar icon` uses the same rule, and its icons can be re-cropped from the
+      picker.
+    - "Edit current crop" reopens the stored original at the saved crop.
+  - **Image size check:** the page reads an image's width and height from its header before the
+    browser decodes it, so a decompression bomb is refused without freezing the member's browser.
+  - **Images on the page** only ever come from the bot itself (`data:`/`blob:` URLs, enforced by
+    the page's CSP). Avatars and Discord-hosted icons are downloaded by the bot and passed on.
   - Changes made on the page follow the same rules as the commands (name filter, cooldown,
     feature checks) and are logged the same way.
   - **Restyling:** edit only `web/static/lunar/lunar-theme.css`. Every color, radius, font,

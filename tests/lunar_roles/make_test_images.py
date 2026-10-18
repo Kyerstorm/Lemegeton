@@ -5,13 +5,15 @@ File 11 is a decompression bomb: never open it in an image viewer.
 """
 import io
 import os
-import random
 import sys
 
 from PIL import Image, ImageDraw
 
 out = sys.argv[1]
 os.makedirs(out, exist_ok=True)
+# Over 256 KB used to be refused; since Milestone 8 originals up to 8 MB are fine.
+if os.path.exists(os.path.join(out, "04_too_big_over_256kb.png")):
+    os.remove(os.path.join(out, "04_too_big_over_256kb.png"))
 
 
 def path(name):
@@ -41,9 +43,14 @@ exif = Image.Exif()
 exif[0x0112] = 6  # "rotate 90° clockwise" camera orientation
 rot.save(path("03_ok_rotated_exif.jpg"), exif=exif.tobytes(), quality=85)
 
+# A big but valid photo-like original (a few MB): accepted, cropped, sent to Discord under 256 KB
+photo = Image.blend(gradient(600, 400).resize((3000, 2000)), Image.effect_noise((3000, 2000), 60).convert("RGB"), 0.35)
+ImageDraw.Draw(photo).ellipse((1200, 700, 1800, 1300), fill=(250, 240, 120))
+photo.save(path("12_ok_big_photo.jpg"), quality=97)
+
 # Refused
-noise = Image.frombytes("RGB", (420, 420), bytes(random.getrandbits(8) for _ in range(420 * 420 * 3)))
-noise.save(path("04_too_big_over_256kb.png"))
+noise = Image.frombytes("RGB", (1700, 1700), os.urandom(1700 * 1700 * 3))  # ~8.7 MB, can't compress
+noise.save(path("04_too_big_over_8mb.png"))
 
 frames = [Image.new("RGB", (64, 64), c) for c in ((255, 0, 0), (0, 0, 255))]
 frames[0].save(path("05_animated.png"), save_all=True, append_images=frames[1:], duration=300, loop=0)

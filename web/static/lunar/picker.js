@@ -5,6 +5,7 @@
 //   Authorization header.
 // - Every value that comes from users or the server (names, messages) is inserted with
 //   textContent, never as HTML. Colors are only used after normalizeHex() has checked them.
+// - Images are only ever data: or blob: URLs (the page's CSP allows nothing remote).
 // - The server re-checks everything; this page only previews and sends.
 (() => {
   "use strict";
@@ -59,6 +60,10 @@
     });
     return parts.join(" ") || "0s";
   };
+  const formatSize = (bytes) => (bytes >= 1048576
+    ? `${(bytes / 1048576).toFixed(1).replace(/\.0$/, "")} MB`
+    : `${Math.max(1, Math.floor(bytes / 1024))} KB`);
+  const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
 
   // ------------------------------------------------------------------ color math
 
@@ -108,13 +113,20 @@
   let saved = null;            // the role as the server last reported it
   const edit = { mode: "solid", primary: null, secondary: null, name: "" };
   let modesAllowed = false;    // Gradient/Holographic selectable (server has them, or the test switch)
+  let iconsUsable = false;     // Role Icon tab usable (server has Role Icons, or the test switch)
   let busy = false;
   let writable = true;
-  let expiresAt = 0;          // closes this soon without use (the server resets it on every successful call)
-  let maxExpiresAt = 0;       // and this at the latest
+  let expiresAt = 0;           // closes this soon without use (the server resets it on every successful call)
+  let maxExpiresAt = 0;        // and this at the latest
   let nextChangeAt = null;
   let palette = [];
   const fields = [];
+
+  // A role icon being prepared: an image (the original file, never re-encoded here) with its crop
+  // square in the image's own pixels, and/or an emoji. Which one is pending depends on the
+  // "Icon from" switch.
+  const iconEdit = { blob: null, url: null, img: null, w: 0, h: 0, crop: null, emoji: "" };
+  let previewUrl = null;       // data: URL of the current crop, for the preview cards
 
   const savedEdit = () => {
     const role = saved.role;
@@ -133,7 +145,15 @@
     return false;
   };
   const nameDirty = () => saved !== null && edit.name.trim() !== savedEdit().name;
-  const isDirty = () => saved !== null && (colorDirty() || nameDirty());
+  const iconSource = () => {
+    const checked = document.querySelector('input[name="icon-source"]:checked');
+    return checked ? checked.value : "upload";
+  };
+  const iconPending = () => {
+    if (iconSource() === "emoji") { return iconEdit.emoji ? "emoji" : null; }
+    return iconEdit.url ? "image" : null;
+  };
+  const isDirty = () => saved !== null && (colorDirty() || nameDirty() || iconPending() !== null);
 
   // ------------------------------------------------------------------ banners and problems
 
@@ -158,27 +178,42 @@
 
   // ------------------------------------------------------------------ API
 
-  const api = (path, options) => {
-    const init = Object.assign({
+  const noteExpiry = (expires, latest) => {
+    if (expires) {
+      expiresAt = Number(expires);
+      maxExpiresAt = Number(latest) || maxExpiresAt;
+    }
+  };
+
+  // options: {body} = JSON POST, {form} = multipart POST, {method} = e.g. DELETE
+  const request = (path, options) => {
+    const opts = options || {};
+    const init = {
       headers: { "Authorization": "Bearer " + token },
       credentials: "omit",
       cache: "no-store",
       referrerPolicy: "no-referrer",
-    }, options || {});
-    if (init.body !== undefined) {
+    };
+    if (opts.method) { init.method = opts.method; }
+    if (opts.body !== undefined) {
       init.method = "POST";
       init.headers["Content-Type"] = "application/json";
-      init.body = JSON.stringify(init.body);
+      init.body = JSON.stringify(opts.body);
     }
-    return fetch("/lunar/api/" + path, init).then((response) =>
-      response.json().catch(() => ({})).then((body) => {
-        if (body && body.expires_at) {
-          expiresAt = body.expires_at;
-          maxExpiresAt = body.max_expires_at || maxExpiresAt;
-        }
-        return { status: response.status, body };
-      }));
+    if (opts.form) {
+      init.method = "POST";
+      init.body = opts.form;
+    }
+    return fetch("/lunar/api/" + path, init).then((response) => {
+      noteExpiry(response.headers.get("X-Lunar-Expires-At"), response.headers.get("X-Lunar-Max-Expires-At"));
+      return response;
+    });
   };
+  const readJson = (response) => response.json().catch(() => ({})).then((body) => {
+    if (body) { noteExpiry(body.expires_at, body.max_expires_at); }
+    return { status: response.status, body };
+  });
+  const api = (path, options) => request(path, options).then(readJson);
 
   // ------------------------------------------------------------------ color fields
 
@@ -274,8 +309,8 @@
 
     const pointTo = (event) => {
       const rect = square.getBoundingClientRect();
-      hsv.s = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-      hsv.v = 1 - Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+      hsv.s = clamp((event.clientX - rect.left) / rect.width, 0, 1);
+      hsv.v = 1 - clamp((event.clientY - rect.top) / rect.height, 0, 1);
       fromHsv();
     };
 
@@ -298,7 +333,7 @@
       const move = moves[event.key];
       if (!move) { return; }
       event.preventDefault();
-      hsv[move[0]] = Math.min(1, Math.max(0, hsv[move[0]] + move[1]));
+      hsv[move[0]] = clamp(hsv[move[0]] + move[1], 0, 1);
       fromHsv();
     });
     hue.addEventListener("input", () => { hsv.h = Number(hue.value); fromHsv(); });
@@ -313,8 +348,6 @@
 
     const field = {
       key, sync, close, setError, pop, button, container,
-      typedValue: () => normalizeHex(hex.value),
-      hasText: () => hex.value.trim() !== "",
       fromHex: (value) => {
         const next = rgbToHsv(hexToRgb(value));
         if (next.s === 0 || next.v === 0) { next.h = hsv.h; }
@@ -357,12 +390,34 @@
     }
   }
 
+  // The icon shown next to the name: what's being prepared, or else the saved one.
+  function renderPreviewIcon() {
+    let icon = saved.role.icon;
+    const pending = iconPending();
+    if (pending === "image" && previewUrl) {
+      icon = { type: "image", url: previewUrl };
+    } else if (pending === "emoji") {
+      icon = { type: "emoji", value: iconEdit.emoji };
+    }
+    all("[data-icon-img]").forEach((img) => {
+      const isImage = Boolean(icon && icon.type === "image");
+      if (isImage) { img.src = icon.url; }
+      show(img, isImage);
+    });
+    all("[data-icon-emoji]").forEach((el) => {
+      const isEmoji = Boolean(icon && icon.type === "emoji");
+      el.textContent = isEmoji ? icon.value : "";
+      show(el, isEmoji);
+    });
+  }
+
   function updatePreview() {
     if (!saved) { return; }
     all("[data-name]").forEach((el) => {
       el.textContent = saved.user.name;
       styleName(el);
     });
+    renderPreviewIcon();
 
     const dot = $("chip-dot");
     dot.classList.remove("holo-fill");
@@ -399,24 +454,15 @@
     const dirty = isDirty();
     $("reset").disabled = !dirty;
     $("dirty-note").textContent = dirty ? "You have unsaved changes." : "No unsaved changes.";
+    refreshButtons();
   }
 
   function showIcon() {
     const icon = saved.role.icon;
-    all("[data-icon-img]").forEach((img) => {
-      const isImage = Boolean(icon && icon.type === "image");
-      if (isImage) { img.src = icon.url; }
-      show(img, isImage);
-    });
-    all("[data-icon-emoji]").forEach((el) => {
-      const isEmoji = Boolean(icon && icon.type === "emoji");
-      el.textContent = isEmoji ? icon.value : "";
-      show(el, isEmoji);
-    });
     const current = $("icon-current");
     current.textContent = "";
     if (icon && icon.type === "image") {
-      const img = make("img", "role-icon", { alt: "Your current role icon", referrerpolicy: "no-referrer" });
+      const img = make("img", "role-icon", { alt: "Your current role icon" });
       img.src = icon.url;
       current.append(img);
     } else if (icon && icon.type === "emoji") {
@@ -424,6 +470,7 @@
     } else {
       current.textContent = "None";
     }
+    renderPreviewIcon();
   }
 
   // ------------------------------------------------------------------ style switch and palette
@@ -464,6 +511,334 @@
     });
   }
 
+  // ------------------------------------------------------------------ role icon: loading and cropping
+
+  const PNG_SIGNATURE = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+  const MAX_SIDE = 4096;          // same limits as the server
+  const MAX_PIXELS = 16000000;
+  const MIN_CROP = 16;
+  const PREVIEW_SIDE = 128;       // canvas size for the live preview (shown smaller)
+  let previewFrame = 0;
+
+  // Width and height from the file's header, read BEFORE the browser decodes anything, so a
+  // decompression bomb (a small file with huge dimensions) is refused without being opened.
+  // Returns null if no size header was found in the bytes given.
+  function headerSize(bytes, isPng) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (isPng) {
+      return bytes.length >= 24 ? { w: view.getUint32(16), h: view.getUint32(20) } : null;
+    }
+    let i = 2;  // JPEG: walk the markers to the first "start of frame"
+    while (i + 9 < bytes.length) {
+      if (bytes[i] !== 0xFF) { i += 1; continue; }
+      const marker = bytes[i + 1];
+      if (marker === 0xFF) { i += 1; continue; }
+      if (marker === 0xD8 || marker === 0x01 || (marker >= 0xD0 && marker <= 0xD7)) { i += 2; continue; }
+      const length = view.getUint16(i + 2);
+      if (marker >= 0xC0 && marker <= 0xCF && marker !== 0xC4 && marker !== 0xC8 && marker !== 0xCC) {
+        return { h: view.getUint16(i + 5), w: view.getUint16(i + 7) };
+      }
+      i += 2 + length;
+    }
+    return null;
+  }
+
+  const validCrop = (crop, w, h) => crop && [crop.x, crop.y, crop.size].every(Number.isInteger)
+    && crop.size >= MIN_CROP && crop.x >= 0 && crop.y >= 0 && crop.x + crop.size <= w && crop.y + crop.size <= h;
+
+  function clearIconImage() {
+    if (iconEdit.url) { URL.revokeObjectURL(iconEdit.url); }
+    Object.assign(iconEdit, { blob: null, url: null, img: null, w: 0, h: 0, crop: null });
+    previewUrl = null;
+    show($("crop"), false);
+    $("crop-img").removeAttribute("src");
+    $("crop-preview").removeAttribute("src");
+  }
+
+  // Check a chosen or downloaded image like the server will, then open it in the crop editor.
+  async function loadImageBlob(blob, crop) {
+    const max = saved.icon_source_max;
+    if (blob.size > max) {
+      throw new Error(`That image is ${formatSize(blob.size)}. Images can be at most ${formatSize(max)}.`);
+    }
+    const head = new Uint8Array(await blob.slice(0, 8).arrayBuffer());
+    const isPng = PNG_SIGNATURE.every((byte, i) => head[i] === byte);
+    const isJpeg = head[0] === 0xFF && head[1] === 0xD8 && head[2] === 0xFF;
+    if (!isPng && !isJpeg) {
+      throw new Error("Only PNG or JPEG images work as role icons (checked by the file's content, not its name).");
+    }
+    const declared = headerSize(new Uint8Array(await blob.slice(0, 256 * 1024).arrayBuffer()), isPng);
+    if (!declared) {
+      throw new Error("I couldn't read that image. It may be damaged.");
+    }
+    if (declared.w > MAX_SIDE || declared.h > MAX_SIDE || declared.w * declared.h > MAX_PIXELS) {
+      throw new Error(`That image is too large in pixels. Please use something no bigger than ${MAX_SIDE}x${MAX_SIDE}.`);
+    }
+    const url = URL.createObjectURL(blob);
+    const probe = new Image();
+    try {
+      // load/error events, not decode(): decode() can wait forever in a hidden or background tab.
+      await new Promise((resolve, reject) => {
+        probe.addEventListener("load", resolve, { once: true });
+        probe.addEventListener("error", reject, { once: true });
+        probe.src = url;
+      });
+    } catch (e) {
+      URL.revokeObjectURL(url);
+      throw new Error("I couldn't read that image. It may be damaged.");
+    }
+    const w = probe.naturalWidth;
+    const h = probe.naturalHeight;
+    if (w > MAX_SIDE || h > MAX_SIDE || w * h > MAX_PIXELS) {
+      URL.revokeObjectURL(url);
+      throw new Error(`That image is too large in pixels. Please use something no bigger than ${MAX_SIDE}x${MAX_SIDE}.`);
+    }
+    clearIconImage();
+    const side = Math.min(w, h);
+    Object.assign(iconEdit, {
+      blob, url, w, h, img: probe,  // already decoded: the preview draws from it
+      crop: validCrop(crop, w, h)
+        ? { x: crop.x, y: crop.y, size: crop.size }
+        : { x: Math.floor((w - side) / 2), y: Math.floor((h - side) / 2), size: side },
+    });
+    $("crop-img").src = url;
+    $("crop-zoom").max = String(Math.max(1, Math.min(10, side / MIN_CROP)));
+    show($("crop"), true);
+    layoutCrop();
+    updatePreview();
+  }
+
+  function clampCrop() {
+    const c = iconEdit.crop;
+    const side = Math.min(iconEdit.w, iconEdit.h);
+    c.size = clamp(c.size, MIN_CROP, side);
+    c.x = clamp(c.x, 0, iconEdit.w - c.size);
+    c.y = clamp(c.y, 0, iconEdit.h - c.size);
+  }
+
+  function stageScale() {
+    return ($("crop-stage").clientWidth || 240) / iconEdit.crop.size;
+  }
+
+  function layoutCrop() {
+    if (!iconEdit.url) { return; }
+    clampCrop();
+    const scale = stageScale();
+    const img = $("crop-img");
+    img.style.width = `${iconEdit.w * scale}px`;
+    img.style.height = `${iconEdit.h * scale}px`;
+    img.style.transform = `translate(${-iconEdit.crop.x * scale}px, ${-iconEdit.crop.y * scale}px)`;
+    $("crop-zoom").value = String(Math.min(iconEdit.w, iconEdit.h) / iconEdit.crop.size);
+    const c = iconEdit.crop;
+    $("crop-stage").setAttribute("aria-label",
+      `Crop area: ${Math.round(c.size)} by ${Math.round(c.size)} pixels from the ${iconEdit.w} by ${iconEdit.h} image`);
+    schedulePreview();
+  }
+
+  // A short timer, not requestAnimationFrame: frames pause in hidden or throttled tabs.
+  function schedulePreview() {
+    if (previewFrame) { return; }
+    previewFrame = window.setTimeout(() => {
+      previewFrame = 0;
+      if (!iconEdit.url) { return; }
+      const canvas = document.createElement("canvas");
+      canvas.width = PREVIEW_SIDE;
+      canvas.height = PREVIEW_SIDE;
+      const ctx = canvas.getContext("2d");
+      ctx.imageSmoothingQuality = "high";
+      const c = iconEdit.crop;
+      ctx.drawImage(iconEdit.img, c.x, c.y, c.size, c.size, 0, 0, PREVIEW_SIDE, PREVIEW_SIDE);
+      previewUrl = canvas.toDataURL("image/png");
+      $("crop-preview").src = previewUrl;
+      updatePreview();
+    }, 30);
+  }
+
+  function moveCrop(dx, dy) {
+    iconEdit.crop.x += dx;
+    iconEdit.crop.y += dy;
+    layoutCrop();
+  }
+
+  function zoomCrop(zoom) {
+    const c = iconEdit.crop;
+    const side = Math.min(iconEdit.w, iconEdit.h);
+    const size = side / clamp(zoom, 1, Number($("crop-zoom").max));
+    const cx = c.x + c.size / 2;
+    const cy = c.y + c.size / 2;
+    c.size = size;
+    c.x = cx - size / 2;
+    c.y = cy - size / 2;
+    layoutCrop();
+  }
+
+  function setupCropEditor() {
+    const stage = $("crop-stage");
+    let drag = null;
+    stage.addEventListener("pointerdown", (event) => {
+      if (!iconEdit.url) { return; }
+      drag = { x: event.clientX, y: event.clientY };
+      stage.setPointerCapture(event.pointerId);
+    });
+    stage.addEventListener("pointermove", (event) => {
+      if (!drag) { return; }
+      const scale = stageScale();
+      moveCrop(-(event.clientX - drag.x) / scale, -(event.clientY - drag.y) / scale);
+      drag = { x: event.clientX, y: event.clientY };
+    });
+    const stop = () => { drag = null; };
+    stage.addEventListener("pointerup", stop);
+    stage.addEventListener("pointercancel", stop);
+    stage.addEventListener("wheel", (event) => {
+      if (!iconEdit.url) { return; }
+      event.preventDefault();
+      zoomCrop(Number($("crop-zoom").value) * (event.deltaY < 0 ? 1.1 : 1 / 1.1));
+    }, { passive: false });
+    stage.addEventListener("keydown", (event) => {
+      if (!iconEdit.url) { return; }
+      const step = iconEdit.crop.size * (event.shiftKey ? 0.1 : 0.02);
+      // Arrow keys move the image (so the crop square moves the other way).
+      const moves = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] };
+      if (moves[event.key]) {
+        event.preventDefault();
+        moveCrop(...moves[event.key]);
+      } else if (event.key === "+" || event.key === "=") {
+        event.preventDefault();
+        zoomCrop(Number($("crop-zoom").value) * 1.1);
+      } else if (event.key === "-" || event.key === "_") {
+        event.preventDefault();
+        zoomCrop(Number($("crop-zoom").value) / 1.1);
+      }
+    });
+    $("crop-zoom").addEventListener("input", () => { if (iconEdit.url) { zoomCrop(Number($("crop-zoom").value)); } });
+    window.addEventListener("resize", layoutCrop);
+  }
+
+  function handleFile(file) {
+    if (!file) { return; }
+    setStatus("icon-load-status", true, "Checking the image…");
+    loadImageBlob(file).then(() => {
+      setStatus("icon-load-status", true, "Loaded. Drag and zoom to crop it, then press Set icon.");
+    }).catch((err) => setStatus("icon-load-status", false, err.message));
+  }
+
+  // A non-image reply from the icon endpoints: show why (and lock the page if access ended).
+  function iconLoadProblem(status, body) {
+    const message = (body && body.message) || "Something went wrong. Try again in a moment.";
+    if (status === 401) { expired(message); } else if (status === 403 && body && body.error === "not_allowed") {
+      lockPage("You can't change this role right now", message);
+    }
+    setStatus("icon-load-status", false, message);
+  }
+
+  function loadFromServer(button, path, options, crop, success) {
+    if (busy || !writable) { return; }
+    busy = true;
+    const label = button.textContent;
+    button.textContent = "Loading…";
+    button.setAttribute("aria-busy", "true");
+    refreshButtons();
+    setStatus("icon-load-status", true, "");
+    request(path, options).then((response) => {
+      if (response.ok && (response.headers.get("Content-Type") || "").startsWith("image/")) {
+        return response.blob().then((blob) => loadImageBlob(blob, crop)).then(() => {
+          setStatus("icon-load-status", true, success);
+        });
+      }
+      return readJson(response).then(({ status, body }) => iconLoadProblem(status, body));
+    }).catch((err) => {
+      setStatus("icon-load-status", false, (err && err.message) || "Can't reach the bot. Check your connection and try again.");
+    }).finally(() => {
+      busy = false;
+      button.textContent = label;
+      button.removeAttribute("aria-busy");
+      refreshButtons();
+    });
+  }
+
+  function showIconSource() {
+    const source = iconSource();
+    show($("icon-upload"), source === "upload");
+    show($("icon-link"), source === "link");
+    show($("icon-emoji"), source === "emoji");
+    show($("crop"), source !== "emoji" && Boolean(iconEdit.url));
+    if (source !== "emoji") { layoutCrop(); }
+    updatePreview();
+  }
+
+  function setupIconTab() {
+    all("[data-source-max]").forEach((el) => { el.textContent = formatSize(saved.icon_source_max); });
+    show($("icon-tools"), iconsUsable);
+    show($("icon-unavailable"), !iconsUsable);
+    all('input[name="icon-source"]').forEach((input) => input.addEventListener("change", showIconSource));
+
+    const fileInput = $("icon-file");
+    fileInput.addEventListener("change", () => {
+      handleFile(fileInput.files && fileInput.files[0]);
+      fileInput.value = "";
+    });
+    const zone = $("dropzone");
+    zone.addEventListener("dragover", (event) => { event.preventDefault(); zone.classList.add("drag-over"); });
+    zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
+    zone.addEventListener("drop", (event) => {
+      event.preventDefault();
+      zone.classList.remove("drag-over");
+      handleFile(event.dataTransfer && event.dataTransfer.files[0]);
+    });
+
+    $("icon-load").addEventListener("click", () => {
+      const url = $("icon-url").value.trim();
+      if (!url) { setStatus("icon-load-status", false, "Paste a link first."); return; }
+      loadFromServer($("icon-load"), "icon/fetch", { body: { url } }, null,
+        "Loaded. Drag and zoom to crop it, then press Set icon.");
+    });
+    $("icon-url").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") { event.preventDefault(); $("icon-load").click(); }
+    });
+
+    const emojiInput = $("emoji-input");
+    emojiInput.addEventListener("input", () => {
+      iconEdit.emoji = emojiInput.value.trim();
+      let note = "";
+      if (iconEdit.emoji && typeof Intl !== "undefined" && Intl.Segmenter) {
+        const count = Array.from(new Intl.Segmenter().segment(iconEdit.emoji)).length;
+        if (count > 1) { note = "Use exactly one emoji."; }
+      }
+      setStatus("icon-load-status", !note, note);
+      updatePreview();
+    });
+
+    $("edit-crop").addEventListener("click", () => {
+      const icon = saved.role.icon;
+      $("source-upload").checked = true;
+      showIconSource();
+      loadFromServer($("edit-crop"), "icon/source", {}, icon && icon.crop,
+        "Loaded your current icon. Adjust the crop, then press Set icon.");
+    });
+    $("set-icon").addEventListener("click", () => {
+      const button = $("set-icon");
+      if (iconSource() === "emoji") {
+        if (!iconEdit.emoji) { setStatus("status-icon", false, "Type or paste an emoji first."); return; }
+        submit(button, "status-icon", "icon/emoji", { body: { emoji: iconEdit.emoji } }, "icon");
+        return;
+      }
+      if (!iconEdit.blob) { setStatus("status-icon", false, "Choose an image or load a link first."); return; }
+      clampCrop();
+      const size = Math.floor(iconEdit.crop.size);
+      const x = clamp(Math.round(iconEdit.crop.x), 0, iconEdit.w - size);
+      const y = clamp(Math.round(iconEdit.crop.y), 0, iconEdit.h - size);
+      const form = new FormData();
+      form.append("image", iconEdit.blob, "original");
+      form.append("crop", JSON.stringify({ x, y, size }));
+      submit(button, "status-icon", "icon", { form }, "icon");
+    });
+    $("remove-icon").addEventListener("click", () => {
+      submit($("remove-icon"), "status-icon", "icon", { method: "DELETE" }, "icon");
+    });
+    setupCropEditor();
+    showIconSource();
+  }
+
   // ------------------------------------------------------------------ buttons and saving
 
   function cooling() {
@@ -474,11 +849,19 @@
     all("[data-set]").forEach((button) => {
       button.disabled = busy || !writable || cooling();
     });
+    const icon = saved && saved.role.icon;
+    all("[data-icon-action]").forEach((button) => {
+      const changes = button.id === "set-icon" || button.id === "remove-icon";
+      let off = busy || !writable || (changes && cooling());
+      if (button.id !== "remove-icon" && !iconsUsable) { off = true; }
+      if (button.id === "edit-crop" && !(icon && icon.type === "image" && icon.has_source)) { off = true; }
+      if (button.id === "remove-icon" && !icon) { off = true; }
+      button.disabled = off;
+    });
   }
 
   function setStatus(id, ok, message, notes) {
     const el = $(id);
-    el.textContent = "";
     el.className = "status " + (ok ? "status-ok" : "status-error");
     el.textContent = message || "";
     (notes || []).forEach((note) => {
@@ -500,6 +883,11 @@
       edit.name = fresh.name;
       $("name-input").value = fresh.name;
       updateNameCount();
+    } else if (part === "icon") {
+      clearIconImage();
+      iconEdit.emoji = "";
+      $("emoji-input").value = "";
+      setStatus("icon-load-status", true, "");
     }
     fields.forEach((f) => f.sync(false));
     showMode();
@@ -509,28 +897,9 @@
     tickCooldown();
   }
 
-  function save(kind, button) {
+  // Send a change and show the result. part = what the reply's state should refresh.
+  function submit(button, statusId, path, options, part) {
     if (busy || !writable) { return; }
-    let path = "color";
-    let body;
-    const statusId = `status-${kind}`;
-    if (kind === "name") {
-      path = "name";
-      body = { name: $("name-input").value };
-    } else if (kind === "holographic") {
-      body = { mode: "holographic" };
-    } else {
-      const needed = kind === "gradient" ? ["primary", "secondary"] : ["primary"];
-      const missing = needed.filter((key) => !edit[key]);
-      if (missing.length) {
-        fields.filter((f) => missing.includes(f.key) && !f.container.closest(".hidden")).forEach((f) => f.setError(HEX_HELP));
-        setStatus(statusId, false, kind === "gradient" ? "Pick both colors first." : "Pick a color first.");
-        return;
-      }
-      body = { mode: kind, primary: edit.primary };
-      if (kind === "gradient") { body.secondary = edit.secondary; }
-    }
-
     busy = true;
     const label = button.textContent;
     button.textContent = "Saving…";
@@ -538,20 +907,20 @@
     refreshButtons();
     setStatus(statusId, true, "");
 
-    api(path, { body }).then(({ status, body: reply }) => {
+    api(path, options).then(({ status, body: reply }) => {
       const message = (reply && reply.message) || "Something went wrong. Try again in a moment.";
       if (status === 401) { expired(message); setStatus(statusId, false, message); return; }
       if (status === 403) { lockPage("You can't change this role right now", message); setStatus(statusId, false, message); return; }
       if (status !== 200) { setStatus(statusId, false, message); return; }
       if (reply.retry_at) { nextChangeAt = reply.retry_at; tickCooldown(); }
       setStatus(statusId, reply.ok, message, reply.notes);
-      if (kind === "name") {
+      if (part === "name") {
         const err = $("name-error");
         err.textContent = reply.ok ? "" : message;
         show(err, !reply.ok);
         $("name-input").setAttribute("aria-invalid", reply.ok ? "false" : "true");
       }
-      if (reply.ok && reply.state) { applySaved(reply.state, kind === "name" ? "name" : "color"); }
+      if (reply.ok && reply.state) { applySaved(reply.state, part); }
     }).catch(() => {
       setStatus(statusId, false, "Can't reach the bot. Check your connection and try again.");
     }).finally(() => {
@@ -560,6 +929,28 @@
       button.removeAttribute("aria-busy");
       refreshButtons();
     });
+  }
+
+  function save(kind, button) {
+    if (kind === "name") {
+      submit(button, "status-name", "name", { body: { name: $("name-input").value } }, "name");
+      return;
+    }
+    if (kind === "holographic") {
+      submit(button, "status-holographic", "color", { body: { mode: "holographic" } }, "color");
+      return;
+    }
+    const statusId = `status-${kind}`;
+    const needed = kind === "gradient" ? ["primary", "secondary"] : ["primary"];
+    const missing = needed.filter((key) => !edit[key]);
+    if (missing.length) {
+      fields.filter((f) => missing.includes(f.key) && !f.container.closest(".hidden")).forEach((f) => f.setError(HEX_HELP));
+      setStatus(statusId, false, kind === "gradient" ? "Pick both colors first." : "Pick a color first.");
+      return;
+    }
+    const body = { mode: kind, primary: edit.primary };
+    if (kind === "gradient") { body.secondary = edit.secondary; }
+    submit(button, statusId, "color", { body }, "color");
   }
 
   // ------------------------------------------------------------------ timers
@@ -605,6 +996,7 @@
         show($(t.getAttribute("aria-controls")), on);
       });
       fields.forEach((f) => f.close(false));
+      if (tab.id === "tab-icon") { layoutCrop(); }
       if (focus) { tab.focus(); }
     };
     tabs.forEach((tab, index) => {
@@ -629,8 +1021,13 @@
     $("name-input").setAttribute("aria-invalid", "false");
     show($("name-error"), false);
     updateNameCount();
+    clearIconImage();
+    iconEdit.emoji = "";
+    $("emoji-input").value = "";
+    setStatus("icon-load-status", true, "");
     fields.forEach((f) => { f.setError(""); f.sync(false); });
     showMode();
+    showIconSource();
     updatePalette();
     updatePreview();
   }
@@ -644,11 +1041,15 @@
 
     const guild = saved.guild;
     modesAllowed = Boolean(guild.gradient || guild.preview_enhanced);
+    iconsUsable = Boolean(guild.icons || guild.preview_icons);
     show($("banner-debug"), Boolean(guild.preview_enhanced));
+    show($("banner-debug-icons"), Boolean(guild.preview_icons));
     show($("mode-hint"), !guild.gradient);
     ["gradient", "holographic"].forEach((mode) => { $(`mode-${mode}`).disabled = !modesAllowed; });
 
-    all("[data-avatar]").forEach((img) => { img.src = saved.user.avatar_url; });
+    all("[data-avatar]").forEach((img) => {
+      if (saved.user.avatar_url) { img.src = saved.user.avatar_url; }
+    });
     const time = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
     all("[data-time]").forEach((el) => { el.textContent = `Today at ${time}`; });
 
@@ -682,6 +1083,7 @@
     });
 
     setupTabs();
+    setupIconTab();
     showMode();
     showIcon();
     updatePreview();

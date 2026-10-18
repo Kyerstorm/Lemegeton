@@ -55,9 +55,9 @@ async def main():
     wide = Image.new("RGB", (1200, 400), (0, 0, 255))
     wide.paste((255, 255, 255), (500, 100, 700, 300))
     out = Image.open(io.BytesIO(images.prepare_icon(png_bytes(wide))))
-    check("output is a 64x64 PNG", out.format == "PNG" and out.size == (64, 64))
+    check("output is a 256x256 PNG when the crop is big enough", out.format == "PNG" and out.size == (256, 256))
     check("wide image: center square kept (white middle, blue sides)",
-          out.getpixel((32, 32))[:3] == (255, 255, 255) and out.getpixel((2, 2))[:3] == (0, 0, 255))
+          out.getpixel((128, 128))[:3] == (255, 255, 255) and out.getpixel((4, 4))[:3] == (0, 0, 255))
     tall = Image.new("RGB", (100, 900), (0, 255, 0))
     check("tall image cropped to square", Image.open(io.BytesIO(images.prepare_icon(png_bytes(tall)))).size == (64, 64))
 
@@ -66,11 +66,11 @@ async def main():
     exif = Image.Exif()
     exif[0x0112] = 6  # display rotated 90° clockwise -> left half ends up on top
     out = Image.open(io.BytesIO(images.prepare_icon(png_bytes(rot, "JPEG", exif=exif.tobytes(), quality=95))))
-    top, bottom = out.getpixel((32, 4)), out.getpixel((32, 60))
+    top, bottom = out.getpixel((out.width // 2, 8)), out.getpixel((out.width // 2, out.height - 8))
     check("JPEG camera rotation applied", top[0] > 200 and top[2] < 80 and bottom[2] > 200, (top, bottom))
 
     for name, data, words in [
-        ("over 256 KB", b"\x89PNG\r\n\x1a\n" + b"0" * (257 * 1024), "256 KB"),
+        ("over 8 MB", b"\x89PNG\r\n\x1a\n" + b"0" * (8 * 1024 * 1024), "8 MB"),
         ("GIF content", png_bytes(Image.new("RGB", (8, 8)), "GIF"), "PNG or JPEG"),
         ("WebP content", png_bytes(Image.new("RGB", (8, 8)), "WEBP"), "PNG or JPEG"),
         ("text", b"hello", "PNG or JPEG"),
@@ -92,10 +92,15 @@ async def main():
     except images.ImageError as exc:
         check("refuses animated PNG", "Animated" in exc.message)
     try:
-        images.check_declared_size(300 * 1024)
+        images.check_declared_size(9 * 1024 * 1024)
         check("declared size checked before download", False)
+    except images.ImageError as exc:
+        check("declared size checked before download", "8 MB" in exc.message, exc.message)
+    try:
+        images.check_declared_size(300 * 1024)
+        check("originals over 256 KB are fine now (only the final icon has that limit)", True)
     except images.ImageError:
-        check("declared size checked before download", True)
+        check("originals over 256 KB are fine now (only the final icon has that limit)", False)
 
     # ------------------------------------------------------------ emoji check
     for good in ["🌙", "👍🏽", "🏳️‍🌈", "👨‍👩‍👧", "1️⃣", "🇵🇰", "❤️", " 🌙 "]:
@@ -196,7 +201,9 @@ async def main():
     rec = await record(m)
     role = g.get_role(role_id)
     applied = Image.open(io.BytesIO(role.display_icon.data)) if isinstance(role.display_icon, FakeIconAsset) else None
-    check("perk: image applied to the same role", r.ok and r.data.id == role_id and applied and applied.size == (64, 64), r.message)
+    check("perk: image applied to the same role", r.ok and r.data.id == role_id and applied
+          and applied.size[0] == applied.size[1] and applied.size[0] in images.ICON_SIZES
+          and len(role.display_icon.data) <= images.MAX_ICON_BYTES, r.message)
     check("perk: PNG saved for restore", rec.icon_png == role.display_icon.data and rec.icon_emoji is None)
     r = await service.set_icon(m, emoji="🌙")
     rec = await record(m)
@@ -436,9 +443,9 @@ async def main():
     check("live path: warns when Discord changed the file", any("the file was changed" in l for l in cap.lines))
 
     # 6) too big: refused before downloading
-    big = FakeAttachment(b"x", "huge.png", "image/png", declared=600 * 1024)
+    big = FakeAttachment(b"x", "huge.png", "image/png", declared=9 * 1024 * 1024)
     msg = await upload(big)
-    check("live path: >256 KB refused before download", "256 KB" in msg and big.reads == [])
+    check("live path: >8 MB refused before download", "8 MB" in msg and big.reads == [])
     service.logger.removeHandler(cap)
 
     await reset()

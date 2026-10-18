@@ -23,6 +23,11 @@
       <p>Gradient and Holographic are unlocked so you can preview them. This server doesn't have
         Discord's Enhanced Role Colors, so saving them will be refused.</p>
     </div>
+    <div id="banner-debug-icons" class="banner banner-warning hidden">
+      <strong>Test switch on</strong>
+      <p>The Role Icon tab is unlocked so you can test it. This server doesn't have Discord's Role
+        Icons (Boost Level 2), so setting an icon will be refused after your image or emoji is checked.</p>
+    </div>
 
     <section id="loading" class="card" aria-live="polite">Loading your role…</section>
 
@@ -132,7 +137,82 @@
 
         <div id="panel-icon" role="tabpanel" aria-labelledby="tab-icon" tabindex="0" class="hidden">
           <p>Current icon: <span id="icon-current"></span></p>
-          <p class="hint">Uploading an icon here comes in the next update. For now, use <code>/lunar icon</code> in Discord.</p>
+          <p id="icon-unavailable" class="hint hidden">Role icons need Boost Level 2 (Discord's Role Icons perk),
+            and this server doesn't have it yet.</p>
+
+          <div id="icon-tools">
+            <fieldset class="segmented">
+              <legend>Icon from</legend>
+              <div class="segments">
+                <input type="radio" name="icon-source" id="source-upload" value="upload" checked>
+                <label for="source-upload">Upload</label>
+                <input type="radio" name="icon-source" id="source-link" value="link">
+                <label for="source-link">Link</label>
+                <input type="radio" name="icon-source" id="source-emoji" value="emoji">
+                <label for="source-emoji">Emoji</label>
+              </div>
+            </fieldset>
+
+            <div id="icon-upload" class="mode-panel">
+              <input id="icon-file" class="visually-hidden" type="file" accept="image/png,image/jpeg"
+                     aria-describedby="dropzone-hint">
+              <label id="dropzone" class="dropzone" for="icon-file">
+                <span>Drop an image here, or click to browse</span>
+                <span id="dropzone-hint" class="hint">PNG or JPEG · up to <span data-source-max></span></span>
+              </label>
+            </div>
+
+            <div id="icon-link" class="mode-panel hidden">
+              <div class="field">
+                <label for="icon-url">Image link</label>
+                <div class="color-row">
+                  <input id="icon-url" class="text-input url-input" type="url" inputmode="url" autocomplete="off"
+                         spellcheck="false" placeholder="https://…" aria-describedby="icon-url-help">
+                  <button id="icon-load" class="btn btn-secondary" type="button" data-icon-action>Load</button>
+                </div>
+                <p id="icon-url-help" class="hint">A direct link to a PNG or JPEG, up to <span data-source-max></span>.
+                  Links that redirect won't work, so paste the image's own address.</p>
+              </div>
+            </div>
+
+            <div id="icon-emoji" class="mode-panel hidden">
+              <div class="field">
+                <label for="emoji-input">Emoji</label>
+                <input id="emoji-input" class="text-input emoji-input" type="text" maxlength="16" autocomplete="off"
+                       spellcheck="false" aria-describedby="emoji-help">
+                <p id="emoji-help" class="hint">Type or paste one standard emoji, like 🌙. Custom server emoji can't be role icons.</p>
+              </div>
+            </div>
+
+            <p id="icon-load-status" class="status" role="status"></p>
+
+            <div id="crop" class="mode-panel hidden">
+              <h2>Crop</h2>
+              <div class="crop-row">
+                <div id="crop-stage" class="crop-stage" tabindex="0" role="group"
+                     aria-label="Crop area" aria-describedby="crop-help">
+                  <img id="crop-img" alt="" draggable="false">
+                </div>
+                <div class="crop-side">
+                  <img id="crop-preview" class="crop-preview" alt="Your icon as it will look">
+                  <p class="hint">Preview</p>
+                </div>
+              </div>
+              <div class="field">
+                <label for="crop-zoom">Zoom</label>
+                <input id="crop-zoom" class="zoom" type="range" min="1" max="10" step="0.01" value="1">
+              </div>
+              <p id="crop-help" class="hint">Drag the image, or use the arrow keys (hold Shift for bigger steps).
+                Press + or − to zoom.</p>
+            </div>
+          </div>
+
+          <div class="toolbar">
+            <button id="set-icon" class="btn btn-primary" type="button" data-icon-action>Set icon</button>
+            <button id="edit-crop" class="btn btn-secondary" type="button" data-icon-action>Edit current crop</button>
+            <button id="remove-icon" class="btn btn-secondary" type="button" data-icon-action>Remove current icon</button>
+          </div>
+          <p id="status-icon" class="status" role="status"></p>
         </div>
 
         <div id="panel-name" role="tabpanel" aria-labelledby="tab-name" tabindex="0" class="hidden">

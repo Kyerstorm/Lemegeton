@@ -2094,6 +2094,16 @@ async def init_lunar_roles_tables():
         "add lunar icon_emoji column",
         "ALTER TABLE lunar_custom_roles ADD COLUMN IF NOT EXISTS icon_emoji TEXT",
     )
+    # Added in Milestone 8: the original icon image exactly as uploaded, and the square cut from it
+    # ({"x", "y", "size"} in the original's pixels), so the icon can be re-cropped without quality loss.
+    await execute_db_operation(
+        "add lunar icon_source column",
+        "ALTER TABLE lunar_custom_roles ADD COLUMN IF NOT EXISTS icon_source BYTEA",
+    )
+    await execute_db_operation(
+        "add lunar icon_crop column",
+        "ALTER TABLE lunar_custom_roles ADD COLUMN IF NOT EXISTS icon_crop TEXT",
+    )
     # A Discord role can belong to at most one tracked record.
     await execute_db_operation(
         "create lunar custom roles role_id index",

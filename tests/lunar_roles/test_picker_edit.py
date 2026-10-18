@@ -240,8 +240,11 @@ async def main():
         names = re.findall(r"textContent = [^;]*", js)
         check("names, server name and messages all go through textContent", len(names) >= 15, len(names))
         attr_writes = re.findall(r"\.(src|href)\s*=\s*([^;]+);", js)
-        check("only avatar/icon URLs from the server are used as src, never names",
-              all(v.strip() in {"saved.user.avatar_url", "icon.url"} for _, v in attr_writes), attr_writes)
+        # icon.url / avatar_url are data: URLs from the server; url = a blob: URL of the chosen file;
+        # previewUrl = a data: URL from the crop canvas. Never names or other text.
+        check("only image URLs (server data:, local blob:/canvas) are used as src, never names",
+              attr_writes and all(v.strip() in {"saved.user.avatar_url", "icon.url", "url", "previewUrl"}
+                                  for _, v in attr_writes), attr_writes)
 
         # ------------------------------------------------------------------ test switch: preview Gradient/Holographic
         config.LUNAR_DEBUG_PREVIEW_ENHANCED_COLORS = True
@@ -307,7 +310,7 @@ async def main():
                  and "aria-label" not in i]
     check("every input in the page has a label", not unlabeled, unlabeled)
     check("tabs use the ARIA tabs pattern", html.count('role="tab"') == 3 and 'role="tablist"' in html and html.count('role="tabpanel"') == 3)
-    check("status lines are announced", html.count('role="status"') == 4)
+    check("status lines are announced", html.count('role="status"') == 6)
 
     css = (STATIC / "picker.css").read_text(encoding="utf-8")
     lengths = re.findall(r"(?<![\w-])\d*\.?\d+(?:px|rem|em)\b", css)

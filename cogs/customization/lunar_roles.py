@@ -398,6 +398,10 @@ class LunarRoles(commands.Cog):
              service.debug_preview_enhanced_active(),
              "The color picker shows Gradient/Holographic even without Enhanced Role Colors (saving is still refused).",
              "the color picker unlocks Gradient and Holographic for previewing (saving them is still refused)"),
+            ("LUNAR_DEBUG_PREVIEW_ROLE_ICONS", config.LUNAR_DEBUG_PREVIEW_ROLE_ICONS,
+             service.debug_preview_icons_active(),
+             "The color picker's Role Icon tab works without Role Icons (setting an icon is still refused).",
+             "the color picker unlocks the Role Icon tab for testing (setting an icon is still refused)"),
         )
 
     @classmethod
@@ -752,7 +756,7 @@ class LunarRoles(commands.Cog):
     @lunar.command(name="icon", description="Set your role icon from an image or an emoji (empty = remove it)")
     @command_meta(section="Customization", name="Lunar Icon")
     @app_commands.describe(
-        image="PNG or JPEG, up to 256 KB. It's cropped to the center square.",
+        image=f"PNG or JPEG, up to {images.format_size(images.source_max_bytes())}. The center square is used.",
         emoji="A standard emoji like 🌙 (pick it from the emoji picker)",
     )
     async def lunar_icon(self, interaction: discord.Interaction,
@@ -797,6 +801,8 @@ class LunarRoles(commands.Cog):
                 logger.warning("Icon upload from %s: downloaded %s bytes but Discord reported %s - the file was changed",
                                member.id, len(data), image.size)
             result = await service.set_icon(member, image=data)
+            if result.ok:
+                result.message += f" Tip: crop it precisely with `/{COMMAND_GROUP} color-picker`."
         else:
             result = await service.set_icon(member, emoji=emoji)
         await _reply(interaction, result, "Icon Set", "Couldn't Set Your Icon")

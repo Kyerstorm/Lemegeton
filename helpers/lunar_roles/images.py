@@ -8,14 +8,19 @@ import io
 import unicodedata
 import warnings
 from collections import OrderedDict
-from typing import List, Optional
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-MAX_ICON_BYTES = 256 * 1024     # input limit, and Discord's role-icon limit
+import config
+
+MAX_ICON_BYTES = 256 * 1024     # Discord's limit for the final role icon
 MAX_ICON_SIDE = 4096            # refuse anything wider/taller before decoding pixels
 MAX_ICON_PIXELS = 16_000_000    # ...or with more pixels than this (decompression bombs)
-ICON_SIZE = 64                  # Discord's documented role-icon size
+ICON_SIZES = (256, 128, 64)     # final icon: the largest of these that fits under MAX_ICON_BYTES
+ICON_SIZE = ICON_SIZES[-1]      # Discord's documented minimum role-icon size
+MIN_CROP = 16                   # smallest square (in the original's pixels) that can be cut out
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 JPEG_SIGNATURE = b"\xff\xd8\xff"
@@ -33,10 +38,22 @@ class ImageError(Exception):
 # Role icons
 # ------------------------------------------------------
 
+def source_max_bytes() -> int:
+    """Largest original image accepted (LUNAR_ICON_SOURCE_MAX_BYTES)."""
+    return config.LUNAR_ICON_SOURCE_MAX_BYTES
+
+
+def format_size(size: int) -> str:
+    if size >= 1024 * 1024:
+        return f"{size / (1024 * 1024):.1f} MB".replace(".0 MB", " MB")
+    return f"{max(1, size // 1024)} KB"
+
+
 def check_declared_size(size: int) -> None:
-    """Refuse before downloading, using the size Discord reports for the attachment."""
-    if size > MAX_ICON_BYTES:
-        raise ImageError(f"That image is {size // 1024} KB. Role icons can be at most {MAX_ICON_BYTES // 1024} KB.")
+    """Refuse before downloading, using the size reported for the file."""
+    limit = source_max_bytes()
+    if size > limit:
+        raise ImageError(f"That image is {format_size(size)}. Images can be at most {format_size(limit)}.")
 
 
 _ALLOWED_CONTENT_TYPES = {"image/png", "image/jpeg", "image/jpg"}
@@ -65,10 +82,9 @@ def sniff_type(data: bytes) -> Optional[str]:
     return None
 
 
-def prepare_icon(data: bytes) -> bytes:
-    """Validate an uploaded PNG/JPEG and return a 64x64 PNG (center-cropped square)."""
-    if len(data) > MAX_ICON_BYTES:
-        raise ImageError(f"That image is {len(data) // 1024} KB. Role icons can be at most {MAX_ICON_BYTES // 1024} KB.")
+def _open_checked(data: bytes) -> Tuple[Image.Image, str]:
+    """Open and fully decode an original image after every safety check. Returns (image, "PNG"|"JPEG")."""
+    check_declared_size(len(data))
     kind = sniff_type(data)
     if kind is None:
         raise ImageError("Only PNG or JPEG images work as role icons (checked by the file's content, not its name).")
@@ -91,33 +107,71 @@ def prepare_icon(data: bytes) -> bytes:
             raise ImageError(_too_many_pixels())
         if kind == "PNG" and (getattr(image, "is_animated", False) or getattr(image, "n_frames", 1) > 1):
             raise ImageError("Animated images can't be role icons. Use a still PNG or JPEG.")
-
-        if kind == "JPEG":
-            image.draft("RGB", (ICON_SIZE * 4, ICON_SIZE * 4))  # decode JPEGs at a reduced size
         try:
             image.load()
         except (Image.DecompressionBombError, Image.DecompressionBombWarning):
             raise ImageError(_too_many_pixels())
         except (OSError, ValueError, SyntaxError):
             raise ImageError("I couldn't read that image. It may be damaged or cut off.")
+    return image, kind
 
+
+def inspect_source(data: bytes) -> Tuple[str, int, int]:
+    """Check an original image without making an icon. Returns (kind, width, height) as displayed
+    (phone photos turned the right way up, matching what browsers show)."""
+    image, kind = _open_checked(data)
+    width, height = image.size
+    if image.getexif().get(0x0112) in (5, 6, 7, 8):  # EXIF orientation: rotated a quarter turn
+        width, height = height, width
+    return kind, width, height
+
+
+@dataclass
+class Icon:
+    png: bytes                       # the final icon for Discord (at most MAX_ICON_BYTES)
+    side: int                        # its width and height
+    crop: Tuple[int, int, int]       # (x, y, size) cut from the original, in its displayed pixels
+
+
+def make_icon(data: bytes, crop: Optional[Tuple[int, int, int]] = None) -> Icon:
+    """Validate an original PNG/JPEG and cut a square icon from it.
+
+    crop is (x, y, size) in the original's pixels (after EXIF rotation); None = the centre square.
+    The result is the largest of ICON_SIZES (never larger than the crop, at least 64) that
+    fits under Discord's 256 KB limit, resized with LANCZOS and saved as PNG.
+    """
+    image, _ = _open_checked(data)
     image = ImageOps.exif_transpose(image).convert("RGBA")
-    side = min(image.size)
-    left = (image.width - side) // 2
-    top = (image.height - side) // 2
-    image = image.crop((left, top, left + side, top + side)).resize((ICON_SIZE, ICON_SIZE), Image.Resampling.LANCZOS)
+    width, height = image.size
+    if crop is None:
+        size = min(width, height)
+        x, y = (width - size) // 2, (height - size) // 2
+    else:
+        try:
+            x, y, size = (int(v) for v in crop)
+        except (TypeError, ValueError):
+            raise ImageError("That crop isn't valid. Try cropping again.")
+        if size < MIN_CROP or x < 0 or y < 0 or x + size > width or y + size > height:
+            raise ImageError("That crop doesn't fit inside the image. Try cropping again.")
+    region = image.crop((x, y, x + size, y + size))
 
-    out = io.BytesIO()
-    image.save(out, format="PNG", optimize=True)
-    result = out.getvalue()
-    if len(result) > MAX_ICON_BYTES:  # can't really happen at 64x64, but never send more than Discord allows
-        raise ImageError("That image is still too large after resizing.")
-    return result
+    targets = [t for t in ICON_SIZES if t <= size] or [ICON_SIZES[-1]]
+    for side in targets:
+        out = io.BytesIO()
+        region.resize((side, side), Image.Resampling.LANCZOS).save(out, format="PNG", optimize=True)
+        if out.tell() <= MAX_ICON_BYTES:
+            return Icon(out.getvalue(), side, (x, y, size))
+    raise ImageError("That image is still too large after resizing.")  # can't really happen at 64x64
+
+
+def prepare_icon(data: bytes) -> bytes:
+    """The centre-square icon for an original image (for callers that only need the PNG)."""
+    return make_icon(data).png
 
 
 def _too_many_pixels() -> str:
-    return (f"That image is too large in pixels. Role icons are shown at {ICON_SIZE}x{ICON_SIZE}, "
-            f"so please use something no bigger than {MAX_ICON_SIDE}x{MAX_ICON_SIDE}.")
+    return (f"That image is too large in pixels. Please use something no bigger than "
+            f"{MAX_ICON_SIDE}x{MAX_ICON_SIDE} ({MAX_ICON_PIXELS // 1_000_000} million pixels).")
 
 
 # ------------------------------------------------------

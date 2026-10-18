@@ -267,11 +267,11 @@ async def main():
         check("admin remove -> link revoked (401)", r.status == 401)
 
         # icon in state
-        await q("c", "UPDATE lunar_custom_roles SET icon_png = ? WHERE guild_id = ? AND user_id = ?", (b"\x89PNG-fake", GID, m.id))
+        await q("c", "UPDATE lunar_custom_roles SET icon_png = ? WHERE guild_id = ? AND user_id = ?", (b"\x89PNG\r\n\x1a\n-fake", GID, m.id))
         token, _ = tokens.create(GID, m.id)
         r = await get("/lunar/api/state", token)
         icon = (await r.json())["state"]["role"]["icon"]
-        check("saved icon image sent as a data URL", icon["type"] == "image" and icon["url"].startswith("data:image/png;base64,"))
+        check("saved icon image sent as a data URL", icon and icon["type"] == "image" and icon["url"].startswith("data:image/png;base64,"), (r.status, await r.text()))
         await q("c", "UPDATE lunar_custom_roles SET icon_png = NULL, icon_emoji = ? WHERE guild_id = ? AND user_id = ?", ("🌙", GID, m.id))
         r = await get("/lunar/api/state", token)
         check("emoji icon sent as text", (await r.json())["state"]["role"]["icon"] == {"type": "emoji", "value": "🌙"})
