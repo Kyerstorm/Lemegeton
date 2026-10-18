@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <title>Lunar Color Picker</title>
+  <link rel="icon" href="/lunar/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/lunar/static/lunar-theme.css">
   <link rel="stylesheet" href="/lunar/static/picker.css">
   <script src="/lunar/static/picker.js" defer></script>
@@ -13,41 +14,140 @@
   <main>
     <h1>Lunar Color Picker</h1>
 
+    <div id="banner-access" class="banner banner-error hidden" role="alert">
+      <strong id="banner-access-title"></strong>
+      <p id="banner-access-text"></p>
+    </div>
+    <div id="banner-debug" class="banner banner-warning hidden">
+      <strong>Test switch on</strong>
+      <p>Gradient and Holographic are unlocked so you can preview them. This server doesn't have
+        Discord's Enhanced Role Colors, so saving them will be refused.</p>
+    </div>
+
     <section id="loading" class="card" aria-live="polite">Loading your role…</section>
 
-    <section id="problem" class="card error hidden" role="alert">
-      <h2 id="problem-title">This link doesn't work</h2>
+    <section id="problem" class="card hidden" role="alert">
+      <h2 id="problem-title"></h2>
       <p id="problem-text"></p>
     </section>
 
-    <section id="ready" class="hidden">
-      <div class="card message">
-        <img id="avatar" class="avatar" alt="">
-        <div>
-          <div class="name-line">
-            <span id="display-name" class="display-name"></span>
-            <img id="role-icon-img" class="role-icon hidden" alt="Role icon">
-            <span id="role-icon-emoji" class="role-icon-emoji hidden"></span>
+    <div id="app" class="hidden">
+      <section class="card" aria-labelledby="preview-title">
+        <h2 id="preview-title">Preview</h2>
+        <div class="preview-grid">
+          <div class="msg msg-dark" aria-label="Dark theme preview" role="group">
+            <img class="avatar" data-avatar alt="" referrerpolicy="no-referrer">
+            <div class="msg-body">
+              <div class="name-line">
+                <span class="name" data-name></span>
+                <img class="role-icon hidden" data-icon-img alt="Role icon" referrerpolicy="no-referrer">
+                <span class="role-icon-emoji hidden" data-icon-emoji></span>
+                <span class="time" data-time></span>
+              </div>
+              <div class="msg-text">Hey! This is how my name looks.</div>
+            </div>
           </div>
-          <div>This is how your name looks with your Lunar role.</div>
+          <div class="msg msg-light" aria-label="Light theme preview" role="group">
+            <img class="avatar" data-avatar alt="" referrerpolicy="no-referrer">
+            <div class="msg-body">
+              <div class="name-line">
+                <span class="name" data-name></span>
+                <img class="role-icon hidden" data-icon-img alt="Role icon" referrerpolicy="no-referrer">
+                <span class="role-icon-emoji hidden" data-icon-emoji></span>
+                <span class="time" data-time></span>
+              </div>
+              <div class="msg-text">Hey! This is how my name looks.</div>
+            </div>
+          </div>
         </div>
-      </div>
+        <div class="chip-line">
+          <span class="muted">Role</span>
+          <span class="chip"><span class="dot" id="chip-dot"></span><span class="chip-name" id="chip-name"></span></span>
+        </div>
+        <p id="contrast-note" class="status-note hidden"></p>
+        <div class="toolbar">
+          <button id="reset" class="btn btn-secondary" type="button" disabled>Reset to saved</button>
+          <span id="dirty-note" class="hint">No unsaved changes.</span>
+        </div>
+        <p class="hint">This link closes <span id="expires"></span> without use (saving or reloading counts as use),
+          and <span id="expires-max"></span> at the latest. Don't share it: anyone with it can change your role.</p>
+        <p id="cooldown-note" class="hint hidden"></p>
+      </section>
 
-      <div class="card">
-        <dl>
-          <dt>Server</dt><dd id="guild-name"></dd>
-          <dt>Role</dt><dd id="role-name"></dd>
-          <dt>Style</dt><dd id="role-style"></dd>
-          <dt>Link expires</dt><dd id="expires"></dd>
-        </dl>
-      </div>
+      <section class="card">
+        <div class="tabs" role="tablist" aria-label="What to change">
+          <button class="tab" type="button" role="tab" id="tab-color" aria-controls="panel-color" aria-selected="true">Color</button>
+          <button class="tab" type="button" role="tab" id="tab-icon" aria-controls="panel-icon" aria-selected="false" tabindex="-1">Role Icon</button>
+          <button class="tab" type="button" role="tab" id="tab-name" aria-controls="panel-name" aria-selected="false" tabindex="-1">Name</button>
+        </div>
 
-      <p class="muted">
-        The color editor is coming in the next update. For now, change your role with
-        <code>/lunar color set</code>, <code>/lunar name</code> and <code>/lunar icon</code>.
-        Don't share this link: anyone with it can change your role until it expires.
-      </p>
-    </section>
+        <div id="panel-color" role="tabpanel" aria-labelledby="tab-color" tabindex="0">
+          <fieldset class="segmented">
+            <legend>Style</legend>
+            <div class="segments">
+              <input type="radio" name="mode" id="mode-solid" value="solid" aria-describedby="mode-hint">
+              <label for="mode-solid">Solid</label>
+              <input type="radio" name="mode" id="mode-gradient" value="gradient" aria-describedby="mode-hint">
+              <label for="mode-gradient">Gradient</label>
+              <input type="radio" name="mode" id="mode-holographic" value="holographic" aria-describedby="mode-hint">
+              <label for="mode-holographic">Holographic</label>
+            </div>
+          </fieldset>
+          <p id="mode-hint" class="hint hidden">Gradient and Holographic need Discord's Enhanced Role Colors, which this server doesn't have yet.</p>
+
+          <div id="panel-solid" class="mode-panel">
+            <div class="field" data-color-field="primary" data-label="Color"></div>
+            <button id="set-solid" class="btn btn-primary" type="button" data-set="solid">Set color</button>
+            <p id="status-solid" class="status" role="status"></p>
+          </div>
+
+          <div id="panel-gradient" class="mode-panel hidden">
+            <div id="gradient-bar" class="gradient-bar" aria-hidden="true"></div>
+            <div class="field" data-color-field="primary" data-label="Primary"></div>
+            <div class="field" data-color-field="secondary" data-label="Secondary"></div>
+            <button id="set-gradient" class="btn btn-primary" type="button" data-set="gradient">Set gradient</button>
+            <p id="status-gradient" class="status" role="status"></p>
+          </div>
+
+          <div id="panel-holographic" class="mode-panel hidden">
+            <div class="gradient-bar holo-fill" aria-hidden="true"></div>
+            <p>Discord's holographic style uses fixed colors, so there's nothing to pick.</p>
+            <button id="set-holographic" class="btn btn-primary" type="button" data-set="holographic">Set holographic</button>
+            <p id="status-holographic" class="status" role="status"></p>
+          </div>
+
+          <div id="palette" class="mode-panel">
+            <h2>Colors extracted from your profile picture</h2>
+            <p id="palette-status" class="hint">Loading colors…</p>
+            <fieldset class="palette-group hidden" id="palette-primary">
+              <legend id="palette-primary-legend">Primary</legend>
+              <div class="swatches"></div>
+            </fieldset>
+            <fieldset class="palette-group hidden" id="palette-secondary">
+              <legend>Secondary</legend>
+              <div class="swatches"></div>
+            </fieldset>
+          </div>
+        </div>
+
+        <div id="panel-icon" role="tabpanel" aria-labelledby="tab-icon" tabindex="0" class="hidden">
+          <p>Current icon: <span id="icon-current"></span></p>
+          <p class="hint">Uploading an icon here comes in the next update. For now, use <code>/lunar icon</code> in Discord.</p>
+        </div>
+
+        <div id="panel-name" role="tabpanel" aria-labelledby="tab-name" tabindex="0" class="hidden">
+          <div class="field">
+            <label for="name-input">Role name</label>
+            <input id="name-input" class="text-input name-input" type="text" autocomplete="off" spellcheck="false"
+                   aria-describedby="name-count name-error">
+            <p id="name-count" class="hint"></p>
+            <p id="name-error" class="field-error hidden"></p>
+          </div>
+          <button id="set-name" class="btn btn-primary" type="button" data-set="name">Set name</button>
+          <p id="status-name" class="status" role="status"></p>
+        </div>
+      </section>
+    </div>
   </main>
 </body>
 </html>

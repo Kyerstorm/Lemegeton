@@ -3,7 +3,9 @@
 - One active link per member per server: a new link replaces the old one.
 - Only a SHA-256 hash of each token is stored, so the tokens themselves never sit in memory
   dumps or logs after they're handed out.
-- Links expire after LUNAR_PICKER_TTL seconds and all stop working when the bot restarts.
+- A link closes after LUNAR_PICKER_IDLE_TTL seconds without a successful API call (each one
+  resets that clock), and after LUNAR_PICKER_MAX_TTL seconds at the latest. All links stop
+  working when the bot restarts.
 - Each token has its own read/write rate limits.
 """
 from __future__ import annotations
@@ -26,9 +28,17 @@ RATE_WINDOW = 60.0
 class PickerLink:
     guild_id: int
     user_id: int
-    expires_at: float  # wall clock (time.time()), so it can be shown as a Discord timestamp
+    # Wall clock (time.time()), so they can be shown as Discord timestamps.
+    last_used: float
+    max_expires_at: float  # hard limit, never extended
+    idle_ttl: float
     reads: Deque[float] = field(default_factory=deque)
     writes: Deque[float] = field(default_factory=deque)
+
+    @property
+    def expires_at(self) -> float:
+        """When the link closes if it isn't used again."""
+        return min(self.last_used + self.idle_ttl, self.max_expires_at)
 
 
 _links: Dict[str, PickerLink] = {}               # token hash -> link
@@ -51,16 +61,25 @@ def _prune() -> None:
         _drop(token_hash)
 
 
-def create(guild_id: int, user_id: int, ttl: Optional[int] = None) -> Tuple[str, float]:
-    """Make a new link for this member, replacing any older one. Returns (token, expires_at)."""
+def create(guild_id: int, user_id: int, idle_ttl: Optional[int] = None,
+           max_ttl: Optional[int] = None) -> Tuple[str, PickerLink]:
+    """Make a new link for this member, replacing any older one. Returns (token, link)."""
     _prune()
     revoke(guild_id, user_id)
     token = secrets.token_urlsafe(32)
-    expires_at = time.time() + (ttl if ttl is not None else config.LUNAR_PICKER_TTL)
+    now = time.time()
+    idle = idle_ttl if idle_ttl is not None else config.LUNAR_PICKER_IDLE_TTL
+    longest = max_ttl if max_ttl is not None else config.LUNAR_PICKER_MAX_TTL
+    link = PickerLink(guild_id, user_id, last_used=now, max_expires_at=now + longest, idle_ttl=idle)
     token_hash = _hash(token)
-    _links[token_hash] = PickerLink(guild_id, user_id, expires_at)
+    _links[token_hash] = link
     _by_member[(guild_id, user_id)] = token_hash
-    return token, expires_at
+    return token, link
+
+
+def touch(link: PickerLink) -> None:
+    """A successful API call: restart the idle clock (never past the hard limit)."""
+    link.last_used = time.time()
 
 
 def lookup(token: str) -> Optional[PickerLink]:

@@ -233,7 +233,8 @@ async def main():
     g.position_calls.clear()
     r = await service.move(a, rb, "below")
     check("already there: no Discord call", r.ok and not g.position_calls, g.position_calls)
-    check("move logged", any("moved" in t for t in g.channel.texts()))
+    check("move logged with both role names as text",
+          any("moved" in t and "(`A`)" in t and "(`B`)" in t for t in g.channel.texts()))
 
     r = await service.move(a, ra, "above")
     check("refuses own role", not r.ok and "own role" in r.message, r.message)

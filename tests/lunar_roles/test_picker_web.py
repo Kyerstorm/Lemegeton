@@ -79,9 +79,13 @@ async def main():
     check("token goes after #", service.picker_url("abc") == "http://localhost:8080/lunar#abc")
 
     # ------------------------------------------------------------------ token store
-    t1, exp1 = tokens.create(GID, m.id)
+    t1, link1 = tokens.create(GID, m.id)
     check("token is long and URL-safe", len(t1) >= 43 and all(c.isalnum() or c in "-_" for c in t1))
-    check("expiry is LUNAR_PICKER_TTL from now", abs(exp1 - (time.time() + config.LUNAR_PICKER_TTL)) < 5)
+    check("defaults: closes after 1 hour idle, 3 hours at most",
+          (config.LUNAR_PICKER_IDLE_TTL, config.LUNAR_PICKER_MAX_TTL) == (3600, 10800))
+    check("new link: closes after the idle time unless used",
+          abs(link1.expires_at - (time.time() + config.LUNAR_PICKER_IDLE_TTL)) < 5
+          and abs(link1.max_expires_at - (time.time() + config.LUNAR_PICKER_MAX_TTL)) < 5)
     check("lookup finds the link", tokens.lookup(t1) is not None and tokens.lookup(t1).user_id == m.id)
     check("only the hash is stored", t1 not in tokens._links and t1 not in str(tokens._links))
     t2, _ = tokens.create(GID, m.id)
@@ -89,7 +93,7 @@ async def main():
     other = with_avatar(FakeMember(g, booster=True, name="other"))
     t_other, _ = tokens.create(GID, other.id)
     check("other members' links are separate", tokens.lookup(t2) is not None and tokens.lookup(t_other) is not None)
-    tokens.lookup(t2).expires_at = time.time() - 1
+    tokens.lookup(t2).max_expires_at = time.time() - 1
     check("expired link refused", tokens.lookup(t2) is None)
     check("unknown and oversized tokens refused", tokens.lookup("nope") is None and tokens.lookup("x" * 500) is None)
     t3, _ = tokens.create(GID, m.id)
@@ -170,7 +174,9 @@ async def main():
         check("state has colors, user and guild",
               body["state"]["role"]["primary"] == "#FF66AA" and body["state"]["user"]["name"] == "moon"
               and body["state"]["guild"]["name"] == "Lunar Lab" and body["state"]["role"]["mode"] == "solid")
-        check("state carries the expiry", abs(body["expires_at"] - (time.time() + config.LUNAR_PICKER_TTL)) < 5)
+        check("state carries both expiry times",
+              abs(body["expires_at"] - (time.time() + config.LUNAR_PICKER_IDLE_TTL)) < 5
+              and abs(body["max_expires_at"] - (time.time() + config.LUNAR_PICKER_MAX_TTL)) < 5, body)
         check("API header no-referrer + no-store",
               r.headers.get("Referrer-Policy") == "no-referrer" and r.headers.get("Cache-Control") == "no-store")
         r = await get("/lunar/api/state")
@@ -189,10 +195,35 @@ async def main():
         check("old link stops working after a new one", r.status == 401)
         r = await get("/lunar/api/state", new_token)
         check("new link works", r.status == 200)
-        tokens.lookup(new_token).expires_at = time.time() - 1
+        tokens.lookup(new_token).max_expires_at = time.time() - 1
         r = await get("/lunar/api/state", new_token)
         check("expired link -> 401 with the 'run it again' message",
               r.status == 401 and "color-picker" in (await r.json())["message"])
+
+        # idle expiry: each successful call resets it; never past the hard limit
+        token, link = tokens.create(GID, m.id, idle_ttl=100, max_ttl=1000)
+        link.last_used = time.time() - 101
+        r = await get("/lunar/api/state", token)
+        check("unused for longer than the idle time -> closed (401)", r.status == 401)
+        token, link = tokens.create(GID, m.id, idle_ttl=100, max_ttl=1000)
+        link.last_used = time.time() - 90
+        r = await get("/lunar/api/state", token)
+        body = await r.json()
+        check("a successful call resets the idle clock", r.status == 200 and abs(link.expires_at - (time.time() + 100)) < 3
+              and abs(body["expires_at"] - (time.time() + 100)) < 3, body)
+        link.last_used = time.time() - 90
+        m.premium_since = None
+        r = await get("/lunar/api/state", token)
+        check("a refused call (403) doesn't reset it", r.status == 403 and time.time() - link.last_used >= 89)
+        m.premium_since = discord.utils.utcnow()
+        link.max_expires_at = time.time() + 20
+        r = await get("/lunar/api/state", token)
+        body = await r.json()
+        check("use never extends past the hard limit", r.status == 200 and body["expires_at"] <= body["max_expires_at"]
+              and abs(body["expires_at"] - (time.time() + 20)) < 3, body)
+        link.max_expires_at = time.time() - 1
+        r = await get("/lunar/api/state", token)
+        check("hard limit reached -> closed even while in use", r.status == 401)
 
         # re-checked on every request
         token, _ = tokens.create(GID, m.id)
@@ -327,7 +358,9 @@ async def main():
     url = view.children[0].url
     check("link button with the token after #", url.startswith("http://localhost:8080/lunar#") and ephemeral)
     check("button link works", tokens.lookup(url.split("#", 1)[1]) is not None)
-    check("reply shows the expiry and the don't-share warning", "<t:" in embed.description and "share" in embed.description)
+    check("reply explains idle + latest expiry and the don't-share warning",
+          "1h** without use" in embed.description and "at the latest" in embed.description
+          and "<t:" in embed.description and "share" in embed.description, embed.description)
     first = url.split("#", 1)[1]
     i = inter(m, refuse_view=True)
     await LunarRoles.lunar_color_picker.callback(cog, i)

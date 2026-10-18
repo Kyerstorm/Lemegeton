@@ -6,10 +6,15 @@ The full build spec is in [LUNAR_ROLES_SPEC.md](LUNAR_ROLES_SPEC.md).
 ## Deployment (Railway)
 
 - Set `ENVIRONMENT=production` on Railway. When it's unset, the bot treats itself as development.
-- Never set `LUNAR_DEBUG_FAIL_MEMBER_FETCH` or `LUNAR_MASS_ARCHIVE_THRESHOLD=0` in production.
+- Never set `LUNAR_DEBUG_FAIL_MEMBER_FETCH`, `LUNAR_DEBUG_PREVIEW_ENHANCED_COLORS` or
+  `LUNAR_MASS_ARCHIVE_THRESHOLD=0` in production.
   - `LUNAR_DEBUG_FAIL_MEMBER_FETCH` is a test switch that stops reconcile from removing any roles.
     It only takes effect when `ENVIRONMENT=development`, and it logs a loud warning at startup and
     in every log channel while it's on.
+  - `LUNAR_DEBUG_PREVIEW_ENHANCED_COLORS` is a test switch that unlocks Gradient and Holographic
+    in the color picker page on a server without Enhanced Role Colors, so their design can be
+    checked. Saving them is still refused. It only takes effect when `ENVIRONMENT=development`, and
+    it logs the same loud warning at startup and in every log channel.
   - `LUNAR_MASS_ARCHIVE_THRESHOLD=0` makes every single removal wait for an admin to confirm.
 - Lunar Roles settings and their defaults (see `.env.example`):
   - `LUNAR_RECONCILE_MINUTES=30`: minutes between automatic checks; one also runs at startup.
@@ -76,6 +81,8 @@ once the CNAME works. HTTPS certificates are automatic for both kinds of domain.
 - `/lunar-admin` commands need Manage Roles, so members without it won't see them.
 - Set a log channel with `/lunar-admin log-channel` to keep a history. `logs/lunar_roles.log`
   is wiped on every restart.
+- Log entries show a role's name next to its mention, because Discord shows a deleted role's
+  mention as "@unknown-role".
 
 ## Behaviour worth knowing
 
@@ -112,14 +119,26 @@ once the CNAME works. HTTPS certificates are automatic for both kinds of domain.
   - There's no way to block someone from making a new role. Mods use Discord's own tools
     (timeouts, kicks, bans, removing the allowed role) for repeat offenders.
 - **Color picker links:**
-  - Each link is private, works for 15 minutes (`LUNAR_PICKER_TTL`), and a new one replaces the old.
+  - Each link is private, and a new one replaces the old.
+  - **How long a link lasts:** it closes after 1 hour without use (`LUNAR_PICKER_IDLE_TTL`,
+    seconds), and after 3 hours at the latest (`LUNAR_PICKER_MAX_TTL`). Every successful page
+    request (loading, saving) restarts the 1-hour clock. Fiddling with colors without saving
+    doesn't count as use.
   - The token sits after `#` in the link, so it's never sent to a server in an address or logged.
   - The page sends it only in an `Authorization` header and refuses it in a URL.
   - Every request re-checks that the member is in the server, still qualifies and has a role.
     Losing the role, an admin `remove` or disabling Lunar Roles ends access at once.
   - Limits: 60 reads and 20 changes a minute per link, and 30 bad links per address per
     10 minutes.
-  - This milestone's page only shows the role; the editor comes next.
+- **Color picker page:**
+  - It has a live preview of Discord's dark and light themes, plus Color and Name tabs. Icons
+    come in the next update; for now members use `/lunar icon`.
+  - Changes made on the page follow the same rules as the commands (name filter, cooldown,
+    feature checks) and are logged the same way.
+  - **Restyling:** edit only `web/static/lunar/lunar-theme.css`. Every color, radius, font,
+    spacing and size is there, each with a comment.
+    - `picker.css` must not contain any (a test checks).
+    - The favicon (`favicon.svg`) has its own two colors.
 - **Migration:** existing `booster_roles` rows were copied once into `lunar_custom_roles` (a marker
   row in `lunar_meta` stops it re-running). The old table is left in place.
 - `/nitro-role-set` and `cogs/customization/server_boost.py` are gone. The boost welcome DM now

@@ -7,7 +7,9 @@ Role logic stays in helpers/lunar_roles/service.py.
 """
 from __future__ import annotations
 
+import json
 import logging
+import re
 import time
 from collections import deque
 from pathlib import Path
@@ -17,7 +19,7 @@ from urllib.parse import urlsplit
 from aiohttp import web
 
 import config
-from helpers.lunar_roles import COMMAND_GROUP, service, tokens
+from helpers.lunar_roles import COMMAND_GROUP, service, tokens, validation
 
 logger = logging.getLogger("web.lunar_picker")
 STATIC_DIR = Path(__file__).resolve().parent / "static" / "lunar"
@@ -26,7 +28,10 @@ STATIC_FILES = {
     "picker.css": "text/css",
     "picker.js": "application/javascript",
     "lunar-theme.css": "text/css",
+    "favicon.svg": "image/svg+xml",
 }
+MAX_BODY = 2048  # bytes; write requests are tiny JSON objects
+MODES = (service.MODE_SOLID, service.MODE_GRADIENT, service.MODE_HOLOGRAPHIC)
 TOKEN_QUERY_KEYS = {"token", "t", "access_token", "auth", "key"}
 
 # Requests with an unknown or expired token, per client address.
@@ -63,6 +68,27 @@ def client_ip(request: web.Request, trust_proxy: Optional[bool] = None) -> str:
     return request.remote or "unknown"
 
 
+def _relative(unix_time: int) -> str:
+    left = max(0, unix_time - int(time.time()))
+    return f"in {service.format_duration(left)}" if left else "now"
+
+
+def web_text(text: str) -> str:
+    """Turn a Discord-formatted service message into plain text for the page.
+
+    The page inserts it with textContent, so this is about readability, not safety.
+    """
+    text = re.sub(r"<t:(\d+)(?::[tTdDfFR])?>", lambda m: _relative(int(m.group(1))), text or "")
+    text = re.sub(r"<@&\d+>", "a role", text)
+    text = re.sub(r"<@!?\d+>", "a member", text)
+    text = re.sub(r"<#\d+>", "a channel", text)
+    return text.replace("**", "").replace("`", "")
+
+
+def _expiry(link: tokens.PickerLink) -> dict:
+    return {"expires_at": int(link.expires_at), "max_expires_at": int(link.max_expires_at)}
+
+
 def _origin(url: str) -> str:
     parts = urlsplit(url)
     return f"{parts.scheme}://{parts.netloc}".lower()
@@ -81,6 +107,9 @@ class LunarPicker:
         app.router.add_get(BASE + "/", self._page)
         app.router.add_get(BASE + "/static/{filename}", self._static)
         app.router.add_get(BASE + "/api/state", self._api_state)
+        app.router.add_get(BASE + "/api/palette", self._api_palette)
+        app.router.add_post(BASE + "/api/color", self._api_color)
+        app.router.add_post(BASE + "/api/name", self._api_name)
 
     # ------------------------------------------------------------------ security
 
@@ -114,7 +143,7 @@ class LunarPicker:
 
     @staticmethod
     def _error(status: int, code: str, message: str) -> web.Response:
-        return web.json_response({"ok": False, "error": code, "message": message}, status=status)
+        return web.json_response({"ok": False, "error": code, "message": web_text(message)}, status=status)
 
     def _failed_allowed(self, ip: str) -> bool:
         now = time.monotonic()
@@ -163,7 +192,7 @@ class LunarPicker:
         path = STATIC_DIR / name
         if content_type is None or not path.is_file():
             raise web.HTTPNotFound()
-        return web.Response(text=path.read_text(encoding="utf-8"), content_type=content_type)
+        return web.Response(text=path.read_text(encoding="utf-8"), content_type=content_type, charset="utf-8")
 
     async def _api_state(self, request: web.Request) -> web.Response:
         link, member, error = await self._member_for(request)
@@ -172,4 +201,85 @@ class LunarPicker:
         result = await service.picker_state(member)
         if not result.ok:
             return self._error(403, "not_allowed", result.message)
-        return web.json_response({"ok": True, "expires_at": int(link.expires_at), "state": result.data})
+        tokens.touch(link)
+        return web.json_response({"ok": True, **_expiry(link), "state": result.data})
+
+    async def _api_palette(self, request: web.Request) -> web.Response:
+        link, member, error = await self._member_for(request)
+        if error is not None:
+            return error
+        check = await service.precheck(member)
+        if check is not None:
+            return self._error(403, "not_allowed", web_text(check.message))
+        result = await service.get_palette(member)
+        tokens.touch(link)
+        if not result.ok:
+            return web.json_response({"ok": False, "message": web_text(result.message), "colors": [], **_expiry(link)})
+        return web.json_response({"ok": True, "colors": [validation.format_hex(c) for c in result.data], **_expiry(link)})
+
+    # ------------------------------------------------------------------ writes
+
+    async def _write(self, request: web.Request, action) -> web.Response:
+        """Shared checks for write calls, then run action(member, body) -> Result."""
+        link, member, error = await self._member_for(request, write=True)
+        if error is not None:
+            return error
+        if request.content_type != "application/json":
+            return self._error(415, "json_only", "Send JSON (Content-Type: application/json).")
+        if request.content_length is not None and request.content_length > MAX_BODY:
+            return self._error(413, "too_big", "That request is too big.")
+        raw = await request.content.read(MAX_BODY + 1)
+        if len(raw) > MAX_BODY:
+            return self._error(413, "too_big", "That request is too big.")
+        try:
+            body = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            return self._error(400, "bad_json", "That request couldn't be read.")
+        if not isinstance(body, dict):
+            return self._error(400, "bad_json", "That request couldn't be read.")
+        check = await service.precheck(member)
+        if check is not None:
+            return self._error(403, "not_allowed", web_text(check.message))
+
+        result = await action(member, body)
+        if isinstance(result, web.Response):
+            return result  # a bad request found by the action
+        state = await service.picker_state(member)
+        tokens.touch(link)
+        payload = {
+            **_expiry(link),
+            "ok": result.ok,
+            "message": web_text(result.message),
+            "notes": [web_text(n) for n in result.notes],
+            "state": state.data if state.ok else None,
+        }
+        if isinstance(result.data, dict) and "retry_at" in result.data:
+            payload["retry_at"] = result.data["retry_at"]
+        return web.json_response(payload)
+
+    async def _api_color(self, request: web.Request) -> web.Response:
+        async def action(member, body):
+            mode = body.get("mode")
+            if mode not in MODES:
+                return self._error(400, "bad_mode", "Pick Solid, Gradient or Holographic.")
+            if mode == service.MODE_HOLOGRAPHIC:
+                return await service.set_colors(member, mode)
+            colors = []
+            for key, label in (("primary", "Primary"), ("secondary", "Secondary")):
+                if key == "secondary" and mode == service.MODE_SOLID:
+                    break
+                raw = body.get(key)
+                value = validation.parse_hex(raw) if isinstance(raw, str) and len(raw) <= 16 else None
+                if value is None:
+                    return self._error(400, "bad_color", f"{label} isn't a hex color. Try #FF66AA.")
+                colors.append(value)
+            return await service.set_colors(member, mode, *colors)
+        return await self._write(request, action)
+
+    async def _api_name(self, request: web.Request) -> web.Response:
+        async def action(member, body):
+            name = body.get("name")
+            if not isinstance(name, str) or len(name) > validation.NAME_MAX * 4:
+                return self._error(400, "bad_name", f"Role names can be at most {validation.NAME_MAX} characters.")
+            return await service.rename(member, name)
+        return await self._write(request, action)

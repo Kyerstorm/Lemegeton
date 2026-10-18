@@ -387,32 +387,50 @@ class LunarRoles(commands.Cog):
         self.bot.remove_dynamic_items(PendingButton)
         service.pending_view_factory = None
 
+    # (setting name, is it set, is it active, what it does, log-channel text)
     @staticmethod
-    def _warn_debug_switch_console():
-        if not config.LUNAR_DEBUG_FAIL_MEMBER_FETCH:
-            return
-        if service.debug_fetch_fail_active():
-            for line in (
-                "!" * 72,
-                "!!! LUNAR_DEBUG_FAIL_MEMBER_FETCH IS ON - TEST SWITCH",
-                "!!! Reconcile will NOT remove any custom roles while this is set.",
-                "!!! Remove it from .env outside testing.",
-                "!" * 72,
-            ):
-                console_logger.warning(line)
-                logger.warning(line)
-        else:
-            console_logger.warning("LUNAR_DEBUG_FAIL_MEMBER_FETCH is set but ignored (ENVIRONMENT isn't development).")
+    def _debug_switches():
+        return (
+            ("LUNAR_DEBUG_FAIL_MEMBER_FETCH", config.LUNAR_DEBUG_FAIL_MEMBER_FETCH, service.debug_fetch_fail_active(),
+             "Reconcile will NOT remove any custom roles while this is set.",
+             "the regular check won't remove any custom roles"),
+            ("LUNAR_DEBUG_PREVIEW_ENHANCED_COLORS", config.LUNAR_DEBUG_PREVIEW_ENHANCED_COLORS,
+             service.debug_preview_enhanced_active(),
+             "The color picker shows Gradient/Holographic even without Enhanced Role Colors (saving is still refused).",
+             "the color picker unlocks Gradient and Holographic for previewing (saving them is still refused)"),
+        )
+
+    @classmethod
+    def _warn_debug_switch_console(cls):
+        for name, is_set, active, effect, _ in cls._debug_switches():
+            if not is_set:
+                continue
+            if active:
+                for line in (
+                    "!" * 72,
+                    f"!!! {name} IS ON - TEST SWITCH",
+                    f"!!! {effect}",
+                    "!!! Remove it from .env outside testing.",
+                    "!" * 72,
+                ):
+                    console_logger.warning(line)
+                    logger.warning(line)
+            else:
+                console_logger.warning("%s is set but ignored (ENVIRONMENT isn't development).", name)
 
     async def _warn_debug_switch_channels(self):
-        if self._debug_warned or not service.debug_fetch_fail_active():
+        if self._debug_warned:
+            return
+        active = [(name, text) for name, _, on, _, text in self._debug_switches() if on]
+        if not active:
             return
         self._debug_warned = True
         for guild in self.bot.guilds:
-            await service.log_event(
-                guild, "🚧 **Test switch on:** `LUNAR_DEBUG_FAIL_MEMBER_FETCH` is set, so the regular check "
-                       "won't remove any custom roles. Remove it from `.env` outside testing.", "error",
-            )
+            for name, text in active:
+                await service.log_event(
+                    guild, f"🚧 **Test switch on:** `{name}` is set, so {text}. Remove it from `.env` outside testing.",
+                    "error",
+                )
 
     # ============================================================================
     # LIFECYCLE EVENTS
@@ -624,7 +642,7 @@ class LunarRoles(commands.Cog):
         result = await service.rename(interaction.user, new_name)
         await _reply(interaction, result, "Role Renamed", "Couldn't Rename Your Role")
 
-    @color.command(name="set", description="Set your role color by hex")
+    @color.command(name="set", description="Set your role color by hex. Try /lunar color-picker to pick it visually.")
     @command_meta(section="Customization", name="Lunar Color Set")
     @app_commands.describe(
         color="Hex color, e.g. #FF66AA",
@@ -804,14 +822,16 @@ class LunarRoles(commands.Cog):
             )
             return
 
-        token, expires_at = tokens.create(guild.id, member.id)
+        token, link = tokens.create(guild.id, member.id)
         url = service.picker_url(token)
-        expires = int(expires_at)
+        latest = int(link.max_expires_at)
         embed = build_info_embed(
             "Your Color Picker",
-            f"This private link works until <t:{expires}:t> (<t:{expires}:R>).\n\n"
+            f"This private link stays open while you use it. It closes after "
+            f"**{service.format_duration(int(link.idle_ttl))}** without use, and at <t:{latest}:t> "
+            f"(<t:{latest}:R>) at the latest.\n\n"
             f"Running `/{COMMAND_GROUP} color-picker` again gives you a new link and stops this one. "
-            "**Don't share it:** anyone with it can change your role until it expires.",
+            "**Don't share it:** anyone with it can change your role until it closes.",
         )
         view = discord.ui.View()
         view.add_item(discord.ui.Button(label="Open color picker", style=discord.ButtonStyle.link, url=url))

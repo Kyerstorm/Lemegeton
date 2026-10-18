@@ -16,7 +16,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
-TEST_GUILD_IDS = (2, 3, 4, 5, 6, 7)  # real Discord IDs are 17-20 digit snowflakes
+TEST_GUILD_IDS = (2, 3, 4, 5, 6, 7, 8)  # real Discord IDs are 17-20 digit snowflakes
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 

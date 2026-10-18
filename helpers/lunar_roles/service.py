@@ -148,18 +148,29 @@ def format_duration(seconds: int) -> str:
     return " ".join(parts) or "0s"
 
 
-async def cooldown_error(guild_id: int, user_id: int, settings: GuildSettings) -> Optional[Result]:
-    """Refuse a change while the member's cooldown is running (cooldown 0 = off)."""
+async def next_change_at(guild_id: int, user_id: int, settings: GuildSettings) -> Optional[int]:
+    """Unix time when the member may change their role again, or None if they can now."""
     if not settings.cooldown_seconds:
         return None
     elapsed = await storage.seconds_since_change(guild_id, user_id)
     if elapsed is None or elapsed >= settings.cooldown_seconds:
         return None
-    ready_at = int(time.time() + (settings.cooldown_seconds - elapsed)) + 1
+    return int(time.time() + (settings.cooldown_seconds - elapsed)) + 1
+
+
+async def cooldown_error(guild_id: int, user_id: int, settings: GuildSettings) -> Optional[Result]:
+    """Refuse a change while the member's cooldown is running (cooldown 0 = off).
+
+    Result.data = {"retry_at": unix time} so the web page can count down.
+    """
+    ready_at = await next_change_at(guild_id, user_id, settings)
+    if ready_at is None:
+        return None
     return Result(
         False,
         f"You changed your role recently. Members can change it once every "
         f"{format_duration(settings.cooldown_seconds)}, so you can change it again <t:{ready_at}:R>.",
+        {"retry_at": ready_at},
     )
 
 
@@ -690,10 +701,10 @@ async def create_role(member: discord.Member, name: str) -> Result:
             return error
     if restoring:
         message = f"Your role **{role.name}** is back, with your saved colors."
-        await log_event(guild, f"{member.mention} recreated their role {role.mention} from saved settings.")
+        await log_event(guild, f"{member.mention} recreated their role {role_ref(role)} from saved settings.")
     else:
         message = f"Created **{role.name}** and gave it to you. Color it with `/{COMMAND_GROUP} color set`."
-        await log_event(guild, f"{member.mention} created their role {role.mention}.", "success")
+        await log_event(guild, f"{member.mention} created their role {role_ref(role)}.", "success")
     return Result(True, message, role, notes)
 
 
@@ -723,7 +734,7 @@ async def rename(member: discord.Member, new_name: str) -> Result:
                 return error
         await storage.update_custom_role(guild.id, member.id, changed=True, name=clean)
     logger.info("Renamed role %s for %s in guild %s", role.id, member.id, guild.id)
-    await log_event(guild, f"{member.mention} renamed their role {validation.code(old_name or '?')} → {role.mention}.")
+    await log_event(guild, f"{member.mention} renamed their role {validation.code(old_name or '?')} → {role_ref(role)}.")
     return Result(True, f"Your role is now called **{clean}**.", role, notes)
 
 
@@ -771,7 +782,7 @@ async def set_colors(
         MODE_HOLOGRAPHIC: "holographic",
         MODE_GRADIENT: f"gradient `{validation.format_hex(primary)}` → `{validation.format_hex(secondary)}`",
     }.get(mode, f"`{validation.format_hex(primary)}`")
-    await log_event(guild, f"{member.mention} recolored {role.mention}: {style_text}.")
+    await log_event(guild, f"{member.mention} recolored {role_ref(role)}: {style_text}.")
     return Result(True, message, role, notes)
 
 
@@ -873,7 +884,7 @@ async def set_icon(member: discord.Member, image: Optional[bytes] = None, emoji:
         await storage.update_custom_role(guild.id, member.id, changed=True, **changes)
     logger.info("Set %s icon on role %s for %s in guild %s", "emoji" if emoji else "image", role.id, member.id, guild.id)
     shown = value if emoji is not None else "an image"
-    await log_event(guild, f"{member.mention} set the icon of {role.mention} to {shown}.")
+    await log_event(guild, f"{member.mention} set the icon of {role_ref(role)} to {shown}.")
     if emoji is not None:
         return Result(True, f"Your role icon is now {value}.", role, notes)
     return Result(True, "Your role icon is set. Images are cropped to the center square and resized to 64x64.", role, notes)
@@ -951,7 +962,7 @@ async def move(member: discord.Member, target: discord.Role, place: str) -> Resu
         if hidden:
             notes.append(hidden)
     logger.info("Moved role %s of %s %s role %s in guild %s", role.id, member.id, place, target.id, guild.id)
-    await log_event(guild, f"{member.mention} moved {role.mention} {place} {target.mention}.")
+    await log_event(guild, f"{member.mention} moved {role_ref(role)} {place} {role_ref(target)}.")
     return Result(True, f"Your role **{role.name}** is now directly {place} **{target.name}**.", role, notes)
 
 
@@ -1195,6 +1206,14 @@ async def hydrate_migrated_roles(bot: discord.Client) -> int:
 # Log channel
 # ------------------------------------------------------
 
+def role_ref(role: discord.Role) -> str:
+    """A role for the log channel: its mention plus its name as plain text.
+
+    A mention of a role that's later deleted shows as "@unknown-role", so the name keeps the entry readable.
+    """
+    return f"{role.mention} ({validation.code(role.name)})"
+
+
 _LOG_COLOURS = {
     "info": PALETTE.INFO,
     "success": PALETTE.SUCCESS,
@@ -1253,6 +1272,11 @@ def mass_archive_threshold() -> int:
 def debug_fetch_fail_active() -> bool:
     """LUNAR_DEBUG_FAIL_MEMBER_FETCH is honoured only in development (the default ENVIRONMENT)."""
     return config.LUNAR_DEBUG_FAIL_MEMBER_FETCH and os.getenv("ENVIRONMENT", "development") == "development"
+
+
+def debug_preview_enhanced_active() -> bool:
+    """LUNAR_DEBUG_PREVIEW_ENHANCED_COLORS is honoured only in development (the default ENVIRONMENT)."""
+    return config.LUNAR_DEBUG_PREVIEW_ENHANCED_COLORS and os.getenv("ENVIRONMENT", "development") == "development"
 
 
 def is_eligible(member: discord.Member, settings: GuildSettings) -> bool:
@@ -1364,7 +1388,7 @@ async def restore(member: discord.Member, settings: Optional[GuildSettings] = No
             await log_event(guild, f"Couldn't restore {member.mention}'s role: {error.message}", "error", settings)
             return error
     logger.info("Restored role %s for %s in guild %s", role.id, member.id, guild.id)
-    await log_event(guild, f"Restored {member.mention}'s role {role.mention} from saved settings.", "success", settings)
+    await log_event(guild, f"Restored {member.mention}'s role {role_ref(role)} from saved settings.", "success", settings)
     if dm:
         try:
             await member.send(RESTORE_DM.format(name=role.name, guild=guild.name))
@@ -1846,6 +1870,8 @@ async def picker_state(member: discord.Member) -> Result:
             "name": guild.name,
             "gradient": features.gradient,
             "icons": features.icons,
+            # Test switch: the page unlocks Gradient/Holographic for previewing; saving is still refused.
+            "preview_enhanced": debug_preview_enhanced_active() and not features.gradient,
         },
         "role": {
             "name": (role.name if role is not None else None) or record.name,
@@ -1856,4 +1882,6 @@ async def picker_state(member: discord.Member) -> Result:
             "icon": icon,
         },
         "cooldown_seconds": settings.cooldown_seconds,
+        "next_change_at": await next_change_at(guild.id, member.id, settings),
+        "name_max": validation.NAME_MAX,
     })

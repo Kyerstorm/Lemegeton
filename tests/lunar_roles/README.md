@@ -29,7 +29,7 @@ summary.
   `ENVIRONMENT` isn't development.
 - **No Discord.** The bot token is never loaded, and any Discord API call raises an error.
   Everything Discord-side is faked.
-- **Fake servers only.** Tests only create and delete rows for the guild IDs 2–7. Real Discord
+- **Fake servers only.** Tests only create and delete rows for the guild IDs 2–8. Real Discord
   server IDs are 17–20 digit numbers, so real data can't be touched. (`seed_lunar_lab.py` isn't
   a test and has its own limits; see below.)
 - **Separate logs.** Logs go to a temporary folder, not the bot's `logs/`.
@@ -44,6 +44,7 @@ summary.
 | `test_palette_and_icons.py` | Icon preparation (crop, EXIF, decompression bombs, file types), emoji check, avatar palette, palette menus, icon set/remove/restore, the `/lunar icon` upload path |
 | `test_admin_extras.py` | Command channel, cooldown, `/lunar position` (including gaps in Discord's position numbers), restoring near the old spot, `/lunar-admin list` and `remove` |
 | `test_picker_web.py` | Web server refactor (picker without the dashboard), picker link tokens, security headers, token-in-URL refusal, eligibility re-checks, rate limits, spoofed `X-Forwarded-For`, `/lunar color-picker` |
+| `test_picker_edit.py` | Picker write APIs (color, name), palette, cooldown on the web, the preview test switch, XSS safety (hostile names come back as plain data; `picker.js` never inserts HTML), theme rules (`picker.css` has no colors or lengths; every theme value has a comment) |
 | `fakes.py` | Fake guilds, roles, members and channels |
 | `make_test_images.py` | Not a test. Generates `test_images/` for testing `/lunar icon` by hand in Discord |
 | `seed_lunar_lab.py` | Not a test. Adds or removes fake saved records in the test server, for testing `/lunar-admin list` pages |
