@@ -27,7 +27,7 @@ human can test it in Discord.
 |---|---|---|
 | Current feature | `cogs/customization/server_boost.py` has `/nitro-role-set role_name hex_color` (solid only) and an `on_member_update` boost-welcome DM. | **Replace** this cog's command with the `/lunar` group. Keep (and update) the welcome DM. |
 | Database | **PostgreSQL only** (`database.py`, asyncpg). Queries go through `execute_db_operation(name, sql, params, fetch_type=...)` using `?` placeholders; the layer converts `INTEGER` → `BIGINT` and `?` → `$n`. | Use `execute_db_operation`. Register new table init functions in `init_db()`'s `table_init_functions` list. |
-| Existing table | `booster_roles(discord_id, guild_id, role_id, created_at, updated_at)`, PK `(discord_id, guild_id)`. | Migrate its rows into the new table on first init (§8), then stop using the old helpers. |
+| Existing table | `booster_roles(discord_id, guild_id, role_id, created_at, updated_at)`, PK `(discord_id, guild_id)`. | Import its rows with `/lunar-admin import-legacy` (§8; originally "on first init"), then stop using the old helpers. |
 | Cog loader | `bot.py` loads **every `.py` file** under `cogs/` and `cogs_test/` as an extension. | Put non-cog code (service, image utils) in `helpers/`, **not** under `cogs/`. |
 | Intents | `members` and `message_content` intents are enabled. | Boost start/stop is detectable via `on_member_update` (`premium_since`). |
 | Command sync | Commands are synced globally (`bot.tree.sync()`). | Nothing extra needed. |
@@ -205,8 +205,13 @@ Use a per-user `asyncio.Lock` so two simultaneous changes for the same user can'
 `lunar_guild_settings` — guild_id PK, enabled, anchor_role_id, command_channel_id, log_channel_id, cooldown_seconds,
 allowed_role_ids (TEXT/JSON), blocked_words (TEXT/JSON), updated_at.
 
-**Migration:** on first init, copy rows from `booster_roles` into `lunar_custom_roles` (read the role's current name/color
-from Discord when the bot is ready; mark `missing` if the role no longer exists). Leave the old table in place.
+**Migration (changed in Milestone 9):** rows are **not** copied automatically on init any more, because the startup
+check then archived old roles of members who no longer qualified, on every server, before an admin had decided anything.
+Instead `/lunar-admin import-legacy` shows a preview (taken over / members who don't qualify / skipped, with reasons)
+and, on confirm, takes the existing roles over as they are (name, color, position read from Discord; nothing recreated).
+Members who don't qualify are archived only if the admin picks that option. A member who uses `/lunar` before the import
+takes over their own old role. Nothing is ever archived automatically while Lunar Roles is off. The old table is left
+in place and only read.
 
 ## 9. Configuration (`config.py` + `.env.example`)
 

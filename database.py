@@ -2066,7 +2066,8 @@ async def remove_booster_role(discord_id: int, guild_id: int) -> bool:
 # ------------------------------------------------------
 
 async def init_lunar_roles_tables():
-    """Create the Lunar Roles tables and copy legacy booster_roles rows into them."""
+    """Create the Lunar Roles tables. Old booster_roles rows are NOT copied here: admins import them
+    with /lunar-admin import-legacy (see helpers/lunar_roles/service.py)."""
     logger.info("🔧 Initializing Lunar Roles tables...")
     await execute_db_operation(
         "create lunar custom roles table",
@@ -2179,33 +2180,6 @@ async def init_lunar_roles_tables():
         """,
     )
 
-    # Legacy migration runs once (a marker row stops it re-adding records that
-    # were later removed). name stays NULL until the bot reads the role from
-    # Discord (see helpers/lunar_roles/service.py).
-    already_migrated = await execute_db_operation(
-        "check lunar booster roles migration",
-        "SELECT value FROM lunar_meta WHERE key = ?",
-        ("booster_roles_migrated",),
-        fetch_type="one",
-    )
-    if not already_migrated:
-        migrated = await execute_db_operation(
-            "migrate booster roles to lunar custom roles",
-            """
-            INSERT INTO lunar_custom_roles (guild_id, user_id, role_id, status, created_at, updated_at)
-            SELECT guild_id, discord_id, role_id, 'active', created_at, CURRENT_TIMESTAMP
-            FROM booster_roles
-            ON CONFLICT DO NOTHING
-            RETURNING user_id
-            """,
-            fetch_type="all",
-        )
-        await execute_db_operation(
-            "mark lunar booster roles migration",
-            "INSERT INTO lunar_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING",
-            ("booster_roles_migrated", str(len(migrated or []))),
-        )
-        logger.info("Migrated %s legacy booster role(s) into lunar_custom_roles.", len(migrated or []))
     logger.info("✅ Lunar Roles tables ready.")
 
 
@@ -2507,7 +2481,7 @@ async def init_db():
         ("Steam Users", init_steam_users_table),
         ("News Tables", init_news_tables),
         ("Booster Roles", init_booster_roles_table),
-        # After Booster Roles: migrates its rows.
+        # After Booster Roles: /lunar-admin import-legacy reads that table.
         ("Lunar Roles", init_lunar_roles_tables),
     ]
 

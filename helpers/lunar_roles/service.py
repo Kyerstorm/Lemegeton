@@ -432,11 +432,21 @@ async def _discord(guild: discord.Guild, action: str, coro) -> Tuple[Any, Option
         return None, Result(False, API_ERROR_MESSAGE)
 
 
-async def _check_member(member: discord.Member) -> Tuple[Optional[GuildSettings], Optional[Result]]:
+async def _check_member(
+    member: discord.Member, adopted: Optional[List[Result]] = None
+) -> Tuple[Optional[GuildSettings], Optional[Result]]:
+    """Set up + eligible. Also takes over the member's old /nitro-role-set role if they still have
+    one (so roles never stack); `adopted` collects that Result for callers that mention it."""
     settings = await storage.get_guild_settings(member.guild.id)
     for check in (ensure_ready(member.guild, settings), ensure_eligible(member, settings)):
         if not check.ok:
             return settings, check
+    adoption = await adopt_legacy_role(member, settings)
+    if adoption is not None:
+        if not adoption.ok:
+            return settings, adoption
+        if adopted is not None:
+            adopted.append(adoption)
     return settings, None
 
 
@@ -668,9 +678,12 @@ async def _ensure_live_role(
 
 
 async def create_role(member: discord.Member, name: str) -> Result:
-    settings, error = await _check_member(member)
+    adopted: List[Result] = []
+    settings, error = await _check_member(member, adopted)
     if error:
         return error
+    if adopted:  # their old /nitro-role-set role is now their Lunar role; never make a second one
+        return Result(True, adopted[0].message, adopted[0].data)
     guild = member.guild
     async with user_lock(guild.id, member.id):
         record = await storage.get_custom_role(guild.id, member.id)
@@ -1212,6 +1225,224 @@ async def hydrate_migrated_roles(bot: discord.Client) -> int:
 
 
 # ------------------------------------------------------
+# Old /nitro-role-set roles (the booster_roles table)
+# ------------------------------------------------------
+# Nothing is copied automatically. An admin runs /lunar-admin import-legacy (preview, then
+# confirm), and a member who uses /lunar before that takes over their own old role. Taking over
+# only creates the Lunar record for the existing Discord role: its name, colors and position are
+# kept and nothing is deleted. booster_roles itself is never changed.
+
+LEGACY_COMMAND = "/nitro-role-set"
+LEGACY_ROLE_GONE = "the role no longer exists"
+LEGACY_ALREADY_IMPORTED = "already imported"
+LEGACY_HAS_LUNAR = "already has a different Lunar role (both roles exist; remove one by hand)"
+LEGACY_ROLE_TAKEN = "the role already belongs to someone else's Lunar role"
+LEGACY_LEFT = "left the server"
+LEGACY_NOT_QUALIFYING = "doesn't boost or have an allowed role"
+
+
+@dataclass
+class LegacyEntry:
+    user_id: int
+    role_id: int
+    role: Optional[discord.Role]
+    reason: str = ""  # why it's skipped / why the member doesn't qualify
+
+
+@dataclass
+class LegacyPlan:
+    take_over: List[LegacyEntry] = field(default_factory=list)       # role kept as the member's Lunar role
+    not_qualifying: List[LegacyEntry] = field(default_factory=list)  # archived only if the admin confirms that part
+    skipped: List[LegacyEntry] = field(default_factory=list)         # left exactly as they are
+    total: int = 0
+
+    @property
+    def not_imported(self) -> int:
+        """Old roles that still exist in Discord and aren't Lunar roles yet."""
+        return len(self.take_over) + len(self.not_qualifying) + sum(
+            1 for e in self.skipped if e.role is not None and e.reason != LEGACY_ALREADY_IMPORTED
+        )
+
+
+@dataclass
+class LegacyReport:
+    taken_over: List[Tuple[int, str]] = field(default_factory=list)  # (user_id, role name)
+    skipped: List[Tuple[int, str]] = field(default_factory=list)     # (user_id, why)
+    archive: Optional["ArchiveReport"] = None
+
+
+def legacy_role_problem(guild: discord.Guild, role: discord.Role, settings: GuildSettings) -> Optional[str]:
+    """Why the bot can't safely take over this old role, or None."""
+    if role.is_default():
+        return "it's @everyone"
+    if getattr(role, "managed", False) or role.is_bot_managed():
+        return "it's managed by an integration or bot"
+    if role >= guild.me.top_role:
+        return "it's at or above my highest role"
+    if is_moderation_role(role):
+        return "it has moderation permissions"
+    if role.id == settings.anchor_role_id:
+        return "it's the anchor role"
+    if role.id in settings.allowed_role_ids:
+        return "it's an allowed role"
+    return None
+
+
+async def plan_legacy_import(guild: discord.Guild, settings: Optional[GuildSettings] = None) -> LegacyPlan:
+    """Sort every old /nitro-role-set role in this server into take over / doesn't qualify / skipped.
+    The caller must make sure the member list is complete first (member_data_problem)."""
+    settings = settings or await storage.get_guild_settings(guild.id)
+    records = await storage.list_roles(guild.id)
+    by_user = {r.user_id: r for r in records}
+    lunar_role_ids = {r.role_id for r in records if r.role_id}
+    plan = LegacyPlan()
+    seen_roles = set()
+    for user_id, role_id in await storage.list_legacy_roles(guild.id):
+        plan.total += 1
+        role = guild.get_role(role_id)
+        entry = LegacyEntry(user_id, role_id, role)
+        record = by_user.get(user_id)
+        if record is not None and record.role_id == role_id:
+            entry.reason = LEGACY_ALREADY_IMPORTED
+            plan.skipped.append(entry)
+        elif role is None:
+            entry.reason = LEGACY_ROLE_GONE
+            plan.skipped.append(entry)
+        elif _live_role(guild, record) is not None:
+            entry.reason = LEGACY_HAS_LUNAR
+            plan.skipped.append(entry)
+        elif role_id in lunar_role_ids or role_id in seen_roles:
+            entry.reason = LEGACY_ROLE_TAKEN
+            plan.skipped.append(entry)
+        elif (problem := legacy_role_problem(guild, role, settings)) is not None:
+            entry.reason = f"I can't take it over: {problem}"
+            plan.skipped.append(entry)
+        else:
+            member = guild.get_member(user_id)
+            if member is None or not is_eligible(member, settings):
+                entry.reason = LEGACY_LEFT if member is None else LEGACY_NOT_QUALIFYING
+                plan.not_qualifying.append(entry)
+            else:
+                plan.take_over.append(entry)
+        seen_roles.add(role_id)
+    return plan
+
+
+def _live_role(guild: discord.Guild, record: Optional[CustomRole]) -> Optional[discord.Role]:
+    """The record's role if it exists in Discord right now."""
+    return guild.get_role(record.role_id) if record is not None and record.role_id else None
+
+
+async def _take_over(guild: discord.Guild, user_id: int, role: discord.Role) -> None:
+    """Make an existing Discord role this member's Lunar role. Changes nothing in Discord.
+    A saved Lunar record without a live role is replaced, because the old role is what they have."""
+    mode, primary, secondary = describe_role_colors(role)
+    await storage.upsert_custom_role(CustomRole(
+        guild_id=guild.id, user_id=user_id, role_id=role.id, status=storage.STATUS_ACTIVE,
+        name=role.name, color_mode=mode, primary_color=primary, secondary_color=secondary,
+        icon_png=None, position_hint=None, last_changed_at=None, created_at=None, updated_at=None,
+    ))
+    # upsert never writes the icon original; clear one left from a replaced saved record
+    await storage.update_custom_role(guild.id, user_id, icon_source=None, icon_crop=None)
+
+
+async def import_legacy(
+    guild: discord.Guild, admin: discord.abc.User, take_over_ids: set, archive_ids: set,
+    progress: Optional["ProgressCallback"] = None,
+) -> LegacyReport:
+    """Carry out what the admin confirmed in the preview.
+
+    The plan is worked out again first, and only members who were in the matching part of the
+    preview are acted on. Old roles of members who don't qualify are archived (deleted from
+    Discord with their settings saved, so they come back if the member qualifies again) only
+    when they're in archive_ids. Nothing else is deleted.
+    """
+    settings = await storage.get_guild_settings(guild.id)
+    plan = await plan_legacy_import(guild, settings)
+    report = LegacyReport()
+    for entry in plan.take_over:
+        if entry.user_id not in take_over_ids:
+            continue
+        async with user_lock(guild.id, entry.user_id):
+            current = await storage.get_custom_role(guild.id, entry.user_id)
+            if current is not None and (current.role_id == entry.role_id or _live_role(guild, current) is not None):
+                report.skipped.append((entry.user_id, LEGACY_ALREADY_IMPORTED))
+                continue
+            await _take_over(guild, entry.user_id, entry.role)
+        report.taken_over.append((entry.user_id, entry.role.name))
+        logger.info("Imported old role %s of user %s in guild %s", entry.role_id, entry.user_id, guild.id)
+
+    to_archive: Dict[int, str] = {}
+    for entry in plan.not_qualifying:
+        if entry.user_id not in archive_ids:
+            continue
+        async with user_lock(guild.id, entry.user_id):
+            current = await storage.get_custom_role(guild.id, entry.user_id)
+            if current is not None and (current.role_id == entry.role_id or _live_role(guild, current) is not None):
+                report.skipped.append((entry.user_id, LEGACY_ALREADY_IMPORTED))
+                continue
+            await _take_over(guild, entry.user_id, entry.role)  # archive() needs the record
+        to_archive[entry.user_id] = f"old {LEGACY_COMMAND} role, {entry.reason}"
+    if to_archive:
+        report.archive = await process_archives(
+            guild, to_archive, respect_pending=False, progress=progress,
+            log_title=f"Old {LEGACY_COMMAND} roles of members who don't qualify, archived by {admin}",
+        )
+
+    lines = [f"<@{uid}>: {validation.code(name)}" for uid, name in report.taken_over[:20]]
+    if len(report.taken_over) > 20:
+        lines.append(f"…and {len(report.taken_over) - 20} more")
+    if report.taken_over or report.skipped:
+        await log_event(
+            guild,
+            f"**{admin.mention} imported old `{LEGACY_COMMAND}` roles.** Took over {len(report.taken_over)} "
+            f"(name, color and position kept), skipped {len(report.skipped)}.\n" + "\n".join(lines),
+            "success", settings,
+        )
+    return report
+
+
+async def adopt_legacy_role(member: discord.Member, settings: GuildSettings) -> Optional[Result]:
+    """If this member still has an old /nitro-role-set role and no Lunar role, make it their Lunar role.
+
+    Returns None when there's nothing to do, Result(True) when the role was taken over, and
+    Result(False) when the old role exists but can't be taken over (so no second role is made).
+    """
+    guild = member.guild
+    role_id = await storage.get_legacy_role_id(guild.id, member.id)
+    if role_id is None:
+        return None
+    role = guild.get_role(role_id)
+    if role is None:
+        return None  # the old role is gone, so a new one can't stack with it
+    async with user_lock(guild.id, member.id):
+        current = await storage.get_custom_role(guild.id, member.id)
+        if current is not None and (current.role_id == role.id or _live_role(guild, current) is not None):
+            return None  # already theirs, or they already have a live Lunar role
+        if await storage.get_custom_role_by_role_id(guild.id, role.id) is not None:
+            problem = "it already belongs to someone else's Lunar role"
+        else:
+            problem = legacy_role_problem(guild, role, settings)
+        if problem:
+            return Result(
+                False,
+                f"You still have your old booster role {validation.code(role.name)} from `{LEGACY_COMMAND}`, "
+                f"but I can't take it over ({problem}), and I won't make you a second one. "
+                f"Ask an admin to check it with `/{ADMIN_GROUP} import-legacy`.",
+            )
+        await _take_over(guild, member.id, role)
+    logger.info("User %s took over their old role %s in guild %s", member.id, role.id, guild.id)
+    await log_event(guild, f"{member.mention} took over their old `{LEGACY_COMMAND}` role {role_ref(role)} "
+                           "as their Lunar role.", "info", settings)
+    return Result(
+        True,
+        f"You already had a booster role from `{LEGACY_COMMAND}`, so it's now your Lunar role: "
+        f"**{role.name}**, with the same name, color and position. Rename it with `/{COMMAND_GROUP} name`.",
+        role,
+    )
+
+
+# ------------------------------------------------------
 # Log channel
 # ------------------------------------------------------
 
@@ -1544,7 +1775,11 @@ async def archive_automatically(guild: discord.Guild, reasons: Dict[int, str], w
     Members in an open pending removal or a running snooze are left alone. Members
     whose snooze ran out are always asked about again (never removed silently).
     Returns the PendingRemoval, an ArchiveReport, or None if nothing was done.
+    Nothing is archived automatically while Lunar Roles is off in this server.
     """
+    if not (await storage.get_guild_settings(guild.id)).enabled:
+        logger.info("Not archiving %s role(s) in guild %s automatically: Lunar Roles is off", len(reasons), guild.id)
+        return None
     blocker = archive_blocker(guild)
     if blocker:
         await _warn_skip(guild, blocker, len(reasons))
@@ -1678,9 +1913,12 @@ def _ineligible_reasons(guild: discord.Guild, settings: GuildSettings, records: 
 
 
 async def archive_ineligible(guild: discord.Guild, why: str) -> Optional[Any]:
-    """Find members who no longer qualify and archive them (guarded). Skips on untrustworthy data."""
-    problem = await member_data_problem(guild)
+    """Find members who no longer qualify and archive them (guarded). Skips on untrustworthy data,
+    and does nothing at all while Lunar Roles is off in this server."""
     settings = await storage.get_guild_settings(guild.id)
+    if not settings.enabled:
+        return None
+    problem = await member_data_problem(guild)
     reasons = _ineligible_reasons(guild, settings, await storage.list_roles(guild.id))
     if not reasons:
         _skip_warned.pop(guild.id, None)

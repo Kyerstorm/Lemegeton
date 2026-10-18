@@ -8,7 +8,7 @@ A production-ready Discord bot that combines anime/manga tracking with AI-powere
 ![Status](https://img.shields.io/badge/status-production--ready-success.svg)
 ![Multi-Guild](https://img.shields.io/badge/multi--guild-ready-brightgreen.svg)
 ![Railway](https://img.shields.io/badge/railway-deployable-purple.svg)
-![Commands](https://img.shields.io/badge/commands-69-brightgreen.svg)
+![Commands](https://img.shields.io/badge/commands-70-brightgreen.svg)
 
 ---
 
@@ -241,7 +241,7 @@ STEAM_API_KEY=your_steam_api_key_here
 
 > All commands are slash commands. Type `/` in Discord to see available commands.
 
-### Total: **69 Commands** across **8 Sections**
+### Total: **70 Commands** across **8 Sections**
 
 ### 🔐 Account Management (3 commands)
 
@@ -271,12 +271,12 @@ STEAM_API_KEY=your_steam_api_key_here
 - `/free-games` - Check free games and manage notifications
 - `/check-free-games` - Manually trigger free games check (Bot Moderator)
 
-### 🎨 Customization (29 commands)
+### 🎨 Customization (30 commands)
 
 - `/theme` - Browse, preview, and apply custom themes
 - `/admin-guild-theme` - Manage server-wide theme settings (Bot Moderator)
 - `/lunar …` (11 commands) - Your own custom booster role (see [Lunar Roles](#-lunar-roles))
-- `/lunar-admin …` (16 commands) - Set up Lunar Roles (Manage Roles; see [Lunar Roles](#-lunar-roles))
+- `/lunar-admin …` (17 commands) - Set up Lunar Roles (Manage Roles; see [Lunar Roles](#-lunar-roles))
 
 ### 🏰 Server Management (8 commands)
 
@@ -340,14 +340,14 @@ The **Interactive Dashboard** (`/dashboard`) is a powerful command management sy
 
 - **Account** (3 commands)
 - **Admin** (3 commands)
-- **Customization** (29 commands)
+- **Customization** (30 commands)
 - **Gaming** (5 commands)
 - **Media** (11 commands)
 - **Server Management** (8 commands)
 - **Social** (3 commands)
 - **Utilities** (7 commands)
 
-**Total: 69 commands** managed through the dashboard
+**Total: 70 commands** managed through the dashboard
 
 ### For Developers
 
@@ -375,7 +375,10 @@ private web page, the **color picker**. Admins set it up with `/lunar-admin`.
 - **Who gets one:** server boosters, plus members with a role an admin allows
   (`/lunar-admin allow-role`).
 - **When they stop qualifying** (or leave), the role is deleted but its settings are saved.
-  When they qualify again, it comes back as it was, near its old spot.
+  When they qualify again, it comes back as it was, near its old spot. While Lunar Roles is off
+  in a server, nothing is removed automatically.
+- **Old `/nitro-role-set` roles** are taken over, never duplicated: an admin imports them with
+  `/lunar-admin import-legacy`, and a member who uses `/lunar` first takes over their own.
 - **Safe by default:** it's off until an admin sets an anchor role and enables it. Names go
   through a filter (built-in protected words like "admin" or "mod", plus the server's own
   blocked words). Removing many roles at once needs an admin to confirm.
@@ -419,6 +422,7 @@ Setup, deployment and the full behaviour notes are in
 | `/lunar-admin list [status:]` | Every custom role with its owner and status (active, saved, missing). |
 | `/lunar-admin remove user: [reason:]` | Delete a member's role and saved settings. With a reason, they get a DM. |
 | `/lunar-admin pending` | See and confirm or cancel a large removal waiting for approval. |
+| `/lunar-admin import-legacy` | Bring old `/nitro-role-set` roles into Lunar Roles. Shows a preview first; roles are taken over as they are (name, color, position), never recreated. |
 
 ### The color picker
 
@@ -464,7 +468,7 @@ Lemegeton/
 ├── Procfile                        # Railway deployment configuration
 ├── .env.example                    # Environment template
 │
-├── cogs/                           # Command modules (69+ commands)
+├── cogs/                           # Command modules (70+ commands)
 │   ├── account/                    # Login, profile, admin login
 │   ├── admin/                      # Bot moderators, changelog, user cleanup
 │   ├── customization/              # Themes, Lunar Roles
@@ -842,7 +846,7 @@ Contributions are welcome! Please follow these guidelines:
 
 ## 📊 Statistics
 
-- **Commands**: 69 slash commands
+- **Commands**: 70 slash commands
 - **Cogs**: 40+ command modules
 - **Database Tables**: 20+ tables with multi-guild support
 - **Themes**: 30+ customizable themes

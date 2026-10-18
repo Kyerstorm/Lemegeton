@@ -333,6 +333,31 @@ async def list_guilds_with_records() -> List[int]:
 
 
 # ------------------------------------------------------
+# Old /nitro-role-set roles (read only: booster_roles is never changed)
+# ------------------------------------------------------
+
+async def list_legacy_roles(guild_id: int) -> List[tuple]:
+    """(user_id, role_id) for every old /nitro-role-set role recorded in this server, oldest first."""
+    rows = await execute_db_operation(
+        "list legacy booster roles",
+        "SELECT discord_id, role_id FROM booster_roles WHERE guild_id = ? ORDER BY created_at, discord_id",
+        (guild_id,),
+        fetch_type="all",
+    )
+    return [(int(row[0]), int(row[1])) for row in rows or []]
+
+
+async def get_legacy_role_id(guild_id: int, user_id: int) -> Optional[int]:
+    row = await execute_db_operation(
+        "get legacy booster role",
+        "SELECT role_id FROM booster_roles WHERE guild_id = ? AND discord_id = ?",
+        (guild_id, user_id),
+        fetch_type="one",
+    )
+    return int(row[0]) if row else None
+
+
+# ------------------------------------------------------
 # Pending mass removals
 # ------------------------------------------------------
 

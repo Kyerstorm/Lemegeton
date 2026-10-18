@@ -152,6 +152,99 @@ class ConfirmView(discord.ui.View):
             pass
 
 
+LEGACY_TIMEOUT = 120  # seconds the import-legacy preview buttons stay usable
+
+
+class LegacyImportView(discord.ui.View):
+    """Buttons under the /lunar-admin import-legacy preview; only the admin who ran it can press."""
+
+    def __init__(self, invoker_id: int, plan: service.LegacyPlan, on_choice):
+        super().__init__(timeout=LEGACY_TIMEOUT)
+        self.invoker_id = invoker_id
+        self.on_choice = on_choice  # async (interaction, archive_others: bool)
+        self.message: Optional[discord.WebhookMessage] = None
+        self.finished = False
+        taking, others = len(plan.take_over), len(plan.not_qualifying)
+        if taking:
+            self._add(f"Take over {taking}", discord.ButtonStyle.success, archive=False)
+        if others:
+            label = f"Take over {taking} and archive {others}" if taking else f"Archive {others}"
+            self._add(label, discord.ButtonStyle.danger, archive=True)
+        cancel = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.secondary)
+        cancel.callback = self._cancel
+        self.add_item(cancel)
+
+    def _add(self, label: str, style: discord.ButtonStyle, archive: bool):
+        button = discord.ui.Button(label=label, style=style)
+
+        async def callback(interaction: discord.Interaction):
+            self.finished = True
+            self.stop()
+            await interaction.response.edit_message(embed=_embed("Working…", "Starting.", PALETTE.WARNING), view=None)
+            await self.on_choice(interaction, archive)
+
+        button.callback = callback
+        self.add_item(button)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.invoker_id:
+            await interaction.response.send_message("Only the admin who ran the command can answer this.", ephemeral=True)
+            return False
+        return True
+
+    async def _cancel(self, interaction: discord.Interaction):
+        self.finished = True
+        self.stop()
+        await interaction.response.edit_message(embed=_embed("Cancelled", "Nothing was changed.", PALETTE.NEUTRAL), view=None)
+
+    async def on_timeout(self):
+        if self.finished or self.message is None:
+            return
+        try:
+            await self.message.edit(embed=_embed("Timed Out", f"No answer within {LEGACY_TIMEOUT // 60} minutes, "
+                                                              "so nothing was changed.", PALETTE.NEUTRAL), view=None)
+        except discord.HTTPException:
+            pass
+
+
+def _legacy_lines(entries, line, limit: int = 15) -> str:
+    lines = [line(e) for e in entries[:limit]]
+    if len(entries) > limit:
+        lines.append(f"…and {len(entries) - limit} more")
+    return "\n".join(lines)
+
+
+def legacy_preview_text(plan: service.LegacyPlan) -> str:
+    """The import-legacy preview: what will be taken over, who doesn't qualify, what's skipped."""
+    old = f"`{service.LEGACY_COMMAND}`"
+    parts = [f"Found **{plan.total}** old {old} role(s) in this server."]
+    if plan.take_over:
+        parts.append(
+            f"**Will be taken over ({len(plan.take_over)})**: they become these members' Lunar roles. "
+            "Name, color and position stay the same, and no new roles are made.\n"
+            + _legacy_lines(plan.take_over, lambda e: f"<@{e.user_id}> → {e.role.mention}")
+        )
+    if plan.not_qualifying:
+        parts.append(
+            f"**Members who don't qualify ({len(plan.not_qualifying)})**: their roles stay untouched unless you "
+            "pick **archive**. Archiving deletes the role from Discord and saves its settings, so it comes back "
+            "if they qualify again.\n"
+            + _legacy_lines(plan.not_qualifying, lambda e: f"<@{e.user_id}> → {e.role.mention} ({e.reason})")
+        )
+    if plan.skipped:
+        parts.append(
+            f"**Skipped ({len(plan.skipped)})**: left exactly as they are.\n"
+            + _legacy_lines(plan.skipped, lambda e: f"<@{e.user_id}>: {e.reason}")
+        )
+    if not plan.take_over and not plan.not_qualifying:
+        parts.append("Nothing to import.")
+    else:
+        parts.append(f"Nothing is deleted from the old {old} records. "
+                     f"These buttons expire in {LEGACY_TIMEOUT // 60} minutes.")
+    text = "\n\n".join(parts)
+    return text if len(text) <= 4000 else text[:3990] + "\n…"
+
+
 PALETTE_TIMEOUT = 300  # seconds the palette menus stay usable
 CLEAR_SECONDARY = "clear"
 
@@ -878,6 +971,10 @@ class LunarRoles(commands.Cog):
         features = service.feature_status(guild)
         counts = await storage.count_roles_by_status(guild.id)
         problems = service.setup_problems(guild, settings)
+        not_imported = (await service.plan_legacy_import(guild, settings)).not_imported
+        if not_imported:
+            problems.append(f"Old /nitro-role-set roles not imported yet: {not_imported}. "
+                            f"Run `/{ADMIN_GROUP} import-legacy`.")
 
         def role_text(role_id):
             role = guild.get_role(role_id) if role_id else None
@@ -1121,6 +1218,52 @@ class LunarRoles(commands.Cog):
         text = service.pending_text(pending, service.mass_archive_threshold())
         await interaction.followup.send(
             embed=_embed("Removal Waiting For Approval", text, PALETTE.WARNING), view=_pending_view(pending.id), ephemeral=True
+        )
+
+    @admin.command(name="import-legacy", description="Bring old /nitro-role-set roles into Lunar Roles (preview first)")
+    @command_meta(section="Customization", name="Lunar Admin Import Legacy")
+    async def admin_import_legacy(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        problem = await service.member_data_problem(guild) or service.archive_blocker(guild)
+        if problem:
+            await interaction.followup.send(embed=build_error_embed(
+                "Can't Import Right Now",
+                f"I can't check who qualifies right now ({problem}), so I won't import anything. Try again in a minute.",
+            ), ephemeral=True)
+            return
+        plan = await service.plan_legacy_import(guild)
+        text = legacy_preview_text(plan)
+        if not plan.take_over and not plan.not_qualifying:
+            await interaction.followup.send(embed=build_info_embed("Import Old Booster Roles", text), ephemeral=True)
+            return
+        take_over_ids = {e.user_id for e in plan.take_over}
+        archive_ids = {e.user_id for e in plan.not_qualifying}
+        admin = interaction.user
+
+        async def on_choice(button_interaction: discord.Interaction, archive_others: bool):
+            async def progress(done: int, total: int, report: service.ArchiveReport):
+                await button_interaction.edit_original_response(
+                    embed=_embed("Archiving…", f"{done}/{total} processed. {report.summary()}", PALETTE.WARNING)
+                )
+
+            report = await service.import_legacy(
+                guild, admin, take_over_ids, archive_ids if archive_others else set(), progress=progress
+            )
+            lines = [f"Took over **{len(report.taken_over)}** old role(s) as Lunar roles (name, color and position kept)."]
+            if report.archive is not None:
+                lines.append(f"Archived old roles of members who don't qualify: {report.archive.summary()}")
+            elif archive_ids:
+                lines.append(f"Left the {len(archive_ids)} old role(s) of members who don't qualify untouched.")
+            if report.skipped:
+                lines.append("**Skipped:** " + ", ".join(f"<@{uid}> ({why})" for uid, why in report.skipped[:15]))
+            failed = report.archive is not None and report.archive.failed
+            embed = _embed("Import Finished", "\n".join(lines), PALETTE.WARNING if failed else PALETTE.SUCCESS)
+            await button_interaction.edit_original_response(embed=embed)
+
+        view = LegacyImportView(admin.id, plan, on_choice)
+        view.message = await interaction.followup.send(
+            embed=build_warning_embed("Import Old Booster Roles", text), view=view, ephemeral=True, wait=True,
         )
 
     @allow_role.command(name="add", description="Let members with this role use Lunar Roles (besides boosters)")

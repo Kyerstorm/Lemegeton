@@ -119,34 +119,55 @@ see them.
      member's name color comes from their highest colored role, so a custom role below another
      colored role won't show.
    - The anchor must be below the bot's role. Existing roles aren't moved.
-3. **Set the log channel.** Run `/lunar-admin log-channel channel:#lunar-logs` (a staff-only
+3. **Import the old `/nitro-role-set` roles** (do this right after the anchor). Run
+   `/lunar-admin import-legacy`. It only shows a preview at first:
+   - **Will be taken over:** members who qualify and still have their old role. It becomes their
+     Lunar role exactly as it is (name, color, position); no new role is made.
+   - **Members who don't qualify** (stopped boosting, or left the server): listed separately.
+     Their old roles stay untouched unless you press **Take over … and archive …**. Archiving
+     deletes the role from Discord and saves its settings, so it comes back if they qualify
+     again.
+   - **Skipped:** the role no longer exists, or the bot can't safely take it over (it's above the
+     bot's role, or has moderation permissions). Also members who already have a different Lunar
+     role; those have two roles, so remove one by hand.
+   - Then press **Take over N** (or **Take over N and archive M**), or **Cancel**. The buttons last
+     2 minutes, and only you can press them.
+   - **Nothing is deleted** from the old `booster_roles` table, and you can run the command again
+     any time; already imported roles are skipped.
+   - If some members qualify through an allowed role instead of boosting, add it first
+     (`/lunar-admin allow-role add`), or they'll show up as not qualifying.
+   - If a member uses any `/lunar` command (once Lunar Roles is on) before you've imported, they
+     take over their own old role automatically, so roles never stack. `/lunar-admin settings` lists "Old /nitro-role-set roles
+     not imported yet: N" under **Problems** while there are any.
+4. **Set the log channel.** Run `/lunar-admin log-channel channel:#lunar-logs` (a staff-only
    channel).
    - It keeps a history of every change, plus warnings and the mass-removal alerts with their
      Confirm/Cancel buttons.
    - The file log (`logs/lunar_roles.log`) is wiped on every restart, so this channel is the
      real history.
-4. **Set the booster channel (optional).** Run `/lunar-admin channel channel:#booster-lounge` to
+5. **Set the booster channel (optional).** Run `/lunar-admin channel channel:#booster-lounge` to
    allow `/lunar` commands only in that channel and its threads. Leave it out (or run it empty) to
    allow them anywhere. `/lunar-admin` commands always work everywhere.
-5. **Optional extras:**
+6. **Optional extras:**
    - `/lunar-admin allow-role add role:<role>`: members with this role qualify too, without
      boosting.
    - `/lunar-admin cooldown seconds:<n>`: a wait between changes (0 = off, the default).
    - `/lunar-admin blocked-words add word:<word>`: more words to keep out of role names. Built-in
      protected words (admin, mod, staff, nitro, …) are already on.
-6. **Turn it on.** Run `/lunar-admin enable`. Boosters who already have saved roles get them back
-   straight away.
-7. **Check.** Run `/lunar-admin settings`.
+7. **Turn it on.** Run `/lunar-admin enable`. Boosters who already have saved roles get them back
+   straight away. **While Lunar Roles is off, nothing is removed automatically**; once it's on,
+   the regular check (every 30 minutes) removes roles of members who no longer qualify.
+8. **Check.** Run `/lunar-admin settings`.
    - **Server features** should show whether the server has gradient/holographic styles (they
      need 3 server boosts) and role icons (they need Boost Level 2).
    - **Problems** should be empty.
    - If there's a "Colors may be hidden" warning, some colored roles sit above the custom roles.
      Move the anchor up, or move those roles down.
-8. **Try it.** As a booster, run `/lunar role name:Test`, then `/lunar color-picker`.
+9. **Try it.** As a booster, run `/lunar role name:Test`, then `/lunar color-picker`.
 
-**Moving from `/nitro-role-set`:** the old booster role command is gone. Existing roles from it
-were copied once into Lunar Roles. They're picked up when the bot starts, and their names are read
-from Discord. The old `booster_roles` table is left in place.
+**Moving from `/nitro-role-set`:** the old booster role command is gone. Its roles are never
+copied automatically; they come over through step 3 (or when their member first uses `/lunar`).
+The old `booster_roles` table is left in place and never changed.
 
 ## 4. Theming the color picker
 
@@ -240,6 +261,8 @@ First, `/lunar-admin settings` → **Server features** should show ✅ for
   (`/lunar-admin allow-role`).
   - Losing eligibility or leaving deletes the custom role but saves its settings. Qualifying
     again restores it near its old spot.
+  - Only while Lunar Roles is **on**: when it's off, no role is archived automatically (neither by
+    the regular check nor by member events). An admin can still confirm removals by hand.
   - Losing the allowed role, the role being taken off the list, or the role being deleted all
     count as no longer qualifying.
 - **Blocked words:**
@@ -318,8 +341,9 @@ First, `/lunar-admin settings` → **Server features** should show ✅ for
   - **User-Agent:** `LemegetonLunarRoles/1.0 (+<LUNAR_PUBLIC_URL>/lunar; role icon fetch)`. Some
     sites (Wikimedia) refuse requests without a contact address like this.
   - The bot only fetches links on servers that have Role Icons.
-- **Migration:** existing `booster_roles` rows were copied once into `lunar_custom_roles` (a marker
-  row in `lunar_meta` stops it re-running).
+- **Old `/nitro-role-set` roles:** `/lunar-admin import-legacy` (section 3, step 3) or self-adoption
+  when the member first uses `/lunar`. Taking over only creates the Lunar record for the existing
+  role, so nothing changes in Discord. `booster_roles` is only read, never changed.
 - `/nitro-role-set` and `cogs/customization/server_boost.py` are gone. The boost welcome DM now
   lives in `cogs/customization/lunar_roles.py`.
 - **Offline tests:** `tests/lunar_roles/` (see its README). They run against a local development

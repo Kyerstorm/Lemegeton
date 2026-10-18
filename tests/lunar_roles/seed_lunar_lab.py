@@ -1,8 +1,18 @@
-"""Not a test. Adds fake "saved" Lunar records to the test server so /lunar-admin list has pages.
+"""Not a test. Adds fake "saved" Lunar records to the test server so /lunar-admin list has pages,
+and fake old /nitro-role-set rows (booster_roles) for testing /lunar-admin import-legacy.
 
     .venv/Scripts/python.exe tests/lunar_roles/seed_lunar_lab.py add [count]   # default 15, max 60
     .venv/Scripts/python.exe tests/lunar_roles/seed_lunar_lab.py status
     .venv/Scripts/python.exe tests/lunar_roles/seed_lunar_lab.py remove        # deletes everything it added
+
+    .venv/Scripts/python.exe tests/lunar_roles/seed_lunar_lab.py legacy-add ROLE_ID [USER_ID]
+    .venv/Scripts/python.exe tests/lunar_roles/seed_lunar_lab.py legacy-status
+    .venv/Scripts/python.exe tests/lunar_roles/seed_lunar_lab.py legacy-remove  # only the rows legacy-add made
+
+legacy-add records ROLE_ID as USER_ID's old /nitro-role-set role. Without USER_ID it uses the next
+fake ID from 1000901 (someone who "left the server"). It never overwrites an existing row, and
+legacy-remove deletes only the rows it added (remembered in lunar_meta), plus Lunar records of its
+fake members. Lunar records of real members are left alone; remove those with /lunar-admin remove.
 
 Safety:
 - Only touches the server in .env's GUILD_ID (the Lunar Lab test server), and only if Lunar
@@ -34,7 +44,10 @@ SEED_FIRST_ID = 1_000_001
 SEED_MAX = 60
 SEED_IDS = range(SEED_FIRST_ID, SEED_FIRST_ID + SEED_MAX)
 SEED_COLORS = (0xFF66AA, 0x66CCFF, 0xFFD166, 0x06D6A0, 0x9B5DE5, 0xF15BB5)
-USAGE = "Usage: seed_lunar_lab.py add [count] | status | remove"
+USAGE = ("Usage: seed_lunar_lab.py add [count] | status | remove | "
+         "legacy-add ROLE_ID [USER_ID] | legacy-status | legacy-remove")
+LEGACY_FAKE_FIRST_ID = 1_000_901
+LEGACY_META_KEY = "seed_legacy_rows"
 
 
 def _guild_id() -> int:
@@ -57,7 +70,7 @@ async def _count(q, guild_id: int) -> int:
 async def main(args) -> int:
     import database as db
 
-    if not args or args[0] not in {"add", "status", "remove"}:
+    if not args or args[0] not in {"add", "status", "remove", "legacy-add", "legacy-status", "legacy-remove"}:
         print(USAGE)
         return 2
     command = args[0]
@@ -74,6 +87,9 @@ async def main(args) -> int:
         print("REFUSING TO SEED: Lunar Roles has no settings for the GUILD_ID server in .env. "
               "Run /lunar-admin anchor there first.")
         return 1
+
+    if command.startswith("legacy-"):
+        return await _legacy(q, guild_id, command, args[1:])
 
     if command == "status":
         print(f"{await _count(q, guild_id)} seed record(s) in the GUILD_ID server.")
@@ -111,6 +127,64 @@ async def main(args) -> int:
         )
     print(f"{await _count(q, guild_id)} seed record(s) in the GUILD_ID server (all 'saved'). "
           "Remove them with: seed_lunar_lab.py remove")
+    return 0
+
+
+async def _legacy(q, guild_id: int, command: str, args) -> int:
+    import json
+
+    row = await q("read legacy seed list", "SELECT value FROM lunar_meta WHERE key = ?", (LEGACY_META_KEY,), fetch_type="one")
+    seeded = [tuple(pair) for pair in json.loads(row[0])] if row and row[0] else []
+
+    async def save():
+        await q("save legacy seed list",
+                "INSERT INTO lunar_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                (LEGACY_META_KEY, json.dumps(seeded)))
+
+    if command == "legacy-status":
+        total = (await q("count legacy rows", "SELECT COUNT(*) FROM booster_roles WHERE guild_id = ?", (guild_id,),
+                         fetch_type="one"))[0]
+        print(f"{total} old /nitro-role-set row(s) in the GUILD_ID server, {len(seeded)} of them added by this script:")
+        for user_id, role_id in seeded:
+            print(f"  user {user_id} -> role {role_id}")
+        return 0
+
+    if command == "legacy-remove":
+        for user_id, role_id in seeded:
+            await q("remove legacy seed row", "DELETE FROM booster_roles WHERE guild_id = ? AND discord_id = ? AND role_id = ?",
+                    (guild_id, user_id, role_id))
+        fake = [u for u, _ in seeded if LEGACY_FAKE_FIRST_ID <= u < LEGACY_FAKE_FIRST_ID + 100]
+        for user_id in fake:  # Lunar records an import made for the fake "left the server" members
+            for table in ("lunar_custom_roles", "lunar_archive_snoozes"):
+                await q("remove legacy seed record", f"DELETE FROM {table} WHERE guild_id = ? AND user_id = ?",
+                        (guild_id, user_id))
+        print(f"Removed {len(seeded)} old-role row(s) this script added, and any Lunar records of its "
+              f"{len(fake)} fake member(s).")
+        seeded.clear()
+        await save()
+        return 0
+
+    try:
+        role_id = int(args[0])
+        user_id = int(args[1]) if len(args) > 1 else None
+    except (IndexError, ValueError):
+        print(USAGE)
+        return 2
+    if user_id is None:
+        used = {u for u, _ in seeded}
+        user_id = next(i for i in range(LEGACY_FAKE_FIRST_ID, LEGACY_FAKE_FIRST_ID + 100) if i not in used)
+    added = await q(
+        "add legacy seed row",
+        "INSERT INTO booster_roles (discord_id, guild_id, role_id) VALUES (?, ?, ?) "
+        "ON CONFLICT (discord_id, guild_id) DO NOTHING RETURNING discord_id",
+        (user_id, guild_id, role_id), fetch_type="one",
+    )
+    if not added:
+        print(f"User {user_id} already has an old-role row; nothing changed.")
+        return 1
+    seeded.append((user_id, role_id))
+    await save()
+    print(f"Added: user {user_id} -> role {role_id} as an old /nitro-role-set role. Undo with: seed_lunar_lab.py legacy-remove")
     return 0
 
 
