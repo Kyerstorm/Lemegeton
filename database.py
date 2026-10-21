@@ -2061,18 +2061,18 @@ async def remove_booster_role(discord_id: int, guild_id: int) -> bool:
 
 
 # ------------------------------------------------------
-# LUNAR ROLES (custom booster roles)
-# Read/write helpers live in helpers/lunar_roles/storage.py.
+# CUSTOM ROLES (custom booster roles)
+# Read/write helpers live in helpers/custom_roles/storage.py.
 # ------------------------------------------------------
 
-async def init_lunar_roles_tables():
-    """Create the Lunar Roles tables. Old booster_roles rows are NOT copied here: admins import them
-    with /lunar-admin import-legacy (see helpers/lunar_roles/service.py)."""
-    logger.info("🔧 Initializing Lunar Roles tables...")
+async def init_custom_roles_tables():
+    """Create the Custom Roles tables. Old booster_roles rows are NOT copied here: admins import them
+    with /custom-role-admin import-legacy (see helpers/custom_roles/service.py)."""
+    logger.info("🔧 Initializing Custom Roles tables...")
     await execute_db_operation(
-        "create lunar custom roles table",
+        "create custom roles table",
         """
-        CREATE TABLE IF NOT EXISTS lunar_custom_roles (
+        CREATE TABLE IF NOT EXISTS custom_role_records (
             guild_id INTEGER NOT NULL,
             user_id INTEGER NOT NULL,
             role_id INTEGER,
@@ -2092,31 +2092,31 @@ async def init_lunar_roles_tables():
     )
     # Added in Milestone 4: a standard Unicode emoji used as the role icon (instead of icon_png).
     await execute_db_operation(
-        "add lunar icon_emoji column",
-        "ALTER TABLE lunar_custom_roles ADD COLUMN IF NOT EXISTS icon_emoji TEXT",
+        "add custom role icon_emoji column",
+        "ALTER TABLE custom_role_records ADD COLUMN IF NOT EXISTS icon_emoji TEXT",
     )
     # Added in Milestone 8: the original icon image exactly as uploaded, and the square cut from it
     # ({"x", "y", "size"} in the original's pixels), so the icon can be re-cropped without quality loss.
     await execute_db_operation(
-        "add lunar icon_source column",
-        "ALTER TABLE lunar_custom_roles ADD COLUMN IF NOT EXISTS icon_source BYTEA",
+        "add custom role icon_source column",
+        "ALTER TABLE custom_role_records ADD COLUMN IF NOT EXISTS icon_source BYTEA",
     )
     await execute_db_operation(
-        "add lunar icon_crop column",
-        "ALTER TABLE lunar_custom_roles ADD COLUMN IF NOT EXISTS icon_crop TEXT",
+        "add custom role icon_crop column",
+        "ALTER TABLE custom_role_records ADD COLUMN IF NOT EXISTS icon_crop TEXT",
     )
     # A Discord role can belong to at most one tracked record.
     await execute_db_operation(
-        "create lunar custom roles role_id index",
+        "create custom roles role_id index",
         """
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_lunar_custom_roles_role_id
-        ON lunar_custom_roles (role_id) WHERE role_id IS NOT NULL
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_custom_role_records_role_id
+        ON custom_role_records (role_id) WHERE role_id IS NOT NULL
         """,
     )
     await execute_db_operation(
-        "create lunar guild settings table",
+        "create custom role guild settings table",
         """
-        CREATE TABLE IF NOT EXISTS lunar_guild_settings (
+        CREATE TABLE IF NOT EXISTS custom_role_guild_settings (
             guild_id INTEGER PRIMARY KEY,
             enabled BOOLEAN NOT NULL DEFAULT FALSE,
             anchor_role_id INTEGER,
@@ -2131,19 +2131,19 @@ async def init_lunar_roles_tables():
     )
     # Added after the first release of this table.
     await execute_db_operation(
-        "add lunar anchor_place column",
-        "ALTER TABLE lunar_guild_settings ADD COLUMN IF NOT EXISTS anchor_place TEXT NOT NULL DEFAULT 'below'",
+        "add custom role anchor_place column",
+        "ALTER TABLE custom_role_guild_settings ADD COLUMN IF NOT EXISTS anchor_place TEXT NOT NULL DEFAULT 'below'",
     )
     await execute_db_operation(
-        "add lunar removed_default_words column",
-        "ALTER TABLE lunar_guild_settings ADD COLUMN IF NOT EXISTS removed_default_words TEXT NOT NULL DEFAULT '[]'",
+        "add custom role removed_default_words column",
+        "ALTER TABLE custom_role_guild_settings ADD COLUMN IF NOT EXISTS removed_default_words TEXT NOT NULL DEFAULT '[]'",
     )
 
     # Automatic mass removals wait here until an admin confirms or cancels.
     await execute_db_operation(
-        "create lunar pending removals table",
+        "create custom role pending removals table",
         """
-        CREATE TABLE IF NOT EXISTS lunar_pending_removals (
+        CREATE TABLE IF NOT EXISTS custom_role_pending_removals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id INTEGER NOT NULL,
             user_ids TEXT NOT NULL DEFAULT '[]',
@@ -2159,9 +2159,9 @@ async def init_lunar_roles_tables():
     )
     # Members kept after a cancelled pending removal aren't asked about again until `until`.
     await execute_db_operation(
-        "create lunar archive snoozes table",
+        "create custom role archive snoozes table",
         """
-        CREATE TABLE IF NOT EXISTS lunar_archive_snoozes (
+        CREATE TABLE IF NOT EXISTS custom_role_archive_snoozes (
             guild_id INTEGER NOT NULL,
             user_id INTEGER NOT NULL,
             until TIMESTAMP NOT NULL,
@@ -2170,9 +2170,9 @@ async def init_lunar_roles_tables():
         """,
     )
     await execute_db_operation(
-        "create lunar meta table",
+        "create custom role meta table",
         """
-        CREATE TABLE IF NOT EXISTS lunar_meta (
+        CREATE TABLE IF NOT EXISTS custom_role_meta (
             key TEXT PRIMARY KEY,
             value TEXT,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -2180,7 +2180,7 @@ async def init_lunar_roles_tables():
         """,
     )
 
-    logger.info("✅ Lunar Roles tables ready.")
+    logger.info("✅ Custom Roles tables ready.")
 
 
 # ------------------------------------------------------
@@ -2481,8 +2481,8 @@ async def init_db():
         ("Steam Users", init_steam_users_table),
         ("News Tables", init_news_tables),
         ("Booster Roles", init_booster_roles_table),
-        # After Booster Roles: /lunar-admin import-legacy reads that table.
-        ("Lunar Roles", init_lunar_roles_tables),
+        # After Booster Roles: /custom-role-admin import-legacy reads that table.
+        ("Custom Roles", init_custom_roles_tables),
     ]
 
     started = time.time()

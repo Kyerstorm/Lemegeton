@@ -18,7 +18,7 @@ A production-ready Discord bot that combines anime/manga tracking with AI-powere
 - [Quick Start](#-quick-start)
 - [Commands](#-commands)
 - [Dashboard System](#-dashboard-system)
-- [Lunar Roles](#-lunar-roles)
+- [Custom Roles](#-custom-roles)
 - [Installation](#-installation)
 - [Configuration](#-configuration)
 - [Project Structure](#-project-structure)
@@ -105,8 +105,8 @@ A production-ready Discord bot that combines anime/manga tracking with AI-powere
 - **Guild-Wide Themes** - Server moderators can set server-wide default themes
 - **User-Specific Themes** - Individual preferences override guild settings
 - **Theme Preview** - Preview themes before applying
-- **Lunar Roles** - One custom role per server booster: name, solid/gradient/holographic color and
-  icon, set by slash commands or a private web color picker (see [Lunar Roles](#-lunar-roles))
+- **Custom Roles** - One custom role per server booster: name, solid/gradient/holographic color and
+  icon, set by slash commands or a private web color picker (see [Custom Roles](#-custom-roles))
 
 ### 🏰 Server Management
 
@@ -275,8 +275,8 @@ STEAM_API_KEY=your_steam_api_key_here
 
 - `/theme` - Browse, preview, and apply custom themes
 - `/admin-guild-theme` - Manage server-wide theme settings (Bot Moderator)
-- `/lunar …` (11 commands) - Your own custom booster role (see [Lunar Roles](#-lunar-roles))
-- `/lunar-admin …` (17 commands) - Set up Lunar Roles (Manage Roles; see [Lunar Roles](#-lunar-roles))
+- `/custom-role …` (11 commands) - Your own custom booster role (see [Custom Roles](#-custom-roles))
+- `/custom-role-admin …` (17 commands) - Set up Custom Roles (Manage Roles; see [Custom Roles](#-custom-roles))
 
 ### 🏰 Server Management (8 commands)
 
@@ -366,19 +366,19 @@ The dashboard automatically discovers decorated commands at bot startup.
 
 ---
 
-## 🌙 Lunar Roles
+## 🎨 Custom Roles
 
-**Lunar Roles** gives every server booster one custom role of their own: its name, its color
-(solid, gradient or holographic) and its icon. Members set it up with `/lunar` commands or on a
-private web page, the **color picker**. Admins set it up with `/lunar-admin`.
+**Custom Roles** gives every server booster one custom role of their own: its name, its color
+(solid, gradient or holographic) and its icon. Members set it up with `/custom-role` commands or on a
+private web page, the **color picker**. Admins set it up with `/custom-role-admin`.
 
 - **Who gets one:** server boosters, plus members with a role an admin allows
-  (`/lunar-admin allow-role`).
+  (`/custom-role-admin allow-role`).
 - **When they stop qualifying** (or leave), the role is deleted but its settings are saved.
-  When they qualify again, it comes back as it was, near its old spot. While Lunar Roles is off
+  When they qualify again, it comes back as it was, near its old spot. While Custom Roles is off
   in a server, nothing is removed automatically.
 - **Old `/nitro-role-set` roles** are taken over, never duplicated: an admin imports them with
-  `/lunar-admin import-legacy`, and a member who uses `/lunar` first takes over their own.
+  `/custom-role-admin import-legacy`, and a member who uses `/custom-role` first takes over their own.
 - **Safe by default:** it's off until an admin sets an anchor role and enables it. Names go
   through a filter (built-in protected words like "admin" or "mod", plus the server's own
   blocked words). Removing many roles at once needs an admin to confirm.
@@ -390,43 +390,43 @@ private web page, the **color picker**. Admins set it up with `/lunar-admin`.
 
 Setup, deployment and the full behaviour notes are in
 [docs/HANDOFF_NOTES.md](docs/HANDOFF_NOTES.md). The design spec is
-[docs/LUNAR_ROLES_SPEC.md](docs/LUNAR_ROLES_SPEC.md).
+[docs/CUSTOM_ROLES_SPEC.md](docs/CUSTOM_ROLES_SPEC.md).
 
-### Member commands (`/lunar`)
-
-| Command | What it does |
-|---|---|
-| `/lunar role name:` | Create your custom role (or bring back your saved one). |
-| `/lunar name new_name:` | Rename your role. |
-| `/lunar color set color: [secondary_color:]` | Set a color by hex (`#A78BFA`, `A78BFA`, `#ABC`). A second color makes a gradient. |
-| `/lunar color holographic` | Use Discord's holographic style. |
-| `/lunar palette` | Pick colors from your avatar, from a menu with a swatch image. |
-| `/lunar icon [image:] [emoji:]` | Set the icon from a PNG/JPEG image or one standard emoji. Run it with neither to remove the icon. |
-| `/lunar color-picker` | Get a private link to the color picker page (see below). |
-| `/lunar assign` / `/lunar unassign` | Put your role on or take it off (you keep it either way). |
-| `/lunar info [user:]` | Show a custom role's name, colors and icon. |
-| `/lunar position direction: role:` | Move your role directly above or below another member's custom role. |
-
-### Admin commands (`/lunar-admin`, needs Manage Roles)
+### Member commands (`/custom-role`)
 
 | Command | What it does |
 |---|---|
-| `/lunar-admin settings` | Everything at a glance: setup, server features, role counts, problems, pending removals. |
-| `/lunar-admin anchor role: [place:]` | The role new custom roles are placed next to (`above` is recommended). |
-| `/lunar-admin enable` / `disable` | Turn Lunar Roles on or off for the server. Enabling needs a valid anchor. |
-| `/lunar-admin log-channel [channel:]` | Where events and errors are posted (empty = off). |
-| `/lunar-admin channel [channel:]` | Only allow `/lunar` commands in one channel and its threads (empty = anywhere). |
-| `/lunar-admin cooldown seconds:` | How long members wait between changes (0 = off, at most 1 day). |
-| `/lunar-admin allow-role add/remove/list` | Roles that qualify for a custom role besides boosting. |
-| `/lunar-admin blocked-words add/remove/list` | Words that can't be used in role names. Built-in words can be switched off and on. |
-| `/lunar-admin list [status:]` | Every custom role with its owner and status (active, saved, missing). |
-| `/lunar-admin remove user: [reason:]` | Delete a member's role and saved settings. With a reason, they get a DM. |
-| `/lunar-admin pending` | See and confirm or cancel a large removal waiting for approval. |
-| `/lunar-admin import-legacy` | Bring old `/nitro-role-set` roles into Lunar Roles. Shows a preview first; roles are taken over as they are (name, color, position), never recreated. |
+| `/custom-role role name:` | Create your custom role (or bring back your saved one). |
+| `/custom-role name new_name:` | Rename your role. |
+| `/custom-role color set color: [secondary_color:]` | Set a color by hex (`#A78BFA`, `A78BFA`, `#ABC`). A second color makes a gradient. |
+| `/custom-role color holographic` | Use Discord's holographic style. |
+| `/custom-role palette` | Pick colors from your avatar, from a menu with a swatch image. |
+| `/custom-role icon [image:] [emoji:]` | Set the icon from a PNG/JPEG image or one standard emoji. Run it with neither to remove the icon. |
+| `/custom-role color-picker` | Get a private link to the color picker page (see below). |
+| `/custom-role assign` / `/custom-role unassign` | Put your role on or take it off (you keep it either way). |
+| `/custom-role info [user:]` | Show a custom role's name, colors and icon. |
+| `/custom-role position direction: role:` | Move your role directly above or below another member's custom role. |
+
+### Admin commands (`/custom-role-admin`, needs Manage Roles)
+
+| Command | What it does |
+|---|---|
+| `/custom-role-admin settings` | Everything at a glance: setup, server features, role counts, problems, pending removals. |
+| `/custom-role-admin anchor role: [place:]` | The role new custom roles are placed next to (`above` is recommended). |
+| `/custom-role-admin enable` / `disable` | Turn Custom Roles on or off for the server. Enabling needs a valid anchor. |
+| `/custom-role-admin log-channel [channel:]` | Where events and errors are posted (empty = off). |
+| `/custom-role-admin channel [channel:]` | Only allow `/custom-role` commands in one channel and its threads (empty = anywhere). |
+| `/custom-role-admin cooldown seconds:` | How long members wait between changes (0 = off, at most 1 day). |
+| `/custom-role-admin allow-role add/remove/list` | Roles that qualify for a custom role besides boosting. |
+| `/custom-role-admin blocked-words add/remove/list` | Words that can't be used in role names. Built-in words can be switched off and on. |
+| `/custom-role-admin list [status:]` | Every custom role with its owner and status (active, saved, missing). |
+| `/custom-role-admin remove user: [reason:]` | Delete a member's role and saved settings. With a reason, they get a DM. |
+| `/custom-role-admin pending` | See and confirm or cancel a large removal waiting for approval. |
+| `/custom-role-admin import-legacy` | Bring old `/nitro-role-set` roles into Custom Roles. Shows a preview first; roles are taken over as they are (name, color, position), never recreated. |
 
 ### The color picker
 
-`/lunar color-picker` replies with a private link to a page served by the bot itself. On it a
+`/custom-role color-picker` replies with a private link to a page served by the bot itself. On it a
 member can:
 
 - **Preview** their role in Discord's dark and light themes, with a contrast warning.
@@ -450,9 +450,9 @@ How it works:
   - Image links are fetched by the bot with strict rules: https only, public addresses only, no
     redirects, 10 seconds.
   - iPhone HEIC photos aren't supported; members are asked to save them as JPEG or PNG first.
-- **Hosting:** the page needs a public `https://` address in production (`LUNAR_PUBLIC_URL`). The
+- **Hosting:** the page needs a public `https://` address in production (`CUSTOM_ROLES_PUBLIC_URL`). The
   settings are listed in `.env.example`, and the look is set in
-  `web/static/lunar/lunar-theme.css`.
+  `web/static/custom_roles/theme.css`.
 
 ---
 
@@ -471,7 +471,7 @@ Lemegeton/
 ├── cogs/                           # Command modules (70+ commands)
 │   ├── account/                    # Login, profile, admin login
 │   ├── admin/                      # Bot moderators, changelog, user cleanup
-│   ├── customization/              # Themes, Lunar Roles
+│   ├── customization/              # Themes, Custom Roles
 │   ├── gaming/                     # Steam integration, free games
 │   ├── media/                      # Browse, recommendations, trending, news
 │   ├── server_management/          # Server info, config, invites, welcome DMs
@@ -494,16 +494,16 @@ Lemegeton/
 │   ├── profile_helper.py           # Profile rendering with bio cleanup
 │   ├── steam_helper.py             # Steam API integration
 │   ├── theme_helper.py             # Theme application
-│   ├── lunar_roles/                # Lunar Roles: service, storage, images, safe link fetch, tokens
+│   ├── custom_roles/                # Custom Roles: service, storage, images, safe link fetch, tokens
 │   └── ...                         # Additional helpers
 │
 ├── web/                            # Built-in web server
 │   ├── dashboard.py                # Web server and dashboard
-│   ├── lunar_picker.py             # Lunar Roles color picker routes and API
-│   └── static/lunar/               # Color picker page (lunar-theme.css holds the look)
+│   ├── custom_role_picker.py             # Custom Roles color picker routes and API
+│   └── static/custom_roles/               # Color picker page (theme.css holds the look)
 │
 ├── tests/
-│   └── lunar_roles/                # Lunar Roles offline tests (local PostgreSQL, no Discord)
+│   └── custom_roles/                # Custom Roles offline tests (local PostgreSQL, no Discord)
 │
 ├── data/                           # Data storage
 │   ├── database.db                 # Main SQLite database
@@ -524,8 +524,8 @@ Lemegeton/
 │
 └── docs/                           # Documentation
     ├── README.md                   # Extended documentation
-    ├── HANDOFF_NOTES.md            # Lunar Roles setup and deploy guide
-    ├── LUNAR_ROLES_SPEC.md         # Lunar Roles design spec
+    ├── HANDOFF_NOTES.md            # Custom Roles setup and deploy guide
+    ├── CUSTOM_ROLES_SPEC.md         # Custom Roles design spec
     ├── LICENSE                     # License file
     └── bugs.md                     # Known issues tracker
 ```
@@ -561,7 +561,7 @@ ENVIRONMENT=production
 STEAM_API_KEY=your_steam_api_key (optional)
 ```
 
-For the Lunar Roles color picker's public address and settings, see
+For the Custom Roles color picker's public address and settings, see
 [docs/HANDOFF_NOTES.md](docs/HANDOFF_NOTES.md#2-railway-setup).
 
 ### Step 4: Configure Persistent Storage

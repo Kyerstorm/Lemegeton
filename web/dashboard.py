@@ -19,7 +19,7 @@ import aiohttp
 from aiohttp import web
 
 import config
-from web.lunar_picker import LunarPicker, is_picker_path
+from web.custom_role_picker import CustomRolePicker, is_picker_path
 
 logger = logging.getLogger("web.dashboard")
 ROOT = Path(__file__).resolve().parent.parent
@@ -44,7 +44,7 @@ class DashboardWebServer:
         self.oauth_states: dict[str, float] = {}
         self._http: aiohttp.ClientSession | None = None
         self._lock = asyncio.Lock()
-        self.lunar_picker = LunarPicker(bot)
+        self.custom_role_picker = CustomRolePicker(bot)
 
     @property
     def configured(self) -> bool:
@@ -55,11 +55,11 @@ class DashboardWebServer:
         )
 
     async def start(self) -> None:
-        """Start the web server if the dashboard is configured or the Lunar color picker is on.
+        """Start the web server if the dashboard is configured or the color picker is on.
 
         Dashboard and OAuth routes are only added when the dashboard is configured.
         """
-        picker = config.LUNAR_PICKER_ENABLED
+        picker = config.CUSTOM_ROLES_PICKER_ENABLED
         if not self.configured:
             logger.warning(
                 "Web dashboard disabled: set DASHBOARD_CLIENT_ID, "
@@ -84,9 +84,9 @@ class DashboardWebServer:
                 await self._http.close()
             self._http = None
             raise
-        self.bot.lunar_picker_ready = picker
+        self.bot.custom_role_picker_ready = picker
         logger.info(
-            "Web server listening on %s:%s (dashboard %s, Lunar color picker %s)",
+            "Web server listening on %s:%s (dashboard %s, Custom role color picker %s)",
             config.DASHBOARD_HOST, config.DASHBOARD_PORT,
             "on" if self.configured else "off", "on" if picker else "off",
         )
@@ -100,8 +100,8 @@ class DashboardWebServer:
                 headers={"User-Agent": "Lemegeton-Dashboard/1.0"},
             )
             self._add_dashboard_routes(app)
-        if config.LUNAR_PICKER_ENABLED:
-            self.lunar_picker.register(app)
+        if config.CUSTOM_ROLES_PICKER_ENABLED:
+            self.custom_role_picker.register(app)
         return app
 
     def _add_dashboard_routes(self, app: web.Application) -> None:
@@ -122,7 +122,7 @@ class DashboardWebServer:
         app.router.add_get("/static/{filename}", self._static_file)
 
     async def stop(self) -> None:
-        self.bot.lunar_picker_ready = False
+        self.bot.custom_role_picker_ready = False
         if self.runner:
             await self.runner.cleanup()
             self.runner = None
