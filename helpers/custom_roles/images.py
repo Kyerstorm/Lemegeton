@@ -361,3 +361,97 @@ def render_swatches(colors: List[int], columns: int = 5) -> bytes:
     out = io.BytesIO()
     canvas.save(out, format="PNG", optimize=True)
     return out.getvalue()
+
+
+# ------------------------------------------------------
+# Color preview (the panel's Color form, before anything is applied)
+# ------------------------------------------------------
+
+DARK_THEME = (0x31, 0x33, 0x38)   # Discord's dark chat background
+LIGHT_THEME = (0xFF, 0xFF, 0xFF)  # ...and light
+LOW_CONTRAST = 3.0                # WCAG's minimum for large text
+PREVIEW_FALLBACK_NAME = "Your name"
+
+
+def _rgb(value: int) -> Tuple[int, int, int]:
+    return (value >> 16) & 255, (value >> 8) & 255, value & 255
+
+
+def contrast_ratio(color: int, background: Tuple[int, int, int]) -> float:
+    """WCAG contrast ratio between a 0xRRGGBB color and a background (1 = invisible, 21 = black on white)."""
+    def luminance(rgb):
+        parts = [c / 255 for c in rgb]
+        parts = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in parts]
+        return 0.2126 * parts[0] + 0.7152 * parts[1] + 0.0722 * parts[2]
+    a, b = luminance(_rgb(color)), luminance(background)
+    return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+
+
+def _preview_font(size: int):
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:  # very old Pillow
+        return ImageFont.load_default()
+
+
+def _drawable_name(name: str) -> str:
+    """The built-in font only has Latin letters; anything else would show as boxes."""
+    name = (name or "").strip()[:32]
+    if not name or any(ord(ch) < 32 or ord(ch) > 0x24F for ch in name):
+        return PREVIEW_FALLBACK_NAME
+    return name
+
+
+def _gradient(colors: List[int], width: int, height: int) -> Image.Image:
+    """A left-to-right blend through the given colors (one color = flat fill)."""
+    stops = [_rgb(c) for c in colors]
+    strip = Image.new("RGB", (max(1, width), 1))
+    for x in range(strip.width):
+        t = x / max(1, strip.width - 1) * (len(stops) - 1)
+        i = min(int(t), len(stops) - 2) if len(stops) > 1 else 0
+        a, b = stops[i], stops[min(i + 1, len(stops) - 1)]
+        f = t - i
+        strip.putpixel((x, 0), tuple(round(a[k] + (b[k] - a[k]) * f) for k in range(3)))
+    return strip.resize((max(1, width), max(1, height)))
+
+
+def render_color_preview(name: str, colors: List[int]) -> bytes:
+    """A PNG showing `name` in the role's color(s) on Discord's dark and light themes, plus the hex codes.
+
+    colors: one color (solid), two (gradient) or three (holographic), as Discord blends them on names.
+    """
+    width, swatch_h, row_h, gap = 560, 44, 72, 8
+    name = _drawable_name(name)
+    name_font, small_font, hex_font = _preview_font(28), _preview_font(15), _preview_font(17)
+    canvas = Image.new("RGB", (width, swatch_h + 2 * row_h + 2 * gap), (30, 31, 34))
+    draw = ImageDraw.Draw(canvas)
+
+    # the colors themselves, labelled with their hex codes
+    cell_w = width // len(colors)
+    for i, value in enumerate(colors):
+        r, g, b = _rgb(value)
+        x0 = i * cell_w
+        x1 = width if i == len(colors) - 1 else x0 + cell_w
+        draw.rectangle((x0, 0, x1, swatch_h), fill=(r, g, b))
+        light = (0.299 * r + 0.587 * g + 0.114 * b) > 150
+        draw.text(((x0 + x1) / 2, swatch_h / 2), f"#{value:06X}", font=hex_font, anchor="mm",
+                  fill=(20, 20, 20) if light else (245, 245, 245))
+
+    # the name as it shows in chat, on each theme
+    for row, (background, label, text_colour) in enumerate((
+        (DARK_THEME, "Dark theme", (148, 155, 164)),
+        (LIGHT_THEME, "Light theme", (92, 94, 102)),
+    )):
+        top = swatch_h + gap + row * (row_h + gap)
+        draw.rectangle((0, top, width, top + row_h), fill=background)
+        draw.ellipse((16, top + 16, 56, top + 56), fill=(128, 132, 142))  # stand-in avatar
+        left, bbox = 72, draw.textbbox((0, 0), name, font=name_font)
+        text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        mask = Image.new("L", (text_w, text_h))
+        ImageDraw.Draw(mask).text((-bbox[0], -bbox[1]), name, font=name_font, fill=255)
+        canvas.paste(_gradient(colors, text_w, text_h), (left, top + (row_h - text_h) // 2), mask)
+        draw.text((width - 14, top + row_h / 2), label, font=small_font, anchor="rm", fill=text_colour)
+
+    out = io.BytesIO()
+    canvas.save(out, format="PNG", optimize=True)
+    return out.getvalue()

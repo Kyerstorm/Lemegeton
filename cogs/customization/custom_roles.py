@@ -255,6 +255,85 @@ def legacy_preview_text(plan: service.LegacyPlan) -> str:
     return text if len(text) <= 4000 else text[:3990] + "\n…"
 
 
+PREVIEW_TIMEOUT = 300  # seconds the Apply/Cancel buttons under a color preview stay usable
+PREVIEW_FILE = "color-preview.png"
+
+
+def preview_colors(mode: str, primary: Optional[int], secondary: Optional[int]) -> list:
+    """The colors Discord blends on a name for this style."""
+    if mode == service.MODE_HOLOGRAPHIC:
+        return list(service.HOLOGRAPHIC_COLORS)
+    if mode == service.MODE_GRADIENT:
+        return [primary, secondary]
+    return [primary]
+
+
+def color_preview_embed(mode: str, colors: list) -> discord.Embed:
+    shown = ("Discord's holographic preset" if mode == service.MODE_HOLOGRAPHIC
+             else " → ".join(f"`{validation.format_hex(c)}`" for c in colors))
+    embed = build_info_embed(
+        "Color Preview",
+        f"**{MODE_LABELS.get(mode, mode)}:** {shown}\n\n"
+        "This is how your name will look. Nothing has changed yet: press **Apply** to use it.",
+    )
+    embed.colour = discord.Colour(colors[0])
+    embed.set_image(url=f"attachment://{PREVIEW_FILE}")
+    hard = [theme for theme, background in (("dark", images.DARK_THEME), ("light", images.LIGHT_THEME))
+            if min(images.contrast_ratio(c, background) for c in colors) < images.LOW_CONTRAST]
+    if hard:
+        embed.add_field(name="⚠️ Heads up", inline=False,
+                        value=f"This may be hard to read on Discord's {' and '.join(hard)} theme.")
+    return embed
+
+
+class ColorPreviewView(discord.ui.View):
+    """Apply/Cancel under a color preview from the panel's Color form. Only the member who filled it in can press."""
+
+    def __init__(self, owner_id: int, mode: str, primary: Optional[int], secondary: Optional[int], on_done):
+        super().__init__(timeout=PREVIEW_TIMEOUT)
+        self.owner_id = owner_id
+        self.mode, self.primary, self.secondary = mode, primary, secondary
+        self.on_done = on_done  # async (Result): shows the outcome on the panel too
+        self.message: Optional[discord.WebhookMessage] = None
+        self.finished = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                f"This preview belongs to someone else. Run `/{COMMAND_GROUP}` and press **Color** to get your own.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Apply", style=discord.ButtonStyle.success)
+    async def apply(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.finished = True
+        self.stop()
+        await interaction.response.defer()
+        result = await service.set_colors(interaction.user, self.mode, self.primary, self.secondary)
+        embed = (build_success_embed("Color Applied", result.message) if result.ok
+                 else build_error_embed("Couldn't Change The Color", result.message))
+        await interaction.edit_original_response(embed=embed, view=None, attachments=[])
+        await self.on_done(result)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.finished = True
+        self.stop()
+        await interaction.response.edit_message(embed=_embed("Cancelled", "Nothing was changed.", PALETTE.NEUTRAL),
+                                                view=None, attachments=[])
+
+    async def on_timeout(self):
+        if self.finished or self.message is None:
+            return
+        try:
+            await self.message.edit(embed=_embed("Preview Expired", "Nothing was changed. Press **Color** on the panel "
+                                                 "to try again.", PALETTE.NEUTRAL), view=None, attachments=[])
+        except discord.HTTPException:
+            pass
+
+
 PALETTE_TIMEOUT = 300  # seconds the palette menus stay usable
 CLEAR_SECONDARY = "clear"
 
@@ -690,12 +769,12 @@ async def member_panel(member: discord.Member, opened_at: int, result: Optional[
     return _with_result(embed, result), view
 
 
-async def apply_color_form(member: discord.Member, style: Optional[str], primary_text: str,
-                           secondary_text: str = "") -> service.Result:
-    """The Color form: style (None = solid), hex texts. Solid ignores the second color."""
+def parse_color_form(style: Optional[str], primary_text: str, secondary_text: str = "") -> service.Result:
+    """Read the Color form without changing anything: data = (mode, primary, secondary).
+    style None = solid; solid ignores the second color; holographic needs none."""
     style = style or service.MODE_SOLID
     if style == service.MODE_HOLOGRAPHIC:
-        return await service.set_colors(member, service.MODE_HOLOGRAPHIC)
+        return service.Result(True, "", (service.MODE_HOLOGRAPHIC, None, None))
     primary_text, secondary_text = (primary_text or "").strip(), (secondary_text or "").strip()
     if not primary_text:
         return service.Result(False, f"Type a color. {HEX_HELP}")
@@ -707,7 +786,16 @@ async def apply_color_form(member: discord.Member, style: Optional[str], primary
     bad = primary_text if primary is None else (secondary_text if gradient and secondary is None else None)
     if bad is not None:
         return service.Result(False, f"{validation.code(bad)} isn't a hex color. {HEX_HELP}")
-    return await service.set_colors(member, style, primary, secondary)
+    return service.Result(True, "", (style, primary, secondary))
+
+
+async def apply_color_form(member: discord.Member, style: Optional[str], primary_text: str,
+                           secondary_text: str = "") -> service.Result:
+    """The Color form applied straight away (the panel previews it first, see ColorPreviewView)."""
+    parsed = parse_color_form(style, primary_text, secondary_text)
+    if not parsed.ok:
+        return parsed
+    return await service.set_colors(member, *parsed.data)
 
 
 async def icon_from_attachment(member: discord.Member, image: discord.Attachment) -> service.Result:
@@ -1310,11 +1398,16 @@ class CustomRoles(commands.Cog):
         secondary = (validation.format_hex(record.secondary_color)
                      if record and record.secondary_color and mode == service.MODE_GRADIENT else None)
 
-        async def work(member, form):
-            return await apply_color_form(member, form.style.value if form.style else None, form.primary.value,
-                                          form.secondary.value if form.secondary else "")
+        async def handler(submit: discord.Interaction, form: PanelModal):
+            await submit.response.defer()
+            problem = parse_color_form(form.style.value if form.style else None, form.primary.value,
+                                       form.secondary.value if form.secondary else "")
+            if problem.ok:
+                problem = await self._send_color_preview(submit, button.opened_at, *problem.data)
+            if problem is not None:  # shown on the panel, like the other forms
+                await self._refresh_member(submit, button.opened_at, problem)
 
-        modal = self._member_form("Color your role", button.opened_at, work)
+        modal = PanelModal("Color your role", handler)
         modal.style = modal.secondary = None
         if enhanced:
             modal.style = modal.field("Style", discord.ui.RadioGroup(options=[
@@ -1344,6 +1437,32 @@ class CustomRoles(commands.Cog):
             tip = f"\n\n{COLOR_FORM_TIP}" if config.CUSTOM_ROLES_PICKER_ENABLED else ""
             modal.add_item(discord.ui.TextDisplay(f"{service.NO_GRADIENT_MESSAGE}{tip}"))
         await interaction.response.send_modal(modal)
+
+    async def _send_color_preview(self, submit: discord.Interaction, opened_at: int, mode: str,
+                                  primary: Optional[int], secondary: Optional[int]) -> Optional[service.Result]:
+        """Show the picked color on Discord's dark and light themes with Apply/Cancel. Nothing changes
+        until Apply. Returns a Result for the panel if it can't be previewed, else None."""
+        member = submit.user
+        error = await service.precheck(member)
+        if error:
+            return error
+        if mode != service.MODE_SOLID and not service.feature_status(member.guild).gradient:
+            return service.Result(False, service.NO_GRADIENT_MESSAGE)
+        colors = preview_colors(mode, primary, secondary)
+        png = await asyncio.to_thread(images.render_color_preview, member.display_name, colors)
+
+        async def on_done(result: service.Result):
+            try:
+                await self._refresh_member(submit, opened_at, result)
+            except discord.HTTPException:
+                pass  # the panel was dismissed or its token ran out; the preview already shows the outcome
+
+        view = ColorPreviewView(member.id, mode, primary, secondary, on_done)
+        view.message = await submit.followup.send(
+            embed=color_preview_embed(mode, colors), file=discord.File(io.BytesIO(png), filename=PREVIEW_FILE),
+            view=view, ephemeral=True, wait=True,
+        )
+        return None
 
     async def _member_icon(self, interaction: discord.Interaction, button: PanelButton):
         async def work(member, form):

@@ -169,6 +169,19 @@ async def main():
         last = inter.edited[-1]
         return last["embed"], last["view"]
 
+    async def submit_color(modal, user):
+        """Submit the Color form; returns (submit interaction, the preview it sent or None)."""
+        inter = await submit(modal, user)
+        return inter, (inter.followup.sent[-1] if inter.followup.sent else None)
+
+    async def press_preview(sent, label, user):
+        """Press Apply or Cancel under a color preview; returns that press."""
+        inter = Inter(user, cog)
+        item = next(c for c in sent.view.children if c.label == label)
+        if await sent.view.interaction_check(inter):
+            await item.callback(inter)
+        return inter
+
     # ================================================================== the two commands
     commands_ = {c.name: c for c in cog_mod.CustomRoles.__cog_app_commands__}
     check("exactly two commands: /custom-role and /custom-role-admin",
@@ -276,8 +289,49 @@ async def main():
           "3 server boosts" in modal.children[1].content and "Color picker" in modal.children[1].content)
     check("  ...the hex field is required", modal.primary.required)
     modal.primary._value = "#A78BFA"
-    embed, view = panel_after(await submit(modal, m))
-    check("solid color set", embed.description.startswith("✅") and (await record(m)).primary_color == 0xA78BFA, embed.description)
+    sub, sent = await submit_color(modal, m)
+    check("valid hex: a private preview, nothing changed yet",
+          isinstance(sent.view, cog_mod.ColorPreviewView) and sent.ephemeral and not sub.edited
+          and (await record(m)).primary_color != 0xA78BFA and "`#A78BFA`" in sent.embed.description, sent)
+    check("  ...the preview image is attached and shown in the embed",
+          sent.file.filename == cog_mod.PREVIEW_FILE and sent.embed.image.url == f"attachment://{cog_mod.PREVIEW_FILE}")
+    sent.file.fp.seek(0)
+    check("  ...a PNG with the swatch and both themes", Image.open(sent.file.fp).size == (560, 204))
+    stranger = Inter(outsider, cog)
+    check("  ...someone else can't press Apply",
+          not await sent.view.interaction_check(stranger) and "someone else" in stranger.response.sent[-1])
+    inter = await press_preview(sent, "Cancel", m)
+    edit = inter.response.edits[-1]
+    check("Cancel: preview closed, nothing changed", edit["view"] is None and edit["attachments"] == []
+          and "Nothing was changed" in edit["embed"].description and (await record(m)).primary_color != 0xA78BFA)
+    sub, sent = await submit_color(modal, m)
+    inter = await press_preview(sent, "Apply", m)
+    shown = inter.edited[-1]
+    check("Apply: color set, preview says so", (await record(m)).primary_color == 0xA78BFA
+          and "Color Applied" in shown["embed"].title and shown["view"] is None and shown["attachments"] == [], shown)
+    embed, view = panel_after(sub)
+    check("  ...and the panel shows the result", embed.description.startswith("✅"), embed.description)
+
+    modal.primary._value = "#FFF59D"
+    _, sent = await submit_color(modal, m)
+    notes = [f.value for f in sent.embed.fields]
+    check("pale color: warns it's hard to read on the light theme only",
+          len(notes) == 1 and "light theme" in notes[0] and "dark" not in notes[0], notes)
+    modal.primary._value = "#3BA55C"
+    _, sent = await submit_color(modal, m)
+    check("color readable on both themes: no warning", not sent.embed.fields, [f.value for f in sent.embed.fields])
+    edits = []
+
+    async def fake_edit(**kw):
+        edits.append(kw)
+
+    sent.view.message = NS(edit=fake_edit)
+    await sent.view.on_timeout()
+    check("unanswered preview expires, nothing changed", edits and edits[-1]["view"] is None
+          and "Expired" in edits[-1]["embed"].title and (await record(m)).primary_color == 0xA78BFA)
+    r = await cog._send_color_preview(Inter(m, cog), now, service.MODE_GRADIENT, 0xFF0000, 0x0000FF)
+    check("gradient preview without the perk: refused before previewing", r is not None and "3 server boosts" in r.message)
+
     modal.primary._value = "purple"
     embed, view = panel_after(await submit(modal, m))
     check("bad hex: ❌ with examples", embed.description.startswith("❌") and "isn't a hex color" in embed.description
@@ -374,7 +428,11 @@ async def main():
     check("gradient without a second color: ❌", embed.description.startswith("❌") and "second color" in embed.description,
           embed.description)
     modal.secondary._value = "#0000FF"
-    embed, bview = panel_after(await submit(modal, b))
+    sub, sent = await submit_color(modal, b)
+    check("gradient preview shows both colors", "`#FF0000` → `#0000FF`" in sent.embed.description
+          and (await record(b)).color_mode != "gradient", sent.embed.description)
+    await press_preview(sent, "Apply", b)
+    embed, bview = panel_after(sub)
     rec = await record(b)
     check("gradient set", embed.description.startswith("✅") and rec.color_mode == "gradient"
           and (rec.primary_color, rec.secondary_color) == (0xFF0000, 0x0000FF), embed.description)
@@ -384,12 +442,15 @@ async def main():
           [o.default for o in again.style.options] == [False, True, False]
           and (again.primary.default, again.secondary.default) == ("#FF0000", "#0000FF"))
     again.style._value, again.primary._value, again.secondary._value = "solid", "#00FF00", "#0000FF"
-    await submit(again, b)
+    _, sent = await submit_color(again, b)
+    await press_preview(sent, "Apply", b)
     rec = await record(b)
     check("solid ignores a leftover second color", rec.color_mode == "solid" and rec.primary_color == 0x00FF00
           and not rec.secondary_color, (rec.color_mode, rec.secondary_color))
     again.style._value, again.primary._value, again.secondary._value = "holographic", "", ""
-    await submit(again, b)
+    _, sent = await submit_color(again, b)
+    check("holographic preview: the preset, no colors needed", "holographic preset" in sent.embed.description)
+    await press_preview(sent, "Apply", b)
     check("holographic needs no colors", (await record(b)).color_mode == "holographic")
     inter = await press(bview, "color", b)
     check("after holographic the hex fields start empty",
