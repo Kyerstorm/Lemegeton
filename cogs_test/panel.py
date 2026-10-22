@@ -19,6 +19,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import database
+from cogs_test.general_commands.dashboard import command_meta
 
 log = logging.getLogger("Lemegeton.Panels")
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
@@ -824,9 +825,15 @@ class PanelAttachmentPicker(discord.ui.View):
 class PanelCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        # discord.py doesn't allow context menus as cog methods, so this one is added to the tree by hand.
+        self.save_menu = app_commands.ContextMenu(name="Save to Panels", callback=self.save_message)
 
     async def cog_load(self):
         await _schema()
+        self.bot.tree.add_command(self.save_menu, override=True)
+
+    async def cog_unload(self):
+        self.bot.tree.remove_command(self.save_menu.name, type=self.save_menu.type)
 
     async def _delete_message(self, channel, message_id: int):
         try:
@@ -929,6 +936,7 @@ class PanelCog(commands.Cog):
             else: await interaction.response.send_message("Something went wrong.", ephemeral=True)
 
     @app_commands.command(name="panels", description="Open the shared Manga Panel Archive")
+    @command_meta(section="Media", name="Panel Archive")
     async def panels(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer(ephemeral=True, thinking=True)
@@ -944,7 +952,6 @@ class PanelCog(commands.Cog):
             if interaction.response.is_done(): await interaction.followup.send("Something went wrong.", ephemeral=True)
             else: await interaction.response.send_message("Something went wrong.", ephemeral=True)
 
-    @app_commands.context_menu(name="Save to Panels")
     async def save_message(self, interaction: discord.Interaction, message: discord.Message):
         try:
             if interaction.guild_id is None:

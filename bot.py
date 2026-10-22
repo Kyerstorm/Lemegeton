@@ -68,7 +68,9 @@ log_file_path = os.path.join(LOG_DIR, LOG_FILE)
 
 # Setup file handler with detailed formatting
 file_handler = logging.FileHandler(log_file_path, encoding='utf-8')
-file_handler.setLevel(logging.DEBUG)
+# LOG_LEVEL in .env (DEBUG/INFO/WARNING/ERROR). DEBUG logs every Discord event, so production defaults to INFO.
+_default_log_level = "INFO" if os.getenv("ENVIRONMENT") == "production" else "DEBUG"
+file_handler.setLevel(getattr(logging, os.getenv("LOG_LEVEL", _default_log_level).strip().upper(), logging.DEBUG))
 
 # Setup console handler
 console_handler = logging.StreamHandler()
