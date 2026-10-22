@@ -364,7 +364,7 @@ async def get_legacy_role_id(guild_id: int, user_id: int) -> Optional[int]:
 PENDING = "pending"
 PENDING_CONFIRMED = "confirmed"
 PENDING_CANCELLED = "cancelled"
-PENDING_WITHDRAWN = "withdrawn"  # everyone in it was removed by /custom-role-admin remove first
+PENDING_WITHDRAWN = "withdrawn"  # everyone in it was removed with Remove a member (/custom-role-admin) first
 
 
 @dataclass

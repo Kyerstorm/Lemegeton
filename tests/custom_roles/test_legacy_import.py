@@ -138,7 +138,7 @@ async def main():
           skipped.get(f.id) == service.LEGACY_HAS_CUSTOM_ROLE, skipped)
     check("not imported yet = old roles that still exist and aren't custom roles", plan.not_imported == 7, plan.not_imported)
 
-    from cogs.customization.custom_roles import LegacyImportView, CustomRoles, legacy_preview_text
+    from cogs.customization.custom_roles import LegacyImportView, CustomRoles, legacy_preview_text, settings_embed
     text = legacy_preview_text(plan)
     check("preview text: all three parts, counts and the no-new-roles promise",
           "Found **8**" in text and "Will be taken over (2)" in text and "Members who don't qualify (2)" in text
@@ -206,15 +206,14 @@ async def main():
     await old_role(p.id, p_role.id)
     cog = CustomRoles.__new__(CustomRoles)
     i = SimpleNamespace(guild=g, user=SimpleNamespace(id=4242), response=Response(), followup=Followup())
-    await CustomRoles.admin_settings.callback(cog, i)
-    embed = i.followup.sent[-1][0]
+    embed = await settings_embed(g)
     problems = next((fl.value for fl in embed.fields if fl.name == "Problems"), "")
     check("settings: 'Old /nitro-role-set roles not imported yet: 1' under Problems",
-          "Old /nitro-role-set roles not imported yet: 1" in problems and "import-legacy" in problems, problems)
+          "Old /nitro-role-set roles not imported yet: 1" in problems and "Import old roles" in problems, problems)
 
-    # ================================================================== the command (preview, then a button)
+    # ================================================================== Import old roles (preview, then a button)
     i = SimpleNamespace(guild=g, user=SimpleNamespace(id=4242, mention="<@4242>"), response=Response(), followup=Followup())
-    await CustomRoles.admin_import_legacy.callback(cog, i)
+    await cog._send_import_preview(i)
     embed, view = i.followup.sent[-1]
     check("command: preview first, nothing changed yet", "Will be taken over (1)" in embed.description
           and view is not None and await record(p.id) is None, embed.description)
@@ -226,13 +225,12 @@ async def main():
     await view.children[0].callback(press)
     check("command: 'Take over 1' imports and reports", (await record(p.id)).role_id == p_role.id
           and "Took over **1**" in edits[-1]["embed"].description, edits[-1]["embed"].description if edits else None)
-    await CustomRoles.admin_settings.callback(cog, i)
-    problems = next((fl.value for fl in i.followup.sent[-1][0].fields if fl.name == "Problems"), "")
+    problems = next((fl.value for fl in (await settings_embed(g)).fields if fl.name == "Problems"), "")
     check("settings: the line disappears once imported", "not imported yet" not in problems, problems)
 
     g.chunked, g.chunk_behaviour = False, "fail"
     i = SimpleNamespace(guild=g, user=SimpleNamespace(id=4242), response=Response(), followup=Followup())
-    await CustomRoles.admin_import_legacy.callback(cog, i)
+    await cog._send_import_preview(i)
     check("command: refuses when the member list can't be loaded", "can't check who qualifies" in i.followup.sent[-1][0].description
           and i.followup.sent[-1][1] is None)
 

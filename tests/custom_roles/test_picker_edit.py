@@ -164,7 +164,7 @@ async def main():
         check("oversized body refused (413)", status == 413)
         status, body = await call("POST", "/custom-roles/api/color", None, {"mode": "solid", "primary": "#FFF"})
         check("write without a link -> 401 with plain-text message", status == 401 and "`" not in body["message"]
-              and "/custom-role color-picker" in body["message"], body)
+              and "/custom-role" in body["message"] and "Color picker" in body["message"], body)
         status, body = await call("POST", "/custom-roles/api/color", tok, {"mode": "solid", "primary": "#FFF"},
                                   headers={"Origin": "https://evil.example"})
         check("write from another site -> 403", status == 403 and body["error"] == "cross_origin")
@@ -322,16 +322,16 @@ async def main():
     radius = re.findall(r"border-radius:(?!\s*var\()[^;]+", css)
     check("picker.css radii all come from the theme", not radius, radius)
     theme = (STATIC / "theme.css").read_text(encoding="utf-8")
-    decls = [l for l in theme.splitlines() if re.match(r"\s*--lp-[\w-]+:", l)]
+    decls = [l for l in theme.splitlines() if re.match(r"\s*--cr-[\w-]+:", l)]
     uncommented = [l.strip() for l in decls if "/*" not in l]
     check("every theme value has its own comment", decls and not uncommented, uncommented)
-    used = set(re.findall(r"var\((--lp-[\w-]+)\)", css + js))
-    defined = {re.match(r"\s*(--lp-[\w-]+):", l).group(1) for l in decls}
+    used = set(re.findall(r"var\((--cr-[\w-]+)\)", css + js))
+    defined = {re.match(r"\s*(--cr-[\w-]+):", l).group(1) for l in decls}
     check("every variable picker.css/js uses is defined in the theme", used <= defined, used - defined)
     check("picker.js only reads theme colors by name", "getPropertyValue" in js)
 
-    from cogs.customization.custom_roles import CustomRoles
-    check("/custom-role color set mentions the picker", "color-picker" in CustomRoles.custom_role_color_set.description)
+    from cogs.customization import custom_roles as cog_mod
+    check("the Color form points to the picker", "Color picker" in cog_mod.COLOR_FORM_TIP)
 
     await reset()
     print(f"\n{sum(results)}/{len(results)} passed")

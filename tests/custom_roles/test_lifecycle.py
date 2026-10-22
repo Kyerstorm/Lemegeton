@@ -326,7 +326,7 @@ async def main():
     await cog._handle_member_change(before, newb)
     check("boost start without saved role -> welcome DM",
           len(newb.dms) == 1 and newb.dms[0].title == "🎉 Welcome, Server Booster!"
-          and any("/custom-role role" in f.value for f in newb.dms[0].fields))
+          and any("/custom-role" in f.value and "Create role" in f.value for f in newb.dms[0].fields))
 
     await service.create_role(newb, "Fresh")
     before = newb.snapshot()
@@ -359,16 +359,11 @@ async def main():
     holders = [FakeMember(g, roles=[allowed], name=f"h{i}") for i in range(2)]
     for h in holders:
         await service.create_role(h, f"Holder {h.name}")
-    sent = []
-
-    class Followup:
-        async def send(self, embed=None, ephemeral=None, view=None, wait=False):
-            sent.append(embed)
-    inter = type("I", (), {"guild": g, "user": admin, "followup": Followup()})()
     affected = await service.preview_allowed_role_removal(g, allowed)
-    await cog._remove_allowed_role(inter, allowed, affected, from_button=False)
-    check("allow-role remove (<= threshold) archives and reports",
-          all([(await record(h)).status == "saved" for h in holders]) and "Removed 2" in sent[-1].description, sent[-1].description)
+    lines = await cog._remove_allowed_roles(g, admin, [allowed], affected)
+    text = " ".join(line for _, line in lines)
+    check("allowed role removed (<= threshold) archives and reports",
+          all([(await record(h)).status == "saved" for h in holders]) and "Removed 2" in text, text)
 
     await reset()
     print(f"\n{sum(results)}/{len(results)} passed")

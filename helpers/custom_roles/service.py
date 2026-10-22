@@ -35,9 +35,9 @@ logger = get_logger("CustomRoles", logfile="custom_roles.log")
 
 NOT_SET_UP_MESSAGE = (
     "Custom Roles isn't set up yet in this server. "
-    f"Ask an admin to run `/{ADMIN_GROUP} anchor` and `/{ADMIN_GROUP} enable`."
+    f"Ask an admin to run `/{ADMIN_GROUP}`, set an **Anchor** and press **Turn on**."
 )
-NO_ROLE_MESSAGE = f"You don't have a custom role yet. Create one with `/{COMMAND_GROUP} role <name>`."
+NO_ROLE_MESSAGE = f"You don't have a custom role yet. Run `/{COMMAND_GROUP}` and press **Create role**."
 PERMISSION_MESSAGE = (
     "I couldn't manage your role. Ask an admin to check that I have **Manage Roles** "
     "and that my role is above the anchor role role."
@@ -123,7 +123,7 @@ def ensure_eligible(member: discord.Member, settings: GuildSettings) -> Result:
 
 
 def command_channel_problem(channel: Any, settings: GuildSettings) -> Optional[str]:
-    """Why /custom-role commands can't be used in this channel, or None.
+    """Why /custom-role can't be used in this channel, or None.
 
     The set channel and its threads are allowed. A deleted channel lifts the restriction.
     """
@@ -273,11 +273,11 @@ def setup_problems(guild: discord.Guild, settings: GuildSettings) -> List[str]:
     if not me.guild_permissions.manage_roles:
         problems.append("I'm missing the **Manage Roles** permission.")
     if not settings.anchor_role_id:
-        problems.append(f"No anchor role set - run `/{ADMIN_GROUP} anchor`.")
+        problems.append(f"No anchor role set - press **Anchor** in `/{ADMIN_GROUP}`.")
     else:
         anchor = guild.get_role(settings.anchor_role_id)
         if anchor is None:
-            problems.append(f"The anchor role was deleted - run `/{ADMIN_GROUP} anchor` again.")
+            problems.append(f"The anchor role was deleted - press **Anchor** in `/{ADMIN_GROUP}` to pick a new one.")
         elif anchor >= me.top_role:
             problems.append(f"The anchor {anchor.mention} is at or above my highest role {me.top_role.mention}.")
     if len(guild.roles) >= ROLE_LIMIT:
@@ -305,7 +305,7 @@ async def set_enabled(guild: discord.Guild, enabled: bool) -> Result:
     if enabled:
         anchor = guild.get_role(settings.anchor_role_id) if settings.anchor_role_id else None
         if anchor is None:
-            return Result(False, f"Set an anchor role first with `/{ADMIN_GROUP} anchor`.", settings)
+            return Result(False, "Set an anchor role first: press **Anchor**.", settings)
         check = validate_anchor(guild, anchor)
         if not check.ok:
             return Result(False, check.message, settings)
@@ -334,8 +334,8 @@ async def set_command_channel(guild: discord.Guild, channel: Optional[discord.ab
     settings = await storage.update_guild_settings(guild.id, command_channel_id=channel.id if channel else None)
     logger.info("Guild %s command channel set to %s", guild.id, channel.id if channel else None)
     if channel is None:
-        return Result(True, f"`/{COMMAND_GROUP}` commands work in any channel again.", settings)
-    return Result(True, f"`/{COMMAND_GROUP}` commands now only work in {channel.mention} and its threads.", settings)
+        return Result(True, f"`/{COMMAND_GROUP}` works in any channel again.", settings)
+    return Result(True, f"`/{COMMAND_GROUP}` now only works in {channel.mention} and its threads.", settings)
 
 
 async def add_allowed_role(guild: discord.Guild, role: discord.Role) -> Result:
@@ -635,7 +635,7 @@ async def _create_discord_role(
 
     _, error = await _discord(guild, f"assigning role {role.id} to {member.id}", member.add_roles(role, reason="Custom Roles"))
     if error:
-        return role, notes, Result(False, f"Your role was created, but I couldn't give it to you. Try `/{COMMAND_GROUP} assign`.")
+        return role, notes, Result(False, f"Your role was created, but I couldn't give it to you. Press **Put on** in `/{COMMAND_GROUP}`.")
     # The cached positions may lag; use the ones we just set.
     if positions is not None and has_colour(role):
         hidden = hidden_colour_notice(member, role, positions)
@@ -671,7 +671,7 @@ async def _ensure_live_role(
     desired = replace(record, **overrides)
     if not desired.name:
         return None, False, [], Result(
-            False, f"Your old role was deleted. Make a new one with `/{COMMAND_GROUP} role <name>`."
+            False, f"Your old role was deleted. Make a new one: run `/{COMMAND_GROUP}` and press **Create role**."
         )
     role, notes, error = await _create_discord_role(member, settings, desired)
     return role, role is not None, notes, error
@@ -692,7 +692,7 @@ async def create_role(member: discord.Member, name: str) -> Result:
             return Result(
                 False,
                 f"Your role already exists by the name {validation.code(existing.name)}.\n"
-                f"Use `/{COMMAND_GROUP} assign` to put it on, or `/{COMMAND_GROUP} name` to rename it.",
+                "Press **Put on** to wear it, or **Rename** to rename it.",
                 existing,
             )
         clean, reason = await _clean_name(guild, name, settings, own_role_id=None)
@@ -718,7 +718,7 @@ async def create_role(member: discord.Member, name: str) -> Result:
         message = f"Your role **{role.name}** is back, with your saved colors."
         await log_event(guild, f"{member.mention} recreated their role {role_ref(role)} from saved settings.")
     else:
-        message = f"Created **{role.name}** and gave it to you. Color it with `/{COMMAND_GROUP} color set`."
+        message = f"Created **{role.name}** and gave it to you. Press **Color** to color it."
         await log_event(guild, f"{member.mention} created their role {role_ref(role)}.", "success")
     return Result(True, message, role, notes)
 
@@ -839,7 +839,7 @@ async def unassign(member: discord.Member) -> Result:
         if error:
             return error
     return Result(
-        True, f"Took **{role.name}** off you. It's still yours - use `/{COMMAND_GROUP} assign` to wear it again.", role
+        True, f"Took **{role.name}** off you. It's still yours - press **Put on** to wear it again.", role
     )
 
 
@@ -989,7 +989,7 @@ async def move(member: discord.Member, target: discord.Role, place: str) -> Resu
 
 
 # ------------------------------------------------------
-# Avatar palette (shared by /custom-role palette and, later, the web picker)
+# Avatar palette (shared by the panel's Palette button and the web picker)
 # ------------------------------------------------------
 
 def palette_avatar(member: discord.Member) -> discord.Asset:
@@ -1062,7 +1062,7 @@ async def handle_role_deleted(role: discord.Role) -> None:
         logger.warning("Custom roles anchor role %s was deleted in guild %s; user commands are paused", role.id, guild.id)
         await log_event(
             guild, f"The custom roles anchor role **{role.name}** was deleted, so user commands are paused. "
-                   f"Run `/{ADMIN_GROUP} anchor` to pick a new one.", "error", settings,
+                   f"Run `/{ADMIN_GROUP}` and press **Anchor** to pick a new one.", "error", settings,
         )
     if role.id in settings.allowed_role_ids:
         settings = await storage.update_guild_settings(
@@ -1079,7 +1079,7 @@ async def handle_role_deleted(role: discord.Role) -> None:
 FALLBACK_ROLE_NAME = "Custom Role"
 RENAMED_DM = (
     "Your role name was reset because it contains a blocked word. "
-    f"Use /{COMMAND_GROUP} name to choose a new one."
+    f"Run /{COMMAND_GROUP} and press Rename to choose a new one."
 )
 
 
@@ -1227,7 +1227,7 @@ async def hydrate_migrated_roles(bot: discord.Client) -> int:
 # ------------------------------------------------------
 # Old /nitro-role-set roles (the booster_roles table)
 # ------------------------------------------------------
-# Nothing is copied automatically. An admin runs /custom-role-admin import-legacy (preview, then
+# Nothing is copied automatically. An admin presses Import old roles in /custom-role-admin (preview, then
 # confirm), and a member who uses /custom-role before that takes over their own old role. Taking over
 # only creates the custom role record for the existing Discord role: its name, colors and position are
 # kept and nothing is deleted. booster_roles itself is never changed.
@@ -1428,7 +1428,7 @@ async def adopt_legacy_role(member: discord.Member, settings: GuildSettings) -> 
                 False,
                 f"You still have your old booster role {validation.code(role.name)} from `{LEGACY_COMMAND}`, "
                 f"but I can't take it over ({problem}), and I won't make you a second one. "
-                f"Ask an admin to check it with `/{ADMIN_GROUP} import-legacy`.",
+                f"Ask an admin to check it with **Import old roles** in `/{ADMIN_GROUP}`.",
             )
         await _take_over(guild, member.id, role)
     logger.info("User %s took over their old role %s in guild %s", member.id, role.id, guild.id)
@@ -1437,7 +1437,7 @@ async def adopt_legacy_role(member: discord.Member, settings: GuildSettings) -> 
     return Result(
         True,
         f"You already had a booster role from `{LEGACY_COMMAND}`, so it's now your custom role: "
-        f"**{role.name}**, with the same name, color and position. Rename it with `/{COMMAND_GROUP} name`.",
+        f"**{role.name}**, with the same name, color and position. Press **Rename** to change it.",
         role,
     )
 
@@ -1726,7 +1726,7 @@ def pending_text(pending: storage.PendingRemoval, threshold: int) -> str:
         f"**Members:** {members}\n\n"
         f"**Confirm** removes them (settings are saved, so they come back if they qualify again). "
         f"**Cancel** keeps them and asks again in {SNOOZE_HOURS} hours if they still don't qualify. "
-        f"You can also use `/{ADMIN_GROUP} pending`."
+        f"You can also use **Pending removal** in `/{ADMIN_GROUP}`."
     )
 
 
@@ -1944,10 +1944,11 @@ async def reconcile_guild(guild: discord.Guild) -> None:
     await restore_saved(guild)
 
 
-async def preview_allowed_role_removal(guild: discord.Guild, role: discord.Role) -> List[int]:
-    """Members whose custom role would be removed if `role` stopped granting access."""
+async def preview_allowed_role_removal(guild: discord.Guild, role: Any) -> List[int]:
+    """Members whose custom role would be removed if `role` (one role, or a list) stopped granting access."""
+    removed = {r.id for r in (role if isinstance(role, (list, tuple, set)) else [role])}
     settings = await storage.get_guild_settings(guild.id)
-    after = replace(settings, allowed_role_ids=[r for r in settings.allowed_role_ids if r != role.id])
+    after = replace(settings, allowed_role_ids=[r for r in settings.allowed_role_ids if r not in removed])
     affected = []
     for record in await storage.list_roles(guild.id):
         if record.status not in (storage.STATUS_ACTIVE, storage.STATUS_MISSING):
@@ -2009,7 +2010,7 @@ async def _withdraw_from_pending(guild: discord.Guild, user_id: int, admin: disc
     if await storage.resolve_pending(pending.id, storage.PENDING_WITHDRAWN, admin.id):
         await _refresh_alert(
             guild, pending, f"❎ Nothing left to remove: {admin.mention} removed the last role in this list with "
-                            f"`/{ADMIN_GROUP} remove`.", keep_buttons=False,
+                            "**Remove a member**.", keep_buttons=False,
         )
         logger.info("Pending removal %s in guild %s closed: its last member was removed", pending.id, guild.id)
 
@@ -2031,7 +2032,7 @@ async def admin_remove(
             if role >= guild.me.top_role:
                 return Result(False, f"{role.mention} is above my highest role, so I can't delete it. Nothing was changed.")
             _, error = await _discord(
-                guild, f"deleting role {role.id} of {user.id} for /{ADMIN_GROUP} remove",
+                guild, f"deleting role {role.id} of {user.id} for Remove a member",
                 role.delete(reason=f"Custom Roles: removed by {admin} ({admin.id})" + (f": {reason}" if reason else "")),
             )
             if error:
@@ -2066,7 +2067,7 @@ async def admin_remove(
 # Color picker (web)
 # ------------------------------------------------------
 
-PICKER_UNAVAILABLE_MESSAGE = "The color picker isn't available right now. You can still use the `/custom-role` commands."
+PICKER_UNAVAILABLE_MESSAGE = "The color picker isn't available right now. You can still use the `/custom-role` panel."
 
 
 def picker_link_problem() -> Optional[str]:

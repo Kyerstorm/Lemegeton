@@ -608,7 +608,7 @@ class DashboardCog(commands.Cog):
         try:
             await self.db.open()
             COMMAND_REGISTRY._commands.clear()
-            # walk_commands recurses into nested groups (e.g. /custom-role color set).
+            # walk_commands recurses into nested groups (e.g. /group subgroup command).
             for command in list(self.bot.tree.walk_commands()):
                 self._register_if_annotated(command)
             logger.info(

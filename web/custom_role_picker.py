@@ -1,4 +1,4 @@
-"""Custom Roles color picker: page, static files and JSON API under /custom-role.
+"""Custom Roles color picker: page, static files and JSON API under /custom-roles.
 
 Works without the dashboard's OAuth settings. Every API call needs the link token in
 an `Authorization: Bearer` header; the token is never accepted in a URL. Each call
@@ -43,7 +43,7 @@ TOKEN_QUERY_KEYS = {"token", "t", "access_token", "auth", "key"}
 FAILED_LIMIT = 30
 FAILED_WINDOW = 600.0
 
-EXPIRED_MESSAGE = f"This link expired. Run `/{COMMAND_GROUP} color-picker` again for a new one."
+EXPIRED_MESSAGE = f"This link expired. Run `/{COMMAND_GROUP}` and press **Color picker** for a new one."
 
 CSP = (
     "default-src 'none'; script-src 'self'; style-src 'self'; "
@@ -100,7 +100,7 @@ def _origin(url: str) -> str:
 
 
 class CustomRolePicker:
-    """Registers the /custom-role routes on the bot's aiohttp app."""
+    """Registers the /custom-roles routes on the bot's aiohttp app."""
 
     def __init__(self, bot):
         self.bot = bot

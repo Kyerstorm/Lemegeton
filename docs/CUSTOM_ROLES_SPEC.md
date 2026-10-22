@@ -2,7 +2,8 @@
 
 Custom booster roles for any server, built into the **Lemegeton** bot (`multi_guild` branch).
 Every server booster gets **one** personal role they can name, color (solid, gradient, holographic) and give an icon,
-from slash commands **or** from a private web page (the "color picker").
+from one `/custom-role` panel **or** from a private web page (the "color picker"). Admins use one
+`/custom-role-admin` panel.
 
 Read this whole file before writing code. Follow the build order in §11 and stop after each milestone so the
 human can test it in Discord.
@@ -25,9 +26,9 @@ human can test it in Discord.
 
 | Area | Fact | Consequence |
 |---|---|---|
-| Current feature | `cogs/customization/server_boost.py` has `/nitro-role-set role_name hex_color` (solid only) and an `on_member_update` boost-welcome DM. | **Replace** this cog's command with the `/custom-role` group. Keep (and update) the welcome DM. |
+| Current feature | `cogs/customization/server_boost.py` has `/nitro-role-set role_name hex_color` (solid only) and an `on_member_update` boost-welcome DM. | **Replace** this cog's command with `/custom-role`. Keep (and update) the welcome DM. |
 | Database | **PostgreSQL only** (`database.py`, asyncpg). Queries go through `execute_db_operation(name, sql, params, fetch_type=...)` using `?` placeholders; the layer converts `INTEGER` → `BIGINT` and `?` → `$n`. | Use `execute_db_operation`. Register new table init functions in `init_db()`'s `table_init_functions` list. |
-| Existing table | `booster_roles(discord_id, guild_id, role_id, created_at, updated_at)`, PK `(discord_id, guild_id)`. | Import its rows with `/custom-role-admin import-legacy` (§8; originally "on first init"), then stop using the old helpers. |
+| Existing table | `booster_roles(discord_id, guild_id, role_id, created_at, updated_at)`, PK `(discord_id, guild_id)`. | Import its rows with **Import old roles** in `/custom-role-admin` (§8; originally "on first init"), then stop using the old helpers. |
 | Cog loader | `bot.py` loads **every `.py` file** under `cogs/` and `cogs_test/` as an extension. | Put non-cog code (service, image utils) in `helpers/`, **not** under `cogs/`. |
 | Intents | `members` and `message_content` intents are enabled. | Boost start/stop is detectable via `on_member_update` (`premium_since`). |
 | Command sync | Commands are synced globally (`bot.tree.sync()`). | Nothing extra needed. |
@@ -61,26 +62,33 @@ human can test it in Discord.
 10. **Role limit:** Discord allows at most **250 roles per server**. Before creating a role, check `len(guild.roles)`;
     if at the limit, refuse with a friendly message and log it to the log channel.
 
-## 4. User commands (`/custom-role ...`)
+## 4. Member panel (`/custom-role`)
 
-All replies are **ephemeral** and use the existing embed helpers. If an admin restricted commands to a channel,
-reply with where to use them instead.
+**Changed after Milestone 9 (rename Part 2):** the 11 `/custom-role` subcommands became one command that opens a
+panel. Its buttons open forms (modals); the behaviour behind each one is unchanged and lives in the service layer.
+This needs discord.py **2.7.1** (file upload in modals arrived in 2.7.0).
 
-| Command | Options | Behaviour |
+All replies are **ephemeral** and use the existing embed helpers. If an admin restricted `/custom-role` to a channel,
+reply with where to use it instead.
+
+The panel shows the member's role (name, style, colors, icon, status). After each change it updates in place and shows
+the result (✅/❌, plus any "Heads up" notes) at the top.
+
+| Button | Form | Behaviour |
 |---|---|---|
-| `/custom-role role` | `name` (required) | Create your role with this name and assign it. If you already have one: reply *"Your role already exists by the name `X`"* + hint to `/custom-role assign` and `/custom-role name`. If you have `saved`/`missing` settings, recreate from them, using the new name. |
-| `/custom-role name` | `new_name` (required) | Rename your role (name filter §4.1). |
-| `/custom-role color set` | `color` (hex, required), `secondary_color` (hex, optional) | Solid if only `color`; gradient if both. Accept `#RRGGBB`, `RRGGBB`, `#RGB`. Description: *"Set your role color by hex. Try /custom-role color-picker to pick it visually."* |
-| `/custom-role color holographic` | — | Apply Discord's holographic preset. |
-| `/custom-role color-picker` | — | Reply with a private link (button) to the web picker (§6). Link expires (default 15 min); generating a new one invalidates the old one. |
-| `/custom-role palette` | — | Extract colors from the user's avatar (§6.4) and reply with **two select menus** ("Primary color", "Secondary color — makes a gradient", max 25 options each, label = hex, emoji-free). Picking primary sets a solid color; picking a secondary as well makes a gradient. Include a "Clear secondary" option. |
-| `/custom-role icon` | `image` (attachment, optional) | With an image: validate, center-crop to square, resize to 64×64 PNG ≤ 256 KB, apply. **Without an image: remove the icon.** Tip in reply: use the color picker to crop precisely. |
-| `/custom-role assign` | — | Put your role back on yourself. |
-| `/custom-role unassign` | — | Take your role off (role is kept). |
-| `/custom-role position` | `direction` (above/below), `role` (another member's custom role) | Move your role directly above/below another **custom** role. Refuse if the target isn't a tracked custom role or the move would leave the custom-role block. |
-| `/custom-role info` | `user` (optional) | Show a role's name, colors (as hex + mode), icon, and created date. |
+| **Create role** (only without a role) | Name | Create your role with this name and assign it. If you have `saved`/`missing` settings, recreate from them, using the new name. |
+| **Rename** | New name (prefilled) | Rename your role (name filter §4.1). |
+| **Color** | Style (Solid/Gradient/Holographic, only with Enhanced Role Styles), primary hex, second hex | Accept `#RRGGBB`, `RRGGBB`, `#RGB`. Solid ignores the second color; Gradient needs both; Holographic applies Discord's preset. Without the perk the form shows one hex field and says gradients need 3 server boosts. |
+| **Icon** | File upload (1 file), one emoji, "Remove my icon" checkbox | Exactly one of the three. Images are validated (§6.5), the center square is used, and the original is kept for re-cropping in the picker. |
+| **Palette** | — | Extract colors from the user's avatar (§6.4) and reply with **two select menus** ("Primary color", "Secondary color — makes a gradient", max 25 options each, label = hex). Include a "Clear secondary" option. |
+| **Put on** / **Take off** | — | Put your role back on, or take it off (role is kept). |
+| **Move** | Another member's custom role, directly above/below | Refuse if the target isn't a tracked custom role or the move would leave the custom-role block. |
+| **Color picker** | — | Reply with a private link (button) to the web picker (§6). Pressing it again invalidates the old link. |
+| **Look up a member** | Member | Show that member's role: name, colors (hex + mode), icon, created date. |
 
-Commands that change something require the user to have a role (except `/custom-role role`); otherwise tell them to run `/custom-role role <name>` first.
+**Expiry:** a panel works for 15 minutes (Discord's interaction limit). Its buttons are persistent (`DynamicItem`), with
+the owner and opening time in the custom ID, so a press after that, or after a restart, answers *"This panel expired,
+run `/custom-role` again"* instead of failing silently. Only the member who opened it can press its buttons.
 
 ### 4.1 Role name filter
 - Length 1–100, trimmed, collapse whitespace.
@@ -88,34 +96,41 @@ Commands that change something require the user to have a role (except `/custom-
 - Reject names containing admin-configured blocked words (case-insensitive, also after removing spaces/punctuation).
 - Reject `@everyone` / `@here` and names that are only invisible characters.
 
-## 5. Admin commands (`/custom-role-admin ...`)
+## 5. Admin panel (`/custom-role-admin`)
 
-Default member permission: **Manage Roles**. Settings are stored per guild (§8).
+Default member permission: **Manage Roles** (checked again on every button press). Settings are stored per guild (§8).
+**Changed after Milestone 9:** the 17 subcommands became one panel, like §4, with the same 15-minute expiry
+(*"This panel expired, run `/custom-role-admin` again"*).
 
-| Command | Behaviour |
-|---|---|
-| `/custom-role-admin settings` | Show all current settings and feature status (gradient available? icons available? role count / 250). |
-| `/custom-role-admin anchor role:` | Custom roles are placed directly below this role. Must be below the bot's top role. |
-| `/custom-role-admin channel [channel]` | Restrict user commands to one channel; no argument = anywhere. (Admins can also use Discord's Server Settings → Integrations.) |
-| `/custom-role-admin log-channel [channel]` | Where to log create/rename/color/icon/delete/restore events and errors. |
-| `/custom-role-admin blocked-words add/remove/list` | Manage blocked words for role names. |
-| `/custom-role-admin cooldown seconds:` | 0 = off (default). |
-| `/custom-role-admin allow-role add/remove/list` | Extra roles allowed to use the feature besides boosters (none by default). |
-| `/custom-role-admin list` | Paginated list of all custom roles: owner, role, status (active/saved/missing). |
-| `/custom-role-admin remove user:` | Delete a user's custom role (moderation). Keeps nothing; logs it. |
-| `/custom-role-admin enable` / `disable` | Turn the whole feature on/off for the server. |
+The panel shows all current settings and feature status (gradient available? icons available? role count / 250),
+role counts, problems and any pending removal.
+
+| Button | Form | Behaviour |
+|---|---|---|
+| **Turn on** / **Turn off** | — | Turn the whole feature on/off for the server. Turning it on needs a valid anchor. |
+| **Anchor** | Role, directly above/below | Custom roles are placed next to this role. Must be below the bot's top role. |
+| **Log channel** | Text channel (empty = off) | Where to log create/rename/color/icon/delete/restore events and errors. |
+| **Command channel** | Text channel (empty = anywhere) | Restrict `/custom-role` to one channel and its threads. |
+| **Cooldown** | Seconds | 0 = off (default), at most 86400. |
+| **Allowed roles** | Up to 25 roles (prefilled) | Extra roles allowed to use the feature besides boosters (none by default). Removals that would archive more than the mass-removal threshold ask for a Confirm. |
+| **Blocked words** | Current lists, then Block / Unblock (one per line) | Manage blocked words for role names; built-in words can be switched off and on. |
+| **Members** | — | Paginated list of all custom roles: owner, role, status (active/saved/missing), with a status filter. |
+| **Remove a member** | Member, or a user ID (for someone who left), optional reason | Delete a user's custom role (moderation) after a Confirm. Keeps nothing; logs it. |
+| **Pending removal** | — | Confirm or cancel a held mass removal. |
+| **Import old roles** | — | §8: preview, then take over. |
+| **Refresh** | — | Rebuild the panel. |
 
 ## 6. Web color picker
 
 Same look and flow as the reference screenshots (dark page, centered column ~600px wide).
 
 ### 6.1 Flow
-1. `/custom-role color-picker` → service creates a token: `secrets.token_urlsafe(32)`, bound to `(user_id, guild_id)`,
+1. The panel's **Color picker** button → service creates a token: `secrets.token_urlsafe(32)`, bound to `(user_id, guild_id)`,
    expiry `CUSTOM_ROLES_PICKER_TTL` (default 900 s), stored in memory (one active token per user per guild).
 2. Bot replies ephemerally with a link button to `{CUSTOM_ROLES_PUBLIC_URL}/custom-roles/{token}`.
 3. The page reads the token from the URL path and calls the API with header `Authorization: Bearer <token>`
    (the token is never sent in API URLs). Pages set `Referrer-Policy: no-referrer` and `Cache-Control: no-store`.
-4. Expired/invalid token → friendly "This link expired — run `/custom-role color-picker` again" page.
+4. Expired/invalid token → friendly "This link expired. Run `/custom-role` and press **Color picker** for a new one" page.
 
 ### 6.2 Page layout
 - **Live preview, top:** two fake Discord messages, **dark theme** and **light theme** cards. Each shows the user's
@@ -154,7 +169,7 @@ Same look and flow as the reference screenshots (dark page, centered column ~600
 Every write goes through the service layer (§7), re-checks eligibility, feature support, cooldown and the name filter,
 and returns `{ok, message, state}`. Rate-limit writes per token (e.g. 20/minute).
 
-### 6.4 Avatar palette (shared by `/custom-role palette` and the web)
+### 6.4 Avatar palette (shared by the panel's **Palette** button and the web)
 Download the member's avatar from the Discord CDN (static PNG, size 128), quantize with Pillow to ~16–20 distinct colors,
 drop near-duplicates, sort by prominence, return hex strings. Cache per avatar hash.
 
@@ -168,7 +183,7 @@ drop near-duplicates, sort by prominence, return hex strings. Cache per avatar h
 ### 6.6 Theming (so the server dev can match a server's own theme easily)
 - Files: `web/static/custom_roles/picker.html`, `picker.css`, `picker.js`, `theme.css`.
 - **All** colors, radii, fonts and spacing used by the picker are CSS variables defined in **`theme.css`** only
-  (e.g. `--lp-bg`, `--lp-card`, `--lp-text`, `--lp-muted`, `--lp-accent` (default Discord blurple `#5865F2`), `--lp-radius`).
+  (e.g. `--cr-bg`, `--cr-card`, `--cr-text`, `--cr-muted`, `--cr-accent` (default Discord blurple `#5865F2`), `--cr-radius`).
   `picker.css` must not contain hard-coded colors. Changing the theme = editing that one file.
 - Add a short comment block at the top of `theme.css` explaining each variable.
 
@@ -207,7 +222,7 @@ allowed_role_ids (TEXT/JSON), blocked_words (TEXT/JSON), updated_at.
 
 **Migration (changed in Milestone 9):** rows are **not** copied automatically on init any more, because the startup
 check then archived old roles of members who no longer qualified, on every server, before an admin had decided anything.
-Instead `/custom-role-admin import-legacy` shows a preview (taken over / members who don't qualify / skipped, with reasons)
+Instead **Import old roles** (`/custom-role-admin`) shows a preview (taken over / members who don't qualify / skipped, with reasons)
 and, on confirm, takes the existing roles over as they are (name, color, position read from Discord; nothing recreated).
 Members who don't qualify are archived only if the admin picks that option. A member who uses `/custom-role` before the import
 takes over their own old role. Nothing is ever archived automatically while Custom Roles is off. The old table is left
@@ -224,12 +239,14 @@ in place and only read.
 Reuse `DASHBOARD_HOST` / `DASHBOARD_PORT` for the listening address.
 
 ## 10. Messages
-- Welcome DM on boost: thank them, point to `/custom-role role <name>` and `/custom-role color-picker`.
+- Welcome DM on boost: thank them, point to `/custom-role` (**Create role**).
 - Restore DM on re-boost: "Welcome back — your role **X** is back."
 - Stop-boost: no DM needed; log it.
 - Keep user-facing text short, friendly, and free of stack traces.
 
 ## 11. Build order (stop after each milestone for testing)
+
+Steps 1–9 use the command names as they were built; step 10 replaced them with the two panels.
 
 1. **Foundation:** tables + migration, settings, service layer skeleton, `/custom-role-admin settings|anchor|enable|disable`.
 2. **Core role commands:** `role`, `name`, `color set`, `color holographic`, `assign`, `unassign`, `info`.
@@ -240,15 +257,18 @@ Reuse `DASHBOARD_HOST` / `DASHBOARD_PORT` for the listening address.
 7. **Picker page:** preview, color tab, palette grid, name tab.
 8. **Icon tab:** upload, link fetch, crop editor, remove.
 9. **Polish + docs:** README section "Custom Roles", `.env.example` entries, admin setup notes, final test pass (§12).
+10. **Panels:** "Lunar Roles" renamed to "Custom Roles" (Part 1), then one `/custom-role` panel and one
+    `/custom-role-admin` panel with modals (Part 2, discord.py 2.7.1), with a clear message on expired panels.
 
 ## 12. Test checklist (human runs these in the test server)
-- [ ] Non-booster gets a clear "boosters only" message for every user command.
-- [ ] `/custom-role role Mogged` creates exactly one role below the anchor and assigns it; running it again says it already exists.
+- [ ] Non-booster gets a clear "boosters only" message from `/custom-role`.
+- [ ] `/custom-role` → **Create role** "Mogged" creates exactly one role next to the anchor and assigns it; the panel then shows it (no Create button).
 - [ ] Renaming, recoloring and icon changes edit the **same** role ID (no new roles appear in Server Settings → Roles).
 - [ ] Solid, gradient and holographic all apply; gradient is refused with a clear message in a server without the perk.
 - [ ] Names like "Admin" (an existing role), blocked words, `@everyone`, empty/invisible names are refused.
-- [ ] `/custom-role palette` shows avatar colors; choosing primary + secondary produces a gradient.
-- [ ] `/custom-role icon` with a big/odd-shaped image gets cropped to a square 64×64; without an image removes the icon.
+- [ ] **Palette** shows avatar colors; choosing primary + secondary produces a gradient.
+- [ ] **Icon** with a big/odd-shaped image gets cropped to a square; **Remove my icon** removes it.
+- [ ] A panel older than 15 minutes answers "This panel expired, run /custom-role again" when pressed.
 - [ ] Remove boost (or simulate: temporarily drop eligibility via allow-role) → role deleted, settings saved; boost again → same name/colors/icon restored + DM.
 - [ ] Stop the bot, change eligibility, start the bot → reconcile fixes it.
 - [ ] Picker link opens, preview updates live in both themes, every Set button works and matches Discord.

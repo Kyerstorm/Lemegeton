@@ -8,7 +8,7 @@ A production-ready Discord bot that combines anime/manga tracking with AI-powere
 ![Status](https://img.shields.io/badge/status-production--ready-success.svg)
 ![Multi-Guild](https://img.shields.io/badge/multi--guild-ready-brightgreen.svg)
 ![Railway](https://img.shields.io/badge/railway-deployable-purple.svg)
-![Commands](https://img.shields.io/badge/commands-70-brightgreen.svg)
+![Commands](https://img.shields.io/badge/commands-44-brightgreen.svg)
 
 ---
 
@@ -106,7 +106,7 @@ A production-ready Discord bot that combines anime/manga tracking with AI-powere
 - **User-Specific Themes** - Individual preferences override guild settings
 - **Theme Preview** - Preview themes before applying
 - **Custom Roles** - One custom role per server booster: name, solid/gradient/holographic color and
-  icon, set by slash commands or a private web color picker (see [Custom Roles](#-custom-roles))
+  icon, set from the `/custom-role` panel or a private web color picker (see [Custom Roles](#-custom-roles))
 
 ### 🏰 Server Management
 
@@ -241,7 +241,7 @@ STEAM_API_KEY=your_steam_api_key_here
 
 > All commands are slash commands. Type `/` in Discord to see available commands.
 
-### Total: **70 Commands** across **8 Sections**
+### Total: **44 Commands** across **8 Sections**
 
 ### 🔐 Account Management (3 commands)
 
@@ -271,12 +271,12 @@ STEAM_API_KEY=your_steam_api_key_here
 - `/free-games` - Check free games and manage notifications
 - `/check-free-games` - Manually trigger free games check (Bot Moderator)
 
-### 🎨 Customization (30 commands)
+### 🎨 Customization (4 commands)
 
 - `/theme` - Browse, preview, and apply custom themes
 - `/admin-guild-theme` - Manage server-wide theme settings (Bot Moderator)
-- `/custom-role …` (11 commands) - Your own custom booster role (see [Custom Roles](#-custom-roles))
-- `/custom-role-admin …` (17 commands) - Set up Custom Roles (Manage Roles; see [Custom Roles](#-custom-roles))
+- `/custom-role` - Your own custom booster role: one panel to create, style and wear it (see [Custom Roles](#-custom-roles))
+- `/custom-role-admin` - Set up Custom Roles from one panel (Manage Roles; see [Custom Roles](#-custom-roles))
 
 ### 🏰 Server Management (8 commands)
 
@@ -340,14 +340,14 @@ The **Interactive Dashboard** (`/dashboard`) is a powerful command management sy
 
 - **Account** (3 commands)
 - **Admin** (3 commands)
-- **Customization** (30 commands)
+- **Customization** (4 commands)
 - **Gaming** (5 commands)
 - **Media** (11 commands)
 - **Server Management** (8 commands)
 - **Social** (3 commands)
 - **Utilities** (7 commands)
 
-**Total: 70 commands** managed through the dashboard
+**Total: 44 commands** managed through the dashboard
 
 ### For Developers
 
@@ -369,17 +369,19 @@ The dashboard automatically discovers decorated commands at bot startup.
 ## 🎨 Custom Roles
 
 **Custom Roles** gives every server booster one custom role of their own: its name, its color
-(solid, gradient or holographic) and its icon. Members set it up with `/custom-role` commands or on a
-private web page, the **color picker**. Admins set it up with `/custom-role-admin`.
+(solid, gradient or holographic) and its icon. Members manage it from one panel, `/custom-role`,
+or on a private web page, the **color picker**. Admins set it up from another panel,
+`/custom-role-admin`.
 
 - **Who gets one:** server boosters, plus members with a role an admin allows
-  (`/custom-role-admin allow-role`).
+  (**Allowed roles** in `/custom-role-admin`).
 - **When they stop qualifying** (or leave), the role is deleted but its settings are saved.
   When they qualify again, it comes back as it was, near its old spot. While Custom Roles is off
   in a server, nothing is removed automatically.
 - **Old `/nitro-role-set` roles** are taken over, never duplicated: an admin imports them with
-  `/custom-role-admin import-legacy`, and a member who uses `/custom-role` first takes over their own.
-- **Safe by default:** it's off until an admin sets an anchor role and enables it. Names go
+  **Import old roles** in `/custom-role-admin`, and a member who uses `/custom-role` first takes
+  over their own.
+- **Safe by default:** it's off until an admin sets an anchor role and turns it on. Names go
   through a filter (built-in protected words like "admin" or "mod", plus the server's own
   blocked words). Removing many roles at once needs an admin to confirm.
 - **Server perks:** gradient and holographic styles need **3 server boosts** (Discord's Enhanced
@@ -392,42 +394,50 @@ Setup, deployment and the full behaviour notes are in
 [docs/HANDOFF_NOTES.md](docs/HANDOFF_NOTES.md). The design spec is
 [docs/CUSTOM_ROLES_SPEC.md](docs/CUSTOM_ROLES_SPEC.md).
 
-### Member commands (`/custom-role`)
+### The member panel (`/custom-role`)
 
-| Command | What it does |
+`/custom-role` opens a private panel showing your role. Its buttons open short forms:
+
+| Button | What it does |
 |---|---|
-| `/custom-role role name:` | Create your custom role (or bring back your saved one). |
-| `/custom-role name new_name:` | Rename your role. |
-| `/custom-role color set color: [secondary_color:]` | Set a color by hex (`#A78BFA`, `A78BFA`, `#ABC`). A second color makes a gradient. |
-| `/custom-role color holographic` | Use Discord's holographic style. |
-| `/custom-role palette` | Pick colors from your avatar, from a menu with a swatch image. |
-| `/custom-role icon [image:] [emoji:]` | Set the icon from a PNG/JPEG image or one standard emoji. Run it with neither to remove the icon. |
-| `/custom-role color-picker` | Get a private link to the color picker page (see below). |
-| `/custom-role assign` / `/custom-role unassign` | Put your role on or take it off (you keep it either way). |
-| `/custom-role info [user:]` | Show a custom role's name, colors and icon. |
-| `/custom-role position direction: role:` | Move your role directly above or below another member's custom role. |
+| **Create role** | Create your custom role (or bring back your saved one). Shown until you have one. |
+| **Rename** | Rename your role. |
+| **Color** | Set a color by hex (`#A78BFA`, `A78BFA`, `#ABC`). With 3 server boosts, also choose Solid, Gradient (two colors) or Holographic. |
+| **Icon** | Upload a PNG/JPEG, type one standard emoji, or remove the icon. |
+| **Palette** | Pick colors from your avatar, from a menu with a swatch image. |
+| **Put on** / **Take off** | Wear your role or take it off (you keep it either way). |
+| **Move** | Put your role directly above or below another member's custom role. |
+| **Color picker** | Get a private link to the color picker page (see below). |
+| **Look up a member** | Show another member's custom role: name, colors and icon. |
 
-### Admin commands (`/custom-role-admin`, needs Manage Roles)
+The panel updates in place after each change and shows the result at the top. It works for
+15 minutes (Discord's limit for a reply); after that, pressing a button says "This panel expired,
+run /custom-role again".
 
-| Command | What it does |
+### The admin panel (`/custom-role-admin`, needs Manage Roles)
+
+`/custom-role-admin` shows everything at a glance (setup, server features, role counts, problems,
+pending removals), with buttons to change it. It expires after 15 minutes too.
+
+| Button | What it does |
 |---|---|
-| `/custom-role-admin settings` | Everything at a glance: setup, server features, role counts, problems, pending removals. |
-| `/custom-role-admin anchor role: [place:]` | The role new custom roles are placed next to (`above` is recommended). |
-| `/custom-role-admin enable` / `disable` | Turn Custom Roles on or off for the server. Enabling needs a valid anchor. |
-| `/custom-role-admin log-channel [channel:]` | Where events and errors are posted (empty = off). |
-| `/custom-role-admin channel [channel:]` | Only allow `/custom-role` commands in one channel and its threads (empty = anywhere). |
-| `/custom-role-admin cooldown seconds:` | How long members wait between changes (0 = off, at most 1 day). |
-| `/custom-role-admin allow-role add/remove/list` | Roles that qualify for a custom role besides boosting. |
-| `/custom-role-admin blocked-words add/remove/list` | Words that can't be used in role names. Built-in words can be switched off and on. |
-| `/custom-role-admin list [status:]` | Every custom role with its owner and status (active, saved, missing). |
-| `/custom-role-admin remove user: [reason:]` | Delete a member's role and saved settings. With a reason, they get a DM. |
-| `/custom-role-admin pending` | See and confirm or cancel a large removal waiting for approval. |
-| `/custom-role-admin import-legacy` | Bring old `/nitro-role-set` roles into Custom Roles. Shows a preview first; roles are taken over as they are (name, color, position), never recreated. |
+| **Turn on** / **Turn off** | Turn Custom Roles on or off for the server. Turning it on needs a valid anchor. |
+| **Anchor** | The role new custom roles are placed next to: directly above it (recommended) or below. |
+| **Log channel** | Where events and errors are posted (empty = off). |
+| **Command channel** | Only allow `/custom-role` in one channel and its threads (empty = anywhere). |
+| **Cooldown** | How long members wait between changes (0 = off, at most 1 day). |
+| **Allowed roles** | Roles that qualify for a custom role besides boosting. |
+| **Blocked words** | Words that can't be used in role names. Built-in words can be switched off and on. |
+| **Members** | Every custom role with its owner and status (active, saved, missing), with a status filter. |
+| **Remove a member** | Delete a member's role and saved settings (also for someone who left, by user ID). With a reason, they get a DM. |
+| **Pending removal** | See and confirm or cancel a large removal waiting for approval. |
+| **Import old roles** | Bring old `/nitro-role-set` roles into Custom Roles. Shows a preview first; roles are taken over as they are (name, color, position), never recreated. |
+| **Refresh** | Reload the panel. |
 
 ### The color picker
 
-`/custom-role color-picker` replies with a private link to a page served by the bot itself. On it a
-member can:
+The panel's **Color picker** button replies with a private link to a page served by the bot
+itself. On it a member can:
 
 - **Preview** their role in Discord's dark and light themes, with a contrast warning.
 - **Color tab:** choose Solid, Gradient or Holographic, use a color square and hue slider or a
@@ -438,10 +448,10 @@ member can:
 
 How it works:
 
-- **The link:** it lasts 1 hour without use, 3 hours at most, and running the command again
+- **The link:** it lasts 1 hour without use, 3 hours at most, and pressing **Color picker** again
   replaces it. The token sits after `#`, so it's never sent in an address or logged; the page
   sends it only in a header.
-- **Same rules as the commands:** every change goes through the same checks (name filter,
+- **Same rules as the panel:** every change goes through the same checks (name filter,
   cooldown, server perks) and is logged the same way. Every request checks again that the member
   still qualifies.
 - **Images:**
@@ -468,7 +478,7 @@ Lemegeton/
 ├── Procfile                        # Railway deployment configuration
 ├── .env.example                    # Environment template
 │
-├── cogs/                           # Command modules (70+ commands)
+├── cogs/                           # Command modules (44+ commands)
 │   ├── account/                    # Login, profile, admin login
 │   ├── admin/                      # Bot moderators, changelog, user cleanup
 │   ├── customization/              # Themes, Custom Roles
@@ -846,7 +856,7 @@ Contributions are welcome! Please follow these guidelines:
 
 ## 📊 Statistics
 
-- **Commands**: 70 slash commands
+- **Commands**: 44 slash commands
 - **Cogs**: 40+ command modules
 - **Database Tables**: 20+ tables with multi-guild support
 - **Themes**: 30+ customizable themes

@@ -198,7 +198,7 @@ async def main():
         tokens.lookup(new_token).max_expires_at = time.time() - 1
         r = await get("/custom-roles/api/state", new_token)
         check("expired link -> 401 with the 'run it again' message",
-              r.status == 401 and "color-picker" in (await r.json())["message"])
+              r.status == 401 and "Color picker" in (await r.json())["message"])
 
         # idle expiry: each successful call resets it; never past the hard limit
         token, link = tokens.create(GID, m.id, idle_ttl=100, max_ttl=1000)
@@ -250,7 +250,7 @@ async def main():
         nobody = with_avatar(FakeMember(g, booster=True, name="norole"))
         t_nobody, _ = tokens.create(GID, nobody.id)
         r = await get("/custom-roles/api/state", t_nobody)
-        check("no role -> 403 telling them to /custom-role role", r.status == 403 and "/custom-role role" in (await r.json())["message"])
+        check("no role -> 403 telling them to press Create role", r.status == 403 and "Create role" in (await r.json())["message"])
 
         # archive and admin remove end the link
         token, _ = tokens.create(GID, other.id)
@@ -321,7 +321,7 @@ async def main():
     finally:
         await client.close()
 
-    # ------------------------------------------------------------------ /custom-role color-picker command
+    # ------------------------------------------------------------------ the panel's Color picker button
     from cogs.customization.custom_roles import CustomRoles
     cog = CustomRoles.__new__(CustomRoles)
     cog.bot = bot
@@ -345,7 +345,7 @@ async def main():
     tokens.clear()
     bot.custom_role_picker_ready = False
     i = inter(m)
-    await CustomRoles.custom_role_color_picker.callback(cog, i)
+    await cog._send_picker_link(i)
     embed, view, ephemeral = i.followup.sent[-1]
     check("server not running: friendly error, no link", "isn't available" in embed.description and view is None
           and not tokens._by_member)
@@ -353,7 +353,7 @@ async def main():
 
     bot.custom_role_picker_ready = True
     i = inter(m)
-    await CustomRoles.custom_role_color_picker.callback(cog, i)
+    await cog._send_picker_link(i)
     embed, view, ephemeral = i.followup.sent[-1]
     url = view.children[0].url
     check("link button with the token after #", url.startswith("http://localhost:8080/custom-roles#") and ephemeral)
@@ -363,19 +363,19 @@ async def main():
           and "<t:" in embed.description and "share" in embed.description, embed.description)
     first = url.split("#", 1)[1]
     i = inter(m, refuse_view=True)
-    await CustomRoles.custom_role_color_picker.callback(cog, i)
+    await cog._send_picker_link(i)
     embed, view, _ = i.followup.sent[-1]
     fallback = embed.fields[0].value if embed.fields else ""
     check("Discord refuses the button: link shown as text", view is None and fallback.startswith("http://localhost:8080/custom-roles#"))
-    check("running it again stops the old link", tokens.lookup(first) is None and tokens.lookup(fallback.split("#", 1)[1]))
+    check("pressing it again stops the old link", tokens.lookup(first) is None and tokens.lookup(fallback.split("#", 1)[1]))
 
     nobody_i = inter(nobody)
-    await CustomRoles.custom_role_color_picker.callback(cog, nobody_i)
-    check("no role: told to make one, no link", "/custom-role role" in nobody_i.followup.sent[-1][0].description)
+    await cog._send_picker_link(nobody_i)
+    check("no role: told to make one, no link", "Create role" in nobody_i.followup.sent[-1][0].description)
 
     os.environ["ENVIRONMENT"] = "production"
     i = inter(m)
-    await CustomRoles.custom_role_color_picker.callback(cog, i)
+    await cog._send_picker_link(i)
     check("production + http address: no link handed out", i.followup.sent[-1][1] is None
           and "https" in g.channel.texts()[-1])
     os.environ["ENVIRONMENT"] = "development"

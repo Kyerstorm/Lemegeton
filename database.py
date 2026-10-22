@@ -2067,7 +2067,7 @@ async def remove_booster_role(discord_id: int, guild_id: int) -> bool:
 
 async def init_custom_roles_tables():
     """Create the Custom Roles tables. Old booster_roles rows are NOT copied here: admins import them
-    with /custom-role-admin import-legacy (see helpers/custom_roles/service.py)."""
+    with Import old roles in /custom-role-admin (see helpers/custom_roles/service.py)."""
     logger.info("🔧 Initializing Custom Roles tables...")
     await execute_db_operation(
         "create custom roles table",
@@ -2481,7 +2481,7 @@ async def init_db():
         ("Steam Users", init_steam_users_table),
         ("News Tables", init_news_tables),
         ("Booster Roles", init_booster_roles_table),
-        # After Booster Roles: /custom-role-admin import-legacy reads that table.
+        # After Booster Roles: Import old roles (/custom-role-admin) reads that table.
         ("Custom Roles", init_custom_roles_tables),
     ]
 

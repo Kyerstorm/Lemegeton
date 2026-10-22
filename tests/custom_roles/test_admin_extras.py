@@ -121,9 +121,8 @@ async def main():
     from cogs.customization.custom_roles import CustomRoles, ListView, PaletteView
     cog = CustomRoles.__new__(CustomRoles)
 
-    def interaction(group, channel, user=None):
-        root = SimpleNamespace(name=group)
-        return SimpleNamespace(command=SimpleNamespace(root_parent=root), guild=g, channel=channel,
+    def interaction(name, channel, user=None):  # /custom-role and /custom-role-admin are plain commands
+        return SimpleNamespace(command=SimpleNamespace(name=name, root_parent=None), guild=g, channel=channel,
                                response=Response(), user=user)
 
     i = interaction(COMMAND_GROUP, other)
@@ -252,7 +251,7 @@ async def main():
     check("non-booster refused", not r.ok and "boost" in r.message.lower(), r.message)
     nobody = FakeMember(g, booster=True, name="norole")
     r = await service.move(nobody, rb, "above")
-    check("no role yet refused", not r.ok and "/custom-role role" in r.message, r.message)
+    check("no role yet refused", not r.ok and "Create role" in r.message, r.message)
     await service.set_cooldown(g, 60)
     r = await service.move(a, rb, "above")
     check("move blocked during cooldown", not r.ok and "<t:" in r.message, r.message)

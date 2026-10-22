@@ -173,7 +173,7 @@
   };
   const expired = (message) => {
     forgetToken();
-    lockPage("This link expired", message || "Run /custom-role color-picker in Discord for a new one. Your edits are still shown below.");
+    lockPage("This link expired", message || "Run /custom-role in Discord and press Color picker for a new one. Your edits are still shown below.");
   };
 
   // ------------------------------------------------------------------ API
@@ -437,8 +437,8 @@
 
     // Readability on Discord's two themes
     const colors = edit.mode === "solid" ? [edit.primary] : edit.mode === "gradient" ? [edit.primary, edit.secondary] : [];
-    const dark = themeColor("--lp-preview-dark-bg");
-    const light = themeColor("--lp-preview-light-bg");
+    const dark = themeColor("--cr-preview-dark-bg");
+    const light = themeColor("--cr-preview-light-bg");
     const hard = [];
     colors.filter(Boolean).forEach((c) => {
       if (dark && contrast(c, dark) < 3) { hard.push("dark"); }
@@ -1165,7 +1165,7 @@
 
   function start() {
     if (!token) {
-      fatal("No link found", "Open this page from the button that /custom-role color-picker gives you in Discord.");
+      fatal("No link found", "Open this page from the Color picker button in /custom-role in Discord.");
       return;
     }
     api("state").then(({ status, body }) => {

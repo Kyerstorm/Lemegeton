@@ -187,7 +187,7 @@ async def main():
     check("image + emoji together refused", not r.ok and "not both" in r.message)
     other = FakeMember(g, booster=True, name="norole")
     r = await service.set_icon(other, emoji="🌙")
-    check("no role yet -> told to run /custom-role role", not r.ok and "/custom-role role" in r.message)
+    check("no role yet -> told to press Create role", not r.ok and "Create role" in r.message)
     plain = FakeMember(g, name="plain")
     r = await service.set_icon(plain, emoji="🌙")
     check("non-booster refused", not r.ok and "boosters" in r.message)
@@ -378,27 +378,12 @@ async def main():
             self.reads.append(use_cached)
             return self.data
 
-    class Followup:
-        def __init__(self):
-            self.sent = []
-
-        async def send(self, embed=None, ephemeral=None, **kw):
-            self.sent.append(embed)
-
-    class CmdInter:
-        def __init__(self, user):
-            self.user, self.guild, self.response, self.followup = user, user.guild, Resp(), Followup()
-
     g = await setup()  # Test Server: no Role Icons perk
     up = FakeMember(g, booster=True, name="uploader")
     await service.create_role(up, "Upload Role")
-    cog = cog_mod.CustomRoles(type("Bot", (), {})())
-    handler = cog_mod.CustomRoles.custom_role_icon.callback
 
-    async def upload(att):
-        inter = CmdInter(up)
-        await handler(cog, inter, image=att, emoji=None)
-        return inter.followup.sent[-1].description
+    async def upload(att):  # the Icon form's upload, as the panel runs it
+        return (await cog_mod.icon_from_attachment(up, att)).message
 
     # Same kinds of files as make_test_images.py, built in memory.
     apng_upload = io.BytesIO()

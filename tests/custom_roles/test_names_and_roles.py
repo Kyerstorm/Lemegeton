@@ -194,7 +194,7 @@ async def main():
         check(f"non-booster refused: {name}", not r.ok and "boosters" in r.message)
 
     r = await service.rename(booster, "x")
-    check("no role yet -> told to run /custom-role role", not r.ok and "/custom-role role" in r.message)
+    check("no role yet -> told to press Create role", not r.ok and "Create role" in r.message)
 
     # ---------------- create ----------------
     r = await service.create_role(booster, "Mogged")
@@ -527,7 +527,7 @@ async def round_a_b(service, storage, v, q):
     check("B role above bot reported as failed", [(u, n) for u, n, _ in sweep.failed] == [(e.id, "Dev High")], sweep.failed)
     check("B new name saved in DB", (await storage.get_custom_role(GID, a.id)).name == "hammad's role")
     check("B same role edited (no new role)", guild.get_role((await storage.get_custom_role(GID, a.id)).role_id).name == "hammad's role")
-    check("B DM text exact", a.dms == ["Your role name was reset because it contains a blocked word. Use /custom-role name to choose a new one."], a.dms)
+    check("B DM text exact", a.dms == ["Your role name was reset because it contains a blocked word. Run /custom-role and press Rename to choose a new one."], a.dms)
     check("B unaffected member got no DM", d.dms == [])
     check("B count after sweep = 1 (the one above the bot)", len(await service.names_breaking_rules(guild)) == 1)
 
