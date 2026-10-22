@@ -456,7 +456,9 @@ class PanelConfigureModal(discord.ui.Modal, title="Configure Panel Archive"):
             if guild is None or not interaction.permissions.manage_guild:
                 await interaction.followup.send("Manage Server permission is required.", ephemeral=True)
                 return
-            storage = self.storage.component.values[0] if self.storage.component.values else None
+            # ChannelSelect yields AppCommandChannel stubs; resolve the real channel for permission checks.
+            picked = self.storage.component.values
+            storage = guild.get_channel(picked[0].id) if picked else None
             if not isinstance(storage, discord.TextChannel):
                 await interaction.followup.send("Choose a text storage channel.", ephemeral=True)
                 return
