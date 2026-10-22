@@ -477,7 +477,7 @@ def get_command_signature(command):
     """Generate a signature for command comparison"""
     return {
         'name': command.name,
-        'description': command.description,
+        'description': getattr(command, 'description', ''),  # context menus have none
         'type': str(type(command)),
         'params': len(command.parameters) if hasattr(command, 'parameters') else 0
     }
