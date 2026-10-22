@@ -502,12 +502,16 @@ async def main():
         custom_role_picker.FETCH_LIMIT = old_fetch_limit
         picker._fetches.clear()
         tok, _ = tokens.create(GID, m.id)
-        for _ in range(custom_role_picker.FETCH_CONCURRENCY):
-            await picker._fetch_slots.acquire()
+        for _ in range(custom_role_picker.IMAGE_CONCURRENCY):
+            await picker._image_slots.acquire()
         r = await call("POST", "/custom-roles/api/icon/fetch", tok, body={"url": f"{base}/ok.png"})
         check("fetch API: global concurrency limit -> 503 busy", r.status == 503 and (await r.json())["error"] == "busy")
-        for _ in range(custom_role_picker.FETCH_CONCURRENCY):
-            picker._fetch_slots.release()
+        r = await call("POST", "/custom-roles/api/icon", tok, form=upload_form(PNG_OK))
+        check("upload API: shares the image slots -> 503 busy", r.status == 503 and (await r.json())["error"] == "busy")
+        for _ in range(custom_role_picker.IMAGE_CONCURRENCY):
+            picker._image_slots.release()
+        r = await call("POST", "/custom-roles/api/icon", tok, form=upload_form(PNG_OK))
+        check("upload API: works again once a slot is free", r.status == 200 and (await r.json())["ok"], r.status)
 
         # without the Role Icons perk
         g2 = await setup()

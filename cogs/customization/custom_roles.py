@@ -45,6 +45,19 @@ def _embed(title: str, text: str, colour: discord.Colour) -> discord.Embed:
     return discord.Embed(title=title, description=text[:4000], colour=colour)
 
 
+def _progress_updater(interaction: discord.Interaction, title: str) -> service.ProgressCallback:
+    """Shows "done/total" on the interaction's message. Never raises: the message may be gone
+    or the interaction token expired (15 min), and that must not stop the removal."""
+    async def progress(done: int, total: int, report: service.ArchiveReport):
+        try:
+            await interaction.edit_original_response(
+                embed=_embed(title, f"{done}/{total} processed. {report.summary()}", PALETTE.WARNING)
+            )
+        except discord.HTTPException as exc:
+            logger.warning("Couldn't show progress %s/%s in guild %s: %s", done, total, interaction.guild_id, exc)
+    return progress
+
+
 class PendingButton(
     discord.ui.DynamicItem[discord.ui.Button],
     template=r"custom-role:pending:(?P<id>[0-9]+):(?P<action>confirm|cancel)",
@@ -83,11 +96,7 @@ class PendingButton(
 
         await interaction.response.edit_message(embed=_embed("Removing…", "Starting.", PALETTE.WARNING), view=None)
 
-        async def progress(done: int, total: int, report: service.ArchiveReport):
-            await interaction.edit_original_response(
-                embed=_embed("Removing…", f"{done}/{total} processed. {report.summary()}", PALETTE.WARNING)
-            )
-
+        progress = _progress_updater(interaction, "Removing…")
         result = await service.confirm_pending(guild, self.pending_id, interaction.user, progress=progress)
         if not result.ok:
             await interaction.edit_original_response(embed=_embed("Nothing To Do", result.message, PALETTE.NEUTRAL))
@@ -1600,11 +1609,7 @@ class CustomRoles(commands.Cog):
         guild, admin = interaction.guild, interaction.user
 
         async def on_confirm(button_interaction: discord.Interaction):
-            async def progress(done: int, total: int, report: service.ArchiveReport):
-                await button_interaction.edit_original_response(
-                    embed=_embed("Removing…", f"{done}/{total} processed. {report.summary()}", PALETTE.WARNING)
-                )
-
+            progress = _progress_updater(button_interaction, "Removing…")
             result = _combined(await self._remove_allowed_roles(guild, admin, roles, affected, progress))
             await button_interaction.edit_original_response(embed=_embed(
                 "Allowed Roles Updated", result.message, PALETTE.SUCCESS if result.ok else PALETTE.WARNING))
@@ -1745,11 +1750,7 @@ class CustomRoles(commands.Cog):
         admin = interaction.user
 
         async def on_choice(button_interaction: discord.Interaction, archive_others: bool):
-            async def progress(done: int, total: int, report: service.ArchiveReport):
-                await button_interaction.edit_original_response(
-                    embed=_embed("Archiving…", f"{done}/{total} processed. {report.summary()}", PALETTE.WARNING)
-                )
-
+            progress = _progress_updater(button_interaction, "Archiving…")
             report = await service.import_legacy(
                 guild, admin, take_over_ids, archive_ids if archive_others else set(), progress=progress
             )

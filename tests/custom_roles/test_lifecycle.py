@@ -365,6 +365,110 @@ async def main():
     check("allowed role removed (<= threshold) archives and reports",
           all([(await record(h)).status == "saved" for h in holders]) and "Removed 2" in text, text)
 
+    # ------------------------------------------------------------------ post-merge fixes
+    async def until(cond, timeout=3.0):
+        deadline = asyncio.get_running_loop().time() + timeout
+        while not await cond() and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.02)
+
+    async def saved(member):
+        return (await record(member)).status == "saved"
+
+    async def flush_done():
+        task = service._event_tasks.get(GID)
+        return task is None or task.done()
+
+    def not_found():
+        return discord.NotFound(type("R", (), {"status": 404, "reason": "x"})(), "Unknown Message")
+
+    await reset()
+    g = FakeGuild(GID)
+    await setup(g)
+    admin = FakeMember(g, name="admin2")
+    config.CUSTOM_ROLES_MASS_ARCHIVE_THRESHOLD = 10
+
+    # fix 1: a removal queued while a flush is running is still handled
+    a, b = FakeMember(g, booster=True, name="flushA"), FakeMember(g, booster=True, name="flushB")
+    for x in (a, b):
+        await service.create_role(x, f"Flush {x.name}")
+        x.premium_since = None
+    real_auto = service.archive_automatically
+    started = asyncio.Event()
+
+    async def slow_auto(guild, reasons, why):
+        started.set()
+        await asyncio.sleep(0.3)
+        return await real_auto(guild, reasons, why)
+
+    service.archive_automatically = slow_auto
+    try:
+        service.queue_archive(g, a.id, "stopped boosting")
+        await asyncio.wait_for(started.wait(), 2)
+        service.queue_archive(g, b.id, "stopped boosting")  # arrives mid-flush
+        await until(lambda: saved(b))
+        await until(flush_done)
+    finally:
+        service.archive_automatically = real_auto
+    check("fix 1: member queued mid-flush is archived with no further event", await saved(a) and await saved(b))
+    check("fix 1: the flush task ends once the queue is empty", await flush_done())
+
+    # fix 3: a member who qualifies again while archive() waits for the lock keeps the role
+    c = FakeMember(g, booster=True, name="reboost")
+    await service.create_role(c, "Comeback")
+    since, c.premium_since = c.premium_since, None
+    lock = service.user_lock(GID, c.id)
+    await lock.acquire()
+    task = asyncio.create_task(service.archive(g, c.id, "stopped boosting"))
+    for _ in range(200):  # until archive() passed its early check and waits for the lock
+        if lock._waiters:
+            break
+        await asyncio.sleep(0.01)
+    c.premium_since = since  # boosts again meanwhile
+    lock.release()
+    r = await task
+    rec = await record(c)
+    check("fix 3: re-checked inside the lock -> role kept",
+          not r.ok and r.message == service.SKIP_STILL_QUALIFIES and rec.status == "active"
+          and g.get_role(rec.role_id) is not None, (r, rec))
+
+    # fix 2: a progress update that fails doesn't stop a confirmed removal
+    config.CUSTOM_ROLES_MASS_ARCHIVE_THRESHOLD = 1
+    service.ARCHIVE_BATCH_SIZE = 2
+    many = [FakeMember(g, booster=True, name=f"p{i}") for i in range(5)]
+    for x in many:
+        await service.create_role(x, f"Prog {x.name}")
+        x.premium_since = None
+    await service.archive_automatically(g, {x.id: "stopped boosting" for x in many}, "test burst")
+    pend = await storage.get_open_pending(GID)
+    calls = []
+
+    async def bad_progress(done, total, report):
+        calls.append(done)
+        if len(calls) == 2:
+            raise not_found()  # the alert was deleted mid-run
+
+    r = await service.confirm_pending(g, pend.id, admin, progress=bad_progress)
+    check("fix 2: progress raising mid-run still processes every member",
+          r.ok and len(r.data.archived) == 5 and calls == [2, 4, 5], (r, calls))
+    check("fix 2: every member's role was removed", all([await saved(x) for x in many]))
+    check("fix 2: summary still logged", any("Pending removal confirmed" in t for t in g.channel.texts()))
+    service.ARCHIVE_BATCH_SIZE = 5
+
+    from cogs.customization.custom_roles import _progress_updater
+
+    class GoneInteraction:
+        guild_id = GID
+
+        async def edit_original_response(self, **kw):
+            raise not_found()
+
+    try:
+        await _progress_updater(GoneInteraction(), "Removing…")(1, 2, service.ArchiveReport())
+        swallowed = True
+    except discord.HTTPException:
+        swallowed = False
+    check("fix 2: the cog's progress updater never raises HTTPException", swallowed)
+
     await reset()
     print(f"\n{sum(results)}/{len(results)} passed")
     sys.exit(0 if all(results) else 1)

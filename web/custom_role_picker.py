@@ -35,13 +35,15 @@ MAX_BODY = 2048  # bytes; write requests are tiny JSON objects
 MULTIPART_OVERHEAD = 64 * 1024  # room for the multipart headers and the crop field
 FETCH_LIMIT = 6          # image links one member may fetch per FETCH_WINDOW
 FETCH_WINDOW = 60.0
-FETCH_CONCURRENCY = 3    # image links fetched at the same time, for everyone together
+IMAGE_CONCURRENCY = 3    # image uploads + link fetches handled at the same time, for everyone together
 MODES = (service.MODE_SOLID, service.MODE_GRADIENT, service.MODE_HOLOGRAPHIC)
 TOKEN_QUERY_KEYS = {"token", "t", "access_token", "auth", "key"}
 
 # Requests with an unknown or expired token, per client address.
 FAILED_LIMIT = 30
 FAILED_WINDOW = 600.0
+MAX_TRACKED = 10_000  # rate-limit keys kept before every stale one is swept out
+BUSY_MESSAGE = "I'm handling a lot of images right now. Try again in a few seconds."
 
 EXPIRED_MESSAGE = f"This link expired. Run `/{COMMAND_GROUP}` and press **Color picker** for a new one."
 
@@ -99,6 +101,24 @@ def _origin(url: str) -> str:
     return f"{parts.scheme}://{parts.netloc}".lower()
 
 
+def _recent(buckets: Dict, key, window: float, now: float) -> int:
+    """How many of key's timestamps are inside the window. Forgets keys with none left,
+    so a scanner rotating addresses can't grow the map forever."""
+    cutoff = now - window
+    if len(buckets) > MAX_TRACKED:
+        for stale in [k for k, b in buckets.items() if not b or b[-1] <= cutoff]:
+            del buckets[stale]
+    bucket = buckets.get(key)
+    if bucket is None:
+        return 0
+    while bucket and bucket[0] <= cutoff:
+        bucket.popleft()
+    if not bucket:
+        del buckets[key]
+        return 0
+    return len(bucket)
+
+
 class CustomRolePicker:
     """Registers the /custom-roles routes on the bot's aiohttp app."""
 
@@ -106,7 +126,7 @@ class CustomRolePicker:
         self.bot = bot
         self._failed: Dict[str, Deque[float]] = {}
         self._fetches: Dict[tuple, Deque[float]] = {}
-        self._fetch_slots = asyncio.Semaphore(FETCH_CONCURRENCY)
+        self._image_slots = asyncio.Semaphore(IMAGE_CONCURRENCY)  # shared by uploads and link fetches
         self.fetch_options: dict = {}  # tests only: lets the link fetcher reach a local test server
 
     def register(self, app: web.Application) -> None:
@@ -138,10 +158,12 @@ class CustomRolePicker:
         try:
             response = await handler(request)
         except web.HTTPException as exc:
+            if exc.status < 400:
+                raise  # redirects are not errors
             if exc.status == 404:
                 response = self._error(404, "not_found", "Not found.")
             else:
-                raise
+                response = self._error(exc.status, "http_error", exc.reason or "Request refused.")
         return self._headers(response)
 
     @staticmethod
@@ -159,11 +181,7 @@ class CustomRolePicker:
         return web.json_response({"ok": False, "error": code, "message": web_text(message)}, status=status)
 
     def _failed_allowed(self, ip: str) -> bool:
-        now = time.monotonic()
-        bucket = self._failed.setdefault(ip, deque())
-        while bucket and bucket[0] <= now - FAILED_WINDOW:
-            bucket.popleft()
-        return len(bucket) < FAILED_LIMIT
+        return _recent(self._failed, ip, FAILED_WINDOW, time.monotonic()) < FAILED_LIMIT
 
     def _note_failed(self, ip: str) -> None:
         self._failed.setdefault(ip, deque()).append(time.monotonic())
@@ -319,6 +337,13 @@ class CustomRolePicker:
     async def _api_icon(self, request: web.Request) -> web.Response:
         """Multipart: "image" = the original PNG/JPEG exactly as chosen, "crop" = {"x", "y", "size"}."""
         async def action(member, req):
+            # Take the slot before reading the body: the raw upload and the decoded image both use memory.
+            if self._image_slots.locked():
+                return self._error(503, "busy", BUSY_MESSAGE)
+            async with self._image_slots:
+                return await upload(member, req)
+
+        async def upload(member, req):
             limit = images.source_max_bytes()
             too_big = self._error(413, "too_big", f"Images can be at most {images.format_size(limit)}.")
             if req.content_length is not None and req.content_length > limit + MULTIPART_OVERHEAD:
@@ -378,12 +403,9 @@ class CustomRolePicker:
 
     def _fetch_allowed(self, key: tuple) -> bool:
         now = time.monotonic()
-        bucket = self._fetches.setdefault(key, deque())
-        while bucket and bucket[0] <= now - FETCH_WINDOW:
-            bucket.popleft()
-        if len(bucket) >= FETCH_LIMIT:
+        if _recent(self._fetches, key, FETCH_WINDOW, now) >= FETCH_LIMIT:
             return False
-        bucket.append(now)
+        self._fetches.setdefault(key, deque()).append(now)
         return True
 
     @staticmethod
@@ -412,9 +434,9 @@ class CustomRolePicker:
             return self._error(403, "no_icons", service.NO_ICONS_MESSAGE)
         if not self._fetch_allowed((member.guild.id, member.id)):
             return self._error(429, "too_many_fetches", "That's a lot of links in a row. Wait a minute and try again.")
-        if self._fetch_slots.locked():
-            return self._error(503, "busy", "I'm fetching a lot of images right now. Try again in a few seconds.")
-        async with self._fetch_slots:
+        if self._image_slots.locked():
+            return self._error(503, "busy", BUSY_MESSAGE)
+        async with self._image_slots:
             host = "?"
             try:
                 data, kind, host = await safe_fetch.fetch_image(

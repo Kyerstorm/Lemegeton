@@ -1585,6 +1585,10 @@ async def archive(
         return Result(False, SKIP_PENDING)
 
     async with user_lock(guild.id, user_id):
+        # Check again: they may have qualified again while we waited for the lock.
+        member = guild.get_member(user_id)
+        if member is not None and is_eligible(member, settings):
+            return Result(False, SKIP_STILL_QUALIFIES)
         record = await storage.get_custom_role(guild.id, user_id)
         if record is None or record.status == storage.STATUS_SAVED:
             return Result(False, SKIP_NOTHING)
@@ -1681,7 +1685,10 @@ async def process_archives(
                 report.failed.append((user_id, result.message))
         done = min(start + ARCHIVE_BATCH_SIZE, total)
         if progress is not None:
-            await progress(done, total, report)
+            try:
+                await progress(done, total, report)
+            except Exception:  # a progress update must never stop the removal
+                logger.warning("Progress update failed in guild %s (%s/%s)", guild.id, done, total, exc_info=True)
         if done < total:
             await asyncio.sleep(ARCHIVE_BATCH_PAUSE)
 
@@ -1884,15 +1891,18 @@ def unqueue_archive(guild_id: int, user_id: int) -> None:
 
 
 async def _flush_events_later(guild: discord.Guild) -> None:
-    await asyncio.sleep(EVENT_BATCH_SECONDS)
-    reasons = _event_queue.pop(guild.id, {})
-    if not reasons:
-        return
-    why = "members stopped qualifying" if len(reasons) > 1 else next(iter(reasons.values()))
-    try:
-        await archive_automatically(guild, reasons, why)
-    except Exception:
-        logger.exception("Handling queued removals failed in guild %s", guild.id)
+    # Loop: members queued while archive_automatically runs see this task as not done,
+    # so queue_archive won't start another one for them.
+    while True:
+        await asyncio.sleep(EVENT_BATCH_SECONDS)
+        reasons = _event_queue.pop(guild.id, {})
+        if not reasons:
+            return
+        why = "members stopped qualifying" if len(reasons) > 1 else next(iter(reasons.values()))
+        try:
+            await archive_automatically(guild, reasons, why)
+        except Exception:
+            logger.exception("Handling queued removals failed in guild %s", guild.id)
 
 
 # ------------------------------------------------------

@@ -318,6 +318,45 @@ async def main():
         check("cross-origin write -> 403", r.status == 403 and (await r.json())["error"] == "cross_origin")
         r = await client.post("/custom-roles/api/state", headers={"Origin": "http://localhost:8080"})
         check("same-origin write passes the origin check (405: no write routes yet)", r.status == 405, r.status)
+
+        # post-merge fix 7: every error status keeps the picker's security headers
+        for method, path in (("POST", "/custom-roles/api/state"), ("PUT", "/custom-roles/api/color")):
+            r = await client.request(method, path)
+            body = await r.json()
+            check(f"{method} {path}: 405 is a JSON error with picker headers",
+                  r.status == 405 and body["error"] == "http_error"
+                  and r.headers.get("Content-Security-Policy") == custom_role_picker.CSP
+                  and r.headers.get("X-Content-Type-Options") == "nosniff"
+                  and r.headers.get("Cache-Control") == "no-store", (r.status, body, dict(r.headers)))
+
+        # post-merge fix 5: rate-limit maps forget addresses and members with nothing left
+        old_window, old_fetch_window = custom_role_picker.FAILED_WINDOW, custom_role_picker.FETCH_WINDOW
+        old_max = custom_role_picker.MAX_TRACKED
+        custom_role_picker.FAILED_WINDOW = custom_role_picker.FETCH_WINDOW = 0.05
+        picker._failed.clear()
+        for i in range(50):  # a scanner rotating IPv6 addresses
+            picker._note_failed(f"2001:db8::{i:x}")
+        await asyncio.sleep(0.1)
+        picker._failed_allowed("2001:db8::0")
+        check("expired address is forgotten when checked", "2001:db8::0" not in picker._failed and len(picker._failed) == 49,
+              len(picker._failed))
+        custom_role_picker.MAX_TRACKED = 10
+        picker._failed_allowed("198.51.100.1")
+        check("over MAX_TRACKED every stale address is swept", len(picker._failed) == 0, len(picker._failed))
+        picker._fetches.clear()
+        picker._fetch_allowed((GID, 1))
+        await asyncio.sleep(0.1)
+        custom_role_picker.MAX_TRACKED = 0
+        picker._fetch_allowed((GID, 2))
+        check("fetch map drops stale members too", list(picker._fetches) == [(GID, 2)], list(picker._fetches))
+        custom_role_picker.FAILED_WINDOW, custom_role_picker.FETCH_WINDOW = old_window, old_fetch_window
+        custom_role_picker.MAX_TRACKED = old_max
+        picker._failed.clear()
+        picker._fetches.clear()
+        for _ in range(custom_role_picker.FAILED_LIMIT):
+            picker._note_failed("203.0.113.9")
+        check("pruning doesn't weaken the limit itself", not picker._failed_allowed("203.0.113.9"))
+        picker._failed.clear()
     finally:
         await client.close()
 

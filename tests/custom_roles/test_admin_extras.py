@@ -62,6 +62,7 @@ async def main():
 
     q = db.execute_db_operation
     await db.init_custom_roles_tables()
+    await db.init_booster_roles_table()  # read by the legacy checks; a fresh database doesn't have it yet
     service.ARCHIVE_BATCH_PAUSE = 0
     service.pending_view_factory = lambda pid: f"VIEW-{pid}"
 
