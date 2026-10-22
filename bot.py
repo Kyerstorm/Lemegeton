@@ -998,6 +998,7 @@ async def update_streaming_status():
 # Cog Management with Timestamps
 # ------------------------------------------------------
 cog_timestamps = {}
+failed_cog_timestamps = {}  # cog -> file mtime of a version that failed to load; not retried until the file changes
 cog_loading_semaphore = asyncio.Semaphore(1)  # Prevent concurrent cog loading
 
 async def load_cogs():
@@ -1109,7 +1110,8 @@ async def _load_cogs_impl():
                             reloaded_count += 1
                         except Exception as reload_error:
                             logger.error(f"❌ Failed to reload cog {cog_name}: {reload_error}", exc_info=True)
-                            
+                            failed_cog_timestamps[cog_name] = last_mod
+
                             # If reload fails, unload the broken extension
                             try:
                                 await bot.unload_extension(cog_name)
@@ -1122,6 +1124,8 @@ async def _load_cogs_impl():
                             failed_count += 1
                     else:
                         logger.debug(f"Cog {cog_name} is up to date")
+                elif failed_cog_timestamps.get(cog_name) == last_mod:
+                    logger.debug(f"Skipping {cog_name}: it failed to load and hasn't changed since")
                 else:
                     # Load new cog
                     logger.debug(f"Loading new cog: {cog_name}")
@@ -1142,11 +1146,13 @@ async def _load_cogs_impl():
                         
                         await bot.load_extension(cog_name)
                         cog_timestamps[cog_name] = last_mod
+                        failed_cog_timestamps.pop(cog_name, None)
                         logger.info(f"✅ Successfully loaded cog: {cog_name}")
                         loaded_count += 1
                     except Exception as load_error:
                         logger.error(f"❌ Failed to load cog {cog_name}: {load_error}", exc_info=True)
-                        
+                        failed_cog_timestamps[cog_name] = last_mod
+
                         # If the extension was partially loaded but failed, try to unload it
                         if cog_name in bot.extensions:
                             try:
