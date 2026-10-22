@@ -283,20 +283,21 @@ class PanelForm(discord.ui.Modal):
         self.panel = panel
         self.source_url = source_url or (panel.get("source_url") if panel else None)
         self.image = discord.ui.Label(
-            text="Image upload (optional when editing; max 8 MB)",
+            text="Image upload",
+            description="Max 8 MB. Optional when editing.",
             component=discord.ui.FileUpload(min_values=1 if mode == "add" else 0, max_values=1, required=mode == "add"),
         )
         self.title_field = discord.ui.Label(
             text="Manga title",
-            component=discord.ui.TextInput(label="Title", default=panel["title"] if panel else None, max_length=100, required=True),
+            component=discord.ui.TextInput(default=panel["title"] if panel else None, max_length=100, required=True),
         )
         self.tags_field = discord.ui.Label(
             text="Tags (comma-separated)",
-            component=discord.ui.TextInput(label="Tags", default=", ".join(panel.get("tags", [])) if panel else None, max_length=300, required=False),
+            component=discord.ui.TextInput(default=", ".join(panel.get("tags", [])) if panel else None, max_length=300, required=False),
         )
         self.caption_field = discord.ui.Label(
             text="Caption",
-            component=discord.ui.TextInput(label="Caption", default=panel.get("caption", "") if panel else None,
+            component=discord.ui.TextInput(default=panel.get("caption", "") if panel else None,
                                            style=discord.TextStyle.paragraph, max_length=500, required=False),
         )
         self.rating_field = discord.ui.Label(
