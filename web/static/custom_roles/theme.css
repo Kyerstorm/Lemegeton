@@ -1,0 +1,110 @@
+/* Custom role color picker theme.
+   Every color, radius, font, spacing and size the picker uses is defined here, and picker.css
+   only refers to these variables. To restyle the page, edit this file only.
+
+   Not covered here (on purpose):
+   - favicon.svg has its own two colors, because a favicon can't read CSS variables.
+   - The color square's white/black overlays and the hue slider's rainbow are drawn by
+     picker.js. They show the colors being picked, so they aren't part of the theme. */
+:root {
+  color-scheme: dark;
+
+  /* ---- Page ---- */
+  --cr-bg: #1E1F22;                 /* page background */
+  --cr-card: #2B2D31;               /* cards and the tab panel */
+  --cr-card-border: #3F4147;        /* card and divider lines */
+  --cr-raised: #383A40;             /* popover and hovered controls */
+  --cr-text: #F2F3F5;               /* main text */
+  --cr-muted: #B5BAC1;              /* labels, hints, timestamps */
+
+  /* ---- Controls ---- */
+  --cr-input-bg: #1E1F22;           /* text boxes */
+  --cr-input-border: #4E5058;       /* text box and swatch outlines */
+  --cr-accent: #5865F2;             /* main buttons, selected tab and style (Discord blurple) */
+  --cr-accent-hover: #4752C4;       /* main buttons when hovered */
+  --cr-accent-text: #FFFFFF;        /* text on accent */
+  --cr-secondary-bg: #4E5058;       /* secondary buttons (Reset, Done) */
+  --cr-secondary-hover: #6D6F78;    /* secondary buttons when hovered */
+  --cr-disabled-bg: #3A3C42;        /* disabled buttons */
+  --cr-disabled-text: #949BA4;      /* text on disabled buttons */
+  --cr-focus: #00A8FC;              /* keyboard focus outline */
+  --cr-selected-ring: #F2F3F5;      /* ring around the picked palette swatch */
+
+  /* ---- Messages ---- */
+  --cr-error: #FA777C;              /* error text */
+  --cr-error-bg: #3B2224;           /* error banner background */
+  --cr-success: #57F287;            /* success text */
+  --cr-warning: #F0B232;            /* "heads up" text and banners */
+  --cr-warning-bg: #3A3020;         /* warning banner background */
+
+  /* ---- Preview cards (meant to look like Discord's own themes) ---- */
+  --cr-preview-dark-bg: #313338;    /* dark theme message background */
+  --cr-preview-dark-text: #DBDEE1;  /* dark theme message text and uncolored names */
+  --cr-preview-dark-muted: #949BA4; /* dark theme timestamp */
+  --cr-preview-light-bg: #FFFFFF;   /* light theme message background */
+  --cr-preview-light-text: #313338; /* light theme message text and uncolored names */
+  --cr-preview-light-muted: #5C5E66;/* light theme timestamp */
+  --cr-chip-bg: #1E1F22;            /* role name chip under the preview */
+
+  /* ---- Role icon upload and crop ---- */
+  --cr-dropzone-border: #6D6F78;    /* dashed outline of the drop zone */
+  --cr-dropzone-bg: #232428;        /* drop zone background */
+  --cr-dropzone-active: #2E3035;    /* drop zone while a file is dragged over it */
+  --cr-stage-bg: #111214;           /* behind the image in the crop area */
+
+  /* ---- Holographic preview (Discord's fixed preset colors) ---- */
+  --cr-holo-1: #A9C9FF;             /* first holographic color */
+  --cr-holo-2: #FFBBEC;             /* second holographic color */
+  --cr-holo-3: #FFC3A0;             /* third holographic color */
+  --cr-holo-speed: 6s;              /* one loop of the holographic shimmer */
+
+  /* ---- Marker on the color square (two rings so it shows on any color) ---- */
+  --cr-marker-inner: #FFFFFF;       /* inner ring of the marker */
+  --cr-marker-outer: #000000;       /* outer ring of the marker */
+
+  /* ---- Shape ---- */
+  --cr-radius: 12px;                /* cards */
+  --cr-radius-small: 6px;           /* buttons, inputs, swatches */
+  --cr-radius-round: 50%;           /* avatars, the color marker, dots */
+  --cr-border-width: 1px;           /* every outline */
+  --cr-focus-width: 2px;            /* keyboard focus outline thickness */
+  --cr-focus-offset: 2px;           /* gap between a control and its focus outline */
+  --cr-ring-width: 2px;             /* ring around the picked swatch */
+
+  /* ---- Type ---- */
+  --cr-font: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;/* page font (system fonts only, nothing downloaded) */
+  --cr-font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;/* hex codes and commands */
+  --cr-font-size: 1rem;             /* body text */
+  --cr-font-size-small: 0.875rem;   /* hints, labels, timestamps */
+  --cr-font-size-title: 1.5rem;     /* page title */
+  --cr-font-size-heading: 1.0625rem;/* card headings */
+  --cr-line-height: 1.45;           /* line spacing for all text */
+  --cr-weight-bold: 600;            /* headings, labels, names and buttons */
+
+  /* ---- Spacing ---- */
+  --cr-space-1: 4px;                /* tightest gap (inside chips) */
+  --cr-space-2: 8px;                /* small gap (between related controls) */
+  --cr-space-3: 12px;               /* medium gap (inside cards) */
+  --cr-space-4: 16px;               /* standard gap (card padding, between fields) */
+  --cr-space-6: 24px;               /* large gap (page top padding) */
+  --cr-space-8: 32px;               /* largest gap (page bottom padding) */
+
+  /* ---- Sizes ---- */
+  --cr-width: 600px;                /* page column */
+  --cr-avatar-size: 40px;           /* preview avatars */
+  --cr-icon-size: 20px;             /* role icon next to the name */
+  --cr-dot-size: 12px;              /* color dot in the role chip */
+  --cr-control-height: 40px;        /* buttons, inputs, color buttons */
+  --cr-hex-width: 7.5rem;           /* hex text boxes */
+  --cr-swatch-size: 32px;           /* palette swatches */
+  --cr-square-size: 200px;          /* the saturation/brightness square */
+  --cr-hue-width: 20px;             /* the hue slider */
+  --cr-marker-size: 14px;           /* marker on the square */
+  --cr-gradient-bar-height: 24px;   /* gradient preview bar */
+  --cr-stage-size: 240px;           /* the square crop area */
+  --cr-crop-preview-size: 64px;     /* the cropped icon preview next to it */
+  --cr-dropzone-height: 120px;      /* drop zone height */
+  --cr-emoji-input-width: 6rem;     /* emoji text box */
+  --cr-dash-width: 2px;             /* drop zone dashed outline thickness */
+  --cr-hidden-size: 1px;            /* screen-reader-only helpers and hidden radios (keep at 1px) */
+}

@@ -196,6 +196,42 @@ DASHBOARD_COOKIE_SECURE = os.getenv("DASHBOARD_COOKIE_SECURE", "false").strip().
 DASHBOARD_SESSION_TTL = _int_env("DASHBOARD_SESSION_TTL", 28800)
 
 # ==============================================================================
+# CUSTOM ROLES (custom booster roles)
+# ==============================================================================
+# Minutes between automatic reconcile runs (also runs once at startup).
+CUSTOM_ROLES_RECONCILE_MINUTES = max(1, _int_env("CUSTOM_ROLES_RECONCILE_MINUTES", 30))
+# Removing more than this many custom roles at once needs an admin to confirm.
+CUSTOM_ROLES_MASS_ARCHIVE_THRESHOLD = max(0, _int_env("CUSTOM_ROLES_MASS_ARCHIVE_THRESHOLD", 10))
+# TEST ONLY: pretend the member list can't be loaded so reconcile skips archiving.
+# Honoured only when ENVIRONMENT is "development" (which is also the default!).
+CUSTOM_ROLES_DEBUG_FAIL_MEMBER_FETCH = os.getenv("CUSTOM_ROLES_DEBUG_FAIL_MEMBER_FETCH", "false").strip().lower() in {
+    "1", "true", "yes", "on",
+}
+# TEST ONLY: unlock Gradient/Holographic in the color picker page for previewing on a server
+# without Enhanced Role Colors. Saving them is still refused. Honoured only in development.
+CUSTOM_ROLES_DEBUG_PREVIEW_ENHANCED_COLORS = os.getenv("CUSTOM_ROLES_DEBUG_PREVIEW_ENHANCED_COLORS", "false").strip().lower() in {
+    "1", "true", "yes", "on",
+}
+# TEST ONLY: unlock the Role Icon tab of the color picker on a server without Role Icons
+# (Boost Level 2). Setting an icon is still refused. Honoured only in development.
+CUSTOM_ROLES_DEBUG_PREVIEW_ROLE_ICONS = os.getenv("CUSTOM_ROLES_DEBUG_PREVIEW_ROLE_ICONS", "false").strip().lower() in {
+    "1", "true", "yes", "on",
+}
+# Largest original image accepted for a role icon (upload or link). The original is kept as-is
+# so the icon can be re-cropped later; the icon sent to Discord is always under 256 KB.
+CUSTOM_ROLES_ICON_SOURCE_MAX_BYTES = max(256 * 1024, _int_env("CUSTOM_ROLES_ICON_SOURCE_MAX_BYTES", 8 * 1024 * 1024))
+# Web color picker: serve it even when the dashboard isn't configured.
+CUSTOM_ROLES_PICKER_ENABLED = os.getenv("CUSTOM_ROLES_PICKER_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+# Base address used in picker links (no trailing slash). Production must use https://.
+CUSTOM_ROLES_PUBLIC_URL = (os.getenv("CUSTOM_ROLES_PUBLIC_URL") or "http://localhost:8080").strip().rstrip("/")
+# A picker link closes after this many seconds without use (each use resets it)...
+CUSTOM_ROLES_PICKER_IDLE_TTL = max(60, _int_env("CUSTOM_ROLES_PICKER_IDLE_TTL", 3600))
+# ...and after this many seconds at the latest, however much it's used.
+CUSTOM_ROLES_PICKER_MAX_TTL = max(CUSTOM_ROLES_PICKER_IDLE_TTL, _int_env("CUSTOM_ROLES_PICKER_MAX_TTL", 10800))
+# true only behind a proxy that appends the client address to X-Forwarded-For (Railway).
+CUSTOM_ROLES_TRUST_PROXY = os.getenv("CUSTOM_ROLES_TRUST_PROXY", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+# ==============================================================================
 # DATABASE CONFIGURATION
 # ==============================================================================
 

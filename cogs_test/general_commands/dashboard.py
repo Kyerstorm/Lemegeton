@@ -608,11 +608,9 @@ class DashboardCog(commands.Cog):
         try:
             await self.db.open()
             COMMAND_REGISTRY._commands.clear()
-            for command in list(self.bot.tree.get_commands()):
+            # walk_commands recurses into nested groups (e.g. /group subgroup command).
+            for command in list(self.bot.tree.walk_commands()):
                 self._register_if_annotated(command)
-                if isinstance(command, app_commands.Group):
-                    for subcommand in command.commands:
-                        self._register_if_annotated(subcommand)
             logger.info(
                 "Dashboard registry initialized: %s commands across %s categories",
                 len(COMMAND_REGISTRY.all_commands()),
