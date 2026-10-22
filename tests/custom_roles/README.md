@@ -29,7 +29,7 @@ summary.
   `ENVIRONMENT` isn't development.
 - **No Discord.** The bot token is never loaded, and any Discord API call raises an error.
   Everything Discord-side is faked.
-- **Fake servers only.** Tests only create and delete rows for the guild IDs 2–11. Real Discord
+- **Fake servers only.** Tests only create and delete rows for the guild IDs 2–12. Real Discord
   server IDs are 17–20 digit numbers, so real data can't be touched. (`seed_test_server.py` isn't
   a test and has its own limits; see below.)
 - **Separate logs.** Logs go to a temporary folder, not the bot's `logs/`.
@@ -48,6 +48,7 @@ summary.
 | `test_picker_icon.py` | Role icon originals (up to 8 MB, stored byte for byte) and crops, the 256/128/64 output, the SSRF-safe link fetcher (URL rules, a 29-address allow-list, mixed DNS answers, pinning, redirects, size and time limits against a local test site), the icon APIs (upload, link, emoji, Edit current crop, remove), rate and concurrency limits, the test switch, the image CSP, the pixel limits (8192 px a side, 16 MP) with messages naming the limit hit, HEIC detection, and the page's checks matching the server's word for word (run through node when it's installed) |
 | `test_legacy_import.py` | Old `/nitro-role-set` roles: no automatic copy at startup, the **Import old roles** preview (take over / don't qualify / skipped with reasons) and buttons, take-over keeping name, colors and position without creating or deleting roles, the archive option, the settings Problems line, self-adoption on first use of `/custom-role` (never a second role), and no automatic archiving while Custom Roles is off |
 | `test_panels.py` | The `/custom-role` and `/custom-role-admin` panels: the two commands and their permissions, every button and form (create, rename, color with and without 3 boosts, icon upload/emoji/remove, put on/take off, move, look up, picker; anchor, turn on/off, channels, cooldown, allowed roles with the mass-removal Confirm, blocked words, members filter, remove by member or ID, pending, import), expiry ("This panel expired, run /custom-role again"), who can press, persistent button IDs, and every form within Discord's limits (at most 5 items, label and title lengths) |
+| `test_setup_fixes.py` | Setup in a new server: the admin panel's setup checklist, **Turn on** refusing without Manage Roles, without an anchor or with the bot's role below the anchor, the ❌ reply for refused admin actions, "Try again" when the database read before a form (or the channel check) is too slow, and panel errors logged to the console and the file |
 | `fakes.py` | Fake guilds, roles, members and channels |
 | `make_test_images.py` | Not a test. Generates `test_images/` for testing the **Icon** form by hand in Discord |
 | `seed_test_server.py` | Not a test. Adds or removes fake saved records in the test server, for testing the **Members** list pages |
