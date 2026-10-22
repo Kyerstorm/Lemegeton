@@ -684,7 +684,7 @@ async def member_panel(member: discord.Member, opened_at: int, result: Optional[
         ("palette", "Palette", style.secondary, 0),
         ("unwear", "Take off", style.secondary, 1) if wearing else ("wear", "Put on", style.success, 1),
         ("move", "Move", style.secondary, 1),
-        ("picker", "Color picker", style.secondary, 1),
+        *([("picker", "Color picker", style.secondary, 1)] if config.CUSTOM_ROLES_PICKER_ENABLED else []),
         ("lookup", "Look up a member", style.secondary, 1),
     ])
     return _with_result(embed, result), view
@@ -734,7 +734,7 @@ async def icon_from_attachment(member: discord.Member, image: discord.Attachment
         logger.warning("Icon upload from %s: downloaded %s bytes but Discord reported %s - the file was changed",
                        member.id, len(data), image.size)
     result = await service.set_icon(member, image=data)
-    if result.ok:
+    if result.ok and config.CUSTOM_ROLES_PICKER_ENABLED:
         result.message += " Tip: crop it precisely with **Color picker**."
     return result
 
@@ -1338,9 +1338,11 @@ class CustomRoles(commands.Cog):
                 discord.ui.TextInput(required=False, max_length=10, placeholder="#60A5FA", default=secondary),
                 description="Only used when the style is Gradient",
             )
-            modal.add_item(discord.ui.TextDisplay(COLOR_FORM_TIP))
+            if config.CUSTOM_ROLES_PICKER_ENABLED:
+                modal.add_item(discord.ui.TextDisplay(COLOR_FORM_TIP))
         else:
-            modal.add_item(discord.ui.TextDisplay(f"{service.NO_GRADIENT_MESSAGE}\n\n{COLOR_FORM_TIP}"))
+            tip = f"\n\n{COLOR_FORM_TIP}" if config.CUSTOM_ROLES_PICKER_ENABLED else ""
+            modal.add_item(discord.ui.TextDisplay(f"{service.NO_GRADIENT_MESSAGE}{tip}"))
         await interaction.response.send_modal(modal)
 
     async def _member_icon(self, interaction: discord.Interaction, button: PanelButton):
@@ -1356,7 +1358,8 @@ class CustomRoles(commands.Cog):
                                   description="A standard emoji from the emoji picker")
         modal.remove = modal.field("Remove my icon", discord.ui.Checkbox(),
                                    description="Tick this to take your current icon off")
-        modal.add_item(discord.ui.TextDisplay(ICON_FORM_TIP))
+        if config.CUSTOM_ROLES_PICKER_ENABLED:
+            modal.add_item(discord.ui.TextDisplay(ICON_FORM_TIP))
         await interaction.response.send_modal(modal)
 
     async def _member_palette(self, interaction: discord.Interaction, button: PanelButton):
