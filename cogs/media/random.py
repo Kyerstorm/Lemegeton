@@ -14,6 +14,7 @@ from helpers.embed_helper import build_error_embed
 from helpers.anilist_helper import post_graphql
 from database import get_all_users_guild_aware
 from cogs_test.general_commands.dashboard import command_meta
+from cogs.media.browse import scrape_novelupdates
 
 # ------------------------------------------------------
 # Logging Setup - Clears on each bot run
@@ -74,17 +75,22 @@ logger.info("Random cog logging initialized - log file cleared")
 # ------------------------------------------------------
 # Constants
 # ------------------------------------------------------
-MEDIA_TYPES = ["ANIME", "MANGA", "LN"]
+MEDIA_TYPES = ["ANIME", "MANGA", "LN", "GENERAL_NOVEL", "BOOKS", "MOVIE", "TV", "WEBNOVEL"]
 MEDIA_TYPE_CHOICES = [
     app_commands.Choice(name="Anime 🎬", value="ANIME"),
     app_commands.Choice(name="Manga 📖", value="MANGA"),
     app_commands.Choice(name="Light Novel 📚", value="LN"),
+    app_commands.Choice(name="General Novels 📕", value="GENERAL_NOVEL"),
+    app_commands.Choice(name="Books 📚", value="BOOKS"),
+    app_commands.Choice(name="Movies 🎞️", value="MOVIE"),
+    app_commands.Choice(name="TV Shows 📺", value="TV"),
+    app_commands.Choice(name="Webnovels 🌐", value="WEBNOVEL"),
     app_commands.Choice(name="All 🎲", value="ALL"),
 ]
 
 
 class Random(commands.Cog):
-    """Cog for generating random anime, manga, and light novel suggestions."""
+    """Generate random suggestions across AniList, books, webnovels, movies, and TV."""
     
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -302,8 +308,123 @@ class Random(commands.Cog):
         progress_embed.set_footer(text="🎲 Random suggestion from AniList")
         return progress_embed
 
+    async def _process_external_random_request(self, interaction: discord.Interaction, media_type: str) -> None:
+        """Reuse BrowseCog providers for random novel, book, movie, TV, and webnovel picks."""
+        browse = self.bot.get_cog("BrowseCog")
+        if browse is None:
+            await interaction.followup.send(embed=build_error_embed(
+                "Browse Unavailable", "The Browse integration is not loaded."
+            ), ephemeral=True)
+            return
+
+        query = random.choice([
+            "fantasy", "adventure", "mystery", "drama", "science fiction",
+            "romance", "historical", "thriller", "comedy", "popular"
+        ])
+        try:
+            if media_type == "WEBNOVEL":
+                import asyncio
+                results = await asyncio.to_thread(scrape_novelupdates, {"query": query}, output=None)
+                if not results:
+                    raise LookupError("No Novel Updates results were found.")
+                item = random.choice(results)
+                embed = discord.Embed(
+                    title=f"🌐 {item.get('title') or 'Unknown webnovel'}"[:256],
+                    url=item.get("url"),
+                    description=(item.get("description") or "No description available.")[:900],
+                    color=PALETTE.PRIMARY,
+                )
+                if item.get("image"):
+                    embed.set_thumbnail(url=item["image"])
+                if item.get("rating"):
+                    embed.add_field(name="⭐ Rating", value=str(item["rating"])[:1024])
+                if item.get("genres"):
+                    embed.add_field(name="🎭 Genres", value=", ".join(item["genres"])[:1024], inline=False)
+                embed.set_footer(text="Random pick • Novel Updates")
+            elif media_type in ("GENERAL_NOVEL", "BOOKS"):
+                book_type = "fiction" if media_type == "GENERAL_NOVEL" else "nonfiction"
+                results = await browse.fetch_book_results(query, book_type)
+                if not results:
+                    raise LookupError("No matching Google Books or Goodreads results were found.")
+                book = random.choice(results).get("volumeInfo", {})
+                embed = discord.Embed(
+                    title=f"{'📖' if book_type == 'fiction' else '📚'} {book.get('title') or 'Unknown title'}"[:256],
+                    url=book.get("infoLink") or book.get("previewLink"),
+                    description=(book.get("description") or "No description available.")[:900],
+                    color=PALETTE.PRIMARY,
+                )
+                image = book.get("imageLinks") or {}
+                thumbnail = image.get("thumbnail") or image.get("smallThumbnail")
+                if thumbnail:
+                    embed.set_thumbnail(url=thumbnail.replace("http://", "https://", 1))
+                if book.get("authors"):
+                    embed.add_field(name="✍️ Author(s)", value=", ".join(book["authors"])[:1024])
+                if book.get("publishedDate"):
+                    embed.add_field(name="📅 Published", value=str(book["publishedDate"])[:1024])
+                if book.get("publisher"):
+                    embed.add_field(name="🏢 Publisher", value=str(book["publisher"])[:1024])
+                if book.get("pageCount"):
+                    embed.add_field(name="📄 Pages", value=str(book["pageCount"])[:1024])
+                if book.get("averageRating") is not None:
+                    embed.add_field(name="⭐ Rating", value=f"{book['averageRating']}/5")
+                if book.get("categories"):
+                    embed.add_field(name="🏷️ Categories", value=", ".join(book["categories"])[:1024], inline=False)
+                embed.set_footer(text=f"Random pick • {book.get('source') or 'Google Books'}")
+            else:
+                import os
+                if not os.getenv("TMDB_BEARER_TOKEN", "").strip():
+                    await interaction.followup.send(embed=build_error_embed(
+                        "TMDB Setup Required",
+                        "Movies and TV random picks require TMDB_BEARER_TOKEN."
+                    ), ephemeral=True)
+                    return
+                media = await browse.fetch_tmdb_media(query, media_type)
+                if not media:
+                    raise LookupError("No TMDB results were found.")
+                ratings = await browse.fetch_mdblist_ratings(media.get("id"), media_type)
+                is_movie = media_type == "MOVIE"
+                title = media.get("title") if is_movie else media.get("name")
+                year_date = media.get("release_date") if is_movie else media.get("first_air_date")
+                year = year_date[:4] if year_date else "Year unknown"
+                embed = discord.Embed(
+                    title=f"{'🎞️' if is_movie else '📺'} {title or 'Unknown title'} ({year})"[:256],
+                    url=f"https://www.themoviedb.org/{'movie' if is_movie else 'tv'}/{media['id']}",
+                    description=(media.get("overview") or "No overview available.")[:900],
+                    color=PALETTE.PRIMARY,
+                )
+                if media.get("poster_path"):
+                    embed.set_thumbnail(url=f"https://image.tmdb.org/t/p/w500{media['poster_path']}")
+                if media.get("vote_average") is not None:
+                    embed.add_field(name="⭐ TMDB Rating", value=f"{media['vote_average']:.1f}/10 · {media.get('vote_count', 0):,} votes")
+                for source, label, scale in (
+                    ("metacritic", "🎞️ Metacritic Metascore", 100),
+                    ("metacriticuser", "👥 Metacritic User Score", 10),
+                ):
+                    record = ratings.get(source)
+                    if record:
+                        value = f"{record['value']:g}/{scale}"
+                        if record.get("url"):
+                            value += f" · [Metacritic]({record['url']})"
+                        embed.add_field(name=label, value=value[:1024])
+                genres = ", ".join(g.get("name", "") for g in media.get("genres", []) if g.get("name"))
+                if genres:
+                    embed.add_field(name="🎭 Genres", value=genres[:1024], inline=False)
+                embed.set_footer(text="Random pick • TMDB" + (" • Metacritic via MDBList" if ratings else ""))
+            await interaction.followup.send(embed=embed)
+        except LookupError as exc:
+            await interaction.followup.send(embed=build_error_embed("No Random Results", str(exc)), ephemeral=True)
+        except Exception:
+            logger.exception("Random %s lookup failed", media_type)
+            await interaction.followup.send(embed=build_error_embed(
+                "Lookup Failed", "Could not fetch a random suggestion right now. Please try again later."
+            ), ephemeral=True)
+
     async def _process_random_request(self, interaction: discord.Interaction, media_type: str) -> None:
-        """Process a random media request with enhanced visual functionality."""
+        """Process random suggestions from AniList or the existing Browse providers."""
+        if media_type in ("GENERAL_NOVEL", "BOOKS", "MOVIE", "TV", "WEBNOVEL"):
+            await interaction.response.defer()
+            await self._process_external_random_request(interaction, media_type)
+            return
         try:
             # Determine actual media type to fetch
             if media_type.upper() == "ALL":
@@ -438,7 +559,7 @@ class Random(commands.Cog):
 
     @app_commands.command(
         name="random",
-        description="🎲 Get a completely random Anime, Manga, Light Novel, or All suggestion from AniList"
+        description="🎲 Get a random Anime, Manga, Light Novel, Novel, Book, Movie, TV Show, Webnovel, or All suggestion"
     )
     @command_meta(section="Media", name="Random")
     @app_commands.describe(media_type="Choose the type of media to get a random suggestion for")
