@@ -3,6 +3,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from discord.ui import View, Button
+import asyncio
 import os
 import logging
 import aiohttp
