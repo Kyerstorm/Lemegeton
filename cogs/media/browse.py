@@ -257,7 +257,8 @@ class BrowseCog(commands.Cog):
     async def fetch_mdblist_ratings(self, tmdb_id: int, media_type: str) -> Dict[str, Dict]:
         """Fetch Metacritic critic and user scores from MDBList using a TMDB ID.
 
-        Metacritic does not provide a public developer API for unrestricted scraping.
+        Metacritic does not offer an unrestricted public developer endpoint, so this
+        uses MDBList's documented API instead of querying Metacritic pages directly.
         MDBList supplies rating-source records through its documented API:
         "metacritic" is critic Metascore (0-100); "metacriticuser" is User Score (0-10).
 
