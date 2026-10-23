@@ -7,7 +7,6 @@ import asyncio
 import logging
 import os
 from typing import List, Dict, Optional, Tuple
-from bs4 import BeautifulSoup
 from urllib.parse import quote_plus, urljoin
 from botasaurus.browser import browser as botasaurus_browser, Driver, Wait
 from discord.ui import View, Button
@@ -21,6 +20,7 @@ GOOGLE_BOOKS_URL = "https://www.googleapis.com/books/v1/volumes"
 GOODREADS_AUTOCOMPLETE_URL = "https://www.goodreads.com/book/auto_complete"
 TMDB_API_BASE_URL = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p"
+MDBLIST_API_BASE_URL = "https://api.mdblist.com"
 
 
 @botasaurus_browser(
@@ -32,7 +32,12 @@ TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p"
     close_on_crash=True,
 )
 def scrape_novelupdates(driver: Driver, data: Dict) -> List[Dict]:
-    """Search Novel Updates in a browser and return matching series."""
+    """Search Novel Updates for public series metadata and normalize up to ten results.
+
+    Botasaurus runs synchronously, so async autocomplete/command callers use
+    asyncio.to_thread. This site-specific scraper does not try to bypass a site's
+    login, CAPTCHA, or other access controls.
+    """
     query = data["query"]
     url = (
         "https://www.novelupdates.com/series-finder/"
@@ -248,6 +253,86 @@ class BrowseCog(commands.Cog):
             logger.warning("TMDB %s details failed for %r: %s", endpoint, query, exc)
             return None
 
+
+    async def fetch_mdblist_ratings(self, tmdb_id: int, media_type: str) -> Dict[str, Dict]:
+        """Fetch Metacritic critic and user scores from MDBList using a TMDB ID.
+
+        Metacritic does not provide a public developer API for unrestricted scraping.
+        MDBList supplies rating-source records through its documented API:
+        "metacritic" is critic Metascore (0-100); "metacriticuser" is User Score (0-10).
+
+        MDBList is optional. If MDBLIST_API_KEY is unset, the caller keeps the TMDB-only
+        rating display. Missing scores are omitted, never estimated.
+        """
+        api_key = os.getenv("MDBLIST_API_KEY", "").strip()
+        if not api_key or not tmdb_id:
+            return {}
+
+        # MDBList calls movies "movie" and TV series "show" in its TMDB-ID endpoints.
+        endpoint_type = "movie" if media_type == "MOVIE" else "show"
+        url = f"{MDBLIST_API_BASE_URL}/tmdb/{endpoint_type}/{tmdb_id}"
+        params = {"apikey": api_key}
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url, params=params) as response:
+                    if response.status != 200:
+                        logger.warning(
+                            "MDBList %s ratings returned HTTP %s for TMDB ID %s",
+                            endpoint_type, response.status, tmdb_id,
+                        )
+                        return {}
+                    payload = await response.json(content_type=None)
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
+            logger.warning("MDBList ratings lookup failed for TMDB ID %s: %s", tmdb_id, exc)
+            return {}
+
+        # Current MDBList responses provide ratings as an array; accept a nested response
+        # too so a response wrapper does not break optional score enrichment.
+        ratings = payload.get("ratings") if isinstance(payload, dict) else None
+        if not isinstance(ratings, list) and isinstance(payload, dict):
+            nested = payload.get("data")
+            ratings = nested.get("ratings") if isinstance(nested, dict) else []
+        if not isinstance(ratings, list):
+            return {}
+
+        wanted = {"metacritic": 100.0, "metacriticuser": 10.0}
+        normalized: Dict[str, Dict] = {}
+        for rating in ratings:
+            if not isinstance(rating, dict):
+                continue
+            source = str(rating.get("source") or "").strip().lower()
+            if source not in wanted:
+                continue
+
+            # "value" uses the rating source's own scale; "score" is only a fallback.
+            raw_value = rating.get("value")
+            if raw_value in (None, "", "N/A"):
+                raw_value = rating.get("score")
+            try:
+                value = float(str(raw_value).strip().split("/", 1)[0])
+            except (TypeError, ValueError):
+                continue
+            if not 0 <= value <= wanted[source]:
+                logger.debug("Ignoring out-of-range %s score %r", source, raw_value)
+                continue
+
+            item = {"value": value}
+            try:
+                votes = int(rating.get("votes"))
+                if votes >= 0:
+                    item["votes"] = votes
+            except (TypeError, ValueError):
+                pass
+
+            rating_url = rating.get("url")
+            # Some providers return non-URL IDs here; only expose a real Metacritic URL.
+            if isinstance(rating_url, str) and rating_url.startswith("https://www.metacritic.com/"):
+                item["url"] = rating_url
+            normalized[source] = item
+
+        return normalized
 
     # --------------------------------------------------
     # Fetch Media Info (Anime, Manga, LN)
@@ -497,6 +582,10 @@ class BrowseCog(commands.Cog):
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
 
+            # Enrich TMDB metadata with optional Metacritic scores from MDBList.
+            # This request is skipped when MDBLIST_API_KEY is not configured.
+            rating_data = await self.fetch_mdblist_ratings(media.get("id"), chosen_type)
+
             is_movie = chosen_type == "MOVIE"
             name = media.get("title") if is_movie else media.get("name")
             year_source = media.get("release_date") if is_movie else media.get("first_air_date")
@@ -523,6 +612,22 @@ class BrowseCog(commands.Cog):
             add_tmdb_field("🎭 Genres", genres)
             if media.get("vote_average") is not None:
                 add_tmdb_field("⭐ TMDB Rating", f"{media['vote_average']:.1f}/10 · {media.get('vote_count', 0):,} votes")
+
+            # Keep critic and audience scores distinct: Metascore is /100, User Score is /10.
+            for source, label, scale in (
+                ("metacritic", "🎞️ Metacritic Metascore", 100),
+                ("metacriticuser", "👥 Metacritic User Score", 10),
+            ):
+                score_record = rating_data.get(source)
+                if not score_record:
+                    continue
+                score_value = f"{score_record['value']:g}/{scale}"
+                if isinstance(score_record.get("votes"), int):
+                    score_value += f" · {score_record['votes']:,} votes"
+                if score_record.get("url"):
+                    score_value += f" · [Metacritic]({score_record['url']})"
+                add_tmdb_field(label, score_value)
+
             add_tmdb_field("📌 Status", media.get("status"))
             add_tmdb_field("🌐 Original Language", media.get("original_language"))
 
@@ -591,7 +696,10 @@ class BrowseCog(commands.Cog):
             recommendations = (media.get("recommendations") or {}).get("results") or []
             similar = [item.get("title") or item.get("name") for item in recommendations[:5] if item.get("title") or item.get("name")]
             add_tmdb_field("✨ Similar", ", ".join(similar), inline=False)
-            embed.set_footer(text="Metadata from TMDB • Movie" if is_movie else "Metadata from TMDB • TV series")
+            source_footer = "Metadata from TMDB"
+            if rating_data:
+                source_footer += " • Metacritic ratings via MDBList"
+            embed.set_footer(text=f"{source_footer} • {'Movie' if is_movie else 'TV series'}")
             await interaction.followup.send(embed=embed)
             return
 
