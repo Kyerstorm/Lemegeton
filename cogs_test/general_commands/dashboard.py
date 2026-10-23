@@ -126,6 +126,12 @@ class ConfigDB:
                 )
                 """,
             )
+            # Tables created before updated_at existed don't get it from CREATE TABLE IF NOT EXISTS.
+            await database.execute_db_operation(
+                "add dashboard guild configs updated_at",
+                "ALTER TABLE dashboard_guild_configs "
+                "ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            )
             await database.execute_db_operation(
                 "create dashboard audit log",
                 """

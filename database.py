@@ -4751,10 +4751,14 @@ async def clear_guild_records(guild_id: int):
         if not isinstance(guild_id, int) or guild_id <= 0:
             raise ValueError(f"Invalid guild_id: {guild_id}")
 
+        # These store guild_id as TEXT (their helpers take str), the rest as BIGINT;
+        # asyncpg won't convert an int parameter for a TEXT column.
+        text_guild_id_tables = {"bot_config", "paginator_state"}
+
         # Use direct connection for atomic operations
         async with postgres_connect() as db:
             db.row_factory = None
-            await db.execute("BEGIN TRANSACTION")
+            await db.execute("BEGIN")
 
             try:
                 deleted_counts = {}
@@ -4801,18 +4805,25 @@ async def clear_guild_records(guild_id: int):
                 ]
 
                 for table_name, column_name in guild_tables:
+                    param = str(guild_id) if table_name in text_guild_id_tables else guild_id
+                    # A failed statement aborts the whole transaction, so each table gets a
+                    # savepoint to roll back to and the other tables still get cleared.
+                    await db.execute("SAVEPOINT guild_table")
                     try:
-                        result = await db.execute(f"DELETE FROM {table_name} WHERE {column_name} = ?", (guild_id,))
+                        result = await db.execute(f"DELETE FROM {table_name} WHERE {column_name} = ?", (param,))
+                        await db.execute("RELEASE SAVEPOINT guild_table")
                         count = result.rowcount
                         if count > 0:
                             deleted_counts[table_name] = count
                             logger.debug(f"Deleted {count} records from {table_name} for guild {guild_id}")
                     except Exception as table_error:
+                        await db.execute("ROLLBACK TO SAVEPOINT guild_table")
                         logger.warning(f"Error deleting from {table_name}: {table_error}")
                         # Continue with other tables
 
-                # Commit the transaction
-                await db.commit()
+                # db.commit() is a no-op (it assumes autocommit), so end the explicit
+                # transaction here; otherwise the pool rolls it back on release.
+                await db.execute("COMMIT")
 
                 total_deleted = sum(deleted_counts.values())
                 logger.info(f"✅ Guild cleanup completed for guild {guild_id}: {total_deleted} total records deleted")
