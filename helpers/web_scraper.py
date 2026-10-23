@@ -532,7 +532,7 @@ async def crawl_public_site(
                 if not _domain_is_allowed(host, domains) or target in self._scheduled_urls:
                     continue
                 self._scheduled_urls.add(target)
-                yield Request(target)
+                yield Request(target, sid=self._session_manager.default_session_id)
 
     spider = _PublicSiteSpider()
     spider.start_urls = seeds
