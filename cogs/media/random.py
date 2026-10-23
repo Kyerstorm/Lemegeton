@@ -3,7 +3,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from discord.ui import View, Button
-import random
+import os
 import logging
 import aiohttp
 from pathlib import Path
@@ -15,6 +15,7 @@ from helpers.anilist_helper import post_graphql
 from database import get_all_users_guild_aware
 from cogs_test.general_commands.dashboard import command_meta
 from cogs.media.browse import scrape_novelupdates
+from helpers.crypto_random import secure_choice, secure_randbelow
 
 # ------------------------------------------------------
 # Logging Setup - Clears on each bot run
@@ -98,11 +99,11 @@ class Random(commands.Cog):
 
     def _get_random_media_type(self) -> str:
         """Select a random media type from available options."""
-        return random.choice(MEDIA_TYPES)
+        return secure_choice(MEDIA_TYPES)
     
     def _apply_random_color(self, embed: discord.Embed) -> discord.Embed:
         """Apply a random color to the embed."""
-        embed.color = discord.Color(random.randint(0, 0xFFFFFF))
+        embed.color = discord.Color(secure_randbelow(0x1000000))
         return embed
 
     async def fetch_detailed_media(self, media_id: int, media_type: str) -> Optional[Dict]:
@@ -226,7 +227,7 @@ class Random(commands.Cog):
             title=f"{'🎬' if media_type=='ANIME' else '📖'} {title_name}",
             url=media_data.get("siteUrl"),
             description=description,
-            color=discord.Color(random.randint(0, 0xFFFFFF))
+            color=discord.Color(secure_randbelow(0x1000000))
         )
 
         # Set thumbnail and banner
@@ -308,6 +309,78 @@ class Random(commands.Cog):
         progress_embed.set_footer(text="🎲 Random suggestion from AniList")
         return progress_embed
 
+    async def _fetch_random_tmdb_media(self, media_type: str) -> Optional[Dict]:
+        """Select a random movie/show from TMDB discovery pages, then fetch full metadata.
+
+        Discovery pages are popularity-sorted, but the page and title are selected
+        cryptographically rather than always taking the first search match.
+        """
+        token = os.getenv("TMDB_BEARER_TOKEN", "").strip()
+        if not token:
+            return None
+
+        endpoint = "movie" if media_type == "MOVIE" else "tv"
+        base_url = "https://api.themoviedb.org/3"
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        params = {
+            "include_adult": "false",
+            "language": "en-US",
+            "page": 1,
+            "sort_by": "popularity.desc",
+        }
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=12)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(
+                    f"{base_url}/discover/{endpoint}", params=params, headers=headers
+                ) as response:
+                    if response.status != 200:
+                        logger.warning("TMDB %s discovery returned HTTP %s", endpoint, response.status)
+                        return None
+                    page_data = await response.json()
+
+                # TMDB exposes at most 500 discover pages; choose a page and then a title.
+                total_pages = min(500, max(1, int(page_data.get("total_pages") or 1)))
+                page = secure_randbelow(total_pages) + 1
+                if page > 1:
+                    params["page"] = page
+                    async with session.get(
+                        f"{base_url}/discover/{endpoint}", params=params, headers=headers
+                    ) as response:
+                        if response.status != 200:
+                            logger.warning("TMDB %s random page returned HTTP %s", endpoint, response.status)
+                            return None
+                        page_data = await response.json()
+
+                candidates = page_data.get("results") or []
+                if not candidates:
+                    return None
+                selected = secure_choice(candidates)
+                media_id = selected.get("id")
+                if not media_id:
+                    return None
+
+                append_fields = (
+                    "credits,videos,keywords,release_dates,external_ids,images,recommendations"
+                    if media_type == "MOVIE"
+                    else "aggregate_credits,videos,keywords,content_ratings,external_ids,images,recommendations"
+                )
+                async with session.get(
+                    f"{base_url}/{endpoint}/{media_id}",
+                    params={"append_to_response": append_fields, "language": "en-US"},
+                    headers=headers,
+                ) as response:
+                    if response.status != 200:
+                        logger.warning("TMDB %s detail lookup returned HTTP %s", endpoint, response.status)
+                        return None
+                    details = await response.json()
+                    details["_media_type"] = media_type
+                    return details
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError) as exc:
+            logger.warning("TMDB random %s lookup failed: %s", endpoint, exc)
+            return None
+
     async def _process_external_random_request(self, interaction: discord.Interaction, media_type: str) -> None:
         """Reuse BrowseCog providers for random novel, book, movie, TV, and webnovel picks."""
         browse = self.bot.get_cog("BrowseCog")
@@ -317,7 +390,7 @@ class Random(commands.Cog):
             ), ephemeral=True)
             return
 
-        query = random.choice([
+        query = secure_choice([
             "fantasy", "adventure", "mystery", "drama", "science fiction",
             "romance", "historical", "thriller", "comedy", "popular"
         ])
@@ -327,7 +400,7 @@ class Random(commands.Cog):
                 results = await asyncio.to_thread(scrape_novelupdates, {"query": query}, output=None)
                 if not results:
                     raise LookupError("No Novel Updates results were found.")
-                item = random.choice(results)
+                item = secure_choice(results)
                 embed = discord.Embed(
                     title=f"🌐 {item.get('title') or 'Unknown webnovel'}"[:256],
                     url=item.get("url"),
@@ -346,7 +419,7 @@ class Random(commands.Cog):
                 results = await browse.fetch_book_results(query, book_type)
                 if not results:
                     raise LookupError("No matching Google Books or Goodreads results were found.")
-                book = random.choice(results).get("volumeInfo", {})
+                book = secure_choice(results).get("volumeInfo", {})
                 embed = discord.Embed(
                     title=f"{'📖' if book_type == 'fiction' else '📚'} {book.get('title') or 'Unknown title'}"[:256],
                     url=book.get("infoLink") or book.get("previewLink"),
@@ -378,7 +451,7 @@ class Random(commands.Cog):
                         "Movies and TV random picks require TMDB_BEARER_TOKEN."
                     ), ephemeral=True)
                     return
-                media = await browse.fetch_tmdb_media(query, media_type)
+                media = await self._fetch_random_tmdb_media(media_type)
                 if not media:
                     raise LookupError("No TMDB results were found.")
                 ratings = await browse.fetch_mdblist_ratings(media.get("id"), media_type)
@@ -421,18 +494,20 @@ class Random(commands.Cog):
 
     async def _process_random_request(self, interaction: discord.Interaction, media_type: str) -> None:
         """Process random suggestions from AniList or the existing Browse providers."""
-        if media_type in ("GENERAL_NOVEL", "BOOKS", "MOVIE", "TV", "WEBNOVEL"):
+        if media_type.upper() == "ALL":
+            media_type = self._get_random_media_type()
+            logger.info(
+                "User %s requested all media; cryptographically selected %s",
+                interaction.user.id, media_type,
+            )
+
+        if media_type.upper() in ("GENERAL_NOVEL", "BOOKS", "MOVIE", "TV", "WEBNOVEL"):
             await interaction.response.defer()
-            await self._process_external_random_request(interaction, media_type)
+            await self._process_external_random_request(interaction, media_type.upper())
             return
         try:
-            # Determine actual media type to fetch
-            if media_type.upper() == "ALL":
-                selected_type = self._get_random_media_type()
-                logger.info(f"User {interaction.user.id} requested random media (all types), selected: {selected_type}")
-            else:
-                selected_type = media_type.upper()
-                logger.info(f"User {interaction.user.id} requested random {selected_type}")
+            selected_type = media_type.upper()
+            logger.info("User %s requested random %s", interaction.user.id, selected_type)
 
             # Defer the response since API call might take time
             await interaction.response.defer()

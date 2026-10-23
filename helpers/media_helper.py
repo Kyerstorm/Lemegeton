@@ -1,6 +1,6 @@
 from helpers.color_palette import PALETTE
-import random
 import discord
+from helpers.crypto_random import secure_randbelow
 import aiohttp
 import asyncio
 import re
@@ -599,7 +599,7 @@ async def fetch_random_media(media_type: str = "ANIME") -> Optional[discord.Embe
         
         for attempt in range(MAX_RETRIES):
             attempts = attempt + 1
-            random_id = random.randint(1, 180000)
+            random_id = secure_randbelow(180000) + 1
             logger.debug(f"Attempt {attempts}/{MAX_RETRIES}: Trying random ID {random_id}")
 
             if media_type in ["ANIME", "MANGA"]:
