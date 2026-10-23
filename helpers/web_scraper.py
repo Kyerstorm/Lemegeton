@@ -147,6 +147,8 @@ def _parse_bool(value: Any, default: bool = False) -> bool:
 
 def _parse_selectors(value: Any) -> Dict[str, str]:
     """Accept a selector mapping or JSON mapping from Scrapy command-line arguments."""
+    if value is None or value == "":
+        return {}
     if isinstance(value, str):
         if not value.strip():
             return {}
