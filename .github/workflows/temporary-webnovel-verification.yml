@@ -27,10 +27,10 @@ jobs:
           import ast
           from pathlib import Path
           from typing import Dict, List
-          from urllib.parse import quote_plus
+          from urllib.parse import quote_plus, urljoin
 
-          from botasaurus.request import request as botasaurus_request, Request
-          from botasaurus.soupify import soupify
+          from botasaurus.browser import browser as botasaurus_browser, Driver, Wait
+          
 
           source_path = Path("cogs/media/browse.py")
           source = source_path.read_text(encoding="utf-8")
@@ -43,9 +43,10 @@ jobs:
               "Dict": Dict,
               "List": List,
               "quote_plus": quote_plus,
-              "botasaurus_request": botasaurus_request,
-              "Request": Request,
-              "soupify": soupify,
+              "botasaurus_browser": botasaurus_browser,
+              "Driver": Driver,
+              "Wait": Wait,
+              "urljoin": urljoin,
           }
           exec(compile(ast.Module(body=[helper], type_ignores=[]), str(source_path), "exec"), namespace)
           results = namespace["scrape_novelupdates"]({"query": "Lord of the Mysteries"}, output=None)
