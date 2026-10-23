@@ -1,0 +1,58 @@
+name: Temporary webnovel verification
+
+on:
+  push:
+    branches:
+      - feature/webnovel-browse
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install scraper dependencies
+        run: python -m pip install --upgrade pip botasaurus beautifulsoup4
+      - name: Compile browse.py
+        run: python -m py_compile cogs/media/browse.py
+      - name: Run the actual Novel Updates scraper helper
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          from typing import Dict, List
+          from urllib.parse import quote_plus
+
+          from botasaurus.request import request as botasaurus_request, Request
+          from botasaurus.soupify import soupify
+
+          source_path = Path("cogs/media/browse.py")
+          source = source_path.read_text(encoding="utf-8")
+          parsed = ast.parse(source, filename=str(source_path))
+          helper = next(
+              node for node in parsed.body
+              if isinstance(node, ast.FunctionDef) and node.name == "scrape_novelupdates"
+          )
+          namespace = {
+              "Dict": Dict,
+              "List": List,
+              "quote_plus": quote_plus,
+              "botasaurus_request": botasaurus_request,
+              "Request": Request,
+              "soupify": soupify,
+          }
+          exec(compile(ast.Module(body=[helper], type_ignores=[]), str(source_path), "exec"), namespace)
+          results = namespace["scrape_novelupdates"]({"query": "Lord of the Mysteries"}, output=None)
+          if not results:
+              raise SystemExit("Scraper returned no series for a known Novel Updates title.")
+          first = results[0]
+          if not first.get("title") or not first.get("url", "").startswith("http"):
+              raise SystemExit(f"First result is missing a valid title or URL: {first!r}")
+          print(f"PASS: received {len(results)} results; first title={first['title']!r}; fields={sorted(first)}")
+          PY
