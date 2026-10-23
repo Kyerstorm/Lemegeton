@@ -1557,6 +1557,16 @@ async def main():
             logger.error(f"❌ Database initialization failed: {db_error}", exc_info=True)
             raise
 
+        # Log in before loading cogs: cogs start task loops in cog_load, and a loop's
+        # before_loop calling wait_until_ready() raises "Client has not been properly
+        # initialised" until login() has run. (bot.start() is login() + connect().)
+        logger.info("Logging in to Discord...")
+        try:
+            await bot.login(config.TOKEN)
+        except discord.LoginFailure as login_error:
+            logger.error(f"❌ Bot login failed - Invalid token: {login_error}")
+            raise
+
         # Load cogs with logging
         logger.info("Loading bot cogs...")
         try:
@@ -1589,10 +1599,7 @@ async def main():
         logger.info("="*60)
 
         try:
-            await bot.start(config.TOKEN)
-        except discord.LoginFailure as login_error:
-            logger.error(f"❌ Bot login failed - Invalid token: {login_error}")
-            raise
+            await bot.connect()
         except discord.ConnectionClosed as connection_error:
             logger.error(f"❌ Bot connection closed: {connection_error}")
             raise
