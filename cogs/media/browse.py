@@ -6,6 +6,7 @@ import aiohttp
 import asyncio
 import logging
 from typing import List, Dict, Optional, Tuple
+from bs4 import BeautifulSoup
 from urllib.parse import quote_plus, urljoin
 from botasaurus.browser import browser as botasaurus_browser, Driver, Wait
 from discord.ui import View, Button
@@ -15,7 +16,7 @@ from helpers.anilist_helper import post_graphql
 from cogs_test.general_commands.dashboard import command_meta
 
 logger = logging.getLogger("BrowseCog")
-GOOGLE_BOOKS_URL = "https://www.googleapis.com/books/v1/volumes?q="
+GOOGLE_BOOKS_URL = "https://www.googleapis.com/books/v1/volumes"
 
 
 @botasaurus_browser(
@@ -81,6 +82,48 @@ STATUS_ORDER = {
 class BrowseCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    @staticmethod
+    def _is_fiction_book(book: Dict) -> bool:
+        """Identify explicitly fiction-categorized results in a non-fiction search."""
+        for category in book.get("categories", []) or []:
+            parts = [part.strip().lower() for part in category.split("/")]
+            if any(part == "fiction" or part.endswith(" fiction") for part in parts):
+                return True
+        return False
+
+    async def fetch_book_results(self, query: str, book_type: str) -> List[Dict]:
+        """Search Google Books by fiction/non-fiction subject and return volume items."""
+        subject = "fiction" if book_type == "fiction" else "nonfiction"
+        params = {
+            "q": f"{query} subject:{subject}",
+            "printType": "books",
+            "maxResults": 10,
+            "orderBy": "relevance",
+        }
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=8)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(GOOGLE_BOOKS_URL, params=params) as response:
+                    if response.status != 200:
+                        logger.warning(
+                            "Google Books returned HTTP %s for %s query %r",
+                            response.status, subject, query,
+                        )
+                        return []
+                    data = await response.json()
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
+            logger.warning("Google Books %s search failed for %r: %s", subject, query, exc)
+            return []
+
+        items = data.get("items", []) or []
+        if subject == "nonfiction":
+            items = [
+                item for item in items
+                if not self._is_fiction_book(item.get("volumeInfo", {}))
+            ]
+        return items
 
     # --------------------------------------------------
     # Fetch Media Info (Anime, Manga, LN)
@@ -291,7 +334,7 @@ class BrowseCog(commands.Cog):
     # --------------------------------------------------
     @app_commands.command(
         name="browse",
-        description="Search Anime, Manga, Light Novels, General Novels and Webnovels"
+        description="Search Anime, Manga, Light Novels, General Novels, Books and Webnovels"
     )
     @command_meta(section="Media", name="Browse")
     @app_commands.describe(
@@ -302,7 +345,8 @@ class BrowseCog(commands.Cog):
         app_commands.Choice(name="Anime", value="ANIME"),
         app_commands.Choice(name="Manga", value="MANGA"),
         app_commands.Choice(name="Light Novel", value="MANGA_NOVEL"),
-        app_commands.Choice(name="General Novel", value="BOOK"),
+        app_commands.Choice(name="General Novels", value="GENERAL_NOVEL"),
+        app_commands.Choice(name="Books", value="BOOKS"),
         app_commands.Choice(name="Webnovels", value="WEBNOVEL"),
     ])
     async def search(self, interaction: discord.Interaction, media_type: app_commands.Choice[str], title: str):
@@ -345,49 +389,65 @@ class BrowseCog(commands.Cog):
             await interaction.followup.send(embed=embed)
             return
 
-        if chosen_type == "BOOK":
-            # 📚 Google Books Fetch
-            async with aiohttp.ClientSession() as session:
-                async with session.get(GOOGLE_BOOKS_URL + title) as response:
-                    if response.status != 200:
-                        embed = build_error_embed(
-                            "No Results Found",
-                            "No results found."
-                        )
-                        await interaction.followup.send(embed=embed, ephemeral=True)
-                        return
-                    data = await response.json()
-                    items = data.get("items", [])
-                    if not items:
-                        embed = build_error_embed(
-                            "No Results Found",
-                            "No results found."
-                        )
-                        await interaction.followup.send(embed=embed, ephemeral=True)
-                        return
-                    book = items[0].get("volumeInfo", {})
+        if chosen_type in ("GENERAL_NOVEL", "BOOKS"):
+            book_type = "fiction" if chosen_type == "GENERAL_NOVEL" else "nonfiction"
+            results = await self.fetch_book_results(title, book_type)
+            if not results:
+                category_name = "general novels" if book_type == "fiction" else "non-fiction books"
+                embed = build_error_embed(
+                    "No Results Found",
+                    f"No {category_name} found matching {title!r}.",
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
 
-            # --------------------------------------------------
-            # Google Books Embed
-            # --------------------------------------------------
+            book = results[0].get("volumeInfo", {})
+            title_text = book.get("title") or "Unknown title"
+            raw_description = BeautifulSoup(
+                book.get("description") or "", "html.parser"
+            ).get_text(" ", strip=True)
+            description = raw_description or "No description is available for this book."
+            if len(description) > 900:
+                description = description[:897].rstrip() + "..."
+
             embed = discord.Embed(
-                title=f"📚 {book.get('title', 'Unknown')}",
-                url=book.get("infoLink"),
-                description=book.get("description", "No description available."),
-                color=PALETTE.PRIMARY
+                title=f"{'📖' if book_type == 'fiction' else '📚'} {title_text}"[:256],
+                url=book.get("infoLink") or book.get("previewLink"),
+                description=description,
+                color=PALETTE.PRIMARY,
             )
 
-            if "imageLinks" in book:
-                embed.set_thumbnail(url=book["imageLinks"].get("thumbnail"))
+            image_links = book.get("imageLinks") or {}
+            thumbnail = image_links.get("thumbnail") or image_links.get("smallThumbnail")
+            if thumbnail:
+                embed.set_thumbnail(url=thumbnail.replace("http://", "https://", 1))
 
-            authors = ", ".join(book.get("authors", [])) if "authors" in book else "Unknown"
-            embed.add_field(name="✍️ Authors", value=authors, inline=True)
-            embed.add_field(name="📅 Published", value=book.get("publishedDate", "Unknown"), inline=True)
-            embed.add_field(name="🏢 Publisher", value=book.get("publisher", "Unknown"), inline=True)
-            embed.add_field(name="📄 Pages", value=book.get("pageCount", "Unknown"), inline=True)
-            embed.add_field(name="⭐ Rating", value=str(book.get("averageRating", "?")) + "/5", inline=True)
+            authors = ", ".join(book.get("authors") or []) or "Unknown"
+            embed.add_field(name="✍️ Author(s)", value=authors[:1024], inline=True)
+            embed.add_field(
+                name="📅 Published",
+                value=str(book.get("publishedDate") or "Unknown")[:1024],
+                inline=True,
+            )
+            if book.get("publisher"):
+                embed.add_field(name="🏢 Publisher", value=str(book["publisher"])[:1024], inline=True)
+            if book.get("pageCount"):
+                embed.add_field(name="📄 Pages", value=str(book["pageCount"]), inline=True)
+            if book.get("averageRating") is not None:
+                embed.add_field(name="⭐ Rating", value=f"{book['averageRating']}/5", inline=True)
 
-            embed.set_footer(text="Fetched from Google Books")
+            categories = book.get("categories") or []
+            if categories:
+                embed.add_field(
+                    name="🏷️ Categories",
+                    value=", ".join(categories)[:1024],
+                    inline=False,
+                )
+
+            embed.set_footer(
+                text="Google Books • General fiction" if book_type == "fiction"
+                else "Google Books • Non-fiction search"
+            )
             await interaction.followup.send(embed=embed)
             return
 
@@ -781,16 +841,17 @@ class BrowseCog(commands.Cog):
                 title = (novel.get("title") or "").strip()
                 if title:
                     choices.append(app_commands.Choice(name=title[:100], value=title[:100]))
-        elif media_type == "BOOK":
-            async with aiohttp.ClientSession() as session:
-                async with session.get(GOOGLE_BOOKS_URL + current) as response:
-                    if response.status != 200:
-                        return []
-                    data = await response.json()
-                    for item in data.get("items", [])[:10]:
-                        info = item.get("volumeInfo", {})
-                        title = info.get("title", "Unknown")[:100]
-                        choices.append(app_commands.Choice(name=title, value=title))
+        elif media_type in ("GENERAL_NOVEL", "BOOKS"):
+            book_type = "fiction" if media_type == "GENERAL_NOVEL" else "nonfiction"
+            results = await self.fetch_book_results(current, book_type)
+            for item in results[:10]:
+                info = item.get("volumeInfo", {})
+                title = (info.get("title") or "").strip()
+                if not title:
+                    continue
+                authors = ", ".join(info.get("authors") or [])
+                label = f"{title} — {authors}" if authors else title
+                choices.append(app_commands.Choice(name=label[:100], value=title[:100]))
         else:
             search_type = "MANGA" if media_type in ("MANGA", "MANGA_NOVEL") else "ANIME"
             results = await self.fetch_media(current, search_type)
