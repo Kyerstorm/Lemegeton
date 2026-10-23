@@ -11,12 +11,16 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install and import Botasaurus
+        run: |
+          python -m pip install --upgrade pip botasaurus
+          python -c "from botasaurus.browser import browser, Driver, Wait; print('PASS: Botasaurus browser API imports')"
       - name: Compile browse.py
         run: python -m py_compile cogs/media/browse.py
       - name: Test scraper extraction with a controlled page fixture
@@ -35,7 +39,7 @@ jobs:
               node for node in parsed.body
               if isinstance(node, ast.FunctionDef) and node.name == "scrape_novelupdates"
           )
-          # Run the extraction function without Botasaurus's browser-launch decorator.
+          # Run extraction without launching a browser or relying on Novel Updates availability.
           helper.decorator_list = []
 
           class Wait:
