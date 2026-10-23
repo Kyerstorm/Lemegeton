@@ -19,6 +19,7 @@ from helpers.custom_roles import images, service, storage, tokens, validation
 
 logger = service.logger  # file log (logs/custom_roles.log)
 console_logger = logging.getLogger("custom_roles_console")  # propagates to the bot's console output
+console_logger.setLevel(logging.INFO)  # refusals and slow-database notes reach the console too
 
 MODE_LABELS = {
     service.MODE_SOLID: "Solid",
@@ -43,6 +44,42 @@ async def _reply(interaction: discord.Interaction, result: service.Result, succe
 
 def _embed(title: str, text: str, colour: discord.Colour) -> discord.Embed:
     return discord.Embed(title=title, description=text[:4000], colour=colour)
+
+
+def log_panel_error(what: str, interaction: discord.Interaction, error: BaseException) -> None:
+    """A panel failure: to the console (what Railway's log view shows) and to logs/custom_roles.log."""
+    guild_id = getattr(interaction, "guild_id", None) or getattr(getattr(interaction, "guild", None), "id", None)
+    user_id = getattr(getattr(interaction, "user", None), "id", None)
+    for log in (logger, console_logger):
+        log.error("Custom Roles %s failed in guild %s for user %s: %r", what, guild_id, user_id, error,
+                  exc_info=(type(error), error, error.__traceback__))
+
+
+def log_panel_note(level: int, message: str, *args) -> None:
+    """Something an admin should be able to see on Railway (a refusal, a slow database): console and file."""
+    for log in (logger, console_logger):
+        log.log(level, "Custom Roles: " + message, *args)
+
+
+async def _send_error(interaction: discord.Interaction):
+    embed = build_error_embed("Something went wrong", "That didn't work. Please try again in a moment.")
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+    except discord.HTTPException as exc:  # the interaction may have expired too; the error is logged anyway
+        log_panel_note(logging.WARNING, "couldn't tell user %s about an error: %r",
+                       getattr(interaction.user, "id", None), exc)
+
+
+class LoggedView(discord.ui.View):
+    """A View whose errors are logged (console and file) and answered, instead of only discord.py's log line."""
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item):
+        log_panel_error(f"{type(self).__name__} {getattr(item, 'label', None) or type(item).__name__!r}",
+                        interaction, error)
+        await _send_error(interaction)
 
 
 def _progress_updater(interaction: discord.Interaction, title: str) -> service.ProgressCallback:
@@ -86,6 +123,13 @@ class PendingButton(
         return True
 
     async def callback(self, interaction: discord.Interaction):
+        try:
+            await self._run(interaction)
+        except Exception as exc:
+            log_panel_error(f"pending removal {self.action}", interaction, exc)
+            await _send_error(interaction)
+
+    async def _run(self, interaction: discord.Interaction):
         guild = interaction.guild
         if self.action == "cancel":
             await interaction.response.edit_message(embed=_embed("Cancelling…", "One moment.", PALETTE.NEUTRAL), view=None)
@@ -105,7 +149,7 @@ class PendingButton(
 
 
 def _pending_view(pending_id: int) -> discord.ui.View:
-    view = discord.ui.View(timeout=None)
+    view = LoggedView(timeout=None)
     view.add_item(PendingButton(pending_id, "confirm"))
     view.add_item(PendingButton(pending_id, "cancel"))
     return view
@@ -124,7 +168,7 @@ def _report_embed(title: str, report: service.ArchiveReport, intro: str = "") ->
     return _embed(title, "\n".join(lines), colour)
 
 
-class ConfirmView(discord.ui.View):
+class ConfirmView(LoggedView):
     """60-second Confirm/Cancel for an admin command; only the admin who ran it can press."""
 
     def __init__(self, invoker_id: int, on_confirm, timeout: float = 60):
@@ -165,7 +209,7 @@ class ConfirmView(discord.ui.View):
 LEGACY_TIMEOUT = 120  # seconds the import-legacy preview buttons stay usable
 
 
-class LegacyImportView(discord.ui.View):
+class LegacyImportView(LoggedView):
     """Buttons under the Import old roles preview; only the admin who opened it can press."""
 
     def __init__(self, invoker_id: int, plan: service.LegacyPlan, on_choice):
@@ -286,7 +330,7 @@ def color_preview_embed(mode: str, colors: list) -> discord.Embed:
     return embed
 
 
-class ColorPreviewView(discord.ui.View):
+class ColorPreviewView(LoggedView):
     """Apply/Cancel under a color preview from the panel's Color form. Only the member who filled it in can press."""
 
     def __init__(self, owner_id: int, mode: str, primary: Optional[int], secondary: Optional[int], on_done):
@@ -338,7 +382,7 @@ PALETTE_TIMEOUT = 300  # seconds the palette menus stay usable
 CLEAR_SECONDARY = "clear"
 
 
-class PaletteView(discord.ui.View):
+class PaletteView(LoggedView):
     """Two select menus from the panel's Palette button. Only the member who ran it can use them."""
 
     def __init__(self, owner: discord.Member, colors: list, gradient_ok: bool):
@@ -472,7 +516,7 @@ def _list_line(entry: service.ListEntry) -> str:
     return line
 
 
-class ListView(discord.ui.View):
+class ListView(LoggedView):
     """Previous/Next pages (and a status filter) for the admin panel's Members button. Only that admin can use them."""
 
     def __init__(self, invoker_id: int, entries: list, title: str, guild: Optional[discord.Guild] = None):
@@ -562,6 +606,9 @@ ADMIN_TITLE = "Custom Roles Settings"
 COLOR_FORM_TIP = "To pick a color by eye, press **Color picker** on the panel."
 ICON_FORM_TIP = "To crop an image precisely, press **Color picker** on the panel."
 HEX_HELP = "Try `#FF66AA`, `FF66AA` or `#F6A`."
+FORM_READ_TIMEOUT = 2.0  # seconds for the database read before a form opens; Discord gives up after 3
+SLOW_DB_MESSAGE = "The database is slow right now, so I couldn't open that. Please try again in a moment."
+SETUP_MARKS = {service.SETUP_DONE: "✅", service.SETUP_TODO: "❌", service.SETUP_OPTIONAL: "➖"}
 BLOCKED_WORD_MAX = 50
 
 
@@ -571,14 +618,6 @@ def panel_expired_text(panel: str) -> str:
 
 def _expiry_line(opened_at: int) -> str:
     return f"⏱️ This panel expires <t:{opened_at + PANEL_TTL}:R>."
-
-
-async def _send_error(interaction: discord.Interaction):
-    embed = build_error_embed("Something went wrong", "That didn't work. Please try again in a moment.")
-    if interaction.response.is_done():
-        await interaction.followup.send(embed=embed, ephemeral=True)
-    else:
-        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 async def _send(interaction: discord.Interaction, embed: discord.Embed, view: Optional[discord.ui.View] = None):
@@ -597,6 +636,42 @@ def _with_result(embed: discord.Embed, result: Optional[service.Result]) -> disc
     if result.notes:
         embed.add_field(name="⚠️ Heads up", value="\n\n".join(result.notes)[:1024], inline=False)
     return embed
+
+
+class SlowDatabase(Exception):
+    """The read before a form timed out; the member was already told to try again."""
+
+
+async def read_before_reply(interaction: discord.Interaction, read, what: str):
+    """Run a database read that has to finish before the first reply (a form, or the channel check).
+
+    Discord gives up on an interaction after 3 seconds, so a slow database gets "Try again" instead
+    of "This interaction failed". Raises SlowDatabase after replying.
+    """
+    try:
+        return await asyncio.wait_for(read, FORM_READ_TIMEOUT)
+    except asyncio.TimeoutError:
+        log_panel_note(logging.WARNING, "database too slow (over %ss) before %s in guild %s for user %s",
+                       FORM_READ_TIMEOUT, what, interaction.guild_id, interaction.user.id)
+        await interaction.response.send_message(embed=build_error_embed("Try Again", SLOW_DB_MESSAGE), ephemeral=True)
+        raise SlowDatabase(what) from None
+
+
+async def send_refusal(interaction: discord.Interaction, title: str, result: Optional[service.Result]) -> None:
+    """A short ❌ reply under the admin panel when an action was refused, so it can't be missed.
+    The panel shows the same line at the top."""
+    if result is None or result.ok:
+        return
+    log_panel_note(logging.INFO, "admin %s in guild %s: %s refused: %s",
+                   interaction.user.id, interaction.guild_id, title, result.message.replace("\n", " "))
+    try:
+        await interaction.followup.send(embed=build_error_embed(title, result.message[:4000]), ephemeral=True)
+    except discord.HTTPException as exc:
+        log_panel_note(logging.WARNING, "couldn't send the refusal reply to %s: %r", interaction.user.id, exc)
+
+
+def setup_checklist_text(guild: discord.Guild, settings: storage.GuildSettings) -> str:
+    return "\n".join(f"{SETUP_MARKS[status]} {text}" for status, text in service.setup_checklist(guild, settings))
 
 
 def _combined(lines: list, empty: str = "Nothing changed.") -> service.Result:
@@ -634,6 +709,14 @@ class PanelButton(
         return cls(match["panel"], match["action"], int(match["owner"]), int(match["at"]), label=item.label or "…")
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        try:
+            return await self._check(interaction)
+        except Exception as exc:
+            log_panel_error(f"panel button {self.panel}/{self.action} check", interaction, exc)
+            await _send_error(interaction)
+            return False
+
+    async def _check(self, interaction: discord.Interaction) -> bool:
         if time.time() > self.opened_at + PANEL_TTL:
             await interaction.response.edit_message(
                 embed=_embed("Panel Expired", panel_expired_text(self.panel), PALETTE.NEUTRAL), view=None
@@ -659,14 +742,16 @@ class PanelButton(
             return
         try:
             await cog.panel_action(interaction, self)
-        except Exception:
-            logger.exception("Panel button %s/%s failed for %s", self.panel, self.action, interaction.user.id)
+        except SlowDatabase:
+            pass  # already answered with "Try again" and logged
+        except Exception as exc:
+            log_panel_error(f"panel button {self.panel}/{self.action}", interaction, exc)
             await _send_error(interaction)
 
 
 def _panel_view(panel: str, owner_id: int, opened_at: int, buttons: list) -> discord.ui.View:
     """buttons: (action, label, style, row)."""
-    view = discord.ui.View(timeout=PANEL_TTL)
+    view = LoggedView(timeout=PANEL_TTL)
     for action, label, style, row in buttons:
         view.add_item(PanelButton(panel, action, owner_id, opened_at, label=label, style=style, row=row))
     return view
@@ -687,7 +772,7 @@ class PanelModal(discord.ui.Modal):
         await self.handler(interaction, self)
 
     async def on_error(self, interaction: discord.Interaction, error: Exception, item=None):
-        logger.error("Panel form %r failed for %s", self.title, interaction.user.id, exc_info=error)
+        log_panel_error(f"panel form {self.title!r}", interaction, error)
         await _send_error(interaction)
 
 
@@ -943,6 +1028,9 @@ async def admin_panel(guild: discord.Guild, admin_id: int, opened_at: int, resul
     pending = await storage.get_open_pending(guild.id)
     embed = await settings_embed(guild, settings)
     embed.description = f"Settings for **{guild.name}**. Change them with the buttons below.\n{_expiry_line(opened_at)}"
+    if not settings.enabled:  # first field, so it's the first thing an admin sees
+        embed.insert_field_at(0, name="🛠️ Setup checklist (Custom Roles is off)",
+                              value=setup_checklist_text(guild, settings)[:1024], inline=False)
     style = discord.ButtonStyle
     view = _panel_view(PANEL_ADMIN, admin_id, opened_at, [
         ("disable", "Turn off", style.secondary, 0) if settings.enabled else ("enable", "Turn on", style.success, 0),
@@ -1286,7 +1374,11 @@ class CustomRoles(commands.Cog):
         root = (getattr(command, "root_parent", None) or command) if command else None
         if root is None or root.name != COMMAND_GROUP or interaction.guild is None:
             return True
-        settings = await storage.get_guild_settings(interaction.guild.id)
+        try:
+            settings = await read_before_reply(interaction, storage.get_guild_settings(interaction.guild.id),
+                                               f"/{COMMAND_GROUP}")
+        except SlowDatabase:
+            return False  # already answered; cog_app_command_error ignores the CheckFailure
         problem = service.command_channel_problem(interaction.channel, settings)
         if problem is None:
             return True
@@ -1296,8 +1388,8 @@ class CustomRoles(commands.Cog):
     async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         if isinstance(error, app_commands.CheckFailure) and interaction.response.is_done():
             return  # interaction_check already told them where to go
-        logger.error("Custom role command %s failed", getattr(interaction.command, "qualified_name", "?"),
-                     exc_info=error)
+        log_panel_error(f"command /{getattr(interaction.command, 'qualified_name', '?')}", interaction,
+                        getattr(error, "original", error))
         await _send_error(interaction)
 
     # ============================================================================
@@ -1364,12 +1456,14 @@ class CustomRoles(commands.Cog):
             await self._refresh_member(interaction, opened_at, result)
         return PanelModal(title, handler)
 
-    def _admin_form(self, title: str, opened_at: int, work) -> PanelModal:
-        """A form whose `work(interaction, modal) -> Result` changes a setting, then the panel shows it."""
+    def _admin_form(self, title: str, opened_at: int, work, refused: str = "Not Saved") -> PanelModal:
+        """A form whose `work(interaction, modal) -> Result` changes a setting, then the panel shows it.
+        A refusal also gets its own ❌ reply titled `refused`."""
         async def handler(interaction: discord.Interaction, modal: PanelModal):
             await interaction.response.defer()
             result = await work(interaction, modal)
             await self._refresh_admin(interaction, opened_at, result)
+            await send_refusal(interaction, refused, result)
         return PanelModal(title, handler)
 
     # ---------------------------------------------------------------- member panel buttons
@@ -1381,7 +1475,8 @@ class CustomRoles(commands.Cog):
         await interaction.response.send_modal(modal)
 
     async def _member_rename(self, interaction: discord.Interaction, button: PanelButton):
-        record = await storage.get_custom_role(interaction.guild.id, interaction.user.id)
+        record = await read_before_reply(
+            interaction, storage.get_custom_role(interaction.guild.id, interaction.user.id), "the Rename form")
         modal = self._member_form("Rename your role", button.opened_at,
                                   lambda member, form: service.rename(member, form.name.value))
         modal.name = modal.field("New name", discord.ui.TextInput(
@@ -1390,7 +1485,8 @@ class CustomRoles(commands.Cog):
 
     async def _member_color(self, interaction: discord.Interaction, button: PanelButton):
         member = interaction.user
-        record = await storage.get_custom_role(member.guild.id, member.id)
+        record = await read_before_reply(interaction, storage.get_custom_role(member.guild.id, member.id),
+                                         "the Color form")
         mode = record.color_mode if record else service.MODE_SOLID
         enhanced = service.feature_status(member.guild).gradient
         primary = (validation.format_hex(record.primary_color)
@@ -1595,10 +1691,11 @@ class CustomRoles(commands.Cog):
         elif result.ok:
             result.message += " Existing roles are kept, and nothing is removed automatically while it's off."
         await self._refresh_admin(interaction, button.opened_at, result)
+        await send_refusal(interaction, "Can't Turn It On Yet" if enable else "Can't Turn It Off", result)
 
     async def _admin_anchor(self, interaction: discord.Interaction, button: PanelButton):
         guild = interaction.guild
-        settings = await storage.get_guild_settings(guild.id)
+        settings = await read_before_reply(interaction, storage.get_guild_settings(guild.id), "the Anchor form")
         current = guild.get_role(settings.anchor_role_id) if settings.anchor_role_id else None
         place = settings.anchor_place if settings.anchor_role_id else service.PLACE_BELOW
 
@@ -1612,7 +1709,7 @@ class CustomRoles(commands.Cog):
                     result.message += " Next: press **Turn on**."
             return result
 
-        modal = self._admin_form("Anchor role", button.opened_at, work)
+        modal = self._admin_form("Anchor role", button.opened_at, work, refused="Anchor Not Set")
         modal.role = modal.field("Anchor role", discord.ui.RoleSelect(
             required=True, default_values=[discord.Object(current.id, type=discord.Role)] if current else []),
             description="New custom roles go next to it. It must be below my highest role.")
@@ -1642,7 +1739,8 @@ class CustomRoles(commands.Cog):
         return modal
 
     async def _admin_log(self, interaction: discord.Interaction, button: PanelButton):
-        settings = await storage.get_guild_settings(interaction.guild.id)
+        settings = await read_before_reply(interaction, storage.get_guild_settings(interaction.guild.id),
+                                           "the Log channel form")
         modal = self._channel_form(
             interaction.guild, "Log channel", "Log channel", "Where Custom Roles posts events and errors. Leave it empty to turn logging off.",
             button.opened_at, settings.log_channel_id,
@@ -1651,7 +1749,8 @@ class CustomRoles(commands.Cog):
         await interaction.response.send_modal(modal)
 
     async def _admin_channel(self, interaction: discord.Interaction, button: PanelButton):
-        settings = await storage.get_guild_settings(interaction.guild.id)
+        settings = await read_before_reply(interaction, storage.get_guild_settings(interaction.guild.id),
+                                           "the Command channel form")
         modal = self._channel_form(
             interaction.guild, "Command channel", "Command channel",
             f"/{COMMAND_GROUP} only works there (and in its threads). Leave it empty to allow any channel.",
@@ -1661,7 +1760,8 @@ class CustomRoles(commands.Cog):
         await interaction.response.send_modal(modal)
 
     async def _admin_cooldown(self, interaction: discord.Interaction, button: PanelButton):
-        settings = await storage.get_guild_settings(interaction.guild.id)
+        settings = await read_before_reply(interaction, storage.get_guild_settings(interaction.guild.id),
+                                           "the Cooldown form")
         modal = self._admin_form("Cooldown", button.opened_at,
                                  lambda submit, form: apply_cooldown_form(submit.guild, form.seconds.value))
         modal.seconds = modal.field("Seconds between changes", discord.ui.TextInput(
@@ -1672,7 +1772,7 @@ class CustomRoles(commands.Cog):
 
     async def _admin_allowed(self, interaction: discord.Interaction, button: PanelButton):
         guild = interaction.guild
-        settings = await storage.get_guild_settings(guild.id)
+        settings = await read_before_reply(interaction, storage.get_guild_settings(guild.id), "the Allowed roles form")
         current = [r for r in (guild.get_role(rid) for rid in settings.allowed_role_ids) if r]
         modal = self._admin_form("Allowed roles", button.opened_at, self._apply_allowed_roles)
         modal.roles = modal.field("Roles that can use Custom Roles", discord.ui.RoleSelect(
@@ -1748,7 +1848,8 @@ class CustomRoles(commands.Cog):
         )
 
     async def _admin_words(self, interaction: discord.Interaction, button: PanelButton):
-        settings = await storage.get_guild_settings(interaction.guild.id)
+        settings = await read_before_reply(interaction, storage.get_guild_settings(interaction.guild.id),
+                                           "the Blocked words form")
         modal = self._admin_form(
             "Blocked words", button.opened_at,
             lambda submit, form: apply_blocked_words_form(submit.guild, form.block.value, form.unblock.value,

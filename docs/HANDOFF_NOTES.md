@@ -116,6 +116,11 @@ Everything below is done from one panel: run `/custom-role-admin`. It shows the 
 button opens a short form. The panel shows the result of each change at the top. It works for
 15 minutes; after that its buttons say it expired, so just run `/custom-role-admin` again.
 
+While Custom Roles is off, the panel starts with a **Setup checklist** (✅ done, ❌ to do, ➖
+optional): Manage Roles, the anchor, the bot's role above the anchor, the log channel, then
+**Turn on**. If a button is refused, you also get a separate ❌ reply saying what to do next, for
+example "Set an Anchor first" or "Move my role above the anchor".
+
 1. **Place the bot's role.** In Server Settings → Roles, drag the bot's own role **above** the
    spot where custom roles should go. Discord only lets the bot manage roles below its own.
 2. **Choose the anchor role.** Custom roles are created next to it.
@@ -158,8 +163,9 @@ button opens a short form. The panel shows the result of each change at the top.
    - **Cooldown:** a wait between changes in seconds (0 = off, the default).
    - **Blocked words:** more words to keep out of role names, one per line. Built-in protected words
      (admin, mod, staff, nitro, …) are already on, and can be switched off in the same form.
-7. **Turn it on.** Press **Turn on**. Boosters who already have saved roles get them back
-   straight away. **While Custom Roles is off, nothing is removed automatically**; once it's on,
+7. **Turn it on.** Press **Turn on**. It's refused (with a ❌ reply saying why) until the bot has
+   **Manage Roles**, an anchor is set, and the bot's role is above the anchor. Boosters who
+   already have saved roles get them back straight away. **While Custom Roles is off, nothing is removed automatically**; once it's on,
    the regular check (every 30 minutes) removes roles of members who no longer qualify.
 8. **Check.** Look at the panel (press **Refresh** if it's been a while).
    - **Server features** should show whether the server has gradient/holographic styles (they
@@ -210,7 +216,8 @@ The two perks have different requirements in Discord
 
 So a server with 3 boosts can already do part 5a; part 5b waits for Boost Level 2. Do each part
 once on the real server, as a booster, with Custom Roles set up (section 3). Anything that fails:
-check the custom roles log channel and `logs/custom_roles.log` for the reason.
+check the custom roles log channel and the bot's console log on Railway (lines starting
+"Custom Roles"; see "Errors on Railway" in section 6) for the reason.
 
 ### 5a. 3-boost check: gradients and holographic
 
@@ -292,6 +299,16 @@ First, `/custom-role-admin` → **Server features** should show ✅ for **Role i
     failing silently. They're persistent buttons, like the pending-removal ones.
   - Without 3 server boosts the **Color** form shows only one hex field and says why; with them
     it also offers Solid, Gradient and Holographic.
+  - **Slow database:** a button that opens a form reads the database first, and Discord gives up
+    after 3 seconds. That read waits at most 2 seconds; if the database is slower, the member gets
+    "The database is slow right now… Please try again" instead of "This interaction failed". The
+    same goes for the `/custom-role` channel check. The database pool is 5 connections by default
+    (`POSTGRES_POOL_SIZE`); raise it if these show up often.
+- **Errors on Railway:** every panel error (a button, a form, a Confirm/Cancel, the color preview,
+  the pending-removal buttons) is logged with its traceback to the **console** (Railway's log view)
+  and to `logs/custom_roles.log`. Each line starts with "Custom Roles", says which part failed, and
+  gives the server and member IDs. Refused admin actions and slow-database timeouts are logged
+  there too. `logs/custom_roles.log` is wiped on every restart, so use the console log.
 - **Command channel:** **Command channel** limits `/custom-role` to one channel and its threads. If that
   channel is deleted, the limit lapses.
 - **Cooldown:** renames, colors, icons and **Move** count as changes. Creating or restoring a

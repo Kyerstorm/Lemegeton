@@ -66,7 +66,7 @@ class Inter:
     """One button press or form submit."""
 
     def __init__(self, user, cog, fetch_user=None):
-        self.user, self.guild = user, user.guild
+        self.user, self.guild, self.guild_id = user, user.guild, user.guild.id
         self.client = NS(get_cog=lambda name: cog if name == "CustomRoles" else None, fetch_user=fetch_user)
         self.response, self.followup, self.edited = Response(), Followup(), []
 

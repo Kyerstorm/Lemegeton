@@ -35,7 +35,8 @@ async def main():
     anchor_ok = FakeRole(901, 5)
     anchor_high = FakeRole(902, 12)
     roles = {r.id: r for r in (bot_top, anchor_ok, anchor_high)}
-    guild = NS(id=GID, me=NS(top_role=bot_top), get_role=lambda rid: roles.get(rid))
+    guild = NS(id=GID, me=NS(top_role=bot_top, guild_permissions=NS(manage_roles=True)),
+               get_role=lambda rid: roles.get(rid))
 
     results = []
 
@@ -54,7 +55,8 @@ async def main():
 
     await storage.update_guild_settings(GID, anchor_role_id=anchor_high.id)  # stored directly, bypassing /anchor
     r = await service.set_enabled(guild, True)
-    check("enable with anchor above the bot is refused", not r.ok)
+    check("enable with anchor above the bot is refused, saying to move the bot's role",
+          not r.ok and "Move my role above" in r.message)
 
     r = await service.set_anchor(guild, anchor_high)
     check("/anchor refuses a role above the bot", not r.ok)
@@ -63,6 +65,12 @@ async def main():
 
     r = await service.set_anchor(guild, anchor_ok)
     check("/anchor accepts a role below the bot", r.ok)
+    guild.me.guild_permissions.manage_roles = False
+    r = await service.set_enabled(guild, True)
+    check("enable without Manage Roles is refused, saying what to do",
+          not r.ok and "Manage Roles" in r.message and "Server Settings" in r.message)
+    check("  ...and feature stays off", (await storage.get_guild_settings(GID)).enabled is False)
+    guild.me.guild_permissions.manage_roles = True
     r = await service.set_enabled(guild, True)
     check("enable after a valid anchor works", r.ok and r.data.enabled is True)
     check("  ...user gate now passes", service.ensure_ready(guild, r.data).ok)

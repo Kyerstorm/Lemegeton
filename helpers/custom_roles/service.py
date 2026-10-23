@@ -184,8 +184,8 @@ def validate_anchor(guild: discord.Guild, role: discord.Role) -> Result:
     if role >= top:
         return Result(
             False,
-            f"{role.mention} is at or above my highest role ({top.mention}), so I can't place roles "
-            "below it. Pick a lower role, or move my role higher in Server Settings → Roles.",
+            f"My highest role ({top.mention}) must be above the anchor {role.mention}. Move my role above it "
+            "in Server Settings → Roles, or pick a lower anchor.",
         )
     return Result(True, "ok")
 
@@ -279,10 +279,44 @@ def setup_problems(guild: discord.Guild, settings: GuildSettings) -> List[str]:
         if anchor is None:
             problems.append(f"The anchor role was deleted - press **Anchor** in `/{ADMIN_GROUP}` to pick a new one.")
         elif anchor >= me.top_role:
-            problems.append(f"The anchor {anchor.mention} is at or above my highest role {me.top_role.mention}.")
+            problems.append(f"The anchor {anchor.mention} is at or above my highest role {me.top_role.mention}. "
+                            "Move my role above it in Server Settings → Roles.")
     if len(guild.roles) >= ROLE_LIMIT:
         problems.append(f"The server is at Discord's {ROLE_LIMIT}-role limit.")
     return problems
+
+
+SETUP_DONE, SETUP_TODO, SETUP_OPTIONAL = "done", "todo", "optional"
+NO_MANAGE_ROLES_MESSAGE = (
+    "I need the **Manage Roles** permission. In Server Settings → Roles, give my role **Manage Roles**, "
+    "then press **Turn on** again."
+)
+NO_ANCHOR_MESSAGE = "Set an Anchor first: press **Anchor** and pick the role custom roles go next to."
+
+
+def setup_checklist(guild: discord.Guild, settings: GuildSettings) -> List[Tuple[str, str]]:
+    """The admin panel's steps while Custom Roles is off: (SETUP_* status, text), in the order to do them."""
+    me = guild.me
+    anchor = guild.get_role(settings.anchor_role_id) if settings.anchor_role_id else None
+    steps = [
+        (SETUP_DONE, "I have **Manage Roles**.") if me.guild_permissions.manage_roles
+        else (SETUP_TODO, "Give my role **Manage Roles** in Server Settings → Roles."),
+        (SETUP_DONE, f"Anchor: directly {settings.anchor_place} {anchor.mention}.") if anchor is not None
+        else (SETUP_TODO, "Press **Anchor** and pick the role custom roles go next to."),
+    ]
+    if anchor is None:
+        steps.append((SETUP_TODO, "My role must be above the anchor (set the anchor first)."))
+    elif anchor >= me.top_role:
+        steps.append((SETUP_TODO, f"Move my role ({me.top_role.mention}) above the anchor {anchor.mention} "
+                                  "in Server Settings → Roles."))
+    else:
+        steps.append((SETUP_DONE, f"My role ({me.top_role.mention}) is above the anchor."))
+    log_channel = guild.get_channel(settings.log_channel_id) if settings.log_channel_id else None
+    steps.append((SETUP_DONE, f"Log channel: {log_channel.mention}.") if log_channel is not None
+                 else (SETUP_OPTIONAL, "Optional: press **Log channel** to keep a history of changes."))
+    ready = all(status == SETUP_DONE for status, _ in steps[:3])
+    steps.append((SETUP_TODO, "Press **Turn on**." if ready else "Then press **Turn on**."))
+    return steps
 
 
 # ------------------------------------------------------
@@ -303,9 +337,12 @@ async def set_anchor(guild: discord.Guild, role: discord.Role, place: str = PLAC
 async def set_enabled(guild: discord.Guild, enabled: bool) -> Result:
     settings = await storage.get_guild_settings(guild.id)
     if enabled:
+        # Same order as the panel's setup checklist.
+        if not guild.me.guild_permissions.manage_roles:
+            return Result(False, NO_MANAGE_ROLES_MESSAGE, settings)
         anchor = guild.get_role(settings.anchor_role_id) if settings.anchor_role_id else None
         if anchor is None:
-            return Result(False, "Set an anchor role first: press **Anchor**.", settings)
+            return Result(False, NO_ANCHOR_MESSAGE, settings)
         check = validate_anchor(guild, anchor)
         if not check.ok:
             return Result(False, check.message, settings)
