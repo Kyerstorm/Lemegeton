@@ -424,8 +424,16 @@ async def fetch_many(
 def _normalize_domains(urls: Sequence[str], allowed_domains: Optional[Iterable[str]]) -> Set[str]:
     """Create the host allowlist used to keep recursive crawls in scope."""
     if allowed_domains:
-        values = [allowed_domains] if isinstance(allowed_domains, str) else list(allowed_domains)
-        domains = {str(value).strip().lower().lstrip(".").rstrip(".") for value in values if str(value).strip()}
+        values = (
+            allowed_domains.replace("\n", ",").split(",")
+            if isinstance(allowed_domains, str)
+            else list(allowed_domains)
+        )
+        domains = {
+            str(value).strip().lower().lstrip(".").rstrip(".")
+            for value in values
+            if str(value).strip()
+        }
     else:
         domains = set()
         for url in urls:
@@ -466,6 +474,9 @@ async def crawl_public_site(
     is not retried through a different engine.
     """
     from scrapling.spiders import Request, Response, Spider
+
+    if isinstance(start_urls, str):
+        start_urls = [start_urls]
 
     seeds = []
     for url in start_urls:
