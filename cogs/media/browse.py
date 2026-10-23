@@ -46,6 +46,13 @@ def scrape_novelupdates(driver: Driver, data: Dict) -> List[Dict]:
     driver.get(url)
     result_cards = driver.select_all(".search_main_box_nu", wait=Wait.LONG)
     if not result_cards:
+        # Novel Updates has changed markup in the past; try its common alternate
+        # result containers before treating a successful page load as no matches.
+        for selector in (".search_main_box", ".search_body_nu", ".search_title"):
+            result_cards = driver.select_all(selector, wait=None)
+            if result_cards:
+                break
+    if not result_cards:
         logger.warning(
             "Novel Updates returned no series cards for query %r. Page text: %s",
             query,
@@ -769,9 +776,15 @@ class BrowseCog(commands.Cog):
 
         if chosen_type == "WEBNOVEL":
             try:
-                results = await asyncio.to_thread(
-                    scrape_novelupdates, {"query": title}, output=None
+                # Browser automation can hang on provider challenges; bound the wait so
+                # the deferred Discord interaction always receives a response.
+                results = await asyncio.wait_for(
+                    asyncio.to_thread(scrape_novelupdates, {"query": title}, output=None),
+                    timeout=20,
                 )
+            except asyncio.TimeoutError:
+                logger.warning("Novel Updates search timed out for %r", title)
+                results = []
             except Exception as e:
                 logger.warning("Novel Updates search failed for %r: %s", title, e, exc_info=True)
                 results = []
@@ -803,7 +816,19 @@ class BrowseCog(commands.Cog):
 
         if chosen_type in ("GENERAL_NOVEL", "BOOKS"):
             book_type = "fiction" if chosen_type == "GENERAL_NOVEL" else "nonfiction"
-            results = await self.fetch_book_results(title, book_type)
+            try:
+                # Keep provider delays/errors from leaving Discord's deferred response
+                # spinning indefinitely.
+                results = await asyncio.wait_for(
+                    self.fetch_book_results(title, book_type),
+                    timeout=18,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Book search timed out for %r (%s)", title, book_type)
+                results = []
+            except Exception:
+                logger.exception("Book search failed for %r (%s)", title, book_type)
+                results = []
             if not results:
                 category_name = "general novels" if book_type == "fiction" else "non-fiction books"
                 embed = build_error_embed(
