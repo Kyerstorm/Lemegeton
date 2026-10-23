@@ -29,14 +29,14 @@ def diagnostic_embed(guild: discord.Guild, channel: discord.abc.GuildChannel, bo
     healthy = sum(status == "Healthy" for status, _, _ in checks)
     attention = sum(status == "Needs attention" for status, _, _ in checks)
     embed = discord.Embed(
-        title=f"Server Check · {guild.name}",
+        title=f"🛠️ Server Check · {guild.name}",
         description=f"Read-only diagnostics for {getattr(channel, 'mention', channel.name)}.\n**Healthy:** {healthy} · **Needs attention:** {attention}",
         color=discord.Color.green() if attention == 0 else discord.Color.orange(),
     )
     for status, name, details in checks:
         symbol = "✅" if status == "Healthy" else "⚠️" if status == "Needs attention" else "ℹ️"
         embed.add_field(name=f"{symbol} {name} · {status}", value=details[:1024], inline=False)
-    embed.set_footer(text="Only the current guild and invocation channel were inspected. No configuration was changed.")
+    embed.set_footer(text="🔒 Read-only report · Current server and channel only · No settings changed")
     return embed
 
 async def add_configured_channel_checks(embed: discord.Embed, guild: discord.Guild) -> None:
@@ -104,7 +104,7 @@ class ServerCheckView(discord.ui.View):
         self.guild_id = guild_id
         self.channel_id = channel_id
 
-    @discord.ui.button(label="Refresh diagnostics", style=discord.ButtonStyle.secondary, custom_id="server-check:refresh")
+    @discord.ui.button(label="🔄 Refresh diagnostics", style=discord.ButtonStyle.secondary, custom_id="server-check:refresh")
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if interaction.guild_id != self.guild_id or interaction.channel_id != self.channel_id:
             await interaction.response.send_message("This diagnostic panel belongs to another server or channel.", ephemeral=True)
@@ -134,10 +134,10 @@ class ServerCheck(commands.Cog):
     @command_meta(section="Server Management", name="Server Check")
     async def server_check(self, interaction: discord.Interaction) -> None:
         if interaction.guild is None or not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+            await interaction.response.send_message("🏠 This command must be used inside a server.", ephemeral=True)
             return
         if not interaction.user.guild_permissions.manage_guild:
-            await interaction.response.send_message("Manage Server permission is required for diagnostics.", ephemeral=True)
+            await interaction.response.send_message("🔒 **Manage Server** permission is required to run diagnostics.", ephemeral=True)
             return
         channel = interaction.channel
         if channel is None or not hasattr(channel, "permissions_for"):

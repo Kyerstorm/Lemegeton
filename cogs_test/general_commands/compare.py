@@ -41,8 +41,8 @@ def _rating_text(ratings: dict, key: str, label: str) -> str | None:
 
 def comparison_embed(category: str, first: dict, second: dict) -> discord.Embed:
     embed = discord.Embed(
-        title=f"Media Comparison · {category.title()}",
-        description="Provider-reported metadata only. Missing fields are marked unavailable; no overall winner is calculated.",
+        title=f"⚖️ Media Comparison · {category.title()}",
+        description="Compare provider-reported details side by side. Missing data is marked unavailable; **no overall winner is calculated.**",
         color=discord.Color.blurple(),
     )
     for item in (first, second):
@@ -161,7 +161,7 @@ def comparison_embed(category: str, first: dict, second: dict) -> discord.Embed:
             embed.add_field(name="Provider page", value=f"[Open {title[:80]}]({url})", inline=False)
         if cover and not embed.thumbnail:
             embed.set_thumbnail(url=cover)
-    embed.set_footer(text="AniList / Google Books / Goodreads / TMDB / MDBList / IGDB / Steam values retain provider attribution.")
+    embed.set_footer(text="📊 Sources: AniList · Google Books · Goodreads · TMDB · MDBList · IGDB · Steam")
     return embed
 
 class CompareSelect(discord.ui.Select):
@@ -173,7 +173,7 @@ class CompareSelect(discord.ui.Select):
             discord.SelectOption(label=media_title(owner.category, item)[:100], value=str(index))
             for index, item in enumerate(results[:25])
         ]
-        super().__init__(placeholder=f"Choose the {side} title", options=options, min_values=1, max_values=1)
+        super().__init__(placeholder=f"🔎 Choose the {side} title", options=options, min_values=1, max_values=1)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if self.side == "first":
@@ -201,7 +201,7 @@ class CompareView(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="Compare selected titles", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="⚖️ Compare selected titles", style=discord.ButtonStyle.primary)
     async def compare_selected(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await interaction.response.defer()
         first = await self.cog.enrich(self.category, self.first[self.first_index])
@@ -300,7 +300,7 @@ class Compare(commands.Cog):
             return
         view = CompareView(self, interaction.user.id, category, left, right)
         await interaction.followup.send(
-            "Choose the exact provider result for each side, then compare. Ratings retain their provider attribution.",
+            "🔎 **Choose the exact result for each side**, then compare. All ratings keep their original provider attribution.",
             view=view, ephemeral=True,
         )
 

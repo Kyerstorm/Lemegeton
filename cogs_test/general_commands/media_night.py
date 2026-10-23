@@ -159,16 +159,16 @@ class MediaNight(commands.Cog):
             link = item.get("siteUrl")
             label = f"[{name}]({link})" if link else name
             lines.append(f"**{index + 1}.** {label}\nVotes: **{totals[index]}**")
-        embed = discord.Embed(title=f"Media Night · {session['category'].title()}", description="\n\n".join(lines)[:4000], color=discord.Color.blurple())
-        embed.add_field(name="Votes cast", value=str(sum(totals)), inline=True)
+        embed = discord.Embed(title=f"🎬 Media Night · {session['category'].title()}", description="\n\n".join(lines)[:4000], color=discord.Color.blurple())
+        embed.add_field(name="🗳️ Votes cast", value=str(sum(totals)), inline=True)
         if final:
             highest = max(totals, default=0)
             winners = [title_of(item) for i, item in enumerate(candidates) if totals[i] == highest]
             result = "No votes were cast." if highest == 0 else ("Tie: " + ", ".join(winners) if len(winners) > 1 else winners[0])
-            embed.add_field(name="Result", value=result[:1024], inline=False)
+            embed.add_field(name="🏆 Result", value=result[:1024], inline=False)
         elif session["status"] == "open":
-            embed.add_field(name="Voting closes", value=f"<t:{int(session['expires_at'].timestamp())}:R>", inline=True)
-        embed.set_footer(text="One vote per person; you may change your vote while voting is open.")
+            embed.add_field(name="⏳ Voting closes", value=f"<t:{int(session['expires_at'].timestamp())}:R>", inline=True)
+        embed.set_footer(text="🗳️ One vote per person · You can change your vote while voting is open")
         return embed
 
     media_night = app_commands.Group(name="media-night", description="Start and manage community media voting")
@@ -245,7 +245,7 @@ class MediaNight(commands.Cog):
             (message.id, session_id, interaction.guild.id, channel.id),
         )
         await message.edit(embed=self.session_embed(session), view=view)
-        await interaction.followup.send(f"Media Night started. Session ID: {session_id}. Use /media-night close with that session ID to close or cancel it. Voting closes in {duration} minutes.", ephemeral=True)
+        await interaction.followup.send(f"🎬 **Media Night is live!** Session ID: `{session_id}`\nUse `/media-night close` with this ID to close or cancel the vote. Voting closes in **{duration} minutes**.", ephemeral=True)
 
     async def cast_vote(self, interaction: discord.Interaction, session_id: str, choice: int) -> None:
         session = self.sessions.get(session_id)
@@ -325,7 +325,7 @@ class MediaNight(commands.Cog):
                 await message.edit(embed=embed, view=None, allowed_mentions=discord.AllowedMentions.none())
         except (discord.NotFound, discord.Forbidden, discord.HTTPException, AttributeError):
             log.info("Media-night message %s could not be edited after closing", session.get("message_id"))
-        await interaction.followup.send("Voting closed. Ties are reported as ties; no automatic tie-breaker is chosen." if action == "close" else "Media Night cancelled.", ephemeral=True)
+        await interaction.followup.send("✅ **Voting closed.** Ties remain ties; no automatic tie-breaker is applied." if action == "close" else "🛑 **Media Night cancelled.**", ephemeral=True)
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(MediaNight(bot))

@@ -44,7 +44,7 @@ def game_embed(game: dict, details: dict | None, steam_data: dict | None) -> dis
     data = details or game
     name = data.get("name") or game.get("name") or "Unknown game"
     embed = discord.Embed(
-        title=str(name)[:256],
+        title=f"🎮 {name}"[:256],
         url=(f"https://www.igdb.com/games/{data.get('slug') or game.get('slug')}" if (data.get("slug") or game.get("slug")) else None),
         description=(data.get("summary") or "No synopsis is available from IGDB.")[:3500],
         color=discord.Color.blurple(),
@@ -61,22 +61,22 @@ def game_embed(game: dict, details: dict | None, steam_data: dict | None) -> dis
     developers = [item.get("company", {}).get("name") for item in companies if item.get("developer") and item.get("company")]
     publishers = [item.get("company", {}).get("name") for item in companies if item.get("publisher") and item.get("company")]
     if developers:
-        embed.add_field(name="Developers", value=", ".join(dict.fromkeys(developers))[:1024], inline=True)
+        embed.add_field(name="👨‍💻 Developers", value=", ".join(dict.fromkeys(developers))[:1024], inline=True)
     if publishers:
-        embed.add_field(name="Publishers", value=", ".join(dict.fromkeys(publishers))[:1024], inline=True)
+        embed.add_field(name="🏢 Publishers", value=", ".join(dict.fromkeys(publishers))[:1024], inline=True)
     release = data.get("first_release_date")
     if isinstance(release, (int, float)):
-        embed.add_field(name="First release", value=f"<t:{int(release)}:D>", inline=True)
+        embed.add_field(name="📅 First release", value=f"<t:{int(release)}:D>", inline=True)
     franchise = data.get("franchise")
     if isinstance(franchise, dict) and franchise.get("name"):
-        embed.add_field(name="Franchise", value=franchise["name"][:1024], inline=True)
+        embed.add_field(name="🧩 Franchise", value=franchise["name"][:1024], inline=True)
     if steam_data:
         app_id = steam_data.get("steam_appid")
         if app_id:
-            embed.add_field(name="Steam", value=f"[Store page](https://store.steampowered.com/app/{app_id}/)", inline=True)
+            embed.add_field(name="🛒 Steam", value=f"[Store page](https://store.steampowered.com/app/{app_id}/)", inline=True)
         price = steam_data.get("price_overview") or {}
         if steam_data.get("is_free"):
-            embed.add_field(name="Steam price", value="Free to Play", inline=True)
+            embed.add_field(name="💰 Steam price", value="Free to Play", inline=True)
         elif price.get("final_formatted"):
             text = price["final_formatted"]
             if price.get("discount_percent"):
@@ -84,13 +84,13 @@ def game_embed(game: dict, details: dict | None, steam_data: dict | None) -> dis
             embed.add_field(name="Steam price", value=text[:1024], inline=True)
         deck = is_steam_deck_verified(steam_data)
         if deck:
-            embed.add_field(name="Steam Deck", value=str(deck)[:1024], inline=True)
+            embed.add_field(name="🕹️ Steam Deck", value=str(deck)[:1024], inline=True)
         controller = get_controller_support(steam_data)
         if controller:
-            embed.add_field(name="Controller support", value=str(controller)[:1024], inline=True)
+            embed.add_field(name="🎮 Controller support", value=str(controller)[:1024], inline=True)
     else:
         embed.add_field(name="Steam listing", value="No matching result was returned by the Steam search. This does not prove the game is unavailable on Steam.", inline=False)
-    embed.set_footer(text="Metadata: IGDB. Store details, when shown, are from Steam.")
+    embed.set_footer(text="🎮 Game metadata: IGDB · Store details, when available: Steam")
     return embed
 
 class GameSelect(discord.ui.Select):
@@ -102,7 +102,7 @@ class GameSelect(discord.ui.Select):
             discord.SelectOption(label=str(item.get("name") or "Unknown game")[:100], value=str(item["slug"])[:100], description=str(item.get("slug") or "")[:100])
             for item in results[:25] if item.get("slug")
         ]
-        super().__init__(placeholder="Select the intended game", min_values=1, max_values=1, options=options)
+        super().__init__(placeholder="🎮 Choose the correct game", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if interaction.user.id != self.owner_id:
@@ -171,7 +171,7 @@ class Game(commands.Cog):
             if not selectable:
                 await interaction.followup.send("IGDB returned matches without selectable identifiers. Try a more specific title.", ephemeral=True)
                 return
-            await interaction.followup.send("Several games may match. Select the correct title; Steam enrichment is added only for an exact name match.", view=GameSelectView(self, interaction.user.id, selectable), ephemeral=True)
+            await interaction.followup.send("🔎 **Several games match.** Choose the correct title below. Steam details are added only for an exact title match.", view=GameSelectView(self, interaction.user.id, selectable), ephemeral=True)
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
             log.warning("Game search failed: %s", exc)
             await interaction.followup.send("Game search is temporarily unavailable. Please try again later.", ephemeral=True)

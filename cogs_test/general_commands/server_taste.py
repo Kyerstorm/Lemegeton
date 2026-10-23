@@ -77,7 +77,7 @@ class ServerTaste(commands.Cog):
                 (guild_id, user_id),
             )
             await interaction.followup.send(
-                "You opted in to this server's aggregate taste report. Only public AniList list metadata is counted; individual profiles and titles are not shown. This consent applies only to this server.",
+                "✅ **You're opted in.** Public AniList metadata may contribute to this server's aggregate report. Individual profiles and titles are never displayed. Consent applies to this server only.",
                 ephemeral=True,
             )
             return
@@ -88,7 +88,7 @@ class ServerTaste(commands.Cog):
                 "DELETE FROM server_taste_opt_ins WHERE guild_id = ? AND discord_id = ?",
                 (guild_id, user_id),
             )
-            await interaction.followup.send("You are opted out of this server's taste report. The opt-out applies only to this server.", ephemeral=True)
+            await interaction.followup.send("✅ **You're opted out.** Your account will no longer contribute to this server's taste report.", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=False, thinking=True)
@@ -140,20 +140,20 @@ class ServerTaste(commands.Cog):
                 genre_counts.update(genres)
                 tag_counts.update(tags)
             embed = discord.Embed(
-                title=f"Server Taste · {'Anime' if category == 'ANIME' else 'Manga'}",
+                title=f"🎭 Server Taste · {'Anime' if category == 'ANIME' else 'Manga'}",
                 color=discord.Color.blurple(),
                 description=f"**Participating public accounts:** {successful}\nInterests are counted at most once per account. Individual member names, titles, scores, and list contents are not displayed.",
             )
             if successful < 3:
-                embed.add_field(name="Sample too small", value="At least 3 participating accounts with publicly accessible AniList lists are required before showing aggregate interests.", inline=False)
+                embed.add_field(name="🔎 Sample too small", value="At least 3 participating accounts with publicly accessible AniList lists are required before showing aggregate interests.", inline=False)
             else:
-                embed.add_field(name="Most represented genres", value="\n".join(f"• {name} — {count} accounts" for name, count in genre_counts.most_common(8)) or "No genre metadata was available.", inline=True)
-                embed.add_field(name="Common themes", value="\n".join(f"• {name} — {count} accounts" for name, count in tag_counts.most_common(8)) or "No eligible tag metadata was available.", inline=True)
-            embed.set_footer(text="Source: public AniList list metadata from opted-in accounts. Private/unavailable lists are excluded; results are not representative of nonparticipants.")
+                embed.add_field(name="🎨 Most represented genres", value="\n".join(f"• {name} — {count} accounts" for name, count in genre_counts.most_common(8)) or "No genre metadata was available.", inline=True)
+                embed.add_field(name="✨ Common themes", value="\n".join(f"• {name} — {count} accounts" for name, count in tag_counts.most_common(8)) or "No eligible tag metadata was available.", inline=True)
+            embed.set_footer(text="📚 Source: public AniList metadata · Opt-in participants only · Individual profiles stay private")
             await interaction.followup.send(embed=embed)
         except Exception:
             log.exception("Failed to produce server taste report for guild %s", guild_id)
-            await interaction.followup.send("The report could not be generated because guild data or AniList was unavailable. No report data was changed.", ephemeral=True)
+            await interaction.followup.send("⚠️ **Report unavailable.** Guild data or AniList could not be reached. No report data was changed.", ephemeral=True)
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(ServerTaste(bot))

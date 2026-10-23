@@ -100,7 +100,7 @@ def schedule_embed(entries: list[dict], title_filter: str | None, page: int) -> 
     description = f"{len(entries)} expected episode entries within the selected window. Explicit times are UTC."
     if title_filter:
         description = f"Expected upcoming episodes matching {title_filter!r}. Explicit times are UTC."
-    embed = discord.Embed(title="Anime Airing Schedule", description=description, color=discord.Color.blurple())
+    embed = discord.Embed(title="📅 Anime Airing Schedule", description=description, color=discord.Color.blurple())
     if not visible:
         embed.description = "No matching expected airing events were returned by AniList for these filters."
     for entry in visible:
@@ -118,7 +118,7 @@ def schedule_embed(entries: list[dict], title_filter: str | None, page: int) -> 
         image = (media.get("coverImage") or {}).get("large")
         if image and not embed.thumbnail:
             embed.set_thumbnail(url=image)
-    embed.set_footer(text=f"Page {page + 1} · Source: AniList. Expected times can change and are not guarantees.")
+    embed.set_footer(text=f"🕒 Times in UTC · Source: AniList · Page {page + 1} · Schedule may change")
     return embed
 
 class AiringView(discord.ui.View):
@@ -138,21 +138,21 @@ class AiringView(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="◀ Previous", style=discord.ButtonStyle.secondary)
     async def previous(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         self.page = max(0, self.page - 1)
         self.previous.disabled = self.page == 0
         self.next.disabled = (self.page + 1) * 5 >= len(self.entries)
         await interaction.response.edit_message(embed=schedule_embed(self.entries, self.filters.get("title"), self.page), view=self)
 
-    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.secondary)
     async def next(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         self.page = min(max(0, (len(self.entries) - 1) // 5), self.page + 1)
         self.previous.disabled = self.page == 0
         self.next.disabled = (self.page + 1) * 5 >= len(self.entries)
         await interaction.response.edit_message(embed=schedule_embed(self.entries, self.filters.get("title"), self.page), view=self)
 
-    @discord.ui.button(label="Refresh", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="🔄 Refresh", style=discord.ButtonStyle.primary)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await interaction.response.defer()
         self.entries = await self.cog.fetch_schedule(**self.filters)
@@ -253,7 +253,7 @@ class Airing(commands.Cog):
         }
         entries = await self.fetch_schedule(**filters)
         if not entries:
-            await interaction.followup.send("AniList returned no expected airing times for these filters, or the schedule service is unavailable. This does not mean the title is cancelled or not airing.", ephemeral=True)
+            await interaction.followup.send("📭 **No upcoming episodes found** for these filters, or AniList is temporarily unavailable. This does not mean the title is cancelled.", ephemeral=True)
             return
         await interaction.followup.send(
             embed=schedule_embed(entries, title, 0),

@@ -14,9 +14,9 @@ def relation_embed(media: dict, page: int = 0) -> discord.Embed:
     relations = ((media.get("relations") or {}).get("edges") or [])
     title = media_title(media)
     embed = discord.Embed(
-        title=f"Franchise · {title}"[:256],
+        title=f"🧬 Franchise · {title}"[:256],
         url=media.get("siteUrl"),
-        description="Relationships below use AniList's relationship labels. They do not define one canonical viewing or reading order.",
+        description="Explore source material, sequels, prequels, spin-offs, and adaptations using **AniList's own relationship labels**. No single viewing or reading order is implied.",
         color=discord.Color.blurple(),
     )
     cover = (media.get("coverImage") or {}).get("large")
@@ -38,11 +38,11 @@ def relation_embed(media: dict, page: int = 0) -> discord.Embed:
         status = node.get("status") or "Status unavailable"
         lines.append(f"**{str(edge.get('relationType') or 'RELATED').replace('_', ' ').title()}** · {kind} · {status}\n{linked_title}")
     embed.add_field(
-        name=f"Related entries ({start + 1}–{start + len(visible)} of {len(relations)})",
+        name=f"🔗 Related entries ({start + 1}–{start + len(visible)} of {len(relations)})",
         value="\n\n".join(lines)[:3900],
         inline=False,
     )
-    embed.set_footer(text=f"AniList relationship metadata · Page {page + 1}/{max(1, (len(relations) - 1) // page_size + 1)}")
+    embed.set_footer(text=f"📚 Source: AniList relationships · Page {page + 1}/{max(1, (len(relations) - 1) // page_size + 1)}")
     return embed
 
 class RelationView(discord.ui.View):
@@ -61,14 +61,14 @@ class RelationView(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="◀ Previous", style=discord.ButtonStyle.secondary)
     async def previous(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         self.page = max(0, self.page - 1)
         self.previous.disabled = self.page == 0
         self.next.disabled = self.page >= self.max_page
         await interaction.response.edit_message(embed=relation_embed(self.media, self.page), view=self)
 
-    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.secondary)
     async def next(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         self.page = min(self.max_page, self.page + 1)
         self.previous.disabled = self.page == 0
@@ -87,7 +87,7 @@ class FranchiseSelect(discord.ui.Select):
             )
             for item in results[:25] if item.get("id")
         ]
-        super().__init__(placeholder="Select the intended title", options=options, min_values=1, max_values=1)
+        super().__init__(placeholder="🔎 Choose the intended title", options=options, min_values=1, max_values=1)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         view = self.owner_view
@@ -136,7 +136,7 @@ class Franchise(commands.Cog):
             return
         view = FranchiseSearchView(interaction.user.id, category, results)
         await interaction.followup.send(
-            "Select the exact title to inspect provider-supplied relationships. Similar names alone are not treated as franchise links.",
+            "🧬 **Choose the exact title** to explore its provider-supplied relationships. Similar names alone are not treated as franchise links.",
             view=view, ephemeral=True,
         )
 
