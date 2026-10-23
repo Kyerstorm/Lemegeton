@@ -20,7 +20,8 @@ psutil==6.1.0
 # Dependencies (automatically installed with above packages)
 aiohappyeyeballs==2.6.1
 aiosignal==1.4.0
-anyio==4.10.0
+# scrapling[fetchers] needs anyio>=4.14
+anyio>=4.14.0,<5
 attrs==25.3.0
 frozenlist==1.7.0
 idna==3.10
