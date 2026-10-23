@@ -76,14 +76,14 @@ class BotModeratorsMainView(discord.ui.View):
                     "Bot Moderators",
                     "There are currently no bot moderators configured.\n\nUse the **Add Moderator** button to add bot moderators."
                 )
-                embed.set_footer(text="Bot moderators can publish changelogs and manage bot-wide settings")
+                embed.set_footer(text="Bot moderators can publish GitHub updates and manage bot-wide settings")
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 logger.info(f"Displayed empty bot moderators list to {interaction.user.id}")
                 return
             
             embed = discord.Embed(
                 title="👑 Bot Moderators",
-                description="Users who can perform bot-wide actions (changelog publishing, bot management, etc.)",
+                description="Users who can perform bot-wide actions (GitHub update publishing, bot management, etc.)",
                 color=PALETTE.PRIMARY
             )
             
@@ -110,7 +110,7 @@ class BotModeratorsMainView(discord.ui.View):
                 inline=False
             )
             
-            embed.set_footer(text="Bot moderators can publish changelogs and manage bot-wide settings")
+            embed.set_footer(text="Bot moderators can publish GitHub updates and manage bot-wide settings")
             
             await interaction.followup.send(embed=embed, ephemeral=True)
             logger.info(f"Displayed {len(moderators)} bot moderators to {interaction.user.id}")
@@ -167,7 +167,7 @@ class BotModeratorsMainView(discord.ui.View):
         embed.add_field(
             name="🔑 Permissions",
             value=(
-                "• **Changelog Publishing** - Post update announcements to all servers\n"
+                "• **GitHub Updates** - Post commit updates to all servers with `/github`\n"
                 "• **Bot-Wide Management** - Configure bot settings across all guilds\n"
                 "• **Moderator Management** - Add or remove other bot moderators\n"
                 "• **View Moderator List** - See all users with elevated permissions"
@@ -269,7 +269,7 @@ class AddBotModeratorModal(discord.ui.Modal):
                 )
                 embed.add_field(
                     name="🔑 Granted Permissions",
-                    value="• Changelog publishing\n• Bot-wide management\n• Moderator management",
+                    value="• GitHub update publishing\n• Bot-wide management\n• Moderator management",
                     inline=False
                 )
                 embed.set_footer(text=f"Added by {interaction.user.display_name}")
@@ -341,7 +341,7 @@ class RemoveBotModeratorModal(discord.ui.Modal):
                 )
                 embed.add_field(
                     name="🚫 Revoked Permissions",
-                    value="• Changelog publishing\n• Bot-wide management\n• Moderator management",
+                    value="• GitHub update publishing\n• Bot-wide management\n• Moderator management",
                     inline=False
                 )
                 embed.set_footer(text=f"Removed by {interaction.user.display_name}")
@@ -396,7 +396,7 @@ class BotModerators(commands.Cog):
             embed.add_field(
                 name="🔑 What Bot Moderators Can Do",
                 value=(
-                    "• **Publish Changelogs** to all configured servers\n"
+                    "• **Publish GitHub Updates** to all configured servers\n"
                     "• **Manage Bot-Wide Settings** across all guilds\n"
                     "• **Add/Remove Bot Moderators** (moderator management)\n"
                     "• **View Bot Moderator List** and audit logs"

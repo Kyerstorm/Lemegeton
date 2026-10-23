@@ -68,7 +68,7 @@ class ServerConfigMainView(discord.ui.View):
                 if channel:
                     embed = build_success_embed(
                         title="Bot Updates Channel",
-                        description="Configure where changelog and update notifications are posted."
+                        description="Configure where GitHub commit and update notifications are posted."
                     )
                     embed.add_field(
                         name="📊 Current Configuration",
@@ -78,7 +78,7 @@ class ServerConfigMainView(discord.ui.View):
                 else:
                     embed = build_warning_embed(
                         title="Bot Updates Channel",
-                        description="Configure where changelog and update notifications are posted."
+                        description="Configure where GitHub commit and update notifications are posted."
                     )
                     embed.add_field(
                         name="⚠️ Configuration Issue",
@@ -88,7 +88,7 @@ class ServerConfigMainView(discord.ui.View):
             else:
                 embed = build_info_embed(
                     title="Bot Updates Channel",
-                    description="Configure where changelog and update notifications are posted."
+                    description="Configure where GitHub commit and update notifications are posted."
                 )
                 embed.add_field(
                     name="📝 No Channel Configured",
@@ -98,7 +98,7 @@ class ServerConfigMainView(discord.ui.View):
             
             embed.add_field(
                 name="ℹ️ About Update Notifications",
-                value="When configured, bot moderators can send changelog updates to this channel using `/changelog`.",
+                value="When configured, new commits are posted here automatically by the GitHub commit tracker (`/github`).",
                 inline=False
             )
             
@@ -404,7 +404,7 @@ class SetBotUpdatesChannelModal(discord.ui.Modal):
             
             embed = build_success_embed(
                 title="Bot Updates Channel Set",
-                description=f"**Channel:** {channel.mention}\n\nChangelog updates will be posted to this channel."
+                description=f"**Channel:** {channel.mention}\n\nGitHub commit updates will be posted to this channel."
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
             logger.info(f"Bot updates channel set for guild {interaction.guild.id}: #{channel.name} ({channel.id})")
@@ -576,7 +576,7 @@ class ServerConfig(commands.Cog):
             
             embed.add_field(
                 name=" Bot Updates Channel",
-                value="Set where changelog updates are posted",
+                value="Set where GitHub commit updates are posted",
                 inline=True
             )
             

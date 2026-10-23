@@ -233,11 +233,11 @@ class HelpCog(commands.Cog):
                     "note": "Add/remove bot moderators with elevated permissions. Bot Moderator only.",
                     "examples": ["/admin-moderator-manage"]
                 },
-                "changelog": {
-                    "desc": "Create and publish a changelog from text or file (Bot Moderator only)",
-                    "usage": "/changelog [text] [file]",
-                    "note": "Publish formatted changelogs with customizable appearance and notifications. Use text OR upload a file.",
-                    "examples": ["/changelog", "/changelog text:New features added"]
+                "github": {
+                    "desc": "GitHub commit tracker - new commits are posted to bot update channels automatically (Bot Moderator only)",
+                    "usage": "/github recent [count] [publish_to] | /github status | /github check",
+                    "note": "Commits are checked every few minutes and posted to every configured bot updates channel. Use `recent` to preview or re-post the latest commits, `check` to poll immediately.",
+                    "examples": ["/github recent", "/github recent count:10 publish_to:All Servers", "/github status", "/github check"]
                 },
                 "set_bot_updates_channel": {
                     "desc": "Set channel to receive bot updates and announcements (Admin only)",
@@ -732,7 +732,7 @@ class HelpCog(commands.Cog):
             "admin": (
                 "• Bot moderators have bot-wide permissions\n"
                 "• Manage bot moderators with `/admin-moderator-manage`\n"
-                "• Publish changelogs with `/changelog`\n"
+                "• Track GitHub commits with `/github`\n"
                 "• Configure bot update channels\n"
                 "• All admin commands require Bot Moderator or Admin permissions"
             ),

@@ -137,7 +137,7 @@ A production-ready Discord bot that combines anime/manga tracking with AI-powere
 ### 👑 Admin Features
 
 - **Bot Moderator System** - Global permissions management
-- **Changelog Publishing** - Create and publish changelogs
+- **GitHub Commit Tracker** - New commits are posted to bot update channels automatically
 - **Command Enable/Disable** - Per-server command management via dashboard
 - **Audit Logging** - Git-style history of all configuration changes
 - **User Cleanup** - Maintenance tools for inactive users
@@ -308,7 +308,7 @@ STEAM_API_KEY=your_steam_api_key_here
 ### 👑 Admin (3 commands)
 
 - `/bot-moderators` - Manage bot moderators (Bot Moderator)
-- `/changelog` - Create and publish changelogs (Bot Moderator)
+- `/github recent|status|check` - GitHub commit tracker (Bot Moderator)
 - `/set-bot-updates-channel` - Configure bot update notifications (Admin)
 
 ---
@@ -480,7 +480,7 @@ Lemegeton/
 │
 ├── cogs/                           # Command modules (44+ commands)
 │   ├── account/                    # Login, profile, admin login
-│   ├── admin/                      # Bot moderators, changelog, user cleanup
+│   ├── admin/                      # Bot moderators, GitHub tracker, user cleanup
 │   ├── customization/              # Themes, Custom Roles
 │   ├── gaming/                     # Steam integration, free games
 │   ├── media/                      # Browse, recommendations, trending, news

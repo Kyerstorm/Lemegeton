@@ -149,6 +149,20 @@ IGDB_CLIENT_SECRET = os.getenv("IGDB_CLIENT_SECRET")
 TWITCH_STREAMING_URL = os.getenv("TWITCH_STREAMING_URL", "https://www.twitch.tv/owobotplays")
 
 # ==============================================================================
+# GITHUB COMMIT TRACKER
+# ==============================================================================
+
+# Repository and branch whose commits are posted to bot-update channels
+GITHUB_REPO = os.getenv("GITHUB_REPO", "Kyerstorm/Lemegeton")
+GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "multi_guild")
+
+# Optional token: raises the API rate limit and allows private repositories
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN") or None
+
+# How often to check for new commits
+GITHUB_POLL_MINUTES = max(1, _int_env("GITHUB_POLL_MINUTES", 10))
+
+# ==============================================================================
 # AI/LLM CONFIGURATION
 # ==============================================================================
 
