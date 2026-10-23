@@ -25,6 +25,7 @@ jobs:
         run: |
           python - <<'PY'
           import ast
+          import logging
           from pathlib import Path
           from typing import Dict, List
           from urllib.parse import quote_plus, urljoin
@@ -47,6 +48,7 @@ jobs:
               "Driver": Driver,
               "Wait": Wait,
               "urljoin": urljoin,
+              "logger": logging.getLogger("scraper-verification"),
           }
           exec(compile(ast.Module(body=[helper], type_ignores=[]), str(source_path), "exec"), namespace)
           results = namespace["scrape_novelupdates"]({"query": "Lord of the Mysteries"}, output=None)
