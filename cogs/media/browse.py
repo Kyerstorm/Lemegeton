@@ -6,6 +6,8 @@ import aiohttp
 import asyncio
 import logging
 from typing import List, Dict, Optional, Tuple
+from urllib.parse import quote_plus, urljoin
+from botasaurus.browser import browser as botasaurus_browser, Driver, Wait
 from discord.ui import View, Button
 from database import get_all_users_guild_aware
 from helpers.embed_helper import build_error_embed, build_info_embed
@@ -15,6 +17,55 @@ from cogs_test.general_commands.dashboard import command_meta
 logger = logging.getLogger("BrowseCog")
 GOOGLE_BOOKS_URL = "https://www.googleapis.com/books/v1/volumes?q="
 
+
+@botasaurus_browser(
+    headless=True,
+    max_retry=1,
+    retry_wait=1,
+    create_error_logs=False,
+    raise_exception=True,
+    close_on_crash=True,
+)
+def scrape_novelupdates(driver: Driver, data: Dict) -> List[Dict]:
+    """Search Novel Updates in a browser and return matching series."""
+    query = data["query"]
+    url = (
+        "https://www.novelupdates.com/series-finder/"
+        f"?sf=1&sh={quote_plus(query)}&sort=sdate&order=desc"
+    )
+    driver.get(url)
+    result_cards = driver.select_all(".search_main_box_nu", wait=Wait.LONG)
+    if not result_cards:
+        logger.warning(
+            "Novel Updates returned no series cards for query %r. Page text: %s",
+            query,
+            (driver.get_text("body") or "")[:300],
+        )
+        return []
+
+    novels = []
+    for result in result_cards[:10]:
+        title_link = result.select(".search_title a", wait=None)
+        if not title_link:
+            continue
+
+        description_node = result.select(".search_body", wait=None)
+        image_node = result.select("img", wait=None)
+        rating_node = result.select(".search_ratings", wait=None)
+        novels.append({
+            "title": title_link.text.strip(),
+            "url": urljoin("https://www.novelupdates.com", title_link.get_attribute("href") or ""),
+            "description": description_node.text.strip() if description_node else None,
+            "image": (image_node.get_attribute("src") or image_node.get_attribute("data-src")) if image_node else None,
+            "rating": rating_node.text.strip() if rating_node else None,
+            "genres": [
+                node.text.strip()
+                for node in result.select_all(".search_genre a", wait=None)
+                if node.text.strip()
+            ],
+        })
+
+    return novels
 # Status order priority
 STATUS_ORDER = {
     "REPEATING": 0,
@@ -240,7 +291,7 @@ class BrowseCog(commands.Cog):
     # --------------------------------------------------
     @app_commands.command(
         name="browse",
-        description="Search Anime, Manga, Light Novels and General Novels"
+        description="Search Anime, Manga, Light Novels, General Novels and Webnovels"
     )
     @command_meta(section="Media", name="Browse")
     @app_commands.describe(
@@ -252,12 +303,47 @@ class BrowseCog(commands.Cog):
         app_commands.Choice(name="Manga", value="MANGA"),
         app_commands.Choice(name="Light Novel", value="MANGA_NOVEL"),
         app_commands.Choice(name="General Novel", value="BOOK"),
+        app_commands.Choice(name="Webnovels", value="WEBNOVEL"),
     ])
     async def search(self, interaction: discord.Interaction, media_type: app_commands.Choice[str], title: str):
         await interaction.response.defer()
 
         chosen_type = media_type.value
         real_type = "MANGA" if chosen_type == "MANGA_NOVEL" else chosen_type
+
+        if chosen_type == "WEBNOVEL":
+            try:
+                results = await asyncio.to_thread(
+                    scrape_novelupdates, {"query": title}, output=None
+                )
+            except Exception as e:
+                logger.warning("Novel Updates search failed for %r: %s", title, e, exc_info=True)
+                results = []
+
+            if not results:
+                embed = build_error_embed("No Results Found", "No webnovel results found on Novel Updates.")
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
+
+            novel = results[0]
+            description = novel.get("description") or "No description available."
+            description = description[:400] + "..." if len(description) > 400 else description
+            embed = discord.Embed(
+                title=f"📚 {novel['title']}",
+                url=novel.get("url"),
+                description=description,
+                color=PALETTE.PRIMARY,
+            )
+            if novel.get("image"):
+                embed.set_thumbnail(url=novel["image"])
+            if novel.get("rating"):
+                embed.add_field(name="⭐ Rating", value=novel["rating"], inline=True)
+            if novel.get("genres"):
+                genres = ", ".join(novel["genres"])
+                embed.add_field(name="🎭 Genres", value=genres[:1024], inline=False)
+            embed.set_footer(text="Fetched from Novel Updates")
+            await interaction.followup.send(embed=embed)
+            return
 
         if chosen_type == "BOOK":
             # 📚 Google Books Fetch
@@ -683,7 +769,19 @@ class BrowseCog(commands.Cog):
         media_type = getattr(interaction.namespace, "media_type", None)
         choices = []
 
-        if media_type == "BOOK":
+        if media_type == "WEBNOVEL":
+            try:
+                results = await asyncio.to_thread(
+                    scrape_novelupdates, {"query": current}, output=None
+                )
+            except Exception as e:
+                logger.debug("Novel Updates autocomplete failed: %s", e)
+                return []
+            for novel in results[:10]:
+                title = (novel.get("title") or "").strip()
+                if title:
+                    choices.append(app_commands.Choice(name=title[:100], value=title[:100]))
+        elif media_type == "BOOK":
             async with aiohttp.ClientSession() as session:
                 async with session.get(GOOGLE_BOOKS_URL + current) as response:
                     if response.status != 200:
