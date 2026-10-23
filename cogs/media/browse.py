@@ -126,6 +126,8 @@ class BrowseCog(commands.Cog):
 
         normalized_results = []
         for result in data if isinstance(data, list) else []:
+            if not isinstance(result, dict):
+                continue
             title = (result.get("title") or result.get("name") or "").strip()
             if not title:
                 continue
@@ -515,7 +517,7 @@ class BrowseCog(commands.Cog):
 
             def add_tmdb_field(label: str, value: Optional[str], inline: bool = True) -> None:
                 if value:
-                    embed.add_field(name=label, value=str(value)[:250], inline=inline)
+                    embed.add_field(name=label, value=str(value)[:200], inline=inline)
 
             genres = ", ".join(g.get("name", "") for g in media.get("genres", []) if g.get("name"))
             add_tmdb_field("🎭 Genres", genres)
