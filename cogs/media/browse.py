@@ -5,6 +5,7 @@ from discord import app_commands
 import aiohttp
 import asyncio
 import logging
+import os
 from typing import List, Dict, Optional, Tuple
 from bs4 import BeautifulSoup
 from urllib.parse import quote_plus, urljoin
@@ -17,6 +18,9 @@ from cogs_test.general_commands.dashboard import command_meta
 
 logger = logging.getLogger("BrowseCog")
 GOOGLE_BOOKS_URL = "https://www.googleapis.com/books/v1/volumes"
+GOODREADS_AUTOCOMPLETE_URL = "https://www.goodreads.com/book/auto_complete"
+TMDB_API_BASE_URL = "https://api.themoviedb.org/3"
+TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p"
 
 
 @botasaurus_browser(
@@ -99,43 +103,149 @@ class BrowseCog(commands.Cog):
                 return True
         return False
 
+    async def fetch_goodreads_results(self, query: str) -> List[Dict]:
+        """Use Goodreads' public autocomplete endpoint as a best-effort book fallback."""
+        params = {"format": "json", "q": query}
+        headers = {"User-Agent": "Lemegeton Discord bot (book metadata lookup)"}
+        try:
+            timeout = aiohttp.ClientTimeout(total=8)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(
+                    GOODREADS_AUTOCOMPLETE_URL, params=params, headers=headers
+                ) as response:
+                    if response.status != 200:
+                        logger.warning("Goodreads fallback returned HTTP %s for %r", response.status, query)
+                        return []
+                    data = await response.json(content_type=None)
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
+            logger.warning("Goodreads fallback failed for %r: %s", query, exc)
+            return []
+
+        if isinstance(data, dict):
+            data = data.get("results") or data.get("books") or []
+
+        normalized_results = []
+        for result in data if isinstance(data, list) else []:
+            title = (result.get("title") or result.get("name") or "").strip()
+            if not title:
+                continue
+            author = result.get("author") or result.get("author_name") or ""
+            authors = author if isinstance(author, list) else ([author] if author else [])
+            image = (
+                result.get("imageUrl") or result.get("image_url")
+                or result.get("image") or result.get("smallImageUrl")
+            )
+            link = result.get("url") or result.get("book_url") or ""
+            if link:
+                link = urljoin("https://www.goodreads.com", link)
+
+            info = {
+                "title": title,
+                "authors": authors,
+                "description": result.get("description") or "",
+                "infoLink": link or "https://www.goodreads.com",
+                "averageRating": result.get("averageRating") or result.get("average_rating"),
+                "pageCount": result.get("num_pages") or result.get("pageCount"),
+                "publishedDate": result.get("publication_year") or result.get("publishedDate"),
+                "source": "Goodreads",
+            }
+            if image:
+                info["imageLinks"] = {"thumbnail": image}
+            normalized_results.append({"volumeInfo": info})
+        return normalized_results[:10]
+
     async def fetch_book_results(self, query: str, book_type: str) -> List[Dict]:
-        """Search Google Books and separate fiction from non-fiction by category metadata."""
+        """Search Google Books first, then fall back to Goodreads if no suitable match exists."""
         params = {
             "q": query,
             "printType": "books",
             "maxResults": 40,
             "orderBy": "relevance",
         }
-
+        filtered_items = []
         try:
             timeout = aiohttp.ClientTimeout(total=8)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(GOOGLE_BOOKS_URL, params=params) as response:
-                    if response.status != 200:
+                    if response.status == 200:
+                        data = await response.json()
+                        for item in data.get("items", []) or []:
+                            book = item.get("volumeInfo") or {}
+                            categories = book.get("categories") or []
+                            is_fiction = self._is_fiction_book(book)
+                            if book_type == "fiction" and is_fiction:
+                                filtered_items.append(item)
+                            elif book_type == "nonfiction" and categories and not is_fiction:
+                                filtered_items.append(item)
+                    else:
                         logger.warning(
                             "Google Books returned HTTP %s for %s query %r",
                             response.status, book_type, query,
                         )
-                        return []
-                    data = await response.json()
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
             logger.warning("Google Books %s search failed for %r: %s", book_type, query, exc)
+
+        if filtered_items:
+            return filtered_items[:10]
+        logger.info("No suitable Google Books result for %r; trying Goodreads", query)
+        return await self.fetch_goodreads_results(query)
+
+    async def search_tmdb_titles(self, query: str, media_type: str) -> List[Dict]:
+        """Search TMDB for movies or TV shows using the configured read-access token."""
+        token = os.getenv("TMDB_BEARER_TOKEN", "").strip()
+        if not token:
+            return []
+        endpoint = "movie" if media_type == "MOVIE" else "tv"
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        params = {"query": query, "include_adult": "false", "language": "en-US", "page": 1}
+        try:
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(
+                    f"{TMDB_API_BASE_URL}/search/{endpoint}", params=params, headers=headers
+                ) as response:
+                    if response.status != 200:
+                        logger.warning("TMDB %s search returned HTTP %s", endpoint, response.status)
+                        return []
+                    data = await response.json()
+                    return data.get("results", [])[:10]
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
+            logger.warning("TMDB %s search failed for %r: %s", endpoint, query, exc)
             return []
 
-        items = data.get("items", []) or []
-        filtered_items = []
-        for item in items:
-            book = item.get("volumeInfo") or {}
-            categories = book.get("categories") or []
-            is_fiction = self._is_fiction_book(book)
+    async def fetch_tmdb_media(self, query: str, media_type: str) -> Optional[Dict]:
+        """Fetch a matching TMDB title and detailed metadata."""
+        token = os.getenv("TMDB_BEARER_TOKEN", "").strip()
+        if not token:
+            return None
+        endpoint = "movie" if media_type == "MOVIE" else "tv"
+        results = await self.search_tmdb_titles(query, media_type)
+        if not results:
+            return None
+        append_fields = (
+            "credits,videos,keywords,release_dates,external_ids,images,recommendations"
+            if media_type == "MOVIE"
+            else "aggregate_credits,videos,keywords,content_ratings,external_ids,images,recommendations"
+        )
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        params = {"append_to_response": append_fields, "language": "en-US"}
+        try:
+            timeout = aiohttp.ClientTimeout(total=12)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(
+                    f"{TMDB_API_BASE_URL}/{endpoint}/{results[0]['id']}",
+                    params=params, headers=headers,
+                ) as response:
+                    if response.status != 200:
+                        logger.warning("TMDB %s details returned HTTP %s", endpoint, response.status)
+                        return None
+                    details = await response.json()
+                    details["_media_type"] = media_type
+                    return details
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError) as exc:
+            logger.warning("TMDB %s details failed for %r: %s", endpoint, query, exc)
+            return None
 
-            if book_type == "fiction" and is_fiction:
-                filtered_items.append(item)
-            elif book_type == "nonfiction" and categories and not is_fiction:
-                filtered_items.append(item)
-
-        return filtered_items[:10]
 
     # --------------------------------------------------
     # Fetch Media Info (Anime, Manga, LN)
@@ -346,7 +456,7 @@ class BrowseCog(commands.Cog):
     # --------------------------------------------------
     @app_commands.command(
         name="browse",
-        description="Search Anime, Manga, Light Novels, General Novels, Books and Webnovels"
+        description="Search Anime, Manga, Light Novels, General Novels, Books, Movies, TV Shows and Webnovels"
     )
     @command_meta(section="Media", name="Browse")
     @app_commands.describe(
@@ -359,6 +469,8 @@ class BrowseCog(commands.Cog):
         app_commands.Choice(name="Light Novel", value="MANGA_NOVEL"),
         app_commands.Choice(name="General Novels", value="GENERAL_NOVEL"),
         app_commands.Choice(name="Books", value="BOOKS"),
+        app_commands.Choice(name="Movies", value="MOVIE"),
+        app_commands.Choice(name="TV Shows", value="TV"),
         app_commands.Choice(name="Webnovels", value="WEBNOVEL"),
     ])
     async def search(self, interaction: discord.Interaction, media_type: app_commands.Choice[str], title: str):
@@ -366,6 +478,120 @@ class BrowseCog(commands.Cog):
 
         chosen_type = media_type.value
         real_type = "MANGA" if chosen_type == "MANGA_NOVEL" else chosen_type
+
+        if chosen_type in ("MOVIE", "TV"):
+            if not os.getenv("TMDB_BEARER_TOKEN", "").strip():
+                embed = build_error_embed(
+                    "TMDB Setup Required",
+                    "Movies and TV metadata require a TMDB API read-access token. Set TMDB_BEARER_TOKEN in your bot environment.",
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
+
+            media = await self.fetch_tmdb_media(title, chosen_type)
+            if not media:
+                label = "movie" if chosen_type == "MOVIE" else "TV show"
+                embed = build_error_embed("No Results Found", f"No {label} found matching {title!r}.")
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
+
+            is_movie = chosen_type == "MOVIE"
+            name = media.get("title") if is_movie else media.get("name")
+            year_source = media.get("release_date") if is_movie else media.get("first_air_date")
+            year = year_source[:4] if year_source else "Year unknown"
+            overview = media.get("overview") or "No overview is available."
+            if len(overview) > 900:
+                overview = overview[:897].rstrip() + "..."
+
+            tmdb_url = f"https://www.themoviedb.org/{'movie' if is_movie else 'tv'}/{media['id']}"
+            embed = discord.Embed(
+                title=f"{'🎬' if is_movie else '📺'} {name or 'Unknown title'} ({year})"[:256],
+                url=tmdb_url, description=overview, color=PALETTE.PRIMARY,
+            )
+            if media.get("poster_path"):
+                embed.set_thumbnail(url=f"{TMDB_IMAGE_BASE_URL}/w500{media['poster_path']}")
+            if media.get("backdrop_path"):
+                embed.set_image(url=f"{TMDB_IMAGE_BASE_URL}/w780{media['backdrop_path']}")
+
+            def add_tmdb_field(label: str, value: Optional[str], inline: bool = True) -> None:
+                if value:
+                    embed.add_field(name=label, value=str(value)[:900], inline=inline)
+
+            genres = ", ".join(g.get("name", "") for g in media.get("genres", []) if g.get("name"))
+            add_tmdb_field("🎭 Genres", genres)
+            if media.get("vote_average") is not None:
+                add_tmdb_field("⭐ TMDB Rating", f"{media['vote_average']:.1f}/10 · {media.get('vote_count', 0):,} votes")
+            add_tmdb_field("📌 Status", media.get("status"))
+            add_tmdb_field("🌐 Original Language", media.get("original_language"))
+
+            if is_movie:
+                add_tmdb_field("📅 Release Date", media.get("release_date"))
+                runtime = media.get("runtime")
+                add_tmdb_field("⏱️ Runtime", f"{runtime} min" if runtime else None)
+                add_tmdb_field("💬 Tagline", media.get("tagline"), inline=False)
+                credits = media.get("credits") or {}
+                crew = credits.get("crew") or []
+                directors = ", ".join(p.get("name", "") for p in crew if p.get("job") == "Director")
+                writers = ", ".join(p.get("name", "") for p in crew if p.get("job") in ("Writer", "Screenplay"))
+                add_tmdb_field("🎥 Director", directors)
+                add_tmdb_field("✍️ Writer(s)", writers)
+                production = ", ".join(c.get("name", "") for c in media.get("production_companies", []) if c.get("name"))
+                add_tmdb_field("🏢 Production", production, inline=False)
+                countries = ", ".join(c.get("name", "") for c in media.get("production_countries", []) if c.get("name"))
+                add_tmdb_field("🌍 Countries", countries)
+                if media.get("budget"):
+                    add_tmdb_field("💰 Budget", f"USD {media['budget']:,}")
+                if media.get("revenue"):
+                    add_tmdb_field("🎟️ Revenue", f"USD {media['revenue']:,}")
+                keyword_data = (media.get("keywords") or {}).get("keywords") or []
+                release_dates = (media.get("release_dates") or {}).get("results") or []
+                certification = next(
+                    (r.get("certification") for c in release_dates if c.get("iso_3166_1") == "US"
+                     for r in c.get("release_dates", []) if r.get("certification")), None
+                )
+                add_tmdb_field("🔞 US Certification", certification)
+            else:
+                add_tmdb_field("📅 First Air Date", media.get("first_air_date"))
+                add_tmdb_field("📅 Last Air Date", media.get("last_air_date"))
+                add_tmdb_field("📺 Seasons / Episodes", f"{media.get('number_of_seasons', '?')} / {media.get('number_of_episodes', '?')}")
+                runtimes = media.get("episode_run_time") or []
+                runtime_text = f"{min(runtimes)}–{max(runtimes)} min" if len(runtimes) > 1 else (f"{runtimes[0]} min" if runtimes else None)
+                add_tmdb_field("⏱️ Episode Runtime", runtime_text)
+                creators = ", ".join(p.get("name", "") for p in media.get("created_by", []) if p.get("name"))
+                add_tmdb_field("✍️ Created By", creators)
+                networks = ", ".join(n.get("name", "") for n in media.get("networks", []) if n.get("name"))
+                add_tmdb_field("📡 Networks", networks, inline=False)
+                credits = media.get("aggregate_credits") or media.get("credits") or {}
+                keyword_data = (media.get("keywords") or {}).get("results") or []
+                ratings = (media.get("content_ratings") or {}).get("results") or []
+                certification = next((r.get("rating") for r in ratings if r.get("iso_3166_1") == "US" and r.get("rating")), None)
+                add_tmdb_field("🔞 US Content Rating", certification)
+
+            cast = credits.get("cast") or []
+            cast_names = []
+            for person in cast[:6]:
+                character = person.get("character") or ", ".join(
+                    role.get("character", "") for role in person.get("roles", []) if role.get("character")
+                )
+                cast_names.append(f"{person.get('name', 'Unknown')}{f' as {character}' if character else ''}")
+            add_tmdb_field("🎭 Cast", ", ".join(cast_names), inline=False)
+
+            keywords = ", ".join(k.get("name", "") for k in keyword_data if k.get("name"))
+            add_tmdb_field("🔎 Keywords", keywords, inline=False)
+            imdb_id = (media.get("external_ids") or {}).get("imdb_id")
+            add_tmdb_field("🔗 IMDb", f"https://www.imdb.com/title/{imdb_id}/" if imdb_id else None, inline=False)
+
+            videos = (media.get("videos") or {}).get("results") or []
+            trailer = next((v for v in videos if v.get("site") == "YouTube" and v.get("type") == "Trailer"), None)
+            if trailer and trailer.get("key"):
+                add_tmdb_field("▶️ Trailer", f"https://www.youtube.com/watch?v={trailer['key']}", inline=False)
+
+            recommendations = (media.get("recommendations") or {}).get("results") or []
+            similar = [item.get("title") or item.get("name") for item in recommendations[:5] if item.get("title") or item.get("name")]
+            add_tmdb_field("✨ Similar", ", ".join(similar), inline=False)
+            embed.set_footer(text="Metadata from TMDB • Movie" if is_movie else "Metadata from TMDB • TV series")
+            await interaction.followup.send(embed=embed)
+            return
 
         if chosen_type == "WEBNOVEL":
             try:
@@ -456,9 +682,10 @@ class BrowseCog(commands.Cog):
                     inline=False,
                 )
 
+            source_name = book.get("source") or "Google Books"
             embed.set_footer(
-                text="Google Books • General fiction" if book_type == "fiction"
-                else "Google Books • Non-fiction search"
+                text=f"{source_name} • General fiction" if book_type == "fiction"
+                else f"{source_name} • Non-fiction search"
             )
             await interaction.followup.send(embed=embed)
             return
@@ -853,6 +1080,15 @@ class BrowseCog(commands.Cog):
                 title = (novel.get("title") or "").strip()
                 if title:
                     choices.append(app_commands.Choice(name=title[:100], value=title[:100]))
+        elif media_type in ("MOVIE", "TV"):
+            results = await self.search_tmdb_titles(current, media_type)
+            for item in results[:10]:
+                title = (item.get("title") if media_type == "MOVIE" else item.get("name")) or ""
+                title = title.strip()
+                if title:
+                    year_source = item.get("release_date") if media_type == "MOVIE" else item.get("first_air_date")
+                    year = f" ({year_source[:4]})" if year_source else ""
+                    choices.append(app_commands.Choice(name=f"{title}{year}"[:100], value=title[:100]))
         elif media_type in ("GENERAL_NOVEL", "BOOKS"):
             book_type = "fiction" if media_type == "GENERAL_NOVEL" else "nonfiction"
             results = await self.fetch_book_results(current, book_type)
