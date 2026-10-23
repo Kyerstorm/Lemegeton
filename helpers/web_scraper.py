@@ -23,7 +23,7 @@ Examples:
     pages = await crawl_public_site(["https://example.com"], max_pages=25)
 
     # Scrapy CLI crawl
-    scrapy runspider helpers/web_scraper.py -a urls=https://example.com \\
+    scrapy runspider helpers/web_scraper.py -a urls=https://example.com \
         -a max_pages=25 -O pages.jsonl
 """
 
@@ -542,6 +542,7 @@ async def crawl_public_site(
     spider.concurrent_requests_per_domain = 1
     spider.download_delay = max(0.5, min(float(delay), 30.0))
     spider.autothrottle_enabled = True
+    spider.max_blocked_retries = 0
     spider._scheduled_urls = set(seeds)
 
     results: List[Dict[str, Any]] = []
@@ -629,7 +630,9 @@ class PublicPageSpider(scrapy.Spider):
         else:
             self.allowed_domains = sorted(_normalize_domains(self.start_urls, None))
 
-    def start_requests(self):
+    async def start(self):
+        # Scrapy 2.13+ supports async start generators; keep requests in the same
+        # callback/error-handling path as discovered links.
         for url in self.start_urls:
             yield scrapy.Request(url, callback=self.parse, errback=self.handle_request_failure)
 
