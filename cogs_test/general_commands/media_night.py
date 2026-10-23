@@ -1,0 +1,331 @@
+"""Persistent, guild/channel-scoped media-night voting for AniList anime and manga."""
+from __future__ import annotations
+import asyncio
+import json
+import logging
+import secrets
+from datetime import datetime, timedelta, timezone
+import aiohttp
+import discord
+from discord import app_commands
+from discord.ext import commands, tasks
+from database import execute_db_operation
+from helpers.anilist_helper import post_graphql
+from cogs_test.general_commands.dashboard import command_meta
+
+log = logging.getLogger(__name__)
+CANDIDATE_QUERY = """
+query($type: MediaType, $perPage: Int) {
+  Page(page: 1, perPage: $perPage) {
+    media(type: $type, sort: TRENDING_DESC, isAdult: false) {
+      id
+      title { romaji english }
+      siteUrl
+      coverImage { large }
+      format
+      genres
+    }
+  }
+}
+"""
+
+def tally_votes(votes: dict[str, int], candidate_count: int) -> list[int]:
+    totals = [0] * candidate_count
+    for value in votes.values():
+        if isinstance(value, int) and 0 <= value < candidate_count:
+            totals[value] += 1
+    return totals
+
+def title_of(item: dict) -> str:
+    titles = item.get("title") or {}
+    return titles.get("english") or titles.get("romaji") or "Untitled media"
+
+class MediaNightView(discord.ui.View):
+    """Persistent vote buttons encode a session ID and candidate index."""
+    def __init__(self, cog: "MediaNight", session_id: str, candidate_count: int):
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.session_id = session_id
+        for index in range(candidate_count):
+            button = discord.ui.Button(
+                label=f"Vote {index + 1}",
+                style=discord.ButtonStyle.primary,
+                custom_id=f"media-night:{session_id}:vote:{index}",
+            )
+            async def callback(interaction: discord.Interaction, chosen: int = index) -> None:
+                await self.cog.cast_vote(interaction, self.session_id, chosen)
+            button.callback = callback
+            self.add_item(button)
+
+class MediaNight(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        self.sessions: dict[str, dict] = {}
+        self.vote_locks: dict[str, asyncio.Lock] = {}
+
+    async def cog_load(self) -> None:
+        await execute_db_operation(
+            "create persistent media-night sessions",
+            """CREATE TABLE IF NOT EXISTS media_night_sessions (
+                session_id TEXT PRIMARY KEY,
+                guild_id BIGINT NOT NULL,
+                channel_id BIGINT NOT NULL,
+                host_id BIGINT NOT NULL,
+                message_id BIGINT,
+                category TEXT NOT NULL,
+                candidates TEXT NOT NULL,
+                votes TEXT NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )""",
+        )
+        await execute_db_operation(
+            "cancel interrupted media-night setup sessions",
+            "UPDATE media_night_sessions SET status = 'cancelled' WHERE status = 'setup'",
+        )
+        await execute_db_operation(
+            "expire old media-night sessions",
+            "UPDATE media_night_sessions SET status = 'expired' WHERE status = 'open' AND expires_at <= CURRENT_TIMESTAMP",
+        )
+        await execute_db_operation(
+            "prevent duplicate active media-night sessions per guild channel",
+            "CREATE UNIQUE INDEX IF NOT EXISTS media_night_one_active_per_channel_idx ON media_night_sessions (guild_id, channel_id) WHERE status IN ('setup', 'open')",
+        )
+        rows = await execute_db_operation(
+            "restore active media-night sessions",
+            "SELECT * FROM media_night_sessions WHERE status = 'open' AND expires_at > CURRENT_TIMESTAMP",
+            fetch_type="all",
+        )
+        for row in rows or []:
+            data = dict(row)
+            session_id = str(data["session_id"])
+            data["candidates"] = json.loads(data["candidates"])
+            data["votes"] = json.loads(data["votes"] or "{}")
+            expiry = data["expires_at"]
+            if expiry.tzinfo is None:
+                data["expires_at"] = expiry.replace(tzinfo=timezone.utc)
+            self.sessions[session_id] = data
+            self.vote_locks[session_id] = asyncio.Lock()
+            if data.get("message_id"):
+                self.bot.add_view(MediaNightView(self, session_id, len(data["candidates"])), message_id=int(data["message_id"]))
+        if not self.expire_sessions.is_running():
+            self.expire_sessions.start()
+
+    async def cog_unload(self) -> None:
+        self.expire_sessions.cancel()
+
+    @tasks.loop(seconds=30)
+    async def expire_sessions(self) -> None:
+        """Close due sessions and update their public voting messages."""
+        now = datetime.now(timezone.utc)
+        for session_id in list(self.sessions):
+            lock = self.vote_locks.setdefault(session_id, asyncio.Lock())
+            async with lock:
+                session = self.sessions.get(session_id)
+                if not session or session.get("status") != "open" or now < session["expires_at"]:
+                    continue
+                session["status"] = "expired"
+                try:
+                    await execute_db_operation(
+                        "expire media-night session",
+                        "UPDATE media_night_sessions SET status = 'expired' WHERE session_id = ? AND guild_id = ? AND channel_id = ? AND status = 'open'",
+                        (session_id, session["guild_id"], session["channel_id"]),
+                    )
+                    guild = self.bot.get_guild(int(session["guild_id"]))
+                    channel = guild.get_channel_or_thread(int(session["channel_id"])) if guild else None
+                    message = await channel.fetch_message(int(session["message_id"])) if channel and session.get("message_id") else None
+                    if message:
+                        await message.edit(
+                            embed=self.session_embed(session, final=True),
+                            view=None,
+                            allowed_mentions=discord.AllowedMentions.none(),
+                        )
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException, AttributeError):
+                    log.info("Expired media-night session %s could not update its message", session_id)
+                except Exception:
+                    log.exception("Unable to expire media-night session %s", session_id)
+
+    @expire_sessions.before_loop
+    async def before_expire_sessions(self) -> None:
+        await self.bot.wait_until_ready()
+
+    def session_embed(self, session: dict, final: bool = False) -> discord.Embed:
+        candidates = session["candidates"]
+        totals = tally_votes(session["votes"], len(candidates))
+        lines = []
+        for index, item in enumerate(candidates):
+            name = title_of(item)
+            link = item.get("siteUrl")
+            label = f"[{name}]({link})" if link else name
+            lines.append(f"**{index + 1}.** {label}\nVotes: **{totals[index]}**")
+        embed = discord.Embed(title=f"Media Night · {session['category'].title()}", description="\n\n".join(lines)[:4000], color=discord.Color.blurple())
+        embed.add_field(name="Votes cast", value=str(sum(totals)), inline=True)
+        if final:
+            highest = max(totals, default=0)
+            winners = [title_of(item) for i, item in enumerate(candidates) if totals[i] == highest]
+            result = "No votes were cast." if highest == 0 else ("Tie: " + ", ".join(winners) if len(winners) > 1 else winners[0])
+            embed.add_field(name="Result", value=result[:1024], inline=False)
+        elif session["status"] == "open":
+            embed.add_field(name="Voting closes", value=f"<t:{int(session['expires_at'].timestamp())}:R>", inline=True)
+        embed.set_footer(text="One vote per person; you may change your vote while voting is open.")
+        return embed
+
+    media_night = app_commands.Group(name="media-night", description="Start and manage community media voting")
+
+    @media_night.command(name="start", description="Start an interactive anime or manga vote in this channel")
+    @app_commands.guild_only()
+    @app_commands.choices(category=[
+        app_commands.Choice(name="Anime", value="ANIME"),
+        app_commands.Choice(name="Manga", value="MANGA"),
+    ])
+    @app_commands.describe(category="Media category", candidates="Number of candidates", duration="Voting duration in minutes (5–240)")
+    @command_meta(section="Community", name="Media Night Start")
+    async def start(self, interaction: discord.Interaction, category: str, candidates: app_commands.Range[int, 2, 5] = 4, duration: app_commands.Range[int, 5, 240] = 30) -> None:
+        if interaction.guild is None or interaction.channel is None:
+            await interaction.response.send_message("Media Night can only be started in a server channel.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        existing = await execute_db_operation(
+            "check active media-night in this guild channel",
+            "SELECT session_id FROM media_night_sessions WHERE guild_id = ? AND channel_id = ? AND status IN ('setup', 'open') AND expires_at > CURRENT_TIMESTAMP",
+            (interaction.guild.id, interaction.channel.id),
+            fetch_type="one",
+        )
+        if existing:
+            await interaction.followup.send("This channel already has an open Media Night. Close it before starting another.", ephemeral=True)
+            return
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
+                payload = await post_graphql(session, CANDIDATE_QUERY, {"type": category, "perPage": 30}, timeout=15)
+            pool = ((payload or {}).get("Page") or {}).get("media") or []
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+            pool = []
+        unique = {int(item["id"]): item for item in pool if item.get("id") and item.get("title")}
+        pool = list(unique.values())
+        if len(pool) < candidates:
+            await interaction.followup.send(f"AniList supplied only {len(pool)} distinct candidates; {candidates} are required. No session was created.", ephemeral=True)
+            return
+        chosen = secrets.SystemRandom().sample(pool, candidates)
+        session_id = secrets.token_hex(5)
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=duration)
+        channel = interaction.channel
+        session = {
+            "session_id": session_id, "guild_id": interaction.guild.id, "channel_id": channel.id,
+            "host_id": interaction.user.id, "message_id": None, "category": category.lower(),
+            "candidates": chosen, "votes": {}, "status": "setup", "expires_at": expires_at,
+        }
+        try:
+            await execute_db_operation(
+                "create media-night session",
+                """INSERT INTO media_night_sessions
+                (session_id, guild_id, channel_id, host_id, message_id, category, candidates, votes, status, expires_at)
+                VALUES (?, ?, ?, ?, NULL, ?, ?, '{}', 'setup', ?)""",
+                (session_id, interaction.guild.id, channel.id, interaction.user.id, category.lower(), json.dumps(chosen), expires_at.replace(tzinfo=None)),
+            )
+        except Exception:
+            log.info("A concurrent Media Night start or database failure prevented session creation in guild %s channel %s", interaction.guild.id, channel.id, exc_info=True)
+            await interaction.followup.send("A session was started in this channel already, or session storage is unavailable. Check the active vote and try again.", ephemeral=True)
+            return
+        self.sessions[session_id] = session
+        self.vote_locks[session_id] = asyncio.Lock()
+        view = MediaNightView(self, session_id, len(chosen))
+        try:
+            message = await channel.send(embed=self.session_embed(session), view=view, allowed_mentions=discord.AllowedMentions.none())
+        except (discord.Forbidden, discord.HTTPException):
+            session["status"] = "cancelled"
+            await execute_db_operation("cancel media-night session whose message could not be sent", "UPDATE media_night_sessions SET status = 'cancelled' WHERE session_id = ? AND guild_id = ?", (session_id, interaction.guild.id))
+            await interaction.followup.send("I couldn't post the voting message. Check this channel's View Channel, Send Messages, and Embed Links permissions.", ephemeral=True)
+            return
+        session["message_id"] = message.id
+        session["status"] = "open"
+        await execute_db_operation(
+            "activate media-night session",
+            "UPDATE media_night_sessions SET message_id = ?, status = 'open' WHERE session_id = ? AND guild_id = ? AND channel_id = ?",
+            (message.id, session_id, interaction.guild.id, channel.id),
+        )
+        await message.edit(embed=self.session_embed(session), view=view)
+        await interaction.followup.send(f"Media Night started. Session ID: {session_id}. Use /media-night close with that session ID to close or cancel it. Voting closes in {duration} minutes.", ephemeral=True)
+
+    async def cast_vote(self, interaction: discord.Interaction, session_id: str, choice: int) -> None:
+        session = self.sessions.get(session_id)
+        if session is None or interaction.guild_id != int(session["guild_id"]) or interaction.channel_id != int(session["channel_id"]):
+            await interaction.response.send_message("This vote belongs to another or unavailable session.", ephemeral=True)
+            return
+        lock = self.vote_locks.setdefault(session_id, asyncio.Lock())
+        async with lock:
+            session = self.sessions.get(session_id)
+            if not session or session["status"] != "open":
+                await interaction.response.send_message("Voting is no longer open.", ephemeral=True)
+                return
+            if datetime.now(timezone.utc) >= session["expires_at"]:
+                session["status"] = "expired"
+                await execute_db_operation("expire media-night after vote deadline", "UPDATE media_night_sessions SET status = 'expired' WHERE session_id = ? AND guild_id = ? AND status = 'open'", (session_id, interaction.guild_id))
+                await interaction.response.edit_message(embed=self.session_embed(session, final=True), view=None)
+                return
+            if choice < 0 or choice >= len(session["candidates"]):
+                await interaction.response.send_message("That candidate is no longer valid.", ephemeral=True)
+                return
+            await interaction.response.defer()
+            session["votes"][str(interaction.user.id)] = choice
+            await execute_db_operation(
+                "save media-night vote",
+                "UPDATE media_night_sessions SET votes = ? WHERE session_id = ? AND guild_id = ? AND channel_id = ? AND status = 'open'",
+                (json.dumps(session["votes"]), session_id, interaction.guild_id, interaction.channel_id),
+            )
+            await interaction.edit_original_response(embed=self.session_embed(session), view=MediaNightView(self, session_id, len(session["candidates"])))
+
+    @media_night.command(name="close", description="Close or cancel a Media Night session")
+    @app_commands.guild_only()
+    @app_commands.choices(action=[
+        app_commands.Choice(name="Close voting and show the result", value="close"),
+        app_commands.Choice(name="Cancel session", value="cancel"),
+    ])
+    @app_commands.describe(session_id="Session ID returned when the vote started", action="Close or cancel")
+    @command_meta(section="Community", name="Media Night Close")
+    async def close(self, interaction: discord.Interaction, session_id: str, action: str = "close") -> None:
+        session = self.sessions.get(session_id)
+        if (
+            interaction.guild is None
+            or session is None
+            or int(session["guild_id"]) != interaction.guild.id
+            or interaction.channel_id != int(session["channel_id"])
+        ):
+            await interaction.response.send_message("That session was not found in this server and channel.", ephemeral=True)
+            return
+        is_host = interaction.user.id == int(session["host_id"])
+        is_mod = isinstance(interaction.user, discord.Member) and (interaction.user.guild_permissions.manage_guild or interaction.user.guild_permissions.manage_messages)
+        if not (is_host or is_mod):
+            await interaction.response.send_message("Only the session host or a server moderator can manage this session.", ephemeral=True)
+            return
+        if session["status"] != "open":
+            await interaction.response.send_message(f"This session is already {session['status']}.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        lock = self.vote_locks.setdefault(session_id, asyncio.Lock())
+        async with lock:
+            session = self.sessions.get(session_id)
+            if not session or session["status"] != "open":
+                await interaction.followup.send("This session has already closed or expired.", ephemeral=True)
+                return
+            session["status"] = "closed" if action == "close" else "cancelled"
+            await execute_db_operation(
+                "finish media-night session",
+                "UPDATE media_night_sessions SET status = ? WHERE session_id = ? AND guild_id = ? AND channel_id = ? AND status = 'open'",
+                (session["status"], session_id, interaction.guild.id, session["channel_id"]),
+            )
+        channel = interaction.guild.get_channel_or_thread(int(session["channel_id"]))
+        try:
+            message = await channel.fetch_message(int(session["message_id"])) if channel and session.get("message_id") else None
+            if message:
+                embed = self.session_embed(session, final=(action == "close"))
+                if action == "cancel":
+                    embed.title = "Media Night · Cancelled"
+                    embed.add_field(name="Status", value="Voting was cancelled by the host or a moderator.", inline=False)
+                await message.edit(embed=embed, view=None, allowed_mentions=discord.AllowedMentions.none())
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException, AttributeError):
+            log.info("Media-night message %s could not be edited after closing", session.get("message_id"))
+        await interaction.followup.send("Voting closed. Ties are reported as ties; no automatic tie-breaker is chosen." if action == "close" else "Media Night cancelled.", ephemeral=True)
+
+async def setup(bot: commands.Bot) -> None:
+    await bot.add_cog(MediaNight(bot))
