@@ -7,7 +7,7 @@ import asyncio
 import logging
 from typing import List, Dict, Optional, Tuple
 from urllib.parse import quote_plus, urljoin
-from botasaurus.browser import browser as botasaurus_browser, Driver
+from botasaurus.browser import browser as botasaurus_browser, Driver, Wait
 from discord.ui import View, Button
 from database import get_all_users_guild_aware
 from helpers.embed_helper import build_error_embed, build_info_embed
@@ -34,7 +34,7 @@ def scrape_novelupdates(driver: Driver, data: Dict) -> List[Dict]:
         f"?sf=1&sh={quote_plus(query)}&sort=sdate&order=desc"
     )
     driver.get(url)
-    result_cards = driver.select_all(".search_main_box_nu", wait=None)
+    result_cards = driver.select_all(".search_main_box_nu", wait=Wait.LONG)
     if not result_cards:
         logger.warning(
             "Novel Updates returned no series cards for query %r. Page text: %s",
