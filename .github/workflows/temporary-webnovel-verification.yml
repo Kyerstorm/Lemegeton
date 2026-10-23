@@ -1,4 +1,4 @@
-name: Temporary webnovel verification
+name: Webnovel scraper verification
 
 on:
   push:
@@ -11,17 +11,15 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install scraper dependencies
-        run: python -m pip install --upgrade pip botasaurus beautifulsoup4
       - name: Compile browse.py
         run: python -m py_compile cogs/media/browse.py
-      - name: Run the actual Novel Updates scraper helper
+      - name: Test scraper extraction with a controlled page fixture
         run: |
           python - <<'PY'
           import ast
@@ -30,9 +28,6 @@ jobs:
           from typing import Dict, List
           from urllib.parse import quote_plus, urljoin
 
-          from botasaurus.browser import browser as botasaurus_browser, Driver, Wait
-          
-
           source_path = Path("cogs/media/browse.py")
           source = source_path.read_text(encoding="utf-8")
           parsed = ast.parse(source, filename=str(source_path))
@@ -40,22 +35,69 @@ jobs:
               node for node in parsed.body
               if isinstance(node, ast.FunctionDef) and node.name == "scrape_novelupdates"
           )
+          # Run the extraction function without Botasaurus's browser-launch decorator.
+          helper.decorator_list = []
+
+          class Wait:
+              LONG = object()
+
+          class Node:
+              def __init__(self, text="", attrs=None):
+                  self.text = text
+                  self.attrs = attrs or {}
+
+              def get_attribute(self, name):
+                  return self.attrs.get(name)
+
+          class ResultCard:
+              def select(self, selector, wait=None):
+                  return {
+                      ".search_title a": Node("Lord of the Mysteries", {"href": "/series/lord-of-the-mysteries/"}),
+                      ".search_body": Node("A test description."),
+                      "img": Node(attrs={"src": "https://example.com/cover.jpg"}),
+                      ".search_ratings": Node("4.7"),
+                  }.get(selector)
+
+              def select_all(self, selector, wait=None):
+                  if selector == ".search_genre a":
+                      return [Node("Action"), Node("Adventure")]
+                  return []
+
+          class Driver:
+              def get(self, url):
+                  self.url = url
+
+              def select_all(self, selector, wait=None):
+                  assert selector == ".search_main_box_nu"
+                  return [ResultCard()]
+
+              def get_text(self, selector):
+                  return "fixture page"
+
           namespace = {
               "Dict": Dict,
               "List": List,
-              "quote_plus": quote_plus,
-              "botasaurus_browser": botasaurus_browser,
               "Driver": Driver,
               "Wait": Wait,
+              "quote_plus": quote_plus,
               "urljoin": urljoin,
               "logger": logging.getLogger("scraper-verification"),
           }
-          exec(compile(ast.Module(body=[helper], type_ignores=[]), str(source_path), "exec"), namespace)
-          results = namespace["scrape_novelupdates"]({"query": "Lord of the Mysteries"}, output=None)
-          if not results:
-              raise SystemExit("Scraper returned no series for a known Novel Updates title.")
-          first = results[0]
-          if not first.get("title") or not first.get("url", "").startswith("http"):
-              raise SystemExit(f"First result is missing a valid title or URL: {first!r}")
-          print(f"PASS: received {len(results)} results; first title={first['title']!r}; fields={sorted(first)}")
+          exec(
+              compile(ast.Module(body=[helper], type_ignores=[]), str(source_path), "exec"),
+              namespace,
+          )
+
+          driver = Driver()
+          results = namespace["scrape_novelupdates"](driver, {"query": "Lord of the Mysteries"})
+          assert len(results) == 1, results
+          result = results[0]
+          assert result["title"] == "Lord of the Mysteries", result
+          assert result["url"] == "https://www.novelupdates.com/series/lord-of-the-mysteries/", result
+          assert result["description"] == "A test description.", result
+          assert result["image"] == "https://example.com/cover.jpg", result
+          assert result["rating"] == "4.7", result
+          assert result["genres"] == ["Action", "Adventure"], result
+          assert "Lord+of+the+Mysteries" in driver.url, driver.url
+          print("PASS: scraper extraction, URL construction, and metadata fields")
           PY
