@@ -135,7 +135,7 @@ class BrowseCog(commands.Cog):
                 result.get("imageUrl") or result.get("image_url")
                 or result.get("image") or result.get("smallImageUrl")
             )
-            link = result.get("url") or result.get("book_url") or ""
+            link = result.get("url") or result.get("book_url") or result.get("bookUrl") or ""
             if link:
                 link = urljoin("https://www.goodreads.com", link)
 
@@ -515,7 +515,7 @@ class BrowseCog(commands.Cog):
 
             def add_tmdb_field(label: str, value: Optional[str], inline: bool = True) -> None:
                 if value:
-                    embed.add_field(name=label, value=str(value)[:900], inline=inline)
+                    embed.add_field(name=label, value=str(value)[:250], inline=inline)
 
             genres = ", ".join(g.get("name", "") for g in media.get("genres", []) if g.get("name"))
             add_tmdb_field("🎭 Genres", genres)
