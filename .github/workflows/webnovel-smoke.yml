@@ -1,0 +1,31 @@
+name: Webnovel scraper smoke test
+
+on:
+  push:
+    branches: [feature/webnovel-browse]
+  pull_request:
+    branches: [multi_guild]
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install project dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+      - name: Check Python syntax
+        run: python -m compileall -q cogs/media/browse.py
+      - name: Scrape a known Novel Updates title
+        run: |
+          python - <<'PY'
+          from cogs.media.browse import scrape_novelupdates
+
+          results = scrape_novelupdates({"query": "Reverend Insanity"}, output=None)
+          assert results, "Novel Updates returned no results for the smoke-test query"
+          assert results[0].get("title"), "The first result has no title"
+          assert results[0].get("url", "").startswith("https://www.novelupdates.com/series/")
+          print(f"Scraper smoke test passed: {results[0]['title']}")
+          PY
