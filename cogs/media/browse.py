@@ -85,20 +85,26 @@ class BrowseCog(commands.Cog):
 
     @staticmethod
     def _is_fiction_book(book: Dict) -> bool:
-        """Identify explicitly fiction-categorized results in a non-fiction search."""
+        """Recognize common fiction labels and genres in Google Books metadata."""
+        fiction_markers = (
+            "fiction", "mystery", "detective", "suspense", "thriller",
+            "romance", "fantasy", "horror", "short stories", "adventure stories",
+            "young adult", "graphic novels", "fairy tales",
+        )
         for category in book.get("categories", []) or []:
-            parts = [part.strip().lower() for part in category.split("/")]
-            if any(part == "fiction" or part.endswith(" fiction") for part in parts):
+            normalized = category.lower().replace("non-fiction", "nonfiction")
+            if "nonfiction" in normalized:
+                continue
+            if any(marker in normalized for marker in fiction_markers):
                 return True
         return False
 
     async def fetch_book_results(self, query: str, book_type: str) -> List[Dict]:
-        """Search Google Books by fiction/non-fiction subject and return volume items."""
-        subject = "fiction" if book_type == "fiction" else "nonfiction"
+        """Search Google Books and separate fiction from non-fiction by category metadata."""
         params = {
-            "q": f"{query} subject:{subject}",
+            "q": query,
             "printType": "books",
-            "maxResults": 10,
+            "maxResults": 40,
             "orderBy": "relevance",
         }
 
@@ -109,21 +115,27 @@ class BrowseCog(commands.Cog):
                     if response.status != 200:
                         logger.warning(
                             "Google Books returned HTTP %s for %s query %r",
-                            response.status, subject, query,
+                            response.status, book_type, query,
                         )
                         return []
                     data = await response.json()
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
-            logger.warning("Google Books %s search failed for %r: %s", subject, query, exc)
+            logger.warning("Google Books %s search failed for %r: %s", book_type, query, exc)
             return []
 
         items = data.get("items", []) or []
-        if subject == "nonfiction":
-            items = [
-                item for item in items
-                if not self._is_fiction_book(item.get("volumeInfo", {}))
-            ]
-        return items
+        filtered_items = []
+        for item in items:
+            book = item.get("volumeInfo") or {}
+            categories = book.get("categories") or []
+            is_fiction = self._is_fiction_book(book)
+
+            if book_type == "fiction" and is_fiction:
+                filtered_items.append(item)
+            elif book_type == "nonfiction" and categories and not is_fiction:
+                filtered_items.append(item)
+
+        return filtered_items[:10]
 
     # --------------------------------------------------
     # Fetch Media Info (Anime, Manga, LN)
