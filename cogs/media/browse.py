@@ -6,9 +6,8 @@ import aiohttp
 import asyncio
 import logging
 from typing import List, Dict, Optional, Tuple
-from urllib.parse import quote_plus
-from botasaurus.request import request as botasaurus_request, Request
-from botasaurus.soupify import soupify
+from urllib.parse import quote_plus, urljoin
+from botasaurus.browser import browser as botasaurus_browser, Driver, Wait
 from discord.ui import View, Button
 from database import get_all_users_guild_aware
 from helpers.embed_helper import build_error_embed, build_info_embed
@@ -19,38 +18,47 @@ logger = logging.getLogger("BrowseCog")
 GOOGLE_BOOKS_URL = "https://www.googleapis.com/books/v1/volumes?q="
 
 
-@botasaurus_request(output=None, max_retry=1, retry_wait=1, create_error_logs=False, raise_exception=True)
-def scrape_novelupdates(request: Request, data: Dict) -> List[Dict]:
-    """Search Novel Updates and return the first page of matching series."""
+@botasaurus_browser(
+    headless=True,
+    max_retry=1,
+    retry_wait=1,
+    create_error_logs=False,
+    raise_exception=True,
+    close_on_crash=True,
+)
+def scrape_novelupdates(driver: Driver, data: Dict) -> List[Dict]:
+    """Search Novel Updates in a browser and return matching series."""
     query = data["query"]
     url = (
         "https://www.novelupdates.com/series-finder/"
         f"?sf=1&sh={quote_plus(query)}&sort=sdate&order=desc"
     )
-    response = request.get(url)
-    response.raise_for_status()
-    soup = soupify(response)
+    driver.get(url)
+    driver.wait_for_element(".search_main_box_nu", wait=Wait.VERY_LONG)
 
     novels = []
-    for result in soup.select(".search_main_box_nu")[:10]:
-        title_link = result.select_one(".search_title a")
+    for result in driver.select_all(".search_main_box_nu", wait=None)[:10]:
+        title_link = result.select(".search_title a", wait=None)
         if not title_link:
             continue
 
-        description_node = result.select_one(".search_body")
-        image_node = result.select_one("img")
-        rating_node = result.select_one(".search_ratings")
+        description_node = result.select(".search_body", wait=None)
+        image_node = result.select("img", wait=None)
+        rating_node = result.select(".search_ratings", wait=None)
         novels.append({
-            "title": title_link.get_text(" ", strip=True),
-            "url": title_link.get("href"),
-            "description": description_node.get_text(" ", strip=True) if description_node else None,
-            "image": (image_node.get("src") or image_node.get("data-src")) if image_node else None,
-            "rating": rating_node.get_text(" ", strip=True) if rating_node else None,
-            "genres": [node.get_text(" ", strip=True) for node in result.select(".search_genre a")],
+            "title": title_link.text.strip(),
+            "url": urljoin("https://www.novelupdates.com", title_link.get_attribute("href") or ""),
+            "description": description_node.text.strip() if description_node else None,
+            "image": (image_node.get_attribute("src") or image_node.get_attribute("data-src")) if image_node else None,
+            "rating": rating_node.text.strip() if rating_node else None,
+            "genres": [
+                node.text.strip()
+                for node in result.select_all(".search_genre a", wait=None)
+                if node.text.strip()
+            ],
         })
 
     return novels
-
 # Status order priority
 STATUS_ORDER = {
     "REPEATING": 0,
