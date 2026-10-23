@@ -91,6 +91,36 @@ MEDIA_TYPE_CHOICES = [
 ]
 
 
+class RandomResultView(View):
+    """Private, invoking-user-scoped controls for a random media result."""
+
+    def __init__(self, cog, owner_id: int, media_type: str, filters: Dict,
+                 source_url: Optional[str] = None, seen_urls: Optional[set] = None):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.owner_id = owner_id
+        self.media_type = media_type
+        self.filters = filters
+        self.seen_urls = set(seen_urls or ())
+        if source_url:
+            self.seen_urls.add(source_url)
+
+        reroll = Button(label="🎲 Reroll", style=discord.ButtonStyle.primary)
+
+        async def reroll_callback(interaction: discord.Interaction):
+            if interaction.user.id != self.owner_id:
+                await interaction.response.send_message("These random controls belong to another user.", ephemeral=True)
+                return
+            await self.cog._process_random_request(
+                interaction, self.media_type, seen_urls=self.seen_urls, **self.filters,
+            )
+
+        reroll.callback = reroll_callback
+        self.add_item(reroll)
+        if source_url and source_url.startswith("https://"):
+            self.add_item(Button(label="Open Source", style=discord.ButtonStyle.link, url=source_url))
+
+
 class Random(commands.Cog):
     """Generate random suggestions across AniList, books, webnovels, movies, and TV."""
     
@@ -106,6 +136,86 @@ class Random(commands.Cog):
         """Apply a random color to the embed."""
         embed.color = discord.Color(secure_randbelow(0x1000000))
         return embed
+
+    @staticmethod
+    def _extract_seen_ids(seen_urls: Optional[set]) -> set:
+        """Extract stable numeric AniList IDs from previously displayed source URLs."""
+        identifiers = set()
+        for url in seen_urls or ():
+            segment = str(url).split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+            if segment.isdigit():
+                identifiers.add(int(segment))
+        return identifiers
+
+    async def _fetch_filtered_random_media(
+        self, media_type: str, genre: Optional[str] = None,
+        year_from: Optional[int] = None, year_to: Optional[int] = None,
+        status: Optional[str] = None, media_format: Optional[str] = None,
+        excluded_ids: Optional[set] = None,
+    ) -> Optional[int]:
+        """Uniformly select from AniList's provider-filtered result set using secure_randbelow."""
+        query = """
+        query (
+            $page: Int, $type: MediaType, $genreIn: [String],
+            $startDateGreater: FuzzyDateInt, $startDateLesser: FuzzyDateInt,
+            $status: MediaStatus, $format: MediaFormat, $excludedIds: [Int]
+        ) {
+            Page(page: $page, perPage: 50) {
+                pageInfo { lastPage }
+                media(
+                    type: $type, genre_in: $genreIn,
+                    startDate_greater: $startDateGreater, startDate_lesser: $startDateLesser,
+                    status: $status, format: $format, id_not_in: $excludedIds, sort: ID_DESC
+                ) { id }
+            }
+        }
+        """
+        api_type = "MANGA" if media_type == "LN" else media_type
+        variables = {
+            "type": api_type,
+            "genreIn": [genre] if genre else None,
+            "startDateGreater": year_from * 10000 if year_from is not None else None,
+            "startDateLesser": year_to * 10000 + 1231 if year_to is not None else None,
+            "status": status,
+            "format": "NOVEL" if media_type == "LN" else media_format,
+            "excludedIds": sorted(excluded_ids or ()) or None,
+        }
+
+        async def fetch_page(session, page_number):
+            payload = await post_graphql(session, query, {**variables, "page": page_number})
+            return (payload or {}).get("Page") or {}
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=15)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                first = await fetch_page(session, 1)
+                first_items = first.get("media") or []
+                if not first_items:
+                    return None
+                page_info = first.get("pageInfo") or {}
+                last_page = max(1, int(page_info.get("lastPage") or 1))
+                last_items = first_items if last_page == 1 else (
+                    await fetch_page(session, last_page)
+                ).get("media") or []
+                eligible_count = (last_page - 1) * 50 + len(last_items)
+                if eligible_count <= 0:
+                    return None
+                offset = secure_randbelow(eligible_count)
+                page_number = offset // 50 + 1
+                position = offset % 50
+                if page_number == 1:
+                    selected_page = first_items
+                elif page_number == last_page:
+                    selected_page = last_items
+                else:
+                    selected_page = (await fetch_page(session, page_number)).get("media") or []
+                if position >= len(selected_page):
+                    return None
+                selected_id = selected_page[position].get("id")
+                return int(selected_id) if selected_id else None
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError) as exc:
+            logger.warning("Filtered AniList random selection failed: %s", exc)
+            return None
 
     async def fetch_detailed_media(self, media_id: int, media_type: str) -> Optional[Dict]:
         """Fetch detailed media information from AniList API."""
@@ -310,12 +420,11 @@ class Random(commands.Cog):
         progress_embed.set_footer(text="🎲 Random suggestion from AniList")
         return progress_embed
 
-    async def _fetch_random_tmdb_media(self, media_type: str) -> Optional[Dict]:
-        """Select a random movie/show from TMDB discovery pages, then fetch full metadata.
-
-        Discovery pages are popularity-sorted, but the page and title are selected
-        cryptographically rather than always taking the first search match.
-        """
+    async def _fetch_random_tmdb_media(
+        self, media_type: str, genre: Optional[str] = None,
+        year_from: Optional[int] = None, year_to: Optional[int] = None,
+    ) -> Optional[Dict]:
+        """Select from TMDB's discover window using unbiased cryptographic indexing."""
         token = os.getenv("TMDB_BEARER_TOKEN", "").strip()
         if not token:
             return None
@@ -329,6 +438,27 @@ class Random(commands.Cog):
             "page": 1,
             "sort_by": "popularity.desc",
         }
+        if genre:
+            movie_genres = {
+                "action": 28, "adventure": 12, "animation": 16, "comedy": 35,
+                "crime": 80, "documentary": 99, "drama": 18, "family": 10751,
+                "fantasy": 14, "history": 36, "horror": 27, "mystery": 9648,
+                "romance": 10749, "sci-fi": 878, "thriller": 53,
+            }
+            tv_genres = {
+                "action": 10759, "adventure": 10759, "animation": 16, "comedy": 35,
+                "crime": 80, "documentary": 99, "drama": 18, "family": 10751,
+                "fantasy": 10765, "mystery": 9648, "sci-fi": 10765,
+            }
+            genre_id = (movie_genres if media_type == "MOVIE" else tv_genres).get(genre.casefold())
+            if genre_id is None:
+                return None
+            params["with_genres"] = genre_id
+        date_field = "primary_release_date" if media_type == "MOVIE" else "first_air_date"
+        if year_from is not None:
+            params[f"{date_field}.gte"] = f"{year_from}-01-01"
+        if year_to is not None:
+            params[f"{date_field}.lte"] = f"{year_to}-12-31"
 
         try:
             timeout = aiohttp.ClientTimeout(total=12)
@@ -341,9 +471,17 @@ class Random(commands.Cog):
                         return None
                     page_data = await response.json()
 
-                # TMDB exposes at most 500 discover pages; choose a page and then a title.
+                # TMDB caps discovery at 500 pages. Index the reachable titles, not pages,
+                # so a shorter final page does not receive the same weight as a full page.
                 total_pages = min(500, max(1, int(page_data.get("total_pages") or 1)))
-                page = secure_randbelow(total_pages) + 1
+                first_candidates = page_data.get("results") or []
+                total_results = max(0, int(page_data.get("total_results") or len(first_candidates)))
+                total_results = min(total_results, total_pages * 20)
+                if total_results == 0:
+                    return None
+                selected_index = secure_randbelow(total_results)
+                page = selected_index // 20 + 1
+                position = selected_index % 20
                 if page > 1:
                     params["page"] = page
                     async with session.get(
@@ -355,9 +493,9 @@ class Random(commands.Cog):
                         page_data = await response.json()
 
                 candidates = page_data.get("results") or []
-                if not candidates:
+                if position >= len(candidates):
                     return None
-                selected = secure_choice(candidates)
+                selected = candidates[position]
                 media_id = selected.get("id")
                 if not media_id:
                     return None
@@ -382,8 +520,12 @@ class Random(commands.Cog):
             logger.warning("TMDB random %s lookup failed: %s", endpoint, exc)
             return None
 
-    async def _process_external_random_request(self, interaction: discord.Interaction, media_type: str) -> None:
-        """Reuse BrowseCog providers for random novel, book, movie, TV, and webnovel picks."""
+    async def _process_external_random_request(
+        self, interaction: discord.Interaction, media_type: str,
+        genre: Optional[str] = None, year_from: Optional[int] = None,
+        year_to: Optional[int] = None, seen_urls: Optional[set] = None,
+    ) -> None:
+        """Reuse configured providers for filtered book, webnovel, movie, and TV picks."""
         browse = self.bot.get_cog("BrowseCog")
         if browse is None:
             await interaction.followup.send(embed=build_error_embed(
@@ -391,16 +533,27 @@ class Random(commands.Cog):
             ), ephemeral=True)
             return
 
-        query = secure_choice([
+        query = genre or secure_choice([
             "fantasy", "adventure", "mystery", "drama", "science fiction",
             "romance", "historical", "thriller", "comedy", "popular"
         ])
         try:
             if media_type == "WEBNOVEL":
                 import asyncio
+                if year_from is not None or year_to is not None:
+                    raise LookupError("Novel Updates results do not expose consistent publication-year data for filtering.")
                 results = await asyncio.to_thread(scrape_novelupdates, {"query": query}, output=None)
+                if genre:
+                    results = [
+                        item for item in results
+                        if genre.casefold() in " ".join(item.get("genres") or []).casefold()
+                    ]
+                results = [
+                    item for item in results
+                    if (item.get("url") or item.get("link")) not in (seen_urls or set())
+                ]
                 if not results:
-                    raise LookupError("No Novel Updates results were found.")
+                    raise LookupError("No unseen Novel Updates results matched the selected genre.")
                 item = secure_choice(results)
                 embed = discord.Embed(
                     title=f"🌐 {item.get('title') or 'Unknown webnovel'}"[:256],
@@ -417,9 +570,16 @@ class Random(commands.Cog):
                 embed.set_footer(text="Random pick • Novel Updates")
             elif media_type in ("GENERAL_NOVEL", "BOOKS"):
                 book_type = "fiction" if media_type == "GENERAL_NOVEL" else "nonfiction"
-                results = await browse.fetch_book_results(query, book_type)
+                results = await browse.fetch_book_results(
+                    query, book_type, genre=genre, year_from=year_from, year_to=year_to,
+                )
+                results = [
+                    item for item in results
+                    if ((item.get("volumeInfo") or {}).get("infoLink")
+                        or (item.get("volumeInfo") or {}).get("previewLink")) not in (seen_urls or set())
+                ]
                 if not results:
-                    raise LookupError("No matching Google Books or Goodreads results were found.")
+                    raise LookupError("No unseen Google Books or Goodreads results matched those filters.")
                 book = secure_choice(results).get("volumeInfo", {})
                 embed = discord.Embed(
                     title=f"{'📖' if book_type == 'fiction' else '📚'} {book.get('title') or 'Unknown title'}"[:256],
@@ -452,9 +612,21 @@ class Random(commands.Cog):
                         "Movies and TV random picks require TMDB_BEARER_TOKEN."
                     ), ephemeral=True)
                     return
-                media = await self._fetch_random_tmdb_media(media_type)
+                media = None
+                for _ in range(5 if seen_urls else 1):
+                    candidate = await self._fetch_random_tmdb_media(
+                        media_type, genre=genre, year_from=year_from, year_to=year_to,
+                    )
+                    if not candidate:
+                        break
+                    candidate_url = (
+                        f"https://www.themoviedb.org/{'movie' if media_type == 'MOVIE' else 'tv'}/{candidate.get('id')}"
+                    )
+                    if candidate_url not in (seen_urls or set()):
+                        media = candidate
+                        break
                 if not media:
-                    raise LookupError("No TMDB results were found.")
+                    raise LookupError("No unseen TMDB titles matched the selected filters.")
                 ratings = await browse.fetch_mdblist_ratings(media.get("id"), media_type)
                 is_movie = media_type == "MOVIE"
                 title = media.get("title") if is_movie else media.get("name")
@@ -484,7 +656,12 @@ class Random(commands.Cog):
                 if genres:
                     embed.add_field(name="🎭 Genres", value=genres[:1024], inline=False)
                 embed.set_footer(text="Random pick • TMDB" + (" • Metacritic via MDBList" if ratings else ""))
-            await interaction.followup.send(embed=embed)
+            view = RandomResultView(
+                self, interaction.user.id, media_type,
+                {"genre": genre, "year_from": year_from, "year_to": year_to},
+                source_url=embed.url, seen_urls=seen_urls,
+            )
+            await interaction.followup.send(embed=embed, view=view)
         except LookupError as exc:
             await interaction.followup.send(embed=build_error_embed("No Random Results", str(exc)), ephemeral=True)
         except Exception:
@@ -493,8 +670,36 @@ class Random(commands.Cog):
                 "Lookup Failed", "Could not fetch a random suggestion right now. Please try again later."
             ), ephemeral=True)
 
-    async def _process_random_request(self, interaction: discord.Interaction, media_type: str) -> None:
-        """Process random suggestions from AniList or the existing Browse providers."""
+    async def _process_random_request(
+        self, interaction: discord.Interaction, media_type: str,
+        genre: Optional[str] = None, year_from: Optional[int] = None,
+        year_to: Optional[int] = None, status: Optional[str] = None,
+        media_format: Optional[str] = None, seen_urls: Optional[set] = None,
+    ) -> None:
+        """Process provider-filtered suggestions while retaining cryptographic selection."""
+        for label, year in (("year_from", year_from), ("year_to", year_to)):
+            if year is not None and not 1000 <= year <= 2100:
+                await interaction.response.send_message(
+                    embed=build_error_embed("Invalid Year", f"{label} must be between 1000 and 2100."),
+                    ephemeral=True,
+                )
+                return
+        if year_from is not None and year_to is not None and year_from > year_to:
+            await interaction.response.send_message(
+                embed=build_error_embed("Invalid Year Range", "year_from cannot be later than year_to."),
+                ephemeral=True,
+            )
+            return
+        has_filters = bool(genre or year_from is not None or year_to is not None or status or media_format)
+        if media_type.upper() == "ALL" and has_filters:
+            await interaction.response.send_message(
+                embed=build_error_embed(
+                    "Choose a Media Type",
+                    "Select a specific category so the filters can be applied by the correct provider.",
+                ),
+                ephemeral=True,
+            )
+            return
         if media_type.upper() == "ALL":
             media_type = self._get_random_media_type()
             logger.info(
@@ -503,20 +708,131 @@ class Random(commands.Cog):
             )
 
         if media_type.upper() in ("GENERAL_NOVEL", "BOOKS", "MOVIE", "TV", "WEBNOVEL"):
+            if status or media_format:
+                await interaction.response.send_message(
+                    embed=build_error_embed(
+                        "Unsupported Filter",
+                        "Status and format filters are available only for AniList categories.",
+                    ),
+                    ephemeral=True,
+                )
+                return
+            if media_type.upper() == "WEBNOVEL" and (year_from is not None or year_to is not None):
+                await interaction.response.send_message(
+                    embed=build_error_embed(
+                        "Unsupported Filter",
+                        "Novel Updates results do not expose consistent publication-year data.",
+                    ),
+                    ephemeral=True,
+                )
+                return
             await interaction.response.defer()
-            await self._process_external_random_request(interaction, media_type.upper())
+            await self._process_external_random_request(
+                interaction, media_type.upper(), genre=genre,
+                year_from=year_from, year_to=year_to, seen_urls=seen_urls,
+            )
             return
         try:
             selected_type = media_type.upper()
+            if selected_type == "MANGA" and media_format == "NOVEL":
+                selected_type = "LN"
+            allowed_formats = {
+                "ANIME": {"TV", "TV_SHORT", "MOVIE", "SPECIAL", "OVA", "ONA"},
+                "MANGA": {"MANGA", "ONE_SHOT", "NOVEL"},
+                "LN": {"NOVEL"},
+            }
+            if media_format and (
+                selected_type not in allowed_formats or media_format not in allowed_formats[selected_type]
+            ):
+                await interaction.response.send_message(
+                    embed=build_error_embed(
+                        "Unsupported Format",
+                        "Choose a format compatible with Anime, Manga, or Light Novels. Novel format is reserved for Light Novels.",
+                    ),
+                    ephemeral=True,
+                )
+                return
             logger.info("User %s requested random %s", interaction.user.id, selected_type)
 
-            # Defer the response since API call might take time
+            # Defer the response since API call might take time.
             await interaction.response.defer()
-            
+
+            if has_filters or selected_type in ("ANIME", "MANGA", "LN"):
+                if selected_type == "LN" and media_format and media_format != "NOVEL":
+                    await interaction.followup.send(
+                        embed=build_error_embed(
+                            "Conflicting Format",
+                            "Light Novel selection requires the AniList Novel format.",
+                        ),
+                        ephemeral=True,
+                    )
+                    return
+                media_id = await self._fetch_filtered_random_media(
+                    selected_type, genre=genre, year_from=year_from, year_to=year_to,
+                    status=status, media_format=media_format,
+                    excluded_ids=self._extract_seen_ids(seen_urls),
+                )
+                if not media_id:
+                    await interaction.followup.send(
+                        embed=build_error_embed(
+                            "No Random Results",
+                            "AniList returned no titles matching these filters. Try broader criteria.",
+                        ),
+                        ephemeral=True,
+                    )
+                    return
+                api_type = "MANGA" if selected_type == "LN" else selected_type
+                detailed_media = await self.fetch_detailed_media(media_id, api_type)
+                if not detailed_media:
+                    await interaction.followup.send(
+                        embed=build_error_embed(
+                            "Lookup Failed",
+                            "A filtered title was selected, but its details could not be loaded.",
+                        ),
+                        ephemeral=True,
+                    )
+                    return
+                enhanced_embed = await self.create_enhanced_embed(detailed_media, selected_type)
+                progress_embed = None if selected_type == "LN" else await self.create_progress_embed(
+                    detailed_media, selected_type, interaction.guild_id,
+                )
+                if progress_embed:
+                    await interaction.followup.send(
+                        embed=enhanced_embed,
+                        view=self.PageView(
+                            enhanced_embed, progress_embed, selected_type,
+                            cog=self, owner_id=interaction.user.id,
+                            filters={
+                                "genre": genre, "year_from": year_from, "year_to": year_to,
+                                "status": status, "media_format": media_format,
+                            },
+                            seen_urls=seen_urls,
+                        ),
+                    )
+                else:
+                    await interaction.followup.send(
+                        embed=enhanced_embed,
+                        view=RandomResultView(
+                            self, interaction.user.id, selected_type,
+                            {
+                                "genre": genre, "year_from": year_from, "year_to": year_to,
+                                "status": status, "media_format": media_format,
+                            },
+                            source_url=enhanced_embed.url, seen_urls=seen_urls,
+                        ),
+                    )
+                return
+
+            # Existing unfiltered random selection remains unchanged.
             # Fetch basic random media first to get the ID
             logger.info(f"Fetching random {selected_type} for user {interaction.user.id}")
-            basic_embed = await fetch_random_media(selected_type)
-            
+            basic_embed = None
+            for _ in range(5 if seen_urls else 1):
+                candidate_embed = await fetch_random_media(selected_type)
+                if not candidate_embed or candidate_embed.url not in (seen_urls or set()):
+                    basic_embed = candidate_embed
+                    break
+
             if not basic_embed:
                 logger.warning(f"No random {selected_type} found for user {interaction.user.id}")
                 error_embed = build_error_embed(
@@ -549,18 +865,46 @@ class Random(commands.Cog):
                     
                     if progress_embed:
                         # Create interactive view with both embeds
-                        view = self.PageView(enhanced_embed, progress_embed, selected_type)
+                        view = self.PageView(
+                            enhanced_embed, progress_embed, selected_type,
+                            cog=self, owner_id=interaction.user.id,
+                            filters={
+                                "genre": genre, "year_from": year_from, "year_to": year_to,
+                                "status": status, "media_format": media_format,
+                            },
+                            seen_urls=seen_urls,
+                        )
                         await interaction.followup.send(embed=enhanced_embed, view=view)
                         logger.info(f"Successfully sent enhanced random {selected_type} with user progress to user {interaction.user.id}")
                     else:
                         # Just send the enhanced embed without progress
-                        await interaction.followup.send(embed=enhanced_embed)
+                        await interaction.followup.send(
+                            embed=enhanced_embed,
+                            view=RandomResultView(
+                                self, interaction.user.id, selected_type,
+                                {
+                                    "genre": genre, "year_from": year_from, "year_to": year_to,
+                                    "status": status, "media_format": media_format,
+                                },
+                                source_url=enhanced_embed.url, seen_urls=seen_urls,
+                            ),
+                        )
                         logger.info(f"Successfully sent enhanced random {selected_type} to user {interaction.user.id}")
                     return
 
             # Fallback to basic embed if detailed fetch failed
             basic_embed = self._apply_random_color(basic_embed)
-            await interaction.followup.send(embed=basic_embed)
+            await interaction.followup.send(
+                embed=basic_embed,
+                view=RandomResultView(
+                    self, interaction.user.id, selected_type,
+                    {
+                        "genre": genre, "year_from": year_from, "year_to": year_to,
+                        "status": status, "media_format": media_format,
+                    },
+                    source_url=basic_embed.url, seen_urls=seen_urls,
+                ),
+            )
             logger.info(f"Successfully sent basic random {selected_type} to user {interaction.user.id}")
             
         except Exception as e:
@@ -581,13 +925,29 @@ class Random(commands.Cog):
     class PageView(View):
         """Interactive view for switching between media info and user progress."""
         
-        def __init__(self, media_embed: discord.Embed, progress_embed: discord.Embed, media_type: str):
-            super().__init__(timeout=120)
+        def __init__(
+            self, media_embed: discord.Embed, progress_embed: discord.Embed, media_type: str,
+            cog=None, owner_id: Optional[int] = None, filters: Optional[Dict] = None,
+            seen_urls: Optional[set] = None,
+        ):
+            super().__init__(timeout=300)
             self.media_embed = media_embed
             self.progress_embed = progress_embed
             self.media_type = media_type
+            self.cog = cog
+            self.owner_id = owner_id
+            self.filters = filters or {}
+            self.seen_urls = set(seen_urls or ())
+            if media_embed.url:
+                self.seen_urls.add(media_embed.url)
             self.current = "info"
             self.rebuild_buttons()
+
+        async def interaction_check(self, interaction: discord.Interaction) -> bool:
+            if self.owner_id is not None and interaction.user.id != self.owner_id:
+                await interaction.response.send_message("These random controls belong to another user.", ephemeral=True)
+                return False
+            return True
 
         def rebuild_buttons(self):
             """Rebuild buttons based on current page."""
@@ -629,6 +989,22 @@ class Random(commands.Cog):
                 btn.callback = media_info_callback
                 self.add_item(btn)
 
+            if self.owner_id is not None and self.cog is not None:
+                reroll = Button(label="🎲 Reroll", style=discord.ButtonStyle.primary)
+
+                async def reroll_callback(interaction: discord.Interaction):
+                    if interaction.user.id != self.owner_id:
+                        await interaction.response.send_message("These random controls belong to another user.", ephemeral=True)
+                        return
+                    await self.cog._process_random_request(
+                        interaction, self.media_type, seen_urls=self.seen_urls, **self.filters,
+                    )
+
+                reroll.callback = reroll_callback
+                self.add_item(reroll)
+                if self.media_embed.url and self.media_embed.url.startswith("https://"):
+                    self.add_item(Button(label="Open Source", style=discord.ButtonStyle.link, url=self.media_embed.url))
+
         async def on_timeout(self):
             """Remove all buttons when view times out."""
             self.clear_items()
@@ -638,17 +1014,69 @@ class Random(commands.Cog):
         description="🎲 Get a random Anime, Manga, Light Novel, Novel, Book, Movie, TV Show, Webnovel, or All suggestion"
     )
     @command_meta(section="Media", name="Random")
-    @app_commands.describe(media_type="Choose the type of media to get a random suggestion for")
-    @app_commands.choices(media_type=MEDIA_TYPE_CHOICES)
-    async def random_media(self, interaction: discord.Interaction, media_type: app_commands.Choice[str]) -> None:
+    @app_commands.describe(
+        media_type="Choose the type of media to get a random suggestion for",
+        genre="Optional genre or subject filter",
+        year_from="Earliest release/publication year",
+        year_to="Latest release/publication year",
+        status="AniList release status filter",
+        media_format="AniList format filter",
+    )
+    @app_commands.choices(
+        media_type=MEDIA_TYPE_CHOICES,
+        genre=[
+            app_commands.Choice(name="Action", value="Action"),
+            app_commands.Choice(name="Adventure", value="Adventure"),
+            app_commands.Choice(name="Comedy", value="Comedy"),
+            app_commands.Choice(name="Drama", value="Drama"),
+            app_commands.Choice(name="Fantasy", value="Fantasy"),
+            app_commands.Choice(name="Horror", value="Horror"),
+            app_commands.Choice(name="Mystery", value="Mystery"),
+            app_commands.Choice(name="Romance", value="Romance"),
+            app_commands.Choice(name="Sci-Fi", value="Sci-Fi"),
+            app_commands.Choice(name="Thriller", value="Thriller"),
+        ],
+        status=[
+            app_commands.Choice(name="Releasing", value="RELEASING"),
+            app_commands.Choice(name="Finished", value="FINISHED"),
+            app_commands.Choice(name="Not Yet Released", value="NOT_YET_RELEASED"),
+            app_commands.Choice(name="Cancelled", value="CANCELLED"),
+        ],
+        media_format=[
+            app_commands.Choice(name="TV", value="TV"),
+            app_commands.Choice(name="TV Short", value="TV_SHORT"),
+            app_commands.Choice(name="Movie", value="MOVIE"),
+            app_commands.Choice(name="Special", value="SPECIAL"),
+            app_commands.Choice(name="OVA", value="OVA"),
+            app_commands.Choice(name="ONA", value="ONA"),
+            app_commands.Choice(name="Manga", value="MANGA"),
+            app_commands.Choice(name="Novel / Light Novel", value="NOVEL"),
+            app_commands.Choice(name="One-shot", value="ONE_SHOT"),
+        ],
+    )
+    async def random_media(
+        self, interaction: discord.Interaction, media_type: app_commands.Choice[str],
+        genre: Optional[app_commands.Choice[str]] = None,
+        year_from: Optional[int] = None, year_to: Optional[int] = None,
+        status: Optional[app_commands.Choice[str]] = None,
+        media_format: Optional[app_commands.Choice[str]] = None,
+    ) -> None:
         """Generate a random media suggestion from AniList.
         
         Args:
             interaction: The Discord interaction
             media_type: The type of media to get a random suggestion for
         """
-        logger.info(f"Random command invoked by {interaction.user} ({interaction.user.id})")
-        await self._process_random_request(interaction, media_type.value)
+        logger.info("Random command invoked by %s (%s)", interaction.user, interaction.user.id)
+        await self._process_random_request(
+            interaction,
+            media_type.value,
+            genre=genre.value if genre else None,
+            year_from=year_from,
+            year_to=year_to,
+            status=status.value if status else None,
+            media_format=media_format.value if media_format else None,
+        )
 
 
 async def setup(bot: commands.Bot):

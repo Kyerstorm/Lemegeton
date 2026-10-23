@@ -660,9 +660,8 @@ class RecommendationView(discord.ui.View):
 
         embed.add_field(name="💰 Price", value=price_str, inline=True)
 
-        # Match score (normalize to percentage)
-        match_percent = min(100, match_score * 3)  # Scale score to percentage
-        embed.add_field(name="🎯 Match Score", value=f"{match_percent:.0f}%", inline=True)
+        # Weighted heuristic scores are not calibrated probabilities or percentages.
+        embed.add_field(name="🎯 Rule-based Score", value=f"{match_score:.1f} points", inline=True)
 
         # Release date
         release_date = details.get("release_date", {}).get("date", "Unknown")
@@ -672,6 +671,22 @@ class RecommendationView(discord.ui.View):
         genres = [g.get("description", "") for g in details.get("genres", [])]
         if genres:
             embed.add_field(name="🏷️ Genres", value=", ".join(genres[:3]), inline=False)
+
+        controller_support = details.get("controller_support")
+        if controller_support in ("full", "partial"):
+            embed.add_field(
+                name="🎮 Controller Support",
+                value=controller_support.title(),
+                inline=True,
+            )
+        # Steam's public appdetails response may omit Deck compatibility; only display it if supplied.
+        deck_compat = details.get("steam_deck_compatibility") or details.get("deck_compatibility")
+        if isinstance(deck_compat, dict) and deck_compat.get("category"):
+            embed.add_field(
+                name="🕹️ Steam Deck",
+                value=str(deck_compat["category"]).replace("_", " ").title(),
+                inline=True,
+            )
 
         # Match reasons
         if match_reasons:

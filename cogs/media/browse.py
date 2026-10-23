@@ -93,6 +93,35 @@ class BrowseCog(commands.Cog):
         self.bot = bot
 
     @staticmethod
+    def normalize_title_search(value: Optional[str]) -> str:
+        """Normalize whitespace and Unicode apostrophes for provider title matching."""
+        return " ".join(str(value or "").replace("’", "'").casefold().split())
+
+    @classmethod
+    def choose_best_title_match(cls, results: List[Dict], query: str, title_getter):
+        """Prefer exact/close title matches while preserving provider order for ties."""
+        if not results:
+            return None
+        wanted = cls.normalize_title_search(query)
+        if not wanted:
+            return results[0]
+        ranked = []
+        for index, item in enumerate(results):
+            titles = title_getter(item)
+            if not isinstance(titles, (tuple, list, set)):
+                titles = [titles]
+            normalized = [cls.normalize_title_search(title) for title in titles if title]
+            rank = 3
+            if wanted in normalized:
+                rank = 0
+            elif any(title.startswith(wanted) for title in normalized):
+                rank = 1
+            elif any(wanted in title for title in normalized):
+                rank = 2
+            ranked.append((rank, index, item))
+        return min(ranked, key=lambda result: (result[0], result[1]))[2]
+
+    @staticmethod
     def _is_fiction_book(book: Dict) -> bool:
         """Recognize common fiction labels and genres in Google Books metadata."""
         fiction_markers = (
@@ -161,14 +190,22 @@ class BrowseCog(commands.Cog):
             normalized_results.append({"volumeInfo": info})
         return normalized_results[:10]
 
-    async def fetch_book_results(self, query: str, book_type: str) -> List[Dict]:
-        """Search Google Books first, then fall back to Goodreads if no suitable match exists."""
+    async def fetch_book_results(
+        self, query: str, book_type: str, genre: Optional[str] = None,
+        year_from: Optional[int] = None, year_to: Optional[int] = None,
+    ) -> List[Dict]:
+        """Search Google Books first, using supported subject and publication-year constraints."""
+        query_parts = [" ".join((query or "").split())]
+        if genre:
+            query_parts.insert(0, f"subject:{genre}")
         params = {
-            "q": query,
+            "q": " ".join(part for part in query_parts if part),
             "printType": "books",
             "maxResults": 40,
             "orderBy": "relevance",
         }
+        if year_from is not None or year_to is not None:
+            params["publishedDate"] = f"{year_from or 1000}..{year_to or 2100}"
         filtered_items = []
         try:
             timeout = aiohttp.ClientTimeout(total=8)
@@ -194,11 +231,17 @@ class BrowseCog(commands.Cog):
 
         if filtered_items:
             return filtered_items[:10]
+        if genre or year_from is not None or year_to is not None:
+            # Goodreads autocomplete does not reliably expose subject/year constraints.
+            return []
         logger.info("No suitable Google Books result for %r; trying Goodreads", query)
         return await self.fetch_goodreads_results(query)
 
     async def search_tmdb_titles(self, query: str, media_type: str) -> List[Dict]:
         """Search TMDB for movies or TV shows using the configured read-access token."""
+        query = " ".join((query or "").split())
+        if not query:
+            return []
         token = os.getenv("TMDB_BEARER_TOKEN", "").strip()
         if not token:
             return []
@@ -229,6 +272,16 @@ class BrowseCog(commands.Cog):
         results = await self.search_tmdb_titles(query, media_type)
         if not results:
             return None
+        best_match = self.choose_best_title_match(
+            results,
+            query,
+            lambda item: (
+                item.get("title"), item.get("original_title"),
+                item.get("name"), item.get("original_name"),
+            ),
+        )
+        if best_match is not None:
+            results = [best_match]
         append_fields = (
             "credits,videos,keywords,release_dates,external_ids,images,recommendations"
             if media_type == "MOVIE"
@@ -344,7 +397,7 @@ class BrowseCog(commands.Cog):
             Page(perPage: 10) {
                 media(search: $search, type: $type) {
                     id
-                    title { romaji english }
+                    title { romaji english native }
                     description(asHtml: false)
                     averageScore
                     siteUrl
@@ -363,6 +416,9 @@ class BrowseCog(commands.Cog):
             }
         }
         """
+        query = " ".join((query or "").split())
+        if not query:
+            return []
         variables = {"search": query, "type": media_type}
 
         try:
@@ -562,6 +618,13 @@ class BrowseCog(commands.Cog):
         app_commands.Choice(name="Webnovels", value="WEBNOVEL"),
     ])
     async def search(self, interaction: discord.Interaction, media_type: app_commands.Choice[str], title: str):
+        title = " ".join((title or "").split())
+        if not title:
+            await interaction.response.send_message(
+                embed=build_error_embed("Search Required", "Enter a title to search for."),
+                ephemeral=True,
+            )
+            return
         await interaction.response.defer()
 
         chosen_type = media_type.value
@@ -750,7 +813,12 @@ class BrowseCog(commands.Cog):
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
 
-            book = results[0].get("volumeInfo", {})
+            selected_book = self.choose_best_title_match(
+                results,
+                title,
+                lambda item: (item.get("volumeInfo") or {}).get("title"),
+            )
+            book = (selected_book or results[0]).get("volumeInfo", {})
             title_text = book.get("title") or "Unknown title"
             raw_description = BeautifulSoup(
                 book.get("description") or "", "html.parser"
@@ -783,7 +851,20 @@ class BrowseCog(commands.Cog):
             if book.get("pageCount"):
                 embed.add_field(name="📄 Pages", value=str(book["pageCount"]), inline=True)
             if book.get("averageRating") is not None:
-                embed.add_field(name="⭐ Rating", value=f"{book['averageRating']}/5", inline=True)
+                rating_source = "Goodreads" if book.get("source") == "Goodreads" else "Google Books"
+                embed.add_field(name=f"⭐ {rating_source} Rating", value=f"{book['averageRating']}/5", inline=True)
+            if book.get("language"):
+                embed.add_field(name="🌐 Language", value=str(book["language"])[:1024], inline=True)
+            identifiers = book.get("industryIdentifiers") or []
+            isbns = [
+                f"{entry.get('type')}: {entry.get('identifier')}"
+                for entry in identifiers
+                if entry.get("type") and entry.get("identifier")
+            ]
+            if isbns:
+                embed.add_field(name="🔖 ISBN", value="\n".join(isbns)[:1024], inline=False)
+            if book.get("subtitle"):
+                embed.add_field(name="📘 Subtitle", value=str(book["subtitle"])[:1024], inline=False)
 
             categories = book.get("categories") or []
             if categories:
@@ -811,7 +892,27 @@ class BrowseCog(commands.Cog):
             await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
-        media = results[0]
+        # Filter subtypes before ranking so manga cannot hide a light novel.
+        if chosen_type == "MANGA_NOVEL":
+            results = [item for item in results if item.get("format") == "NOVEL"]
+        elif chosen_type == "MANGA":
+            results = [item for item in results if item.get("format") != "NOVEL"]
+        if not results:
+            label = "Light Novel" if chosen_type == "MANGA_NOVEL" else "Manga"
+            await interaction.followup.send(
+                embed=build_error_embed("No Results Found", f"No {label} results found matching {title!r}."),
+                ephemeral=True,
+            )
+            return
+        media = self.choose_best_title_match(
+            results,
+            title,
+            lambda item: (
+                (item.get("title") or {}).get("english"),
+                (item.get("title") or {}).get("romaji"),
+                (item.get("title") or {}).get("native"),
+            ),
+        )
 
         # Filter by format to ensure correct media type
         if chosen_type == "MANGA_NOVEL" and media.get("format") != "NOVEL":
@@ -861,8 +962,21 @@ class BrowseCog(commands.Cog):
         if banner_url:
             embed.set_image(url=banner_url)
 
-        embed.add_field(name="⭐ Average Score", value=f"{media.get('averageScore', 'N/A')}%", inline=True)
-        embed.add_field(name="📌 Status", value=media.get("status", "Unknown"), inline=True)
+        if media.get("averageScore") is not None:
+            embed.add_field(name="⭐ AniList Score", value=f"{media['averageScore']}/100", inline=True)
+        embed.add_field(
+            name="📌 Status",
+            value=(media.get("status") or "Unknown").replace("_", " ").title(),
+            inline=True,
+        )
+        format_value = (media.get("format") or "").replace("_", " ").title()
+        if format_value:
+            embed.add_field(name="📋 Format", value=format_value, inline=True)
+        title_data = media.get("title") or {}
+        native_title = title_data.get("native")
+        primary_title = title_data.get("english") or title_data.get("romaji") or native_title
+        if native_title and native_title != primary_title:
+            embed.add_field(name="🈯 Native Title", value=str(native_title)[:1024], inline=False)
 
         if real_type == "ANIME":
             embed.add_field(name="📺 Episodes", value=media.get("episodes", '?'), inline=True)

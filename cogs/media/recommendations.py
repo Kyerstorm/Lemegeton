@@ -48,7 +48,7 @@ logger.info("Recommendations cog logging initialized")
 # ------------------------------------------------------
 # CACHING SYSTEM
 # ------------------------------------------------------
-# Cache structure: {user_id: {"data": recommendations_data, "timestamp": timestamp, "username": username}}
+# Cache keys include guild, user, AniList account, and media category.
 recommendations_cache = {}
 
 # ------------------------------------------------------
@@ -100,6 +100,7 @@ query ($userName: String, $type: MediaType) {
                                 }
                                 chapters
                                 volumes
+                                episodes
                             }
                         }
                     }
@@ -164,7 +165,9 @@ def normalize_score(score: float, score_format: str = "POINT_10") -> float:
         return float(score)
 
 def get_format_category(format_type: str, country_of_origin: str = None) -> str:
-    """Categorize manga formats into main types using format and country of origin."""
+    """Categorize AniList manga-like formats using format and country of origin."""
+    if format_type == "NOVEL":
+        return "light_novels"
     # Use country of origin for more accurate categorization
     if country_of_origin:
         if country_of_origin == "KR":  # South Korea
@@ -202,17 +205,24 @@ def truncate_description(description: str, max_length: int = 200) -> str:
 # PAGINATION VIEW CLASS - ONE TITLE PER PAGE
 # ------------------------------------------------------
 class RecommendationsView(discord.ui.View):
-    def __init__(self, user_id: int, recommendations_data: Dict[str, List], username: str):
+    def __init__(
+        self, user_id: int, recommendations_data: Dict[str, List],
+        username: str, media_type: str = "MANGA",
+    ):
         super().__init__(timeout=300)
         self.user_id = user_id
         self.recommendations_data = recommendations_data
         self.username = username
-        self.current_category = "manga"
+        self.media_type = media_type
+        self.current_category = "anime" if media_type == "ANIME" else "manga"
         self.current_index = 0
         self.embeds_cache = {}
-        
-        # Initialize with first available category that has recommendations
-        for category in ["manga", "manhwa", "manhua"]:
+        category_order = (
+            ["anime"] if media_type == "ANIME"
+            else ["light_novels"] if media_type == "LIGHT_NOVEL"
+            else ["manga", "manhwa", "manhua", "light_novels"]
+        )
+        for category in category_order:
             if recommendations_data.get(category):
                 self.current_category = category
                 break
@@ -226,36 +236,27 @@ class RecommendationsView(discord.ui.View):
         """Update button styles and states based on current page."""
         self.clear_items()
         
-        # Category buttons
-        manga_button = discord.ui.Button(
-            label="Manga", 
-            custom_id="manga", 
-            style=discord.ButtonStyle.primary if self.current_category == "manga" else discord.ButtonStyle.secondary,
-            emoji="📖",
-            disabled=not self.recommendations_data.get("manga")
-        )
-        manga_button.callback = self.manga_button_callback
-        self.add_item(manga_button)
-        
-        manhwa_button = discord.ui.Button(
-            label="Manhwa", 
-            custom_id="manhwa", 
-            style=discord.ButtonStyle.primary if self.current_category == "manhwa" else discord.ButtonStyle.secondary,
-            emoji="🇰🇷",
-            disabled=not self.recommendations_data.get("manhwa")
-        )
-        manhwa_button.callback = self.manhwa_button_callback
-        self.add_item(manhwa_button)
-        
-        manhua_button = discord.ui.Button(
-            label="Manhua", 
-            custom_id="manhua", 
-            style=discord.ButtonStyle.primary if self.current_category == "manhua" else discord.ButtonStyle.secondary,
-            emoji="🇨🇳",
-            disabled=not self.recommendations_data.get("manhua")
-        )
-        manhua_button.callback = self.manhua_button_callback
-        self.add_item(manhua_button)
+        if self.media_type == "ANIME":
+            categories = [("anime", "Anime", "🎬", self.manga_button_callback)]
+        elif self.media_type == "LIGHT_NOVEL":
+            categories = [("light_novels", "Light Novels", "📚", self.light_novel_button_callback)]
+        else:
+            categories = [
+                ("manga", "Manga", "📖", self.manga_button_callback),
+                ("manhwa", "Manhwa", "🇰🇷", self.manhwa_button_callback),
+                ("manhua", "Manhua", "🇨🇳", self.manhua_button_callback),
+                ("light_novels", "Light Novels", "📚", self.light_novel_button_callback),
+            ]
+        for category, label, emoji, callback in categories:
+            button = discord.ui.Button(
+                label=label,
+                custom_id=category,
+                style=discord.ButtonStyle.primary if self.current_category == category else discord.ButtonStyle.secondary,
+                emoji=emoji,
+                disabled=not self.recommendations_data.get(category),
+            )
+            button.callback = callback
+            self.add_item(button)
         
         # Navigation buttons (second row)
         current_recs = self.recommendations_data.get(self.current_category, [])
@@ -304,32 +305,33 @@ class RecommendationsView(discord.ui.View):
         media = rec['media']
         vote_count = rec['vote_count']
         
-        # Get title
-        title = media['title']['english'] or media['title']['romaji']
-        
-        # Create embed similar to browse.py
+        title_data = media.get("title") or {}
+        title = title_data.get("english") or title_data.get("romaji") or title_data.get("native") or "Unknown title"
+        is_anime = self.current_category == "anime"
+        media_path = "anime" if is_anime else "manga"
+        media_icon = "🎬" if is_anime else ("📚" if self.current_category == "light_novels" else "📖")
         embed = discord.Embed(
-            title=f"📖 {title}",
-            url=f"https://anilist.co/manga/{media['id']}",
+            title=f"{media_icon} {title}",
+            url=f"https://anilist.co/{media_path}/{media['id']}",
             description=truncate_description(media.get('description', ''), 300),
             color=PALETTE.PRIMARY
         )
         
         # Set thumbnail if available
-        cover_url = media.get('coverImage', {}).get('large')
+        cover_url = (media.get("coverImage") or {}).get("large")
         if cover_url:
             embed.set_thumbnail(url=cover_url)
         
         # Add fields similar to browse.py
         embed.add_field(
             name="⭐ Average Score", 
-            value=f"{media.get('averageScore', 'N/A')}%" if media.get('averageScore') else "N/A", 
+            value=f"{media['averageScore']}/100" if media.get('averageScore') is not None else "N/A", 
             inline=True
         )
         
         embed.add_field(
             name="📌 Status", 
-            value=media.get('status', 'Unknown').replace('_', ' ').title(), 
+            value=(media.get("status") or "Unknown").replace("_", " ").title(),
             inline=True
         )
         
@@ -339,11 +341,14 @@ class RecommendationsView(discord.ui.View):
             inline=True
         )
         
-        # Chapters and volumes
-        if media.get('chapters'):
-            embed.add_field(name="📖 Chapters", value=media.get('chapters', '?'), inline=True)
-        if media.get('volumes'):
-            embed.add_field(name="📚 Volumes", value=media.get('volumes', '?'), inline=True)
+        if is_anime:
+            if media.get("episodes") is not None:
+                embed.add_field(name="📺 Episodes", value=str(media["episodes"]), inline=True)
+        else:
+            if media.get("chapters") is not None:
+                embed.add_field(name="📖 Chapters", value=str(media["chapters"]), inline=True)
+            if media.get("volumes") is not None:
+                embed.add_field(name="📚 Volumes", value=str(media["volumes"]), inline=True)
         
         # Format
         format_type = media.get('format', '').replace('_', ' ').title()
@@ -389,7 +394,7 @@ class RecommendationsView(discord.ui.View):
         try:
             await interaction.response.defer()
             
-            self.current_category = "manga"
+            self.current_category = "anime" if self.media_type == "ANIME" else "manga"
             self.current_index = 0
             self.update_button_states()
             
@@ -470,6 +475,20 @@ class RecommendationsView(discord.ui.View):
             except:
                 pass
 
+    async def light_novel_button_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                embed=build_error_embed("Permission Denied", "This menu is not for you!"),
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
+        self.current_category = "light_novels"
+        self.current_index = 0
+        self.update_button_states()
+        embed = await self.create_embed()
+        await interaction.edit_original_response(embed=embed, view=self)
+
     async def previous_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id:
             embed = build_error_embed(
@@ -547,12 +566,14 @@ class RecommendationsCog(commands.Cog):
         self.bot = bot
         logger.info("Recommendations cog initialized")
     
-    def get_cached_recommendations(self, user_id: int) -> Optional[Tuple[Dict[str, List], str]]:
-        """Get cached recommendations if they exist and are less than 24 hours old."""
-        if user_id not in recommendations_cache:
+    def get_cached_recommendations(
+        self, guild_id: Optional[int], user_id: int, username: str, media_type: str,
+    ) -> Optional[Tuple[Dict[str, List], str]]:
+        """Read cache scoped by guild, user, AniList account, and media category."""
+        cache_key = (guild_id, user_id, username.casefold(), media_type)
+        if cache_key not in recommendations_cache:
             return None
-        
-        cache_entry = recommendations_cache[user_id]
+        cache_entry = recommendations_cache[cache_key]
         cache_time = cache_entry["timestamp"]
         
         # Check if cache is less than 24 hours old
@@ -561,26 +582,30 @@ class RecommendationsCog(commands.Cog):
             return cache_entry["data"], cache_entry["username"]
         else:
             # Remove expired cache
-            del recommendations_cache[user_id]
-            logger.info(f"Cache expired for user {user_id}, removed from cache")
+            del recommendations_cache[cache_key]
+            logger.info("Expired recommendations for user %s in guild %s", user_id, guild_id)
             return None
     
-    def cache_recommendations(self, user_id: int, recommendations_data: Dict[str, List], username: str):
-        """Cache recommendations data for 24 hours."""
-        recommendations_cache[user_id] = {
+    def cache_recommendations(
+        self, guild_id: Optional[int], user_id: int, username: str,
+        media_type: str, recommendations_data: Dict[str, List],
+    ):
+        """Cache results with guild, AniList account, and category isolation."""
+        cache_key = (guild_id, user_id, username.casefold(), media_type)
+        recommendations_cache[cache_key] = {
             "data": recommendations_data,
             "timestamp": time.time(),
-            "username": username
+            "username": username,
         }
-        logger.info(f"Cached recommendations for user {user_id} (username: {username})")
+        logger.info("Cached %s recommendations for user %s in guild %s", media_type, user_id, guild_id)
 
-    async def fetch_user_manga_list(self, username: str) -> Tuple[List[Dict], set]:
-        """Fetch user's manga list from AniList API. Returns manga list and set of user's media IDs."""
-        logger.info(f"Fetching manga list for user: {username}")
-        
+    async def fetch_user_manga_list(self, username: str, media_type: str = "MANGA") -> Tuple[List[Dict], set]:
+        """Fetch a user's AniList list for the chosen supported media category."""
+        logger.info("Fetching %s list for AniList user %s", media_type, username)
+
         variables = {
             "userName": username,
-            "type": "MANGA"
+            "type": media_type,
         }
         
         async with aiohttp.ClientSession() as session:
@@ -605,7 +630,7 @@ class RecommendationsCog(commands.Cog):
                         if entry.get("status") != "PLANNING":
                             manga_list.append(entry)
             
-            logger.info(f"Retrieved {len(manga_list)} manga entries (excluding planning)")
+            logger.info("Retrieved %s %s entries (excluding planning)", len(manga_list), media_type.lower())
             logger.info(f"User has {len(user_media_ids)} total media IDs in their list")
             return manga_list, user_media_ids
 
@@ -627,14 +652,19 @@ class RecommendationsCog(commands.Cog):
         logger.info(f"Filtered to {len(filtered_manga)} highly-rated manga (score >= 7.0)")
         return filtered_manga
 
-    def extract_recommendations(self, manga_list: List[Dict], user_media_ids: set) -> Dict[str, List]:
-        """Extract and categorize recommendations, tracking both AniList ratings and occurrence counts."""
-        logger.info("Extracting recommendations with AniList ratings and occurrence tracking")
-        
+    def extract_recommendations(
+        self, manga_list: List[Dict], user_media_ids: set, media_type: str = "MANGA",
+    ) -> Dict[str, List]:
+        """Extract provider recommendations by requested media type, excluding seen list entries."""
+        if media_type == "ANIME":
+            category_names = ["anime"]
+        elif media_type == "LIGHT_NOVEL":
+            category_names = ["light_novels"]
+        else:
+            category_names = ["manga", "manhwa", "manhua", "light_novels"]
         recommendations_by_category = {
-            "manga": defaultdict(lambda: {"max_rating": 0, "occurrences": 0, "media": None}),
-            "manhwa": defaultdict(lambda: {"max_rating": 0, "occurrences": 0, "media": None}), 
-            "manhua": defaultdict(lambda: {"max_rating": 0, "occurrences": 0, "media": None})
+            category: defaultdict(lambda: {"max_rating": 0, "occurrences": 0, "media": None})
+            for category in category_names
         }
         
         excluded_count = 0
@@ -653,7 +683,9 @@ class RecommendationsCog(commands.Cog):
                 if rec_status not in ["RELEASING", "FINISHED", "NOT_YET_RELEASED"]:
                     continue
                 
-                media_id = rec_media["id"]
+                media_id = rec_media.get("id")
+                if not media_id:
+                    continue
                 
                 # Skip if user already has this title in their list
                 if media_id in user_media_ids:
@@ -661,8 +693,14 @@ class RecommendationsCog(commands.Cog):
                     continue
                 
                 format_type = rec_media.get("format", "MANGA")
+                if media_type == "LIGHT_NOVEL" and format_type != "NOVEL":
+                    continue
                 country_of_origin = rec_media.get("countryOfOrigin")
-                category = get_format_category(format_type, country_of_origin)
+                category = (
+                    "anime" if media_type == "ANIME"
+                    else "light_novels" if media_type == "LIGHT_NOVEL"
+                    else get_format_category(format_type, country_of_origin)
+                )
                 
                 # Get AniList recommendation rating (upvotes)
                 recommendation_rating = rec.get("rating", 0) or 0
@@ -680,17 +718,20 @@ class RecommendationsCog(commands.Cog):
                 # Always increment occurrence count
                 current_entry["occurrences"] += 1
         
-        logger.info(f"Extracted recommendations: "
-                   f"manga={len(recommendations_by_category['manga'])}, "
-                   f"manhwa={len(recommendations_by_category['manhwa'])}, "
-                   f"manhua={len(recommendations_by_category['manhua'])}")
+        logger.info(
+            "Extracted recommendation candidates by category: %s",
+            {category: len(entries) for category, entries in recommendations_by_category.items()},
+        )
         logger.info(f"Excluded {excluded_count} recommendations already in user's list")
         logger.info("Tracking both AniList ratings and occurrence counts for filtering")
         
         return recommendations_by_category
 
-    def filter_and_rank_recommendations(self, recommendations_by_category: Dict) -> Dict[str, List]:
-        """Filter recommendations with occurrence >=3 AND rating >=3, rank by AniList ratings."""
+    def filter_and_rank_recommendations(
+        self, recommendations_by_category: Dict, genre: Optional[str] = None,
+        year_from: Optional[int] = None, year_to: Optional[int] = None,
+    ) -> Dict[str, List]:
+        """Filter by real candidate metadata, then rank AniList's recommendation signals."""
         logger.info("Filtering recommendations with occurrence >=3 AND rating >=3")
         
         final_recommendations = {}
@@ -699,8 +740,23 @@ class RecommendationsCog(commands.Cog):
             # Double filter: occurrence >=3 AND rating >=3
             filtered_recs = {}
             for media_id, data in rec_dict.items():
-                if data["occurrences"] >= 3 and data["max_rating"] >= 3:
-                    filtered_recs[media_id] = data
+                media = data.get("media") or {}
+                if data["occurrences"] < 3 or data["max_rating"] < 3:
+                    continue
+                if genre and not any(
+                    genre.casefold() in str(value).casefold()
+                    for value in (media.get("genres") or [])
+                ):
+                    continue
+                raw_year = (media.get("startDate") or {}).get("year")
+                if year_from is not None or year_to is not None:
+                    if not isinstance(raw_year, int):
+                        continue
+                    if year_from is not None and raw_year < year_from:
+                        continue
+                    if year_to is not None and raw_year > year_to:
+                        continue
+                filtered_recs[media_id] = data
             
             # Create list with media details and ratings
             rec_list = []
@@ -726,12 +782,45 @@ class RecommendationsCog(commands.Cog):
         
         return final_recommendations
 
-    @app_commands.command(name="recommendations", description="Get personalized manga recommendations based on your highly-rated library")
+    @app_commands.command(name="recommendations", description="Get AniList recommendations for anime, manga, or light novels")
     @command_meta(section="Media", name="Recommendations")
-    @app_commands.describe(username="AniList username (optional, uses your linked account if not provided)")
-    async def recommendations(self, interaction: discord.Interaction, username: Optional[str] = None):
-        """Generate personalized manga recommendations."""
-        logger.info(f"Recommendations command triggered by user {interaction.user.id}")
+    @app_commands.describe(
+        username="AniList username (optional, uses your linked account if not provided)",
+        media_type="AniList category to recommend",
+        genre="Optional genre name filter",
+        year_from="Earliest release year",
+        year_to="Latest release year",
+    )
+    @app_commands.choices(media_type=[
+        app_commands.Choice(name="Manga (including manhwa/manhua)", value="MANGA"),
+        app_commands.Choice(name="Anime", value="ANIME"),
+        app_commands.Choice(name="Light Novels", value="LIGHT_NOVEL"),
+    ])
+    async def recommendations(
+        self, interaction: discord.Interaction, username: Optional[str] = None,
+        media_type: Optional[app_commands.Choice[str]] = None, genre: Optional[str] = None,
+        year_from: Optional[int] = None, year_to: Optional[int] = None,
+    ):
+        """Generate recommendations based on AniList's native recommendation graph."""
+        selected_type = media_type.value if media_type else "MANGA"
+        api_type = "MANGA" if selected_type == "LIGHT_NOVEL" else selected_type
+        genre = " ".join((genre or "").split()) or None
+        if year_from is not None and not 1900 <= year_from <= 2100:
+            return await interaction.response.send_message(
+                embed=build_error_embed("Invalid Year", "year_from must be between 1900 and 2100."),
+                ephemeral=True,
+            )
+        if year_to is not None and not 1900 <= year_to <= 2100:
+            return await interaction.response.send_message(
+                embed=build_error_embed("Invalid Year", "year_to must be between 1900 and 2100."),
+                ephemeral=True,
+            )
+        if year_from is not None and year_to is not None and year_from > year_to:
+            return await interaction.response.send_message(
+                embed=build_error_embed("Invalid Year Range", "year_from cannot be later than year_to."),
+                ephemeral=True,
+            )
+        logger.info("Recommendations requested by %s for %s", interaction.user.id, selected_type)
         
         # Defer the response as this will take time
         await interaction.response.defer()
@@ -767,7 +856,11 @@ class RecommendationsCog(commands.Cog):
                     return
             
             # Check cache first
-            cached_data = self.get_cached_recommendations(interaction.user.id)
+            cached_data = None
+            if not genre and year_from is None and year_to is None:
+                cached_data = self.get_cached_recommendations(
+                    interaction.guild_id, interaction.user.id, username, selected_type,
+                )
             if cached_data:
                 final_recommendations, cached_username = cached_data
                 
@@ -780,7 +873,9 @@ class RecommendationsCog(commands.Cog):
                 await interaction.followup.send(embed=cache_embed)
                 
                 # Create pagination view with cached data
-                view = RecommendationsView(interaction.user.id, final_recommendations, cached_username)
+                view = RecommendationsView(
+                    interaction.user.id, final_recommendations, cached_username, selected_type,
+                )
                 initial_embed = await view.create_embed()
                 await interaction.edit_original_response(embed=initial_embed, view=view)
                 
@@ -790,7 +885,7 @@ class RecommendationsCog(commands.Cog):
             # Show initial loading message
             loading_embed = discord.Embed(
                 title="🔍 Generating Recommendations...",
-                description=f"Analyzing {username}'s manga library to find personalized recommendations...",
+                description=f"Analyzing {username}'s {selected_type.replace('_', ' ').lower()} list to find recommendations...",
                 color=PALETTE.PRIMARY
             )
             await interaction.followup.send(embed=loading_embed)
@@ -798,11 +893,16 @@ class RecommendationsCog(commands.Cog):
             # Stage 1: Fetch user's manga list
             logger.info(f"Stage 1: Fetching manga list for {username}")
             try:
-                manga_list, user_media_ids = await self.fetch_user_manga_list(username)
+                manga_list, user_media_ids = await self.fetch_user_manga_list(username, api_type)
+                if selected_type == "LIGHT_NOVEL":
+                    manga_list = [
+                        entry for entry in manga_list
+                        if (entry.get("media") or {}).get("format") == "NOVEL"
+                    ]
                 if not manga_list:
                     embed = build_error_embed(
-                        "No Manga Found",
-                        f"No manga found in {username}'s library (excluding planning list)."
+                        "No Media Found",
+                        f"No {selected_type.replace('_', ' ').lower()} found in {username}'s AniList list (excluding planning entries)."
                     )
                     await interaction.edit_original_response(embed=embed)
                     return
@@ -828,28 +928,36 @@ class RecommendationsCog(commands.Cog):
             
             # Stage 3: Extract recommendations
             logger.info("Stage 3: Extracting recommendations")
-            recommendations_by_category = self.extract_recommendations(filtered_manga, user_media_ids)
+            recommendations_by_category = self.extract_recommendations(
+                filtered_manga, user_media_ids, selected_type,
+            )
             
             # Stage 4: Filter and rank recommendations
             logger.info("Stage 4: Filtering and ranking recommendations")
-            final_recommendations = self.filter_and_rank_recommendations(recommendations_by_category)
+            final_recommendations = self.filter_and_rank_recommendations(
+                recommendations_by_category, genre=genre, year_from=year_from, year_to=year_to,
+            )
             
             # Check if we have any recommendations
             total_recommendations = sum(len(recs) for recs in final_recommendations.values())
             if total_recommendations == 0:
                 embed = build_warning_embed(
                     "No Recommendations Found",
-                    "No recommendations found with 3+ votes. Try reading more manga to get better recommendations!"
+                    "No recommendations matched the selected category and filters. Try a broader genre or year range."
                 )
                 await interaction.edit_original_response(embed=embed)
                 return
             
             # Create pagination view
             logger.info("Stage 5: Creating pagination view")
-            view = RecommendationsView(interaction.user.id, final_recommendations, username)
-            
-            # Cache the recommendations for 24 hours
-            self.cache_recommendations(interaction.user.id, final_recommendations, username)
+            view = RecommendationsView(
+                interaction.user.id, final_recommendations, username, selected_type,
+            )
+            if not genre and year_from is None and year_to is None:
+                self.cache_recommendations(
+                    interaction.guild_id, interaction.user.id, username,
+                    selected_type, final_recommendations,
+                )
             
             # Create initial embed (first recommendation in first available category)
             initial_embed = await view.create_embed()

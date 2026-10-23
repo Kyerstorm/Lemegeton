@@ -61,39 +61,61 @@ class SteamRecommendation(commands.Cog):
     @command_meta(section="Gaming", name="Steam Recommendations")
     @app_commands.describe(
         genre="Filter by specific genre",
-        max_price="Maximum price in USD (leave blank for any price)",
+        min_price="Minimum current Steam Store price in USD",
+        max_price="Maximum current Steam Store price in USD",
         exclude_early_access="Exclude Early Access games",
-        multiplayer_only="Show only multiplayer games"
+        multiplayer_only="Show only multiplayer games",
+        controller_support="Use Steam's published controller-support field",
     )
-    @app_commands.choices(genre=[
-        app_commands.Choice(name="Any Genre", value="any"),
-        app_commands.Choice(name="Action", value="action"),
-        app_commands.Choice(name="Adventure", value="adventure"),
-        app_commands.Choice(name="RPG", value="rpg"),
-        app_commands.Choice(name="Strategy", value="strategy"),
-        app_commands.Choice(name="Indie", value="indie"),
-        app_commands.Choice(name="Simulation", value="simulation"),
-        app_commands.Choice(name="Casual", value="casual"),
-        app_commands.Choice(name="Sports", value="sports"),
-        app_commands.Choice(name="Racing", value="racing"),
-    ])
+    @app_commands.choices(
+        genre=[
+            app_commands.Choice(name="Any Genre", value="any"),
+            app_commands.Choice(name="Action", value="action"),
+            app_commands.Choice(name="Adventure", value="adventure"),
+            app_commands.Choice(name="RPG", value="rpg"),
+            app_commands.Choice(name="Strategy", value="strategy"),
+            app_commands.Choice(name="Indie", value="indie"),
+            app_commands.Choice(name="Simulation", value="simulation"),
+            app_commands.Choice(name="Casual", value="casual"),
+            app_commands.Choice(name="Sports", value="sports"),
+            app_commands.Choice(name="Racing", value="racing"),
+        ],
+        controller_support=[
+            app_commands.Choice(name="Any", value="any"),
+            app_commands.Choice(name="Full Support", value="full"),
+            app_commands.Choice(name="Partial Support", value="partial"),
+        ],
+    )
     async def steam_recommendation(
         self,
         interaction: discord.Interaction,
         genre: Optional[app_commands.Choice[str]] = None,
+        min_price: Optional[float] = None,
         max_price: Optional[float] = None,
         exclude_early_access: Optional[bool] = False,
-        multiplayer_only: Optional[bool] = False
+        multiplayer_only: Optional[bool] = False,
+        controller_support: Optional[app_commands.Choice[str]] = None,
     ):
-        logger.info(f"/steam-recommendation by {interaction.user} - genre={genre} max_price={max_price}")
+        if ((min_price is not None and min_price < 0)
+                or (max_price is not None and max_price < 0)):
+            return await interaction.response.send_message(
+                embed=build_error_embed("Invalid Price", "Price filters must be zero or greater."),
+                ephemeral=True,
+            )
+        if min_price is not None and max_price is not None and min_price > max_price:
+            return await interaction.response.send_message(
+                embed=build_error_embed("Invalid Price Range", "Minimum price cannot exceed maximum price."),
+                ephemeral=True,
+            )
         await interaction.response.defer(ephemeral=True)
 
-        # Build filter options
         filters = {
             'genre': genre.value if genre else 'any',
+            'min_price': min_price,
             'max_price': max_price,
             'exclude_early_access': exclude_early_access,
-            'multiplayer_only': multiplayer_only
+            'multiplayer_only': multiplayer_only,
+            'controller_support': controller_support.value if controller_support else 'any',
         }
 
         # Get the Steam ID only from this guild's PostgreSQL record.
@@ -178,9 +200,11 @@ class SteamRecommendation(commands.Cog):
         if filters is None:
             filters = {
                 'genre': 'any',
+                'min_price': None,
                 'max_price': None,
                 'exclude_early_access': False,
-                'multiplayer_only': False
+                'multiplayer_only': False,
+                'controller_support': 'any',
             }
         
         # Step 1: Analyze user's gaming preferences
@@ -292,17 +316,25 @@ class SteamRecommendation(commands.Cog):
                 if filters['genre'].lower() not in genres:
                     continue
 
-            # Price filter
-            if filters['max_price'] is not None:
-                price_info = details.get("price_overview", {})
-                if price_info:
-                    # Price is in cents, convert to dollars
-                    final_price = price_info.get("final", 0) / 100
-                    if final_price > filters['max_price']:
-                        continue
-                # Free games pass the filter
-                elif not details.get("is_free", False):
-                    # No price info and not free - skip
+            # Price filtering uses current Steam pricing (amounts are in cents).
+            if filters.get('min_price') is not None or filters.get('max_price') is not None:
+                price_info = details.get("price_overview") or {}
+                if details.get("is_free", False):
+                    final_price = 0.0
+                elif isinstance(price_info.get("final"), int):
+                    final_price = price_info["final"] / 100
+                else:
+                    # Unknown price is not equivalent to free or zero-priced.
+                    continue
+                if filters.get('min_price') is not None and final_price < filters['min_price']:
+                    continue
+                if filters.get('max_price') is not None and final_price > filters['max_price']:
+                    continue
+
+            wanted_controller = filters.get("controller_support", "any")
+            actual_controller = details.get("controller_support")
+            if wanted_controller != "any":
+                if actual_controller not in ("full", "partial") or actual_controller != wanted_controller:
                     continue
 
             # Early Access filter
@@ -441,7 +473,19 @@ class SteamRecommendation(commands.Cog):
         embed.add_field(name="📅 Release Date", value=release_date, inline=True)
         embed.add_field(name="🎮 Genres", value=", ".join(genres[:3]) if genres else "Unknown", inline=True)
         
-        # Add match reasons if available
+        controller_support = details.get("controller_support")
+        if controller_support in ("full", "partial"):
+            embed.add_field(
+                name="🎮 Controller Support",
+                value=controller_support.title(),
+                inline=True,
+            )
+        platforms = details.get("platforms") or {}
+        supported_platforms = [platform.title() for platform, supported in platforms.items() if supported]
+        if supported_platforms:
+            embed.add_field(name="🖥️ Platforms", value=", ".join(supported_platforms), inline=True)
+
+        # Explain recommendations using the actual signals used by the weighted rules.
         if "match_reasons" in recommendation and recommendation["match_reasons"]:
             reasons = "\n".join(f"• {reason}" for reason in recommendation["match_reasons"][:3])
             embed.add_field(name="🎯 Why recommended", value=reasons, inline=False)

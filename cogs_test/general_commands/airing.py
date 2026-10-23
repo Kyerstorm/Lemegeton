@@ -64,8 +64,13 @@ query($search: String) {
 }
 """
 
-def filter_schedule(entries: list[dict], day: str | None = None, season: str | None = None, year: int | None = None) -> list[dict]:
-    """Filter valid provider timestamps and sort chronologically in UTC."""
+def filter_schedule(
+    entries: list[dict], day: str | None = None, season: str | None = None,
+    year: int | None = None, days: int | None = None,
+) -> list[dict]:
+    """Filter actual future AniList timestamps, using UTC for weekday and window comparisons."""
+    now = datetime.now(timezone.utc)
+    deadline = now.timestamp() + days * 86400 if days is not None else None
     result = []
     for entry in entries:
         timestamp = entry.get("airingAt")
@@ -73,7 +78,7 @@ def filter_schedule(entries: list[dict], day: str | None = None, season: str | N
         if not isinstance(timestamp, (int, float)):
             continue
         moment = datetime.fromtimestamp(timestamp, timezone.utc)
-        if moment <= datetime.now(timezone.utc):
+        if moment <= now or (deadline is not None and timestamp > deadline):
             continue
         if day and moment.strftime("%A").casefold() != day.casefold():
             continue
@@ -84,12 +89,17 @@ def filter_schedule(entries: list[dict], day: str | None = None, season: str | N
         result.append(entry)
     return sorted(result, key=lambda item: item["airingAt"])
 
+
+def format_utc_airing_time(timestamp: int) -> str:
+    """Render the provider timestamp explicitly in UTC for an unambiguous schedule."""
+    return datetime.fromtimestamp(timestamp, timezone.utc).strftime("%a, %d %b %Y %H:%M UTC")
+
 def schedule_embed(entries: list[dict], title_filter: str | None, page: int) -> discord.Embed:
     start = page * 5
     visible = entries[start:start + 5]
-    description = f"{len(entries)} matching expected episode entries. Times are shown in UTC."
+    description = f"{len(entries)} expected episode entries within the selected window. Explicit times are UTC."
     if title_filter:
-        description = f"Upcoming expected episodes matching {title_filter!r}. Times are shown in UTC."
+        description = f"Expected upcoming episodes matching {title_filter!r}. Explicit times are UTC."
     embed = discord.Embed(title="Anime Airing Schedule", description=description, color=discord.Color.blurple())
     if not visible:
         embed.description = "No matching expected airing events were returned by AniList for these filters."
@@ -102,7 +112,7 @@ def schedule_embed(entries: list[dict], title_filter: str | None, page: int) -> 
         label = f"[{title}]({url})" if url else title
         embed.add_field(
             name=f"{label} · Episode {entry.get('episode') or '?'}"[:256],
-            value=f"<t:{timestamp}:F> · <t:{timestamp}:R>\nStatus: {media.get('status') or 'Unavailable'} · {media.get('format') or 'Format unavailable'}",
+            value=f"UTC: **{format_utc_airing_time(timestamp)}** · <t:{timestamp}:R>\nStatus: {media.get('status') or 'Unavailable'} · {media.get('format') or 'Format unavailable'}",
             inline=False,
         )
         image = (media.get("coverImage") or {}).get("large")
@@ -151,11 +161,24 @@ class AiringView(discord.ui.View):
         self.next.disabled = len(self.entries) <= 5
         await interaction.edit_original_response(embed=schedule_embed(self.entries, self.filters.get("title"), 0), view=self)
 
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            item.disabled = True
+        message = self.message
+        if message is not None:
+            try:
+                await message.edit(view=self)
+            except discord.HTTPException:
+                pass
+
 class Airing(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    async def fetch_schedule(self, title: str | None = None, day: str | None = None, season: str | None = None, year: int | None = None) -> list[dict]:
+    async def fetch_schedule(
+        self, title: str | None = None, day: str | None = None,
+        season: str | None = None, year: int | None = None, days: int = 7,
+    ) -> list[dict]:
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
                 if title:
@@ -167,7 +190,7 @@ class Airing(commands.Cog):
                         {"airingAt": node.get("airingAt"), "episode": node.get("episode"), "media": media}
                         for node in ((media.get("airingSchedule") or {}).get("nodes") or [])
                     ]
-                    return filter_schedule(entries, day=day, season=season, year=year)
+                    return filter_schedule(entries, day=day, season=season, year=year, days=days)
                 if season or year:
                     payload = await post_graphql(session, SEASON_QUERY, {"season": season, "year": year}, timeout=15)
                     media_items = ((payload or {}).get("Page") or {}).get("media") or []
@@ -176,14 +199,14 @@ class Airing(commands.Cog):
                         for media in media_items
                         for node in ((media.get("airingSchedule") or {}).get("nodes") or [])
                     ]
-                    return filter_schedule(entries, day=day, season=season, year=year)
+                    return filter_schedule(entries, day=day, season=season, year=year, days=days)
                 now = int(datetime.now(timezone.utc).timestamp())
-                end = now + (14 * 86400 if day else 7 * 86400)
+                end = now + days * 86400
                 payload = await post_graphql(session, SCHEDULE_QUERY, {"from": now, "to": end}, timeout=15)
             entries = (((payload or {}).get("Page") or {}).get("airingSchedules") or [])
-            return filter_schedule(entries, day=day)
-        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError) as exc:
-            log.warning("AniList airing schedule request failed: %s", exc)
+            return filter_schedule(entries, day=day, days=days)
+        except Exception as exc:
+            log.warning("AniList airing schedule request failed: %s", exc, exc_info=True)
             return []
 
     @app_commands.command(name="airing", description="Browse expected upcoming anime episode times from AniList")
@@ -196,8 +219,20 @@ class Airing(commands.Cog):
             app_commands.Choice(name="Summer", value="SUMMER"),
             app_commands.Choice(name="Fall", value="FALL"),
         ],
+        window=[
+            app_commands.Choice(name="Next 24 Hours", value=1),
+            app_commands.Choice(name="Next 3 Days", value=3),
+            app_commands.Choice(name="Next 7 Days", value=7),
+            app_commands.Choice(name="Next 14 Days", value=14),
+        ],
     )
-    @app_commands.describe(title="Optional anime title", day="Filter upcoming episodes by UTC weekday", season="Filter by AniList season", year="Season year")
+    @app_commands.describe(
+        title="Optional anime title",
+        day="Filter upcoming episodes by UTC weekday",
+        season="Filter by AniList season",
+        year="Season year",
+        window="How far ahead to show expected episodes",
+    )
     @command_meta(section="Media Discovery", name="Airing")
     async def airing(
         self,
@@ -206,9 +241,16 @@ class Airing(commands.Cog):
         day: str | None = None,
         season: str | None = None,
         year: app_commands.Range[int, 1970, 2100] | None = None,
+        window: app_commands.Choice[int] | None = None,
     ) -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
-        filters = {"title": title, "day": day, "season": season, "year": year}
+        filters = {
+            "title": title.strip() if title else None,
+            "day": day,
+            "season": season,
+            "year": year,
+            "days": window.value if window else 7,
+        }
         entries = await self.fetch_schedule(**filters)
         if not entries:
             await interaction.followup.send("AniList returned no expected airing times for these filters, or the schedule service is unavailable. This does not mean the title is cancelled or not airing.", ephemeral=True)
