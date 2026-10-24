@@ -958,8 +958,10 @@ are scoped to a guild.
   optional moderation-log channel, and optional moderator role.
 - Use **Add Panel** to upload an image (PNG/JPEG/GIF/WebP/AVIF) within the
   effective Discord upload limit for the user and configured storage server.
-  Enter a manga title, AniList manga ID, or AniList manga URL, alongside tags,
-  caption, and content rating. Oversized images receive a specific size-limit message.
+  Enter a manga title, AniList manga ID, or AniList manga URL. Tags are required
+  and support multi-select; the required chapter/caption field stores the chapter
+  number separately and displays it with the caption. Oversized images receive a
+  specific size-limit message.
 - The **Save to Panels** message context menu opens the add flow for image messages.
 - Browsing and search results are posted publicly in the current channel; mature
   panels are excluded unless that channel is marked NSFW by Discord.

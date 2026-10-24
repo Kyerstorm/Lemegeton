@@ -28,6 +28,16 @@ log = logging.getLogger("Lemegeton.Panels")
 # Fallback only; use Discord's effective interaction/storage limits when available.
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"}
+PANEL_TAGS = (
+    "action", "adventure", "comedy", "drama", "fantasy", "horror", "mystery",
+    "psychological", "romance", "sci-fi", "slice of life", "supernatural",
+    "thriller", "tragedy", "isekai", "martial arts", "school life", "historical",
+    "shounen", "shoujo", "seinen", "josei", "manhwa", "manhua", "double spread",
+)
+CHAPTER_CAPTION_RE = re.compile(
+    r"^\s*(?:(?:chapter|ch\.?)\s*)?#?(\d+(?:\.\d+)?)\s*(?:[-–—:|]\s*|\s+)(.+?)\s*$",
+    re.IGNORECASE,
+)
 BROWSER_TIMEOUT = 1800
 DEFAULT_STORAGE_CHANNEL_ID = None  # Optional deployment-wide fallback.
 
@@ -64,6 +74,7 @@ async def _schema() -> None:
                 filename TEXT NOT NULL,
                 title VARCHAR(100) NOT NULL,
                 anilist_id BIGINT,
+                chapter_number VARCHAR(32),
                 caption VARCHAR(500),
                 source_url TEXT,
                 is_nsfw BOOLEAN NOT NULL DEFAULT FALSE,
@@ -79,6 +90,7 @@ async def _schema() -> None:
             )
         """)
         await conn.execute("ALTER TABLE panels ADD COLUMN IF NOT EXISTS anilist_id BIGINT")
+        await conn.execute("ALTER TABLE panels ADD COLUMN IF NOT EXISTS chapter_number VARCHAR(32)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_panels_created_at ON panels(created_at DESC)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_panels_uploader_id ON panels(uploader_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_panel_tags_tag ON panel_tags(tag)")
@@ -116,6 +128,20 @@ def _tags(raw: str | None) -> list[str]:
     if len(result) > 10:
         raise ValueError("Use no more than 10 unique tags.")
     return result
+
+
+def _parse_chapter_caption(value: str) -> tuple[str, str]:
+    """Require a chapter number and caption from one modal field."""
+    match = CHAPTER_CAPTION_RE.fullmatch(value.strip())
+    if not match:
+        raise ValueError(
+            "Enter both a chapter number and caption, for example "
+            "**Chapter 12 — The final battle begins**."
+        )
+    chapter_number, caption = match.group(1), match.group(2).strip()
+    if not caption:
+        raise ValueError("A caption is required after the chapter number.")
+    return chapter_number, caption
 
 
 def _anilist_reference_id(value: str) -> int | None:
@@ -215,7 +241,10 @@ async def _panel_ids(allow_mature: bool, user_id: int | None = None,
     if keyword:
         args.append(f"%{keyword}%")
         n = len(args)
-        clauses.append(f"(p.title ILIKE ${n} OR COALESCE(p.caption,'') ILIKE ${n})")
+        clauses.append(
+            f"(p.title ILIKE ${n} OR COALESCE(p.caption,'') ILIKE ${n} "
+            f"OR COALESCE(p.chapter_number,'') ILIKE ${n})"
+        )
     if tags:
         args.append(tags)
         n = len(args)
@@ -292,9 +321,16 @@ def _embed(panel: dict[str, Any], page: int, total: int, guild_name: str | None)
     mature = bool(panel["is_nsfw"])
     anilist_id = panel.get("anilist_id")
     anilist_url = f"https://anilist.co/manga/{int(anilist_id)}" if anilist_id else None
+    caption = str(panel.get("caption") or "").strip()
+    chapter_number = panel.get("chapter_number")
+    description = (
+        f"**Chapter {discord.utils.escape_markdown(str(chapter_number))}**\n{caption}"
+        if chapter_number and caption
+        else (caption or "*No caption provided.*")
+    )
     embed = discord.Embed(
         title=str(panel["title"])[:100],
-        description=(panel.get("caption") or "*No caption provided.*")[:4000],
+        description=description[:4000],
         colour=PALETTE.DANGER if mature else PALETTE.PRIMARY,
         timestamp=panel.get("created_at"),
         url=anilist_url,
@@ -365,14 +401,40 @@ class PanelForm(discord.ui.Modal):
             description="Enter a title, numeric AniList manga ID, or an AniList manga URL.",
             component=discord.ui.TextInput(default=panel["title"] if panel else None, max_length=300, required=True),
         )
+        selected_tags = list(panel.get("tags", [])) if panel else []
+        tag_values = list(dict.fromkeys([*selected_tags, *PANEL_TAGS]))[:25]
         self.tags_field = discord.ui.Label(
-            text="Tags (comma-separated)",
-            component=discord.ui.TextInput(default=", ".join(panel.get("tags", [])) if panel else None, max_length=300, required=False),
+            text="🏷️ Tags (select 1–10)",
+            description="Choose at least one tag. Multiple tags are supported.",
+            component=discord.ui.Select(
+                placeholder="Select all tags that fit this panel",
+                options=[
+                    discord.SelectOption(
+                        label=tag.title()[:100],
+                        value=tag,
+                        default=tag in selected_tags,
+                    )
+                    for tag in tag_values
+                ],
+                min_values=1,
+                max_values=min(10, len(tag_values)),
+            ),
         )
+        caption_default = None
+        if panel:
+            old_caption = str(panel.get("caption") or "")
+            old_chapter = panel.get("chapter_number")
+            caption_default = f"Chapter {old_chapter} — {old_caption}" if old_chapter else old_caption
         self.caption_field = discord.ui.Label(
-            text="Caption",
-            component=discord.ui.TextInput(default=panel.get("caption", "") if panel else None,
-                                           style=discord.TextStyle.paragraph, max_length=500, required=False),
+            text="📖 Chapter number & caption",
+            description="Required. Format: Chapter 12 — your caption.",
+            component=discord.ui.TextInput(
+                default=caption_default,
+                placeholder="Chapter 12 — The final battle begins",
+                style=discord.TextStyle.paragraph,
+                max_length=500,
+                required=True,
+            ),
         )
         self.rating_field = discord.ui.Label(
             text="Content rating",
@@ -396,7 +458,8 @@ class PanelForm(discord.ui.Modal):
                 await interaction.followup.send("This form belongs to another user.", ephemeral=True)
                 return
             submitted_title = str(self.title_field.component.value or "").strip()
-            caption = str(self.caption_field.component.value or "").strip()
+            chapter_input = str(self.caption_field.component.value or "").strip()
+            chapter_number, caption = _parse_chapter_caption(chapter_input)
             if not submitted_title:
                 await interaction.followup.send("A manga title, AniList ID, or AniList URL is required.", ephemeral=True)
                 return
@@ -408,7 +471,11 @@ class PanelForm(discord.ui.Modal):
             if anilist_id is None and self.panel:
                 anilist_id = self.panel.get("anilist_id")
             source_url = requested_anilist_url or self.source_url
-            tags = _tags(str(self.tags_field.component.value or ""))
+            selected_tags = list(self.tags_field.component.values or [])
+            if not selected_tags:
+                await interaction.followup.send("Select at least one tag for this panel.", ephemeral=True)
+                return
+            tags = _tags(",".join(selected_tags))
             values = self.image.component.values or []
             upload = values[0] if values else None
             image_bytes = None
@@ -478,19 +545,19 @@ class PanelForm(discord.ui.Modal):
                     if self.mode == "add":
                         row = await conn.fetchrow("""
                             INSERT INTO panels(uploader_id,uploader_guild_id,storage_message_id,storage_channel_id,
-                                attachment_url,filename,title,anilist_id,caption,source_url,is_nsfw)
-                            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id
+                                attachment_url,filename,title,anilist_id,chapter_number,caption,source_url,is_nsfw)
+                            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id
                         """, interaction.user.id, guild.id, storage_message_id, storage_channel_id,
-                             attachment_url, filename, title, anilist_id, caption or None, source_url, mature)
+                             attachment_url, filename, title, anilist_id, chapter_number, caption, source_url, mature)
                         panel_id = int(row["id"])
                     else:
                         panel_id = int(self.panel["id"])
                         await conn.execute("""
                             UPDATE panels SET storage_message_id=$1,storage_channel_id=$2,attachment_url=$3,
-                                filename=$4,title=$5,anilist_id=$6,caption=$7,source_url=$8,is_nsfw=$9,updated_at=NOW()
-                            WHERE id=$10
+                                filename=$4,title=$5,anilist_id=$6,chapter_number=$7,caption=$8,source_url=$9,is_nsfw=$10,updated_at=NOW()
+                            WHERE id=$11
                         """, storage_message_id, storage_channel_id, attachment_url, filename, title,
-                             anilist_id, caption or None, source_url, mature, panel_id)
+                             anilist_id, chapter_number, caption, source_url, mature, panel_id)
                         await conn.execute("DELETE FROM panel_tags WHERE panel_id=$1", panel_id)
                     for tag in tags:
                         await conn.execute("INSERT INTO panel_tags(panel_id,tag) VALUES($1,$2) ON CONFLICT DO NOTHING", panel_id, tag)
