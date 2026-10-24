@@ -8,10 +8,10 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
-import random
 import re
 import secrets
 from typing import Any
+from urllib.parse import urlsplit
 
 import aiohttp
 import discord
@@ -20,9 +20,13 @@ from discord.ext import commands
 
 import database
 from cogs_test.general_commands.dashboard import command_meta
+from helpers.anilist_helper import fetch_media_by_id
+from helpers.color_palette import PALETTE
+from helpers.crypto_random import secure_choice
 
 log = logging.getLogger("Lemegeton.Panels")
-MAX_IMAGE_BYTES = 8 * 1024 * 1024
+# Fallback only; use Discord's effective interaction/storage limits when available.
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
 IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"}
 BROWSER_TIMEOUT = 1800
 DEFAULT_STORAGE_CHANNEL_ID = None  # Optional deployment-wide fallback.
@@ -59,6 +63,7 @@ async def _schema() -> None:
                 attachment_url TEXT NOT NULL,
                 filename TEXT NOT NULL,
                 title VARCHAR(100) NOT NULL,
+                anilist_id BIGINT,
                 caption VARCHAR(500),
                 source_url TEXT,
                 is_nsfw BOOLEAN NOT NULL DEFAULT FALSE,
@@ -73,6 +78,7 @@ async def _schema() -> None:
                 PRIMARY KEY (panel_id, tag)
             )
         """)
+        await conn.execute("ALTER TABLE panels ADD COLUMN IF NOT EXISTS anilist_id BIGINT")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_panels_created_at ON panels(created_at DESC)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_panels_uploader_id ON panels(uploader_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_panel_tags_tag ON panel_tags(tag)")
@@ -112,12 +118,70 @@ def _tags(raw: str | None) -> list[str]:
     return result
 
 
+def _anilist_reference_id(value: str) -> int | None:
+    """Extract a manga ID from a numeric value or canonical AniList manga URL."""
+    raw = value.strip()
+    if raw.isdecimal():
+        media_id = int(raw)
+        if media_id <= 0:
+            raise ValueError("AniList manga IDs must be positive numbers.")
+        return media_id
+
+    if raw.lower().startswith("www.anilist.co/"):
+        raw = f"https://{raw}"
+    parsed = urlsplit(raw)
+    if parsed.scheme or parsed.netloc:
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme not in {"http", "https"} or host not in {"anilist.co", "www.anilist.co"}:
+            raise ValueError("Use a manga title, AniList manga ID, or AniList manga URL.")
+        match = re.match(r"^/manga/(\d+)(?:/|$)", parsed.path, re.IGNORECASE)
+        if not match:
+            raise ValueError("That URL is not an AniList manga page. Use an AniList manga URL.")
+        media_id = int(match.group(1))
+        if media_id <= 0:
+            raise ValueError("AniList manga IDs must be positive numbers.")
+        return media_id
+    return None
+
+
+async def _resolve_manga_reference(value: str) -> tuple[str, int | None, str | None]:
+    """Resolve explicit AniList IDs/URLs, leaving ordinary titles untouched."""
+    media_id = _anilist_reference_id(value)
+    if media_id is None:
+        return value.strip(), None, None
+
+    media = await fetch_media_by_id(media_id, "MANGA")
+    if not media or not media.get("id"):
+        raise ValueError(f"AniList could not resolve manga ID {media_id}. Check the ID/URL and try again.")
+    titles = media.get("title") or {}
+    title = str(titles.get("english") or titles.get("romaji") or titles.get("native") or "").strip()
+    if not title:
+        raise ValueError(f"AniList returned no usable title for manga ID {media_id}.")
+    resolved_id = int(media["id"])
+    return title, resolved_id, f"https://anilist.co/manga/{resolved_id}"
+
+
+def _max_upload_bytes(interaction: discord.Interaction, storage: discord.TextChannel) -> int:
+    """Use the tightest known upload limit across the interaction and storage server."""
+    limits = []
+    for candidate in (
+        getattr(interaction, "filesize_limit", None),
+        getattr(getattr(storage, "guild", None), "filesize_limit", None),
+    ):
+        try:
+            limit = int(candidate)
+        except (TypeError, ValueError):
+            continue
+        if limit > 0:
+            limits.append(limit)
+    return min(limits) if limits else MAX_IMAGE_BYTES
+
+
 def _nsfw(interaction: discord.Interaction) -> bool:
     try:
         return bool(interaction.channel and interaction.channel.is_nsfw())
     except (AttributeError, TypeError):
         return False
-
 
 async def _settings(guild_id: int) -> dict[str, Any]:
     pool = await _pool()
@@ -226,23 +290,32 @@ async def _fresh_attachment(bot: commands.Bot, panel: dict[str, Any]) -> str | N
 
 def _embed(panel: dict[str, Any], page: int, total: int, guild_name: str | None) -> discord.Embed:
     mature = bool(panel["is_nsfw"])
+    anilist_id = panel.get("anilist_id")
+    anilist_url = f"https://anilist.co/manga/{int(anilist_id)}" if anilist_id else None
     embed = discord.Embed(
         title=str(panel["title"])[:100],
-        description=(panel.get("caption") or "No caption provided.")[:4000],
-        colour=discord.Colour.dark_magenta() if mature else discord.Colour.blurple(),
+        description=(panel.get("caption") or "*No caption provided.*")[:4000],
+        colour=PALETTE.DANGER if mature else PALETTE.PRIMARY,
         timestamp=panel.get("created_at"),
+        url=anilist_url,
     )
     if panel.get("attachment_url"):
         embed.set_image(url=panel["attachment_url"])
-    embed.add_field(name="Tags", value=", ".join(f"`{t}`" for t in panel.get("tags", [])) or "None", inline=False)
-    embed.add_field(name="Uploader", value=f"<@{panel['uploader_id']}>", inline=True)
-    embed.add_field(name="Source guild", value=guild_name or "Unknown / unavailable", inline=True)
-    embed.add_field(name="Mature", value="Age-restricted" if mature else "No", inline=True)
-    embed.set_footer(text=f"Panel #{panel['id']} • Page {page} of {max(total, 1)}")
-    if panel.get("source_url"):
-        embed.add_field(name="Source", value=f"[Open link]({panel['source_url']})", inline=False)
+    tags = ", ".join(panel.get("tags", [])) or "None"
+    embed.add_field(name="🏷️ Tags", value=tags[:1024], inline=False)
+    if anilist_id:
+        embed.add_field(
+            name="📚 AniList manga",
+            value=f"[Open manga page]({anilist_url}) · ID: {int(anilist_id)}",
+            inline=True,
+        )
+    embed.add_field(name="👤 Uploader", value=f"<@{panel['uploader_id']}>", inline=True)
+    embed.add_field(name="🌐 Source server", value=guild_name or "Unknown / unavailable", inline=True)
+    embed.add_field(name="🔞 Content rating", value="Age-restricted" if mature else "Safe", inline=True)
+    embed.set_footer(text=f"📖 Panel #{panel['id']} • Page {page} of {max(total, 1)}")
+    if panel.get("source_url") and panel.get("source_url") != anilist_url:
+        embed.add_field(name="🔗 Source", value=f"[Open source link]({panel['source_url']})", inline=False)
     return embed
-
 
 async def _is_mod(interaction: discord.Interaction) -> bool:
     if interaction.guild is None:
@@ -283,13 +356,14 @@ class PanelForm(discord.ui.Modal):
         self.panel = panel
         self.source_url = source_url or (panel.get("source_url") if panel else None)
         self.image = discord.ui.Label(
-            text="Image upload",
-            description="Max 8 MB. Optional when editing.",
+            text="🖼️ Panel image",
+            description="Discord's upload limit for this server applies. Optional when editing.",
             component=discord.ui.FileUpload(min_values=1 if mode == "add" else 0, max_values=1, required=mode == "add"),
         )
         self.title_field = discord.ui.Label(
-            text="Manga title",
-            component=discord.ui.TextInput(default=panel["title"] if panel else None, max_length=100, required=True),
+            text="📚 Manga title, AniList ID or URL",
+            description="Enter a title, numeric AniList manga ID, or an AniList manga URL.",
+            component=discord.ui.TextInput(default=panel["title"] if panel else None, max_length=300, required=True),
         )
         self.tags_field = discord.ui.Label(
             text="Tags (comma-separated)",
@@ -321,28 +395,31 @@ class PanelForm(discord.ui.Modal):
             if interaction.user.id != self.user_id:
                 await interaction.followup.send("This form belongs to another user.", ephemeral=True)
                 return
-            title = str(self.title_field.component.value or "").strip()
+            submitted_title = str(self.title_field.component.value or "").strip()
             caption = str(self.caption_field.component.value or "").strip()
-            if not title or len(title) > 100:
-                await interaction.followup.send("Title is required and must be 100 characters or fewer.", ephemeral=True)
+            if not submitted_title:
+                await interaction.followup.send("A manga title, AniList ID, or AniList URL is required.", ephemeral=True)
                 return
+            title, requested_anilist_id, requested_anilist_url = await _resolve_manga_reference(submitted_title)
+            if not title or len(title) > 100:
+                await interaction.followup.send("The resolved manga title must be 100 characters or fewer.", ephemeral=True)
+                return
+            anilist_id = requested_anilist_id
+            if anilist_id is None and self.panel:
+                anilist_id = self.panel.get("anilist_id")
+            source_url = requested_anilist_url or self.source_url
             tags = _tags(str(self.tags_field.component.value or ""))
             values = self.image.component.values or []
             upload = values[0] if values else None
             image_bytes = None
             filename = self.panel["filename"] if self.panel else "panel-image"
+            upload_size = 0
             if upload:
                 content_type = (getattr(upload, "content_type", None) or "").lower()
                 if content_type not in IMAGE_TYPES:
                     await interaction.followup.send("Only PNG, JPEG, GIF, WebP, or AVIF images are accepted.", ephemeral=True)
                     return
-                if getattr(upload, "size", 0) > MAX_IMAGE_BYTES:
-                    await interaction.followup.send("Images must be 8 MB or smaller.", ephemeral=True)
-                    return
-                image_bytes = await upload.read()
-                if len(image_bytes) > MAX_IMAGE_BYTES:
-                    await interaction.followup.send("Images must be 8 MB or smaller.", ephemeral=True)
-                    return
+                upload_size = int(getattr(upload, "size", 0) or 0)
                 filename = getattr(upload, "filename", filename)
             guild = interaction.guild
             if guild is None or guild.id != self.guild_id:
@@ -360,6 +437,28 @@ class PanelForm(discord.ui.Modal):
             if channel_id and storage.id != int(channel_id) and not DEFAULT_STORAGE_CHANNEL_ID:
                 await interaction.followup.send("Configured storage channel is unavailable; ask an admin to reconfigure it.", ephemeral=True)
                 return
+            max_image_bytes = _max_upload_bytes(interaction, storage)
+            if upload and upload_size > max_image_bytes:
+                uploaded_mib = upload_size / (1024 * 1024)
+                limit_mib = max_image_bytes / (1024 * 1024)
+                await interaction.followup.send(
+                    f"That image is **{uploaded_mib:.1f} MiB**, but the configured archive server supports "
+                    f"up to **{limit_mib:.1f} MiB** per file. Try a higher-limit storage server or a smaller export.",
+                    ephemeral=True,
+                )
+                return
+            if upload:
+                image_bytes = await upload.read()
+                if len(image_bytes) > max_image_bytes:
+                    uploaded_mib = len(image_bytes) / (1024 * 1024)
+                    limit_mib = max_image_bytes / (1024 * 1024)
+                    await interaction.followup.send(
+                        f"That image is **{uploaded_mib:.1f} MiB**, above this archive's "
+                        f"**{limit_mib:.1f} MiB** per-file limit.",
+                        ephemeral=True,
+                    )
+                    return
+
             attachment_url = self.panel["attachment_url"] if self.panel else None
             storage_message_id = self.panel.get("storage_message_id") if self.panel else None
             storage_channel_id = self.panel.get("storage_channel_id") if self.panel else None
@@ -379,19 +478,19 @@ class PanelForm(discord.ui.Modal):
                     if self.mode == "add":
                         row = await conn.fetchrow("""
                             INSERT INTO panels(uploader_id,uploader_guild_id,storage_message_id,storage_channel_id,
-                                attachment_url,filename,title,caption,source_url,is_nsfw)
-                            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id
+                                attachment_url,filename,title,anilist_id,caption,source_url,is_nsfw)
+                            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id
                         """, interaction.user.id, guild.id, storage_message_id, storage_channel_id,
-                             attachment_url, filename, title, caption or None, self.source_url, mature)
+                             attachment_url, filename, title, anilist_id, caption or None, source_url, mature)
                         panel_id = int(row["id"])
                     else:
                         panel_id = int(self.panel["id"])
                         await conn.execute("""
                             UPDATE panels SET storage_message_id=$1,storage_channel_id=$2,attachment_url=$3,
-                                filename=$4,title=$5,caption=$6,is_nsfw=$7,updated_at=NOW()
-                            WHERE id=$8
+                                filename=$4,title=$5,anilist_id=$6,caption=$7,source_url=$8,is_nsfw=$9,updated_at=NOW()
+                            WHERE id=$10
                         """, storage_message_id, storage_channel_id, attachment_url, filename, title,
-                             caption or None, mature, panel_id)
+                             anilist_id, caption or None, source_url, mature, panel_id)
                         await conn.execute("DELETE FROM panel_tags WHERE panel_id=$1", panel_id)
                     for tag in tags:
                         await conn.execute("INSERT INTO panel_tags(panel_id,tag) VALUES($1,$2) ON CONFLICT DO NOTHING", panel_id, tag)
@@ -405,6 +504,18 @@ class PanelForm(discord.ui.Modal):
             if stored_message:
                 await self.cog._delete_message(stored_message.channel, stored_message.id)
             await interaction.followup.send(str(exc), ephemeral=True)
+        except discord.HTTPException as exc:
+            log.warning("Discord rejected panel storage upload/update: %s", exc)
+            if stored_message:
+                await self.cog._delete_message(stored_message.channel, stored_message.id)
+            if getattr(exc, "code", None) == 40005:
+                message = (
+                    "Discord rejected the image because it exceeds the storage server's upload limit. "
+                    "Try a higher-limit storage server or a smaller export."
+                )
+            else:
+                message = "Discord could not store the panel image. Check the storage channel's Attach Files permission and try again."
+            await interaction.followup.send(message, ephemeral=True)
         except Exception:
             log.exception("Panel form submit failed")
             if stored_message:
@@ -562,34 +673,34 @@ class PanelBrowserView(discord.ui.View):
     def _build(self):
         self.clear_items()
         controls = [
-            ("First", "first", self.page > 0), ("Prev", "prev", self.page > 0),
-            ("Next", "next", self.page < len(self.panel_ids)-1), ("Last", "last", self.page < len(self.panel_ids)-1),
-            ("Random", "random", bool(self.panel_ids)),
+            ("First", "first", self.page > 0, "⏮️"), ("Prev", "prev", self.page > 0, "◀️"),
+            ("Next", "next", self.page < len(self.panel_ids)-1, "▶️"), ("Last", "last", self.page < len(self.panel_ids)-1, "⏭️"),
+            ("Random", "random", bool(self.panel_ids), "🎲"),
         ]
-        for label, action, enabled in controls:
-            b = discord.ui.Button(label=label, style=discord.ButtonStyle.secondary, disabled=not enabled,
+        for label, action, enabled, emoji in controls:
+            b = discord.ui.Button(label=label, emoji=emoji, style=discord.ButtonStyle.secondary, disabled=not enabled,
                                   custom_id=f"panels:{action}:{self.token}")
             async def cb(interaction: discord.Interaction, act=action):
                 await self._navigate(interaction, act)
             b.callback = cb
             self.add_item(b)
         if self.panel_ids:
-            self.add_item(discord.ui.Button(label="Jump", style=discord.ButtonStyle.secondary,
+            self.add_item(discord.ui.Button(label="Jump", emoji="↗️", style=discord.ButtonStyle.secondary,
                                             custom_id=f"panels:jump:{self.token}"))
             self.children[-1].callback = self._jump
-            self.add_item(discord.ui.Button(label="Filter", style=discord.ButtonStyle.secondary,
+            self.add_item(discord.ui.Button(label="Filter", emoji="🏷️", style=discord.ButtonStyle.secondary,
                                             custom_id=f"panels:filteropen:{self.token}"))
             self.children[-1].callback = self._filter
-            self.add_item(discord.ui.Button(label="Edit", style=discord.ButtonStyle.primary,
+            self.add_item(discord.ui.Button(label="Edit", emoji="✏️", style=discord.ButtonStyle.primary,
                                             custom_id=f"panels:edit:{self.token}"))
             self.children[-1].callback = self._edit
-            self.add_item(discord.ui.Button(label="Delete", style=discord.ButtonStyle.danger,
+            self.add_item(discord.ui.Button(label="Delete", emoji="🗑️", style=discord.ButtonStyle.danger,
                                             custom_id=f"panels:delete:{self.token}"))
             self.children[-1].callback = self._delete
-        self.add_item(discord.ui.Button(label="Clear Filter", style=discord.ButtonStyle.secondary,
+        self.add_item(discord.ui.Button(label="Clear Filter", emoji="🧹", style=discord.ButtonStyle.secondary,
                                         custom_id=f"panels:clear:{self.token}", disabled=not (self.tags or self.keyword)))
         self.children[-1].callback = self._clear
-        self.add_item(discord.ui.Button(label="Close", style=discord.ButtonStyle.danger,
+        self.add_item(discord.ui.Button(label="Close", emoji="✖️", style=discord.ButtonStyle.danger,
                                         custom_id=f"panels:close:{self.token}"))
         self.children[-1].callback = self._close
 
@@ -599,7 +710,7 @@ class PanelBrowserView(discord.ui.View):
             elif action == "prev": self.page -= 1
             elif action == "next": self.page += 1
             elif action == "last": self.page = len(self.panel_ids)-1
-            elif action == "random" and self.panel_ids: self.page = random.randrange(len(self.panel_ids))
+            elif action == "random" and self.panel_ids: self.page = secure_choice(range(len(self.panel_ids)))
             self.page = max(0, min(self.page, max(0, len(self.panel_ids)-1)))
             await self.cog._render(interaction, self)
         except Exception:
@@ -756,35 +867,35 @@ class PanelHomeView(discord.ui.View):
         super().__init__(timeout=300)
         self.cog = cog
 
-    @discord.ui.button(label="Browse All", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="Browse All", emoji="📚", style=discord.ButtonStyle.primary, row=0)
     async def browse(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._safe_home_action(interaction, "browse")
 
-    @discord.ui.button(label="My Panels", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="My Panels", emoji="🗂️", style=discord.ButtonStyle.secondary, row=0)
     async def mine(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._safe_home_action(interaction, "mine")
 
-    @discord.ui.button(label="Random", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="Random", emoji="🎲", style=discord.ButtonStyle.secondary, row=0)
     async def random_panel(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._safe_home_action(interaction, "random")
 
-    @discord.ui.button(label="Search", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="Search", emoji="🔎", style=discord.ButtonStyle.secondary, row=0)
     async def search(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(PanelSearchModal(self.cog))
 
-    @discord.ui.button(label="Add Panel", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label="Add Panel", emoji="➕", style=discord.ButtonStyle.success, row=0)
     async def add(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.guild_id is None:
             await interaction.response.send_message("Adding panels is only available in a server.", ephemeral=True); return
         await interaction.response.send_modal(PanelForm(self.cog, mode="add", user_id=interaction.user.id, guild_id=interaction.guild_id))
 
-    @discord.ui.button(label="Configure", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="Configure", emoji="⚙️", style=discord.ButtonStyle.secondary, row=1)
     async def configure(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.guild_id is None or not interaction.permissions.manage_guild:
             await interaction.response.send_message("Manage Server permission is required in a server.", ephemeral=True); return
         await interaction.response.send_modal(PanelConfigureModal(self.cog))
 
-    @discord.ui.button(label="Moderation Log", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="Moderation Log", emoji="🛡️", style=discord.ButtonStyle.secondary, row=1)
     async def moderation_log(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             if not await _is_mod(interaction):
@@ -792,7 +903,7 @@ class PanelHomeView(discord.ui.View):
             pool = await _pool()
             async with pool.acquire() as conn:
                 rows = await conn.fetch("SELECT * FROM mod_log WHERE guild_id=$1 ORDER BY created_at DESC LIMIT 15", interaction.guild_id)
-            embed = discord.Embed(title="Panel Moderation Log", colour=discord.Colour.orange())
+            embed = discord.Embed(title="🛡️ Panel Moderation Log", colour=PALETTE.WARNING)
             embed.description = "\n".join(
                 f"• <t:{int(r['created_at'].timestamp())}:R> — <@{r['moderator_id']}> deleted **{discord.utils.escape_markdown(r['panel_title'] or 'Untitled')}** (#{r['panel_id']})"
                 for r in rows
@@ -819,7 +930,7 @@ class PanelAttachmentPicker(discord.ui.View):
         try:
             selected = self.attachments[int(self.children[0].values[0])]
             await interaction.response.send_modal(PanelForm(self.cog, mode="add", user_id=interaction.user.id,
-                                                            guild_id=interaction.guild_id or 0, source_url=selected.url))
+                                                            guild_id=interaction.guild_id or 0, source_url=self.message.jump_url))
         except Exception:
             log.exception("Attachment selection failed")
             await interaction.response.send_message("Something went wrong.", ephemeral=True)
@@ -928,7 +1039,7 @@ class PanelCog(commands.Cog):
             else:
                 ids = await _panel_ids(_nsfw(interaction))
             if action == "random" and ids:
-                ids = [random.choice(ids)]
+                ids = [secure_choice(ids)]
             await self._post_browser(
                 interaction, ids, user_id=interaction.user.id if action == "mine" else None,
                 fixed_ids=(action == "random"),
@@ -944,11 +1055,19 @@ class PanelCog(commands.Cog):
         try:
             await interaction.response.defer(ephemeral=True, thinking=True)
             count = await _count(_nsfw(interaction))
-            embed = discord.Embed(title="Manga Panel Archive",
-                                  description=f"Shared archive across all servers. **{count}** panels are visible here.",
-                                  colour=discord.Colour.blurple())
+            embed = discord.Embed(
+                title="📚 Manga Panel Archive",
+                description=(
+                    "A shared gallery of manga moments, double spreads, and standout artwork.\n"
+                    f"**{count:,}** panels are visible in this channel."
+                ),
+                colour=PALETTE.PRIMARY,
+            )
+            embed.add_field(name="🖼️ Browse", value="Explore the archive, jump between panels, or pick a random find.", inline=True)
+            embed.add_field(name="➕ Contribute", value="Upload a panel, add tags, and link its AniList manga entry.", inline=True)
+            embed.set_footer(text="Panels are shared across servers • Storage is configured per server")
             if not _nsfw(interaction):
-                embed.add_field(name="Age restriction", value="Some panels are hidden in this channel (age-restricted).", inline=False)
+                embed.add_field(name="🔞 Content visibility", value="Mature panels are hidden in channels that are not age-restricted.", inline=False)
             await interaction.followup.send(embed=embed, view=PanelHomeView(self), ephemeral=True)
         except Exception:
             log.exception("/panels failed")
@@ -964,7 +1083,7 @@ class PanelCog(commands.Cog):
                 await interaction.response.send_message("That message has no supported image attachments.", ephemeral=True); return
             if len(images) == 1:
                 await interaction.response.send_modal(PanelForm(self, mode="add", user_id=interaction.user.id,
-                                                                guild_id=interaction.guild_id, source_url=images[0].url))
+                                                                guild_id=interaction.guild_id, source_url=message.jump_url))
             else:
                 await interaction.response.send_message("Choose the image to save, then complete the Add Panel form.", view=PanelAttachmentPicker(self, message, images), ephemeral=True)
         except Exception:
