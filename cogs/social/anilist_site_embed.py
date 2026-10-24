@@ -2159,6 +2159,7 @@ class AniListCog(commands.Cog):
             siteUrl
             summary
             body(asHtml: false)
+            score
             rating
             ratingAmount
             userRating
@@ -2186,9 +2187,12 @@ class AniListCog(commands.Cog):
             if not body.strip():
                 logger.info("AniList API returned an empty body for review %s; trying HTML fallback", review_id)
                 return None
-            # rating is AniList's aggregate review rating; preserve its native scale.
-            rating = r.get("rating") if r.get("rating") is not None else r.get("score")
-            rating_amount = r.get("ratingAmount") or None  # best-effort: may represent number of people that voted on the review or not
+            # AniList's Review.score is the reviewer's 0-100 score; Review.rating is the
+            # count of "helpful" votes and ratingAmount the total votes. Map them onto the
+            # same keys the HTML fallback produces (rating/ratingDenom, likes, ratingAmount).
+            rating = r.get("score")
+            likes = r.get("rating")
+            rating_amount = r.get("ratingAmount") or None
             user = r.get("user") or {}
             site_url = r.get("siteUrl") or f"https://anilist.co/review/{review_id}"
             return {
@@ -2197,6 +2201,8 @@ class AniListCog(commands.Cog):
                 "user": user,
                 "body": body,
                 "rating": rating,
+                "ratingDenom": 100 if rating is not None else None,
+                "likes": likes,
                 "ratingAmount": rating_amount,
                 "images": []  # API does not expose images in Review payload; HTML fallback may provide them
             }
