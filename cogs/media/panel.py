@@ -188,6 +188,20 @@ async def _resolve_manga_reference(value: str) -> tuple[str, int | None, str | N
     return title, resolved_id, f"https://anilist.co/manga/{resolved_id}"
 
 
+def _carry_anilist_link(panel: dict[str, Any] | None, title: str, requested_id: int | None,
+                        source_url: str | None) -> tuple[int | None, str | None]:
+    """Keep an edited panel's AniList link only while its title is unchanged."""
+    if requested_id is not None or not panel or not panel.get("anilist_id"):
+        return requested_id, source_url
+    if title == panel.get("title"):
+        return int(panel["anilist_id"]), source_url
+    # Retitled to plain text: drop the old link and its AniList source URL, but keep
+    # any other source (e.g. the Discord message the panel was saved from).
+    if source_url == f"https://anilist.co/manga/{int(panel['anilist_id'])}":
+        source_url = None
+    return None, source_url
+
+
 def _max_upload_bytes(interaction: discord.Interaction, storage: discord.TextChannel) -> int:
     """Use the tightest known upload limit across the interaction and storage server."""
     limits = []
@@ -468,10 +482,9 @@ class PanelForm(discord.ui.Modal):
             if not title or len(title) > 100:
                 await interaction.followup.send("The resolved manga title must be 100 characters or fewer.", ephemeral=True)
                 return
-            anilist_id = requested_anilist_id
-            if anilist_id is None and self.panel:
-                anilist_id = self.panel.get("anilist_id")
-            source_url = requested_anilist_url or self.source_url
+            anilist_id, source_url = _carry_anilist_link(
+                self.panel, title, requested_anilist_id, requested_anilist_url or self.source_url,
+            )
             selected_tags = list(self.tags_field.component.values or [])
             if not selected_tags:
                 await interaction.followup.send("Select at least one tag for this panel.", ephemeral=True)
