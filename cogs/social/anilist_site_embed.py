@@ -777,7 +777,7 @@ class AniListCog(commands.Cog):
             logger.info("Parsing mode: %d%% — fetching HTML...", progress)
             async with self.session.get(url, timeout=HTML_TIMEOUT, headers={"User-Agent": "Mozilla/5.0 (compatible; Lemegeton/1.0)"}) as resp:
                 if resp.status != 200:
-                    logger.warning("Review HTML fallback returned HTTP %s for %s", resp.status, url)
+                    logger.warning("Media HTML fallback returned HTTP %s for %s", resp.status, url)
                     return None
                 html = await resp.text()
         except Exception as e:
@@ -2203,7 +2203,10 @@ class AniListCog(commands.Cog):
         url = f"https://anilist.co/review/{review_id}"
         logger.info("Review parsing fallback started for %s", url)
         try:
-            async with self.session.get(url, timeout=HTML_TIMEOUT, headers={"User-Agent": "AniListBot/1.0"}) as resp:
+            async with self.session.get(url, timeout=HTML_TIMEOUT, headers={"User-Agent": "Mozilla/5.0 (compatible; Lemegeton/1.0)"}) as resp:
+                if resp.status != 200:
+                    logger.warning("Review HTML fallback returned HTTP %s for %s", resp.status, url)
+                    return None
                 html = await resp.text()
         except Exception:
             logger.exception("Failed to fetch review page HTML")
