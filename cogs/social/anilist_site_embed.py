@@ -447,20 +447,25 @@ class AniListCog(commands.Cog):
         return text.strip()
 
     def extract_media(self, text: Optional[str]):
+        """Extract AniList placeholders, Markdown images, HTML images, and direct media URLs."""
         if not text:
             return [], ""
         media_links = []
-        # explicit placeholders
-        for m in re.finditer(r"(?:imgx?|vid)\((https?://[^\s)]+)\)", text):
-            media_links.append(m.group(1))
-        # plain direct image links
-        for m in re.finditer(r"(https?://[^\s]+(?:\.png|\.jpg|\.jpeg|\.gif|\.webp))", text):
-            url = m.group(1)
-            if url not in media_links:
-                media_links.append(url)
-        # remove those links from the cleaned text so they don't appear twice
-        cleaned = re.sub(r"(?:imgx?|vid)\((https?://[^\s)]+)\)", "", text)
-        cleaned = re.sub(r"https?://[^\s]+(?:\.png|\.jpg|\.jpeg|\.gif|\.mp4|\.webm|\.webp)", "", cleaned)
+        patterns = (
+            r"(?:imgx?|vid)\((https?://[^\s)]+)\)",
+            r"!\[[^\]]*\]\((https?://[^\s)]+)\)",
+            r"""<img\b[^>]*\bsrc=["'](https?://[^"']+)["'][^>]*>""",
+            r"(https?://[^\s<>]+\.(?:png|jpe?g|gif|webp|mp4|webm)(?:\?[^\s<>]*)?)",
+        )
+        for pattern in patterns:
+            for match in re.finditer(pattern, text, re.I):
+                url = match.group(1).rstrip(".,)")
+                if url.startswith(("https://", "http://")) and url not in media_links:
+                    media_links.append(url)
+
+        cleaned = text
+        for pattern in patterns:
+            cleaned = re.sub(pattern, "", cleaned, flags=re.I)
         return media_links, cleaned.strip()
 
     # ---------------------
