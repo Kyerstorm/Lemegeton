@@ -975,7 +975,7 @@ class AniListCog(commands.Cog):
             status
             startDate { year month day }
             endDate { year month day }
-            studios(isMain: true) { nodes { id name siteUrl } }
+            studios { nodes { id name siteUrl isMain } }
             popularity
             favourites
             source
@@ -1140,70 +1140,120 @@ class AniListCog(commands.Cog):
         return embeds
 
     def build_characters_embed(self, media: dict, support: bool = False) -> List[discord.Embed]:
+        """Build linked character credits with role labels and safe pagination."""
         char_edges = (media.get("characters") or {}).get("edges") or []
         if not char_edges:
-            return [build_info_embed(description="No characters found.")]
-        if support:
-            selected = [e for e in char_edges if (e.get("role") or "").upper() != "MAIN"]
-            title = "Support Cast"
-        else:
-            selected = [e for e in char_edges if (e.get("role") or "").upper() == "MAIN"]
-            title = "Main Characters"
+            return [build_info_embed(title="🎭 Characters", description="AniList returned no character credits for this title.")]
+
+        selected = [
+            edge for edge in char_edges
+            if ((edge.get("role") or "").upper() != "MAIN") == support
+        ]
+        title = "🌟 Support Cast" if support else "🎭 Main Characters"
         if not selected:
-            selected = char_edges[:10]
+            return [build_info_embed(title=title, description="No characters in this category were returned. Try the other cast view.")]
+
         embeds = []
         chunk_size = 6
-        for i in range(0, len(selected), chunk_size):
-            chunk = selected[i:i + chunk_size]
+        total_pages = math.ceil(len(selected) / chunk_size)
+        for page_index in range(total_pages):
+            chunk = selected[page_index * chunk_size:(page_index + 1) * chunk_size]
             em = discord.Embed(title=title, color=PALETTE.PRIMARY)
-            for e in chunk:
-                node = e.get("node") or {}
-                name = (node.get("name") or {}).get("full") or "Unknown"
-                cid = node.get("id")
-                url = f"https://anilist.co/character/{cid}" if cid else None
-                value = f"[AniList]({url})" if url else "—"
-                em.add_field(name=name, value=value, inline=False)
-            first_img = (chunk[0].get("node") or {}).get("image", {}).get("large")
+            lines = []
+            for edge in chunk:
+                node = edge.get("node") or {}
+                name_data = node.get("name") or {}
+                name = name_data.get("full") or name_data.get("native") or "Unknown character"
+                character_id = node.get("id")
+                url = node.get("siteUrl") or (f"https://anilist.co/character/{character_id}" if character_id else None)
+                role = " ".join(str(edge.get("role") or "Supporting").split()).title()
+                label = f"[**{name[:180]}**]({url})" if url else f"**{name[:180]}**"
+                lines.append(f"{label}\n`{role}`")
+            em.description = "\n\n".join(lines)[:4000]
+            first_node = (chunk[0].get("node") or {}) if chunk else {}
+            first_img = (first_node.get("image") or {}).get("large")
             if first_img:
                 em.set_thumbnail(url=first_img)
+            em.set_footer(text=f"AniList • Character credits • Page {page_index + 1}/{total_pages}")
             embeds.append(em)
         return embeds
 
     def build_staff_embed(self, media: dict) -> List[discord.Embed]:
+        """Render staff credits with each person's credited role and profile link."""
         staff_edges = (media.get("staff") or {}).get("edges") or []
         if not staff_edges:
-            return [build_info_embed(description="No staff info found.")]
+            return [build_info_embed(title="🛡️ Staff", description="AniList returned no staff credits for this title.")]
+
         embeds = []
         chunk_size = 8
-        for i in range(0, len(staff_edges), chunk_size):
-            chunk = staff_edges[i:i + chunk_size]
-            em = discord.Embed(title="Staff", color=discord.Color.dark_teal())
+        total_pages = math.ceil(len(staff_edges) / chunk_size)
+        for page_index in range(total_pages):
+            chunk = staff_edges[page_index * chunk_size:(page_index + 1) * chunk_size]
+            em = discord.Embed(
+                title="🛡️ Production Staff",
+                description="People credited on this title, as listed by AniList.",
+                color=PALETTE.PRIMARY,
+            )
             for edge in chunk:
-                role = edge.get("role") or "Staff"
+                role = " ".join(str(edge.get("role") or "Staff").split()) or "Staff"
                 node = edge.get("node") or {}
-                name = (node.get("name") or {}).get("full") or "Unknown"
-                sid = node.get("id")
-                url = f"https://anilist.co/staff/{sid}" if sid else None
-                value = f"{role}\n" + (f"[AniList]({url})" if url else "")
-                em.add_field(name=name, value=value, inline=False)
-            first_img = (chunk[0].get("node") or {}).get("image", {}).get("large")
+                name_data = node.get("name") or {}
+                name = name_data.get("full") or name_data.get("native") or "Unknown staff member"
+                staff_id = node.get("id")
+                url = node.get("siteUrl") or (f"https://anilist.co/staff/{staff_id}" if staff_id else None)
+                value = f"🎬 **{role[:900]}**"
+                if url:
+                    value += f"\n[View profile]({url})"
+                em.add_field(name=name[:256], value=value[:1024], inline=True)
+            first_node = (chunk[0].get("node") or {}) if chunk else {}
+            first_img = (first_node.get("image") or {}).get("large")
             if first_img:
                 em.set_thumbnail(url=first_img)
+            em.set_footer(text=f"AniList • Staff credits • Page {page_index + 1}/{total_pages}")
             embeds.append(em)
         return embeds
 
     def build_studios_embed(self, media: dict) -> discord.Embed:
+        """Show all returned studios and distinguish the main studio from other producers."""
         studios = (media.get("studios") or {}).get("nodes") or []
-        em = discord.Embed(title="Studios & Production", url=media.get("siteUrl"), color=discord.Color.from_rgb(42, 132, 122))
+        em = discord.Embed(
+            title="🏢 Studios & Production",
+            url=media.get("siteUrl"),
+            description="Production companies associated with this title.",
+            color=PALETTE.PRIMARY,
+        )
         if not studios:
-            em.description = "No studio information was found in the API response or page HTML."
+            em.description = "AniList returned no studio information for this title."
+            em.set_footer(text="AniList • Studio credits")
             return em
-        for studio in studios[:20]:
+
+        # Deduplicate by AniList ID, falling back to the normalized name.
+        unique_studios = []
+        seen = set()
+        for studio in studios:
+            if not isinstance(studio, dict):
+                continue
+            name = (studio.get("name") or "").strip()
+            studio_id = studio.get("id")
+            key = ("id", studio_id) if studio_id is not None else ("name", name.casefold())
+            if not name or key in seen:
+                continue
+            seen.add(key)
+            unique_studios.append(studio)
+
+        main_studios = [studio for studio in unique_studios if studio.get("isMain") is True]
+        other_studios = [studio for studio in unique_studios if studio.get("isMain") is not True]
+        ordered = main_studios + other_studios
+        for studio in ordered[:25]:
             name = studio.get("name") or "Unknown studio"
-            sid = studio.get("id")
-            url = studio.get("siteUrl") or (f"https://anilist.co/studio/{sid}" if sid else None)
-            em.add_field(name=name, value=f"[View on AniList]({url})" if url else "Studio details unavailable", inline=True)
-        em.set_footer(text="AniList • Studios")
+            studio_id = studio.get("id")
+            url = studio.get("siteUrl") or (f"https://anilist.co/studio/{studio_id}" if studio_id else None)
+            role = "⭐ Main studio" if studio.get("isMain") is True else "🏭 Production"
+            value = f"{role}\n[View on AniList]({url})" if url else role
+            em.add_field(name=name[:256], value=value, inline=True)
+        if len(ordered) > 25:
+            em.add_field(name="➕ More studios", value=f"{len(ordered) - 25} additional studios omitted to fit Discord's embed limits.", inline=False)
+        em.set_footer(text=f"AniList • {len(ordered)} studio{'s' if len(ordered) != 1 else ''}")
         return em
 
     def build_stats_embed(self, media: dict) -> discord.Embed:
