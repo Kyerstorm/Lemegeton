@@ -433,8 +433,9 @@ class AniListCog(commands.Cog):
         text = re.sub(r'(?<!~)~([^!\[].*?)~(?!~)', r'~~\1~~', text, flags=re.S)
         # remove remaining HTML tags but keep link syntax [text](url)
         # preserve markdown links by not stripping inside brackets and parentheses
-        # simple approach: remove tags
+        # Strip HTML while decoding entities so review text remains readable.
         text = re.sub(r"<[^>]+>", "", text)
+        text = html_lib.unescape(text)
         # remove weird AniList media placeholders we don't want in Discord
         text = re.sub(r"~+imgx?\((https?://[^\s)]+)\)~+", r"\1", text)
         text = re.sub(r"~+vid\((https?://[^\s)]+)\)~+", r"\1", text)
@@ -774,7 +775,10 @@ class AniListCog(commands.Cog):
             # Step 1: fetch HTML
             progress = 10
             logger.info("Parsing mode: %d%% — fetching HTML...", progress)
-            async with self.session.get(url, timeout=HTML_TIMEOUT, headers={"User-Agent": "AniListBot/1.0"}) as resp:
+            async with self.session.get(url, timeout=HTML_TIMEOUT, headers={"User-Agent": "Mozilla/5.0 (compatible; Lemegeton/1.0)"}) as resp:
+                if resp.status != 200:
+                    logger.warning("Review HTML fallback returned HTTP %s for %s", resp.status, url)
+                    return None
                 html = await resp.text()
         except Exception as e:
             logger.exception("Parsing fetch failed at 10%%")
@@ -2168,8 +2172,13 @@ class AniListCog(commands.Cog):
             
             # Normalize fields
             body = r.get("body") or r.get("summary") or ""
-            # rating returned by API might be on a 100-scale or 10-scale; keep raw and normalize later
-            rating = r.get("rating") or r.get("score") or None
+            # Empty bodies can occur when content is only available in rendered HTML.
+            # Return None so the caller runs the HTML fallback instead of showing a blank review.
+            if not body.strip():
+                logger.info("AniList API returned an empty body for review %s; trying HTML fallback", review_id)
+                return None
+            # rating is AniList's aggregate review rating; preserve its native scale.
+            rating = r.get("rating") if r.get("rating") is not None else r.get("score")
             rating_amount = r.get("ratingAmount") or None  # best-effort: may represent number of people that voted on the review or not
             user = r.get("user") or {}
             site_url = r.get("siteUrl") or f"https://anilist.co/review/{review_id}"
