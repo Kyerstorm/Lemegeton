@@ -33,6 +33,9 @@ ANIME_URL_RE = re.compile(r"https?://anilist\.co/anime/(\d+)(?:/[^/\s]+)?/?", re
 MANGA_URL_RE = re.compile(r"https?://anilist\.co/manga/(\d+)(?:/[^/\s]+)?/?", re.IGNORECASE)
 
 REVIEW_URL_RE = re.compile(r"https?://anilist\.co/review/(\d+)", re.IGNORECASE)
+CHARACTER_URL_RE = re.compile(r"https?://anilist\.co/character/(\d+)(?:/[^\s/?#]+)?/?", re.IGNORECASE)
+STAFF_URL_RE = re.compile(r"https?://anilist\.co/staff/(\d+)(?:/[^\s/?#]+)?/?", re.IGNORECASE)
+STUDIO_URL_RE = re.compile(r"https?://anilist\.co/studio/(\d+)(?:/[^\s/?#]+)?/?", re.IGNORECASE)
 
 REPLIES_PER_PAGE = 5
 HTML_TIMEOUT = 15  # seconds for parsing fallback HTTP requests
@@ -1786,6 +1789,31 @@ class AniListCog(commands.Cog):
                 logger.exception("Failed to persist media paginator for manga.")
             return
 
+        # Character, staff, and studio profile links
+        for entity_kind, pattern in (
+            ("character", CHARACTER_URL_RE),
+            ("staff", STAFF_URL_RE),
+            ("studio", STUDIO_URL_RE),
+        ):
+            match = pattern.search(message.content)
+            if not match:
+                continue
+            entity_id = int(match.group(1))
+            entity = await self.fetch_entity(entity_kind, entity_id)
+            if not entity:
+                await message.channel.send(embed=build_error_embed(description=f"Failed to fetch AniList {entity_kind} profile."))
+                return
+            embeds = self.build_entity_embeds(entity_kind, entity)
+            try:
+                view = self.EntityPaginator(embeds, self) if len(embeds) > 1 else None
+                sent = await message.channel.send(embed=embeds[0], view=view)
+                if view:
+                    view.message_id = sent.id
+            except Exception:
+                logger.exception("Failed to render AniList %s profile %s", entity_kind, entity_id)
+                await message.channel.send(embed=build_warning_embed(description=f"Could not render this AniList {entity_kind} profile."))
+            return
+
         # Reviews: separate handling for review links
         m = REVIEW_URL_RE.search(message.content)
         if m:
@@ -1824,6 +1852,281 @@ class AniListCog(commands.Cog):
     # ---------------------
     # NEW: REVIEW fetching + parsing + embed + pagination
     # ---------------------
+    async def fetch_entity(self, entity_kind: str, entity_id: int) -> Optional[dict]:
+        """Fetch an AniList character, staff member, or studio; use page HTML if GraphQL fails."""
+        queries = {
+            "character": """
+                query($id: Int) {
+                  Character(id: $id) {
+                    id siteUrl name { full native alternative }
+                    image { large }
+                    description(asHtml: false)
+                    gender age dateOfBirth { year month day }
+                    favourites
+                    media(perPage: 10, sort: POPULARITY_DESC) {
+                      edges { characterRole node { id type siteUrl title { romaji english } coverImage { large } }
+                      }
+                    }
+                  }
+                }
+            """,
+            "staff": """
+                query($id: Int) {
+                  Staff(id: $id) {
+                    id siteUrl name { full native alternative }
+                    language: languageV2
+                    image { large }
+                    description(asHtml: false)
+                    primaryOccupations yearsActive homeTown
+                    favourites
+                    staffMedia(perPage: 10, sort: POPULARITY_DESC) {
+                      edges { staffRole node { id type siteUrl title { romaji english } coverImage { large } } }
+                    }
+                  }
+                }
+            """,
+            "studio": """
+                query($id: Int) {
+                  Studio(id: $id) {
+                    id siteUrl name isAnimationStudio favourites
+                    media(perPage: 10, sort: POPULARITY_DESC) {
+                      nodes { id type siteUrl title { romaji english } coverImage { large } }
+                    }
+                  }
+                }
+            """,
+        }
+        query = queries.get(entity_kind)
+        if not query:
+            return None
+        try:
+            payload = await post_graphql(self.session, query, {"id": entity_id}, timeout=20)
+            entity = payload.get(entity_kind.title()) if payload else None
+            if entity:
+                entity["_entity_kind"] = entity_kind
+                entity["_source"] = "api"
+                return entity
+        except Exception:
+            logger.exception("AniList %s API fetch failed for id %s", entity_kind, entity_id)
+
+        return await self.fetch_entity_html_fallback(entity_kind, entity_id)
+
+    async def fetch_entity_html_fallback(self, entity_kind: str, entity_id: int) -> Optional[dict]:
+        """Best-effort HTML fallback using OpenGraph metadata and embedded JSON on AniList pages."""
+        url = f"https://anilist.co/{entity_kind}/{entity_id}"
+        try:
+            async with self.session.get(
+                url,
+                timeout=HTML_TIMEOUT,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; Lemegeton/1.0)"},
+            ) as response:
+                if response.status != 200:
+                    logger.warning("AniList HTML fallback returned HTTP %s for %s", response.status, url)
+                    return None
+                html_text = await response.text()
+        except Exception:
+            logger.exception("AniList HTML fallback request failed for %s", url)
+            return None
+
+        def meta_value(*properties):
+            for prop in properties:
+                pattern = r'<meta[^>]+(?:property|name)=["\\']' + re.escape(prop) + r'["\\'][^>]+content=["\\']([^"\\']*)["\\']'
+                match = re.search(pattern, html_text, re.I | re.S)
+                if not match:
+                    pattern = r'<meta[^>]+content=["\\']([^"\\']*)["\\'][^>]+(?:property|name)=["\\']' + re.escape(prop) + r'["\\']'
+                    match = re.search(pattern, html_text, re.I | re.S)
+                if match:
+                    return html_lib.unescape(match.group(1)).strip()
+            return None
+
+        title = meta_value("og:title", "twitter:title")
+        description = meta_value("og:description", "description", "twitter:description")
+        image = meta_value("og:image", "twitter:image")
+        site_url = meta_value("og:url") or url
+        name = re.sub(r"\\s*[-|]\\s*AniList.*$", "", title or "").strip()
+        if not name:
+            title_match = re.search(r"<title[^>]*>(.*?)</title>", html_text, re.I | re.S)
+            name = html_lib.unescape(re.sub(r"<[^>]+>", "", title_match.group(1))).strip() if title_match else ""
+
+        # Embedded JSON can retain structured profile fields when the page's meta tags are sparse.
+        embedded_name = None
+        embedded_description = None
+        embedded_image = None
+        for pattern in (
+            r'<script[^>]+type=["\\']application/ld\\+json["\\'][^>]*>(.*?)</script>',
+            r'<script[^>]+id=["\\']__NEXT_DATA__["\\'][^>]*>(.*?)</script>',
+        ):
+            for match in re.finditer(pattern, html_text, re.I | re.S):
+                try:
+                    data = json.loads(match.group(1))
+                except (ValueError, TypeError):
+                    continue
+                stack = [data]
+                while stack:
+                    item = stack.pop()
+                    if isinstance(item, dict):
+                        embedded_name = embedded_name or item.get("name") or item.get("full")
+                        embedded_description = embedded_description or item.get("description") or item.get("about")
+                        embedded_image = embedded_image or item.get("image") or item.get("large")
+                        stack.extend(item.values())
+                    elif isinstance(item, list):
+                        stack.extend(item)
+        name = name or (embedded_name if isinstance(embedded_name, str) else None)
+        description = description or (embedded_description if isinstance(embedded_description, str) else None)
+        image = image or (embedded_image if isinstance(embedded_image, str) else None)
+        if not name:
+            logger.warning("AniList HTML fallback could not extract a name from %s", url)
+            return None
+
+        entity = {
+            "id": entity_id,
+            "siteUrl": site_url,
+            "name": {"full": name, "native": None, "alternative": []},
+            "description": description or "",
+            "image": {"large": image} if image else {},
+            "favourites": None,
+            "_entity_kind": entity_kind,
+            "_source": "html",
+        }
+        if entity_kind == "character":
+            entity["media"] = {"edges": []}
+        elif entity_kind == "staff":
+            entity["staffMedia"] = {"edges": []}
+        else:
+            entity["media"] = {"nodes": []}
+            entity["isAnimationStudio"] = None
+        return entity
+
+    def build_entity_embeds(self, entity_kind: str, entity: dict) -> List[discord.Embed]:
+        """Build a profile overview followed by linked, paginated works when available."""
+        name_data = entity.get("name") or {}
+        name = (name_data.get("full") if isinstance(name_data, dict) else None) or entity.get("name") or "Unknown"
+        if isinstance(name, dict):
+            name = name.get("full") or name.get("native") or "Unknown"
+        profile_url = entity.get("siteUrl") or f"https://anilist.co/{entity_kind}/{entity.get('id')}"
+        descriptions = entity.get("description") or ""
+        description = self.clean_text(descriptions)
+        if len(description) > 1200:
+            description = description[:1197].rstrip() + "..."
+        icon = {"character": "🎭", "staff": "🛡️", "studio": "🏢"}[entity_kind]
+        title = f"{icon} {name}"
+        embed = discord.Embed(title=title[:256], url=profile_url, description=description or "*No description available.*", color=PALETTE.PRIMARY)
+        image_data = entity.get("image") or {}
+        image_url = image_data.get("large") if isinstance(image_data, dict) else image_data if isinstance(image_data, str) else None
+        if image_url and str(image_url).startswith(("https://", "http://")):
+            embed.set_thumbnail(url=image_url)
+        meta = []
+        favourites = entity.get("favourites")
+        if favourites is not None:
+            meta.append(f"⭐ **Favourites:** {favourites:,}" if isinstance(favourites, int) else f"⭐ **Favourites:** {favourites}")
+        if entity_kind == "character":
+            if entity.get("gender"):
+                meta.append(f"⚧ **Gender:** {entity['gender']}")
+            if entity.get("age"):
+                meta.append(f"🎂 **Age:** {entity['age']}")
+            dob = entity.get("dateOfBirth") or {}
+            date_bits = [str(dob.get(key)) for key in ("year", "month", "day") if dob.get(key)]
+            if date_bits:
+                meta.append("📅 **Birthday:** " + "-".join(date_bits))
+        elif entity_kind == "staff":
+            language = entity.get("language")
+            if language:
+                meta.append(f"🗣️ **Language:** {language}")
+            occupations = entity.get("primaryOccupations") or []
+            if occupations:
+                meta.append("🎬 **Occupations:** " + ", ".join(str(value) for value in occupations[:5]))
+            years = entity.get("yearsActive") or []
+            if years:
+                meta.append("📆 **Active:** " + ", ".join(str(value) for value in years))
+            if entity.get("homeTown"):
+                meta.append(f"📍 **Hometown:** {entity['homeTown']}")
+        else:
+            meta.append("🎞️ **Animation studio:** " + ("Yes" if entity.get("isAnimationStudio") else "No" if entity.get("isAnimationStudio") is False else "Unknown"))
+        if meta:
+            embed.add_field(name="Profile", value="\\n".join(meta)[:1024], inline=False)
+        source = "HTML fallback" if entity.get("_source") == "html" else "AniList GraphQL"
+        embed.set_footer(text=f"AniList • {source} • ID {entity.get('id', '—')}")
+        embeds = [embed]
+
+        if entity_kind == "character":
+            edges = ((entity.get("media") or {}).get("edges") or [])
+        elif entity_kind == "staff":
+            edges = ((entity.get("staffMedia") or {}).get("edges") or [])
+        else:
+            edges = []
+            for media in ((entity.get("media") or {}).get("nodes") or []):
+                edges.append({"node": media, "staffRole": "Studio"})
+        works = []
+        seen = set()
+        for edge in edges:
+            media = edge.get("node") or {}
+            if not media or not media.get("id"):
+                continue
+            if media["id"] in seen:
+                continue
+            seen.add(media["id"])
+            media_title = (media.get("title") or {}).get("romaji") or (media.get("title") or {}).get("english") or "Untitled"
+            media_url = media.get("siteUrl") or f"https://anilist.co/{str(media.get('type') or 'anime').lower()}/{media['id']}"
+            cover = (media.get("coverImage") or {}).get("large")
+            role = edge.get("characterRole") or edge.get("staffRole") or ""
+            works.append((media_title, media_url, cover, role))
+        for offset in range(0, len(works), 5):
+            chunk = works[offset:offset + 5]
+            page_number = offset // 5 + 1
+            works_embed = discord.Embed(
+                title=f"📚 Notable Works • {name}"[:256],
+                url=profile_url,
+                color=PALETTE.PRIMARY,
+                description="\\n".join(
+                    f"{'🎭' if entity_kind == 'character' else '🎬'} [{title[:180]}]({url})" + (f" — {role}" if role else "")
+                    for title, url, _, role in chunk
+                )[:4000],
+            )
+            if chunk and chunk[0][2]:
+                works_embed.set_thumbnail(url=chunk[0][2])
+            works_embed.set_footer(text=f"AniList • Works • Page {page_number}/{math.ceil(len(works) / 5)}")
+            embeds.append(works_embed)
+        return embeds
+
+    class EntityPaginator(ui.View):
+        """In-memory paginator for entity profile and works embeds."""
+        def __init__(self, embeds: List[discord.Embed], cog: "AniListCog"):
+            super().__init__(timeout=900)
+            self.embeds = embeds
+            self.cog = cog
+            self.current = 0
+            self.message_id = None
+            self.previous_button = ui.Button(label="⬅ Previous", style=discord.ButtonStyle.secondary)
+            self.page_button = ui.Button(label=f"1/{len(embeds)}", style=discord.ButtonStyle.secondary, disabled=True)
+            self.next_button = ui.Button(label="Next ➡", style=discord.ButtonStyle.primary)
+            self.previous_button.callback = self.previous
+            self.next_button.callback = self.next
+            self.add_item(self.previous_button)
+            self.add_item(self.page_button)
+            self.add_item(self.next_button)
+            self._refresh()
+
+        def _refresh(self):
+            self.previous_button.disabled = self.current <= 0
+            self.next_button.disabled = self.current >= len(self.embeds) - 1
+            self.page_button.label = f"{self.current + 1}/{len(self.embeds)}"
+
+        async def previous(self, interaction: discord.Interaction):
+            if self.current <= 0:
+                await interaction.response.defer()
+                return
+            self.current -= 1
+            self._refresh()
+            await interaction.response.edit_message(embed=self.embeds[self.current], view=self)
+
+        async def next(self, interaction: discord.Interaction):
+            if self.current >= len(self.embeds) - 1:
+                await interaction.response.defer()
+                return
+            self.current += 1
+            self._refresh()
+            await interaction.response.edit_message(embed=self.embeds[self.current], view=self)
+
     async def fetch_review_api(self, review_id: int) -> Optional[dict]:
         """
         Attempt to fetch review via AniList GraphQL API.
@@ -1839,8 +2142,9 @@ class AniListCog(commands.Cog):
             body(asHtml: false)
             rating
             ratingAmount
-            score
+            userRating
             user { id name siteUrl avatar { large } }
+            media { id type siteUrl title { romaji english native } coverImage { large } }
           }
         }
         """
