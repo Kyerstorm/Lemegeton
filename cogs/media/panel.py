@@ -139,7 +139,8 @@ def _parse_chapter_caption(value: str) -> tuple[str, str]:
             "**Chapter 12 — The final battle begins**."
         )
     chapter_number, caption = match.group(1), match.group(2).strip()
-    if not caption:
+    # Reject separator-only remainders so "Chapter 12 —" doesn't store "—" as the caption.
+    if not caption.strip("-–—:| \t"):
         raise ValueError("A caption is required after the chapter number.")
     return chapter_number, caption
 
@@ -153,7 +154,7 @@ def _anilist_reference_id(value: str) -> int | None:
             raise ValueError("AniList manga IDs must be positive numbers.")
         return media_id
 
-    if raw.lower().startswith("www.anilist.co/"):
+    if raw.lower().startswith(("www.anilist.co/", "anilist.co/")):
         raw = f"https://{raw}"
     parsed = urlsplit(raw)
     if parsed.scheme or parsed.netloc:
