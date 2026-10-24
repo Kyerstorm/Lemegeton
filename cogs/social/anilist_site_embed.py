@@ -1949,7 +1949,7 @@ class AniListCog(commands.Cog):
         description = meta_value("og:description", "description", "twitter:description")
         image = meta_value("og:image", "twitter:image")
         site_url = meta_value("og:url") or url
-        name = re.sub(r"\\s*[-|]\\s*AniList.*$", "", title or "").strip()
+        name = re.sub(r"\s*[-|]\s*AniList.*$", "", title or "").strip()
         if not name:
             title_match = re.search(r"<title[^>]*>(.*?)</title>", html_text, re.I | re.S)
             name = html_lib.unescape(re.sub(r"<[^>]+>", "", title_match.group(1))).strip() if title_match else ""
