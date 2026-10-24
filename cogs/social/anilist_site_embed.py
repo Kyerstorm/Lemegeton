@@ -987,7 +987,7 @@ class AniListCog(commands.Cog):
             status
             startDate { year month day }
             endDate { year month day }
-            studios { nodes { id name siteUrl isMain } }
+            studios { edges { isMain node { id name siteUrl } } }
             popularity
             favourites
             source
@@ -1011,7 +1011,14 @@ class AniListCog(commands.Cog):
             if not media_data:
                 logger.warning(f"AniList API returned no Media for id {media_id}")
                 return None
-            
+
+            # isMain lives on StudioEdge, not Studio; flatten edges into the
+            # {"nodes": [...]} shape the embed builders and HTML fallback share.
+            studio_edges = (media_data.get("studios") or {}).get("edges") or []
+            media_data["studios"] = {"nodes": [
+                {**(edge.get("node") or {}), "isMain": edge.get("isMain")}
+                for edge in studio_edges if edge.get("node")
+            ]}
             return media_data
         except Exception:
             logger.exception("AniList media API fetch failed.", exc_info=True)
@@ -1078,6 +1085,8 @@ class AniListCog(commands.Cog):
 
         # Studios
         studios_nodes = (media.get("studios") or {}).get("nodes") or []
+        # The overview lists main studios only; the Studios page shows every producer.
+        studios_nodes = [n for n in studios_nodes if n.get("isMain") is True] or studios_nodes
         if studios_nodes:
             studios_str = ", ".join(n.get("name") for n in studios_nodes if n.get("name"))
             embed.add_field(name="Studio", value=studios_str or "—", inline=True)
