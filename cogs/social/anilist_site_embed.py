@@ -1930,13 +1930,14 @@ class AniListCog(commands.Cog):
 
         def meta_value(*properties):
             for prop in properties:
-                pattern = r'<meta[^>]+(?:property|name)=["\\']' + re.escape(prop) + r'["\\'][^>]+content=["\\']([^"\\']*)["\\']'
-                match = re.search(pattern, html_text, re.I | re.S)
-                if not match:
-                    pattern = r'<meta[^>]+content=["\\']([^"\\']*)["\\'][^>]+(?:property|name)=["\\']' + re.escape(prop) + r'["\\']'
-                    match = re.search(pattern, html_text, re.I | re.S)
-                if match:
-                    return html_lib.unescape(match.group(1)).strip()
+                patterns = (
+                    r"<meta[^>]+(?:property|name)=[\"" + "'" + r"][^>]+content=[\"" + "'" + r"]([^\"" + "'" + r"]*)[\"" + "'" + r"]",
+                    r"<meta[^>]+content=[\"" + "'" + r"]([^\"" + "'" + r"]*)[\"" + "'" + r"][^>]+(?:property|name)=[\"" + "'" + r"]" + re.escape(prop) + r"[\"" + "'" + r"]",
+                )
+                for pattern in patterns:
+                    match = re.search(pattern.replace("PROP", re.escape(prop)), html_text, re.I | re.S)
+                    if match:
+                        return html_lib.unescape(match.group(1)).strip()
             return None
 
         title = meta_value("og:title", "twitter:title")
@@ -1953,8 +1954,8 @@ class AniListCog(commands.Cog):
         embedded_description = None
         embedded_image = None
         for pattern in (
-            r'<script[^>]+type=["\\']application/ld\\+json["\\'][^>]*>(.*?)</script>',
-            r'<script[^>]+id=["\\']__NEXT_DATA__["\\'][^>]*>(.*?)</script>',
+            r"<script[^>]+type=[\"" + "'" + r"]application/ld\+json[\"" + "'" + r"][^>]*>(.*?)</script>",
+            r"<script[^>]+id=[\"" + "'" + r"]__NEXT_DATA__[\"" + "'" + r"][^>]*>(.*?)</script>",
         ):
             for match in re.finditer(pattern, html_text, re.I | re.S):
                 try:
@@ -2043,7 +2044,7 @@ class AniListCog(commands.Cog):
         else:
             meta.append("🎞️ **Animation studio:** " + ("Yes" if entity.get("isAnimationStudio") else "No" if entity.get("isAnimationStudio") is False else "Unknown"))
         if meta:
-            embed.add_field(name="Profile", value="\\n".join(meta)[:1024], inline=False)
+            embed.add_field(name="Profile", value="\n".join(meta)[:1024], inline=False)
         source = "HTML fallback" if entity.get("_source") == "html" else "AniList GraphQL"
         embed.set_footer(text=f"AniList • {source} • ID {entity.get('id', '—')}")
         embeds = [embed]
@@ -2077,7 +2078,7 @@ class AniListCog(commands.Cog):
                 title=f"📚 Notable Works • {name}"[:256],
                 url=profile_url,
                 color=PALETTE.PRIMARY,
-                description="\\n".join(
+                description="\n".join(
                     f"{'🎭' if entity_kind == 'character' else '🎬'} [{title[:180]}]({url})" + (f" — {role}" if role else "")
                     for title, url, _, role in chunk
                 )[:4000],
