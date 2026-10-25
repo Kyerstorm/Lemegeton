@@ -12,6 +12,7 @@ import aiohttp
 import discord
 from discord.ext import commands
 import config
+from web.custom_role_picker_server import CustomRolePickerServer, loopback_bind_host as _loopback_bind_host
 
 # Suppress deprecation warning from discord.py's internal WebSocket connection code
 # This is a known issue in discord.py 2.6.0 that will be fixed in future versions
@@ -1597,11 +1598,16 @@ class DashboardBotBridge:
         self.port = getattr(config, "DASHBOARD_BRIDGE_PORT", 8091)
 
     async def start(self) -> None:
-        if not self.secret:
-            dashboard_bridge_logger.warning("Dashboard bot bridge is disabled: set DASHBOARD_BRIDGE_SECRET.")
+        if not self.secret or len(self.secret.encode("utf-8")) < 32:
+            dashboard_bridge_logger.error("Dashboard bot bridge disabled: DASHBOARD_BRIDGE_SECRET must contain at least 32 UTF-8 bytes.")
             return
         if self.runner:
             return
+        safe_host = _loopback_bind_host(self.host)
+        if safe_host is None:
+            dashboard_bridge_logger.error("Dashboard bot bridge refused to bind to non-loopback host %r.", self.host)
+            return
+        self.host = safe_host
         app = web.Application(client_max_size=64 * 1024, middlewares=[self._authenticate])
         app.router.add_get("/health", self._health)
         app.router.add_get("/guilds", self._guilds)
@@ -1812,6 +1818,10 @@ class DashboardBotBridge:
 
     async def _sync(self, request: web.Request) -> web.Response:
         guild = self._guild(request)
+        async with self._guild_lock(guild.id):
+            return await self._sync_locked(request, guild)
+
+    async def _sync_locked(self, request: web.Request, guild: Any) -> web.Response:
         data = await self._json_body(request)
         actor_id = data.get("actor_id")
         if not _valid_identifier(actor_id):
@@ -1908,45 +1918,6 @@ continues to perform its existing Discord/member/role validation in Python.
 custom_role_picker_logger = logging.getLogger("web.custom_role_picker_server")
 
 
-class CustomRolePickerServer:
-    def __init__(self, bot):
-        self.bot = bot
-        self.runner: web.AppRunner | None = None
-        self.site: web.TCPSite | None = None
-
-    def build_app(self) -> web.Application:
-        from web.custom_role_picker import CustomRolePicker
-        app = web.Application()
-        CustomRolePicker(self.bot).register(app)
-        return app
-
-    async def start(self) -> None:
-        if not config.CUSTOM_ROLES_PICKER_ENABLED or self.runner:
-            return
-        self.runner = web.AppRunner(self.build_app(), access_log=custom_role_picker_logger)
-        await self.runner.setup()
-        host = getattr(config, "DASHBOARD_PICKER_HOST", "127.0.0.1")
-        port = getattr(config, "DASHBOARD_PICKER_PORT", 8092)
-        self.site = web.TCPSite(self.runner, host, port)
-        try:
-            await self.site.start()
-        except Exception:
-            await self.runner.cleanup()
-            self.runner = None
-            self.site = None
-            raise
-        self.bot.custom_role_picker_ready = True
-        custom_role_picker_logger.info("Custom-role picker running privately on %s:%s behind the Rust dashboard proxy", host, port)
-
-    async def stop(self) -> None:
-        self.bot.custom_role_picker_ready = False
-        if self.runner:
-            await self.runner.cleanup()
-            self.runner = None
-            self.site = None
-
-
-# ------------------------------------------------------
 # Main Function with Comprehensive Logging
 # ------------------------------------------------------
 async def main():

@@ -18,7 +18,8 @@ pub struct AppConfig {
 }
 impl AppConfig {
     pub fn from_env() -> Self {
-        let port = env::var("DASHBOARD_PORT").ok().and_then(|v| v.parse().ok()).unwrap_or(8080);
+        let port = env::var("DASHBOARD_PORT").ok().and_then(|v| v.parse::<u16>().ok()).filter(|value| *value > 0)
+            .or_else(|| env::var("PORT").ok().and_then(|v| v.parse::<u16>().ok()).filter(|value| *value > 0)).unwrap_or(8080);
         let client_id = env::var("DASHBOARD_CLIENT_ID").or_else(|_| env::var("CLIENT_ID"))
             .or_else(|_| env::var("BOT_ID")).unwrap_or_default();
         let redirect_uri = env::var("DASHBOARD_REDIRECT_URI").unwrap_or_else(|_| format!("http://localhost:{port}/oauth/callback"));
@@ -35,18 +36,49 @@ impl AppConfig {
             bridge_url: loopback_url(env::var("DASHBOARD_BRIDGE_URL").unwrap_or_else(|_| "http://127.0.0.1:8091".to_string()), "http://127.0.0.1:8091"),
             bridge_secret: env::var("DASHBOARD_BRIDGE_SECRET").unwrap_or_default(),
             picker_url: loopback_url(env::var("DASHBOARD_PICKER_URL").unwrap_or_else(|_| "http://127.0.0.1:8092".to_string()), "http://127.0.0.1:8092"),
-            bind_host: env::var("DASHBOARD_HOST").unwrap_or_else(|_| "0.0.0.0".to_string()), port,
+            bind_host: env::var("DASHBOARD_HOST").unwrap_or_else(|_| "127.0.0.1".to_string()), port,
             secure_cookie,
             session_ttl: env::var("DASHBOARD_SESSION_TTL").ok().and_then(|v| v.parse().ok()).unwrap_or(28_800).max(300),
             owner_ids,
         }
     }
     pub fn oauth_ready(&self) -> bool { !self.client_id.is_empty() && !self.client_secret.is_empty() && !self.redirect_uri.is_empty() }
+
+    pub fn validate_public_configuration(&self) -> Result<(), String> {
+        let public = reqwest::Url::parse(&self.public_origin)
+            .map_err(|_| "DASHBOARD_PUBLIC_URL must be a valid origin URL.".to_string())?;
+        if !public.username().is_empty() || public.password().is_some()
+            || public.path() != "/" || public.query().is_some() || public.fragment().is_some() {
+            return Err("DASHBOARD_PUBLIC_URL must contain only the public scheme, host, and optional port.".to_string());
+        }
+
+        let host = public.host_str().unwrap_or_default();
+        let loopback = matches!(host, "localhost" | "127.0.0.1" | "::1");
+        if public.scheme() != "https" && !(public.scheme() == "http" && loopback) {
+            return Err("The dashboard must use HTTPS outside localhost. Terminate TLS at a trusted reverse proxy.".to_string());
+        }
+        if public.scheme() == "https" && !self.secure_cookie {
+            return Err("DASHBOARD_COOKIE_SECURE must be true when DASHBOARD_PUBLIC_URL uses HTTPS.".to_string());
+        }
+
+        let redirect = reqwest::Url::parse(&self.redirect_uri)
+            .map_err(|_| "DASHBOARD_REDIRECT_URI must be a valid URL.".to_string())?;
+        if !redirect.username().is_empty() || redirect.password().is_some()
+            || redirect.query().is_some() || redirect.fragment().is_some()
+            || redirect.path() != "/oauth/callback"
+            || redirect.origin().ascii_serialization() != public.origin().ascii_serialization() {
+            return Err("DASHBOARD_REDIRECT_URI must use the public origin and end exactly with /oauth/callback.".to_string());
+        }
+        if !loopback && redirect.scheme() != "https" {
+            return Err("The Discord OAuth callback must use HTTPS outside localhost.".to_string());
+        }
+        Ok(())
+    }
 }
 fn loopback_url(value: String, fallback: &str) -> String {
     let allowed = ["http://127.0.0.1:", "http://localhost:", "http://[::1]:"].iter().any(|prefix| {
         value.strip_prefix(*prefix).and_then(|tail| tail.split('/').next())
-            .is_some_and(|port| !port.is_empty() && port.bytes().all(|byte| byte.is_ascii_digit()))
+            .and_then(|port| port.parse::<u16>().ok()).is_some_and(|port| port > 0)
     });
     if allowed { value.trim_end_matches('/').to_string() } else { fallback.to_string() }
 }
@@ -67,7 +99,8 @@ pub struct OAuthState { pub expires_at: u64, pub browser_nonce: String }
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<AppConfig>, pub client: reqwest::Client, pub sessions: Arc<Mutex<HashMap<String, Session>>>,
-    pub oauth_states: Arc<Mutex<HashMap<String, OAuthState>>>, pub write_limits: Arc<Mutex<HashMap<String, VecDeque<u64>>>>,
+    pub oauth_states: Arc<Mutex<HashMap<String, OAuthState>>>, pub oauth_start_events: Arc<Mutex<VecDeque<u64>>>,
+    pub token_refresh_lock: Arc<Mutex<()>>, pub write_limits: Arc<Mutex<HashMap<String, VecDeque<u64>>>>,
     pub last_status: Arc<Mutex<Option<Value>>>,
 }
 impl AppState {
@@ -75,7 +108,8 @@ impl AppState {
         let client = reqwest::Client::builder().timeout(Duration::from_secs(12)).connect_timeout(Duration::from_secs(4))
             .redirect(reqwest::redirect::Policy::none()).user_agent("Lemegeton-Dashboard/2.0").build().expect("reqwest client configuration is valid");
         Self { config: Arc::new(config), client, sessions: Arc::new(Mutex::new(HashMap::new())),
-            oauth_states: Arc::new(Mutex::new(HashMap::new())), write_limits: Arc::new(Mutex::new(HashMap::new())),
+            oauth_states: Arc::new(Mutex::new(HashMap::new())), oauth_start_events: Arc::new(Mutex::new(VecDeque::new())),
+            token_refresh_lock: Arc::new(Mutex::new(())), write_limits: Arc::new(Mutex::new(HashMap::new())),
             last_status: Arc::new(Mutex::new(None)) }
     }
 }
@@ -95,7 +129,7 @@ pub type ApiResult<T> = Result<T, ApiError>;
 pub fn now_secs() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() }
 pub fn new_token() -> String { format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()) }
 pub fn is_owner(state: &AppState, user_id: &str) -> bool { state.config.owner_ids.contains(user_id) }
-pub fn can_manage_guild(permissions: u64, owner: bool) -> bool { owner || permissions & (MANAGE_GUILD | ADMINISTRATOR) != 0 }
+pub fn can_manage_guild(permissions: u64) -> bool { permissions & (MANAGE_GUILD | ADMINISTRATOR) != 0 }
 pub fn protected_command(name: &str) -> bool { matches!(name, "help" | "feedback") }
 
 pub fn cookie_value(headers: &HeaderMap, key: &str) -> Option<String> {
@@ -140,7 +174,14 @@ pub async fn discord_json(state: &AppState, path: &str, token: &str) -> ApiResul
     response.json::<Value>().await.map_err(|_| ApiError::new(StatusCode::BAD_GATEWAY, "Discord returned an invalid response."))
 }
 pub async fn access_token(state: &AppState, session_id: &str) -> ApiResult<String> {
-    let snapshot = state.sessions.lock().await.get(session_id).cloned().ok_or_else(ApiError::unauthorized)?;
+    let mut snapshot = state.sessions.lock().await.get(session_id).cloned().ok_or_else(ApiError::unauthorized)?;
+    if snapshot.expires_at <= now_secs() { return Err(ApiError::unauthorized()); }
+    if snapshot.access_expires_at > now_secs().saturating_add(15) { return Ok(snapshot.access_token); }
+
+    // Discord may rotate refresh tokens. Serialize refreshes, then re-read the session so
+    // concurrent requests reuse the first successful refresh instead of racing the old token.
+    let _refresh_guard = state.token_refresh_lock.lock().await;
+    snapshot = state.sessions.lock().await.get(session_id).cloned().ok_or_else(ApiError::unauthorized)?;
     if snapshot.expires_at <= now_secs() { return Err(ApiError::unauthorized()); }
     if snapshot.access_expires_at > now_secs().saturating_add(15) { return Ok(snapshot.access_token); }
     let refresh = snapshot.refresh_token.clone().ok_or_else(ApiError::unauthorized)?;
@@ -151,21 +192,44 @@ pub async fn access_token(state: &AppState, session_id: &str) -> ApiResult<Strin
         .send().await.map_err(|_| ApiError::new(StatusCode::BAD_GATEWAY, "Discord authorization refresh failed."))?;
     let status = response.status();
     let data = response.json::<Value>().await.unwrap_or(Value::Null);
-    if !status.is_success() || data.get("access_token").and_then(Value::as_str).is_none() {
-        if let Some(session) = state.sessions.lock().await.get_mut(session_id) { session.access_token.clear(); session.refresh_token = None; }
+    let token = data.get("access_token").and_then(Value::as_str).filter(|value| !value.is_empty()).map(ToOwned::to_owned);
+    if !status.is_success() || token.is_none() {
+        if let Some(session) = state.sessions.lock().await.get_mut(session_id) {
+            session.access_token.clear();
+            session.refresh_token = None;
+        }
         return Err(ApiError::unauthorized());
     }
-    let token = data["access_token"].as_str().unwrap_or_default().to_string();
-    let new_refresh = data.get("refresh_token").and_then(Value::as_str).map(ToOwned::to_owned).or(snapshot.refresh_token);
+    let token = token.unwrap_or_default();
+    let new_refresh = data.get("refresh_token").and_then(Value::as_str).filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned).or(snapshot.refresh_token);
     let expiry = data.get("expires_in").and_then(Value::as_u64).unwrap_or(3600);
     if let Some(session) = state.sessions.lock().await.get_mut(session_id) {
-        session.access_token = token.clone(); session.refresh_token = new_refresh;
+        session.access_token = token.clone();
+        session.refresh_token = new_refresh;
         session.access_expires_at = now_secs().saturating_add(expiry.saturating_sub(45).max(30));
-    } else { return Err(ApiError::unauthorized()); }
+    } else {
+        return Err(ApiError::unauthorized());
+    }
     Ok(token)
 }
+
+pub async fn allow_oauth_start(state: &AppState) -> bool {
+    const WINDOW_SECONDS: u64 = 60;
+    const MAX_STARTS_PER_WINDOW: usize = 60;
+    let now = now_secs();
+    let mut events = state.oauth_start_events.lock().await;
+    while events.front().is_some_and(|timestamp| now.saturating_sub(*timestamp) >= WINDOW_SECONDS) {
+        events.pop_front();
+    }
+    if events.len() >= MAX_STARTS_PER_WINDOW {
+        return false;
+    }
+    events.push_back(now);
+    true
+}
 pub async fn bridge_json(state: &AppState, method: Method, path: &str, body: Option<Value>) -> ApiResult<Value> {
-    if state.config.bridge_secret.is_empty() { return Err(ApiError::unavailable()); }
+    if state.config.bridge_secret.as_bytes().len() < 32 { return Err(ApiError::unavailable()); }
     if !path.starts_with('/') || path.contains("..") { return Err(ApiError::bad_request("Invalid management operation.")); }
     let mut request = state.client.request(method, format!("{}{}", state.config.bridge_url, path))
         .header(header::AUTHORIZATION, format!("Bearer {}", state.config.bridge_secret));
@@ -190,7 +254,6 @@ pub async fn manageable_guilds(state: &AppState, session_id: &str, session: &Ses
     let bot_guilds = bridge_json(state, Method::GET, "/guilds", None).await?;
     let bot_map: HashMap<String, Value> = bot_guilds.as_array().into_iter().flatten()
         .filter_map(|g| g.get("id").and_then(Value::as_str).map(|id| (id.to_string(), g.clone()))).collect();
-    let owner = is_owner(state, &session.user.id);
     let mut result = Vec::new();
     for guild in user_guilds.as_array().into_iter().flatten() {
         let id = match guild.get("id").and_then(Value::as_str) { Some(id) => id, None => continue };
@@ -198,7 +261,7 @@ pub async fn manageable_guilds(state: &AppState, session_id: &str, session: &Ses
         let permissions = guild.get("permissions").and_then(Value::as_str).and_then(|v| v.parse::<u64>().ok())
             .or_else(|| guild.get("permissions").and_then(Value::as_u64)).unwrap_or(0);
         let administrator = permissions & ADMINISTRATOR != 0;
-        if !can_manage_guild(permissions, owner) { continue; }
+        if !can_manage_guild(permissions) { continue; }
         result.push(DashboardGuild { id: id.to_string(),
             name: bot_guild.get("name").and_then(Value::as_str).unwrap_or("Discord server").to_string(),
             icon: bot_guild.get("icon").and_then(Value::as_str).map(ToOwned::to_owned),
@@ -275,12 +338,48 @@ mod tests {
     }
     #[test]
     fn permission_check_requires_manage_server_admin_or_configured_owner() {
-        assert!(!can_manage_guild(0, false));
-        assert!(can_manage_guild(MANAGE_GUILD, false));
-        assert!(can_manage_guild(ADMINISTRATOR, false));
-        assert!(can_manage_guild(0, true));
-        assert!(!can_manage_guild(1 << 10, false));
+        assert!(!can_manage_guild(0));
+        assert!(can_manage_guild(MANAGE_GUILD));
+        assert!(can_manage_guild(ADMINISTRATOR));
+        assert!(!can_manage_guild(0));
+        assert!(!can_manage_guild(1 << 10));
     }
+    #[test]
+    fn public_configuration_rejects_plain_http_for_non_loopback_hosts() {
+        let mut config = test_state().config.as_ref().clone();
+        config.public_origin = "http://dashboard.example".to_string();
+        config.redirect_uri = "http://dashboard.example/oauth/callback".to_string();
+        config.secure_cookie = false;
+        assert!(config.validate_public_configuration().is_err());
+    }
+
+    #[test]
+    fn public_configuration_requires_secure_cookies_for_https() {
+        let mut config = test_state().config.as_ref().clone();
+        config.secure_cookie = false;
+        assert!(config.validate_public_configuration().is_err());
+        config.secure_cookie = true;
+        assert!(config.validate_public_configuration().is_ok());
+    }
+
+    #[test]
+    fn callback_must_match_the_exact_public_origin_and_path() {
+        let mut config = test_state().config.as_ref().clone();
+        config.redirect_uri = "https://attacker.example/oauth/callback".to_string();
+        assert!(config.validate_public_configuration().is_err());
+        config.redirect_uri = "https://dashboard.example/not-oauth".to_string();
+        assert!(config.validate_public_configuration().is_err());
+    }
+
+    #[tokio::test]
+    async fn oauth_start_rate_limit_blocks_excessive_attempts() {
+        let state = test_state();
+        for _ in 0..60 {
+            assert!(allow_oauth_start(&state).await);
+        }
+        assert!(!allow_oauth_start(&state).await);
+    }
+
     #[test]
     fn internal_service_targets_cannot_be_repointed_to_public_hosts() {
         let fallback = "http://127.0.0.1:8091";

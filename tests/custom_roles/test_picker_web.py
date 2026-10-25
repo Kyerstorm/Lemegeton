@@ -39,7 +39,7 @@ async def main():
     import database as db
     from helpers.custom_roles import service, storage, tokens
     from web import custom_role_picker
-    from utils.dashboard_picker_server import CustomRolePickerServer
+    from web.custom_role_picker_server import CustomRolePickerServer
 
     q = db.execute_db_operation
     await db.init_custom_roles_tables()
@@ -145,7 +145,9 @@ async def main():
 
         r = await get("/custom-roles")
         page = await r.text()
-        check("picker page served", r.status == 200 and "Custom Role Color Picker" in page)
+        check("picker page served", r.status == 200 and "Make it" in page and "Custom Role Color Picker" in page)
+        check("picker matches the control-plane brand", "COMMUNITY CONTROL" in page and "ROLE STUDIO" in page)
+        check("picker exposes an accessible hero and private-session label", 'aria-labelledby="picker-title"' in page and 'aria-label="Private role editing link"' in page)
         for name, value in (("Referrer-Policy", "no-referrer"), ("Cache-Control", "no-store"),
                             ("X-Frame-Options", "DENY"), ("X-Content-Type-Options", "nosniff")):
             check(f"page header {name}: {value}", r.headers.get(name) == value, r.headers.get(name))
@@ -312,10 +314,13 @@ async def main():
         picker._failed.clear()
 
         # writes from other sites
-        r = await client.post("/custom-roles/api/state", headers={"Origin": "https://evil.example"})
-        check("cross-origin write -> 403", r.status == 403 and (await r.json())["error"] == "cross_origin")
-        r = await client.post("/custom-roles/api/state", headers={"Origin": "http://localhost:8080"})
-        check("same-origin write passes the origin check (405: no write routes yet)", r.status == 405, r.status)
+        payload = {"mode": "solid", "primary": "#FF0000"}
+        r = await client.post("/custom-roles/api/color", headers={"Authorization": f"Bearer {good}", "Origin": "https://evil.example"}, json=payload)
+        check("mutations reject another origin", r.status == 403 and (await r.json())["error"] == "cross_origin")
+        r = await client.post("/custom-roles/api/color", headers={"Authorization": f"Bearer {good}"}, json=payload)
+        check("mutations reject a missing Origin header", r.status == 403 and (await r.json())["error"] == "cross_origin")
+        r = await client.post("/custom-roles/api/color", headers={"Authorization": f"Bearer {good}", "Origin": "http://localhost:8080"}, json=payload)
+        check("configured origin is accepted for a valid mutation", r.status == 200, r.status)
 
         # post-merge fix 7: every error status keeps the picker's security headers
         for method, path in (("POST", "/custom-roles/api/state"), ("PUT", "/custom-roles/api/color")):

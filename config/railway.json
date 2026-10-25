@@ -10,6 +10,8 @@
   },
   "variables": {
     "PYTHONUNBUFFERED": "1",
-    "PYTHONPATH": "/app"
+    "PYTHONPATH": "/app",
+    "DASHBOARD_HOST": "0.0.0.0",
+    "DASHBOARD_ALLOW_PUBLIC_BIND": "true"
   }
 }

@@ -1,0 +1,34 @@
+[Unit]
+Description=Lemegeton Rust web dashboard
+After=network-online.target lemegeton-bot.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lemegeton-dashboard
+Group=lemegeton-read
+WorkingDirectory=/opt/lemegeton
+EnvironmentFile=/etc/lemegeton/dashboard.env
+Environment=HOME=/nonexistent
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/lemegeton/dashboard-rs/target/release/lemegeton-dashboard
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+UMask=0077
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

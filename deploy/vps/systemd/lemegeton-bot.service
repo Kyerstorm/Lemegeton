@@ -1,0 +1,39 @@
+[Unit]
+Description=Lemegeton Discord bot and private runtime bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lemegeton
+Group=lemegeton-bot
+SupplementaryGroups=lemegeton-read
+WorkingDirectory=/opt/lemegeton
+EnvironmentFile=/etc/lemegeton/bot.env
+Environment=PYTHONPATH=/opt/lemegeton
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=HOME=/opt/lemegeton/runtime-home
+Environment=XDG_CACHE_HOME=/opt/lemegeton/runtime-home/.cache
+ExecStart=/opt/lemegeton/.venv/bin/python /opt/lemegeton/bot.py
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=45s
+UMask=0077
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/opt/lemegeton/data /opt/lemegeton/logs /opt/lemegeton/runtime-home
+
+[Install]
+WantedBy=multi-user.target

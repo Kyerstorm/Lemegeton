@@ -8,5 +8,11 @@
     "startCommand": "./scripts/start.sh",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
+  },
+  "variables": {
+    "DASHBOARD_HOST": "0.0.0.0",
+    "PYTHONUNBUFFERED": "1",
+    "PYTHONPATH": "/app",
+    "DASHBOARD_ALLOW_PUBLIC_BIND": "true"
   }
 }

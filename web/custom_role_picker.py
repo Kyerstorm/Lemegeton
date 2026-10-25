@@ -23,7 +23,7 @@ import config
 from helpers.custom_roles import COMMAND_GROUP, images, safe_fetch, service, tokens, validation
 
 logger = logging.getLogger("web.custom_role_picker")
-STATIC_DIR = Path(__file__).resolve().parent / "static" / "custom_roles"
+STATIC_DIR = Path(__file__).resolve().parent
 BASE = "/custom-roles"
 STATIC_FILES = {
     "picker.css": "text/css",
@@ -150,11 +150,19 @@ class CustomRolePicker:
     async def _middleware(self, request: web.Request, handler):
         if not is_picker_path(request.path):
             return await handler(request)
-        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
-            origin = request.headers.get("Origin")
-            allowed = {_origin(config.CUSTOM_ROLES_PUBLIC_URL), f"{request.scheme}://{request.host}".lower()}
-            if origin and origin.rstrip("/").lower() not in allowed:
-                return self._headers(self._error(403, "cross_origin", "Requests from other sites aren't allowed."))
+        mutating_routes = {
+            ("POST", BASE + "/api/color"),
+            ("POST", BASE + "/api/name"),
+            ("POST", BASE + "/api/icon"),
+            ("DELETE", BASE + "/api/icon"),
+            ("POST", BASE + "/api/icon/emoji"),
+            ("POST", BASE + "/api/icon/fetch"),
+        }
+        if (request.method, request.path) in mutating_routes:
+            origin = request.headers.get("Origin", "").rstrip("/").lower()
+            allowed_origin = _origin(config.CUSTOM_ROLES_PUBLIC_URL)
+            if not origin or origin != allowed_origin:
+                return self._headers(self._error(403, "cross_origin", "Requests must come from the configured dashboard origin."))
         try:
             response = await handler(request)
         except web.HTTPException as exc:

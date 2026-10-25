@@ -11,8 +11,22 @@
   <script src="/custom-roles/static/picker.js" defer></script>
 </head>
 <body>
-  <main>
-    <h1>Custom Role Color Picker</h1>
+  <main class="picker-shell">
+    <header class="picker-topbar">
+      <div class="brand-lockup" role="group" aria-label="Lemegeton role studio">
+        <span class="brand-mark" aria-hidden="true">L.</span>
+        <span class="brand-copy"><strong>LEMEGETON</strong><small>COMMUNITY CONTROL</small></span>
+      </div>
+      <div class="topbar-status" aria-label="Private role editing link">
+        <span class="status-led" aria-hidden="true"></span>
+        <span><strong>PRIVATE SESSION</strong><small>SECURE ROLE ACCESS</small></span>
+      </div>
+    </header>
+    <section class="picker-hero" aria-labelledby="picker-title">
+      <p class="eyebrow"><span>ROLE STUDIO</span><span class="eyebrow-divider">/</span><span>PERSONALIZATION</span></p>
+      <h1 id="picker-title">Make it <span>yours.</span></h1>
+      <p class="lede">Tune your role’s color, name, and icon. Changes are checked by the bot and applied to your Discord role.</p>
+    </section>
 
     <div id="banner-access" class="banner banner-error hidden" role="alert">
       <strong id="banner-access-title"></strong>

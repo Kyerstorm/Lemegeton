@@ -10,9 +10,17 @@ FRONTEND_APP = (ROOT / "dashboard-frontend" / "src" / "App.tsx").read_text(encod
 FRONTEND_STYLES = (ROOT / "dashboard-frontend" / "src" / "styles.ts").read_text(encoding="utf-8")
 FRONTEND_ENTRY = (ROOT / "dashboard-frontend" / "src" / "main.tsx").read_text(encoding="utf-8")
 FRONTEND_CONFIG = (ROOT / "dashboard-frontend" / "vite.config.ts").read_text(encoding="utf-8")
+RUST_STATE = (ROOT / "dashboard-rs" / "src" / "state.rs").read_text(encoding="utf-8")
+RUST_AUTH = (ROOT / "dashboard-rs" / "src" / "auth.rs").read_text(encoding="utf-8")
+RUST_CARGO = (ROOT / "dashboard-rs" / "Cargo.toml").read_text(encoding="utf-8")
 FRONTEND_PACKAGE = (ROOT / "dashboard-frontend" / "package.json").read_text(encoding="utf-8")
 WORKFLOW = (ROOT / ".github" / "workflows" / "dashboard.yml").read_text(encoding="utf-8")
 START_SCRIPT = (ROOT / "scripts" / "start.sh").read_text(encoding="utf-8")
+PICKER_SOURCE = (ROOT / "web" / "custom_role_picker.py").read_text(encoding="utf-8")
+PICKER_SERVER = (ROOT / "web" / "custom_role_picker_server.py").read_text(encoding="utf-8")
+PICKER_PAGE = (ROOT / "web" / "picker.html").read_text(encoding="utf-8")
+PICKER_THEME = (ROOT / "web" / "theme.css").read_text(encoding="utf-8")
+PICKER_SCRIPT = (ROOT / "web" / "picker.js").read_text(encoding="utf-8")
 
 
 class DashboardAssetTests(unittest.TestCase):
@@ -86,6 +94,35 @@ class DashboardAssetTests(unittest.TestCase):
         self.assertIn('      - "config/railway.json"', WORKFLOW)
         self.assertIn('      - "scripts/start.sh"', WORKFLOW)
 
+
+    def test_security_fixes_have_regression_coverage(self):
+        self.assertIn("validate_public_configuration", RUST_STATE)
+        self.assertIn("allow_oauth_start", RUST_STATE)
+        self.assertIn("Too many sign-in attempts", RUST_AUTH)
+        self.assertIn("/oauth2/token/revoke", RUST_AUTH)
+        self.assertIn("can_manage_guild(permissions)", RUST_STATE)
+        self.assertNotIn("can_manage_guild(permissions, owner)", RUST_STATE)
+        self.assertIn('version = "1.54.1"', RUST_CARGO)
+        self.assertIn("cross-origin-opener-policy", MAIN_SOURCE)
+        self.assertIn("x-permitted-cross-domain-policies", MAIN_SOURCE)
+        self.assertIn("DASHBOARD_ALLOW_PUBLIC_BIND", MAIN_SOURCE)
+
+
+    def test_custom_role_picker_is_consolidated_under_web(self):
+        for filename in ("custom_role_picker.py", "custom_role_picker_server.py", "picker.html", "picker.css", "theme.css", "picker.js", "favicon.svg"):
+            with self.subTest(filename=filename):
+                self.assertTrue((ROOT / "web" / filename).is_file())
+        self.assertEqual(PICKER_SOURCE.split("STATIC_DIR = ", 1)[1].splitlines()[0], "Path(__file__).resolve().parent")
+        self.assertNotIn("web.static/custom_roles", PICKER_SOURCE)
+        self.assertFalse((ROOT / "web" / "static" / "custom_roles" / "picker.html").exists())
+        self.assertIn("COMMUNITY CONTROL", PICKER_PAGE)
+        self.assertIn("ROLE STUDIO", PICKER_PAGE)
+        self.assertIn("#090a09", PICKER_THEME)
+        self.assertIn("#d9ff72", PICKER_THEME)
+        self.assertIn("configured dashboard origin", PICKER_SOURCE)
+        self.assertIn("images.source_max_bytes() + MULTIPART_OVERHEAD", PICKER_SERVER)
+        self.assertNotIn("innerHTML", PICKER_SCRIPT)
+        self.assertNotIn("eval(", PICKER_SCRIPT)
 
     def test_accessibility_and_security_headers_remain(self):
         for marker in ("@media(max-width:760px)", "@media(max-width:480px)",
