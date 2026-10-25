@@ -1,4 +1,5 @@
 import discord
+from helpers.command_error_handler import application_error_message
 from discord.ext import commands
 from discord import app_commands
 import logging
@@ -242,7 +243,7 @@ class WelcomeDM(commands.Cog):
             await interaction.followup.send(
                 embed=build_error_embed(
                     title="Unexpected Error",
-                    description="An error occurred while processing your file. Please try again."
+                    description=application_error_message(e)
                 ),
                 ephemeral=True
             )
