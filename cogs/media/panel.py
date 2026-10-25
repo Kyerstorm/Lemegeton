@@ -778,7 +778,7 @@ class PanelJumpModal(FeedbackAwareModal, title="Jump to Page"):
             await interaction.response.send_message("Enter a valid page number.", ephemeral=True)
         except Exception:
             log.exception("Panel jump failed")
-            await interaction.response.send_message("Something went wrong.", ephemeral=True)
+            await interaction.response.send_message(application_error_message(exc), ephemeral=True)
 
 
 class PanelTagFilter(discord.ui.Select):
@@ -878,7 +878,7 @@ class PanelBrowserView(FeedbackAwareView):
             await self.cog._render(interaction, self)
         except Exception:
             log.exception("Panel navigation failed")
-            await interaction.response.send_message("Something went wrong.", ephemeral=True)
+            await interaction.response.send_message(application_error_message(exc), ephemeral=True)
 
     async def _jump(self, interaction: discord.Interaction):
         if self.panel_ids:
@@ -1077,9 +1077,9 @@ class PanelHomeView(FeedbackAwareView):
                 for r in rows
             ) or "No moderation actions have been logged for this server."
             await interaction.response.send_message(embed=embed, ephemeral=True)
-        except Exception:
+        except Exception as exc:
             log.exception("Moderation log view failed")
-            if interaction.response.is_done(): await interaction.followup.send("Something went wrong.", ephemeral=True)
+            if interaction.response.is_done(): await interaction.followup.send(application_error_message(exc), ephemeral=True)
             else: await interaction.response.send_message("Something went wrong.", ephemeral=True)
 
 
@@ -1099,7 +1099,7 @@ class PanelAttachmentPicker(FeedbackAwareView):
             selected = self.attachments[int(self.children[0].values[0])]
             await interaction.response.send_modal(PanelForm(self.cog, mode="add", user_id=interaction.user.id,
                                                             guild_id=interaction.guild_id or 0, source_url=self.message.jump_url))
-        except Exception:
+        except Exception as exc:
             log.exception("Attachment selection failed")
             await interaction.response.send_message("Something went wrong.", ephemeral=True)
 
@@ -1157,10 +1157,10 @@ class PanelCog(commands.Cog):
             msg = "Public panel browser posted in this channel."
             if interaction.response.is_done(): await interaction.followup.send(msg, ephemeral=True)
             else: await interaction.response.send_message(msg, ephemeral=True)
-        except Exception:
+        except Exception as exc:
             log.exception("Could not post panel browser")
             if interaction.response.is_done(): await interaction.followup.send(application_error_message(exc), ephemeral=True)
-            else: await interaction.response.send_message("Something went wrong opening the browser.", ephemeral=True)
+            else: await interaction.response.send_message(application_error_message(exc), ephemeral=True)
 
     async def _resolved_embed(self, panel, page, total):
         url = await _fresh_attachment(self.bot, panel)
@@ -1194,7 +1194,7 @@ class PanelCog(commands.Cog):
                 await interaction.response.edit_message(content="No panels match this filter.", embed=None, view=browser); return
             embed = await self._resolved_embed(panel, browser.page+1, len(ids))
             await interaction.response.edit_message(content=None, embed=embed, view=browser)
-        except Exception:
+        except Exception as exc:
             log.exception("Rendering panel browser failed")
             if interaction.response.is_done(): await interaction.followup.send("Something went wrong.", ephemeral=True)
             else: await interaction.response.send_message("Something went wrong.", ephemeral=True)
@@ -1212,7 +1212,7 @@ class PanelCog(commands.Cog):
                 interaction, ids, user_id=interaction.user.id if action == "mine" else None,
                 fixed_ids=(action == "random"),
             )
-        except Exception:
+        except Exception as exc:
             log.exception("Panel home action failed")
             if interaction.response.is_done(): await interaction.followup.send("Something went wrong.", ephemeral=True)
             else: await interaction.response.send_message("Something went wrong.", ephemeral=True)
@@ -1237,7 +1237,7 @@ class PanelCog(commands.Cog):
             if not _nsfw(interaction):
                 embed.add_field(name="🔞 Content visibility", value="Mature panels are hidden in channels that are not age-restricted.", inline=False)
             await interaction.followup.send(embed=embed, view=PanelHomeView(self), ephemeral=True)
-        except Exception:
+        except Exception as exc:
             log.exception("/panels failed")
             if interaction.response.is_done(): await interaction.followup.send("Something went wrong.", ephemeral=True)
             else: await interaction.response.send_message("Something went wrong.", ephemeral=True)
@@ -1254,7 +1254,7 @@ class PanelCog(commands.Cog):
                                                                 guild_id=interaction.guild_id, source_url=message.jump_url))
             else:
                 await interaction.response.send_message("Choose the image to save, then complete the Add Panel form.", view=PanelAttachmentPicker(self, message, images), ephemeral=True)
-        except Exception:
+        except Exception as exc:
             log.exception("Save to Panels context menu failed")
             if interaction.response.is_done(): await interaction.followup.send("Something went wrong.", ephemeral=True)
             else: await interaction.response.send_message("Something went wrong.", ephemeral=True)
