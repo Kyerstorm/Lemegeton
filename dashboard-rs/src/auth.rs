@@ -187,7 +187,7 @@ mod tests {
 
     #[tokio::test]
     async fn oauth_callback_rejects_missing_state_before_network_access() {
-        let response = oauth_callback(State(test_state()), Query(OAuthCallback {
+        let response = oauth_callback(State(test_state()), HeaderMap::new(), Query(OAuthCallback {
             code: Some("authorization-code".to_string()), state: None, error: None,
         })).await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
