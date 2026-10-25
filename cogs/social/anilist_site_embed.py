@@ -56,7 +56,7 @@ REVIEW_URL_RE = re.compile(r"https?://anilist\.co/review/(\d+)", re.IGNORECASE)
 CHARACTER_URL_RE = re.compile(r"https?://anilist\.co/character/(\d+)(?:/[^\s/?#]+)?/?", re.IGNORECASE)
 STAFF_URL_RE = re.compile(r"https?://anilist\.co/staff/(\d+)(?:/[^\s/?#]+)?/?", re.IGNORECASE)
 STUDIO_URL_RE = re.compile(r"https?://anilist\.co/studio/(\d+)(?:/[^\s/?#]+)?/?", re.IGNORECASE)
-USER_URL_RE = re.compile(r"https?://anilist\.co/user/([A-Za-z0-9_-]+)(?:/([A-Za-z-]+))?(?:/)?(?:[?#]\S*)?", re.IGNORECASE)
+USER_URL_RE = re.compile(r"https?://(?:www\\.)?anilist\\.co/user/([A-Za-z0-9_-]+)(?:/([^?#]*))?(?:[?#]\\S*)?", re.IGNORECASE)
 
 REPLIES_PER_PAGE = 5
 HTML_TIMEOUT = 15  # seconds for parsing fallback HTTP requests
@@ -2423,11 +2423,11 @@ class AniListCog(commands.Cog):
             "_source": "html",
         }
 
-    async def fetch_user_media_list(self, user_id: int, media_type: str) -> Optional[dict]:
+    async def fetch_user_media_list(self, user_id: int, media_type: str, page: int = 1) -> Optional[dict]:
         """Fetch a bounded page of a public user's anime or manga list."""
         query = """
-        query($userId: Int, $type: MediaType) {
-          Page(page: 1, perPage: 10) {
+        query($userId: Int, $type: MediaType, $page: Int) {
+          Page(page: $page, perPage: 10) {
             pageInfo { currentPage hasNextPage total }
             mediaList(userId: $userId, type: $type, sort: [UPDATED_TIME_DESC]) {
               status score progress progressVolumes updatedAt
@@ -2442,7 +2442,7 @@ class AniListCog(commands.Cog):
         """
         try:
             payload = await post_graphql(
-                self.session, query, {"userId": user_id, "type": media_type}, timeout=12
+                self.session, query, {"userId": user_id, "type": media_type, "page": max(1, page)}, timeout=12
             )
             return (payload or {}).get("Page")
         except Exception:
@@ -2635,12 +2635,12 @@ class AniListCog(commands.Cog):
             score_text = f"{score:g}/100" if isinstance(score, (int, float)) and score else "Not scored"
             url = media.get("siteUrl") or f"https://anilist.co/{media_type.lower()}/{media.get('id')}"
             embed.add_field(
-                name=f"[{title[:210]}]({url})",
-                value=f"**Status:** {status}\n**Progress:** {progress_text}\n**Score:** {score_text}",
+                name=title[:256],
+                value=f"[Open on AniList]({url})\n**Status:** {status}\n**Progress:** {progress_text}\n**Score:** {score_text}",
                 inline=True,
             )
         page_info = page_data.get("pageInfo") or {}
-        footer = f"AniList • Showing {len(entries[:10])} entries"
+        footer = f"AniList • Page {page_info.get("currentPage", 1)} • Showing {len(entries[:10])} entries"
         if page_info.get("hasNextPage"):
             footer += " • More entries are available on AniList"
         embed.set_footer(text=footer)
