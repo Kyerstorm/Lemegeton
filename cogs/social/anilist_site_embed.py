@@ -48,14 +48,14 @@ def _anilist_warning(description: str, title: str = "AniList") -> discord.Embed:
         description=f"{description}\n\nIf this issue persists, please run /feedback and include the AniList link.",
     )
 
-ACTIVITY_URL_RE = re.compile(r"https?://anilist\.co/activity/(\d+)", re.IGNORECASE)
-ANIME_URL_RE = re.compile(r"https?://anilist\.co/anime/(\d+)(?:/[^/\s]+)?/?", re.IGNORECASE)
-MANGA_URL_RE = re.compile(r"https?://anilist\.co/manga/(\d+)(?:/[^/\s]+)?/?", re.IGNORECASE)
+ACTIVITY_URL_RE = re.compile(r"https?://(?:www\.)?anilist\.co/activity/(\d+)", re.IGNORECASE)
+ANIME_URL_RE = re.compile(r"https?://(?:www\.)?anilist\.co/anime/(\d+)(?:/[^/\s]+)?/?", re.IGNORECASE)
+MANGA_URL_RE = re.compile(r"https?://(?:www\.)?anilist\.co/manga/(\d+)(?:/[^/\s]+)?/?", re.IGNORECASE)
 
-REVIEW_URL_RE = re.compile(r"https?://anilist\.co/review/(\d+)", re.IGNORECASE)
-CHARACTER_URL_RE = re.compile(r"https?://anilist\.co/character/(\d+)(?:/[^\s/?#]+)?/?", re.IGNORECASE)
-STAFF_URL_RE = re.compile(r"https?://anilist\.co/staff/(\d+)(?:/[^\s/?#]+)?/?", re.IGNORECASE)
-STUDIO_URL_RE = re.compile(r"https?://anilist\.co/studio/(\d+)(?:/[^\s/?#]+)?/?", re.IGNORECASE)
+REVIEW_URL_RE = re.compile(r"https?://(?:www\.)?anilist\.co/review/(\d+)", re.IGNORECASE)
+CHARACTER_URL_RE = re.compile(r"https?://(?:www\.)?anilist\.co/character/(\d+)(?:/[^\s/?#]+)?/?", re.IGNORECASE)
+STAFF_URL_RE = re.compile(r"https?://(?:www\.)?anilist\.co/staff/(\d+)(?:/[^\s/?#]+)?/?", re.IGNORECASE)
+STUDIO_URL_RE = re.compile(r"https?://(?:www\.)?anilist\.co/studio/(\d+)(?:/[^\s/?#]+)?/?", re.IGNORECASE)
 USER_URL_RE = re.compile(r"https?://(?:www\.)?anilist\.co/user/([A-Za-z0-9_-]+)(?:/([^?#]*))?(?:[?#]\S*)?", re.IGNORECASE)
 
 REPLIES_PER_PAGE = 5
@@ -495,8 +495,8 @@ class AniListCog(commands.Cog):
 
         text = re.sub(r"<[^>]+>", "", text)
         text = html_lib.unescape(text)
-        text = re.sub(r"~+img(?:\d+|x)?\((https?://[^\s)]+)\)~+", r"\1", text)
-        text = re.sub(r"~+vid\((https?://[^\s)]+)\)~+", r"\1", text)
+        text = re.sub(r"~*img(?:\d+|x)?\((https?://[^\s)]+)\)~*", r"\1", text)
+        text = re.sub(r"~*vid\((https?://[^\s)]+)\)~*", r"\1", text)
         text = re.sub(r"^# (.+)$", r"__**\1**__", text, flags=re.M)
         text = re.sub(r"^## (.+)$", r"**\1**", text, flags=re.M)
         text = re.sub(r"^### (.+)$", r"_\1_", text, flags=re.M)
