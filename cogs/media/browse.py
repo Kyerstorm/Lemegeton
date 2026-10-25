@@ -279,6 +279,12 @@ def scrape_novelupdates(driver: Driver, data: Dict) -> List[Dict]:
             logger.warning("Novel Updates browser route failed for %s: %s", url, exc)
             continue
         successful_page_loads += 1
+        html = driver.page_html or ""
+        challenge = detect_access_challenge(None, html)
+        if challenge:
+            raise ScrapeBlockedError(
+                f"Novel Updates stopped the browser search ({challenge})."
+            )
         if route_index == 0:
             # Give the preferred route time to render its usual result container;
             # other routes stay non-blocking and are parsed through generic anchors.
@@ -286,12 +292,12 @@ def scrape_novelupdates(driver: Driver, data: Dict) -> List[Dict]:
                 driver.select_all(".search_main_box_nu", wait=Wait.LONG)
             except Exception:
                 pass
-        html = driver.page_html or ""
-        challenge = detect_access_challenge(None, html)
-        if challenge:
-            raise ScrapeBlockedError(
-                f"Novel Updates stopped the browser search ({challenge})."
-            )
+            html = driver.page_html or html
+            challenge = detect_access_challenge(None, html)
+            if challenge:
+                raise ScrapeBlockedError(
+                    f"Novel Updates stopped the browser search ({challenge})."
+                )
         results = _novelupdates_parse_html(html, url)
         if results:
             logger.info(
