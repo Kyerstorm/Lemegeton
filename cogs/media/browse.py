@@ -1,5 +1,6 @@
 from helpers.color_palette import PALETTE
 import discord
+from helpers.command_error_handler import application_error_message, FeedbackAwareView
 from discord.ext import commands
 from discord import app_commands
 import aiohttp
@@ -9,7 +10,7 @@ import os
 from typing import List, Dict, Optional, Tuple
 from urllib.parse import quote_plus, urljoin
 from botasaurus.browser import browser as botasaurus_browser, Driver, Wait
-from discord.ui import View, Button
+from discord.ui import Button
 from database import get_all_users_guild_aware
 from helpers.embed_helper import build_error_embed, build_info_embed
 from helpers.anilist_helper import post_graphql
@@ -782,12 +783,16 @@ class BrowseCog(commands.Cog):
                     asyncio.to_thread(scrape_novelupdates, {"query": title}, output=None),
                     timeout=20,
                 )
-            except asyncio.TimeoutError:
-                logger.warning("Novel Updates search timed out for %r", title)
-                results = []
+            except asyncio.TimeoutError as e:
+                logger.warning("Novel Updates search timed out for %r", title, exc_info=True)
+                embed = build_error_embed("Novel Updates Timed Out", application_error_message(e))
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
             except Exception as e:
                 logger.warning("Novel Updates search failed for %r: %s", title, e, exc_info=True)
-                results = []
+                embed = build_error_embed("Novel Updates Unavailable", application_error_message(e))
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
 
             if not results:
                 embed = build_error_embed("No Results Found", "No webnovel results found on Novel Updates.")
@@ -1025,7 +1030,7 @@ class BrowseCog(commands.Cog):
         # --------------------------------------------------
         # PageView with Lazy-Loading
         # --------------------------------------------------
-        class PageView(View):
+        class PageView(FeedbackAwareView):
             def __init__(self, embed1, media_data, real_type_val, guild_id, bot):
                 super().__init__(timeout=300)
                 self.embed1 = embed1
