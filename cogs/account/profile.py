@@ -1,6 +1,7 @@
 from helpers.color_palette import PALETTE
 # cogs/profile.py
 import discord
+from helpers.command_error_handler import application_error_message, FeedbackAwareModal, FeedbackAwareView
 from discord.ext import commands
 from discord import app_commands
 import aiohttp
@@ -607,7 +608,7 @@ class Profile(commands.Cog):
             else:
                 # Not registered in any guild → present registration
                 logger.info(f"User {target.id} not found in any guild")
-                view = discord.ui.View()
+                view = FeedbackAwareView()
                 view.add_item(RegisterButton(target.id, guild_id))
                 await interaction.followup.send(
                     f"❌ {target.mention} hasn't registered an AniList username.\nClick below to register:",
@@ -863,8 +864,11 @@ class Profile(commands.Cog):
                 logger.error(f"Failed to send static fallback profile: {inner_e}")
                 try:
                     await interaction.followup.send("❌ Critical error: Unable to display profile at all.", ephemeral=True)
-                except Exception:
-                    pass
+                except Exception as inner_send_error:
+                    try:
+                        await interaction.followup.send(application_error_message(inner_send_error), ephemeral=True)
+                    except Exception:
+                        logger.exception("Failed to deliver the profile error message")
             return
 
         # Debug: log the returned message and component structure for troubleshooting
@@ -878,7 +882,7 @@ class Profile(commands.Cog):
             logger.exception("Error while logging sent message components for profile")
 
 
-class UnifiedProfileView(discord.ui.View):
+class UnifiedProfileView(FeedbackAwareView):
     """View for unified profile with achievements, favorites, and gallery buttons"""
     
     def __init__(self, profile_embed: discord.Embed, achievements_view, favorites_view, gallery_view=None):
@@ -918,7 +922,7 @@ class UnifiedProfileView(discord.ui.View):
             await interaction.response.send_message("📭 No images found in bio.", ephemeral=True)
 
 
-class ProfilePager(discord.ui.View):
+class ProfilePager(FeedbackAwareView):
     def __init__(self, pages: List[discord.Embed], achievements_view, favorites_view):
         super().__init__(timeout=120)
         self.pages = pages
@@ -956,7 +960,7 @@ class ProfilePager(discord.ui.View):
         )
 
 
-class AchievementsView(discord.ui.View):
+class AchievementsView(FeedbackAwareView):
     def __init__(self, achievements_data: Dict, user_data: Dict, avatar_url: str, profile_url: str, profile_pager=None):
         super().__init__(timeout=120)
         self.achievements_data = achievements_data
@@ -1163,7 +1167,7 @@ class AchievementsView(discord.ui.View):
             )
 
 
-class FavoritesView(discord.ui.View):
+class FavoritesView(FeedbackAwareView):
     def __init__(self, user_data: Dict, avatar_url: str, profile_url: str, profile_pager=None):
         super().__init__(timeout=120)
         self.user_data = user_data
@@ -1361,7 +1365,7 @@ class FavoritesView(discord.ui.View):
             )
 
 
-class GalleryView(discord.ui.View):
+class GalleryView(FeedbackAwareView):
     """View for displaying bio images in a paginated gallery"""
     
     def __init__(self, images: List[str], user_name: str, avatar_url: str, profile_pager=None):
@@ -1434,7 +1438,7 @@ class GalleryView(discord.ui.View):
             )
 
 
-class Pager(discord.ui.View):
+class Pager(FeedbackAwareView):
     def __init__(self, pages: List[discord.Embed]):
         super().__init__(timeout=120)
         self.pages = pages
@@ -1473,7 +1477,7 @@ class RegisterButton(discord.ui.Button):
         await interaction.response.send_modal(AniListRegisterModal(self.user_id, self.guild_id))
 
 
-class AniListRegisterModal(discord.ui.Modal, title="Register AniList"):
+class AniListRegisterModal(FeedbackAwareModal, title="Register AniList"):
     username = discord.ui.TextInput(label="AniList Username", placeholder="e.g. yourusername", required=True)
 
     def __init__(self, user_id: int, guild_id: int):
