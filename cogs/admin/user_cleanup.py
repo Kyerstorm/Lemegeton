@@ -301,7 +301,7 @@ class UserCleanup(commands.Cog):
             logger.error(f"Error in manual cleanup command: {e}", exc_info=True)
             embed = build_error_embed(
                 "Cleanup Error",
-                f"Error during cleanup: {str(e)}"
+                prefix_error_message(e) or FEEDBACK_ERROR_GUIDANCE
             )
             await ctx.send(embed=embed)
 
