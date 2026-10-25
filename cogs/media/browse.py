@@ -8,8 +8,11 @@ from bs4 import BeautifulSoup
 import logging
 import os
 from typing import List, Dict, Optional, Tuple
-from urllib.parse import quote_plus, urljoin
-from botasaurus.browser import browser as botasaurus_browser, Driver, Wait
+from urllib.parse import quote_plus, urljoin, urlsplit
+from botasaurus.browser import browser as botasaurus_browser, Driver
+from helpers.web_scraper import (
+    fetch_public_page, ScrapeBlockedError, ScrapeRequestError, detect_access_challenge,
+)
 from discord.ui import View, Button
 from database import get_all_users_guild_aware
 from helpers.embed_helper import build_error_embed, build_info_embed
@@ -24,6 +27,230 @@ TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p"
 MDBLIST_API_BASE_URL = "https://api.mdblist.com"
 
 
+def _novelupdates_search_urls(query: str) -> List[str]:
+    """Known public Novel Updates search routes, ordered from most to least targeted."""
+    query = " ".join((query or "").split())
+    if not query:
+        return []
+    term = quote_plus(query)
+    return [
+        f"https://www.novelupdates.com/series-finder/?sf=1&sh={term}&sort=sdate&order=desc",
+        f"https://www.novelupdates.com/?s={term}&post_type=series",
+        f"https://www.novelupdates.com/series-finder/?sf=1&sh={term}&sort=abc&order=asc",
+    ]
+
+
+def _novelupdates_is_series_url(url: str, base_url: str) -> bool:
+    """Accept only Novel Updates series URLs, not genre links or site navigation."""
+    target = urljoin(base_url, url or "")
+    parts = urlsplit(target)
+    host = (parts.hostname or "").lower().rstrip(".")
+    return (
+        parts.scheme in ("http", "https")
+        and (host == "novelupdates.com" or host.endswith(".novelupdates.com"))
+        and "/series/" in parts.path.lower()
+    )
+
+
+def _novelupdates_title_anchor(card):
+    """Find a title anchor across the known and fallback Novel Updates layouts."""
+    selectors = (
+        ".search_title a[href]",
+        ".series_title a[href]",
+        ".search_result_title a[href]",
+        "a.search_title[href]",
+        "a[href*='/series/']",
+    )
+    for selector in selectors:
+        try:
+            anchor = card.select_one(selector)
+        except Exception:
+            anchor = None
+        if anchor and anchor.get("href"):
+            return anchor
+    if getattr(card, "name", None) == "a" and card.get("href"):
+        return card
+    return None
+
+
+def _novelupdates_parse_html(html: str, base_url: str) -> List[Dict]:
+    """Parse series metadata from normal cards, alternate cards, or bare series links."""
+    if not html:
+        return []
+    soup = BeautifulSoup(html, "html.parser")
+    card_selectors = (
+        ".search_main_box_nu",
+        ".search_main_box",
+        ".search_result",
+        ".series_result",
+        "article",
+    )
+    cards = []
+    for selector in card_selectors:
+        try:
+            candidates = soup.select(selector)
+        except Exception:
+            candidates = []
+        if any(_novelupdates_title_anchor(card) for card in candidates):
+            cards = candidates
+            break
+
+    # If the wrapper classes changed, recover directly from series links and climb
+    # to a nearby card for any available description/rating/image metadata.
+    if not cards:
+        recovered = []
+        seen_links = set()
+        for anchor in soup.select("a[href*='/series/']"):
+            href = anchor.get("href") or ""
+            if not _novelupdates_is_series_url(href, base_url):
+                continue
+            target = urljoin(base_url, href).rstrip("/")
+            if target in seen_links:
+                continue
+            seen_links.add(target)
+            card = (
+                anchor.find_parent("div", class_="search_main_box_nu")
+                or anchor.find_parent("div", class_="search_main_box")
+                or anchor.find_parent("article")
+                or anchor.parent
+                or anchor
+            )
+            recovered.append((card, anchor))
+        entries = recovered
+    else:
+        entries = [(card, _novelupdates_title_anchor(card)) for card in cards]
+
+    novels = []
+    seen_urls = set()
+    for card, title_link in entries:
+        if not title_link:
+            continue
+        href = (title_link.get("href") or "").strip()
+        if not _novelupdates_is_series_url(href, base_url):
+            continue
+        url = urljoin(base_url, href).split("#", 1)[0]
+        dedupe_url = url.rstrip("/").casefold()
+        if dedupe_url in seen_urls:
+            continue
+
+        title = " ".join(title_link.get_text(" ", strip=True).split())
+        if not title:
+            title = " ".join(str(
+                title_link.get("title") or title_link.get("aria-label") or ""
+            ).split())
+        if not title:
+            slug = urlsplit(url).path.rstrip("/").split("/")[-1]
+            title = slug.replace("-", " ").replace("_", " ").strip()
+        if not title:
+            continue
+
+        def first_text(*selectors: str) -> Optional[str]:
+            for selector in selectors:
+                try:
+                    node = card.select_one(selector)
+                except Exception:
+                    node = None
+                if node:
+                    value = " ".join(node.get_text(" ", strip=True).split())
+                    if value:
+                        return value[:4000]
+            return None
+
+        description = first_text(
+            ".search_body", ".search_body_nu", ".search_desc",
+            ".series_synopsis", ".desc", "[class*='description']",
+        )
+        rating = first_text(".search_ratings", ".search_rating", ".rating")
+        image_url = None
+        image_node = None
+        try:
+            image_node = card.select_one("img[src], img[data-src], img[data-lazy-src], img[srcset]")
+        except Exception:
+            pass
+        if image_node:
+            image_value = (
+                image_node.get("data-src")
+                or image_node.get("data-lazy-src")
+                or image_node.get("src")
+                or image_node.get("srcset")
+                or ""
+            ).strip()
+            if image_value:
+                image_url = urljoin(base_url, image_value.split(",", 1)[0].split(" ", 1)[0])
+
+        genres = []
+        try:
+            genre_nodes = card.select(
+                ".search_genre a, .search_genres a, a[href*='/genre/']"
+            )
+        except Exception:
+            genre_nodes = []
+        for node in genre_nodes:
+            genre = " ".join(node.get_text(" ", strip=True).split())
+            if genre and genre.casefold() not in {item.casefold() for item in genres}:
+                genres.append(genre)
+
+        novels.append({
+            "title": title[:256],
+            "url": url,
+            "description": description,
+            "image": image_url,
+            "rating": rating,
+            "genres": genres,
+        })
+        seen_urls.add(dedupe_url)
+        if len(novels) >= 10:
+            break
+
+    return novels
+
+
+def _novelupdates_results_from_helper(payload: Dict) -> List[Dict]:
+    """Normalize the web-scraper helper's scoped links and parallel text fields."""
+    fields = payload.get("fields") or {}
+
+    def field_at(name: str, index: int) -> Optional[str]:
+        value = fields.get(name)
+        if isinstance(value, str):
+            return value if index == 0 else None
+        if isinstance(value, list) and index < len(value):
+            text_value = " ".join(str(value[index]).split())
+            return text_value or None
+        return None
+
+    results = []
+    seen_urls = set()
+    for link in payload.get("links") or []:
+        href = str(link.get("url") or "").strip()
+        if not _novelupdates_is_series_url(href, payload.get("url") or "https://www.novelupdates.com/"):
+            continue
+        url = urljoin(payload.get("url") or "https://www.novelupdates.com/", href).split("#", 1)[0]
+        normalized_url = url.rstrip("/").casefold()
+        if normalized_url in seen_urls:
+            continue
+        title = " ".join(str(link.get("text") or "").split())
+        index = len(results)
+        if not title:
+            title = field_at("titles", index) or ""
+        if not title:
+            slug = urlsplit(url).path.rstrip("/").split("/")[-1]
+            title = slug.replace("-", " ").replace("_", " ").strip()
+        if not title:
+            continue
+        results.append({
+            "title": title[:256],
+            "url": url,
+            "description": field_at("descriptions", index),
+            "image": None,
+            "rating": field_at("ratings", index),
+            "genres": [],
+        })
+        seen_urls.add(normalized_url)
+        if len(results) >= 10:
+            break
+    return results
+
+
 @botasaurus_browser(
     headless=True,
     max_retry=1,
@@ -33,76 +260,86 @@ MDBLIST_API_BASE_URL = "https://api.mdblist.com"
     close_on_crash=True,
 )
 def scrape_novelupdates(driver: Driver, data: Dict) -> List[Dict]:
-    """Search Novel Updates for public series metadata and normalize up to ten results.
-
-    Botasaurus runs synchronously, so async autocomplete/command callers use
-    asyncio.to_thread. This site-specific scraper does not try to bypass a site's
-    login, CAPTCHA, or other access controls.
-    """
-    query = data["query"]
-    url = (
-        "https://www.novelupdates.com/series-finder/"
-        f"?sf=1&sh={quote_plus(query)}&sort=sdate&order=desc"
-    )
-    driver.get(url)
-    result_cards = driver.select_all(".search_main_box_nu", wait=Wait.LONG)
-    if not result_cards:
-        # Novel Updates has changed markup in the past; try its common alternate
-        # result containers before treating a successful page load as no matches.
-        for selector in (".search_main_box", ".search_body_nu", ".search_title"):
-            result_cards = driver.select_all(selector, wait=None)
-            if result_cards:
-                break
-    if not result_cards:
-        logger.warning(
-            "Novel Updates returned no series cards for query %r. Page text: %s",
-            query,
-            (driver.get_text("body") or "")[:300],
+    """Browser fallback for public Novel Updates search pages using multiple layouts."""
+    query = " ".join(str(data.get("query") or "").split())
+    urls = data.get("urls") or _novelupdates_search_urls(query)
+    for url in urls:
+        driver.get(url)
+        html = driver.page_html or ""
+        challenge = detect_access_challenge(None, html)
+        if challenge:
+            raise ScrapeBlockedError(
+                f"Novel Updates stopped the browser search ({challenge})."
+            )
+        results = _novelupdates_parse_html(html, url)
+        if results:
+            logger.info(
+                "Novel Updates browser search returned %s results for %r at %s",
+                len(results), query, url,
+            )
+            return results
+        page_text = BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
+        logger.debug(
+            "Novel Updates layout produced no series links for %r at %s; page text: %s",
+            query, url, page_text[:250],
         )
+    logger.info("Novel Updates returned no series links for query %r after %s routes", query, len(urls))
+    return []
+
+
+async def search_novelupdates(
+    query: str,
+    *,
+    browser_fallback: bool = True,
+    http_timeout: int = 7,
+    max_http_urls: int = 2,
+) -> List[Dict]:
+    """Use the shared HTTP scraper first, then Botasaurus for browser-rendered markup."""
+    query = " ".join((query or "").split())
+    urls = _novelupdates_search_urls(query)
+    if not urls:
         return []
 
-    novels = []
-    for result in result_cards[:10]:
-        # The normal result card nests its title link, but some fallback selectors
-        # return the title node itself rather than the whole card.
-        title_link = result.select(".search_title a", wait=None)
-        if not title_link:
-            title_link = result.select("a[href*='/series/']", wait=None)
-        if not title_link:
-            result_class = (result.get_attribute("class") or "").split()
-            if "search_title" in result_class:
-                title_link = result if result.get_attribute("href") else result.select("a", wait=None)
-        if not title_link:
+    selectors = {
+        "titles": ".search_main_box_nu .search_title a, .search_main_box .search_title a, "
+                  ".search_title a, a[href*='/series/']",
+        "descriptions": ".search_body, .search_body_nu, .search_desc, .series_synopsis",
+        "ratings": ".search_ratings, .search_rating, .rating",
+    }
+    for url in urls[:max(1, min(max_http_urls, len(urls)))]:
+        try:
+            payload = await fetch_public_page(
+                url,
+                engine="http",
+                selectors=selectors,
+                include_text=False,
+                include_links=True,
+                link_selector="a[href*='/series/']",
+                timeout=max(1, min(int(http_timeout), 10)),
+                retries=0,
+            )
+        except ScrapeBlockedError:
+            # A challenge/rate limit is a hard stop; do not retry the page through
+            # another engine or attempt to evade the site's access controls.
+            raise
+        except (ScrapeRequestError, ValueError) as exc:
+            logger.debug("Novel Updates HTTP route failed for %s: %s", url, exc)
             continue
+        results = _novelupdates_results_from_helper(payload)
+        if results:
+            logger.info(
+                "Novel Updates HTTP search returned %s results for %r at %s",
+                len(results), query, url,
+            )
+            return results
 
-        title = (title_link.text or "").strip()
-        if not title:
-            title = (
-                title_link.get_attribute("title")
-                or title_link.get_attribute("aria-label")
-                or ""
-            ).strip()
-        if not title:
-            continue
+    if not browser_fallback:
+        return []
+    return await asyncio.to_thread(
+        scrape_novelupdates, {"query": query, "urls": urls}, output=None
+    )
 
-        description_node = result.select(".search_body", wait=None)
-        image_node = result.select("img", wait=None)
-        rating_node = result.select(".search_ratings", wait=None)
-        href = title_link.get_attribute("href") or ""
-        novels.append({
-            "title": title,
-            "url": urljoin("https://www.novelupdates.com", href) if href else "https://www.novelupdates.com",
-            "description": description_node.text.strip() if description_node else None,
-            "image": (image_node.get_attribute("src") or image_node.get_attribute("data-src")) if image_node else None,
-            "rating": rating_node.text.strip() if rating_node else None,
-            "genres": [
-                node.text.strip()
-                for node in result.select_all(".search_genre a", wait=None)
-                if node.text.strip()
-            ],
-        })
 
-    return novels
 # Status order priority
 STATUS_ORDER = {
     "REPEATING": 0,
