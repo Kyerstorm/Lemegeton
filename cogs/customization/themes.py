@@ -4,6 +4,7 @@ Provides comprehensive theme customization with predefined themes, character the
 """
 
 import discord
+from helpers.command_error_handler import FeedbackAwareView, application_error_message
 from discord.ext import commands
 from discord import app_commands
 from typing import Dict, List, Optional, Tuple, Union, Any
@@ -480,7 +481,7 @@ class ThemeManager:
         return self.get_theme("default")
 
 
-class ThemeMainMenuView(discord.ui.View):
+class ThemeMainMenuView(FeedbackAwareView):
     """Main menu view for unified theme system"""
     
     def __init__(self, theme_cog):
@@ -743,7 +744,7 @@ class CustomThemeSystem(commands.Cog):
             logger.error(f"Error in theme command for user {interaction.user.id} in guild {guild_id}: {e}", exc_info=True)
             embed = build_error_embed(
                 "Error",
-                "An error occurred while opening theme system. Please try again."
+                application_error_message(e)
             )
             
             try:
@@ -1045,7 +1046,7 @@ class CustomThemeSystem(commands.Cog):
             logger.error(f"Error in admin-guild-theme command: {e}", exc_info=True)
             embed = build_error_embed(
                 "Error",
-                "An error occurred while processing the guild theme request."
+                application_error_message(e)
             )
             await interaction.followup.send(embed=embed)
     
