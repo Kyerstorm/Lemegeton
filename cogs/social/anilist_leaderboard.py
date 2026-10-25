@@ -1,5 +1,6 @@
 from helpers.color_palette import PALETTE
 import discord
+from helpers.command_error_handler import FeedbackAwareView
 from discord.ext import commands
 from discord import app_commands
 import aiohttp
@@ -353,7 +354,7 @@ MEDIA_TYPES = {
         "media_label": "Anime"
     }
 }
-class LeaderboardView(discord.ui.View):
+class LeaderboardView(FeedbackAwareView):
     """Interactive paginated view for leaderboard display."""
     
     def __init__(self, leaderboard_data: List[Tuple], medium: str = "manga"):
