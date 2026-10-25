@@ -14,7 +14,7 @@ Features:
 """
 
 import discord
-from helpers.command_error_handler import FeedbackAwareView
+from helpers.command_error_handler import application_error_message, prefix_error_message, FEEDBACK_ERROR_GUIDANCE, FeedbackAwareView
 from discord.ext import commands, tasks
 from discord import app_commands
 import aiohttp
@@ -475,7 +475,7 @@ class LoliList(commands.Cog):
         except Exception as e:
             logger.error(f"loliadd exception: {e}\n{traceback.format_exc()}")
             try:
-                await send_temp(ctx, discord.Embed(description="Internal error (logged).", color=PALETTE.DANGER))
+                await send_temp(ctx, discord.Embed(description=prefix_error_message(e) or FEEDBACK_ERROR_GUIDANCE, color=PALETTE.DANGER))
             except Exception:
                 pass
             self._active_sessions.pop(ctx.author.id, None)
@@ -662,8 +662,12 @@ class LoliList(commands.Cog):
             try:
                 existing = await execute_db_operation("find_entry", "SELECT id, anilist_username FROM lolilist_entries WHERE anilist_id = ?", (info["id"],), fetch_type="one")
             except Exception as e:
-                logger.error(f"DB find err: {e}")
-                existing = None
+                logger.error(f"DB find err: {e}", exc_info=True)
+                await send_temp(ctx, discord.Embed(
+                    description=prefix_error_message(e) or FEEDBACK_ERROR_GUIDANCE,
+                    color=PALETTE.DANGER,
+                ))
+                return
             if not existing:
                 await send_temp(ctx, discord.Embed(description=f"Entry not found for {info.get('name')}", color=PALETTE.WARNING))
                 return
@@ -690,7 +694,7 @@ class LoliList(commands.Cog):
                 await send_temp(ctx, discord.Embed(description=f"✅ Deleted {existing[1]}.", color=PALETTE.SUCCESS))
             except Exception as e:
                 logger.error(f"delete single err: {e}")
-                await send_temp(ctx, discord.Embed(description="❌ Failed to delete (DB error).", color=PALETTE.DANGER))
+                await send_temp(ctx, discord.Embed(description=prefix_error_message(e) or FEEDBACK_ERROR_GUIDANCE, color=PALETTE.DANGER))
 
         except Exception as e:
             logger.error(f"_handle_delete exception: {e}\n{traceback.format_exc()}")
@@ -728,8 +732,9 @@ class LoliList(commands.Cog):
         try:
             rows = await execute_db_operation("fetch_all", "SELECT anilist_username, anilist_url, avatar_url, added_at FROM lolilist_entries ORDER BY added_at DESC", (), fetch_type="all")
         except Exception as e:
-            logger.error(f"fetch_all error: {e}")
-            rows = []
+            logger.error(f"fetch_all error: {e}", exc_info=True)
+            await interaction.followup.send(application_error_message(e), ephemeral=True)
+            return
 
         if not rows:
             await interaction.followup.send("❌ No entries found.", ephemeral=True)
@@ -769,7 +774,7 @@ class LoliList(commands.Cog):
             sent = await interaction.followup.send(content=warning_line, embeds=initial_embeds, view=view)
         except Exception as e:
             logger.error(f"send leaderboard err: {e}")
-            await interaction.followup.send("Failed to send leaderboard (missing permission?).", ephemeral=True)
+            await interaction.followup.send(application_error_message(e), ephemeral=True)
             return
         view.message = sent
 
