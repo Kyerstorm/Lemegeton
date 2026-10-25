@@ -1,6 +1,6 @@
 from helpers.color_palette import PALETTE
 import discord
-from helpers.command_error_handler import FeedbackAwareView
+from helpers.command_error_handler import application_error_message, FeedbackAwareView
 from discord.ext import commands
 from discord import app_commands
 import aiohttp
@@ -1105,7 +1105,7 @@ class Leaderboard(commands.Cog):
             
             error_embed = discord.Embed(
                 title="❌ Something Went Wrong",
-                description="An error occurred while generating the leaderboard. Please try again later!",
+                description=application_error_message(e),
                 color=PALETTE.DANGER
             )
             
