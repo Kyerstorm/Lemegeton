@@ -37,7 +37,7 @@ def _anilist_error(description: str, title: str = "AniList") -> discord.Embed:
     """Return an actionable AniList error with the project's feedback route."""
     return build_error_embed(
         title=title,
-        description=f"{description}\n\nIf this issue persists, please run /feedback and include the AniList link.",
+        description=f"{description}\n\nIf this issue persists, contact a server moderator or administrator and include the AniList link.",
     )
 
 
@@ -45,7 +45,7 @@ def _anilist_warning(description: str, title: str = "AniList") -> discord.Embed:
     """Return an actionable AniList warning with the project's feedback route."""
     return build_warning_embed(
         title=title,
-        description=f"{description}\n\nIf this issue persists, please run /feedback and include the AniList link.",
+        description=f"{description}\n\nIf this issue persists, contact a server moderator or administrator and include the AniList link.",
     )
 
 ACTIVITY_URL_RE = re.compile(r"https?://(?:www\.)?anilist\.co/activity/(\d+)", re.IGNORECASE)
@@ -2620,7 +2620,7 @@ class AniListCog(commands.Cog):
             description="Most recently updated entries returned by AniList.",
         )
         if page_data is None:
-            embed.description = "AniList could not retrieve this list right now. Please run /feedback if the problem persists."
+            embed.description = "AniList could not retrieve this list right now. If the problem persists, contact a server moderator or administrator and include the AniList link."
             embed.set_footer(text="AniList")
             return embed
         entries = page_data.get("mediaList") or []
@@ -2675,7 +2675,7 @@ class AniListCog(commands.Cog):
             description="The five latest public activities returned by AniList.",
         )
         if activities is None:
-            embed.description = "AniList activity is temporarily unavailable. Please run /feedback if the problem persists."
+            embed.description = "AniList activity is temporarily unavailable. If the problem persists, contact a server moderator or administrator and include the AniList link."
             embed.set_footer(text="AniList")
             return embed
         if not activities:
@@ -3079,7 +3079,7 @@ class AniListCog(commands.Cog):
                 list_data = await self.cog.fetch_user_media_entries(username, self.media_type)
                 if list_data is None:
                     await interaction.followup.send(
-                        "AniList could not retrieve your list. Please run /feedback if this persists.",
+                        "AniList could not retrieve your list. If this persists, contact a server moderator or administrator and include the AniList link.",
                         ephemeral=True,
                     )
                     return
@@ -3110,7 +3110,7 @@ class AniListCog(commands.Cog):
                             connection = (result or {}).get("media") or {}
                             if not result:
                                 await interaction.followup.send(
-                                    "AniList could not check all studio projects. Please run /feedback if this persists.",
+                                    "AniList could not check all studio projects. If this persists, contact a server moderator or administrator and include the relevant AniList links.",
                                     ephemeral=True,
                                 )
                                 return
@@ -3160,12 +3160,12 @@ class AniListCog(commands.Cog):
                 try:
                     if interaction.response.is_done():
                         await interaction.followup.send(
-                            "Could not compare your list right now. Please run /feedback and report the issue.",
+                            "Could not compare your list right now. Please contact a server moderator or administrator and include the relevant AniList links.",
                             ephemeral=True,
                         )
                     else:
                         await interaction.response.send_message(
-                            "Could not compare your list right now. Please run /feedback and report the issue.",
+                            "Could not compare your list right now. Please contact a server moderator or administrator and include the relevant AniList links.",
                             ephemeral=True,
                         )
                 except Exception:
