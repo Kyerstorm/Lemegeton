@@ -14,7 +14,7 @@ pub const ADMINISTRATOR: u64 = 1 << 3;
 pub struct AppConfig {
     pub client_id: String, pub client_secret: String, pub redirect_uri: String, pub public_origin: String,
     pub bridge_url: String, pub bridge_secret: String, pub picker_url: String, pub bind_host: String,
-    pub port: u16, pub secure_cookie: bool, pub session_ttl: u64, pub owner_ids: HashSet<String>, pub static_dir: String,
+    pub port: u16, pub secure_cookie: bool, pub session_ttl: u64, pub owner_ids: HashSet<String>,
 }
 impl AppConfig {
     pub fn from_env() -> Self {
@@ -38,7 +38,7 @@ impl AppConfig {
             bind_host: env::var("DASHBOARD_HOST").unwrap_or_else(|_| "0.0.0.0".to_string()), port,
             secure_cookie,
             session_ttl: env::var("DASHBOARD_SESSION_TTL").ok().and_then(|v| v.parse().ok()).unwrap_or(28_800).max(300),
-            owner_ids, static_dir: env::var("DASHBOARD_STATIC_DIR").unwrap_or_else(|_| "web/static".to_string()),
+            owner_ids,
         }
     }
     pub fn oauth_ready(&self) -> bool { !self.client_id.is_empty() && !self.client_secret.is_empty() && !self.redirect_uri.is_empty() }
@@ -250,7 +250,7 @@ mod tests {
             bridge_url: "http://127.0.0.1:8091".to_string(), bridge_secret: "bridge".to_string(),
             picker_url: "http://127.0.0.1:8092".to_string(), bind_host: "127.0.0.1".to_string(),
             port: 8080, secure_cookie: true, session_ttl: 3600,
-            owner_ids: HashSet::new(), static_dir: "web/static".to_string(),
+            owner_ids: HashSet::new(),
         })
     }
     fn test_session(csrf: &str, expires_at: u64) -> Session {

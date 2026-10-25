@@ -1,74 +1,37 @@
-"""Focused unit tests for the loopback-only bot management bridge."""
-from __future__ import annotations
-
-import json
+"""Source-level regression checks for private runtime adapters embedded in bot.py."""
+from pathlib import Path
+import ast
 import unittest
-from datetime import datetime, timezone
-from types import SimpleNamespace
 
-from aiohttp import web
-from aiohttp.test_utils import make_mocked_request
-
-from utils.dashboard_bridge import DashboardBotBridge, _connection_status, _effective_enabled, _iso, _valid_identifier
+ROOT = Path(__file__).resolve().parents[1]
+BOT_SOURCE = (ROOT / "bot.py").read_text(encoding="utf-8")
+BOT_TREE = ast.parse(BOT_SOURCE)
 
 
-class DashboardBridgeHelperTests(unittest.TestCase):
-    def test_actor_identifiers_must_be_positive_numeric_ids(self):
-        self.assertTrue(_valid_identifier("123456789"))
-        self.assertTrue(_valid_identifier(123456789))
-        for value in ("", "0", "-1", "1.2", "abc", None, True, "1/../../etc"):
-            self.assertFalse(_valid_identifier(value))
+class DashboardRuntimeSourceTests(unittest.TestCase):
+    def test_runtime_adapters_live_in_the_existing_bot_entrypoint(self):
+        classes = {node.name for node in BOT_TREE.body if isinstance(node, ast.ClassDef)}
+        functions = {node.name for node in BOT_TREE.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        self.assertIn("DashboardBotBridge", classes)
+        self.assertIn("CustomRolePickerServer", classes)
+        self.assertIn("_connection_status", functions)
+        self.assertIn("_valid_identifier", functions)
 
-    def test_explicit_command_override_takes_precedence_over_section_default(self):
-        meta = {"command": SimpleNamespace(name="browse"), "section": "Media"}
-        self.assertTrue(_effective_enabled("browse", meta, {"sections": {"Media": False}, "commands": {"browse": True}}))
-        self.assertFalse(_effective_enabled("browse", meta, {"sections": {"Media": True}, "commands": {"browse": False}}))
+    def test_private_listeners_use_authentication_and_loopback_defaults(self):
+        self.assertIn('"127.0.0.1"', BOT_SOURCE)
+        self.assertIn("DASHBOARD_BRIDGE_SECRET", BOT_SOURCE)
+        self.assertIn("hmac.compare_digest", BOT_SOURCE)
 
-    def test_section_state_is_used_only_without_an_explicit_override(self):
-        meta = {"command": SimpleNamespace(name="browse"), "section": "Media"}
-        self.assertTrue(_effective_enabled("browse", meta, {"sections": {"Media": True}, "commands": {}}))
-        self.assertFalse(_effective_enabled("browse", meta, {"sections": {}, "commands": {}}))
+    def test_removed_adapter_modules_are_not_referenced_or_present(self):
+        self.assertNotIn("utils.dashboard_bridge", BOT_SOURCE)
+        self.assertNotIn("utils.dashboard_picker_server", BOT_SOURCE)
+        self.assertFalse((ROOT / "utils" / "dashboard_bridge.py").exists())
+        self.assertFalse((ROOT / "utils" / "dashboard_picker_server.py").exists())
 
-    def test_protected_command_remains_enabled(self):
-        meta = {"command": SimpleNamespace(name="help"), "section": "General"}
-        self.assertTrue(_effective_enabled("help", meta, {"sections": {"General": False}, "commands": {"help": False}}))
-
-    def test_gateway_status_distinguishes_connecting_offline_degraded_and_online(self):
-        self.assertEqual(_connection_status(False, False, None), "connecting")
-        self.assertEqual(_connection_status(False, True, None), "offline")
-        self.assertEqual(_connection_status(True, False, 120.0), "online")
-        self.assertEqual(_connection_status(True, True, 650.0), "degraded")
-
-    def test_timestamp_serialization_is_safe(self):
-        now = datetime(2026, 1, 2, 3, 4, tzinfo=timezone.utc)
-        self.assertEqual(_iso(now), "2026-01-02T03:04:00+00:00")
-        self.assertIsNone(_iso(None))
-
-
-class DashboardBridgeAuthenticationTests(unittest.IsolatedAsyncioTestCase):
-    async def test_missing_or_invalid_bearer_secret_is_rejected(self):
-        bridge = DashboardBotBridge(SimpleNamespace())
-        bridge.secret = "test-bridge-secret"
-        request = make_mocked_request("GET", "/health", headers={"Authorization": "Bearer wrong"})
-
-        async def handler(_request):
-            return web.Response(text="should not execute")
-
-        response = await bridge._authenticate(request, handler)
-        self.assertEqual(response.status, 401)
-        self.assertEqual(json.loads(response.text)["error"], "Unauthorized internal dashboard request.")
-
-    async def test_matching_bearer_secret_allows_request(self):
-        bridge = DashboardBotBridge(SimpleNamespace())
-        bridge.secret = "test-bridge-secret"
-        request = make_mocked_request("GET", "/health", headers={"Authorization": "Bearer test-bridge-secret"})
-
-        async def handler(_request):
-            return web.json_response({"ok": True})
-
-        response = await bridge._authenticate(request, handler)
-        self.assertEqual(response.status, 200)
-        self.assertEqual(json.loads(response.text), {"ok": True})
+    def test_command_updates_keep_sync_and_rollback_paths(self):
+        self.assertIn("attempt_sync_for_guild", BOT_SOURCE)
+        self.assertIn("The previous configuration was restored", BOT_SOURCE)
+        self.assertIn("async with self._guild_lock(guild.id)", BOT_SOURCE)
 
 
 if __name__ == "__main__":

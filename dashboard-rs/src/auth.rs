@@ -1,23 +1,18 @@
-use axum::{extract::{Query, State}, http::{header, HeaderMap, HeaderValue, StatusCode}, response::{Html, IntoResponse, Redirect, Response}, Json};
+use axum::{extract::{Query, State}, http::{header, HeaderMap, HeaderValue, StatusCode}, response::{IntoResponse, Redirect, Response}, Json};
 use serde_json::{json, Value};
+use crate::ui;
 use crate::state::{access_token, cookie_value, manageable_guilds, new_token, now_secs, session_from_headers, token_response_cookie,
     expired_cookie, oauth_state_cookie, expired_oauth_state_cookie, ApiError, ApiResult, AppState, DashboardUser, DiscordTokenResponse, DiscordUserResponse, OAuthCallback, OAuthState, Session, DISCORD_API};
 use subtle::ConstantTimeEq;
 
 pub async fn home(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if session_from_headers(&state, &headers).await.is_ok() {
-        return match page(&state, "dashboard.html") { Ok(value) => value.into_response(), Err(error) => error.into_response() };
+        return ui::dashboard_html().into_response();
     }
     Redirect::to("/login").into_response()
 }
 pub async fn login_page(State(state): State<AppState>) -> Response {
-    match page(&state, "login.html") { Ok(value) => value.into_response(), Err(error) => error.into_response() }
-}
-fn page(state: &AppState, name: &str) -> ApiResult<Html<String>> {
-    if !matches!(name, "dashboard.html" | "login.html") { return Err(ApiError::new(StatusCode::NOT_FOUND, "Page not found.")); }
-    let content = std::fs::read_to_string(std::path::Path::new(&state.config.static_dir).join(name))
-        .map_err(|_| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "The dashboard interface could not be loaded."))?;
-    Ok(Html(content))
+    ui::login_html().into_response()
 }
 pub async fn oauth_start(State(state): State<AppState>) -> Response {
     if !state.config.oauth_ready() {
@@ -147,7 +142,7 @@ mod tests {
             bridge_url: "http://127.0.0.1:8091".to_string(), bridge_secret: String::new(),
             picker_url: "http://127.0.0.1:8092".to_string(), bind_host: "127.0.0.1".to_string(),
             port: 8080, secure_cookie: false, session_ttl: 3600,
-            owner_ids: HashSet::new(), static_dir: "web/static".to_string(),
+            owner_ids: HashSet::new(),
         })
     }
     #[tokio::test]

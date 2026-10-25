@@ -1,6 +1,6 @@
 # Lemegeton web dashboard
 
-The public dashboard is a Rust/Axum service. The Discord bot remains the existing Python/discord.py application. A narrowly scoped Python adapter runs inside the bot process because only that process owns the live command tree and gateway connection. The Rust service communicates with it over a loopback-only HTTP bridge protected by a shared bearer secret.
+The public dashboard is a Rust/Axum service. The Discord bot remains the existing Python/discord.py application. The public HTTP service and the dashboard's markup, stylesheet, and browser controller are embedded in Rust source. A narrow runtime adapter is consolidated into the existing bot entrypoint because only the live discord.py process owns its command tree and gateway connection; no separate Python dashboard service modules are needed.
 
 ## Capabilities and boundaries
 
@@ -27,12 +27,12 @@ Configure the following in the service environment (see `.env.example` for the f
 | `DASHBOARD_COOKIE_SECURE` | Set `true` when served over HTTPS |
 | `DASHBOARD_OWNER_IDS` | Optional comma-separated Discord IDs with bot-wide log/integration access |
 | `ADMIN_DISCORD_ID` | Existing configured bot administrator; also receives dashboard-owner access |
-| `DASHBOARD_BRIDGE_SECRET` | Long random shared secret, identical in Rust and Python processes |
+| `DASHBOARD_BRIDGE_SECRET` | Long random shared secret, read by Rust and the embedded bot runtime |
 | `DASHBOARD_BRIDGE_URL` | Internal bridge URL; default `http://127.0.0.1:8091` |
 | `DASHBOARD_PICKER_URL` | Private picker URL; default `http://127.0.0.1:8092` |
 | `DASHBOARD_PORT` | Public Rust service port; default `8080` |
 
-Use a strong unique value for `DASHBOARD_BRIDGE_SECRET`. Do not commit it. The Python bridge and picker listeners must remain bound to loopback; do not expose those ports through a reverse proxy or firewall. On production HTTPS, set `DASHBOARD_PUBLIC_URL` to the browser-visible origin and `DASHBOARD_COOKIE_SECURE=true`. The configured OAuth callback must exactly match the Discord Developer Portal entry.
+Use a strong unique value for `DASHBOARD_BRIDGE_SECRET`. Do not commit it. The bot runtime adapter and custom-role picker listeners must remain bound to loopback; the public dashboard is served by Rust. On production HTTPS, set `DASHBOARD_PUBLIC_URL` to the browser-visible origin and `DASHBOARD_COOKIE_SECURE=true`. The configured OAuth callback must exactly match the Discord Developer Portal entry.
 
 The bot still requires its existing Discord token and PostgreSQL configuration. The dashboard does not create a second Discord client or a second command registry.
 
@@ -43,7 +43,7 @@ The bot still requires its existing Discord token and PostgreSQL configuration. 
 3. Configure the environment values above and the existing bot/database values.
 4. Build the public service: `cargo build --manifest-path dashboard-rs/Cargo.toml`.
 5. Start the dashboard backend with `cargo run --manifest-path dashboard-rs/Cargo.toml` in one terminal.
-6. Start the existing bot with `python bot.py` in another terminal. The bot starts its private bridge and custom-role picker automatically.
+6. Start the existing bot with `python bot.py` in another terminal. The bot starts its private runtime adapter and custom-role picker automatically.
 7. Open the public dashboard address. For local development, register `http://localhost:8080/oauth/callback` and use `DASHBOARD_PUBLIC_URL=http://localhost:8080`.
 
 For the combined deployment entry point, build the release binary first, then use `./scripts/start.sh`. Railway configuration builds the Rust binary and starts both services through this script.
@@ -52,7 +52,7 @@ For the combined deployment entry point, build the release binary first, then us
 
 - Rust unit tests: `cargo test --manifest-path dashboard-rs/Cargo.toml`
 - Rust formatting: `cargo fmt --manifest-path dashboard-rs/Cargo.toml -- --check`
-- Python syntax: `python -m compileall -q utils/dashboard_bridge.py utils/dashboard_picker_server.py web/custom_role_picker.py`
+- Python syntax: `python -m compileall -q bot.py web/custom_role_picker.py`
 - Bridge unit tests: `python -m unittest discover -s tests -p "test_dashboard_bridge.py"`
 - Existing custom-role web regression suite: run the project's documented `tests/custom_roles/run_all.py` entry point in a configured test environment.
 
