@@ -14,6 +14,7 @@ Features:
 """
 
 import discord
+from helpers.command_error_handler import FeedbackAwareView
 from discord.ext import commands, tasks
 from discord import app_commands
 import aiohttp
@@ -147,7 +148,7 @@ async def fetch_anilist_graphql(identifier: str, session: aiohttp.ClientSession)
 
 # -------------------- UI Views --------------------
 
-class ConfirmView(discord.ui.View):
+class ConfirmView(FeedbackAwareView):
     """Generic confirm/cancel view. .value will be True/False/None."""
     def __init__(self, timeout: float = CONFIRM_TIMEOUT):
         super().__init__(timeout=timeout)
@@ -166,7 +167,7 @@ class ConfirmView(discord.ui.View):
         self.stop()
 
 
-class PagingView(discord.ui.View):
+class PagingView(FeedbackAwareView):
     """
     Pagination view:
     Prev  [Page X/Y disabled]  Next
