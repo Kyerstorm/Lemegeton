@@ -555,7 +555,7 @@ class Login(commands.Cog):
                 
         except Exception as e:
             logger.error(f"Database error during registration for {discord_user} (ID: {user_id}) in guild {guild_id}: {e}", exc_info=True)
-            return "❌ An error occurred while registering you. Please try again later."
+            return application_error_message(e)
 
     # Deprecated method removed - use _update_existing_user_guild_aware instead
 
@@ -703,7 +703,7 @@ class Login(commands.Cog):
 
         except Exception as e:
             logger.error(f"Database error during Steam registration for {discord_user} (ID: {user_id}): {e}", exc_info=True)
-            return "❌ An error occurred while registering your Steam profile. Please try again later."
+            return application_error_message(e)
 
     async def get_user_data(self, user_id: int, guild_id: int) -> dict:
         """Get combined user data from both AniList and Steam systems."""
