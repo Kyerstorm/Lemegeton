@@ -9,7 +9,7 @@ import logging
 import os
 from typing import List, Dict, Optional, Tuple
 from urllib.parse import quote_plus, urljoin, urlsplit
-from botasaurus.browser import browser as botasaurus_browser, Driver
+from botasaurus.browser import browser as botasaurus_browser, Driver, Wait
 from helpers.web_scraper import (
     fetch_public_page, ScrapeBlockedError, ScrapeRequestError, detect_access_challenge,
 )
@@ -263,8 +263,15 @@ def scrape_novelupdates(driver: Driver, data: Dict) -> List[Dict]:
     """Browser fallback for public Novel Updates search pages using multiple layouts."""
     query = " ".join(str(data.get("query") or "").split())
     urls = data.get("urls") or _novelupdates_search_urls(query)
-    for url in urls:
+    for route_index, url in enumerate(urls):
         driver.get(url)
+        if route_index == 0:
+            # Give the preferred route time to render its usual result container;
+            # other routes stay non-blocking and are parsed through generic anchors.
+            try:
+                driver.select_all(".search_main_box_nu", wait=Wait.LONG)
+            except Exception:
+                pass
         html = driver.page_html or ""
         challenge = detect_access_challenge(None, html)
         if challenge:
@@ -324,6 +331,9 @@ async def search_novelupdates(
             raise
         except (ScrapeRequestError, ValueError) as exc:
             logger.debug("Novel Updates HTTP route failed for %s: %s", url, exc)
+            continue
+        except Exception:
+            logger.exception("Unexpected Novel Updates HTTP scraper failure for %s", url)
             continue
         results = _novelupdates_results_from_helper(payload)
         if results:
