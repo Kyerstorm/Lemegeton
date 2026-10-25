@@ -4,7 +4,7 @@ Consolidates all server management commands into a single interactive interface
 """
 
 import discord
-from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView
+from helpers.command_error_handler import application_error_message, FeedbackAwareModal, FeedbackAwareView
 from discord.ext import commands
 from discord import app_commands
 import logging
@@ -275,7 +275,7 @@ class ServerConfigMainView(FeedbackAwareView):
             await interaction.followup.send(
                 embed=build_error_embed(
                     title="Error",
-                    description="Failed to load server settings. Please try again."
+                    description=application_error_message(e)
                 ),
                 ephemeral=True
             )
@@ -346,7 +346,7 @@ class ServerConfigMainView(FeedbackAwareView):
             await interaction.followup.send(
                 embed=build_error_embed(
                     "Diagnostics Failed",
-                    "Could not read all settings. Check bot/database logs and try again.",
+                    application_error_message(exc),
                 ),
                 ephemeral=True,
             )
@@ -397,7 +397,7 @@ class ConfirmChannelRemovalView(FeedbackAwareView):
         except Exception as exc:
             logger.error("Channel setting removal failed in guild %s: %s", self.guild_id, exc, exc_info=True)
             await interaction.edit_original_response(
-                embed=build_error_embed("Removal Failed", "The setting was not confirmed as removed. Check the database logs."),
+                embed=build_error_embed("Removal Failed", application_error_message(exc)),
                 view=None,
             )
 
@@ -613,7 +613,7 @@ class SetBotUpdatesChannelModal(FeedbackAwareModal):
             await interaction.followup.send(
                 embed=build_error_embed(
                     title="Error",
-                    description="Failed to set bot updates channel. Please try again."
+                    description=application_error_message(e)
                 ),
                 ephemeral=True
             )
@@ -717,7 +717,7 @@ class SetInviteChannelModal(FeedbackAwareModal):
             await interaction.followup.send(
                 embed=build_error_embed(
                     title="Error",
-                    description="Failed to set invite tracking channel. Please try again."
+                    description=application_error_message(e)
                 ),
                 ephemeral=True
             )
@@ -797,7 +797,7 @@ class ServerConfig(commands.Cog):
             await interaction.response.send_message(
                 embed=build_error_embed(
                     title="Error",
-                    description="Failed to open server configuration. Please try again."
+                    description=application_error_message(e)
                 ),
                 ephemeral=True
             )
