@@ -36,6 +36,7 @@ REVIEW_URL_RE = re.compile(r"https?://anilist\.co/review/(\d+)", re.IGNORECASE)
 CHARACTER_URL_RE = re.compile(r"https?://anilist\.co/character/(\d+)(?:/[^\s/?#]+)?/?", re.IGNORECASE)
 STAFF_URL_RE = re.compile(r"https?://anilist\.co/staff/(\d+)(?:/[^\s/?#]+)?/?", re.IGNORECASE)
 STUDIO_URL_RE = re.compile(r"https?://anilist\.co/studio/(\d+)(?:/[^\s/?#]+)?/?", re.IGNORECASE)
+USER_URL_RE = re.compile(r"https?://anilist\.co/user/([A-Za-z0-9_-]+)(?:/)?(?:[?#]\S*)?", re.IGNORECASE)
 
 REPLIES_PER_PAGE = 5
 HTML_TIMEOUT = 15  # seconds for parsing fallback HTTP requests
@@ -352,7 +353,7 @@ class AniListCog(commands.Cog):
         await delete_paginator_state(str(message_id))
 
     # Media persistence
-    async def _add_media_persistence(self, message_id: int, channel_id: int, media_id: int, media_type: str, total_pages: int, current_page: int = 1):
+    async def _add_media_persistence(self, message_id: int, channel_id: int, media_id: int, media_type: str, total_pages: int, current_page: int = 1, media: Optional[dict] = None):
         """Add media paginator persistence to database."""
         guild_id = str(channel_id)  # We'll need to get guild_id properly in production
         await set_paginator_state(
@@ -365,7 +366,7 @@ class AniListCog(commands.Cog):
             media_id=media_id,
             media_type=media_type
         )
-        view = self.MediaPaginator(self, message_id, channel_id, media_id, media_type, total_pages, current_page)
+        view = self.MediaPaginator(self, message_id, channel_id, media_id, media_type, total_pages, current_page, media=media)
         try:
             self.bot.add_view(view, message_id=message_id)
         except Exception:
@@ -420,31 +421,67 @@ class AniListCog(commands.Cog):
     # Text cleaning / media extraction
     # ---------------------
     def clean_text(self, text: Optional[str]) -> str:
+        """Convert AniList Markdown/HTML to readable Discord Markdown."""
         if not text:
             return ""
-        # convert <br> tags first
-        text = re.sub(r"<br\s*/?>", "\n", text)
-        # convert AniList style ~!(...)!~ spoilers to Discord spoilers
+
+        # Preserve formatting before removing HTML. Review bodies may arrive as
+        # Markdown from GraphQL or rendered HTML from the page fallback.
+        text = re.sub(
+            r"<pre\b[^>]*>(.*?)</pre\s*>",
+            lambda match: chr(96) * 3 + "\n" + re.sub(r"<[^>]+>", "", match.group(1)).strip() + "\n" + chr(96) * 3,
+            text,
+            flags=re.I | re.S,
+        )
+        text = re.sub(
+            r"<code\b[^>]*>(.*?)</code\s*>",
+            lambda match: chr(96) + match.group(1) + chr(96),
+            text,
+            flags=re.I | re.S,
+        )
+
+        def replace_html_link(match):
+            label = html_lib.unescape(re.sub(r"<[^>]+>", "", match.group(2))).strip()
+            url = html_lib.unescape(match.group(1)).strip()
+            return f"[{label}]({url})" if label and url else (label or url)
+
+        text = re.sub(
+            r"""<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>(.*?)</a\s*>""",
+            replace_html_link,
+            text,
+            flags=re.I | re.S,
+        )
+        text = re.sub(r"<(strong|b)\b[^>]*>(.*?)</\1\s*>", r"**\2**", text, flags=re.I | re.S)
+        text = re.sub(r"<(em|i)\b[^>]*>(.*?)</\1\s*>", r"*\2*", text, flags=re.I | re.S)
+        text = re.sub(r"<(del|s|strike)\b[^>]*>(.*?)</\1\s*>", r"~~\2~~", text, flags=re.I | re.S)
+        text = re.sub(r"<blockquote\b[^>]*>", "\n> ", text, flags=re.I)
+        text = re.sub(r"</blockquote\s*>", "\n", text, flags=re.I)
+        text = re.sub(r"<li\b[^>]*>", "• ", text, flags=re.I)
+        text = re.sub(r"</li\s*>", "\n", text, flags=re.I)
+        text = re.sub(r"<br\s*/?>", "\n", text, flags=re.I)
+        text = re.sub(r"<hr\s*/?>", "\n—\n", text, flags=re.I)
+        text = re.sub(
+            r"</?(?:p|div|section|article|h[1-6]|ul|ol|pre|table|tr)\b[^>]*>",
+            "\n",
+            text,
+            flags=re.I,
+        )
+        text = re.sub(r"<(https?://[^>]+)>", r"\1", text, flags=re.I)
+
+        # Translate AniList's spoiler and strikethrough syntax.
         text = re.sub(r"~!(.*?)!~", r"||\1||", text, flags=re.S)
-        # convert ~[link](url)~ style to strikethrough of the link in Discord
-        text = re.sub(r'~\[(.*?)\]\((https?://[^\s)]+)\)~', r'~~[\1](\2)~~', text)
-        # convert general ~text~ to strikethrough (avoid the ones already converted to spoilers/strikethrough)
-        # but only convert single-line non-markdown bracketed tildes
-        text = re.sub(r'(?<!~)~([^!\[].*?)~(?!~)', r'~~\1~~', text, flags=re.S)
-        # remove remaining HTML tags but keep link syntax [text](url)
-        # preserve markdown links by not stripping inside brackets and parentheses
-        # Strip HTML while decoding entities so review text remains readable.
+        text = re.sub(r'~\[(.*?)\]\((https?://[^\s)]+)\)~', r"~~[\1](\2)~~", text)
+        text = re.sub(r"(?<!~)~([^!\[].*?)~(?!~)", r"~~\1~~", text, flags=re.S)
+
         text = re.sub(r"<[^>]+>", "", text)
         text = html_lib.unescape(text)
-        # remove weird AniList media placeholders we don't want in Discord
         text = re.sub(r"~+imgx?\((https?://[^\s)]+)\)~+", r"\1", text)
         text = re.sub(r"~+vid\((https?://[^\s)]+)\)~+", r"\1", text)
-        # replace multiple consecutive blank lines
-        text = re.sub(r"\n{3,}", "\n\n", text)
-        # headers to bold/underline where possible
         text = re.sub(r"^# (.+)$", r"__**\1**__", text, flags=re.M)
         text = re.sub(r"^## (.+)$", r"**\1**", text, flags=re.M)
         text = re.sub(r"^### (.+)$", r"_\1_", text, flags=re.M)
+        text = re.sub(r"[ \t]+\n", "\n", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
 
     def extract_media(self, text: Optional[str]):
@@ -992,8 +1029,8 @@ class AniListCog(commands.Cog):
             favourites
             source
             tags { id name isAdult rank isMediaSpoiler }
-            staff(perPage:50) { edges { role node { id name { full native } siteUrl image { large } } } }
-            characters(perPage:50) { edges { role node { id name { full native } siteUrl image { large } } } }
+            staff(perPage:25) { edges { role node { id name { full native } siteUrl image { large } } } }
+            characters(perPage:25) { edges { role node { id name { full native } siteUrl image { large } } } }
             relations { edges { relationType node { id type siteUrl title { romaji english native } coverImage { large } } } }
             stats { scoreDistribution { score amount } statusDistribution { status amount } }
             recommendations { edges { node { mediaRecommendation { id title { romaji english } coverImage { large } siteUrl } } } }
@@ -1354,7 +1391,7 @@ class AniListCog(commands.Cog):
     
 
     class MediaPaginator(ui.View):
-        def __init__(self, cog: "AniListCog", message_id: int, channel_id: int, media_id: int, media_type: str, total_pages: int, current_page: int = 1):
+        def __init__(self, cog: "AniListCog", message_id: int, channel_id: int, media_id: int, media_type: str, total_pages: int, current_page: int = 1, media: Optional[dict] = None):
             super().__init__(timeout=None)
             self.cog = cog
             self.message_id = str(message_id)
@@ -1363,6 +1400,7 @@ class AniListCog(commands.Cog):
             self.media_type = media_type
             self.total_pages = max(1, int(total_pages))
             self.current_page = max(1, int(current_page))
+            self.media = media
 
             # Buttons
             self.main_button = ui.Button(
@@ -1415,134 +1453,140 @@ class AniListCog(commands.Cog):
                 custom_id=f"media_select:{self.message_id}"
             )
             select.callback = self.select_callback
+            self.select = select
             self.add_item(select)
 
         async def show_description(self, interaction: discord.Interaction):
             try:
-                media = await self.cog.fetch_media(self.media_id, self.media_type)
+                if not interaction.response.is_done():
+                    await interaction.response.defer()
+                media = self.media
+                if media is None:
+                    media = await self.cog.fetch_media(self.media_id, self.media_type)
+                    self.media = media
                 if not media:
-                    await interaction.response.send_message(embed=build_error_embed(description="Could not fetch description."), ephemeral=True)
+                    await interaction.followup.send(embed=build_error_embed(description="Could not fetch description."), ephemeral=True)
                     return
                 embeds = self.cog.render_media_pages(media, page=2, total_pages=2)
-                # Ensure review button and media main exist on all pages
                 self.clear_items()
                 self.add_item(self.back_button)
                 self.add_item(self.rec_button)
                 self.add_item(self.review_button)
-                for item in self.children:
-                    if isinstance(item, ui.Select):
-                        self.add_item(item)
-                await interaction.response.edit_message(embeds=embeds, view=self)
+                self.add_item(self.select)
+                await interaction.followup.edit_message(interaction.message.id, embeds=embeds, view=self)
             except Exception:
                 logger.exception("Failed to show description")
                 try:
-                    await interaction.response.send_message(embed=build_warning_embed(description="Could not load description."), ephemeral=True)
+                    await interaction.followup.send(embed=build_warning_embed(description="Could not load description."), ephemeral=True)
                 except Exception:
                     pass
 
         async def show_main(self, interaction: discord.Interaction):
             try:
-                media = await self.cog.fetch_media(self.media_id, self.media_type)
+                if not interaction.response.is_done():
+                    await interaction.response.defer()
+                media = self.media
+                if media is None:
+                    media = await self.cog.fetch_media(self.media_id, self.media_type)
+                    self.media = media
                 if not media:
-                    await interaction.response.send_message(embed=build_error_embed(description="Could not fetch main page."), ephemeral=True)
+                    await interaction.followup.send(embed=build_error_embed(description="Could not fetch main page."), ephemeral=True)
                     return
                 embeds = self.cog.render_media_pages(media, page=1, total_pages=2)
                 self.clear_items()
                 self.add_item(self.main_button)
                 self.add_item(self.rec_button)
                 self.add_item(self.review_button)
-                for item in self.children:
-                    if isinstance(item, ui.Select):
-                        self.add_item(item)
-                await interaction.response.edit_message(embeds=embeds, view=self)
+                self.add_item(self.select)
+                await interaction.followup.edit_message(interaction.message.id, embeds=embeds, view=self)
             except Exception:
                 logger.exception("Failed to show main page")
                 try:
-                    await interaction.response.send_message(embed=build_warning_embed(description="Could not load main page."), ephemeral=True)
+                    await interaction.followup.send(embed=build_warning_embed(description="Could not load main page."), ephemeral=True)
                 except Exception:
                     pass
 
         async def show_recommendations(self, interaction: discord.Interaction):
             try:
-                media = await self.cog.fetch_media(self.media_id, self.media_type)
+                if not interaction.response.is_done():
+                    await interaction.response.defer()
+                media = self.media
+                if media is None:
+                    media = await self.cog.fetch_media(self.media_id, self.media_type)
+                    self.media = media
                 if not media:
-                    await interaction.response.send_message(embed=build_error_embed(description="Could not fetch recommendations."), ephemeral=True)
+                    await interaction.followup.send(embed=build_error_embed(description="Could not fetch recommendations."), ephemeral=True)
                     return
                 embed = self.cog.build_recommendations_embed(media)
                 self.clear_items()
                 self.add_item(self.back_button)
                 self.add_item(self.main_button)
                 self.add_item(self.review_button)
-                self.add_item(self.rec_button)  # leave rec button too
-                for item in self.children:
-                    if isinstance(item, ui.Select):
-                        self.add_item(item)
-                await interaction.response.edit_message(embeds=[embed], view=self)
+                self.add_item(self.rec_button)
+                self.add_item(self.select)
+                await interaction.followup.edit_message(interaction.message.id, embeds=[embed], view=self)
             except Exception:
                 logger.exception("show_recommendations failed")
                 try:
-                    await interaction.response.send_message(embed=build_warning_embed(description="Failed to fetch recommendations."), ephemeral=True)
+                    await interaction.followup.send(embed=build_warning_embed(description="Failed to fetch recommendations."), ephemeral=True)
                 except Exception:
                     pass
 
         async def show_review_for_media(self, interaction: discord.Interaction):
-            """
-            Try to fetch a top review for the media and show it using the review embedding/paginator.
-            """
-            # GraphQL: fetch some review ids for the media
-            query = """
-            query($mediaId: Int, $type: MediaType) {
-              Media(id: $mediaId, type: $type) {
-                reviews(perPage: 3, sort: RATING_DESC) {
-                  nodes {
-                    id
+            """Fetch and display a top review for the current media."""
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.defer()
+                query = """
+                query($mediaId: Int, $type: MediaType) {
+                  Media(id: $mediaId, type: $type) {
+                    reviews(perPage: 3, sort: RATING_DESC) {
+                      nodes { id }
+                    }
                   }
                 }
-              }
-            }
-            """
-            variables = {"mediaId": self.media_id, "type": self.media_type}
-            try:
-                payload = await post_graphql(self.cog.session, query, variables, timeout=15)
-                if payload and payload.get("Media"):
-                    rev_nodes = payload["Media"].get("reviews", {}).get("nodes", [])
-                else:
-                    rev_nodes = []
-            except Exception:
-                rev_nodes = []
-
-            if not rev_nodes:
-                await interaction.response.send_message(embed=build_info_embed(description="No reviews found for this media."), ephemeral=True)
-                return
-
-            rid = rev_nodes[0].get("id")
-            if not rid:
-                await interaction.response.send_message(embed=build_info_embed(description="No valid review found."), ephemeral=True)
-                return
-
-            review_data = await self.cog.fetch_review_api(rid)
-            if not review_data:
-                review_data = await self.cog.fetch_review_parse_fallback(rid)
-                if not review_data:
-                    await interaction.response.send_message(embed=build_error_embed(description="Could not fetch review."), ephemeral=True)
+                """
+                payload = await post_graphql(
+                    self.cog.session, query,
+                    {"mediaId": self.media_id, "type": self.media_type},
+                    timeout=10,
+                )
+                rev_nodes = ((payload or {}).get("Media") or {}).get("reviews", {}).get("nodes", [])
+                if not rev_nodes:
+                    await interaction.followup.send(embed=build_info_embed(description="No reviews found for this media."), ephemeral=True)
                     return
 
-            embeds = self.cog._make_review_embeds_from_data(review_data)
-            # edit the current message to show the review's first page and attach paginator view for follow-ups
-            self.clear_items()
-            self.add_item(self.back_button)
-            self.add_item(self.main_button)
-            self.add_item(self.rec_button)
-            self.add_item(self.review_button)
-            # Attach the actual review paginator to the message. bot.add_view() only
-            # registers callbacks; it does not update the components shown to users.
-            view = self.cog.ReviewPaginator(embeds=embeds, cog=self.cog)
-            await interaction.response.edit_message(embeds=[embeds[0]], view=view)
+                rid = rev_nodes[0].get("id")
+                if not rid:
+                    await interaction.followup.send(embed=build_info_embed(description="No valid review found."), ephemeral=True)
+                    return
+
+                review_data = await self.cog.fetch_review_api(rid)
+                if not review_data:
+                    review_data = await self.cog.fetch_review_parse_fallback(rid)
+                if not review_data:
+                    await interaction.followup.send(embed=build_error_embed(description="Could not fetch review."), ephemeral=True)
+                    return
+
+                embeds = self.cog._make_review_embeds_from_data(review_data)
+                view = self.cog.ReviewPaginator(embeds=embeds, cog=self.cog)
+                await interaction.followup.edit_message(interaction.message.id, embeds=[embeds[0]], view=view)
+            except Exception:
+                logger.exception("Failed to fetch review for media %s %s", self.media_type, self.media_id)
+                try:
+                    await interaction.followup.send(embed=build_warning_embed(description="Failed to fetch review."), ephemeral=True)
+                except Exception:
+                    pass
 
         async def select_callback(self, interaction: discord.Interaction):
             try:
+                if not interaction.response.is_done():
+                    await interaction.response.defer()
                 value = interaction.data.get("values", [None])[0]
-                media = await self.cog.fetch_media(self.media_id, self.media_type)
+                media = self.media
+                if media is None:
+                    media = await self.cog.fetch_media(self.media_id, self.media_type)
+                    self.media = media
                 if not media:
                     error_embed = build_error_embed(description="Could not fetch media details.")
                     if not interaction.response.is_done():
@@ -1773,7 +1817,7 @@ class AniListCog(commands.Cog):
                 logger.exception("Failed to send anime message")
                 return
             try:
-                view = await self._add_media_persistence(sent.id, sent.channel.id, media_id, "ANIME", total_pages, current_page=1)
+                view = await self._add_media_persistence(sent.id, sent.channel.id, media_id, "ANIME", total_pages, current_page=1, media=media)
                 try:
                     await sent.edit(view=view)
                 except Exception:
@@ -1798,7 +1842,7 @@ class AniListCog(commands.Cog):
                 logger.exception("Failed to send manga message")
                 return
             try:
-                view = await self._add_media_persistence(sent.id, sent.channel.id, media_id, "MANGA", total_pages, current_page=1)
+                view = await self._add_media_persistence(sent.id, sent.channel.id, media_id, "MANGA", total_pages, current_page=1, media=media)
                 try:
                     await sent.edit(view=view)
                 except Exception:
@@ -1830,6 +1874,22 @@ class AniListCog(commands.Cog):
             except Exception:
                 logger.exception("Failed to render AniList %s profile %s", entity_kind, entity_id)
                 await message.channel.send(embed=build_warning_embed(description=f"Could not render this AniList {entity_kind} profile."))
+            return
+
+        # AniList user profiles, including numeric IDs such as /user/2.
+        m = USER_URL_RE.search(message.content)
+        if m:
+            identifier = m.group(1)
+            user_data = await self.fetch_user_profile(identifier)
+            if not user_data:
+                await message.channel.send(embed=build_error_embed(description="Failed to fetch AniList user profile."))
+                return
+            try:
+                view = self.UserProfileView(self, user_data)
+                await message.channel.send(embed=self.build_user_profile_embed(user_data), view=view)
+            except Exception:
+                logger.exception("Failed to render AniList user profile %s", identifier)
+                await message.channel.send(embed=build_warning_embed(description="Could not render this AniList user profile."))
             return
 
         # Reviews: separate handling for review links
@@ -2107,6 +2167,322 @@ class AniListCog(commands.Cog):
             embeds.append(works_embed)
         return embeds
 
+    async def fetch_user_profile(self, identifier: str) -> Optional[dict]:
+        """Fetch a public AniList profile by numeric ID or username."""
+        numeric_id = int(identifier) if identifier.isdigit() else None
+        query = """
+        query($id: Int, $name: String) {
+          User(id: $id, name: $name) {
+            id
+            name
+            siteUrl
+            about(asHtml: false)
+            avatar { large }
+            bannerImage
+            createdAt
+            updatedAt
+            donatorTier
+            donatorBadge
+            statistics {
+              anime { count meanScore minutesWatched episodesWatched }
+              manga { count meanScore chaptersRead volumesRead }
+            }
+            favourites {
+              anime(page: 1, perPage: 5) { nodes { id siteUrl title { romaji english } } }
+              manga(page: 1, perPage: 5) { nodes { id siteUrl title { romaji english } } }
+              characters(page: 1, perPage: 5) { nodes { id siteUrl name { full } } }
+              staff(page: 1, perPage: 5) { nodes { id siteUrl name { full } } }
+              studios(page: 1, perPage: 5) { nodes { id siteUrl name } }
+            }
+          }
+        }
+        """
+        variables = {"id": numeric_id, "name": None if numeric_id is not None else identifier}
+        try:
+            payload = await post_graphql(self.session, query, variables, timeout=12)
+            user_data = (payload or {}).get("User")
+            if user_data:
+                user_data["_source"] = "api"
+                return user_data
+        except Exception:
+            logger.exception("AniList user profile API fetch failed for %s", identifier)
+
+        # A small HTML fallback still gives a useful profile if GraphQL is unavailable.
+        url = f"https://anilist.co/user/{identifier}"
+        try:
+            async with self.session.get(
+                url,
+                timeout=HTML_TIMEOUT,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; Lemegeton/1.0)"},
+            ) as response:
+                if response.status != 200:
+                    logger.warning("AniList user HTML fallback returned HTTP %s for %s", response.status, url)
+                    return None
+                html_text = await response.text()
+        except (aiohttp.ClientError, asyncio.TimeoutError):
+            logger.warning("AniList user HTML fallback failed for %s", url, exc_info=True)
+            return None
+
+        def meta_value(*properties):
+            for prop in properties:
+                patterns = (
+                    r"""<meta[^>]+(?:property|name)=["']""" + re.escape(prop) + r"""["'][^>]+content=["']([^"']*)["']""",
+                    r"""<meta[^>]+content=["']([^"']*)["'][^>]+(?:property|name)=["']""" + re.escape(prop) + r"""["']""",
+                )
+                for pattern in patterns:
+                    match = re.search(pattern, html_text, re.I | re.S)
+                    if match:
+                        return html_lib.unescape(match.group(1)).strip()
+            return None
+
+        title = meta_value("og:title", "twitter:title")
+        name = re.sub(r"\s*[-|]\s*AniList.*$", "", title or "").strip()
+        if not name:
+            return None
+        description = meta_value("og:description", "description", "twitter:description") or ""
+        image = meta_value("og:image", "twitter:image")
+        profile_id = numeric_id
+        if profile_id is None:
+            match = re.search(r'"id"\s*:\s*(\d+)', html_text)
+            profile_id = int(match.group(1)) if match else None
+        return {
+            "id": profile_id,
+            "name": name,
+            "siteUrl": meta_value("og:url") or url,
+            "about": description,
+            "avatar": {"large": image} if image else {},
+            "bannerImage": None,
+            "statistics": {"anime": {}, "manga": {}},
+            "favourites": {},
+            "_source": "html",
+        }
+
+    async def fetch_user_activities(self, user_id: int) -> Optional[List[dict]]:
+        """Fetch a user's five most recent public AniList activities."""
+        query = """
+        query($userId: Int) {
+          Page(page: 1, perPage: 5) {
+            activities(userId: $userId, sort: ID_DESC) {
+              __typename
+              ... on TextActivity {
+                id text createdAt likeCount replyCount siteUrl
+              }
+              ... on MessageActivity {
+                id message createdAt likeCount replyCount siteUrl
+                recipient { name }
+              }
+              ... on ListActivity {
+                id status progress createdAt likeCount replyCount siteUrl
+                media { id type siteUrl title { romaji english } }
+              }
+            }
+          }
+        }
+        """
+        try:
+            payload = await post_graphql(self.session, query, {"userId": user_id}, timeout=10)
+            page_data = (payload or {}).get("Page")
+            if page_data is not None:
+                return page_data.get("activities") or []
+        except Exception:
+            logger.exception("AniList activity fetch failed for user %s", user_id)
+        return None
+
+    def build_user_profile_embed(self, user_data: dict) -> discord.Embed:
+        """Build the complete first-page overview for an AniList user profile."""
+        username = user_data.get("name") or "Unknown User"
+        profile_url = user_data.get("siteUrl") or f"https://anilist.co/user/{user_data.get('id', '')}"
+        about = self.clean_text(user_data.get("about") or "")
+        if len(about) > 1000:
+            about = about[:997].rstrip() + "..."
+        embed = discord.Embed(
+            title=f"👤 {username} • AniList Profile"[:256],
+            url=profile_url,
+            description=about or "*No profile description provided.*",
+            color=PALETTE.PRIMARY,
+        )
+        avatar = user_data.get("avatar") or {}
+        if isinstance(avatar, dict) and avatar.get("large"):
+            embed.set_thumbnail(url=avatar["large"])
+        if user_data.get("bannerImage"):
+            embed.set_image(url=user_data["bannerImage"])
+
+        statistics = user_data.get("statistics") or {}
+        anime = statistics.get("anime") or {}
+        manga = statistics.get("manga") or {}
+
+        def score_label(value):
+            if value is None:
+                return "—"
+            try:
+                return f"{float(value):.1f}/100"
+            except (TypeError, ValueError):
+                return "—"
+
+        anime_lines = [
+            f"**Entries:** {anime.get('count', 0):,}",
+            f"**Mean score:** {score_label(anime.get('meanScore'))}",
+            f"**Episodes watched:** {anime.get('episodesWatched', 0):,}",
+            f"**Time watched:** {anime.get('minutesWatched', 0):,} minutes",
+        ]
+        manga_lines = [
+            f"**Entries:** {manga.get('count', 0):,}",
+            f"**Mean score:** {score_label(manga.get('meanScore'))}",
+            f"**Chapters read:** {manga.get('chaptersRead', 0):,}",
+            f"**Volumes read:** {manga.get('volumesRead', 0):,}",
+        ]
+        embed.add_field(name="🎬 Anime Statistics", value="\n".join(anime_lines), inline=True)
+        embed.add_field(name="📚 Manga Statistics", value="\n".join(manga_lines), inline=True)
+
+        account_lines = []
+        if user_data.get("createdAt"):
+            account_lines.append(f"**Joined:** <t:{int(user_data['createdAt'])}:D> (<t:{int(user_data['createdAt'])}:R>)")
+        if user_data.get("updatedAt"):
+            account_lines.append(f"**Profile updated:** <t:{int(user_data['updatedAt'])}:R>")
+        if user_data.get("donatorTier"):
+            account_lines.append(f"**Donator tier:** {user_data['donatorTier']}")
+        if user_data.get("donatorBadge"):
+            account_lines.append(f"**Badge:** {str(user_data['donatorBadge'])[:100]}")
+        if account_lines:
+            embed.add_field(name="ℹ️ Account", value="\n".join(account_lines)[:1024], inline=False)
+
+        favourites = user_data.get("favourites") or {}
+        favourite_specs = (
+            ("anime", "🎞️ Favourite Anime", "media"),
+            ("manga", "📖 Favourite Manga", "media"),
+            ("characters", "🎭 Favourite Characters", "character"),
+            ("staff", "🎙️ Favourite Staff", "staff"),
+            ("studios", "🏢 Favourite Studios", "studio"),
+        )
+        for key, label, kind in favourite_specs:
+            nodes = ((favourites.get(key) or {}).get("nodes") or [])
+            links = []
+            for item in nodes[:5]:
+                if kind == "media":
+                    title = item.get("title") or {}
+                    item_name = title.get("english") or title.get("romaji") or "Untitled"
+                elif kind in ("character", "staff"):
+                    name_data = item.get("name") or {}
+                    item_name = name_data.get("full") or "Unknown"
+                else:
+                    item_name = item.get("name") or "Unknown"
+                item_url = item.get("siteUrl")
+                if not item_url and item.get("id"):
+                    item_url = f"https://anilist.co/{kind}/{item['id']}"
+                links.append(f"[{str(item_name)[:100]}]({item_url})" if item_url else str(item_name)[:100])
+            embed.add_field(name=label, value=", ".join(links)[:950] if links else "*None listed*", inline=False)
+
+        source = "HTML fallback" if user_data.get("_source") == "html" else "AniList GraphQL"
+        embed.set_footer(text=f"AniList • {source} • User ID {user_data.get('id', '—')}")
+        return embed
+
+    def build_user_activity_embed(self, user_data: dict, activities: Optional[List[dict]]) -> discord.Embed:
+        """Build a single activity page listing the user's latest public activity."""
+        username = user_data.get("name") or "AniList User"
+        profile_url = user_data.get("siteUrl") or f"https://anilist.co/user/{user_data.get('id', '')}"
+        embed = discord.Embed(
+            title=f"📰 {username} • Latest Activity"[:256],
+            url=profile_url,
+            color=PALETTE.SECONDARY,
+            description="The five latest public activities returned by AniList.",
+        )
+        if activities is None:
+            embed.description = "AniList activity is temporarily unavailable. Please try again."
+            embed.set_footer(text="Powered by AniList")
+            return embed
+        if not activities:
+            embed.description = "No recent public activity was found."
+            embed.set_footer(text="Powered by AniList")
+            return embed
+
+        for activity in activities[:5]:
+            typename = activity.get("__typename") or "Activity"
+            created_at = activity.get("createdAt")
+            if typename == "ListActivity":
+                media = activity.get("media") or {}
+                title_data = media.get("title") or {}
+                media_title = title_data.get("english") or title_data.get("romaji") or "Unknown media"
+                media_url = media.get("siteUrl") or (f"https://anilist.co/{str(media.get('type') or 'anime').lower()}/{media['id']}" if media.get("id") else profile_url)
+                progress = " ".join(str(part) for part in (activity.get("status"), activity.get("progress")) if part)
+                content = f"**{progress or 'Updated list'}:** [{media_title}]({media_url})"
+                label = "List update"
+                emoji = "📚"
+            elif typename == "MessageActivity":
+                recipient = (activity.get("recipient") or {}).get("name")
+                content = self.clean_text(activity.get("message") or "")
+                if recipient:
+                    content = f"**To {recipient}**\n{content}"
+                label = "Message"
+                emoji = "✉️"
+            else:
+                content = self.clean_text(activity.get("text") or "")
+                label = "Status update"
+                emoji = "💬"
+
+            if created_at:
+                label = f"{label} · <t:{int(created_at)}:R>"
+            activity_url = activity.get("siteUrl")
+            field_name = f"{emoji} [{label}]({activity_url})" if activity_url else f"{emoji} {label}"
+            stats = f"❤️ {activity.get('likeCount', 0)} · 💬 {activity.get('replyCount', 0)}"
+            content = content.strip() or "*No text content.*"
+            value = f"{content}\n\n{stats}"
+            if len(value) > 1000:
+                value = value[:997].rstrip() + "..."
+            embed.add_field(name=field_name[:256], value=value, inline=False)
+
+        embed.set_footer(text=f"AniList • {len(activities[:5])} recent activities • User ID {user_data.get('id', '—')}")
+        return embed
+
+    class UserProfileView(ui.View):
+        """Toggle between an AniList profile overview and its latest activity."""
+        def __init__(self, cog: "AniListCog", user_data: dict):
+            super().__init__(timeout=900)
+            self.cog = cog
+            self.user_data = user_data
+            self.activities = None
+            self.main_button = ui.Button(label="👤 Main Profile", style=discord.ButtonStyle.primary)
+            self.activity_button = ui.Button(
+                label="📰 Latest Activity",
+                style=discord.ButtonStyle.secondary,
+                disabled=not user_data.get("id"),
+            )
+            self.main_button.callback = self.show_main
+            self.activity_button.callback = self.show_activity
+            self.add_item(self.main_button)
+            self.add_item(self.activity_button)
+
+        async def show_main(self, interaction: discord.Interaction):
+            try:
+                await interaction.response.edit_message(embed=self.cog.build_user_profile_embed(self.user_data), view=self)
+            except Exception:
+                logger.exception("Failed to restore AniList profile page")
+                try:
+                    if interaction.response.is_done():
+                        await interaction.followup.send(embed=build_warning_embed(description="Could not show the main profile."), ephemeral=True)
+                    else:
+                        await interaction.response.send_message(embed=build_warning_embed(description="Could not show the main profile."), ephemeral=True)
+                except Exception:
+                    pass
+
+        async def show_activity(self, interaction: discord.Interaction):
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.defer()
+                user_id = self.user_data.get("id")
+                if not user_id:
+                    await interaction.followup.send(embed=build_warning_embed(description="AniList did not provide a profile ID for activity lookup."), ephemeral=True)
+                    return
+                if self.activities is None:
+                    self.activities = await self.cog.fetch_user_activities(int(user_id))
+                embed = self.cog.build_user_activity_embed(self.user_data, self.activities)
+                await interaction.followup.edit_message(interaction.message.id, embed=embed, view=self)
+            except Exception:
+                logger.exception("Failed to show AniList user activity")
+                try:
+                    await interaction.followup.send(embed=build_warning_embed(description="Could not load recent activity."), ephemeral=True)
+                except Exception:
+                    pass
+
     class EntityPaginator(ui.View):
         """In-memory paginator for entity profile and works embeds."""
         def __init__(self, embeds: List[discord.Embed], cog: "AniListCog"):
@@ -2267,7 +2643,7 @@ class AniListCog(commands.Cog):
                     if src and src not in images:
                         images.append(src)
                 # remove tags
-                body_text = re.sub(r'<[^>]+>', '', raw_html).strip()
+                body_text = raw_html.strip()
         # Another heuristic
         if not body_text:
             m_main = re.search(r'<div[^>]+id=["\']review-body-[^"\']+["\'][^>]*>(.*?)</div>', html, re.S | re.I)
@@ -2277,7 +2653,7 @@ class AniListCog(commands.Cog):
                     src = img.group(1)
                     if src and src not in images:
                         images.append(src)
-                body_text = re.sub(r'<[^>]+>', '', b).strip()
+                body_text = b.strip()
 
         # Parse rating (various possible formats)
         try:
@@ -2470,7 +2846,21 @@ class AniListCog(commands.Cog):
         SAFE_CHUNK = 1500  # conservative chunk size for body text per page
         # Use cleaned_full as the user-facing text (converted), but if extract_media removed some parts, prefer cleaned_full
         text_for_chunks = self.clean_text(cleaned_removed) or cleaned_full or ""
-        text_chunks = [text_for_chunks[i:i + SAFE_CHUNK] for i in range(0, len(text_for_chunks), SAFE_CHUNK)] if text_for_chunks else []
+        text_chunks = []
+        remaining = text_for_chunks.strip()
+        while remaining:
+            if len(remaining) <= SAFE_CHUNK:
+                text_chunks.append(remaining)
+                break
+            split_at = remaining.rfind("\n\n", 0, SAFE_CHUNK)
+            if split_at < SAFE_CHUNK // 2:
+                split_at = remaining.rfind("\n", 0, SAFE_CHUNK)
+            if split_at < SAFE_CHUNK // 2:
+                split_at = remaining.rfind(" ", 0, SAFE_CHUNK)
+            if split_at <= 0:
+                split_at = SAFE_CHUNK
+            text_chunks.append(remaining[:split_at].rstrip())
+            remaining = remaining[split_at:].lstrip()
 
         embeds: List[discord.Embed] = []
         # If there are no media_links -> create text pages only (one or multiple)
