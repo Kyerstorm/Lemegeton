@@ -666,6 +666,8 @@ class DashboardCog(commands.Cog):
             return True
         try:
             cfg = await self.db.get_guild_config(interaction.guild.id)
+            if fullname not in cfg.get("commands", {}) and meta["section"] not in cfg.get("sections", {}):
+                return True
             return _is_enabled(fullname, meta, cfg)
         except Exception:
             logger.exception(
