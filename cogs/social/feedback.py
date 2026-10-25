@@ -119,7 +119,7 @@ class FeedbackModal(discord.ui.Modal, title="Submit Feedback"):
 
     async def on_error(self, interaction: discord.Interaction, error: Exception):
         logger.exception("Unhandled error in feedback modal", exc_info=error)
-        message = "Something went wrong while submitting feedback. Please run /feedback to try again."
+        message = "Something went wrong while submitting feedback. Please try `/feedback` again; if the issue continues, contact a server moderator or administrator."
         try:
             if interaction.response.is_done():
                 await interaction.followup.send(message, ephemeral=True)
@@ -224,12 +224,12 @@ class Feedback(commands.Cog):
             try:
                 if interaction.response.is_done():
                     await interaction.followup.send(
-                        "The feedback form could not be opened. Please try again.",
+                        "The feedback form could not be opened. Please contact a server moderator or administrator to report this issue.",
                         ephemeral=True,
                     )
                 else:
                     await interaction.response.send_message(
-                        "The feedback form could not be opened. Please try again.",
+                        "The feedback form could not be opened. Please contact a server moderator or administrator to report this issue.",
                         ephemeral=True,
                     )
             except discord.HTTPException:
