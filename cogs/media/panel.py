@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 
 import aiohttp
 import discord
+from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView, application_error_message
 from discord import app_commands
 from discord.ext import commands
 
@@ -28,14 +29,77 @@ log = logging.getLogger("Lemegeton.Panels")
 # Fallback only; use Discord's effective interaction/storage limits when available.
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"}
+# Discord string selects allow at most 25 options each. Two documented selects provide
+# a useful tag vocabulary without making the upload form unwieldy.
 PANEL_TAGS = (
-    "action", "adventure", "comedy", "drama", "fantasy", "horror", "mystery",
-    "psychological", "romance", "sci-fi", "slice of life", "supernatural",
-    "thriller", "tragedy", "isekai", "martial arts", "school life", "historical",
-    "shounen", "shoujo", "seinen", "josei", "manhwa", "manhua", "double spread",
+    "action", "adventure", "comedy", "drama", "fantasy",
+    "horror", "mystery", "psychological", "romance", "sci-fi",
+    "slice of life", "supernatural", "thriller", "tragedy", "isekai",
+    "martial arts", "school life", "historical", "shounen", "shoujo",
+    "seinen", "josei", "manhwa", "manhua", "manhua-style",
 )
+PANEL_VISUAL_TAGS = (
+    "double spread", "splash page", "panel sequence", "iconic moment", "character close-up",
+    "fight scene", "comedy panel", "emotional scene", "flashback", "worldbuilding",
+    "monster / creature", "weapons", "magic", "cyberpunk", "post-apocalyptic",
+    "folklore", "mythology", "politics", "survival", "revenge",
+    "cultivation", "time travel", "reincarnation", "fan service", "mature",
+)
+PANEL_TAG_DESCRIPTIONS = {
+    "action": "Fast-paced movement, combat, or physical conflict.",
+    "adventure": "Journeys, quests, exploration, or discovery.",
+    "comedy": "Humorous scenes, jokes, or visual gags.",
+    "drama": "Character-focused conflict or serious emotional stakes.",
+    "fantasy": "Magic, mythical worlds, or supernatural fantasy settings.",
+    "horror": "Fear, dread, disturbing imagery, or horror themes.",
+    "mystery": "Clues, secrets, investigations, or unanswered questions.",
+    "psychological": "Mind games, inner conflict, or psychological tension.",
+    "romance": "Romantic relationships or affectionate moments.",
+    "sci-fi": "Science fiction, advanced technology, or space themes.",
+    "slice of life": "Everyday activities and ordinary life moments.",
+    "supernatural": "Ghosts, spirits, curses, or paranormal events.",
+    "thriller": "Suspense, danger, urgency, or high tension.",
+    "tragedy": "Loss, grief, suffering, or tragic developments.",
+    "isekai": "Transported, reincarnated, or trapped in another world.",
+    "martial arts": "Martial arts technique, tournaments, or hand-to-hand combat.",
+    "school life": "School, academy, classroom, or campus settings.",
+    "historical": "Historical eras, period clothing, or past civilizations.",
+    "shounen": "Shounen demographic or action-adventure storytelling.",
+    "shoujo": "Shoujo demographic or relationship-focused storytelling.",
+    "seinen": "Seinen demographic or mature-targeted storytelling.",
+    "josei": "Josei demographic or adult relationship-focused storytelling.",
+    "manhwa": "Korean comics or manhwa-specific visual conventions.",
+    "manhua": "Chinese comics or manhua-specific visual conventions.",
+    "manhua-style": "Art inspired by Chinese comic styling.",
+    "double spread": "Artwork spanning two facing pages.",
+    "splash page": "A single large panel or full-page illustration.",
+    "panel sequence": "A sequence of panels meant to be read together.",
+    "iconic moment": "A memorable or especially recognizable scene.",
+    "character close-up": "A close portrait or detailed character expression.",
+    "fight scene": "Combat, duels, battles, or action choreography.",
+    "comedy panel": "A standalone humorous panel or gag.",
+    "emotional scene": "A scene focused on a strong emotional reaction.",
+    "flashback": "A memory, flashback, or past-event scene.",
+    "worldbuilding": "World details, maps, lore, architecture, or setting reveals.",
+    "monster / creature": "Monsters, beasts, fantasy creatures, or unusual beings.",
+    "weapons": "Weapons, equipment, or weapon-focused artwork.",
+    "magic": "Spells, magical effects, rituals, or supernatural powers.",
+    "cyberpunk": "Neon-lit urban futures, cybernetics, or dystopian technology.",
+    "post-apocalyptic": "Ruined worlds, collapse, or post-disaster settings.",
+    "folklore": "Folk tales, legends, and regional traditional motifs.",
+    "mythology": "Gods, myths, divine beings, or myth-inspired imagery.",
+    "politics": "Royal courts, factions, diplomacy, or political conflict.",
+    "survival": "Endurance, harsh environments, or survival situations.",
+    "revenge": "Retribution, vengeance, or revenge-driven scenes.",
+    "cultivation": "Cultivation, martial progression, or xianxia/xuanhuan themes.",
+    "time travel": "Time loops, timelines, time jumps, or temporal travel.",
+    "reincarnation": "Rebirth, reincarnation, or a second-life premise.",
+    "fan service": "Fan-service imagery or suggestive presentation; use the mature tag when age-restricted.",
+    "mature": "Age-restricted content. The panel stays hidden in non-NSFW channels.",
+}
 CHAPTER_CAPTION_RE = re.compile(
-    r"^\s*(?:(?:chapter|ch\.?)\s*)?#?(\d+(?:\.\d+)?)\s*(?:[-–—:|]\s*|\s+)(.+?)\s*$",
+    r"^\s*(?:(?:chapter|ch\.?)\s*)?#?(\d+(?:\.\d+)?|N/A)"
+    r"(?:\s*(?:[-–—:|]\s*|\s+)(.*?))?\s*$",
     re.IGNORECASE,
 )
 BROWSER_TIMEOUT = 1800
@@ -125,23 +189,24 @@ def _tags(raw: str | None) -> list[str]:
             raise ValueError("Each tag must be 30 characters or fewer.")
         if tag not in result:
             result.append(tag)
-    if len(result) > 10:
-        raise ValueError("Use no more than 10 unique tags.")
+    if len(result) > 20:
+        raise ValueError("Use no more than 20 unique tags across both selectors.")
     return result
 
 
 def _parse_chapter_caption(value: str) -> tuple[str, str]:
-    """Require a chapter number and caption from one modal field."""
+    """Require a chapter number (or N/A) while allowing the caption to be omitted."""
     match = CHAPTER_CAPTION_RE.fullmatch(value.strip())
     if not match:
         raise ValueError(
-            "Enter both a chapter number and caption, for example "
-            "**Chapter 12 — The final battle begins**."
+            "Enter a chapter number, or **N/A** if unknown. A caption is optional. "
+            "Examples: **Chapter 12 — Final battle**, **Chapter 12**, or **N/A**."
         )
-    chapter_number, caption = match.group(1), match.group(2).strip()
-    # Reject separator-only remainders so "Chapter 12 —" doesn't store "—" as the caption.
-    if not caption.strip("-–—:| \t"):
-        raise ValueError("A caption is required after the chapter number.")
+    chapter_number = match.group(1).upper() if match.group(1).upper() == "N/A" else match.group(1)
+    caption = (match.group(2) or "").strip()
+    # Reject a dangling separator but accept a chapter number with no caption.
+    if value.strip().endswith(("-", "–", "—", ":", "|")):
+        raise ValueError("A caption may be omitted, but do not leave a separator at the end.")
     return chapter_number, caption
 
 
@@ -338,11 +403,12 @@ def _embed(panel: dict[str, Any], page: int, total: int, guild_name: str | None)
     anilist_url = f"https://anilist.co/manga/{int(anilist_id)}" if anilist_id else None
     caption = str(panel.get("caption") or "").strip()
     chapter_number = panel.get("chapter_number")
-    description = (
-        f"**Chapter {discord.utils.escape_markdown(str(chapter_number))}**\n{caption}"
-        if chapter_number and caption
-        else (caption or "*No caption provided.*")
-    )
+    description_lines = []
+    if chapter_number:
+        chapter_label = discord.utils.escape_markdown(str(chapter_number))
+        description_lines.append(f"**Chapter {chapter_label}**")
+    description_lines.append(caption or "*No caption provided.*")
+    description = "\n".join(description_lines)
     embed = discord.Embed(
         title=str(panel["title"])[:100],
         description=description[:4000],
@@ -399,7 +465,7 @@ async def _audit_delete(interaction: discord.Interaction, panel: dict[str, Any])
             log.warning("Could not post panel audit log to guild %s", interaction.guild_id)
 
 
-class PanelForm(discord.ui.Modal):
+class PanelForm(FeedbackAwareModal):
     def __init__(self, cog: "PanelCog", *, mode: str, user_id: int, guild_id: int,
                  panel: dict[str, Any] | None = None, source_url: str | None = None):
         super().__init__(title="Add Manga Panel" if mode == "add" else "Edit Manga Panel", timeout=300)
@@ -417,16 +483,24 @@ class PanelForm(discord.ui.Modal):
             component=discord.ui.TextInput(default=panel["title"] if panel else None, max_length=300, required=True),
         )
         selected_tags = list(panel.get("tags", [])) if panel else []
-        tag_values = list(dict.fromkeys([*selected_tags, *PANEL_TAGS]))[:25]
+        if panel and panel.get("is_nsfw") and "mature" not in selected_tags:
+            selected_tags.append("mature")
+        tag_values = list(dict.fromkeys(
+            [tag for tag in selected_tags if tag not in PANEL_VISUAL_TAGS] + list(PANEL_TAGS)
+        ))[:25]
+        visual_tag_values = list(dict.fromkeys(
+            [tag for tag in selected_tags if tag in PANEL_VISUAL_TAGS] + list(PANEL_VISUAL_TAGS)
+        ))[:25]
         self.tags_field = discord.ui.Label(
-            text="🏷️ Tags (select 1–10)",
-            description="Choose at least one tag. Multiple tags are supported.",
+            text="🏷️ Genres & story (required)",
+            description="Choose 1–10 tags. Each option includes a short description.",
             component=discord.ui.Select(
-                placeholder="Select all tags that fit this panel",
+                placeholder="Choose genres and story themes",
                 options=[
                     discord.SelectOption(
                         label=tag.title()[:100],
                         value=tag,
+                        description=PANEL_TAG_DESCRIPTIONS.get(tag, "Saved tag from an earlier version.")[:100],
                         default=tag in selected_tags,
                     )
                     for tag in tag_values
@@ -435,34 +509,42 @@ class PanelForm(discord.ui.Modal):
                 max_values=min(10, len(tag_values)),
             ),
         )
-        caption_default = None
+        self.visual_tags_field = discord.ui.Label(
+            text="🎨 Themes & panel style (optional)",
+            description="Choose up to 10 more tags. Select Mature for age-restricted content.",
+            component=discord.ui.Select(
+                placeholder="Choose visual, scene, or setting tags",
+                options=[
+                    discord.SelectOption(
+                        label=tag.title()[:100],
+                        value=tag,
+                        description=PANEL_TAG_DESCRIPTIONS.get(tag, "Saved tag from an earlier version.")[:100],
+                        default=tag in selected_tags,
+                    )
+                    for tag in visual_tag_values
+                ],
+                min_values=0,
+                max_values=min(10, len(visual_tag_values)),
+            ),
+        )
+        caption_default = "N/A"
         if panel:
             old_caption = str(panel.get("caption") or "")
-            old_chapter = panel.get("chapter_number")
-            caption_default = f"Chapter {old_chapter} — {old_caption}" if old_chapter else old_caption
+            old_chapter = panel.get("chapter_number") or "N/A"
+            chapter_label = f"Chapter {old_chapter}" if str(old_chapter).upper() != "N/A" else "N/A"
+            caption_default = f"{chapter_label} — {old_caption}" if old_caption else chapter_label
         self.caption_field = discord.ui.Label(
-            text="📖 Chapter number & caption",
-            description="Required. Format: Chapter 12 — your caption.",
+            text="📖 Chapter number (required) • caption (optional)",
+            description="Enter a chapter number; if unknown, enter N/A. Caption is optional. Examples: Chapter 12 — Final battle; Chapter 12; N/A.",
             component=discord.ui.TextInput(
-                default=caption_default,
-                placeholder="Chapter 12 — The final battle begins",
+                default=caption_default if panel else None,
+                placeholder="Chapter 12 — final battle, or N/A",
                 style=discord.TextStyle.paragraph,
                 max_length=500,
                 required=True,
             ),
         )
-        self.rating_field = discord.ui.Label(
-            text="Content rating",
-            component=discord.ui.Select(
-                placeholder="Safe or Mature",
-                options=[
-                    discord.SelectOption(label="Safe", value="false", default=not bool(panel and panel["is_nsfw"])),
-                    discord.SelectOption(label="Mature", value="true", default=bool(panel and panel["is_nsfw"])),
-                ],
-                min_values=1, max_values=1,
-            ),
-        )
-        for item in (self.image, self.title_field, self.tags_field, self.caption_field, self.rating_field):
+        for item in (self.image, self.title_field, self.tags_field, self.visual_tags_field, self.caption_field):
             self.add_item(item)
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -485,7 +567,7 @@ class PanelForm(discord.ui.Modal):
             anilist_id, source_url = _carry_anilist_link(
                 self.panel, title, requested_anilist_id, requested_anilist_url or self.source_url,
             )
-            selected_tags = list(self.tags_field.component.values or [])
+            selected_tags = list(self.tags_field.component.values or []) + list(self.visual_tags_field.component.values or [])
             if not selected_tags:
                 await interaction.followup.send("Select at least one tag for this panel.", ephemeral=True)
                 return
@@ -552,7 +634,7 @@ class PanelForm(discord.ui.Modal):
             elif self.mode == "add":
                 await interaction.followup.send("Please attach an image.", ephemeral=True)
                 return
-            mature = str(self.rating_field.component.values[0]).lower() == "true"
+            mature = "mature" in tags
             pool = await _pool()
             async with pool.acquire() as conn:
                 async with conn.transaction():
@@ -604,7 +686,7 @@ class PanelForm(discord.ui.Modal):
             await interaction.followup.send("Something went wrong while saving the panel.", ephemeral=True)
 
 
-class PanelSearchModal(discord.ui.Modal, title="Search Manga Panels"):
+class PanelSearchModal(FeedbackAwareModal, title="Search Manga Panels"):
     keyword = discord.ui.TextInput(label="Keyword (2–50 chars)", min_length=2, max_length=50, required=True)
     tags = discord.ui.TextInput(label="Tags (optional, comma-separated)", max_length=300, required=False)
 
@@ -628,7 +710,7 @@ class PanelSearchModal(discord.ui.Modal, title="Search Manga Panels"):
             await interaction.followup.send("Something went wrong while searching.", ephemeral=True)
 
 
-class PanelConfigureModal(discord.ui.Modal, title="Configure Panel Archive"):
+class PanelConfigureModal(FeedbackAwareModal, title="Configure Panel Archive"):
     def __init__(self, cog: "PanelCog"):
         super().__init__(timeout=180)
         self.cog = cog
@@ -677,7 +759,7 @@ class PanelConfigureModal(discord.ui.Modal, title="Configure Panel Archive"):
             await interaction.followup.send("Something went wrong while saving settings.", ephemeral=True)
 
 
-class PanelJumpModal(discord.ui.Modal, title="Jump to Page"):
+class PanelJumpModal(FeedbackAwareModal, title="Jump to Page"):
     page_number = discord.ui.TextInput(label="Page number", min_length=1, max_length=7, required=True)
 
     def __init__(self, view: "PanelBrowserView"):
@@ -738,7 +820,7 @@ class PanelTagFilter(discord.ui.Select):
                 await interaction.response.send_message("Something went wrong applying the filter.", ephemeral=True)
 
 
-class PanelBrowserView(discord.ui.View):
+class PanelBrowserView(FeedbackAwareView):
     """Public single-message browser. Navigation re-queries against current channel NSFW status."""
     def __init__(self, cog: "PanelCog", ids: list[int], *, tags: list[str] | None = None,
                  keyword: str | None = None, user_id: int | None = None, fixed_ids: bool = False):
@@ -814,7 +896,7 @@ class PanelBrowserView(discord.ui.View):
                 """)
             options = [discord.SelectOption(label=str(r["tag"])[:100], value=str(r["tag"])) for r in rows]
             options.append(discord.SelectOption(label="Other (search)", value="other"))
-            view = discord.ui.View(timeout=120)
+            view = FeedbackAwareView(timeout=120)
             view.add_item(PanelTagFilter(self, options))
             await interaction.response.send_message("Choose up to five tags; all selected tags must match.", view=view, ephemeral=True)
         except Exception:
@@ -859,20 +941,25 @@ class PanelBrowserView(discord.ui.View):
                 f"Delete panel **{discord.utils.escape_markdown(panel['title'])}** (#{panel['id']}) permanently?",
                 view=PanelDeleteConfirm(self.cog, panel, self), ephemeral=True,
             )
-        except Exception:
+        except Exception as exc:
             log.exception("Delete panel action failed")
-            await interaction.response.send_message("Something went wrong.", ephemeral=True)
+            if interaction.response.is_done():
+                await interaction.followup.send(application_error_message(exc), ephemeral=True)
+            else:
+                await interaction.response.send_message(application_error_message(exc), ephemeral=True)
 
     async def _close(self, interaction: discord.Interaction):
         try:
             await interaction.response.edit_message(content="Panel browser closed.", embed=None, view=None)
-        except Exception:
+        except Exception as exc:
             log.exception("Close panel browser failed")
-            if not interaction.response.is_done():
-                await interaction.response.send_message("Something went wrong.", ephemeral=True)
+            if interaction.response.is_done():
+                await interaction.followup.send(application_error_message(exc), ephemeral=True)
+            else:
+                await interaction.response.send_message(application_error_message(exc), ephemeral=True)
 
 
-class PanelDeleteConfirm(discord.ui.View):
+class PanelDeleteConfirm(FeedbackAwareView):
     def __init__(self, cog: "PanelCog", panel: dict[str, Any], browser: PanelBrowserView):
         super().__init__(timeout=60)
         self.cog, self.panel, self.browser = cog, panel, browser
@@ -905,14 +992,14 @@ class PanelDeleteConfirm(discord.ui.View):
             self.browser.page = min(self.browser.page, max(0, len(self.browser.panel_ids)-1))
         except Exception:
             log.exception("Confirm panel deletion failed")
-            await interaction.followup.send("Something went wrong deleting the panel.", ephemeral=True)
+            await interaction.followup.send(application_error_message(exc), ephemeral=True)
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(content="Deletion cancelled.", view=None)
 
 
-class PanelResultView(discord.ui.View):
+class PanelResultView(FeedbackAwareView):
     def __init__(self, cog: "PanelCog", panel_id: int):
         super().__init__(timeout=180)
         self.cog, self.panel_id = cog, panel_id
@@ -943,7 +1030,7 @@ class PanelResultView(discord.ui.View):
         await interaction.response.edit_message(content="Done.", embed=None, view=None)
 
 
-class PanelHomeView(discord.ui.View):
+class PanelHomeView(FeedbackAwareView):
     def __init__(self, cog: "PanelCog"):
         super().__init__(timeout=300)
         self.cog = cog
@@ -996,7 +1083,7 @@ class PanelHomeView(discord.ui.View):
             else: await interaction.response.send_message("Something went wrong.", ephemeral=True)
 
 
-class PanelAttachmentPicker(discord.ui.View):
+class PanelAttachmentPicker(FeedbackAwareView):
     def __init__(self, cog: "PanelCog", message: discord.Message, attachments: list[discord.Attachment]):
         super().__init__(timeout=120)
         self.cog, self.message, self.attachments = cog, message, attachments
@@ -1072,7 +1159,7 @@ class PanelCog(commands.Cog):
             else: await interaction.response.send_message(msg, ephemeral=True)
         except Exception:
             log.exception("Could not post panel browser")
-            if interaction.response.is_done(): await interaction.followup.send("Something went wrong opening the browser.", ephemeral=True)
+            if interaction.response.is_done(): await interaction.followup.send(application_error_message(exc), ephemeral=True)
             else: await interaction.response.send_message("Something went wrong opening the browser.", ephemeral=True)
 
     async def _resolved_embed(self, panel, page, total):
