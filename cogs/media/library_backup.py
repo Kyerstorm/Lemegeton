@@ -711,7 +711,7 @@ class LibraryBackup(commands.Cog):
                 logger.error(f"Failed to send backup in channel for {interaction.user.id}: {e}", exc_info=True)
                 embed = build_error_embed(
                     "Send Failed",
-                    "Could not send file to channel. Check permissions."
+                    application_error_message(e)
                 )
                 await progress_msg.edit(embed=embed)
 
