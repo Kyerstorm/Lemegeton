@@ -248,9 +248,22 @@ def _extract_page_data(
 
     if _parse_bool(data.get("include_links"), default=False):
         links = []
-        for node in soup.select("a[href]"):
+        link_selector = data.get("link_selector")
+        try:
+            link_nodes = soup.select(str(link_selector)) if link_selector else soup.select("a[href]")
+        except Exception as exc:
+            logger.warning("Invalid link selector %r: %s", link_selector, exc)
+            link_nodes = []
+
+        for node in link_nodes:
             if len(links) >= MAX_LINK_RESULTS:
                 break
+            # Link selectors should normally target anchors; containers are accepted
+            # too, so callers can scope links to a particular card layout.
+            if not node.get("href"):
+                node = node.select_one("a[href]")
+            if not node:
+                continue
             href = (node.get("href") or "").strip()
             if not href:
                 continue
@@ -302,6 +315,7 @@ async def fetch_public_page(
     include_text: bool = True,
     max_text_chars: int = DEFAULT_MAX_TEXT_CHARS,
     include_links: bool = False,
+    link_selector: Optional[str] = None,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
     retries: int = 2,
 ) -> Dict[str, Any]:
@@ -321,6 +335,7 @@ async def fetch_public_page(
         "include_text": include_text,
         "max_text_chars": max_text_chars,
         "include_links": include_links,
+        "link_selector": link_selector,
     }
 
     if mode == "browser":
