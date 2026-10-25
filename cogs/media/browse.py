@@ -831,9 +831,13 @@ class BrowseCog(commands.Cog):
             except asyncio.TimeoutError:
                 logger.warning("Book search timed out for %r (%s)", title, book_type)
                 results = []
-            except Exception:
+            except Exception as exc:
                 logger.exception("Book search failed for %r (%s)", title, book_type)
-                results = []
+                await interaction.followup.send(
+                    embed=build_error_embed("Book Search Failed", application_error_message(exc)),
+                    ephemeral=True,
+                )
+                return
             if not results:
                 category_name = "general novels" if book_type == "fiction" else "non-fiction books"
                 embed = build_error_embed(
