@@ -63,7 +63,7 @@ pub struct Session {
 #[derive(Clone, Serialize)]
 pub struct DashboardGuild { pub id: String, pub name: String, pub icon: Option<String>, pub administrator: bool, pub member_count: Option<u64> }
 #[derive(Clone)]
-pub struct OAuthState { pub expires_at: u64 }
+pub struct OAuthState { pub expires_at: u64, pub browser_nonce: String }
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<AppConfig>, pub client: reqwest::Client, pub sessions: Arc<Mutex<HashMap<String, Session>>>,
@@ -221,6 +221,14 @@ pub struct DiscordTokenResponse { pub access_token: Option<String>, pub refresh_
 pub struct DiscordUserResponse { pub id: String, pub username: String, pub global_name: Option<String>, pub avatar: Option<String> }
 #[derive(Deserialize)]
 pub struct OAuthCallback { pub code: Option<String>, pub state: Option<String>, pub error: Option<String> }
+pub fn oauth_state_cookie(nonce: &str, state: &AppState) -> String {
+    let secure = if state.config.secure_cookie { "; Secure" } else { "" };
+    format!("lemegeton_oauth_state={nonce}; Path=/oauth/callback; HttpOnly; SameSite=Lax; Max-Age=600{secure}")
+}
+pub fn expired_oauth_state_cookie(state: &AppState) -> String {
+    let secure = if state.config.secure_cookie { "; Secure" } else { "" };
+    format!("lemegeton_oauth_state=; Path=/oauth/callback; HttpOnly; SameSite=Lax; Max-Age=0{secure}")
+}
 pub fn token_response_cookie(session_id: &str, state: &AppState) -> String {
     let secure = if state.config.secure_cookie { "; Secure" } else { "" };
     format!("lemegeton_session={session_id}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}{}", state.config.session_ttl, secure)
