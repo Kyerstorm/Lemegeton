@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import ipaddress
 import logging
-from typing import Any
 
 from aiohttp import web
 
@@ -38,17 +37,17 @@ class CustomRolePickerServer:
         return app
 
     async def start(self) -> None:
-        if not config.CUSTOM_ROLES_PICKER_ENABLED or self.runner:
+        if not config.CUSTOM_ROLES_PICKER_ENABLED:
+            return
+        configured_host = getattr(config, "DASHBOARD_PICKER_HOST", "127.0.0.1")
+        host = loopback_bind_host(configured_host)
+        if host is None:
+            custom_role_picker_logger.error("Custom-role picker refused to bind to non-loopback host %r.", configured_host)
+            return
+        if self.runner:
             return
         self.runner = web.AppRunner(self.build_app(), access_log=custom_role_picker_logger)
         await self.runner.setup()
-        configured_host = getattr(config, "DASHBOARD_PICKER_HOST", "127.0.0.1")
-        host = _loopback_bind_host(configured_host)
-        if host is None:
-            custom_role_picker_logger.error("Custom-role picker refused to bind to non-loopback host %r.", configured_host)
-            await self.runner.cleanup()
-            self.runner = None
-            return
         port = getattr(config, "DASHBOARD_PICKER_PORT", 8092)
         self.site = web.TCPSite(self.runner, host, port)
         try:
