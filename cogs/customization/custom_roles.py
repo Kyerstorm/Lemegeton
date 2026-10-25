@@ -14,6 +14,7 @@ import config
 from cogs_test.general_commands.dashboard import command_meta
 from helpers.color_palette import PALETTE
 from helpers.embed_helper import build_error_embed, build_info_embed, build_success_embed, build_warning_embed
+from helpers.command_error_handler import FEEDBACK_ERROR_GUIDANCE
 from helpers.custom_roles import ADMIN_GROUP, COMMAND_GROUP, ROLE_LIMIT
 from helpers.custom_roles import images, service, storage, tokens, validation
 
@@ -62,7 +63,7 @@ def log_panel_note(level: int, message: str, *args) -> None:
 
 
 async def _send_error(interaction: discord.Interaction):
-    embed = build_error_embed("Something went wrong", "That didn't work. Please try again in a moment.")
+    embed = build_error_embed("Something went wrong", FEEDBACK_ERROR_GUIDANCE)
     try:
         if interaction.response.is_done():
             await interaction.followup.send(embed=embed, ephemeral=True)
