@@ -125,8 +125,8 @@ def _tags(raw: str | None) -> list[str]:
             raise ValueError("Each tag must be 30 characters or fewer.")
         if tag not in result:
             result.append(tag)
-    if len(result) > 10:
-        raise ValueError("Use no more than 10 unique tags.")
+    if len(result) > 25:
+        raise ValueError("Use no more than 25 unique tags.")
     return result
 
 
@@ -419,7 +419,7 @@ class PanelForm(discord.ui.Modal):
         selected_tags = list(panel.get("tags", [])) if panel else []
         tag_values = list(dict.fromkeys([*selected_tags, *PANEL_TAGS]))[:25]
         self.tags_field = discord.ui.Label(
-            text="🏷️ Tags (select 1–10)",
+            text="🏷️ Tags (select 1–25)",
             description="Choose at least one tag. Multiple tags are supported.",
             component=discord.ui.Select(
                 placeholder="Select all tags that fit this panel",
@@ -432,7 +432,7 @@ class PanelForm(discord.ui.Modal):
                     for tag in tag_values
                 ],
                 min_values=1,
-                max_values=min(10, len(tag_values)),
+                max_values=min(25, len(tag_values)),
             ),
         )
         caption_default = None
