@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 
 import discord
+from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView
 from discord.ext import commands, tasks
 from discord import app_commands
 import aiohttp
@@ -1026,7 +1027,7 @@ class NewsCog(commands.Cog):
         logger.warning("Watchdog task encountered error - will restart in 5 minutes")
 
 
-class NewsManagementView(discord.ui.View):
+class NewsManagementView(FeedbackAwareView):
     """Interactive view for managing news system."""
     
     def __init__(self, cog):
@@ -1097,7 +1098,7 @@ class NewsManagementView(discord.ui.View):
             return
         
         select = AccountRemoveSelect(self.cog, options)
-        view = discord.ui.View()
+        view = FeedbackAwareView()
         view.add_item(select)
         embed = build_info_embed(
             "Remove Account",
@@ -1227,7 +1228,7 @@ class NewsManagementView(discord.ui.View):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
-class AddAccountModal(discord.ui.Modal):
+class AddAccountModal(FeedbackAwareModal):
     """Modal for adding a new Twitter account."""
     
     def __init__(self, cog):
@@ -1336,7 +1337,7 @@ class AccountRemoveSelect(discord.ui.Select):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-class WhitelistManagementView(discord.ui.View):
+class WhitelistManagementView(FeedbackAwareView):
     """View for managing account-specific whitelist keywords."""
     
     def __init__(self, cog):
@@ -1366,7 +1367,7 @@ class WhitelistManagementView(discord.ui.View):
             return
         
         select = AccountSelectForAdd(self.cog, options)
-        view = discord.ui.View()
+        view = FeedbackAwareView()
         view.add_item(select)
         embed = build_info_embed(
             "Add Keywords",
@@ -1390,7 +1391,7 @@ class WhitelistManagementView(discord.ui.View):
                   for handle, keywords in all_whitelists.items()]
         
         select = AccountSelectForRemove(self.cog, options, all_whitelists)
-        view = discord.ui.View()
+        view = FeedbackAwareView()
         view.add_item(select)
         embed = build_info_embed(
             "Remove Keywords",
@@ -1472,7 +1473,7 @@ class AccountSelectForRemove(discord.ui.Select):
         options = [discord.SelectOption(label=keyword, value=keyword) for keyword in keywords]
         
         select = KeywordRemoveSelect(self.cog, handle, options)
-        view = discord.ui.View()
+        view = FeedbackAwareView()
         view.add_item(select)
         embed = build_info_embed(
             "Remove Keyword",
@@ -1481,7 +1482,7 @@ class AccountSelectForRemove(discord.ui.Select):
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
-class AddAccountWhitelistModal(discord.ui.Modal):
+class AddAccountWhitelistModal(FeedbackAwareModal):
     """Modal for adding whitelist keywords to a specific account."""
     
     def __init__(self, cog, handle):
