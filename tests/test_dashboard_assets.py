@@ -120,6 +120,8 @@ class DashboardAssetTests(unittest.TestCase):
         self.assertIn("#090a09", PICKER_THEME)
         self.assertIn("#d9ff72", PICKER_THEME)
         self.assertIn("configured dashboard origin", PICKER_SOURCE)
+        self.assertIn("record_event(self._failed", PICKER_SOURCE)
+        self.assertIn("record_event(self._fetches", PICKER_SOURCE)
         self.assertIn("images.source_max_bytes() + MULTIPART_OVERHEAD", PICKER_SERVER)
         self.assertNotIn("innerHTML", PICKER_SCRIPT)
         self.assertNotIn("eval(", PICKER_SCRIPT)

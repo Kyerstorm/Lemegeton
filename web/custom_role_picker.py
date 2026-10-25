@@ -21,6 +21,7 @@ from aiohttp import web
 
 import config
 from helpers.custom_roles import COMMAND_GROUP, images, safe_fetch, service, tokens, validation
+from web.rate_limit_memory import record_event
 
 logger = logging.getLogger("web.custom_role_picker")
 STATIC_DIR = Path(__file__).resolve().parent
@@ -192,7 +193,7 @@ class CustomRolePicker:
         return _recent(self._failed, ip, FAILED_WINDOW, time.monotonic()) < FAILED_LIMIT
 
     def _note_failed(self, ip: str) -> None:
-        self._failed.setdefault(ip, deque()).append(time.monotonic())
+        record_event(self._failed, ip, FAILED_WINDOW, time.monotonic(), MAX_TRACKED)
 
     async def _member_for(self, request: web.Request, write: bool = False):
         """Resolve the bearer token to a live member, or return an error response."""
@@ -413,7 +414,7 @@ class CustomRolePicker:
         now = time.monotonic()
         if _recent(self._fetches, key, FETCH_WINDOW, now) >= FETCH_LIMIT:
             return False
-        self._fetches.setdefault(key, deque()).append(now)
+        record_event(self._fetches, key, FETCH_WINDOW, now, MAX_TRACKED)
         return True
 
     @staticmethod

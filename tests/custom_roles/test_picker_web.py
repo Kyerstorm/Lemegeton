@@ -352,6 +352,15 @@ async def main():
         custom_role_picker.MAX_TRACKED = 0
         picker._fetch_allowed((GID, 2))
         check("fetch map drops stale members too", list(picker._fetches) == [(GID, 2)], list(picker._fetches))
+        custom_role_picker.MAX_TRACKED = 10
+        picker._failed.clear()
+        for i in range(50):
+            picker._note_failed(f"rotating-client-{i}")
+        check("active rotating client keys stay within the hard map cap", len(picker._failed) <= 10, len(picker._failed))
+        picker._fetches.clear()
+        for i in range(50):
+            picker._fetch_allowed((GID, i))
+        check("active rotating fetch keys stay within the hard map cap", len(picker._fetches) <= 10, len(picker._fetches))
         custom_role_picker.FAILED_WINDOW, custom_role_picker.FETCH_WINDOW = old_window, old_fetch_window
         custom_role_picker.MAX_TRACKED = old_max
         picker._failed.clear()

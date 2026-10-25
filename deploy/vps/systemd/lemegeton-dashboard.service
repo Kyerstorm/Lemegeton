@@ -6,7 +6,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=lemegeton-dashboard
-Group=lemegeton-read
+Group=lemegeton-dashboard
+SupplementaryGroups=lemegeton-read
 WorkingDirectory=/opt/lemegeton
 EnvironmentFile=/etc/lemegeton/dashboard.env
 Environment=HOME=/nonexistent
