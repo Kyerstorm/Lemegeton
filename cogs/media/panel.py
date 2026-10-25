@@ -776,7 +776,7 @@ class PanelJumpModal(FeedbackAwareModal, title="Jump to Page"):
             await self.browser.cog._render(interaction, self.browser)
         except ValueError:
             await interaction.response.send_message("Enter a valid page number.", ephemeral=True)
-        except Exception:
+        except Exception as exc:
             log.exception("Panel jump failed")
             await interaction.response.send_message(application_error_message(exc), ephemeral=True)
 
@@ -876,7 +876,7 @@ class PanelBrowserView(FeedbackAwareView):
             elif action == "random" and self.panel_ids: self.page = secure_choice(range(len(self.panel_ids)))
             self.page = max(0, min(self.page, max(0, len(self.panel_ids)-1)))
             await self.cog._render(interaction, self)
-        except Exception:
+        except Exception as exc:
             log.exception("Panel navigation failed")
             await interaction.response.send_message(application_error_message(exc), ephemeral=True)
 
@@ -990,7 +990,7 @@ class PanelDeleteConfirm(FeedbackAwareView):
             await interaction.followup.send("Panel deleted.", ephemeral=True)
             self.browser.panel_ids = [pid for pid in self.browser.panel_ids if pid != int(panel["id"])]
             self.browser.page = min(self.browser.page, max(0, len(self.browser.panel_ids)-1))
-        except Exception:
+        except Exception as exc:
             log.exception("Confirm panel deletion failed")
             await interaction.followup.send(application_error_message(exc), ephemeral=True)
 
@@ -1080,7 +1080,7 @@ class PanelHomeView(FeedbackAwareView):
         except Exception as exc:
             log.exception("Moderation log view failed")
             if interaction.response.is_done(): await interaction.followup.send(application_error_message(exc), ephemeral=True)
-            else: await interaction.response.send_message("Something went wrong.", ephemeral=True)
+            else: await interaction.response.send_message(application_error_message(exc), ephemeral=True)
 
 
 class PanelAttachmentPicker(FeedbackAwareView):
