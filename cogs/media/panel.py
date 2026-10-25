@@ -29,8 +29,8 @@ log = logging.getLogger("Lemegeton.Panels")
 # Fallback only; use Discord's effective interaction/storage limits when available.
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"}
-# Discord string selects allow at most 25 options each. Two documented selects provide
-# a useful tag vocabulary without making the upload form unwieldy.
+# Discord string selects allow 25 options at a time, so the picker pages through
+# AniList's full non-adult tag collection and supplements it with MangaUpdates genres.
 PANEL_TAGS = (
     "action", "adventure", "comedy", "drama", "fantasy",
     "horror", "mystery", "psychological", "romance", "sci-fi",
@@ -38,6 +38,23 @@ PANEL_TAGS = (
     "martial arts", "school life", "historical", "shounen", "shoujo",
     "seinen", "josei", "manhwa", "manhua", "manhua-style",
 )
+PANEL_MANGAUPDATES_TAGS = (
+    "doujinshi", "gender bender", "harem", "mecha", "shoujo ai",
+    "shounen ai", "sports", "yaoi", "yuri",
+)
+MAX_PANEL_TAGS = 20
+MAX_TAG_LENGTH = 100
+ANILIST_TAG_QUERY = """
+query {
+  MediaTagCollection {
+    name
+    description
+    isAdult
+  }
+}
+"""
+_PANEL_TAG_CATALOGUE: tuple[tuple[str, str], ...] | None = None
+_PANEL_TAG_CATALOGUE_LOCK = asyncio.Lock()
 PANEL_VISUAL_TAGS = (
     "double spread", "splash page", "panel sequence", "iconic moment", "character close-up",
     "fight scene", "comedy panel", "emotional scene", "flashback", "worldbuilding",
@@ -96,6 +113,15 @@ PANEL_TAG_DESCRIPTIONS = {
     "reincarnation": "Rebirth, reincarnation, or a second-life premise.",
     "fan service": "Fan-service imagery or suggestive presentation; use the mature tag when age-restricted.",
     "mature": "Age-restricted content. The panel stays hidden in non-NSFW channels.",
+    "doujinshi": "Self-published or independently produced comics.",
+    "gender bender": "Stories involving gender disguise, transformation, or role reversal.",
+    "harem": "Stories centered on one character and multiple potential partners.",
+    "mecha": "Robots, powered armor, or large mechanical vehicles.",
+    "shoujo ai": "Romantic relationships between female characters.",
+    "shounen ai": "Romantic relationships between male characters.",
+    "sports": "Sports, athletic competition, or training.",
+    "yaoi": "Male-male romance or relationships.",
+    "yuri": "Female-female romance or relationships.",
 }
 CHAPTER_CAPTION_RE = re.compile(
     r"^\s*(?:(?:chapter|ch\.?)\s*)?#?(\d+(?:\.\d+)?|N/A)"
@@ -149,10 +175,11 @@ async def _schema() -> None:
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS panel_tags (
                 panel_id BIGINT NOT NULL REFERENCES panels(id) ON DELETE CASCADE,
-                tag VARCHAR(30) NOT NULL,
+                tag VARCHAR(100) NOT NULL,
                 PRIMARY KEY (panel_id, tag)
             )
         """)
+        await conn.execute("ALTER TABLE panel_tags ALTER COLUMN tag TYPE VARCHAR(100)")
         await conn.execute("ALTER TABLE panels ADD COLUMN IF NOT EXISTS anilist_id BIGINT")
         await conn.execute("ALTER TABLE panels ADD COLUMN IF NOT EXISTS chapter_number VARCHAR(32)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_panels_created_at ON panels(created_at DESC)")
@@ -179,19 +206,78 @@ async def _schema() -> None:
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_mod_log_guild_created ON mod_log(guild_id, created_at DESC)")
 
 
-def _tags(raw: str | None) -> list[str]:
+def _normalise_tag_values(values: list[str] | tuple[str, ...]) -> list[str]:
     result: list[str] = []
-    for part in (raw or "").split(","):
-        tag = part.strip().lower()
+    for value in values:
+        tag = str(value).strip().lower()
         if not tag:
             continue
-        if len(tag) > 30:
-            raise ValueError("Each tag must be 30 characters or fewer.")
+        if len(tag) > MAX_TAG_LENGTH:
+            raise ValueError(f"Each tag must be {MAX_TAG_LENGTH} characters or fewer.")
         if tag not in result:
             result.append(tag)
-    if len(result) > 20:
-        raise ValueError("Use no more than 20 unique tags across both selectors.")
+    if len(result) > MAX_PANEL_TAGS:
+        raise ValueError(f"Use no more than {MAX_PANEL_TAGS} unique tags.")
     return result
+
+
+def _tags(raw: str | None) -> list[str]:
+    return _normalise_tag_values((raw or "").split(","))
+
+
+def _build_panel_tag_catalogue(
+    anilist_tags: list[dict[str, Any]] | None = None,
+) -> tuple[tuple[str, str], ...]:
+    """Combine bundled MangaUpdates-style tags with AniList's non-adult tag collection."""
+    catalogue: dict[str, str] = {}
+    for tag in (*PANEL_TAGS, *PANEL_VISUAL_TAGS, *PANEL_MANGAUPDATES_TAGS):
+        catalogue[tag] = PANEL_TAG_DESCRIPTIONS.get(tag, "MangaUpdates genre or category.")
+
+    for entry in anilist_tags or []:
+        if not isinstance(entry, dict) or bool(entry.get("isAdult")):
+            continue
+        name = str(entry.get("name") or "").strip().lower()
+        if not name or len(name) > MAX_TAG_LENGTH:
+            continue
+        description = re.sub(r"<[^>]*>", " ", str(entry.get("description") or ""))
+        description = " ".join(description.split()) or "AniList manga tag."
+        if len(description) > 100:
+            description = description[:97].rstrip() + "..."
+        catalogue.setdefault(name, description)
+
+    return tuple(sorted(catalogue.items()))
+
+
+async def _panel_tag_catalogue() -> tuple[tuple[str, str], ...]:
+    """Fetch AniList tags once per process, falling back to the bundled catalogue."""
+    global _PANEL_TAG_CATALOGUE
+    if _PANEL_TAG_CATALOGUE is not None:
+        return _PANEL_TAG_CATALOGUE
+
+    async with _PANEL_TAG_CATALOGUE_LOCK:
+        if _PANEL_TAG_CATALOGUE is not None:
+            return _PANEL_TAG_CATALOGUE
+
+        catalogue = _build_panel_tag_catalogue()
+        timeout = aiohttp.ClientTimeout(total=10)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    "https://graphql.anilist.co",
+                    json={"query": ANILIST_TAG_QUERY},
+                    headers={"Accept": "application/json"},
+                ) as response:
+                    response.raise_for_status()
+                    payload = await response.json(content_type=None)
+            entries = payload.get("data", {}).get("MediaTagCollection")
+            if not isinstance(entries, list):
+                raise ValueError("AniList did not return a tag collection")
+            catalogue = _build_panel_tag_catalogue(entries)
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError) as exc:
+            log.warning("Could not load AniList tag catalogue; using bundled tags: %s", exc)
+
+        _PANEL_TAG_CATALOGUE = catalogue
+        return catalogue
 
 
 def _parse_chapter_caption(value: str) -> tuple[str, str]:
@@ -465,13 +551,174 @@ async def _audit_delete(interaction: discord.Interaction, panel: dict[str, Any])
             log.warning("Could not post panel audit log to guild %s", interaction.guild_id)
 
 
+class PanelTagPickerView(FeedbackAwareView):
+    """Paginated tag selector; every Discord select contains at most 25 options."""
+
+    def __init__(
+        self,
+        cog: "PanelCog",
+        *,
+        catalogue: tuple[tuple[str, str], ...],
+        mode: str,
+        user_id: int,
+        guild_id: int,
+        panel: dict[str, Any] | None = None,
+        source_url: str | None = None,
+    ):
+        super().__init__(timeout=300)
+        self.cog, self.mode = cog, mode
+        self.user_id, self.guild_id = user_id, guild_id
+        self.panel = panel
+        self.source_url = source_url
+        selected = list(panel.get("tags", [])) if panel else []
+        if panel and panel.get("is_nsfw") and "mature" not in selected:
+            selected.append("mature")
+
+        by_name = dict(catalogue)
+        for tag in selected:
+            by_name.setdefault(tag, "Previously saved tag retained for this panel.")
+        self.catalogue = tuple(sorted(by_name.items()))
+        self.selected_tags = selected[:MAX_PANEL_TAGS]
+        self.page = 0
+        self._tag_select: discord.ui.Select | None = None
+        self._build()
+
+    @property
+    def page_count(self) -> int:
+        return max(1, (len(self.catalogue) + 24) // 25)
+
+    def _page_entries(self) -> tuple[tuple[str, str], ...]:
+        start = self.page * 25
+        return self.catalogue[start:start + 25]
+
+    def _content(self) -> str:
+        return (
+            "🏷️ **Choose panel tags**\n"
+            f"Page **{self.page + 1}/{self.page_count}** · "
+            f"**{len(self.catalogue):,}** available tags · "
+            f"**{len(self.selected_tags)}/{MAX_PANEL_TAGS}** selected.\n"
+            "Selections on other pages are retained. Choose tags, browse with Previous/Next, "
+            "then press **Continue**."
+        )
+
+    def _build(self) -> None:
+        self.clear_items()
+        entries = self._page_entries()
+        visible_tags = {tag for tag, _ in entries}
+        other_selected = sum(tag not in visible_tags for tag in self.selected_tags)
+        capacity = max(1, min(MAX_PANEL_TAGS - other_selected, len(entries)))
+        select = discord.ui.Select(
+            placeholder=f"Select tags · page {self.page + 1}/{self.page_count}",
+            options=[
+                discord.SelectOption(
+                    label=tag.title()[:100],
+                    value=tag,
+                    description=description[:100],
+                    default=tag in self.selected_tags,
+                )
+                for tag, description in entries
+            ],
+            min_values=0,
+            max_values=capacity,
+            row=0,
+        )
+        select.callback = self._select_tags
+        self._tag_select = select
+        self.add_item(select)
+
+        previous = discord.ui.Button(
+            label="Previous", style=discord.ButtonStyle.secondary, row=1, disabled=self.page == 0
+        )
+        previous.callback = self._previous_page
+        self.add_item(previous)
+
+        page_label = discord.ui.Button(
+            label=f"{self.page + 1}/{self.page_count}",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+            disabled=True,
+        )
+        self.add_item(page_label)
+
+        next_page = discord.ui.Button(
+            label="Next", style=discord.ButtonStyle.secondary, row=1, disabled=self.page + 1 >= self.page_count
+        )
+        next_page.callback = self._next_page
+        self.add_item(next_page)
+
+        continue_button = discord.ui.Button(label="Continue", style=discord.ButtonStyle.success, row=2)
+        continue_button.callback = self._continue
+        self.add_item(continue_button)
+
+        cancel_button = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.danger, row=2)
+        cancel_button.callback = self._cancel
+        self.add_item(cancel_button)
+
+    async def _select_tags(self, interaction: discord.Interaction) -> None:
+        visible_tags = {tag for tag, _ in self._page_entries()}
+        selected_here = list(self._tag_select.values if self._tag_select else [])
+        updated = [tag for tag in self.selected_tags if tag not in visible_tags]
+        updated.extend(selected_here)
+        updated = list(dict.fromkeys(updated))
+        if len(updated) > MAX_PANEL_TAGS:
+            await interaction.response.send_message(
+                f"You can select at most {MAX_PANEL_TAGS} tags across all pages.",
+                ephemeral=True,
+            )
+            return
+        self.selected_tags = updated
+        self._build()
+        await interaction.response.edit_message(content=self._content(), view=self)
+
+    async def _previous_page(self, interaction: discord.Interaction) -> None:
+        self.page = max(0, self.page - 1)
+        self._build()
+        await interaction.response.edit_message(content=self._content(), view=self)
+
+    async def _next_page(self, interaction: discord.Interaction) -> None:
+        self.page = min(self.page_count - 1, self.page + 1)
+        self._build()
+        await interaction.response.edit_message(content=self._content(), view=self)
+
+    async def _continue(self, interaction: discord.Interaction) -> None:
+        if not self.selected_tags:
+            await interaction.response.send_message("Select at least one tag before continuing.", ephemeral=True)
+            return
+        await interaction.response.send_modal(
+            PanelForm(
+                self.cog,
+                mode=self.mode,
+                user_id=self.user_id,
+                guild_id=self.guild_id,
+                panel=self.panel,
+                source_url=self.source_url,
+                selected_tags=list(self.selected_tags),
+            )
+        )
+
+    async def _cancel(self, interaction: discord.Interaction) -> None:
+        await interaction.response.edit_message(content="Panel submission cancelled.", view=None)
+
+
 class PanelForm(FeedbackAwareModal):
-    def __init__(self, cog: "PanelCog", *, mode: str, user_id: int, guild_id: int,
-                 panel: dict[str, Any] | None = None, source_url: str | None = None):
+    def __init__(
+        self,
+        cog: "PanelCog",
+        *,
+        mode: str,
+        user_id: int,
+        guild_id: int,
+        panel: dict[str, Any] | None = None,
+        source_url: str | None = None,
+        selected_tags: list[str] | None = None,
+    ):
         super().__init__(title="Add Manga Panel" if mode == "add" else "Edit Manga Panel", timeout=300)
         self.cog, self.mode, self.user_id, self.guild_id = cog, mode, user_id, guild_id
         self.panel = panel
         self.source_url = source_url or (panel.get("source_url") if panel else None)
+        self.selected_tags = list(
+            selected_tags if selected_tags is not None else (panel.get("tags", []) if panel else [])
+        )
         self.image = discord.ui.Label(
             text="🖼️ Panel image",
             description="Discord's upload limit for this server applies. Optional when editing.",
@@ -482,51 +729,8 @@ class PanelForm(FeedbackAwareModal):
             description="Enter a title, numeric AniList manga ID, or an AniList manga URL.",
             component=discord.ui.TextInput(default=panel["title"] if panel else None, max_length=300, required=True),
         )
-        selected_tags = list(panel.get("tags", [])) if panel else []
-        if panel and panel.get("is_nsfw") and "mature" not in selected_tags:
-            selected_tags.append("mature")
-        tag_values = list(dict.fromkeys(
-            [tag for tag in selected_tags if tag not in PANEL_VISUAL_TAGS] + list(PANEL_TAGS)
-        ))[:25]
-        visual_tag_values = list(dict.fromkeys(
-            [tag for tag in selected_tags if tag in PANEL_VISUAL_TAGS] + list(PANEL_VISUAL_TAGS)
-        ))[:25]
-        self.tags_field = discord.ui.Label(
-            text="🏷️ Genres & story (required)",
-            description="Choose 1–10 tags. Each option includes a short description.",
-            component=discord.ui.Select(
-                placeholder="Choose genres and story themes",
-                options=[
-                    discord.SelectOption(
-                        label=tag.title()[:100],
-                        value=tag,
-                        description=PANEL_TAG_DESCRIPTIONS.get(tag, "Saved tag from an earlier version.")[:100],
-                        default=tag in selected_tags,
-                    )
-                    for tag in tag_values
-                ],
-                min_values=1,
-                max_values=min(10, len(tag_values)),
-            ),
-        )
-        self.visual_tags_field = discord.ui.Label(
-            text="🎨 Themes & panel style (optional)",
-            description="Choose up to 10 more tags. Select Mature for age-restricted content.",
-            component=discord.ui.Select(
-                placeholder="Choose visual, scene, or setting tags",
-                options=[
-                    discord.SelectOption(
-                        label=tag.title()[:100],
-                        value=tag,
-                        description=PANEL_TAG_DESCRIPTIONS.get(tag, "Saved tag from an earlier version.")[:100],
-                        default=tag in selected_tags,
-                    )
-                    for tag in visual_tag_values
-                ],
-                min_values=0,
-                max_values=min(10, len(visual_tag_values)),
-            ),
-        )
+        if panel and panel.get("is_nsfw") and "mature" not in self.selected_tags:
+            self.selected_tags.append("mature")
         caption_default = "N/A"
         if panel:
             old_caption = str(panel.get("caption") or "")
@@ -544,7 +748,7 @@ class PanelForm(FeedbackAwareModal):
                 required=True,
             ),
         )
-        for item in (self.image, self.title_field, self.tags_field, self.visual_tags_field, self.caption_field):
+        for item in (self.image, self.title_field, self.caption_field):
             self.add_item(item)
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -567,11 +771,10 @@ class PanelForm(FeedbackAwareModal):
             anilist_id, source_url = _carry_anilist_link(
                 self.panel, title, requested_anilist_id, requested_anilist_url or self.source_url,
             )
-            selected_tags = list(self.tags_field.component.values or []) + list(self.visual_tags_field.component.values or [])
-            if not selected_tags:
+            if not self.selected_tags:
                 await interaction.followup.send("Select at least one tag for this panel.", ephemeral=True)
                 return
-            tags = _tags(",".join(selected_tags))
+            tags = _normalise_tag_values(self.selected_tags)
             values = self.image.component.values or []
             upload = values[0] if values else None
             image_bytes = None
@@ -922,8 +1125,10 @@ class PanelBrowserView(FeedbackAwareView):
                 await interaction.response.send_message("Image unavailable or hidden in this channel.", ephemeral=True); return
             if not await _can_manage(interaction, panel):
                 await interaction.response.send_message("Only the uploader or a moderator of this server can edit this panel.", ephemeral=True); return
-            await interaction.response.send_modal(PanelForm(self.cog, mode="edit", user_id=interaction.user.id,
-                                                            guild_id=interaction.guild_id or 0, panel=panel))
+            await self.cog._open_tag_picker(
+                interaction, mode="edit", user_id=interaction.user.id,
+                guild_id=interaction.guild_id or 0, panel=panel,
+            )
         except Exception as exc:
             log.exception("Edit panel action failed")
             await interaction.response.send_message("Something went wrong.", ephemeral=True)
@@ -1019,8 +1224,10 @@ class PanelResultView(FeedbackAwareView):
             panel = await _get_panel(self.panel_id, True)
             if not panel or not await _can_manage(interaction, panel):
                 await interaction.response.send_message("You cannot edit this panel.", ephemeral=True); return
-            await interaction.response.send_modal(PanelForm(self.cog, mode="edit", user_id=interaction.user.id,
-                                                            guild_id=interaction.guild_id or 0, panel=panel))
+            await self.cog._open_tag_picker(
+                interaction, mode="edit", user_id=interaction.user.id,
+                guild_id=interaction.guild_id or 0, panel=panel,
+            )
         except Exception as exc:
             log.exception("Edit saved panel failed")
             await interaction.response.send_message("Something went wrong.", ephemeral=True)
@@ -1055,7 +1262,9 @@ class PanelHomeView(FeedbackAwareView):
     async def add(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.guild_id is None:
             await interaction.response.send_message("Adding panels is only available in a server.", ephemeral=True); return
-        await interaction.response.send_modal(PanelForm(self.cog, mode="add", user_id=interaction.user.id, guild_id=interaction.guild_id))
+        await self.cog._open_tag_picker(
+            interaction, mode="add", user_id=interaction.user.id, guild_id=interaction.guild_id,
+        )
 
     @discord.ui.button(label="Configure", emoji="⚙️", style=discord.ButtonStyle.secondary, row=1)
     async def configure(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1097,8 +1306,10 @@ class PanelAttachmentPicker(FeedbackAwareView):
     async def choose(self, interaction: discord.Interaction):
         try:
             selected = self.attachments[int(self.children[0].values[0])]
-            await interaction.response.send_modal(PanelForm(self.cog, mode="add", user_id=interaction.user.id,
-                                                            guild_id=interaction.guild_id or 0, source_url=self.message.jump_url))
+            await self.cog._open_tag_picker(
+                interaction, mode="add", user_id=interaction.user.id,
+                guild_id=interaction.guild_id or 0, source_url=self.message.jump_url,
+            )
         except Exception as exc:
             log.exception("Attachment selection failed")
             await interaction.response.send_message("Something went wrong.", ephemeral=True)
@@ -1132,6 +1343,29 @@ class PanelCog(commands.Cog):
             try: channel = await self.bot.fetch_channel(int(panel["storage_channel_id"]))
             except discord.HTTPException: return
         await self._delete_message(channel, int(panel["storage_message_id"]))
+
+    async def _open_tag_picker(
+        self,
+        interaction: discord.Interaction,
+        *,
+        mode: str,
+        user_id: int,
+        guild_id: int,
+        panel: dict[str, Any] | None = None,
+        source_url: str | None = None,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        catalogue = await _panel_tag_catalogue()
+        view = PanelTagPickerView(
+            self,
+            catalogue=catalogue,
+            mode=mode,
+            user_id=user_id,
+            guild_id=guild_id,
+            panel=panel,
+            source_url=source_url,
+        )
+        await interaction.followup.send(content=view._content(), view=view, ephemeral=True)
 
     async def _post_browser(self, interaction: discord.Interaction, ids: list[int], tags: list[str] | None = None,
                             keyword: str | None = None, user_id: int | None = None, fixed_ids: bool = False):
@@ -1250,8 +1484,10 @@ class PanelCog(commands.Cog):
             if not images:
                 await interaction.response.send_message("That message has no supported image attachments.", ephemeral=True); return
             if len(images) == 1:
-                await interaction.response.send_modal(PanelForm(self, mode="add", user_id=interaction.user.id,
-                                                                guild_id=interaction.guild_id, source_url=message.jump_url))
+                await self._open_tag_picker(
+                    interaction, mode="add", user_id=interaction.user.id,
+                    guild_id=interaction.guild_id, source_url=message.jump_url,
+                )
             else:
                 await interaction.response.send_message("Choose the image to save, then complete the Add Panel form.", view=PanelAttachmentPicker(self, message, images), ephemeral=True)
         except Exception as exc:
