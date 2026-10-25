@@ -45,45 +45,81 @@ else:
 
 
 class FeedbackModal(discord.ui.Modal, title="Submit Feedback"):
-    """Collect feedback details in Discord's native modal."""
-
-    category = discord.ui.TextInput(
-        label="Feedback type",
-        placeholder="Ideas or Bugs",
-        min_length=4,
-        max_length=10,
-        required=True,
-    )
-    description = discord.ui.TextInput(
-        label="What would you like to share?",
-        placeholder="Describe your idea or the bug, including steps to reproduce if relevant.",
-        style=discord.TextStyle.paragraph,
-        min_length=10,
-        max_length=4000,
-        required=True,
-    )
-    image_url = discord.ui.TextInput(
-        label="Image URL (optional)",
-        placeholder="https://…",
-        max_length=500,
-        required=False,
-    )
+    """Collect feedback details and up to five image uploads."""
 
     def __init__(self, cog):
-        super().__init__()
+        super().__init__(timeout=300)
         self.cog = cog
+        self.category_field = discord.ui.Label(
+            text="Feedback type",
+            component=discord.ui.TextInput(
+                placeholder="Ideas or Bugs",
+                min_length=4,
+                max_length=10,
+                required=True,
+            ),
+        )
+        self.description_field = discord.ui.Label(
+            text="What would you like to share?",
+            description="Describe your idea or the bug.",
+            component=discord.ui.TextInput(
+                style=discord.TextStyle.paragraph,
+                min_length=10,
+                max_length=3000,
+                required=True,
+            ),
+        )
+        self.steps_field = discord.ui.Label(
+            text="Steps / context",
+            description="For bugs, explain how to reproduce it. Optional for ideas.",
+            component=discord.ui.TextInput(
+                style=discord.TextStyle.paragraph,
+                max_length=1500,
+                required=False,
+            ),
+        )
+        self.expected_field = discord.ui.Label(
+            text="Expected result",
+            description="What should happen, or what outcome would help?",
+            component=discord.ui.TextInput(
+                style=discord.TextStyle.paragraph,
+                max_length=1000,
+                required=False,
+            ),
+        )
+        self.images_field = discord.ui.Label(
+            text="Screenshots or image evidence (optional)",
+            description="Upload up to five PNG, JPEG, GIF, WebP, or AVIF images.",
+            component=discord.ui.FileUpload(min_values=0, max_values=5, required=False),
+        )
+        for item in (
+            self.category_field,
+            self.description_field,
+            self.steps_field,
+            self.expected_field,
+            self.images_field,
+        ):
+            self.add_item(item)
 
     async def on_submit(self, interaction: discord.Interaction):
+        description = str(self.description_field.component.value or "").strip()
+        context = str(self.steps_field.component.value or "").strip()
+        expected = str(self.expected_field.component.value or "").strip()
+        combined_description = description
+        if context:
+            combined_description += f"\n\n**Steps / context**\n{context}"
+        if expected:
+            combined_description += f"\n\n**Expected result**\n{expected}"
         await self.cog._submit_feedback(
             interaction,
-            category=str(self.category.value),
-            description=str(self.description.value).strip(),
-            image_url=str(self.image_url.value).strip() if self.image_url.value else None,
+            category=str(self.category_field.component.value),
+            description=combined_description,
+            images=list(self.images_field.component.values or []),
         )
 
     async def on_error(self, interaction: discord.Interaction, error: Exception):
         logger.exception("Unhandled error in feedback modal", exc_info=error)
-        message = "Something went wrong while submitting feedback. Please try again later."
+        message = "Something went wrong while submitting feedback. Please run /feedback to try again."
         try:
             if interaction.response.is_done():
                 await interaction.followup.send(message, ephemeral=True)
@@ -205,7 +241,7 @@ class Feedback(commands.Cog):
         *,
         category: str,
         description: str,
-        image_url: str | None = None,
+        images: list | None = None,
     ):
         """Validate and publish a modal submission to the configured feedback channel."""
         user = interaction.user
@@ -231,16 +267,6 @@ class Feedback(commands.Cog):
                 ephemeral=True,
             )
             return
-
-        if image_url:
-            from urllib.parse import urlparse
-            parsed_url = urlparse(image_url)
-            if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
-                await interaction.response.send_message(
-                    "The image URL must be a valid link beginning with https:// or http://.",
-                    ephemeral=True,
-                )
-                return
 
         type_name, color = category_aliases[normalized_category]
         logger.info("Feedback submission started by %s - Type: %s", user_info, type_name)
@@ -277,10 +303,58 @@ class Feedback(commands.Cog):
             avatar = user.display_avatar.url if user.display_avatar else None
             embed.set_author(name=user.display_name, icon_url=avatar)
             embed.set_footer(text=f"Submitted by {user} • User ID: {user.id}")
-            if image_url:
-                embed.set_image(url=image_url)
+            feedback_files = []
+            image_embeds = []
+            allowed_image_types = {
+                "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif",
+            }
+            allowed_extensions = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif"}
+            for index, upload in enumerate(images or [], start=1):
+                content_type = (getattr(upload, "content_type", None) or "").lower()
+                original_name = Path(getattr(upload, "filename", f"feedback-{index}.png")).name
+                extension = Path(original_name).suffix.lower()
+                if content_type not in allowed_image_types or extension not in allowed_extensions:
+                    await interaction.followup.send(
+                        f"Image {index} is not supported. Please run /feedback again and upload PNG, JPEG, GIF, WebP, or AVIF files.",
+                        ephemeral=True,
+                    )
+                    return
+                file_size = int(getattr(upload, "size", 0) or 0)
+                size_limit = int(getattr(interaction, "filesize_limit", 0) or 0)
+                if size_limit and file_size > size_limit:
+                    await interaction.followup.send(
+                        f"Image {index} exceeds this server's upload limit. Please run /feedback again with a smaller image.",
+                        ephemeral=True,
+                    )
+                    return
+                image_data = await upload.read()
+                if not image_data:
+                    await interaction.followup.send(
+                        f"Image {index} was empty or could not be read. Please run /feedback again.",
+                        ephemeral=True,
+                    )
+                    return
+                if size_limit and len(image_data) > size_limit:
+                    await interaction.followup.send(
+                        f"Image {index} exceeds this server's upload limit. Please run /feedback again with a smaller image.",
+                        ephemeral=True,
+                    )
+                    return
+                stem = Path(original_name).stem[:60] or f"image-{index}"
+                filename = f"feedback-{index}-{stem}{extension}"
+                feedback_files.append(discord.File(io.BytesIO(image_data), filename=filename))
+                image_embed = discord.Embed(
+                    title=f"📎 Image {index}/{len(images or [])}",
+                    color=color,
+                )
+                image_embed.set_image(url=f"attachment://{filename}")
+                image_embeds.append(image_embed)
 
-            message = await channel.send(embed=embed, view=FeedbackView(self.bot, user))
+            message = await channel.send(
+                embeds=[embed, *image_embeds],
+                files=feedback_files,
+                view=FeedbackView(self.bot, user),
+            )
 
             self.message_user_map[message.id] = user.id
             try:
