@@ -1,6 +1,6 @@
 from helpers.color_palette import PALETTE
 import discord
-from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView
+from helpers.command_error_handler import application_error_message, FeedbackAwareModal, FeedbackAwareView
 from discord.ext import commands
 from discord import app_commands
 import logging
@@ -636,7 +636,7 @@ class InviteTracker(commands.Cog):
             await interaction.followup.send(
                 embed=build_error_embed(
                     title="Error",
-                    description="An error occurred while fetching statistics. Please try again."
+                    description=application_error_message(e)
                 ),
                 ephemeral=True
             )
@@ -927,7 +927,7 @@ class InviteTracker(commands.Cog):
             await interaction.followup.send(
                 embed=build_error_embed(
                     title="Error",
-                    description="An error occurred while fetching the leaderboard. Please try again."
+                    description=application_error_message(e)
                 ),
                 ephemeral=True
             )
@@ -973,7 +973,7 @@ class InviteTracker(commands.Cog):
             await interaction.followup.send(
                 embed=build_error_embed(
                     title="Error",
-                    description="An error occurred while loading theme settings. Please try again."
+                    description=application_error_message(e)
                 ),
                 ephemeral=True
             )
@@ -1074,7 +1074,7 @@ class CustomMessageModal(FeedbackAwareModal, title="Custom Message Editor"):
             await interaction.followup.send(
                 embed=build_error_embed(
                     title="Error",
-                    description="An error occurred while saving messages. Please try again."
+                    description=application_error_message(e)
                 ),
                 ephemeral=True
             )
@@ -1181,7 +1181,7 @@ class InviteThemeView(FeedbackAwareView):
             await interaction.followup.send(
                 embed=build_error_embed(
                     title="Error",
-                    description="An error occurred. Please try again."
+                    description=application_error_message(e)
                 ),
                 ephemeral=True
             )
