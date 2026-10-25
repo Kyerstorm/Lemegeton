@@ -323,7 +323,9 @@ async def handle_component_error(
     """
     error_source = source or interaction
     if log_error:
-        _log_error(error_source, error, label=f"component:{component}")
+        # Log the interaction, not only the View/Modal object, so user/guild/channel IDs
+        # remain available while the component object is used to resolve exclusions.
+        _log_error(interaction, error, label=f"component:{component}")
     if is_excluded_command(error_source):
         return
     await _send_interaction_message(interaction, FEEDBACK_ERROR_GUIDANCE)
