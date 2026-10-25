@@ -14,6 +14,7 @@ import config
 from cogs_test.general_commands.dashboard import command_meta
 from helpers.color_palette import PALETTE
 from helpers.embed_helper import build_error_embed, build_info_embed, build_success_embed, build_warning_embed
+from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView, FEEDBACK_ERROR_GUIDANCE, application_error_message
 from helpers.custom_roles import ADMIN_GROUP, COMMAND_GROUP, ROLE_LIMIT
 from helpers.custom_roles import images, service, storage, tokens, validation
 
@@ -61,8 +62,9 @@ def log_panel_note(level: int, message: str, *args) -> None:
         log.log(level, "Custom Roles: " + message, *args)
 
 
-async def _send_error(interaction: discord.Interaction):
-    embed = build_error_embed("Something went wrong", "That didn't work. Please try again in a moment.")
+async def _send_error(interaction: discord.Interaction, error: BaseException | None = None):
+    message = application_error_message(error) if error is not None else FEEDBACK_ERROR_GUIDANCE
+    embed = build_error_embed("Something went wrong", message)
     try:
         if interaction.response.is_done():
             await interaction.followup.send(embed=embed, ephemeral=True)
@@ -79,7 +81,7 @@ class LoggedView(discord.ui.View):
     async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item):
         log_panel_error(f"{type(self).__name__} {getattr(item, 'label', None) or type(item).__name__!r}",
                         interaction, error)
-        await _send_error(interaction)
+        await _send_error(interaction, error)
 
 
 def _progress_updater(interaction: discord.Interaction, title: str) -> service.ProgressCallback:
@@ -127,7 +129,7 @@ class PendingButton(
             await self._run(interaction)
         except Exception as exc:
             log_panel_error(f"pending removal {self.action}", interaction, exc)
-            await _send_error(interaction)
+            await _send_error(interaction, exc)
 
     async def _run(self, interaction: discord.Interaction):
         guild = interaction.guild
@@ -757,7 +759,7 @@ def _panel_view(panel: str, owner_id: int, opened_at: int, buttons: list) -> dis
     return view
 
 
-class PanelModal(discord.ui.Modal):
+class PanelModal(FeedbackAwareModal):
     """A form opened from a panel button; `handler(interaction, modal)` does the work."""
 
     def __init__(self, title: str, handler):
@@ -1390,7 +1392,7 @@ class CustomRoles(commands.Cog):
             return  # interaction_check already told them where to go
         log_panel_error(f"command /{getattr(interaction.command, 'qualified_name', '?')}", interaction,
                         getattr(error, "original", error))
-        await _send_error(interaction)
+        await _send_error(interaction, getattr(error, "original", error))
 
     # ============================================================================
     # COMMANDS: one panel each
@@ -1647,7 +1649,7 @@ class CustomRoles(commands.Cog):
             "Pressing **Color picker** again gives you a new link and stops this one. "
             "**Don't share it:** anyone with it can change your role until it closes.",
         )
-        view = discord.ui.View()
+        view = FeedbackAwareView()
         view.add_item(discord.ui.Button(label="Open color picker", style=discord.ButtonStyle.link, url=url))
         try:
             await interaction.followup.send(embed=embed, view=view, ephemeral=True)
