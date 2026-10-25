@@ -45,7 +45,7 @@ sudo chmod 0750 /opt/lemegeton/data /opt/lemegeton/logs /opt/lemegeton/runtime-h
 
 ## Secrets and environment
 
-Create `/etc/lemegeton/bot.env` from `.env.example`, including the existing bot/database settings, `DASHBOARD_BRIDGE_SECRET`, and picker settings. Create `/etc/lemegeton/dashboard.env` with these dashboard values:
+Create `/etc/lemegeton/bot.env` from `.env.example`, including the existing bot/database settings, `DASHBOARD_BRIDGE_SECRET`, and picker settings. For this Nginx deployment, set `CUSTOM_ROLES_PUBLIC_URL=https://dashboard.example.com` and `CUSTOM_ROLES_TRUST_PROXY=true` in **bot.env**. The trusted Nginx proxy below appends the real client address as the rightmost `X-Forwarded-For` value; do not enable trust-proxy mode unless your actual ingress does that. Create `/etc/lemegeton/dashboard.env` with these Rust dashboard values:
 
 ```dotenv
 DASHBOARD_HOST=127.0.0.1

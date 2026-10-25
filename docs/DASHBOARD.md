@@ -32,8 +32,10 @@ Configure the following in the service environment (see `.env.example` for the f
 | `DASHBOARD_PICKER_URL` | Private picker URL; default `http://127.0.0.1:8092` |
 | `DASHBOARD_PORT` | Public Rust service port; default `8080` |
 | `DASHBOARD_ALLOW_PUBLIC_BIND` | Explicit opt-in to a non-loopback bind; only enable behind platform ingress or a protected reverse proxy |
+| `CUSTOM_ROLES_PUBLIC_URL` | Exact browser-visible origin for picker mutation Origin checks; match `DASHBOARD_PUBLIC_URL` |
+| `CUSTOM_ROLES_TRUST_PROXY` | Enable only when the trusted ingress appends the real client IP as the rightmost `X-Forwarded-For` entry |
 
-Use a random `DASHBOARD_BRIDGE_SECRET` of at least 32 UTF-8 bytes (for example, `openssl rand -hex 32`). Do not commit it. Rust refuses to call the bot bridge with a shorter value; the Python bridge and picker refuse non-loopback listeners. The Rust web service binds to `127.0.0.1` by default. On production HTTPS, set `DASHBOARD_PUBLIC_URL` to the browser-visible origin and `DASHBOARD_COOKIE_SECURE=true`; startup fails closed if a non-local HTTP origin or mismatched OAuth callback is configured. The configured OAuth callback must exactly match the Discord Developer Portal entry.
+Use a random `DASHBOARD_BRIDGE_SECRET` of at least 32 UTF-8 bytes (for example, `openssl rand -hex 32`). Do not commit it. Rust refuses to call the bot bridge with a shorter value; the Python bridge and picker refuse non-loopback listeners. The Rust web service binds to `127.0.0.1` by default. On production HTTPS, set `DASHBOARD_PUBLIC_URL` and `CUSTOM_ROLES_PUBLIC_URL` to the same browser-visible origin and `DASHBOARD_COOKIE_SECURE=true`; startup fails closed if a non-local HTTP origin or mismatched OAuth callback is configured. The configured OAuth callback must exactly match the Discord Developer Portal entry.
 
 The bot still requires its existing Discord token and PostgreSQL configuration. The dashboard does not create a second Discord client or a second command registry.
 
