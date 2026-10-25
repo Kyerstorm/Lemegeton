@@ -1081,18 +1081,39 @@ class BrowseCog(commands.Cog):
                 # Browser automation can hang on provider challenges; bound the wait so
                 # the deferred Discord interaction always receives a response.
                 results = await asyncio.wait_for(
-                    asyncio.to_thread(scrape_novelupdates, {"query": title}, output=None),
-                    timeout=20,
+                    search_novelupdates(title),
+                    timeout=45,
                 )
+            except ScrapeBlockedError as exc:
+                logger.warning("Novel Updates blocked the search for %r: %s", title, exc)
+                embed = build_error_embed(
+                    "Novel Updates Temporarily Unavailable",
+                    "Novel Updates blocked or rate-limited automated access. Please try again later.",
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
             except asyncio.TimeoutError:
                 logger.warning("Novel Updates search timed out for %r", title)
-                results = []
+                embed = build_error_embed(
+                    "Novel Updates Search Timed Out",
+                    "Novel Updates took too long to respond. Please try again in a moment.",
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
             except Exception as e:
                 logger.warning("Novel Updates search failed for %r: %s", title, e, exc_info=True)
-                results = []
+                embed = build_error_embed(
+                    "Novel Updates Search Failed",
+                    "The search service failed while reading Novel Updates. Please try again later.",
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
 
             if not results:
-                embed = build_error_embed("No Results Found", "No webnovel results found on Novel Updates.")
+                embed = build_error_embed(
+                    "No Results Found",
+                    f"No webnovel results found on Novel Updates for {title!r}.",
+                )
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
 
@@ -1622,8 +1643,13 @@ class BrowseCog(commands.Cog):
 
         if media_type == "WEBNOVEL":
             try:
-                results = await asyncio.to_thread(
-                    scrape_novelupdates, {"query": current}, output=None
+                # Autocomplete gets a short HTTP-only probe; full searches can use
+                # the slower Botasaurus fallback after Discord's response is deferred.
+                results = await asyncio.wait_for(
+                    search_novelupdates(
+                        current, browser_fallback=False, http_timeout=2, max_http_urls=1
+                    ),
+                    timeout=2.25,
                 )
             except Exception as e:
                 logger.debug("Novel Updates autocomplete failed: %s", e)
