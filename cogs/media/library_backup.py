@@ -1,6 +1,7 @@
 from helpers.color_palette import PALETTE
 # library_backup.py
 import discord
+from helpers.command_error_handler import application_error_message, FeedbackAwareView
 from discord import app_commands
 from discord.ext import commands
 import io
@@ -519,7 +520,7 @@ class LibraryBackup(commands.Cog):
             username = await get_anilist_username_from_db(interaction.user.id, guild_id)
             if not username:
                 # show register guidance view
-                class RegisterView(discord.ui.View):
+                class RegisterView(FeedbackAwareView):
                     def __init__(self):
                         super().__init__(timeout=300)
 
@@ -610,7 +611,7 @@ class LibraryBackup(commands.Cog):
             await edit_progress(0, "Failed to fetch AniList data.")
             embed = build_error_embed(
                 "Error",
-                "Failed to fetch AniList data. Try again later."
+                application_error_message(e)
             )
             await progress_msg.edit(embed=embed)
             return
@@ -662,7 +663,7 @@ class LibraryBackup(commands.Cog):
             logger.error(f"Error generating file for {username}: {e}", exc_info=True)
             embed = build_error_embed(
                 "Export Failed",
-                "An error occurred while generating the file."
+                application_error_message(e)
             )
             await progress_msg.edit(embed=embed)
             return
