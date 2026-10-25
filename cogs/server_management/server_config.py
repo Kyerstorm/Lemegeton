@@ -4,6 +4,7 @@ Consolidates all server management commands into a single interactive interface
 """
 
 import discord
+from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView
 from discord.ext import commands
 from discord import app_commands
 import logging
@@ -69,7 +70,7 @@ def validate_config_channel(channel, guild_id: int, bot_member, is_text_channel:
     return None
 
 
-class ServerConfigMainView(discord.ui.View):
+class ServerConfigMainView(FeedbackAwareView):
     """Main menu view for unified server configuration system"""
     
     def __init__(self, cog, guild_id: int):
@@ -351,7 +352,7 @@ class ServerConfigMainView(discord.ui.View):
             )
 
 
-class ConfirmChannelRemovalView(discord.ui.View):
+class ConfirmChannelRemovalView(FeedbackAwareView):
     """Require an explicit, guild-scoped confirmation before clearing a channel setting."""
 
     def __init__(self, cog, guild_id: int, setting: str):
@@ -408,7 +409,7 @@ class ConfirmChannelRemovalView(discord.ui.View):
         )
 
 
-class BotUpdatesConfigView(discord.ui.View):
+class BotUpdatesConfigView(FeedbackAwareView):
     """View for configuring bot updates channel"""
     
     def __init__(self, cog, current_channel_id, guild_id: int):
@@ -466,7 +467,7 @@ class BotUpdatesConfigView(discord.ui.View):
             view=ServerConfigMainView(self.cog, self.guild_id),
         )
 
-class InviteChannelConfigView(discord.ui.View):
+class InviteChannelConfigView(FeedbackAwareView):
     """View for configuring invite tracking channel"""
     
     def __init__(self, cog, current_channel_id, guild_id: int):
@@ -524,7 +525,7 @@ class InviteChannelConfigView(discord.ui.View):
             view=ServerConfigMainView(self.cog, self.guild_id),
         )
 
-class SetBotUpdatesChannelModal(discord.ui.Modal):
+class SetBotUpdatesChannelModal(FeedbackAwareModal):
     """Modal for setting bot updates channel"""
     
     def __init__(self, cog, guild_id: int):
@@ -618,7 +619,7 @@ class SetBotUpdatesChannelModal(discord.ui.Modal):
             )
 
 
-class SetInviteChannelModal(discord.ui.Modal):
+class SetInviteChannelModal(FeedbackAwareModal):
     """Modal for setting invite tracking channel"""
     
     def __init__(self, cog, guild_id: int):
