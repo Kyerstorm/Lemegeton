@@ -489,6 +489,17 @@ async def _count(allow_mature: bool, user_id: int | None = None) -> int:
     return int(row["n"])
 
 
+async def _count_from_guild(guild_id: int) -> int:
+    """Count all panels originally contributed from one Discord server."""
+    pool = await _pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT COUNT(*) AS n FROM panels WHERE uploader_guild_id=$1",
+            guild_id,
+        )
+    return int(row["n"])
+
+
 async def _fresh_attachment(bot: commands.Bot, panel: dict[str, Any]) -> str | None:
     url = str(panel["attachment_url"])
     match = re.search(r"(?:[?&])ex=([0-9a-fA-F]+)", url)
@@ -1490,12 +1501,19 @@ class PanelCog(commands.Cog):
     async def panels(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer(ephemeral=True, thinking=True)
-            count = await _count(_nsfw(interaction))
+            server_count = (
+                await _count_from_guild(interaction.guild_id)
+                if interaction.guild_id is not None else 0
+            )
+            global_count = await _count(True)
             embed = discord.Embed(
                 title="📚 Manga Panel Archive",
                 description=(
                     "A shared gallery of manga moments, double spreads, and standout artwork.\n"
-                    f"**{count:,}** panels are visible in this channel."
+                    + "```ansi\n"
+                    + f"\u001b[1;32m{server_count:,}\u001b[0m Panels are From This Server\n"
+                    + f"\u001b[1;36m{global_count:,}\u001b[0m Total amount of Panels Globally\n"
+                    + "```"
                 ),
                 colour=PALETTE.PRIMARY,
             )
