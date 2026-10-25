@@ -1,5 +1,6 @@
 from helpers.color_palette import PALETTE
 import discord
+from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView
 from discord.ext import commands
 from discord import app_commands
 import logging
@@ -986,7 +987,7 @@ class InviteTracker(commands.Cog):
 # Interactive UI Components for Invite Theme Customization
 # ------------------------------------------------------
 
-class CustomMessageModal(discord.ui.Modal, title="Custom Message Editor"):
+class CustomMessageModal(FeedbackAwareModal, title="Custom Message Editor"):
     """Modal for editing custom join/leave messages"""
 
     def __init__(self, guild_id: int, message_type: str, existing_messages: List[str]):
@@ -1079,7 +1080,7 @@ class CustomMessageModal(discord.ui.Modal, title="Custom Message Editor"):
             )
 
 
-class InviteThemeView(discord.ui.View):
+class InviteThemeView(FeedbackAwareView):
     """Interactive view for invite theme customization"""
 
     def __init__(self, guild_id: int, xianxia_enabled: int, custom_join: List[str], custom_leave: List[str], owner_id: int):
