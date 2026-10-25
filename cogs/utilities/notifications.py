@@ -1,8 +1,9 @@
 from helpers.color_palette import PALETTE
 import discord
+from helpers.command_error_handler import application_error_message, FeedbackAwareView
 from discord import app_commands
 from discord.ext import commands
-from discord.ui import View, Button, Select
+from discord.ui import Button, Select
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -201,7 +202,7 @@ class NotificationTypeSelect(Select):
         await interaction.edit_original_response(embed=embed, view=view)
 
 
-class NotificationTypeView(View):
+class NotificationTypeView(FeedbackAwareView):
     """View for managing multiple notification type subscriptions"""
 
     def __init__(self, cog: 'NotificationsCog', current_subscriptions: List[str], owner_id: int):
@@ -441,7 +442,7 @@ class NotificationsCog(commands.Cog):
         except Exception as e:
             embed = discord.Embed(
                 title="❌ An Error Occurred",
-                description="Something went wrong while loading the notifications interface. Please try again later.",
+                description=application_error_message(e),
                 color=PALETTE.DANGER
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
