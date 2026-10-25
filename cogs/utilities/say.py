@@ -1,5 +1,6 @@
 from helpers.color_palette import PALETTE
 import discord
+from helpers.command_error_handler import application_error_message
 from discord import app_commands
 from discord.ext import commands
 import asyncio
@@ -130,7 +131,7 @@ class Say(commands.Cog):
             except Exception as e:
                 logger.error(f"Error fetching message {reply_to}: {e}", exc_info=True)
                 await interaction.response.send_message(
-                    f"❌ An error occurred while fetching the message to reply to.",
+                    application_error_message(e),
                     ephemeral=True
                 )
                 return
@@ -196,7 +197,7 @@ class Say(commands.Cog):
         except Exception as e:
             logger.error(f"Error sending message: {e}", exc_info=True)
             await interaction.followup.send(
-                "❌ An error occurred while sending the message.",
+                application_error_message(e),
                 ephemeral=True
             )
 
