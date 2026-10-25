@@ -1,5 +1,6 @@
 from helpers.color_palette import PALETTE
 import discord
+from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView
 from discord.ext import commands
 from typing import Optional, List
 import logging
@@ -285,7 +286,7 @@ class PlannedFeatures(commands.Cog):
 
         return embed
 
-    class FeatureView(discord.ui.View):
+    class FeatureView(FeedbackAwareView):
         """View for navigating between feature pages"""
 
         def __init__(self, cog, current_page: int = 1, status_filter: Optional[str] = None, category_filter: Optional[str] = None):
@@ -405,7 +406,7 @@ class PlannedFeatures(commands.Cog):
                 ephemeral=True
             )
 
-    class FilterView(discord.ui.View):
+    class FilterView(FeedbackAwareView):
         """View for filtering features by status and category"""
         def __init__(self, cog, current_page: int = 1, status_filter: Optional[str] = None, category_filter: Optional[str] = None):
             super().__init__(timeout=300)
@@ -449,7 +450,7 @@ class PlannedFeatures(commands.Cog):
             await view.update_buttons()
             await interaction.response.edit_message(embed=embed, view=view)
 
-    class AddFeatureModal(discord.ui.Modal):
+    class AddFeatureModal(FeedbackAwareModal):
         """Modal for adding a new planned feature"""
 
         def __init__(self, cog):
@@ -577,7 +578,7 @@ class PlannedFeatures(commands.Cog):
                     ephemeral=True
                 )
     
-    class EditFeatureView(discord.ui.View):
+    class EditFeatureView(FeedbackAwareView):
         """View for selecting a feature to edit"""
         
         def __init__(self, cog, current_page: int = 1):
@@ -654,7 +655,7 @@ class PlannedFeatures(commands.Cog):
             modal = PlannedFeatures.EditFeatureModal(self.cog, feature)
             await interaction.response.send_modal(modal)
     
-    class EditFeatureModal(discord.ui.Modal):
+    class EditFeatureModal(FeedbackAwareModal):
         """Modal for editing an existing planned feature"""
 
         def __init__(self, cog, feature: dict):
@@ -784,7 +785,7 @@ class PlannedFeatures(commands.Cog):
                     ephemeral=True
                 )
     
-    class RemoveFeatureView(discord.ui.View):
+    class RemoveFeatureView(FeedbackAwareView):
         """View for selecting a feature to remove"""
         
         def __init__(self, cog, current_page: int = 1):
@@ -880,7 +881,7 @@ class PlannedFeatures(commands.Cog):
             
             await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
     
-    class ConfirmRemoveView(discord.ui.View):
+    class ConfirmRemoveView(FeedbackAwareView):
         """Confirmation view for removing a feature"""
         
         def __init__(self, cog, feature_id: int, feature_name: str):
