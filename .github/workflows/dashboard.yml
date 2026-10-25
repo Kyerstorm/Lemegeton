@@ -1,0 +1,61 @@
+name: Dashboard backend checks
+
+on:
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "dashboard-rs/**"
+      - "utils/dashboard_bridge.py"
+      - "utils/dashboard_picker_server.py"
+      - "web/static/dashboard.*"
+      - "web/static/login.html"
+      - "tests/test_dashboard_bridge.py"
+      - "tests/test_dashboard_assets.py"
+      - "tests/test_dashboard_command_policy.py"
+      - "tests/custom_roles/test_picker_web.py"
+      - "tests/custom_roles/test_picker_disabled.py"
+      - "tests/custom_roles/test_picker_edit.py"
+      - "tests/custom_roles/test_picker_icon.py"
+      - "bot.py"
+      - "config.py"
+      - "cogs_test/general_commands/dashboard.py"
+      - "README.md"
+      - ".env.example"
+      - "railway.json"
+      - "railway.toml"
+      - "Procfile"
+      - ".github/workflows/dashboard.yml"
+  push:
+    branches: [multi_guild]
+    paths:
+      - "Cargo.toml"
+      - "dashboard-rs/**"
+      - "utils/dashboard_bridge.py"
+      - "utils/dashboard_picker_server.py"
+      - "tests/test_dashboard_bridge.py"
+      - "tests/test_dashboard_assets.py"
+      - "tests/test_dashboard_command_policy.py"
+      - "bot.py"
+      - "config.py"
+      - "cogs_test/general_commands/dashboard.py"
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --workspace
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install aiohttp python-dotenv discord.py==2.7.1 asyncpg==0.32.0
+      - run: python -m compileall -q utils/dashboard_bridge.py utils/dashboard_picker_server.py web/custom_role_picker.py config.py cogs_test/general_commands/dashboard.py
+      - run: python -m unittest discover -s tests -p "test_dashboard_bridge.py"
+      - run: python -m unittest discover -s tests -p "test_dashboard_assets.py"
+      - run: python -m unittest discover -s tests -p "test_dashboard_command_policy.py"

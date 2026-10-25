@@ -1,4 +1,6 @@
 .env
+target/
+**/target/
 data/
 tools/
 

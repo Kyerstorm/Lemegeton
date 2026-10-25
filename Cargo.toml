@@ -1,0 +1,3 @@
+[workspace]
+members = ["dashboard-rs"]
+resolver = "2"

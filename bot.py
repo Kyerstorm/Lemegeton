@@ -9,7 +9,8 @@ import aiohttp
 import discord
 from discord.ext import commands
 import config
-from web.dashboard import DashboardWebServer
+from utils.dashboard_bridge import DashboardBotBridge
+from utils.dashboard_picker_server import CustomRolePickerServer
 
 # Suppress deprecation warning from discord.py's internal WebSocket connection code
 # This is a known issue in discord.py 2.6.0 that will be fixed in future versions
@@ -1531,7 +1532,8 @@ async def main():
     """
     Main bot initialization function with comprehensive logging and error handling.
     """
-    dashboard_server = DashboardWebServer(bot)
+    dashboard_bridge = DashboardBotBridge(bot)
+    picker_server = CustomRolePickerServer(bot)
     logger.info("="*60)
     logger.info("STARTING BOT INITIALIZATION")
     logger.info("="*60)
@@ -1586,11 +1588,12 @@ async def main():
             logger.error(f"❌ Cog watcher failed to start: {watcher_error}", exc_info=True)
             # Continue without watcher
 
-        # Start the optional authenticated web management console.
-        try:
-            await dashboard_server.start()
-        except Exception as dashboard_error:
-            logger.error("Web dashboard failed to start: %s", dashboard_error, exc_info=True)
+        # The Rust process serves the public dashboard; Python exposes only local bot operations.
+        for server, label in ((picker_server, "custom-role picker"), (dashboard_bridge, "dashboard bot bridge")):
+            try:
+                await server.start()
+            except Exception as server_error:
+                logger.error("%s failed to start: %s", label, server_error, exc_info=True)
 
         # Start the bot with comprehensive logging
         logger.info("Starting Discord bot connection...")
@@ -1635,11 +1638,12 @@ async def main():
             await asyncio.gather(*background_tasks, return_exceptions=True)
             logger.info("✅ All background tasks cancelled")
 
-        # Stop the web management console before closing the bot.
-        try:
-            await dashboard_server.stop()
-        except Exception as dashboard_error:
-            logger.warning("Web dashboard shutdown failed: %s", dashboard_error, exc_info=True)
+        # Stop private Python listeners before closing the Discord client.
+        for server, label in ((dashboard_bridge, "dashboard bot bridge"), (picker_server, "custom-role picker")):
+            try:
+                await server.stop()
+            except Exception as server_error:
+                logger.warning("%s shutdown failed: %s", label, server_error, exc_info=True)
 
         # Close bot connection
         if not bot.is_closed():

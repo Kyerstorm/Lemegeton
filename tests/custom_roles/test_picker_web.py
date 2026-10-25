@@ -39,7 +39,7 @@ async def main():
     import database as db
     from helpers.custom_roles import service, storage, tokens
     from web import custom_role_picker
-    from web.dashboard import DashboardWebServer
+    from utils.dashboard_picker_server import CustomRolePickerServer
 
     q = db.execute_db_operation
     await db.init_custom_roles_tables()
@@ -114,23 +114,21 @@ async def main():
     check("trust on: blank header -> socket address",
           custom_role_picker.client_ip(req({"X-Forwarded-For": " , "}), trust_proxy=True) == "198.51.100.1")
 
-    # ------------------------------------------------------------------ server refactor
-    config.DASHBOARD_CLIENT_ID = config.DASHBOARD_CLIENT_SECRET = config.DASHBOARD_SECRET_KEY = None
-    server = DashboardWebServer(bot)
-    check("dashboard not configured in tests", not server.configured)
+    # ------------------------------------------------------------------ private picker server
+    server = CustomRolePickerServer(bot)
     config.CUSTOM_ROLES_PICKER_ENABLED = False
     await server.start()
-    check("nothing on (no dashboard, picker off): server doesn't start", server.runner is None)
+    check("picker disabled: private server doesn't start", server.runner is None)
     config.CUSTOM_ROLES_PICKER_ENABLED = True
-    old_host, old_port = config.DASHBOARD_HOST, config.DASHBOARD_PORT
-    config.DASHBOARD_HOST, config.DASHBOARD_PORT = "127.0.0.1", 0
+    old_host, old_port = config.DASHBOARD_PICKER_HOST, config.DASHBOARD_PICKER_PORT
+    config.DASHBOARD_PICKER_HOST, config.DASHBOARD_PICKER_PORT = "127.0.0.1", 0
     await server.start()
-    check("picker on without the dashboard: server starts", server.runner is not None and bot.custom_role_picker_ready)
+    check("picker starts on its private listener", server.runner is not None and bot.custom_role_picker_ready)
     await server.stop()
     check("stop marks the picker unavailable", not bot.custom_role_picker_ready)
-    config.DASHBOARD_HOST, config.DASHBOARD_PORT = old_host, old_port
+    config.DASHBOARD_PICKER_HOST, config.DASHBOARD_PICKER_PORT = old_host, old_port
 
-    app = DashboardWebServer(bot).build_app()
+    app = CustomRolePickerServer(bot).build_app()
     client = TestClient(TestServer(app))
     await client.start_server()
     try:
