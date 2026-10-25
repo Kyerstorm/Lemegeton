@@ -2813,13 +2813,22 @@ class AniListCog(commands.Cog):
         async def next_page(self, interaction: discord.Interaction):
             await self._show_section(interaction, self.current_section, page=self.page + 1)
 
-    async def fetch_studio_projects(self, studio_id: int, page: int, sort: str, media_type: Optional[str]) -> Optional[dict]:
-        """Fetch one page of studio projects using AniList-supported sort/filter args."""
+    async def fetch_studio_projects(
+        self,
+        studio_id: int,
+        page: int,
+        sort: str,
+        media_type: Optional[str],
+        *,
+        media_ids: Optional[List[int]] = None,
+        per_page: int = 10,
+    ) -> Optional[dict]:
+        """Fetch a page of studio projects, optionally restricted to IDs in a user's list."""
         query = """
-        query($studioId: Int, $page: Int, $sort: [MediaSort], $type: MediaType) {
-          Page(page: $page, perPage: 10) {
+        query($studioId: Int, $page: Int, $perPage: Int, $mediaIds: [Int], $sort: [MediaSort], $type: MediaType) {
+          Page(page: $page, perPage: $perPage) {
             pageInfo { currentPage hasNextPage total }
-            media(studios: [$studioId], type: $type, sort: $sort) {
+            media(studios: [$studioId], id_in: $mediaIds, type: $type, sort: $sort) {
               id type siteUrl title { romaji english }
               coverImage { large }
               startDate { year month day }
@@ -2832,15 +2841,24 @@ class AniListCog(commands.Cog):
             payload = await post_graphql(
                 self.session,
                 query,
-                {"studioId": studio_id, "page": max(1, page), "sort": [sort], "type": media_type},
+                {
+                    "studioId": studio_id,
+                    "page": max(1, page),
+                    "perPage": max(1, min(50, per_page)),
+                    "mediaIds": media_ids,
+                    "sort": [sort],
+                    "type": media_type,
+                },
                 timeout=12,
             )
             page_data = (payload or {}).get("Page")
             if page_data is None:
                 return None
             return {
-                "pageInfo": page_data.get("pageInfo") or {},
-                "nodes": page_data.get("media") or [],
+                "media": {
+                    "pageInfo": page_data.get("pageInfo") or {},
+                    "nodes": page_data.get("media") or [],
+                }
             }
         except Exception:
             logger.exception("AniList studio projects failed for studio %s", studio_id)
@@ -3027,6 +3045,8 @@ class AniListCog(commands.Cog):
                         ephemeral=True,
                     )
                     return
+
+                # Acknowledge before DB and provider requests.
                 await interaction.response.defer(ephemeral=True, thinking=True)
                 record = await get_user_guild_aware(interaction.user.id, guild_id)
                 username = record[4] if record and len(record) > 4 else None
@@ -3036,34 +3056,85 @@ class AniListCog(commands.Cog):
                         ephemeral=True,
                     )
                     return
-                data = await self.cog.fetch_user_media_entries(username, self.media_type)
-                if data is None:
+
+                list_data = await self.cog.fetch_user_media_entries(username, self.media_type)
+                if list_data is None:
                     await interaction.followup.send(
                         "AniList could not retrieve your list. Please run /feedback if this persists.",
                         ephemeral=True,
                     )
                     return
+
                 entries = {}
-                for listing in data.get("lists") or []:
+                for listing in list_data.get("lists") or []:
                     for entry in listing.get("entries") or []:
                         if entry.get("mediaId") is not None:
                             entries[int(entry["mediaId"])] = entry
-                matches = []
-                for media in (self.media_connection.get("nodes") or []):
+                media_ids = list(entries)
+                matched_media = []
+                if media_ids:
+                    # Query by the user's media IDs in bounded batches, so this
+                    # searches every matching studio project rather than only
+                    # the ten projects visible on the current page.
+                    for offset in range(0, len(media_ids), 9000):
+                        batch_ids = media_ids[offset:offset + 9000]
+                        page = 1
+                        while page <= 100:
+                            result = await self.cog.fetch_studio_projects(
+                                int(self.studio["id"]),
+                                page,
+                                self.sort,
+                                self.media_type,
+                                media_ids=batch_ids,
+                                per_page=50,
+                            )
+                            connection = (result or {}).get("media") or {}
+                            if not result:
+                                await interaction.followup.send(
+                                    "AniList could not check all studio projects. Please run /feedback if this persists.",
+                                    ephemeral=True,
+                                )
+                                return
+                            matched_media.extend(connection.get("nodes") or [])
+                            page_info = connection.get("pageInfo") or {}
+                            if not page_info.get("hasNextPage"):
+                                break
+                            page += 1
+
+                rows = []
+                for media in matched_media:
                     entry = entries.get(int(media.get("id") or 0))
-                    if entry:
-                        title_data = media.get("title") or {}
-                        title = title_data.get("english") or title_data.get("romaji") or "Untitled"
-                        url = media.get("siteUrl") or f"https://anilist.co/{str(media.get('type') or 'anime').lower()}/{media.get('id')}"
-                        status = (entry.get("status") or "UNKNOWN").replace("_", " ").title()
-                        matches.append(f"• [{title[:140]}]({url}) — {status}; progress {entry.get('progress', 0)}; score {entry.get('score', 0) or '—'}")
+                    if not entry:
+                        continue
+                    title_data = media.get("title") or {}
+                    title = title_data.get("english") or title_data.get("romaji") or "Untitled"
+                    url = media.get("siteUrl") or f"https://anilist.co/{str(media.get('type') or 'anime').lower()}/{media.get('id')}"
+                    status = (entry.get("status") or "UNKNOWN").replace("_", " ").title()
+                    progress = entry.get("progress", 0) or 0
+                    score = entry.get("score", 0) or "—"
+                    rows.append(f"• [{title[:130]}]({url}) — {status}; progress {progress}; score {score}")
+
+                rows.sort(key=lambda line: line.casefold())
+                shown = []
+                used = 0
+                for line in rows:
+                    if used + len(line) + 1 > 3700:
+                        break
+                    shown.append(line)
+                    used += len(line) + 1
+                if not rows:
+                    description = "No matching studio projects were found in your linked AniList list."
+                else:
+                    description = "\n".join(shown)
+                    if len(shown) < len(rows):
+                        description += f"\n\nShowing {len(shown)} of {len(rows)} matches."
                 embed = discord.Embed(
                     title=f"🔎 Your List Matches • {self.studio.get('name') or 'Studio'}"[:256],
                     url=self.studio.get("siteUrl"),
                     color=PALETTE.SUCCESS,
-                    description="\n".join(matches)[:4000] if matches else "No matches found on the current project page. Change pages or filters to check other projects.",
+                    description=description,
                 )
-                embed.set_footer(text=f"AniList • Current project page {self.page}")
+                embed.set_footer(text=f"AniList • {len(rows)} matching projects • Filter: {self._labels()[1]} • Sort: {self._labels()[0]}")
                 await interaction.followup.send(embed=embed, ephemeral=True)
             except Exception:
                 logger.exception("Failed to compare studio projects with linked AniList list")
