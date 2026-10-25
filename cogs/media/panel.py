@@ -1512,7 +1512,7 @@ class PanelCog(commands.Cog):
                     "A shared gallery of manga moments, double spreads, and standout artwork.\n"
                     + "```ansi\n"
                     + f"\u001b[1;32m{server_count:,}\u001b[0m Panels are From This Server\n"
-                    + f"\u001b[1;36m{global_count:,}\u001b[0m Total amount of Panels Globally\n"
+                    + f"Total amount of Panels Globally \u001b[1;36m{global_count:,}\u001b[0m\n"
                     + "```"
                 ),
                 colour=PALETTE.PRIMARY,
