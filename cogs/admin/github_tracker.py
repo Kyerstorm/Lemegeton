@@ -28,7 +28,9 @@ LAST_SHA_KEY = "github_last_sha"
 LAST_SHA_SCOPE = "global"
 # How far back to look for the last posted commit before treating history as rewritten
 MAX_LOOKBACK = 100
+MAX_COMMIT_STATS_LOOKUPS = 20
 EMBED_DESCRIPTION_LIMIT = 4000
+GITHUB_ICON_URL = "https://github.githubassets.com/favicons/favicon.png"
 
 
 class GitHubAPIError(Exception):
@@ -157,6 +159,67 @@ class GitHubTracker(commands.Cog):
         except ValueError:
             return None
 
+    async def _fetch_commit_stats(self, commits: list[dict]) -> None:
+        """Attach best-effort file and line statistics to recent commits."""
+        if not self.session or self.session.closed:
+            return
+
+        semaphore = asyncio.Semaphore(4)
+
+        async def fetch_one(commit: dict) -> None:
+            sha = commit.get("sha")
+            if not sha:
+                return
+
+            try:
+                async with semaphore:
+                    async with self.session.get(
+                        f"{GITHUB_API_URL}/repos/{self.repo}/commits/{sha}",
+                        headers=self._headers(),
+                        timeout=aiohttp.ClientTimeout(total=5),
+                    ) as response:
+                        if response.status != 200:
+                            logger.debug(
+                                "GitHub commit stats unavailable for %s (HTTP %s)",
+                                sha[:7], response.status
+                            )
+                            return
+                        details = await response.json()
+
+                stats = details.get("stats") or {}
+                files = details.get("files") or []
+                commit["_tracker_stats"] = {
+                    "files_changed": len(files),
+                    "additions": int(stats.get("additions") or 0),
+                    "deletions": int(stats.get("deletions") or 0),
+                }
+            except Exception as exc:
+                # Statistics must never prevent a commit announcement from being published.
+                logger.debug("Could not fetch stats for commit %s: %s", sha[:7], exc)
+
+        await asyncio.gather(
+            *(fetch_one(commit) for commit in commits[:MAX_COMMIT_STATS_LOOKUPS])
+        )
+
+    @staticmethod
+    def _format_commit_stats(commit: dict) -> str:
+        """Format commit statistics as compact Discord subtext and a colour-coded diff."""
+        stats = commit.get("_tracker_stats")
+        if not stats:
+            return "-# Change statistics unavailable"
+
+        files_changed = stats["files_changed"]
+        additions = stats["additions"]
+        deletions = stats["deletions"]
+        file_label = "file" if files_changed == 1 else "files"
+        return (
+            f"-# 📄 {files_changed:,} {file_label} changed\n"
+            "```diff\n"
+            f"+ {additions:,} lines added\n"
+            f"- {deletions:,} lines deleted\n"
+            "```"
+        )
+
     def _format_commit_line(self, commit: dict) -> str:
         summary = commit["commit"]["message"].split("\n", 1)[0].strip()
         if len(summary) > 100:
@@ -170,13 +233,14 @@ class GitHubTracker(commands.Cog):
         length = 0
         for index, commit in enumerate(commits):
             line = self._format_commit_line(commit)
+            entry = f"{line}\n{self._format_commit_stats(commit)}"
             remaining = len(commits) - index
             # Leave room for the "...and N more" trailer
-            if length + len(line) + 1 > EMBED_DESCRIPTION_LIMIT - 40:
+            if length + len(entry) + 1 > EMBED_DESCRIPTION_LIMIT - 40:
                 lines.append(f"*…and {remaining} more*")
                 break
-            lines.append(line)
-            length += len(line) + 1
+            lines.append(entry)
+            length += len(entry) + 1
 
         count = len(commits)
         embed = discord.Embed(
@@ -186,9 +250,9 @@ class GitHubTracker(commands.Cog):
             color=PALETTE.PRIMARY,
         )
         embed.set_author(
-            name=f"{self.repo} • {self.branch}",
+            name=f"GitHub • {self.repo} • {self.branch}",
             url=f"https://github.com/{self.repo}",
-            icon_url="https://github.githubassets.com/favicons/favicon.png",
+            icon_url=GITHUB_ICON_URL,
         )
         newest = max((d for d in (self._commit_date(c) for c in commits) if d), default=None)
         if newest:
@@ -278,6 +342,7 @@ class GitHubTracker(commands.Cog):
                 if not new_commits:
                     return "No new commits.", None
 
+                await self._fetch_commit_stats(new_commits)
                 embed = self._build_commits_embed(new_commits)
                 result = await self._publish_to_all(embed)
                 # Advance even if some guilds failed, so working guilds don't get duplicates next cycle
@@ -344,6 +409,7 @@ class GitHubTracker(commands.Cog):
             )
             return
 
+        await self._fetch_commit_stats(commits)
         embed = self._build_commits_embed(
             list(reversed(commits)),
             title=f"🛠️ Latest {len(commits)} commit{'s' if len(commits) != 1 else ''} to {self.repo}",
