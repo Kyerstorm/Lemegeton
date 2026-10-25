@@ -1,5 +1,6 @@
 from helpers.color_palette import PALETTE
 import discord
+from helpers.command_error_handler import application_error_message, FeedbackAwareModal, FeedbackAwareView
 from discord import app_commands
 from discord.ext import commands
 import logging
@@ -57,7 +58,7 @@ if not any(isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", Non
 
 logger.info("Login cog logging system initialized")
 
-class LoginView(discord.ui.View):
+class LoginView(FeedbackAwareView):
     """Interactive view for login/registration/unregistration actions."""
     
     def __init__(self, user_id: int, username: str, is_registered: bool, anilist_username: str = None, 
@@ -214,7 +215,7 @@ class LoginView(discord.ui.View):
             logger.error(f"Error handling LoginView timeout: {e}", exc_info=True)
 
 
-class RegistrationModal(discord.ui.Modal):
+class RegistrationModal(FeedbackAwareModal):
     """Modal for collecting registration information for AniList or Steam."""
     
     def __init__(self, is_update: bool = False, registration_type: str = "anilist"):
@@ -293,7 +294,7 @@ class RegistrationModal(discord.ui.Modal):
             await interaction.edit_original_response(content=result)
 
 
-class UnregisterConfirmView(discord.ui.View):
+class UnregisterConfirmView(FeedbackAwareView):
     """View for confirming unregistration from services.
 
     Accepts guild_id so the actual unregistration call can be scoped to the guild
@@ -893,12 +894,12 @@ class Login(commands.Cog):
             try:
                 if not interaction.response.is_done():
                     await interaction.response.send_message(
-                        "❌ An unexpected error occurred. Please try again later.",
+                        application_error_message(e),
                         ephemeral=True
                     )
                 else:
                     await interaction.followup.send(
-                        "❌ An unexpected error occurred. Please try again later.",
+                        application_error_message(e),
                         ephemeral=True
                     )
             except Exception as follow_e:
