@@ -32,9 +32,9 @@ human can test it in Discord.
 | Cog loader | `bot.py` loads **every `.py` file** under `cogs/` and `cogs_test/` as an extension. | Put non-cog code (service, image utils) in `helpers/`, **not** under `cogs/`. |
 | Intents | `members` and `message_content` intents are enabled. | Boost start/stop is detectable via `on_member_update` (`premium_since`). |
 | Command sync | Commands are synced globally (`bot.tree.sync()`). | Nothing extra needed. |
-| Web server | `web/dashboard.py` (`DashboardWebServer`, aiohttp) serves the admin dashboard. **`start()` returns early unless `DASHBOARD_CLIENT_ID`, `DASHBOARD_CLIENT_SECRET` and `DASHBOARD_SECRET_KEY` are all set.** | Refactor so the HTTP server starts if **either** the dashboard is configured **or** the color picker is enabled; only register dashboard/OAuth routes when the dashboard is configured. The picker must work with no OAuth configured. |
+| Web server | The public dashboard is a Rust/Axum service (`dashboard-rs/`). The existing Python custom-role picker runs on loopback through `utils/dashboard_picker_server.py`; Rust proxies `/custom-roles` to it. | Keep the picker token checks and Discord role validation in Python. The picker must remain available even when Discord OAuth is not configured; its private port must never be exposed publicly. |
 | Security middleware | Rejects cross-origin POST/PUT/PATCH/DELETE; CSP is `script-src 'self'`, `img-src 'self' https://cdn.discordapp.com data:`, `connect-src 'self'`. | Picker JS must be **external files** (no inline `<script>`). Use **`data:` URLs** for image previews (not `blob:`), or explicitly add `blob:` to `img-src`. |
-| Theme | `web/static/theme.css` holds the dashboard's design tokens as CSS variables. | Picker styling must also be token-driven (§6.6). |
+| Theme | `web/static/custom_roles/theme.css` holds the picker-specific design tokens. The obsolete `web/static/theme.css` dashboard stylesheet has been removed. | Keep picker styling token-driven (§6.6) and independent of the Rust dashboard stylesheet. |
 | Utilities | `helpers/color_palette.py`, `helpers/embed_helper.py` exist; Pillow 11 is installed. | Reuse them. |
 
 ## 3. Core behaviour rules
@@ -236,7 +236,7 @@ in place and only read.
 | `CUSTOM_ROLES_PUBLIC_URL` | `http://localhost:8080` | Base URL used in picker links (production: the bot's public HTTPS URL). |
 | `CUSTOM_ROLES_PICKER_TTL` | `900` | Link lifetime in seconds. |
 
-Reuse `DASHBOARD_HOST` / `DASHBOARD_PORT` for the listening address.
+The public Rust dashboard binds to `DASHBOARD_HOST` / `DASHBOARD_PORT`. The Python picker binds to loopback on `DASHBOARD_PICKER_PORT`; do not expose the private picker port.
 
 ## 10. Messages
 - Welcome DM on boost: thank them, point to `/custom-role` (**Create role**).

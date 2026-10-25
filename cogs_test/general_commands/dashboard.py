@@ -255,9 +255,12 @@ def _is_enabled(fullname: str, meta: dict[str, Any], cfg: dict[str, Any]) -> boo
     if _is_protected(meta["command"]):
         return True
     section = meta["section"]
-    if cfg.get("sections", {}).get(section) is False:
-        return False
-    return bool(cfg.get("commands", {}).get(fullname, False))
+    command_overrides = cfg.get("commands", {})
+    if fullname in command_overrides:
+        return command_overrides[fullname] is True
+    if section in cfg.get("sections", {}):
+        return cfg["sections"][section] is True
+    return False
 
 
 def _has_dashboard_access(interaction: discord.Interaction, bot: commands.Bot) -> bool:
@@ -575,7 +578,7 @@ async def attempt_sync_for_guild(bot: commands.Bot, guild: discord.Guild):
     """Sync dashboard-managed commands without deleting unrelated guild commands."""
     db: ConfigDB | None = getattr(bot, "_dashboard_db", None)
     if db is None:
-        return
+        return False
     try:
         cfg = await db.get_guild_config(guild.id)
         managed_names = {meta["command"].name for _, meta in COMMAND_REGISTRY.all_commands()}
@@ -597,8 +600,10 @@ async def attempt_sync_for_guild(bot: commands.Bot, guild: discord.Guild):
                 logger.warning("Skipping already registered command %s for guild %s", command.name, guild.id)
         await bot.tree.sync(guild=guild)
         logger.info("Synced %s dashboard-managed commands for guild %s", len(enabled_commands), guild.id)
+        return True
     except Exception:
         logger.exception("Dashboard command sync failed for guild %s", guild.id)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -618,6 +623,12 @@ class DashboardCog(commands.Cog):
             # walk_commands recurses into nested groups (e.g. /group subgroup command).
             for command in list(self.bot.tree.walk_commands()):
                 self._register_if_annotated(command)
+                fullname = getattr(command, "qualified_name", getattr(command, "name", ""))
+                meta = COMMAND_REGISTRY.get_meta(fullname)
+                checks = getattr(command, "checks", None)
+                add_check = getattr(command, "add_check", None)
+                if meta and checks is not None and callable(add_check) and self._dashboard_execution_guard not in checks:
+                    add_check(self._dashboard_execution_guard)
             logger.info(
                 "Dashboard registry initialized: %s commands across %s categories",
                 len(COMMAND_REGISTRY.all_commands()),
@@ -639,6 +650,31 @@ class DashboardCog(commands.Cog):
         name = getattr(callback, "__dashboard_name__", None) or command.name
         fullname = getattr(command, "qualified_name", command.name)
         COMMAND_REGISTRY.register(fullname, command, section, name)
+
+    async def _dashboard_execution_guard(self, interaction: discord.Interaction) -> bool:
+        """Enforce persisted guild command state before executing managed slash commands.
+
+        Discord command visibility/synchronization is not a security boundary: a global
+        command can still be visible after a guild override. This check blocks execution
+        through the actual application-command dispatch path.
+        """
+        if interaction.guild is None:
+            return True
+        command = getattr(interaction, "command", None)
+        fullname = COMMAND_REGISTRY.find_fullname_by_cmd(command) if command is not None else None
+        meta = COMMAND_REGISTRY.get_meta(fullname) if fullname else None
+        if not meta or _is_protected(meta["command"]):
+            return True
+        try:
+            cfg = await self.db.get_guild_config(interaction.guild.id)
+            return _is_enabled(fullname, meta, cfg)
+        except Exception:
+            logger.exception(
+                "Could not verify dashboard command access for guild %s command %s",
+                interaction.guild.id, fullname,
+            )
+            # Fail closed: a database failure must not bypass a saved disablement.
+            return False
 
     @app_commands.command(name="dashboard", description="Open Lemegeton's server command control center")
     async def dashboard(self, interaction: discord.Interaction):

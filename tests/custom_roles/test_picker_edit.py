@@ -61,7 +61,7 @@ async def main():
     import database as db
     from helpers.custom_roles import service, storage, tokens
     from web import custom_role_picker
-    from web.dashboard import DashboardWebServer
+    from utils.dashboard_picker_server import CustomRolePickerServer
 
     q = db.execute_db_operation
     await db.init_custom_roles_tables()
@@ -87,10 +87,9 @@ async def main():
 
     config.CUSTOM_ROLES_PICKER_ENABLED = True
     config.CUSTOM_ROLES_PUBLIC_URL = "http://localhost:8080"
-    config.DASHBOARD_CLIENT_ID = config.DASHBOARD_CLIENT_SECRET = config.DASHBOARD_SECRET_KEY = None
     guilds = {}
     bot = SimpleNamespace(get_guild=lambda gid: guilds.get(gid), custom_role_picker_ready=True)
-    client = TestClient(TestServer(DashboardWebServer(bot).build_app()))
+    client = TestClient(TestServer(CustomRolePickerServer(bot).build_app()))
     await client.start_server()
 
     async def call(method, path, token=None, body=None, headers=None, raw=None):

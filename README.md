@@ -315,39 +315,24 @@ STEAM_API_KEY=your_steam_api_key_here
 
 ## 🎛️ Dashboard System
 
-The **Interactive Dashboard** (`/dashboard`) is a powerful command management system that allows server administrators to control which bot commands are enabled or disabled on a per-server basis.
+Lemegeton has two related control surfaces: the existing ephemeral Discord `/dashboard` command and the separate authenticated web control plane documented in [docs/DASHBOARD.md](docs/DASHBOARD.md). Both use the bot's actual dashboard command registry and the existing PostgreSQL-backed guild configuration.
 
-### Features
+### Discord dashboard features
 
-- **Section-Based Organization** - Commands organized into 8 logical sections
-- **Per-Command Toggle** - Enable/disable individual commands
-- **Real-Time Status** - Visual indicators (✅ enabled / ❌ disabled)
-- **Git-Style Audit Log** - Complete history of all configuration changes
-- **Batch Operations** - "Subscribe to All" / "Unsubscribe from All" buttons
-- **Reset Functionality** - Restore default configuration
-- **Dark Aesthetic UI** - GitHub-inspired interface
+- Category-based command browser and per-command state.
+- Guild-specific command overrides saved by the existing `ConfigDB`.
+- Confirmation for resetting guild settings and a recent audit trail.
+- Protected system commands that cannot be disabled through the dashboard.
+- A runtime command check which enforces stored overrides before registered dashboard-managed application commands execute.
 
-### Using the Dashboard
+The command inventory is discovered from `@command_meta` annotations at runtime. It is intentionally not hard-coded here because the live registry can change as extensions are added.
 
-1. Type `/dashboard` in your Discord server
-2. Use the dropdown or navigation buttons (◀️ ▶️) to browse sections
-3. Click command buttons to toggle them on/off
-4. View real-time status indicators
-5. Use "Reset Config" to restore defaults
-6. Use "View Audit" to see change history
+### Using the Discord dashboard
 
-### Dashboard Sections
-
-- **Account** (3 commands)
-- **Admin** (3 commands)
-- **Customization** (4 commands)
-- **Gaming** (5 commands)
-- **Media** (11 commands)
-- **Server Management** (8 commands)
-- **Social** (3 commands)
-- **Utilities** (7 commands)
-
-**Total: 44 commands** managed through the dashboard
+1. Run `/dashboard` in a server where you have an appropriate administrative permission.
+2. Navigate the registered command categories and toggle a supported command.
+3. Use the audit view to inspect recorded configuration changes.
+4. Use the confirmed reset action to restore the defaults for that guild.
 
 ### For Developers
 
@@ -917,33 +902,13 @@ Made with ❤️ for the anime community by [Kyerstorm](https://github.com/Kyers
 
 ## Web management dashboard
 
-The multi-guild dashboard is an optional authenticated web interface that runs in the same process as the Discord bot. Its responsive UI assets are kept separately in `web/static/dashboard.html`, `web/static/dashboard.css`, and `web/static/dashboard.js`. The web API reuses the dashboard cog's per-guild configuration database; the Discord UI and web UI therefore work from the same settings.
+The public web control plane is a Rust/Axum application under `dashboard-rs/`, with a React + TypeScript frontend under `dashboard-frontend/src/`. Components live in `.tsx`, styling is authored from `styles.ts`, and Vite builds the production `app.js` and `app.css` assets served by Rust. No handwritten dashboard HTML, standalone CSS, or standalone JavaScript source files are needed. The runtime adapter stays consolidated in `bot.py` because only the live Python bot owns the command tree and Discord gateway. The custom-role picker remains a Python feature behind a private loopback listener and is reverse-proxied through Rust.
 
-### Configure Discord OAuth2
+**Full setup and deployment guide:** [docs/DASHBOARD.md](docs/DASHBOARD.md).
 
-1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and select the application used by Lemegeton.
-2. In **OAuth2 → General**, add the exact callback URL to **Redirects**. For a local install this is `http://localhost:8080/oauth/callback`; for production, use your public HTTPS hostname.
-3. Set the following variables in your local `.env` file (do not commit real secrets):
-   - `DASHBOARD_CLIENT_ID` — the OAuth application ID; defaults to `CLIENT_ID` if left empty.
-   - `DASHBOARD_CLIENT_SECRET` — OAuth2 client secret from the Developer Portal.
-   - `DASHBOARD_SECRET_KEY` — a long, unique random secret value.
-   - `DASHBOARD_HOST` and `DASHBOARD_PORT` — bind address and port (defaults `0.0.0.0:8080`).
-   - `DASHBOARD_REDIRECT_URI` — must exactly match the URL registered in Discord.
-   - `DASHBOARD_COOKIE_SECURE=true` when served over HTTPS.
-4. Start the bot normally and open the configured dashboard URL. Sign in with Discord. Only servers where the bot is present and your Discord account has **Manage Server** or **Administrator** access are listed.
+The Rust service supports Discord OAuth2 sign-in, server-side sessions with CSRF protection, guild-permission revalidation, live runtime status, the actual dashboard-managed slash-command registry, per-guild overrides, confirmed command synchronization, audit history, diagnostics, owner-only logs and integration status, and persisted-resource reporting. The interface is monochrome and responsive, with reduced-motion support and restrained Unicode/numeric transitions.
 
-The web server is skipped when OAuth credentials are not configured, so existing bot-only deployments can continue without dashboard setup. Keep the dashboard behind HTTPS in production, and do not expose it publicly without configuring OAuth.
-
-### Dashboard sections
-
-- **Overview:** live bot readiness, latency, guild member count, command counts, and recent audit activity.
-- **Commands:** search and filter registered dashboard commands, toggle per-guild command state, and publish the selection to Discord. Protected commands remain locked.
-- **Audit trail:** recent per-guild configuration actions.
-- **System health:** process runtime, loaded extensions, guild count, and gateway state.
-- **Runtime logs:** restricted access to the bot and dashboard log files.
-- **Data overview:** explains the dashboard's persisted resources.
-
-The UI uses a dark ink palette with warm paper, muted lilac, mint, and antique-gold accents; premium typography; subtle SVG chart drawing, orbit details, hover transitions, and reduced-motion support. The CSS and JavaScript are separate from the page markup for easier design review and maintenance.
+The dashboard deliberately does not expose arbitrary code, shell commands, raw SQL, or cog unload/reload buttons. Prefix commands are not presented as web-configurable unless they have an explicit, enforced registry implementation. When the Python bridge or Discord synchronization is unavailable, the dashboard reports the failure instead of claiming an operation succeeded.
 
 
 ## Shared Manga Panel Archive

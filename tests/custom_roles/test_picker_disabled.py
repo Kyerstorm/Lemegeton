@@ -115,7 +115,7 @@ async def main():
     from cogs.customization import custom_roles as cog_mod
     from cogs.customization.custom_roles import PANEL_MEMBER
     from helpers.custom_roles import FEATURE_GRADIENT, FEATURE_ICONS, service, storage
-    from web.dashboard import DashboardWebServer
+    from utils.dashboard_picker_server import CustomRolePickerServer
 
     check("switch read as off", config.CUSTOM_ROLES_PICKER_ENABLED is False, config.CUSTOM_ROLES_PICKER_ENABLED)
 
@@ -180,15 +180,12 @@ async def main():
           and all(s.view is None for s in inter.followup.sent), [(e.title, e.description) for e in sent])
     check("service explains why", "turned off" in (service.picker_link_problem() or ""), service.picker_link_problem())
 
-    # ================================================================== web server
-    bot = NS()
-    server = DashboardWebServer(bot)
-    if server.configured:
-        check("web server: dashboard is configured here, so this check doesn't apply", True)
-    else:
-        await server.start()
-        check("web server: not started (no dashboard, picker off)",
-              server.runner is None and not getattr(bot, "custom_role_picker_ready", False))
+    # ================================================================== private picker listener
+    bot = NS(custom_role_picker_ready=False)
+    server = CustomRolePickerServer(bot)
+    await server.start()
+    check("picker disabled: private listener stays stopped",
+          server.runner is None and not getattr(bot, "custom_role_picker_ready", False))
 
     await q("c", "DELETE FROM custom_role_records WHERE guild_id = ?", (GID,))
     print(f"\n{sum(results)}/{len(results)} passed")

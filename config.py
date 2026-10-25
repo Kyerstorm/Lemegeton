@@ -193,21 +193,18 @@ CIRCUIT_BREAKER_TIMEOUT = _int_env("CIRCUIT_BREAKER_TIMEOUT", 60)  # 60 seconds 
 CIRCUIT_BREAKER_SUCCESS_THRESHOLD = _int_env("CIRCUIT_BREAKER_SUCCESS_THRESHOLD", 2)  # Close circuit after 2 successes
 
 # ==============================================================================
-# WEB MANAGEMENT DASHBOARD
 # ==============================================================================
-DASHBOARD_CLIENT_ID = _int_env("DASHBOARD_CLIENT_ID", CLIENT_ID)
-DASHBOARD_CLIENT_SECRET = os.getenv("DASHBOARD_CLIENT_SECRET")
-DASHBOARD_SECRET_KEY = os.getenv("DASHBOARD_SECRET_KEY")
-DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "0.0.0.0")
-DASHBOARD_PORT = _int_env("DASHBOARD_PORT", 8080)
-DASHBOARD_REDIRECT_URI = os.getenv(
-    "DASHBOARD_REDIRECT_URI",
-    f"http://localhost:{DASHBOARD_PORT}/oauth/callback",
-)
-DASHBOARD_COOKIE_SECURE = os.getenv("DASHBOARD_COOKIE_SECURE", "false").strip().lower() in {
-    "1", "true", "yes", "on",
-}
-DASHBOARD_SESSION_TTL = _int_env("DASHBOARD_SESSION_TTL", 28800)
+# INTERNAL DASHBOARD BOT BRIDGE
+# ==============================================================================
+# Must match DASHBOARD_BRIDGE_SECRET in the Rust dashboard service.
+# This listener binds to loopback only; never expose it publicly.
+DASHBOARD_BRIDGE_SECRET = os.getenv("DASHBOARD_BRIDGE_SECRET", "")
+DASHBOARD_BRIDGE_HOST = "127.0.0.1"
+DASHBOARD_BRIDGE_PORT = _int_env("DASHBOARD_BRIDGE_PORT", 8091)
+
+# Existing Python custom-role picker runs privately behind the Rust reverse proxy.
+DASHBOARD_PICKER_HOST = "127.0.0.1"
+DASHBOARD_PICKER_PORT = _int_env("DASHBOARD_PICKER_PORT", 8092)
 
 # ==============================================================================
 # CUSTOM ROLES (custom booster roles)
@@ -352,10 +349,9 @@ __all__ = [
     # Database
     'DB_PATH', 'DATABASE_PATH', 'DB_CONNECTION_POOL_SIZE',
 
-    # Web Dashboard
-    'DASHBOARD_CLIENT_ID', 'DASHBOARD_CLIENT_SECRET', 'DASHBOARD_SECRET_KEY',
-    'DASHBOARD_HOST', 'DASHBOARD_PORT', 'DASHBOARD_REDIRECT_URI',
-    'DASHBOARD_COOKIE_SECURE', 'DASHBOARD_SESSION_TTL',
+    # Internal dashboard adapters
+    'DASHBOARD_BRIDGE_SECRET', 'DASHBOARD_BRIDGE_HOST', 'DASHBOARD_BRIDGE_PORT',
+    'DASHBOARD_PICKER_HOST', 'DASHBOARD_PICKER_PORT',
 
     # Legacy
     'CHALLENGE_ROLE_IDS', 'ALL_STAR_STAGE1_ROLE_ID', 'ALL_STAR_STAGE2_ROLE_ID',

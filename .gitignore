@@ -1,4 +1,6 @@
 .env
+target/
+**/target/
 data/
 tools/
 
@@ -76,3 +78,7 @@ claude.exe
 
 # Generated images for testing /custom-role icon (contains a decompression bomb)
 test_images/
+
+# Generated dashboard frontend dependencies and bundles
+dashboard-frontend/node_modules/
+dashboard-frontend/dist/
