@@ -906,6 +906,8 @@ The public web control plane is a Rust/Axum application under `dashboard-rs/`, w
 
 **Full setup and deployment guide:** [docs/DASHBOARD.md](docs/DASHBOARD.md).
 
+**VPS/systemd/Nginx, Docker, and security review:** [deploy/vps/README.md](deploy/vps/README.md) · [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md).
+
 The Rust service supports Discord OAuth2 sign-in, server-side sessions with CSRF protection, guild-permission revalidation, live runtime status, the actual dashboard-managed slash-command registry, per-guild overrides, confirmed command synchronization, audit history, diagnostics, owner-only logs and integration status, and persisted-resource reporting. The interface is monochrome and responsive, with reduced-motion support and restrained Unicode/numeric transitions.
 
 The dashboard deliberately does not expose arbitrary code, shell commands, raw SQL, or cog unload/reload buttons. Prefix commands are not presented as web-configurable unless they have an explicit, enforced registry implementation. When the Python bridge or Discord synchronization is unavailable, the dashboard reports the failure instead of claiming an operation succeeded.

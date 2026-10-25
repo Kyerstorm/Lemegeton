@@ -1,7 +1,7 @@
 use axum::{extract::{Query, State}, http::{header, HeaderMap, HeaderValue, StatusCode}, response::{IntoResponse, Redirect, Response}, Json};
 use serde_json::{json, Value};
 use crate::ui;
-use crate::state::{access_token, cookie_value, manageable_guilds, new_token, now_secs, session_from_headers, token_response_cookie,
+use crate::state::{access_token, allow_oauth_start, cookie_value, is_owner, manageable_guilds, new_token, now_secs, session_from_headers, token_response_cookie,
     expired_cookie, oauth_state_cookie, expired_oauth_state_cookie, ApiError, ApiResult, AppState, DashboardUser, DiscordTokenResponse, DiscordUserResponse, OAuthCallback, OAuthState, Session, DISCORD_API};
 use subtle::ConstantTimeEq;
 
@@ -17,6 +17,9 @@ pub async fn login_page() -> Response {
 pub async fn oauth_start(State(state): State<AppState>) -> Response {
     if !state.config.oauth_ready() {
         return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "Discord OAuth is not configured. Set DASHBOARD_CLIENT_ID, DASHBOARD_CLIENT_SECRET, and DASHBOARD_REDIRECT_URI.").into_response();
+    }
+    if !allow_oauth_start(&state).await {
+        return ApiError::new(StatusCode::TOO_MANY_REQUESTS, "Too many sign-in attempts. Wait a minute and try again.").into_response();
     }
     let state_token = new_token();
     let browser_nonce = new_token();
@@ -94,7 +97,7 @@ pub async fn oauth_callback(State(state): State<AppState>, headers: HeaderMap, Q
         sessions.insert(session_id.clone(), session.clone());
     }
     match manageable_guilds(&state, &session_id, &session).await {
-        Ok(guilds) if !guilds.is_empty() => {}
+        Ok(guilds) if !guilds.is_empty() || is_owner(&state, &session.user.id) => {}
         Ok(_) => {
             state.sessions.lock().await.remove(&session_id);
             return ApiError::new(StatusCode::FORBIDDEN, "No manageable servers found. The bot must be present in a server where your account has Manage Server or Administrator permission.").into_response();
@@ -119,9 +122,27 @@ pub async fn bootstrap(State(state): State<AppState>, headers: HeaderMap) -> Api
     Ok(Json(json!({"user":session.user,"guilds":guilds,"selected_guild_id":selected,"csrf_token":session.csrf})))
 }
 pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Response> {
-    let (session_id, _) = crate::state::write_session(&state, &headers).await?;
+    let (session_id, session) = crate::state::write_session(&state, &headers).await?;
     state.sessions.lock().await.remove(&session_id);
     state.write_limits.lock().await.remove(&session_id);
+
+    // Revoke the refresh token after removing the local session. Logout still succeeds if
+    // Discord is unreachable; the server-side session is already invalidated.
+    let revoke_token = session.refresh_token.as_deref().filter(|value| !value.is_empty())
+        .unwrap_or(session.access_token.as_str());
+    if state.config.oauth_ready() && !revoke_token.is_empty() {
+        let revoke = state.client.post(format!("{DISCORD_API}/oauth2/token/revoke"))
+            .form(&[
+                ("client_id", state.config.client_id.as_str()),
+                ("client_secret", state.config.client_secret.as_str()),
+                ("token", revoke_token),
+            ]);
+        match tokio::time::timeout(std::time::Duration::from_secs(3), revoke.send()).await {
+            Ok(Ok(response)) if response.status().is_success() => {}
+            _ => tracing::warn!("Discord token revocation failed during dashboard logout; the local session was still invalidated."),
+        }
+    }
+
     let mut response = Json(json!({"ok":true})).into_response();
     let cookie = HeaderValue::from_str(&expired_cookie(&state))
         .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Could not clear the session cookie."))?;

@@ -9,33 +9,65 @@
 :root {
   color-scheme: dark;
 
+  /* Shared tokens are aligned with dashboard-frontend/src/styles.ts. */
+  --cr-soft: #b8beb5;
+  --cr-bg-glow: #1b2117;
+  --cr-mark-tracking: -.08em;
+  --cr-brand-tracking: .19em;
+  --cr-brand-tracking-small: .15em;
+  --cr-brand-tracking-mobile: .12em;
+  --cr-status-tracking: .08em;
+  --cr-status-tracking-small: .045em;
+  --cr-eyebrow-tracking: .13em;
+  --cr-hero-tracking: -.065em;
+  --cr-font-size-hero-responsive: clamp(2rem, 5vw, 3.75rem);
+  --cr-line-soft: #202420;
+  --cr-line-strong: #4a5047;
+  --cr-brand-mark: 41px;
+  --cr-brand-line: #4c5940;
+  --cr-brand-top: #222b1b;
+  --cr-font-size-brand: 20px;
+  --cr-font-size-micro: 9px;
+  --cr-status-led: 6px;
+  --cr-glow-size: 14px;
+  --cr-glow-hover: 22px;
+  --cr-glow-color: #d9ff7255;
+  --cr-glow-soft: #d9ff7222;
+  --cr-font-size-hero-min: 2rem;
+  --cr-font-size-hero: 3.75rem;
+  --cr-font-size-hero-mobile: 2.5rem;
+  --cr-lede-width: 660px;
+  --cr-card-shadow: #0f110f;
+  --cr-card-top: #151815;
+  --cr-heading-tracking: -.025em;
+
   /* ---- Page ---- */
-  --cr-bg: #1E1F22;                 /* page background */
-  --cr-card: #2B2D31;               /* cards and the tab panel */
-  --cr-card-border: #3F4147;        /* card and divider lines */
-  --cr-raised: #383A40;             /* popover and hovered controls */
-  --cr-text: #F2F3F5;               /* main text */
-  --cr-muted: #B5BAC1;              /* labels, hints, timestamps */
+  --cr-bg: #090a09;                 /* page background */
+  --cr-card: #101210;               /* cards and the tab panel */
+  --cr-card-border: #282d28;        /* card and divider lines */
+  --cr-raised: #1b1f1b;             /* popover and hovered controls */
+  --cr-text: #eff1ed;               /* main text */
+  --cr-muted: #8c948a;              /* labels, hints, timestamps */
 
   /* ---- Controls ---- */
-  --cr-input-bg: #1E1F22;           /* text boxes */
-  --cr-input-border: #4E5058;       /* text box and swatch outlines */
-  --cr-accent: #5865F2;             /* main buttons, selected tab and style (Discord blurple) */
-  --cr-accent-hover: #4752C4;       /* main buttons when hovered */
-  --cr-accent-text: #FFFFFF;        /* text on accent */
-  --cr-secondary-bg: #4E5058;       /* secondary buttons (Reset, Done) */
-  --cr-secondary-hover: #6D6F78;    /* secondary buttons when hovered */
-  --cr-disabled-bg: #3A3C42;        /* disabled buttons */
-  --cr-disabled-text: #949BA4;      /* text on disabled buttons */
-  --cr-focus: #00A8FC;              /* keyboard focus outline */
-  --cr-selected-ring: #F2F3F5;      /* ring around the picked palette swatch */
+  --cr-input-bg: #0b0d0b;           /* text boxes */
+  --cr-input-border: #282d28;       /* text box and swatch outlines */
+  --cr-accent: #d9ff72;             /* main buttons, selected tab and style (Discord blurple) */
+  --cr-accent-hover: #e5ffa4;       /* main buttons when hovered */
+  --cr-accent-text: #161b11;        /* text on accent */
+  --cr-secondary-bg: #151815;       /* secondary buttons (Reset, Done) */
+  --cr-secondary-hover: #20251e;    /* secondary buttons when hovered */
+  --cr-disabled-bg: #1b1f1b;        /* disabled buttons */
+  --cr-disabled-text: #687064;      /* text on disabled buttons */
+  --cr-focus: #d9ff72;              /* keyboard focus outline */
+  --cr-selected-ring: #eff1ed;      /* ring around the picked palette swatch */
 
   /* ---- Messages ---- */
-  --cr-error: #FA777C;              /* error text */
-  --cr-error-bg: #3B2224;           /* error banner background */
-  --cr-success: #57F287;            /* success text */
-  --cr-warning: #F0B232;            /* "heads up" text and banners */
-  --cr-warning-bg: #3A3020;         /* warning banner background */
+  --cr-error: #ff8585;              /* error text */
+  --cr-error-bg: #241817;           /* error banner background */
+  --cr-success: #d9ff72;            /* success text */
+  --cr-warning: #e8c875;            /* "heads up" text and banners */
+  --cr-warning-bg: #211f16;         /* warning banner background */
 
   /* ---- Preview cards (meant to look like Discord's own themes) ---- */
   --cr-preview-dark-bg: #313338;    /* dark theme message background */
@@ -44,18 +76,18 @@
   --cr-preview-light-bg: #FFFFFF;   /* light theme message background */
   --cr-preview-light-text: #313338; /* light theme message text and uncolored names */
   --cr-preview-light-muted: #5C5E66;/* light theme timestamp */
-  --cr-chip-bg: #1E1F22;            /* role name chip under the preview */
+  --cr-chip-bg: #0b0d0b;            /* role name chip under the preview */
 
   /* ---- Role icon upload and crop ---- */
-  --cr-dropzone-border: #6D6F78;    /* dashed outline of the drop zone */
-  --cr-dropzone-bg: #232428;        /* drop zone background */
-  --cr-dropzone-active: #2E3035;    /* drop zone while a file is dragged over it */
-  --cr-stage-bg: #111214;           /* behind the image in the crop area */
+  --cr-dropzone-border: #41483b;    /* dashed outline of the drop zone */
+  --cr-dropzone-bg: #0d100d;        /* drop zone background */
+  --cr-dropzone-active: #171b16;    /* drop zone while a file is dragged over it */
+  --cr-stage-bg: #090a09;           /* behind the image in the crop area */
 
   /* ---- Holographic preview (Discord's fixed preset colors) ---- */
-  --cr-holo-1: #A9C9FF;             /* first holographic color */
-  --cr-holo-2: #FFBBEC;             /* second holographic color */
-  --cr-holo-3: #FFC3A0;             /* third holographic color */
+  --cr-holo-1: #d9ff72;             /* first holographic color */
+  --cr-holo-2: #eff1ed;             /* second holographic color */
+  --cr-holo-3: #8c948a;             /* third holographic color */
   --cr-holo-speed: 6s;              /* one loop of the holographic shimmer */
 
   /* ---- Marker on the color square (two rings so it shows on any color) ---- */
@@ -63,8 +95,8 @@
   --cr-marker-outer: #000000;       /* outer ring of the marker */
 
   /* ---- Shape ---- */
-  --cr-radius: 12px;                /* cards */
-  --cr-radius-small: 6px;           /* buttons, inputs, swatches */
+  --cr-radius: 15px;                /* cards */
+  --cr-radius-small: 9px;           /* buttons, inputs, swatches */
   --cr-radius-round: 50%;           /* avatars, the color marker, dots */
   --cr-border-width: 1px;           /* every outline */
   --cr-focus-width: 2px;            /* keyboard focus outline thickness */
@@ -72,8 +104,8 @@
   --cr-ring-width: 2px;             /* ring around the picked swatch */
 
   /* ---- Type ---- */
-  --cr-font: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;/* page font (system fonts only, nothing downloaded) */
-  --cr-font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;/* hex codes and commands */
+  --cr-font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;/* page font (system fonts only, nothing downloaded) */
+  --cr-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;/* hex codes and commands */
   --cr-font-size: 1rem;             /* body text */
   --cr-font-size-small: 0.875rem;   /* hints, labels, timestamps */
   --cr-font-size-title: 1.5rem;     /* page title */

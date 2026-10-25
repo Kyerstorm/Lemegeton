@@ -5,6 +5,7 @@ from discord.ext import commands
 from discord import app_commands
 import aiohttp
 import asyncio
+from bs4 import BeautifulSoup
 import logging
 import os
 from typing import List, Dict, Optional, Tuple
@@ -63,16 +64,35 @@ def scrape_novelupdates(driver: Driver, data: Dict) -> List[Dict]:
 
     novels = []
     for result in result_cards[:10]:
+        # The normal result card nests its title link, but some fallback selectors
+        # return the title node itself rather than the whole card.
         title_link = result.select(".search_title a", wait=None)
         if not title_link:
+            title_link = result.select("a[href*='/series/']", wait=None)
+        if not title_link:
+            result_class = (result.get_attribute("class") or "").split()
+            if "search_title" in result_class:
+                title_link = result if result.get_attribute("href") else result.select("a", wait=None)
+        if not title_link:
+            continue
+
+        title = (title_link.text or "").strip()
+        if not title:
+            title = (
+                title_link.get_attribute("title")
+                or title_link.get_attribute("aria-label")
+                or ""
+            ).strip()
+        if not title:
             continue
 
         description_node = result.select(".search_body", wait=None)
         image_node = result.select("img", wait=None)
         rating_node = result.select(".search_ratings", wait=None)
+        href = title_link.get_attribute("href") or ""
         novels.append({
-            "title": title_link.text.strip(),
-            "url": urljoin("https://www.novelupdates.com", title_link.get_attribute("href") or ""),
+            "title": title,
+            "url": urljoin("https://www.novelupdates.com", href) if href else "https://www.novelupdates.com",
             "description": description_node.text.strip() if description_node else None,
             "image": (image_node.get_attribute("src") or image_node.get_attribute("data-src")) if image_node else None,
             "rating": rating_node.text.strip() if rating_node else None,
@@ -138,10 +158,29 @@ class BrowseCog(commands.Cog):
             "young adult", "graphic novels", "fairy tales",
         )
         for category in book.get("categories", []) or []:
-            normalized = category.lower().replace("non-fiction", "nonfiction")
+            normalized = str(category).lower().replace("non-fiction", "nonfiction")
             if "nonfiction" in normalized:
                 continue
             if any(marker in normalized for marker in fiction_markers):
+                return True
+        return False
+
+    @staticmethod
+    def _is_nonfiction_book(book: Dict) -> bool:
+        """Recognize explicit non-fiction subjects without rejecting unclassified books."""
+        nonfiction_markers = (
+            "biography", "autobiography", "memoir", "history", "science",
+            "business", "economics", "cooking", "education", "health",
+            "fitness", "religion", "travel", "political science", "social science",
+            "reference", "philosophy", "technology", "engineering", "law",
+            "computer", "sports", "nature", "mathematics", "medical",
+            "psychology", "self-help", "family", "relationships", "true crime",
+            "finance", "management", "agriculture", "architecture", "parenting",
+            "environment", "government", "statistics",
+        )
+        for category in book.get("categories", []) or []:
+            normalized = str(category).lower().replace("non-fiction", "nonfiction")
+            if "nonfiction" in normalized or any(marker in normalized for marker in nonfiction_markers):
                 return True
         return False
 
@@ -214,6 +253,7 @@ class BrowseCog(commands.Cog):
         }
         if year_from is not None or year_to is not None:
             params["publishedDate"] = f"{year_from or 1000}..{year_to or 2100}"
+        all_items = []
         filtered_items = []
         try:
             timeout = aiohttp.ClientTimeout(total=8)
@@ -222,12 +262,17 @@ class BrowseCog(commands.Cog):
                     if response.status == 200:
                         data = await response.json()
                         for item in data.get("items", []) or []:
+                            if not isinstance(item, dict):
+                                continue
                             book = item.get("volumeInfo") or {}
-                            categories = book.get("categories") or []
+                            if not isinstance(book, dict) or not book.get("title"):
+                                continue
+                            all_items.append(item)
                             is_fiction = self._is_fiction_book(book)
+                            is_nonfiction = self._is_nonfiction_book(book)
                             if book_type == "fiction" and is_fiction:
                                 filtered_items.append(item)
-                            elif book_type == "nonfiction" and categories and not is_fiction:
+                            elif book_type == "nonfiction" and is_nonfiction:
                                 filtered_items.append(item)
                     else:
                         logger.warning(
@@ -242,6 +287,26 @@ class BrowseCog(commands.Cog):
         if genre or year_from is not None or year_to is not None:
             # Goodreads autocomplete does not reliably expose subject/year constraints.
             return []
+
+        # Google Books often omits categories or labels them too broadly to classify
+        # a result. Keep likely matches instead of dropping every title and needlessly
+        # waiting on Goodreads. Exclude only results explicitly classified as the
+        # opposite media type.
+        fallback_items = [
+            item for item in all_items
+            if not (
+                self._is_nonfiction_book(item.get("volumeInfo") or {})
+                if book_type == "fiction"
+                else self._is_fiction_book(item.get("volumeInfo") or {})
+            )
+        ]
+        if fallback_items:
+            logger.info(
+                "Using unclassified Google Books results for %s query %r",
+                book_type, query,
+            )
+            return fallback_items[:10]
+
         logger.info("No suitable Google Books result for %r; trying Goodreads", query)
         return await self.fetch_goodreads_results(query)
 
@@ -715,7 +780,7 @@ class BrowseCog(commands.Cog):
                 add_tmdb_field("🎥 Director", directors)
                 add_tmdb_field("✍️ Writer(s)", writers)
                 production = ", ".join(c.get("name", "") for c in media.get("production_companies", []) if c.get("name"))
-                add_tmdb_field("🏢 Production", production, inline=False)
+                add_tmdb_field("🏢 Production", production)
                 countries = ", ".join(c.get("name", "") for c in media.get("production_countries", []) if c.get("name"))
                 add_tmdb_field("🌍 Countries", countries)
                 if media.get("budget"):
@@ -739,7 +804,7 @@ class BrowseCog(commands.Cog):
                 creators = ", ".join(p.get("name", "") for p in media.get("created_by", []) if p.get("name"))
                 add_tmdb_field("✍️ Created By", creators)
                 networks = ", ".join(n.get("name", "") for n in media.get("networks", []) if n.get("name"))
-                add_tmdb_field("📡 Networks", networks, inline=False)
+                add_tmdb_field("📡 Networks", networks)
                 credits = media.get("aggregate_credits") or media.get("credits") or {}
                 keyword_data = (media.get("keywords") or {}).get("results") or []
                 ratings = (media.get("content_ratings") or {}).get("results") or []
@@ -1350,7 +1415,18 @@ class BrowseCog(commands.Cog):
                     choices.append(app_commands.Choice(name=f"{title}{year}"[:100], value=title[:100]))
         elif media_type in ("GENERAL_NOVEL", "BOOKS"):
             book_type = "fiction" if media_type == "GENERAL_NOVEL" else "nonfiction"
-            results = await self.fetch_book_results(current, book_type)
+            try:
+                # Discord autocomplete interactions have a short response deadline.
+                results = await asyncio.wait_for(
+                    self.fetch_book_results(current, book_type),
+                    timeout=2.25,
+                )
+            except asyncio.TimeoutError:
+                logger.debug("Book autocomplete timed out for %r (%s)", current, book_type)
+                return []
+            except Exception:
+                logger.exception("Book autocomplete failed for %r (%s)", current, book_type)
+                return []
             for item in results[:10]:
                 info = item.get("volumeInfo", {})
                 title = (info.get("title") or "").strip()

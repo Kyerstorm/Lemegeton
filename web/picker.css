@@ -392,3 +392,31 @@ dd { margin: 0; overflow-wrap: anywhere; }
   background: var(--cr-stage-bg);
 }
 .zoom { width: min(var(--cr-stage-size), 100%); }
+
+/* Lemegeton dashboard visual language */
+html { min-height: 100%; background: var(--cr-bg); }
+body { min-height: 100vh; background: radial-gradient(ellipse at 74% -12%, var(--cr-bg-glow) 0%, transparent 43%), var(--cr-bg); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+.picker-topbar { display:flex; justify-content:space-between; align-items:center; gap:var(--cr-space-4); padding:0 0 var(--cr-space-5); margin-bottom:var(--cr-space-6); border-bottom:var(--cr-border-width) solid var(--cr-line-soft); }
+.brand-lockup { display:inline-flex; align-items:center; gap:var(--cr-space-3); min-width:0; }
+.brand-mark { display:grid; place-items:center; width:var(--cr-brand-mark); height:var(--cr-brand-mark); border:var(--cr-border-width) solid var(--cr-brand-line); border-radius:var(--cr-radius); background:linear-gradient(145deg,var(--cr-brand-top),var(--cr-card)); color:var(--cr-accent); font-size:var(--cr-font-size-brand); font-weight:750; letter-spacing:var(--cr-mark-tracking); }
+.brand-copy { display:flex; flex-direction:column; gap:var(--cr-space-1); }
+.brand-copy strong { color:var(--cr-text); font-size:var(--cr-font-size-small); font-weight:750; letter-spacing:var(--cr-brand-tracking); }
+.brand-copy small { color:var(--cr-muted); font:var(--cr-font-size-micro) var(--cr-font-mono); letter-spacing:var(--cr-brand-tracking-small); }
+.topbar-status { display:inline-flex; align-items:center; gap:var(--cr-space-2); padding:var(--cr-space-2) var(--cr-space-3); border:var(--cr-border-width) solid var(--cr-card-border); border-radius:var(--cr-radius-small); background:var(--cr-card); }
+.topbar-status>span:last-child { display:flex; flex-direction:column; gap:var(--cr-space-1); }
+.topbar-status strong { color:var(--cr-soft); font:var(--cr-font-size-micro) var(--cr-font-mono); letter-spacing:var(--cr-status-tracking); }
+.topbar-status small { color:var(--cr-muted); font:var(--cr-font-size-micro) var(--cr-font-mono); letter-spacing:var(--cr-status-tracking-small); }
+.status-led { width:var(--cr-status-led); height:var(--cr-status-led); border-radius:var(--cr-radius-round); background:var(--cr-accent); box-shadow:0 0 var(--cr-glow-size) var(--cr-glow-color); }
+.picker-hero { margin:0 0 var(--cr-space-6); }
+.eyebrow { display:flex; align-items:center; gap:var(--cr-space-2); margin:0 0 var(--cr-space-3); color:var(--cr-muted); font:var(--cr-font-size-micro) var(--cr-font-mono); letter-spacing:var(--cr-eyebrow-tracking); }
+.eyebrow-divider { color:var(--cr-line-strong); }
+.picker-hero h1 { margin:0; font-size:var(--cr-font-size-hero-responsive); line-height:1.03; letter-spacing:var(--cr-hero-tracking); font-weight:650; }
+.picker-hero h1 span { color:var(--cr-accent); font-weight:450; }
+.picker-hero .lede { max-width:var(--cr-lede-width); margin:var(--cr-space-3) 0 0; color:var(--cr-muted); font-size:var(--cr-font-size-small); line-height:1.8; }
+.card { background:linear-gradient(145deg,var(--cr-card),var(--cr-card-shadow)); border-color:var(--cr-card-border); box-shadow:inset 0 var(--cr-border-width) 0 var(--cr-card-top); transition:border-color .18s ease,background .18s ease; }
+.card h2 { letter-spacing:var(--cr-heading-tracking); }
+.btn-primary { font-weight:700; box-shadow:0 0 var(--cr-glow-size) var(--cr-glow-soft); }
+.btn-primary:hover:not(:disabled) { box-shadow:0 0 var(--cr-glow-hover) var(--cr-glow-soft); }
+input, select, textarea { accent-color:var(--cr-accent); }
+@media (max-width:640px) { .picker-topbar { align-items:flex-start; } .topbar-status { padding:var(--cr-space-2); } .topbar-status small { display:none; } .brand-copy strong { letter-spacing:var(--cr-brand-tracking-mobile); } .picker-hero h1 { font-size:var(--cr-font-size-hero-mobile); } }
+@media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; scroll-behavior:auto !important; transition-duration:.01ms !important; } }

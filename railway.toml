@@ -10,3 +10,9 @@ restartPolicyMaxRetries = 10
 [[deploy.volumes]]
 mountPath = "/app/data"
 name = "lemegeton-data"
+
+[variables]
+DASHBOARD_HOST = "0.0.0.0"
+DASHBOARD_ALLOW_PUBLIC_BIND = "true"
+PYTHONUNBUFFERED = "1"
+PYTHONPATH = "/app"

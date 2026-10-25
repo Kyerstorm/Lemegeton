@@ -60,6 +60,16 @@ class MediaDiscoveryHelperTests(unittest.TestCase):
         )
         self.assertIs(selected, results[1])
 
+    def test_book_category_helpers_distinguish_fiction_and_nonfiction(self):
+        self.assertTrue(BrowseCog._is_fiction_book({"categories": ["Fiction / Fantasy"]}))
+        self.assertTrue(BrowseCog._is_nonfiction_book({"categories": ["History"]}))
+        self.assertFalse(BrowseCog._is_nonfiction_book({"categories": ["Fiction / Fantasy"]}))
+
+    def test_uncategorized_books_remain_eligible_for_fallback_results(self):
+        book = {"title": "An Unclassified Title"}
+        self.assertFalse(BrowseCog._is_fiction_book(book))
+        self.assertFalse(BrowseCog._is_nonfiction_book(book))
+
     def test_novel_format_is_categorized_as_light_novel(self):
         self.assertEqual(get_format_category("NOVEL", "JP"), "light_novels")
 
