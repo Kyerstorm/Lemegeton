@@ -11,7 +11,7 @@ pub async fn home(State(state): State<AppState>, headers: HeaderMap) -> Response
     }
     Redirect::to("/login").into_response()
 }
-pub async fn login_page(State(state): State<AppState>) -> Response {
+pub async fn login_page() -> Response {
     ui::login_html().into_response()
 }
 pub async fn oauth_start(State(state): State<AppState>) -> Response {

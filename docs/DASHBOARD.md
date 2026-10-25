@@ -1,6 +1,6 @@
 # Lemegeton web dashboard
 
-The public dashboard is a Rust/Axum service. The Discord bot remains the existing Python/discord.py application. The public HTTP service and the dashboard's markup, stylesheet, and browser controller are embedded in `dashboard-rs/src/ui.rs` and served by Rust. A narrow runtime adapter is consolidated into the existing bot entrypoint because only the live discord.py process owns its command tree and gateway connection; no separate Python dashboard service modules are needed.
+The public control plane is a Rust/Axum service with a React + TypeScript frontend in `dashboard-frontend/src/`. Screen components live in `.tsx` and styling is authored in `styles.ts`; Vite builds those sources into `dashboard-frontend/dist/app.js` and `app.css`, which Rust serves from the same origin. No handwritten dashboard HTML or standalone CSS/JavaScript source files are used. The Discord bot remains the existing Python/discord.py application. A narrow runtime adapter stays consolidated in `bot.py` because only the live bot process owns its command tree and gateway connection.
 
 ## Capabilities and boundaries
 
@@ -39,14 +39,15 @@ The bot still requires its existing Discord token and PostgreSQL configuration. 
 ## Local development
 
 1. Install Python dependencies with `python -m pip install -r requirements.txt`.
-2. Install a current stable Rust toolchain.
+2. Install Node.js 22 or newer and a current stable Rust toolchain.
 3. Configure the environment values above and the existing bot/database values.
-4. Build the public service: `cargo build --manifest-path dashboard-rs/Cargo.toml`.
-5. Start the dashboard backend with `cargo run --manifest-path dashboard-rs/Cargo.toml` in one terminal.
-6. Start the existing bot with `python bot.py` in another terminal. The bot starts its private runtime adapter and custom-role picker automatically.
-7. Open the public dashboard address. For local development, register `http://localhost:8080/oauth/callback` and use `DASHBOARD_PUBLIC_URL=http://localhost:8080`.
+4. Build the frontend: `npm install --prefix dashboard-frontend && npm run build --prefix dashboard-frontend`.
+5. Build the public service: `cargo build --manifest-path dashboard-rs/Cargo.toml`.
+6. Start the dashboard backend with `cargo run --manifest-path dashboard-rs/Cargo.toml` from the repository root in one terminal.
+7. Start the existing bot with `python bot.py` in another terminal. The bot starts its private runtime adapter and custom-role picker automatically.
+8. Open the public dashboard address. For local development, register `http://localhost:8080/oauth/callback` and use `DASHBOARD_PUBLIC_URL=http://localhost:8080`.
 
-For the combined deployment entry point, build the release binary first, then use `./scripts/start.sh`. Railway configuration builds the Rust binary and starts both services through this script.
+For the combined deployment entry point, build the frontend assets and release binary first, then use `./scripts/start.sh`. The Railway build command installs Node dependencies, generates the frontend assets, compiles the Rust service, and starts both services through this script. `dashboard-frontend/dist/` is generated output and is not a frontend source directory.
 
 ## Testing and checks
 

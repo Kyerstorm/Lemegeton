@@ -5,6 +5,7 @@ on:
     paths:
       - "Cargo.toml"
       - "dashboard-rs/**"
+      - "dashboard-frontend/**"
       - "dashboard-rs/src/ui.rs"
       - "tests/test_dashboard_bridge.py"
       - "tests/test_dashboard_assets.py"
@@ -27,6 +28,7 @@ on:
     paths:
       - "Cargo.toml"
       - "dashboard-rs/**"
+      - "dashboard-frontend/**"
       - "tests/test_dashboard_bridge.py"
       - "tests/test_dashboard_assets.py"
       - "tests/test_dashboard_command_policy.py"
@@ -39,6 +41,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --prefix dashboard-frontend --no-audit --no-fund
+      - run: npm run typecheck --prefix dashboard-frontend
+      - run: npm run build --prefix dashboard-frontend
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --workspace
 

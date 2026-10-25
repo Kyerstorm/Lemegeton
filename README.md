@@ -902,7 +902,7 @@ Made with ❤️ for the anime community by [Kyerstorm](https://github.com/Kyers
 
 ## Web management dashboard
 
-The public web control plane is a Rust/Axum application under `dashboard-rs/`. The page markup, styling, and browser controller are embedded in `dashboard-rs/src/ui.rs` and served from the compiled Rust application; there are no standalone dashboard HTML, CSS, or JavaScript source files. The runtime adapter is consolidated into the existing `bot.py` entrypoint because only the live Python bot owns the command tree and Discord gateway. The custom-role picker remains a Python feature behind a private loopback listener and is reverse-proxied through Rust.
+The public web control plane is a Rust/Axum application under `dashboard-rs/`, with a React + TypeScript frontend under `dashboard-frontend/src/`. Components live in `.tsx`, styling is authored from `styles.ts`, and Vite builds the production `app.js` and `app.css` assets served by Rust. No handwritten dashboard HTML, standalone CSS, or standalone JavaScript source files are needed. The runtime adapter stays consolidated in `bot.py` because only the live Python bot owns the command tree and Discord gateway. The custom-role picker remains a Python feature behind a private loopback listener and is reverse-proxied through Rust.
 
 **Full setup and deployment guide:** [docs/DASHBOARD.md](docs/DASHBOARD.md).
 
