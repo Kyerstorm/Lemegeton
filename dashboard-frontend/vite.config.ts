@@ -27,7 +27,6 @@ export default defineConfig({
   build: {
     outDir: resolve(root, "dist"),
     emptyOutDir: true,
-    minify: "esbuild",
     cssCodeSplit: false,
     reportCompressedSize: false,
     lib: {
@@ -36,6 +35,5 @@ export default defineConfig({
       formats: ["iife"],
       fileName: () => "app.js"
     },
-    rollupOptions: { output: { inlineDynamicImports: true } }
   }
 });
