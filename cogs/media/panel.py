@@ -679,11 +679,11 @@ class PanelForm(FeedbackAwareModal):
             else:
                 message = "Discord could not store the panel image. Check the storage channel's Attach Files permission and try again."
             await interaction.followup.send(message, ephemeral=True)
-        except Exception:
+        except Exception as exc:
             log.exception("Panel form submit failed")
             if stored_message:
                 await self.cog._delete_message(stored_message.channel, stored_message.id)
-            await interaction.followup.send("Something went wrong while saving the panel.", ephemeral=True)
+            await interaction.followup.send(application_error_message(exc), ephemeral=True)
 
 
 class PanelSearchModal(FeedbackAwareModal, title="Search Manga Panels"):
@@ -705,9 +705,9 @@ class PanelSearchModal(FeedbackAwareModal, title="Search Manga Panels"):
             await self.cog._post_browser(interaction, ids, tags=_tags(str(self.tags.value or "")), keyword=keyword)
         except ValueError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
-        except Exception:
+        except Exception as exc:
             log.exception("Panel search failed")
-            await interaction.followup.send("Something went wrong while searching.", ephemeral=True)
+            await interaction.followup.send(application_error_message(exc), ephemeral=True)
 
 
 class PanelConfigureModal(FeedbackAwareModal, title="Configure Panel Archive"):
@@ -754,9 +754,9 @@ class PanelConfigureModal(FeedbackAwareModal, title="Configure Panel Archive"):
                     panel_mod_role_id=EXCLUDED.panel_mod_role_id
                 """, guild.id, storage.id, logs[0].id if logs else None, roles[0].id if roles else None)
             await interaction.followup.send("Archive settings saved for this server.", ephemeral=True)
-        except Exception:
+        except Exception as exc:
             log.exception("Panel configuration failed")
-            await interaction.followup.send("Something went wrong while saving settings.", ephemeral=True)
+            await interaction.followup.send(application_error_message(exc), ephemeral=True)
 
 
 class PanelJumpModal(FeedbackAwareModal, title="Jump to Page"):
@@ -812,10 +812,10 @@ class PanelTagFilter(discord.ui.Select):
                         embed=None, view=self.browser
                     )
             await interaction.response.send_message("Filter applied to the public browser.", ephemeral=True)
-        except Exception:
+        except Exception as exc:
             log.exception("Panel filter failed")
             if interaction.response.is_done():
-                await interaction.followup.send("Something went wrong applying the filter.", ephemeral=True)
+                await interaction.followup.send(application_error_message(exc), ephemeral=True)
             else:
                 await interaction.response.send_message("Something went wrong applying the filter.", ephemeral=True)
 
@@ -899,9 +899,9 @@ class PanelBrowserView(FeedbackAwareView):
             view = FeedbackAwareView(timeout=120)
             view.add_item(PanelTagFilter(self, options))
             await interaction.response.send_message("Choose up to five tags; all selected tags must match.", view=view, ephemeral=True)
-        except Exception:
+        except Exception as exc:
             log.exception("Open panel filter failed")
-            await interaction.response.send_message("Something went wrong.", ephemeral=True)
+            await interaction.response.send_message(application_error_message(exc), ephemeral=True)
 
     async def _clear(self, interaction: discord.Interaction):
         try:
@@ -909,7 +909,7 @@ class PanelBrowserView(FeedbackAwareView):
             self.panel_ids = await _panel_ids(_nsfw(interaction))
             self.page = 0
             await self.cog._render(interaction, self)
-        except Exception:
+        except Exception as exc:
             log.exception("Clear panel filter failed")
             await interaction.response.send_message("Something went wrong.", ephemeral=True)
 
@@ -924,7 +924,7 @@ class PanelBrowserView(FeedbackAwareView):
                 await interaction.response.send_message("Only the uploader or a moderator of this server can edit this panel.", ephemeral=True); return
             await interaction.response.send_modal(PanelForm(self.cog, mode="edit", user_id=interaction.user.id,
                                                             guild_id=interaction.guild_id or 0, panel=panel))
-        except Exception:
+        except Exception as exc:
             log.exception("Edit panel action failed")
             await interaction.response.send_message("Something went wrong.", ephemeral=True)
 
@@ -1009,7 +1009,7 @@ class PanelResultView(FeedbackAwareView):
         try:
             ids = [self.panel_id] if await _get_panel(self.panel_id, _nsfw(interaction)) else []
             await self.cog._post_browser(interaction, ids)
-        except Exception:
+        except Exception as exc:
             log.exception("View saved panel failed")
             await interaction.response.send_message("Something went wrong.", ephemeral=True)
 
@@ -1021,7 +1021,7 @@ class PanelResultView(FeedbackAwareView):
                 await interaction.response.send_message("You cannot edit this panel.", ephemeral=True); return
             await interaction.response.send_modal(PanelForm(self.cog, mode="edit", user_id=interaction.user.id,
                                                             guild_id=interaction.guild_id or 0, panel=panel))
-        except Exception:
+        except Exception as exc:
             log.exception("Edit saved panel failed")
             await interaction.response.send_message("Something went wrong.", ephemeral=True)
 
