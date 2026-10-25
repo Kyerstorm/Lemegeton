@@ -24,17 +24,35 @@ class PanelChapterCaptionTests(unittest.TestCase):
 
 
 class PanelTagCatalogueTests(unittest.TestCase):
-    def test_each_select_stays_within_discord_option_limit(self):
+    def test_bundled_tag_groups_stay_within_discord_option_limit(self):
         self.assertLessEqual(len(panel.PANEL_TAGS), 25)
         self.assertLessEqual(len(panel.PANEL_VISUAL_TAGS), 25)
 
-    def test_all_options_have_short_descriptions(self):
-        all_tags = (*panel.PANEL_TAGS, *panel.PANEL_VISUAL_TAGS)
+    def test_all_bundled_options_have_short_descriptions(self):
+        all_tags = (*panel.PANEL_TAGS, *panel.PANEL_VISUAL_TAGS, *panel.PANEL_MANGAUPDATES_TAGS)
         self.assertEqual(len(all_tags), len(set(all_tags)))
         for tag in all_tags:
             with self.subTest(tag=tag):
                 self.assertTrue(panel.PANEL_TAG_DESCRIPTIONS.get(tag))
                 self.assertLessEqual(len(panel.PANEL_TAG_DESCRIPTIONS[tag]), 100)
+
+    def test_catalogue_includes_non_adult_anilist_and_mangaupdates_tags(self):
+        catalogue = dict(panel._build_panel_tag_catalogue([
+            {"name": "New AniList Tag", "description": "A test description.", "isAdult": False},
+            {"name": "Filtered AniList Tag", "description": "Not selectable.", "isAdult": True},
+        ]))
+        self.assertIn("new anilist tag", catalogue)
+        self.assertNotIn("filtered anilist tag", catalogue)
+        self.assertIn("doujinshi", catalogue)
+        self.assertIn("shoujo ai", catalogue)
+        self.assertGreater(len(catalogue), 50)
+        self.assertTrue(all(len(description) <= 100 for description in catalogue.values()))
+
+    def test_tag_values_use_discord_limit_and_support_longer_names(self):
+        long_tag = "x" * 100
+        self.assertEqual(panel._normalise_tag_values([long_tag]), [long_tag])
+        with self.assertRaisesRegex(ValueError, "100 characters or fewer"):
+            panel._normalise_tag_values(["x" * 101])
 
     def test_tag_parser_accepts_twenty_distinct_tags_across_both_selects(self):
         selected = ",".join((*panel.PANEL_TAGS[:10], *panel.PANEL_VISUAL_TAGS[:10]))
