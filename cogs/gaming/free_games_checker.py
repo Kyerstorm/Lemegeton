@@ -764,7 +764,7 @@ class FreeGamesManagementView(FeedbackAwareView):
             try:
                 embed = build_error_embed(
                     "Error",
-                    "An error occurred while getting status."
+                    application_error_message(e)
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
             except:
@@ -870,7 +870,7 @@ class ChannelSetupModal(FeedbackAwareModal, title="Setup Free Games Notification
             try:
                 embed = build_error_embed(
                     "Error",
-                    "An error occurred while setting up notifications."
+                    application_error_message(e)
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
             except:
@@ -1011,7 +1011,7 @@ class FreeGamesCog(commands.Cog):
             try:
                 embed = build_error_embed(
                     "Error",
-                    "An error occurred while loading the free games management system."
+                    application_error_message(e)
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
             except:
@@ -1144,7 +1144,7 @@ class FreeGamesCog(commands.Cog):
             logger.error(f"Error in check_free_games_now command: {e}", exc_info=True)
             try:
                 await interaction.followup.send(
-                    "❌ An error occurred while checking for free games. Please try again later.",
+                    application_error_message(e),
                     ephemeral=True
                 )
             except:
