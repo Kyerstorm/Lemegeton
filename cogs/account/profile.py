@@ -579,7 +579,7 @@ class Profile(commands.Cog):
             # Catch any other defer errors
             logger.error(f"Error deferring interaction: {e}")
             try:
-                await interaction.response.send_message("❌ An error occurred. Please try again.", ephemeral=True)
+                await interaction.response.send_message(application_error_message(e), ephemeral=True)
             except:
                 pass
             return
@@ -863,7 +863,7 @@ class Profile(commands.Cog):
             except Exception as inner_e:
                 logger.error(f"Failed to send static fallback profile: {inner_e}")
                 try:
-                    await interaction.followup.send("❌ Critical error: Unable to display profile at all.", ephemeral=True)
+                    await interaction.followup.send(application_error_message(inner_e), ephemeral=True)
                 except Exception as inner_send_error:
                     try:
                         await interaction.followup.send(application_error_message(inner_send_error), ephemeral=True)
