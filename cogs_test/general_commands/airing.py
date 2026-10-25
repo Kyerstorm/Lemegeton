@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timezone
 import aiohttp
 import discord
+from helpers.command_error_handler import FeedbackAwareView
 from discord import app_commands
 from discord.ext import commands
 from helpers.anilist_helper import post_graphql
@@ -121,7 +122,7 @@ def schedule_embed(entries: list[dict], title_filter: str | None, page: int) -> 
     embed.set_footer(text=f"🕒 Times in UTC · Source: AniList · Page {page + 1} · Schedule may change")
     return embed
 
-class AiringView(discord.ui.View):
+class AiringView(FeedbackAwareView):
     def __init__(self, cog: "Airing", entries: list[dict], filters: dict, owner_id: int):
         super().__init__(timeout=180)
         self.cog = cog
