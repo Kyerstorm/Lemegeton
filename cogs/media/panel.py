@@ -13,7 +13,6 @@ import secrets
 from typing import Any
 from urllib.parse import urlsplit
 
-import aiohttp
 import discord
 from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView, application_error_message
 from discord import app_commands
@@ -42,19 +41,83 @@ PANEL_MANGAUPDATES_TAGS = (
     "doujinshi", "gender bender", "harem", "mecha", "shoujo ai",
     "shounen ai", "sports", "yaoi", "yuri",
 )
+PANEL_ANILIST_TAGS = (
+    "4-koma", "achromatic", "achronological order", "acrobatics", "acting",
+    "adoption", "advertisement", "afterlife", "age gap", "age regression",
+    "agender", "agriculture", "airsoft", "alchemy", "aliens", "alternate universe",
+    "american football", "amnesia", "anachronism", "ancient china", "angels",
+    "animals", "anthology", "anthropomorphism", "anti-hero", "archery",
+    "aromantic", "arranged marriage", "artificial intelligence", "asexual",
+    "assassins", "astronomy", "athletics", "augmented reality", "autobiographical",
+    "aviation", "badminton", "ballet", "band", "bar", "baseball", "basketball",
+    "battle royale", "biographical", "bisexual", "blackmail", "body swapping",
+    "boxing", "bullying", "calligraphy", "card battle", "cars", "cgi", "chibi",
+    "chuunibyou", "classic literature", "college", "coming of age", "cosplay",
+    "crossdressing", "crossover", "cute girls doing cute things", "cycling",
+    "dancing", "delinquents", "demons", "development", "dragons", "drawing",
+    "dystopian", "economics", "educational", "ensemble cast", "environmental",
+    "episodic", "espionage", "fairy tale", "family life", "fashion",
+    "female protagonist", "fishing", "fitness", "flash", "food", "football",
+    "foreign", "fugitive", "full cgi", "full colour", "gangs", "gender bending",
+    "gender neutral", "ghost", "gods", "gyaru", "henshin", "hikikomori",
+    "ice skating", "idol", "iyashikei", "kaiju", "karuta", "kemonomimi", "kids",
+    "love triangle", "mafia", "mahjong", "maids", "male protagonist",
+    "memory manipulation", "meta", "military", "monster girl", "mopeds",
+    "motorcycles", "musical", "nekomimi", "ninja", "no dialogue", "noir",
+    "otaku culture", "outdoor", "philosophy", "photography", "pirates", "poker",
+    "police", "primarily female cast", "primarily male cast", "puppetry",
+    "real robot", "rehabilitation", "robots", "rural", "samurai", "satire",
+    "school", "school club", "ships", "shogi", "space", "space opera",
+    "steampunk", "stop motion", "super power", "super robot", "superhero",
+    "surreal comedy", "swimming", "swordplay", "table tennis", "tanks", "teacher",
+    "tennis", "time manipulation", "time skip", "trains", "triads", "tsundere",
+    "urban fantasy", "vampire", "video games", "virtual world", "volleyball",
+    "war", "witch", "work", "wrestling", "writing", "wuxia", "yakuza",
+    "yandere", "youkai", "zombie", "adaptation", "artbook", "award winning",
+    "based on a manga", "based on a novel", "biography", "character growth",
+    "classic", "combat", "coming-of-age", "conspiracy", "contemporary",
+    "courtroom", "crime", "detective", "disaster", "disguise", "dungeon",
+    "dystopia", "exorcists", "found family", "genius protagonist", "gothic",
+    "investigation", "journey", "legal", "lgbtq+ themes", "lost civilization",
+    "low fantasy", "magical girl", "management", "medicine", "mentor",
+    "modern fantasy", "morality", "multiverse", "music band", "mystic arts",
+    "natural disaster", "orphan", "parallel world", "pharmacy", "pilots",
+    "post-war", "prophecy", "quest", "rebellion", "school festival",
+    "secret identity", "secret organization", "siblings", "small town",
+    "space travel", "special forces", "spirit world", "sports team", "summoning",
+    "supernatural powers", "tournament", "training", "travel", "treasure hunt",
+    "undercover", "urban life", "vigilante", "villainess", "virtual reality",
+    "vampires", "werewolf", "world war", "workplace", "warring states",
+    "xianxia", "xuanhuan", "zombies", "academy", "adventure guild", "alchemist",
+    "ancient ruins", "angst", "anti-war", "archaeology", "artificial life",
+    "assassination", "boarding school", "bookworm", "business", "captivity",
+    "cat people", "childhood friends", "climate", "clone", "competition",
+    "construction", "cooking", "crafting", "cybernetics", "dark fantasy",
+    "demon lord", "desert", "diplomacy", "dreams", "elemental powers", "empires",
+    "escape", "family business", "farming", "fencing", "folklore", "food culture",
+    "friendship", "frontier", "genetics", "ghost hunting", "gladiators",
+    "gods and goddesses", "government", "guilds", "healing", "heroic fantasy",
+    "historical fantasy", "hunting", "immortality", "inheritance", "insects",
+    "island", "journalism", "kingdom building", "knights", "language", "life lessons",
+    "literature", "lone wolf", "loyalty", "magical artifacts", "magical academy",
+    "martial arts tournament", "mercenaries", "merchants", "military academy",
+    "mystical creatures", "naval", "necromancy", "nobility",
+    "non-human protagonist", "occult", "open world", "organized crime", "palace",
+    "parenthood", "performing arts", "philanthropy", "pirate crew",
+    "planetary exploration", "poetry", "prison", "reconstruction", "rescue",
+    "royalty", "rural life", "sailing", "school trip", "science", "scientists",
+    "sculpture", "seasonal", "secret past", "sentai", "shipbuilding", "siege",
+    "social issues", "sorcery", "street racing", "strategy", "subway",
+    "survival skills", "swordsmanship", "technology", "theater", "time loop",
+    "time paradox", "transformation", "underdog", "urban exploration", "veterans",
+    "warriors", "weather", "western", "witchcraft", "woodworking", "world travel",
+    "writing club", "zoology"
+)
+PANEL_NSFW_TAGS = ("nsfw",)
 MAX_PANEL_TAGS = 20
 MAX_TAG_LENGTH = 100
-ANILIST_TAG_QUERY = """
-query {
-  MediaTagCollection {
-    name
-    description
-    isAdult
-  }
-}
-"""
-_PANEL_TAG_CATALOGUE: tuple[tuple[str, str], ...] | None = None
-_PANEL_TAG_CATALOGUE_LOCK = asyncio.Lock()
+
+NSFW_TAGS = frozenset({"nsfw", "mature"})
 PANEL_VISUAL_TAGS = (
     "double spread", "splash page", "panel sequence", "iconic moment", "character close-up",
     "fight scene", "comedy panel", "emotional scene", "flashback", "worldbuilding",
@@ -112,7 +175,8 @@ PANEL_TAG_DESCRIPTIONS = {
     "time travel": "Time loops, timelines, time jumps, or temporal travel.",
     "reincarnation": "Rebirth, reincarnation, or a second-life premise.",
     "fan service": "Fan-service imagery or suggestive presentation; use the mature tag when age-restricted.",
-    "mature": "Age-restricted content. The panel stays hidden in non-NSFW channels.",
+    "mature": "Age-restricted content. Hidden outside NSFW channels.",
+    "nsfw": "Age-restricted content. Selecting this tag hides the panel outside NSFW channels.",
     "doujinshi": "Self-published or independently produced comics.",
     "gender bender": "Stories involving gender disguise, transformation, or role reversal.",
     "harem": "Stories centered on one character and multiple potential partners.",
@@ -123,6 +187,10 @@ PANEL_TAG_DESCRIPTIONS = {
     "yaoi": "Male-male romance or relationships.",
     "yuri": "Female-female romance or relationships.",
 }
+for _tag in PANEL_ANILIST_TAGS:
+    PANEL_TAG_DESCRIPTIONS.setdefault(_tag, f"Story, character, or setting tag: {_tag.strip()}.")
+for _tag in PANEL_NSFW_TAGS:
+    PANEL_TAG_DESCRIPTIONS.setdefault(_tag, "Age-restricted content; hidden outside NSFW channels.")
 CHAPTER_CAPTION_RE = re.compile(
     r"^\s*(?:(?:chapter|ch\.?)\s*)?#?(\d+(?:\.\d+)?|N/A)"
     r"(?:\s*(?:[-–—:|]\s*|\s+)(.*?))?\s*$",
@@ -225,59 +293,25 @@ def _tags(raw: str | None) -> list[str]:
     return _normalise_tag_values((raw or "").split(","))
 
 
-def _build_panel_tag_catalogue(
-    anilist_tags: list[dict[str, Any]] | None = None,
-) -> tuple[tuple[str, str], ...]:
-    """Combine bundled MangaUpdates-style tags with AniList's non-adult tag collection."""
+def _build_panel_tag_catalogue() -> tuple[tuple[str, str], ...]:
+    """Return the hand-maintained AniList-inspired and MangaUpdates tag catalogue."""
     catalogue: dict[str, str] = {}
-    for tag in (*PANEL_TAGS, *PANEL_VISUAL_TAGS, *PANEL_MANGAUPDATES_TAGS):
-        catalogue[tag] = PANEL_TAG_DESCRIPTIONS.get(tag, "MangaUpdates genre or category.")
-
-    for entry in anilist_tags or []:
-        if not isinstance(entry, dict) or bool(entry.get("isAdult")):
-            continue
-        name = str(entry.get("name") or "").strip().lower()
-        if not name or len(name) > MAX_TAG_LENGTH:
-            continue
-        description = re.sub(r"<[^>]*>", " ", str(entry.get("description") or ""))
-        description = " ".join(description.split()) or "AniList manga tag."
-        if len(description) > 100:
-            description = description[:97].rstrip() + "..."
-        catalogue.setdefault(name, description)
-
+    for tag in (
+        *PANEL_TAGS,
+        *PANEL_VISUAL_TAGS,
+        *PANEL_MANGAUPDATES_TAGS,
+        *PANEL_ANILIST_TAGS,
+        *PANEL_NSFW_TAGS,
+    ):
+        catalogue[tag] = PANEL_TAG_DESCRIPTIONS.get(
+            tag, f"Story, character, or setting tag: {tag}."
+        )[:100]
     return tuple(sorted(catalogue.items()))
 
 
-async def _panel_tag_catalogue() -> tuple[tuple[str, str], ...]:
-    """Fetch AniList tags once per process, falling back to the bundled catalogue."""
-    global _PANEL_TAG_CATALOGUE
-    if _PANEL_TAG_CATALOGUE is not None:
-        return _PANEL_TAG_CATALOGUE
-
-    async with _PANEL_TAG_CATALOGUE_LOCK:
-        if _PANEL_TAG_CATALOGUE is not None:
-            return _PANEL_TAG_CATALOGUE
-
-        catalogue = _build_panel_tag_catalogue()
-        timeout = aiohttp.ClientTimeout(total=10)
-        try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(
-                    "https://graphql.anilist.co",
-                    json={"query": ANILIST_TAG_QUERY},
-                    headers={"Accept": "application/json"},
-                ) as response:
-                    response.raise_for_status()
-                    payload = await response.json(content_type=None)
-            entries = payload.get("data", {}).get("MediaTagCollection")
-            if not isinstance(entries, list):
-                raise ValueError("AniList did not return a tag collection")
-            catalogue = _build_panel_tag_catalogue(entries)
-        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError) as exc:
-            log.warning("Could not load AniList tag catalogue; using bundled tags: %s", exc)
-
-        _PANEL_TAG_CATALOGUE = catalogue
-        return catalogue
+def _tags_require_nsfw(tags: list[str] | tuple[str, ...]) -> bool:
+    """Treat either explicit NSFW marker as an age-restriction flag."""
+    return any(tag.strip().lower() in NSFW_TAGS for tag in tags)
 
 
 def _parse_chapter_caption(value: str) -> tuple[str, str]:
@@ -837,7 +871,7 @@ class PanelForm(FeedbackAwareModal):
             elif self.mode == "add":
                 await interaction.followup.send("Please attach an image.", ephemeral=True)
                 return
-            mature = "mature" in tags
+            mature = _tags_require_nsfw(tags)
             pool = await _pool()
             async with pool.acquire() as conn:
                 async with conn.transaction():
@@ -1355,7 +1389,7 @@ class PanelCog(commands.Cog):
         source_url: str | None = None,
     ) -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
-        catalogue = await _panel_tag_catalogue()
+        catalogue = _build_panel_tag_catalogue()
         view = PanelTagPickerView(
             self,
             catalogue=catalogue,
