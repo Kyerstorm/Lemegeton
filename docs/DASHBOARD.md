@@ -1,6 +1,6 @@
 # Lemegeton web dashboard
 
-The public control plane is a Rust/Axum service with a React + TypeScript frontend in `dashboard-frontend/src/`. Screen components live in `.tsx` and styling is authored in `styles.ts`; Vite builds those sources into `dashboard-frontend/dist/app.js` and `app.css`, which Rust serves from the same origin. No handwritten dashboard HTML or standalone CSS/JavaScript source files are used. The Discord bot remains the existing Python/discord.py application. A narrow runtime adapter stays consolidated in `bot.py` because only the live bot process owns its command tree and gateway connection.
+The public control plane is a Rust/Axum service with a React + TypeScript frontend in `dashboard-frontend/src/`. Screen components live in `.tsx` and styling is authored in `styles.ts`; Vite builds those sources into `dashboard-frontend/dist/app.js` and `app.css`, which Rust serves from the same origin. The root `railpack.json` explicitly supplies Node 22 for this nested package, so a Python/Rust deployment does not rely on language auto-detection to provide Node. No handwritten dashboard HTML or standalone CSS/JavaScript source files are used. The Discord bot remains the existing Python/discord.py application. A narrow runtime adapter stays consolidated in `bot.py` because only the live bot process owns its command tree and gateway connection.
 
 ## Capabilities and boundaries
 

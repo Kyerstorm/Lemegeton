@@ -35,6 +35,12 @@ on:
       - "bot.py"
       - "config.py"
       - "cogs_test/general_commands/dashboard.py"
+      - "railpack.json"
+      - "config/railway.json"
+      - "scripts/start.sh"
+      - "railway.json"
+      - "railway.toml"
+      - ".env.example"
 
 jobs:
   rust:

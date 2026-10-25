@@ -1,6 +1,6 @@
 [build]
 builder = "RAILPACK"
-buildCommand = "python -m pip install -r requirements.txt && cargo build --manifest-path dashboard-rs/Cargo.toml --release"
+buildCommand = "python -m pip install -r requirements.txt && npm install --prefix dashboard-frontend --no-audit --no-fund && npm run typecheck --prefix dashboard-frontend && npm run build --prefix dashboard-frontend && cargo build --manifest-path dashboard-rs/Cargo.toml --release"
 
 [deploy]
 startCommand = "./scripts/start.sh"
