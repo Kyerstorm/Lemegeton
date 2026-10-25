@@ -1,4 +1,5 @@
 import discord
+from helpers.command_error_handler import FeedbackAwareView
 from discord.ext import commands
 from discord import app_commands
 import re
@@ -33,7 +34,7 @@ class ConvertSession:
 # Speed Mode toggle button
 # =====================================================
 
-class SpeedModeView(discord.ui.View):
+class SpeedModeView(FeedbackAwareView):
     def __init__(self, session: ConvertSession):
         super().__init__(timeout=30)
         self.session = session
@@ -52,7 +53,7 @@ class SpeedModeView(discord.ui.View):
 # Add More / Done UI
 # =====================================================
 
-class AddMoreView(discord.ui.View):
+class AddMoreView(FeedbackAwareView):
     def __init__(self, session: ConvertSession):
         super().__init__(timeout=600)
         self.session = session
