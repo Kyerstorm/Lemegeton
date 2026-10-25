@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 
 import discord
-from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView
+from helpers.command_error_handler import application_error_message, FeedbackAwareModal, FeedbackAwareView
 from discord.ext import commands, tasks
 from discord import app_commands
 import aiohttp
@@ -1047,7 +1047,7 @@ class NewsManagementView(FeedbackAwareView):
             try:
                 embed = build_error_embed(
                     "Error",
-                    "An error occurred. Please try again."
+                    application_error_message(e)
                 )
                 await interaction.response.send_message(embed=embed, ephemeral=True)
             except:
@@ -1189,7 +1189,7 @@ class NewsManagementView(FeedbackAwareView):
             logger.error(f"Error during force update: {e}", exc_info=True)
             error_embed = build_error_embed(
                 "Force Update Failed",
-                f"Error during manual update: {str(e)}"
+                application_error_message(e)
             )
             await interaction.edit_original_response(embed=error_embed)
     
@@ -1222,7 +1222,7 @@ class NewsManagementView(FeedbackAwareView):
             logger.error(f"Failed to restart background task: {e}", exc_info=True)
             embed = build_error_embed(
                 "Restart Failed",
-                f"Failed to restart background task: {str(e)}"
+                application_error_message(e)
             )
         
         await interaction.followup.send(embed=embed, ephemeral=True)
@@ -1306,7 +1306,7 @@ class AddAccountModal(FeedbackAwareModal):
             logger.error(f"Error adding account: {e}", exc_info=True)
             embed = build_error_embed(
                 "Error",
-                f"Error: {str(e)}"
+                application_error_message(e)
             )
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
