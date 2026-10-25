@@ -542,7 +542,7 @@ class Random(commands.Cog):
             if media_type == "WEBNOVEL":
                 if year_from is not None or year_to is not None:
                     raise LookupError("Novel Updates results do not expose consistent publication-year data for filtering.")
-                results = await search_novelupdates(query)
+                results = await search_novelupdates(query, require_genres=bool(genre))
                 if genre:
                     results = [
                         item for item in results
