@@ -1,6 +1,6 @@
 from helpers.color_palette import PALETTE
 import discord
-from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView
+from helpers.command_error_handler import prefix_error_message, FEEDBACK_ERROR_GUIDANCE, FeedbackAwareModal, FeedbackAwareView
 from discord.ext import commands
 from typing import Optional, List
 import logging
@@ -967,7 +967,7 @@ class PlannedFeatures(commands.Cog):
         except Exception as e:
             logger.error(f"Error displaying planned features: {e}", exc_info=True)
             try:
-                await ctx.send("❌ **Error**\n\nFailed to load planned features. Please try again later.")
+                await ctx.send("❌ **Error**\n\n" + (prefix_error_message(e) or FEEDBACK_ERROR_GUIDANCE))
             except Exception:
                 # If sending fails, log and swallow
                 logger.exception("Failed to send error message to channel")
