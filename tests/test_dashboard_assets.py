@@ -75,6 +75,7 @@ class DashboardAssetTests(unittest.TestCase):
         )
         for command in commands:
             with self.subTest(command=command):
+                self.assertIn("npm run typecheck --prefix dashboard-frontend", command)
                 self.assertIn("npm run build --prefix dashboard-frontend", command)
                 self.assertIn("cargo build --manifest-path dashboard-rs/Cargo.toml --release", command)
         self.assertIn("dashboard-frontend/dist/app.js", START_SCRIPT)
