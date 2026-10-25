@@ -119,7 +119,7 @@ class FeedbackModal(discord.ui.Modal, title="Submit Feedback"):
 
     async def on_error(self, interaction: discord.Interaction, error: Exception):
         logger.exception("Unhandled error in feedback modal", exc_info=error)
-        message = "Something went wrong while submitting feedback. Please try `/feedback` again; if the issue continues, contact a server moderator or administrator."
+        message = "The feedback system isn't working right now."
         try:
             if interaction.response.is_done():
                 await interaction.followup.send(message, ephemeral=True)
@@ -224,12 +224,12 @@ class Feedback(commands.Cog):
             try:
                 if interaction.response.is_done():
                     await interaction.followup.send(
-                        "The feedback form could not be opened. Please contact a server moderator or administrator to report this issue.",
+                        "The feedback system isn't working right now.",
                         ephemeral=True,
                     )
                 else:
                     await interaction.response.send_message(
-                        "The feedback form could not be opened. Please contact a server moderator or administrator to report this issue.",
+                        "The feedback system isn't working right now.",
                         ephemeral=True,
                     )
             except discord.HTTPException:
@@ -256,7 +256,7 @@ class Feedback(commands.Cog):
 
         if normalized_category not in category_aliases:
             await interaction.response.send_message(
-                "Feedback type must be **Ideas** or **Bugs**. Please run `/feedback` and try again.",
+                "Feedback type must be **Ideas** or **Bugs**.",
                 ephemeral=True,
             )
             return
@@ -289,7 +289,7 @@ class Feedback(commands.Cog):
             if not isinstance(channel, (discord.TextChannel, discord.Thread)):
                 logger.error("Configured feedback channel %s is missing or is not a text channel", BOT_FEEDBACK_CHANNEL_ID)
                 await interaction.followup.send(
-                    "The feedback channel is not available right now. Please contact a server moderator.",
+                    "The feedback system isn't working right now.",
                     ephemeral=True,
                 )
                 return
@@ -340,7 +340,7 @@ class Feedback(commands.Cog):
                 extension = Path(original_name).suffix.lower()
                 if content_type not in allowed_image_types or extension not in allowed_extensions:
                     await interaction.followup.send(
-                        f"Image {index} is not supported. Please run /feedback again and upload PNG, JPEG, GIF, WebP, or AVIF files.",
+                        f"Image {index} is not supported. Use PNG, JPEG, GIF, WebP, or AVIF.",
                         ephemeral=True,
                     )
                     return
@@ -348,20 +348,20 @@ class Feedback(commands.Cog):
                 size_limit = int(getattr(interaction, "filesize_limit", 0) or 0)
                 if size_limit and file_size > size_limit:
                     await interaction.followup.send(
-                        f"Image {index} exceeds this server's upload limit. Please run /feedback again with a smaller image.",
+                        f"Image {index} exceeds this server's upload limit. Use a smaller image.",
                         ephemeral=True,
                     )
                     return
                 image_data = await upload.read()
                 if not image_data:
                     await interaction.followup.send(
-                        f"Image {index} was empty or could not be read. Please run /feedback again.",
+                        f"Image {index} was empty or could not be read. Try a different image.",
                         ephemeral=True,
                     )
                     return
                 if size_limit and len(image_data) > size_limit:
                     await interaction.followup.send(
-                        f"Image {index} exceeds this server's upload limit. Please run /feedback again with a smaller image.",
+                        f"Image {index} exceeds this server's upload limit. Use a smaller image.",
                         ephemeral=True,
                     )
                     return
@@ -402,13 +402,13 @@ class Feedback(commands.Cog):
         except discord.Forbidden:
             logger.exception("Permission denied while publishing feedback from %s", user_info)
             await interaction.followup.send(
-                "I don't have permission to post feedback right now. Please contact a server moderator.",
+                "The feedback system isn't working right now.",
                 ephemeral=True,
             )
         except Exception:
             logger.exception("Error in feedback submission by %s", user_info)
             await interaction.followup.send(
-                "An error occurred while submitting your feedback. Please try again later.",
+                "The feedback system isn't working right now.",
                 ephemeral=True,
             )
 
@@ -532,7 +532,7 @@ class FeedbackView(View):
         try:
             feedback_cog = self.bot.get_cog("Feedback")
             if not feedback_cog:
-                await interaction.response.send_message("❌ Feedback system not available.", ephemeral=True)
+                await interaction.response.send_message("❌ The feedback system isn't working right now.", ephemeral=True)
                 return
 
             safe_name = "".join(c for c in user.display_name if c.isalnum() or c in '-_').lower()
