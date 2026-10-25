@@ -1,6 +1,6 @@
 # Lemegeton web dashboard
 
-The public dashboard is a Rust/Axum service. The Discord bot remains the existing Python/discord.py application. The public HTTP service and the dashboard's markup, stylesheet, and browser controller are embedded in Rust source. A narrow runtime adapter is consolidated into the existing bot entrypoint because only the live discord.py process owns its command tree and gateway connection; no separate Python dashboard service modules are needed.
+The public dashboard is a Rust/Axum service. The Discord bot remains the existing Python/discord.py application. The public HTTP service and the dashboard's markup, stylesheet, and browser controller are embedded in `dashboard-rs/src/ui.rs` and served by Rust. A narrow runtime adapter is consolidated into the existing bot entrypoint because only the live discord.py process owns its command tree and gateway connection; no separate Python dashboard service modules are needed.
 
 ## Capabilities and boundaries
 
