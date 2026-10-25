@@ -1,5 +1,6 @@
 from helpers.color_palette import PALETTE
 import discord
+from helpers.command_error_handler import FeedbackAwareView, application_error_message
 from discord import app_commands
 from discord.ext import commands
 import logging
@@ -546,7 +547,7 @@ class HelpCog(commands.Cog):
             
             error_embed = build_error_embed(
                 title="Error",
-                description="Failed to load help information. Please try again later."
+                description=application_error_message(e)
             )
             
             try:
@@ -755,7 +756,7 @@ class HelpCog(commands.Cog):
         return tips.get(category_key, "")
 
 
-class HelpNavigationView(discord.ui.View):
+class HelpNavigationView(FeedbackAwareView):
     """Navigation view for help command with dropdown menu."""
     
     def __init__(
@@ -890,7 +891,7 @@ class CategorySelect(discord.ui.Select):
             
             await interaction.response.send_message(
                 embed=build_error_embed(
-                    description="An error occurred while loading that category. Please try again."
+                    description=application_error_message(e)
                 ),
                 ephemeral=True
             )
