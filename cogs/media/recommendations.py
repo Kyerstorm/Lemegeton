@@ -851,7 +851,7 @@ class RecommendationsCog(commands.Cog):
                     logger.error(f"Error retrieving username from database: {e}", exc_info=True)
                     embed = build_error_embed(
                         "Database Error",
-                        "Automatic username lookup failed. You can enter an AniList username manually.\\n\\n" + application_error_message(e)
+                        "Automatic username lookup failed. You can enter an AniList username manually.\n\n" + application_error_message(e)
                     )
                     await interaction.followup.send(embed=embed, ephemeral=True)
                     return
@@ -911,7 +911,7 @@ class RecommendationsCog(commands.Cog):
                 logger.error(f"Error fetching manga list: {e}", exc_info=True)
                 embed = build_error_embed(
                     "Error",
-                    f"Could not fetch manga list for '{username}'. Check the username, then try again.\\n\\n" + application_error_message(e)
+                    f"Could not fetch manga list for '{username}'. Check the username, then try again.\n\n" + application_error_message(e)
                 )
                 await interaction.edit_original_response(embed=embed)
                 return
