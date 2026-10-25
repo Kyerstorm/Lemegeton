@@ -526,7 +526,7 @@ class ThemeMainMenuView(FeedbackAwareView):
             logger.error(f"Error opening theme browser: {e}", exc_info=True)
             embed = build_error_embed(
                 "Error",
-                "An error occurred while opening the theme browser. Please try again."
+                application_error_message(e)
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
     
@@ -567,7 +567,7 @@ class ThemeMainMenuView(FeedbackAwareView):
             logger.info(f"Theme showcase sent to user {interaction.user.id}")
         except Exception as e:
             logger.error(f"Error in theme showcase: {e}")
-            await interaction.followup.send("❌ Error loading theme showcase.", ephemeral=True)
+            await interaction.followup.send(application_error_message(e), ephemeral=True)
     
     @discord.ui.button(label="⚙️ My Current Theme", style=discord.ButtonStyle.secondary, row=1)
     async def current_theme(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1048,7 +1048,7 @@ class CustomThemeSystem(commands.Cog):
                 "Error",
                 application_error_message(e)
             )
-            await interaction.followup.send(embed=embed)
+            await interaction.followup.send(embed=embed, ephemeral=True)
     
     async def _handle_set_guild_theme(self, interaction: discord.Interaction, theme_name: Optional[str]):
         """Set guild default theme"""
