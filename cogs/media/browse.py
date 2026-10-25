@@ -263,8 +263,22 @@ def scrape_novelupdates(driver: Driver, data: Dict) -> List[Dict]:
     """Browser fallback for public Novel Updates search pages using multiple layouts."""
     query = " ".join(str(data.get("query") or "").split())
     urls = data.get("urls") or _novelupdates_search_urls(query)
+    successful_page_loads = 0
+    route_errors = []
     for route_index, url in enumerate(urls):
-        driver.get(url)
+        try:
+            driver.get(url)
+        except Exception as exc:
+            html = driver.page_html or ""
+            challenge = detect_access_challenge(None, html)
+            if challenge:
+                raise ScrapeBlockedError(
+                    f"Novel Updates stopped the browser search ({challenge})."
+                ) from exc
+            route_errors.append(f"{url}: {exc}")
+            logger.warning("Novel Updates browser route failed for %s: %s", url, exc)
+            continue
+        successful_page_loads += 1
         if route_index == 0:
             # Give the preferred route time to render its usual result container;
             # other routes stay non-blocking and are parsed through generic anchors.
@@ -290,6 +304,11 @@ def scrape_novelupdates(driver: Driver, data: Dict) -> List[Dict]:
             "Novel Updates layout produced no series links for %r at %s; page text: %s",
             query, url, page_text[:250],
         )
+    if successful_page_loads == 0:
+        raise ScrapeRequestError(
+            "Botasaurus could not load any Novel Updates search route. "
+            + "; ".join(route_errors[:3])
+        )
     logger.info("Novel Updates returned no series links for query %r after %s routes", query, len(urls))
     return []
 
@@ -300,6 +319,7 @@ async def search_novelupdates(
     browser_fallback: bool = True,
     http_timeout: int = 7,
     max_http_urls: int = 2,
+    require_genres: bool = False,
 ) -> List[Dict]:
     """Use the shared HTTP scraper first, then Botasaurus for browser-rendered markup."""
     query = " ".join((query or "").split())
@@ -336,7 +356,7 @@ async def search_novelupdates(
             logger.exception("Unexpected Novel Updates HTTP scraper failure for %s", url)
             continue
         results = _novelupdates_results_from_helper(payload)
-        if results:
+        if results and (not require_genres or any(item.get("genres") for item in results)):
             logger.info(
                 "Novel Updates HTTP search returned %s results for %r at %s",
                 len(results), query, url,
