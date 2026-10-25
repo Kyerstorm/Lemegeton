@@ -2427,6 +2427,7 @@ class AniListCog(commands.Cog):
         """Fetch a bounded page of a public user's anime or manga list."""
         query = """
         query($userId: Int, $type: MediaType, $page: Int) {
+          User(id: $userId) { mediaListOptions { scoreFormat } }
           Page(page: $page, perPage: 10) {
             pageInfo { currentPage hasNextPage total }
             mediaList(userId: $userId, type: $type, sort: [UPDATED_TIME_DESC]) {
@@ -2444,7 +2445,11 @@ class AniListCog(commands.Cog):
             payload = await post_graphql(
                 self.session, query, {"userId": user_id, "type": media_type, "page": max(1, page)}, timeout=12
             )
-            return (payload or {}).get("Page")
+            if not payload or payload.get("Page") is None:
+                return None
+            page_data = payload["Page"]
+            page_data["scoreFormat"] = ((payload.get("User") or {}).get("mediaListOptions") or {}).get("scoreFormat")
+            return page_data
         except Exception:
             logger.exception("AniList %s list fetch failed for user %s", media_type, user_id)
             return None
@@ -2632,7 +2637,21 @@ class AniListCog(commands.Cog):
             total = media.get("episodes") if media_type == "ANIME" else media.get("chapters")
             progress_text = f"{progress}/{total or '?'}" if progress is not None else "—"
             score = entry.get("score")
-            score_text = f"{score:g}/100" if isinstance(score, (int, float)) and score else "Not scored"
+            score_format = page_data.get("scoreFormat") or "POINT_100"
+            if not isinstance(score, (int, float)) or not score:
+                score_text = "Not scored"
+            elif score_format == "POINT_100":
+                score_text = f"{score:g}/100"
+            elif score_format == "POINT_10_DECIMAL":
+                score_text = f"{score:.1f}/10"
+            elif score_format == "POINT_10":
+                score_text = f"{score:g}/10"
+            elif score_format == "POINT_5":
+                score_text = f"{score:g}/5"
+            elif score_format == "POINT_3":
+                score_text = f"{score:g}/3"
+            else:
+                score_text = f"{score:g}"
             url = media.get("siteUrl") or f"https://anilist.co/{media_type.lower()}/{media.get('id')}"
             embed.add_field(
                 name=title[:256],
