@@ -6,6 +6,7 @@ with an interactive carousel for browsing results.
 """
 
 import discord
+from helpers.command_error_handler import FeedbackAwareView, application_error_message
 from discord.ext import commands
 from discord import app_commands
 import aiohttp
@@ -104,7 +105,7 @@ async def batch_fetch_game_details(session: aiohttp.ClientSession,
 
 # ===== GAME SEARCH VIEW CLASS =====
 
-class GameSearchView(discord.ui.View):
+class GameSearchView(FeedbackAwareView):
     """Carousel view for browsing top 3 search results"""
 
     def __init__(self, search_results: List[Dict], game_details: List[Dict],
@@ -322,7 +323,7 @@ class GameSearchView(discord.ui.View):
             try:
                 embed = build_error_embed(
                     "Error Loading Details",
-                    "An error occurred while loading game details."
+                    application_error_message(e)
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
             except:
@@ -484,7 +485,7 @@ class SteamGame(commands.Cog):
             try:
                 embed = build_error_embed(
                     "Unexpected Error",
-                    "An unexpected error occurred. Please try again later."
+                    application_error_message(e)
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
             except:
