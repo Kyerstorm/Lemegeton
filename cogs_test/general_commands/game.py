@@ -5,6 +5,7 @@ import logging
 from difflib import SequenceMatcher
 import aiohttp
 import discord
+from helpers.command_error_handler import FeedbackAwareView
 from discord import app_commands
 from discord.ext import commands
 import helpers.igdb_helper as igdb
@@ -116,7 +117,7 @@ class GameSelect(discord.ui.Select):
         embed = await self.cog.resolve_embed(selected)
         await interaction.edit_original_response(embed=embed, view=None)
 
-class GameSelectView(discord.ui.View):
+class GameSelectView(FeedbackAwareView):
     def __init__(self, cog: "Game", owner_id: int, results: list[dict]):
         super().__init__(timeout=180)
         self.add_item(GameSelect(cog, owner_id, results))
