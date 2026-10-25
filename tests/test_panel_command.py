@@ -36,23 +36,36 @@ class PanelTagCatalogueTests(unittest.TestCase):
                 self.assertTrue(panel.PANEL_TAG_DESCRIPTIONS.get(tag))
                 self.assertLessEqual(len(panel.PANEL_TAG_DESCRIPTIONS[tag]), 100)
 
-    def test_catalogue_includes_non_adult_anilist_and_mangaupdates_tags(self):
-        catalogue = dict(panel._build_panel_tag_catalogue([
-            {"name": "New AniList Tag", "description": "A test description.", "isAdult": False},
-            {"name": "Filtered AniList Tag", "description": "Not selectable.", "isAdult": True},
-        ]))
-        self.assertIn("new anilist tag", catalogue)
-        self.assertNotIn("filtered anilist tag", catalogue)
+    def test_catalogue_is_hand_curated_static_and_extensive(self):
+        catalogue = dict(panel._build_panel_tag_catalogue())
+        self.assertGreaterEqual(len(catalogue), 350)
+        self.assertIn("4-koma", catalogue)
+        self.assertIn("achromatic", catalogue)
+        self.assertIn("kingdom building", catalogue)
         self.assertIn("doujinshi", catalogue)
         self.assertIn("shoujo ai", catalogue)
-        self.assertGreater(len(catalogue), 50)
         self.assertTrue(all(len(description) <= 100 for description in catalogue.values()))
+        self.assertEqual(len(catalogue), len(set(catalogue)))
+
+    def test_catalogue_does_not_use_the_anilist_api(self):
+        self.assertFalse(hasattr(panel, "ANILIST_TAG_QUERY"))
+        self.assertFalse(hasattr(panel, "_panel_tag_catalogue"))
 
     def test_tag_values_use_discord_limit_and_support_longer_names(self):
         long_tag = "x" * 100
         self.assertEqual(panel._normalise_tag_values([long_tag]), [long_tag])
         with self.assertRaisesRegex(ValueError, "100 characters or fewer"):
             panel._normalise_tag_values(["x" * 101])
+
+    def test_nsfw_and_mature_tags_are_age_restricted(self):
+        catalogue = dict(panel._build_panel_tag_catalogue())
+        self.assertIn("nsfw", catalogue)
+        self.assertIn("mature", catalogue)
+        self.assertIn("NSFW channels", catalogue["nsfw"])
+        self.assertTrue(panel._tags_require_nsfw(["nsfw"]))
+        self.assertTrue(panel._tags_require_nsfw(["mature"]))
+        self.assertTrue(panel._tags_require_nsfw(["NSFW"]))
+        self.assertFalse(panel._tags_require_nsfw(["action", "romance"]))
 
     def test_tag_parser_accepts_twenty_distinct_tags_across_both_selects(self):
         selected = ",".join((*panel.PANEL_TAGS[:10], *panel.PANEL_VISUAL_TAGS[:10]))
