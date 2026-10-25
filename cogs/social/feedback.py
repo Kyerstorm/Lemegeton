@@ -294,12 +294,37 @@ class Feedback(commands.Cog):
                 )
                 return
 
+            # Keep all modal text without exceeding Discord's per-embed description limit.
+            description_chunks = []
+            remaining = description.strip()
+            while remaining:
+                if len(remaining) <= 3800:
+                    description_chunks.append(remaining)
+                    break
+                split_at = remaining.rfind("\n\n", 0, 3800)
+                if split_at < 1900:
+                    split_at = remaining.rfind("\n", 0, 3800)
+                if split_at < 1900:
+                    split_at = remaining.rfind(" ", 0, 3800)
+                if split_at <= 0:
+                    split_at = 3800
+                description_chunks.append(remaining[:split_at].rstrip())
+                remaining = remaining[split_at:].lstrip()
+
             embed = discord.Embed(
                 title=f"New {'Idea' if type_name == 'ideas' else 'Bug'} Submitted",
-                description=description,
+                description=description_chunks[0] if description_chunks else "No details supplied.",
                 color=color,
                 timestamp=discord.utils.utcnow(),
             )
+            continuation_embeds = [
+                discord.Embed(
+                    title="📝 Additional Feedback Details",
+                    description=chunk,
+                    color=color,
+                )
+                for chunk in description_chunks[1:]
+            ]
             avatar = user.display_avatar.url if user.display_avatar else None
             embed.set_author(name=user.display_name, icon_url=avatar)
             embed.set_footer(text=f"Submitted by {user} • User ID: {user.id}")
@@ -351,7 +376,7 @@ class Feedback(commands.Cog):
                 image_embeds.append(image_embed)
 
             message = await channel.send(
-                embeds=[embed, *image_embeds],
+                embeds=[embed, *continuation_embeds, *image_embeds],
                 files=feedback_files,
                 view=FeedbackView(self.bot, user),
             )
