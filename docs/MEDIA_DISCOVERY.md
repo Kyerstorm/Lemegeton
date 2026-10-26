@@ -32,7 +32,7 @@ No chapter-to-episode or volume-to-season mapping is guessed. Release-order and 
 
 ## Cross-media similarity
 
-**/similar** resolves a title through AniList, Google Books or TMDB, then searches anime, manga, books, movies and television for candidates with overlapping provider-reported genres.
+**/similar** resolves a title through AniList, Novel Updates, Google Books or TMDB, then searches anime, manga, books, movies and television for candidates with overlapping provider-reported genres.
 
 The result has separate sections for:
 - **Provider-generated recommendations**, where AniList or TMDB supplies them.
