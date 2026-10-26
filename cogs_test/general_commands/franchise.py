@@ -226,6 +226,118 @@ class Franchise(commands.Cog):
         self.bot = bot
         self.browse = BrowseCog(bot)
 
+    @staticmethod
+    def _normalized_title(value: str) -> str:
+        return re.sub(r"\W+", " ", (value or "").casefold()).strip()
+
+    async def enrich_cross_provider_matches(self, media: dict, category: str) -> None:
+        """Add exact-title matches from other providers, never claiming verified adaptations."""
+        source_title = media_title(media)
+        normalized = self._normalized_title(source_title)
+        if not normalized:
+            return
+        if category == "ANIME":
+            anilist_types = ["MANGA"]
+            tmdb_types = ["MOVIE", "TV"]
+        elif category == "MANGA":
+            anilist_types = ["ANIME"]
+            tmdb_types = ["MOVIE", "TV"]
+        elif category == "MOVIE":
+            anilist_types = ["ANIME", "MANGA"]
+            tmdb_types = ["TV"]
+        elif category == "TV":
+            anilist_types = ["ANIME", "MANGA"]
+            tmdb_types = ["MOVIE"]
+        else:
+            anilist_types = ["ANIME", "MANGA"]
+            tmdb_types = ["MOVIE", "TV"]
+
+        jobs = []
+        job_descriptors = []
+        for target_type in anilist_types:
+            jobs.append(fetch_media_by_search(source_title, target_type, per_page=8))
+            job_descriptors.append(("anilist", target_type))
+        for target_type in tmdb_types:
+            jobs.append(self.browse.search_tmdb_titles(source_title, target_type))
+            job_descriptors.append(("tmdb", target_type))
+        if category != "BOOK":
+            jobs.append(self.browse.fetch_book_results(source_title, "fiction"))
+            job_descriptors.append(("books-fiction", "BOOK"))
+            jobs.append(self.browse.fetch_book_results(source_title, "nonfiction"))
+            job_descriptors.append(("books-nonfiction", "BOOK"))
+
+        results = await asyncio.gather(*jobs, return_exceptions=True)
+        existing = list(media.get("_provider_related") or [])
+        seen = {
+            str(item.get("url") or "").casefold()
+            for item in existing if item.get("url")
+        }
+        for descriptor, result in zip(job_descriptors, results):
+            if isinstance(result, Exception):
+                log.debug("Cross-provider title matching failed for %s: %r", descriptor, result)
+                continue
+            provider_key, target_type = descriptor
+            for candidate in result or []:
+                if provider_key == "anilist":
+                    titles = [
+                        (candidate.get("title") or {}).get("english"),
+                        (candidate.get("title") or {}).get("romaji"),
+                        (candidate.get("title") or {}).get("native"),
+                    ]
+                    candidate_title = next((value for value in titles if value), None)
+                    url = candidate.get("siteUrl")
+                    candidate_type = target_type.title()
+                    status = candidate.get("status")
+                    cover = (candidate.get("coverImage") or {}).get("large")
+                    source_name = "AniList"
+                elif provider_key.startswith("books-"):
+                    info = candidate.get("volumeInfo") or {}
+                    candidate_title = info.get("title")
+                    url = info.get("infoLink") or candidate.get("selfLink")
+                    authors = info.get("authors") or []
+                    status = ", ".join(authors) if authors else None
+                    candidate_type = "Book / novel"
+                    cover = (info.get("imageLinks") or {}).get("thumbnail")
+                    source_name = "Google Books"
+                else:
+                    candidate_title = (
+                        candidate.get("title") if target_type == "MOVIE" else candidate.get("name")
+                    )
+                    alternatives = [
+                        candidate_title, candidate.get("original_title"),
+                        candidate.get("original_name"), candidate.get("title"), candidate.get("name"),
+                    ]
+                    candidate_title = next((value for value in alternatives if value and self._normalized_title(value) == normalized), candidate_title)
+                    candidate_id = candidate.get("id")
+                    url = f"https://www.themoviedb.org/{'movie' if target_type == 'MOVIE' else 'tv'}/{candidate_id}" if candidate_id else None
+                    status = candidate.get("release_date") if target_type == "MOVIE" else candidate.get("first_air_date")
+                    candidate_type = "Movie" if target_type == "MOVIE" else "TV series"
+                    cover = f"https://image.tmdb.org/t/p/w500{candidate['poster_path']}" if candidate.get("poster_path") else None
+                    source_name = "TMDB"
+                if not candidate_title or self._normalized_title(str(candidate_title)) != normalized:
+                    continue
+                if url and url.casefold() in seen:
+                    continue
+                if url:
+                    seen.add(url.casefold())
+                entry = {
+                    "title": str(candidate_title)[:256],
+                    "url": url,
+                    "relationType": "Exact-title match · adaptation relationship unverified",
+                    "type": candidate_type,
+                    "status": status,
+                    "date": None,
+                    "source": f"{source_name} title match only",
+                }
+                if cover:
+                    entry["image"] = cover
+                existing.append(entry)
+                if len(existing) >= 24:
+                    break
+            if len(existing) >= 24:
+                break
+        media["_provider_related"] = existing
+
     async def search_options(self, title: str, category: str) -> list[dict]:
         if category in ("ANIME", "MANGA"):
             return await fetch_media_by_search(title, category, per_page=10)
