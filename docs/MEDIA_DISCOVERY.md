@@ -77,7 +77,7 @@ The family-friendly option is a best-effort metadata filter, not a parental-rati
 
 ## Comparison
 
-**/compare** compares two to four selected entries from the same category, now including Novel Updates webnovels as well as the existing AniList, Google Books, TMDB and game providers. Ratings keep their provider/scale labels; fields differ according to the category rather than assuming that every media type has the same attributes.
+**/compare** compares two to four selected entries side by side, including mixed categories such as a webnovel, anime, film, and TV series in the same comparison. Choose a default category and use the per-title category overrides when needed. Ratings retain their provider/scale labels; fields differ by category rather than assuming that every media type has the same attributes.
 
 ## Configuration and operational notes
 
