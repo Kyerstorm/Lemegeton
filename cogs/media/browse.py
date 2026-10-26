@@ -1151,11 +1151,8 @@ class BrowseCog(commands.Cog):
             director.casefold() in str(person.get("name") or "").casefold()
             and (
                 str(person.get("job") or "").casefold() == "director"
-                or any(
-                    director_role.casefold() == "director"
-                    for job in (person.get("jobs") or [])
-                    if (director_role := str((job or {}).get("job") or ""))
-                )
+                or any(str((job or {}).get("job") or "").casefold() == "director"
+                       for job in (person.get("jobs") or []))
             )
             for person in crew if isinstance(person, dict)
         ):
