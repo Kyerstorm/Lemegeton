@@ -49,7 +49,7 @@ def local_match_reason(seed_genres: set[str], candidate_genres: set[str]) -> tup
 
 
 def provider_title(item: dict[str, Any], category: str) -> str:
-    if category in ("ANIME", "MANGA"):
+    if category in ("ANIME", "MANGA", "LIGHT_NOVEL"):
         title = item.get("title") or {}
         return str(title.get("english") or title.get("romaji") or title.get("native") or "Untitled")
     if category == "BOOK":
@@ -65,8 +65,13 @@ class CrossMediaRecommendations(commands.Cog):
         self.browse = BrowseCog(bot)
 
     async def resolve_seed(self, query: str, category: str) -> dict[str, Any] | None:
-        if category in ("ANIME", "MANGA"):
-            results = await self.browse.fetch_media(query, category)
+        if category in ("ANIME", "MANGA", "LIGHT_NOVEL"):
+            ani_type = "ANIME" if category == "ANIME" else "MANGA"
+            results = await self.browse.fetch_media(query, ani_type)
+            if category == "LIGHT_NOVEL":
+                results = [item for item in results if str(item.get("format") or "").upper() == "NOVEL"]
+            elif category == "MANGA":
+                results = [item for item in results if str(item.get("format") or "").upper() != "NOVEL"]
             seed = self.browse.choose_best_title_match(
                 results, query,
                 lambda item: (
@@ -77,7 +82,7 @@ class CrossMediaRecommendations(commands.Cog):
             )
             if not seed:
                 return None
-            details = await fetch_media_by_id(int(seed["id"]), category)
+            details = await fetch_media_by_id(int(seed["id"]), ani_type)
             return details or seed
         if category == "WEBNOVEL":
             results = await asyncio.wait_for(search_novelupdates(query), timeout=45)
@@ -101,7 +106,7 @@ class CrossMediaRecommendations(commands.Cog):
     @staticmethod
     def seed_metadata(seed: dict[str, Any], category: str) -> tuple[str, str | None, list[str], list[str], list[dict]]:
         title = provider_title(seed, category)
-        if category in ("ANIME", "MANGA"):
+        if category in ("ANIME", "MANGA", "LIGHT_NOVEL"):
             genres = list(seed.get("genres") or [])
             tags = [
                 str(tag.get("name")) for tag in (seed.get("tags") or [])
@@ -255,7 +260,9 @@ class CrossMediaRecommendations(commands.Cog):
                 continue
             for item in response or []:
                 item_category = str(item.get("_cross_category") or item.get("_category") or category)
-                if item_category in ("ANIME", "MANGA"):
+                if category == "MANGA" and str(item.get("format") or "").upper() == "NOVEL":
+                    item_category = "LIGHT_NOVEL"
+                if item_category in ("ANIME", "MANGA", "LIGHT_NOVEL"):
                     candidate_genres = genre_tokens(list(item.get("genres") or []))
                     item_title = provider_title(item, item_category)
                     url = item.get("siteUrl")
@@ -300,6 +307,7 @@ class CrossMediaRecommendations(commands.Cog):
     @app_commands.choices(category=[
         app_commands.Choice(name="Anime", value="ANIME"),
         app_commands.Choice(name="Manga / manhwa / manhua", value="MANGA"),
+        app_commands.Choice(name="Light novel", value="LIGHT_NOVEL"),
         app_commands.Choice(name="Books and novels", value="BOOK"),
         app_commands.Choice(name="Webnovels (Novel Updates)", value="WEBNOVEL"),
         app_commands.Choice(name="Movie", value="MOVIE"),
@@ -337,7 +345,7 @@ class CrossMediaRecommendations(commands.Cog):
         )
         if seed_url:
             embed.url = seed_url
-        if category in ("ANIME", "MANGA"):
+        if category in ("ANIME", "MANGA", "LIGHT_NOVEL"):
             cover = (seed.get("coverImage") or {}).get("large")
         elif category == "BOOK":
             cover = ((seed.get("volumeInfo") or {}).get("imageLinks") or {}).get("thumbnail")
@@ -350,7 +358,7 @@ class CrossMediaRecommendations(commands.Cog):
             embed.set_thumbnail(url=cover)
 
         provider_suggestions = []
-        if category in ("ANIME", "MANGA"):
+        if category in ("ANIME", "MANGA", "LIGHT_NOVEL"):
             connections = ((seed.get("recommendations") or {}).get("edges") or [])
             for edge in connections[:4]:
                 rec = ((edge.get("node") or {}).get("mediaRecommendation") or {})
