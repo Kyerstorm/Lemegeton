@@ -13,7 +13,7 @@ from discord.ext import commands
 
 from helpers.command_error_handler import FeedbackAwareView
 from helpers.anilist_helper import fetch_media_by_id, fetch_media_by_search
-from cogs.media.browse import BrowseCog
+from cogs.media.browse import BrowseCog, search_novelupdates
 from cogs_test.general_commands.dashboard import command_meta
 
 log = logging.getLogger(__name__)
@@ -143,10 +143,13 @@ class RelationView(FeedbackAwareView):
 class FranchiseSelect(discord.ui.Select):
     def __init__(self, owner: "FranchiseSearchView", results: list[dict]):
         self.owner_view = owner
-        self.results = {str(item.get("id") or item.get("volumeInfo", {}).get("title")): item for item in results}
+        self.results = {
+            str(item.get("id") or item.get("volumeInfo", {}).get("title") or (item.get("url") if owner.category == "WEBNOVEL" else item.get("title"))): item
+            for item in results
+        }
         options = []
         for item in results[:25]:
-            value = str(item.get("id") or item.get("volumeInfo", {}).get("title") or "")
+            value = str(item.get("id") or item.get("volumeInfo", {}).get("title") or (item.get("url") if owner.category == "WEBNOVEL" else item.get("title")) or "")
             if not value:
                 continue
             if owner.category == "BOOK":
@@ -158,6 +161,8 @@ class FranchiseSelect(discord.ui.Select):
                 label = media_title(item)
                 if owner.category in ("ANIME", "MANGA"):
                     description = f"{item.get('format') or owner.category} · {item.get('status') or 'Status unavailable'}"
+                elif owner.category == "WEBNOVEL":
+                    description = f"{item.get('author') or 'Author unavailable'} · {item.get('status') or 'Status unavailable'}"
                 else:
                     date = item.get("release_date") if owner.category == "MOVIE" else item.get("first_air_date")
                     description = (date[:4] if date else "TMDB result")
@@ -179,6 +184,29 @@ class FranchiseSelect(discord.ui.Select):
                 media = await fetch_media_by_id(int(selected["id"]), view.category)
             elif view.category in ("MOVIE", "TV"):
                 media = await view.cog.fetch_tmdb_relationships(selected, view.category)
+            elif view.category == "WEBNOVEL":
+                url = selected.get("url")
+                image = selected.get("image")
+                details = []
+                if selected.get("author"):
+                    details.append(f"Author: {selected['author']}")
+                if selected.get("status"):
+                    details.append(f"Status: {selected['status']}")
+                if selected.get("genres"):
+                    details.append("Genres: " + ", ".join(str(value) for value in selected["genres"]))
+                if selected.get("description"):
+                    details.append(str(selected["description"]))
+                media = {
+                    "title": selected.get("title") or "Untitled",
+                    "description": "\n\n".join(details),
+                    "siteUrl": url,
+                    "coverImage": {"large": image} if image else {},
+                    "type": "WEBNOVEL",
+                    "_provider": "Novel Updates",
+                    "_source_url": url,
+                    "_source_label": "Novel Updates",
+                    "_provider_related": [],
+                }
             else:
                 info = selected.get("volumeInfo") or {}
                 url = info.get("infoLink") or selected.get("selfLink")
@@ -341,6 +369,8 @@ class Franchise(commands.Cog):
     async def search_options(self, title: str, category: str) -> list[dict]:
         if category in ("ANIME", "MANGA"):
             return await fetch_media_by_search(title, category, per_page=10)
+        if category == "WEBNOVEL":
+            return await asyncio.wait_for(search_novelupdates(title), timeout=45)
         if category in ("MOVIE", "TV"):
             return await self.browse.search_tmdb_titles(title, category)
         fiction, nonfiction = await asyncio.gather(
@@ -450,6 +480,7 @@ class Franchise(commands.Cog):
         app_commands.Choice(name="Movies", value="MOVIE"),
         app_commands.Choice(name="TV shows", value="TV"),
         app_commands.Choice(name="Books and novels", value="BOOK"),
+        app_commands.Choice(name="Webnovels (Novel Updates)", value="WEBNOVEL"),
     ])
     @app_commands.describe(title="Title to explore", category="Metadata provider to search")
     @command_meta(section="Media Discovery", name="Franchise")
@@ -464,7 +495,7 @@ class Franchise(commands.Cog):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             results = await self.search_options(title, category)
-        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+        except Exception:
             log.exception("Franchise search failed for %r (%s)", title, category)
             results = []
         if not results:
@@ -475,7 +506,7 @@ class Franchise(commands.Cog):
             return
         view = FranchiseSearchView(interaction.user.id, category, results, self)
         await interaction.followup.send(
-            "🧬 **Choose the exact title.** AniList relationships and TMDB collection membership are shown as provider metadata; TMDB recommendations are labelled separately. Google Books does not expose a reliable adaptation graph, so the book view only shows its edition/source link.",
+            "🧬 **Choose the exact title.** AniList relationships and TMDB collection membership are shown as provider metadata; TMDB recommendations and exact-title cross-provider matches are labelled separately. Google Books and Novel Updates do not expose a reliable adaptation graph, so those entries link to source metadata without invented relationships.",
             view=view, ephemeral=True,
         )
 
