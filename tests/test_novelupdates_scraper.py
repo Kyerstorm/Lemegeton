@@ -1,10 +1,14 @@
 """Regression tests for Novel Updates' alternative search-page layouts."""
+import asyncio
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from cogs.media.browse import (
+    _NOVELUPDATES_SEARCH_CACHE,
     _novelupdates_parse_html,
     _novelupdates_results_from_helper,
     _novelupdates_search_urls,
+    search_novelupdates,
 )
 
 
@@ -20,6 +24,9 @@ class NovelUpdatesParserTests(unittest.TestCase):
           <div class="search_ratings">4.7</div>
           <img data-src="/images/test-cover.jpg">
           <div class="search_genre"><a href="/genre/fantasy/">Fantasy</a></div>
+          <div class="search_author">A. Writer</div>
+          <div class="search_status">Ongoing</div>
+          <div class="search_original">Royal Road</div>
         </div>
         """
         results = _novelupdates_parse_html(html, BASE_URL)
@@ -30,6 +37,9 @@ class NovelUpdatesParserTests(unittest.TestCase):
         self.assertEqual(results[0]["rating"], "4.7")
         self.assertEqual(results[0]["image"], "https://www.novelupdates.com/images/test-cover.jpg")
         self.assertEqual(results[0]["genres"], ["Fantasy"])
+        self.assertEqual(results[0]["author"], "A. Writer")
+        self.assertEqual(results[0]["status"], "Ongoing")
+        self.assertEqual(results[0]["platform"], "Royal Road")
 
     def test_recovers_series_links_when_card_classes_change(self):
         html = """
@@ -76,6 +86,10 @@ class NovelUpdatesParserTests(unittest.TestCase):
             "fields": {
                 "descriptions": ["Helper description."],
                 "ratings": ["4.2"],
+                "authors": ["B. Author"],
+                "statuses": ["Completed"],
+                "platforms": ["Novel Updates"],
+                "genres": ["Fantasy, Adventure"],
             },
         }
         results = _novelupdates_results_from_helper(payload)
@@ -83,6 +97,10 @@ class NovelUpdatesParserTests(unittest.TestCase):
         self.assertEqual(results[0]["title"], "Helper Result")
         self.assertEqual(results[0]["description"], "Helper description.")
         self.assertEqual(results[0]["rating"], "4.2")
+        self.assertEqual(results[0]["author"], "B. Author")
+        self.assertEqual(results[0]["status"], "Completed")
+        self.assertEqual(results[0]["platform"], "Novel Updates")
+        self.assertEqual(results[0]["genres"], ["Fantasy", "Adventure"])
 
     def test_search_urls_include_encoded_fallback_routes(self):
         urls = _novelupdates_search_urls("A Novel & More")
@@ -93,6 +111,42 @@ class NovelUpdatesParserTests(unittest.TestCase):
 
     def test_empty_query_does_not_request_site(self):
         self.assertEqual(_novelupdates_search_urls("   "), [])
+
+
+class NovelUpdatesSearchCacheTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        _NOVELUPDATES_SEARCH_CACHE.clear()
+
+    async def test_successful_results_are_cached(self):
+        result = [{"title": "Cached novel", "url": "https://www.novelupdates.com/series/cached-novel/"}]
+        with patch("cogs.media.browse._search_novelupdates_uncached", new=AsyncMock(return_value=result)) as search:
+            first = await search_novelupdates("Cache me")
+            second = await search_novelupdates("  Cache me  ")
+        self.assertEqual(first, result)
+        self.assertEqual(second, result)
+        search.assert_awaited_once()
+
+    async def test_empty_results_are_not_cached(self):
+        with patch("cogs.media.browse._search_novelupdates_uncached", new=AsyncMock(return_value=[])) as search:
+            await search_novelupdates("Nothing here")
+            await search_novelupdates("Nothing here")
+        self.assertEqual(search.await_count, 2)
+
+    async def test_concurrent_identical_searches_are_coalesced(self):
+        result = [{"title": "One shared lookup", "url": "https://www.novelupdates.com/series/shared/"}]
+
+        async def delayed_search(*args, **kwargs):
+            await asyncio.sleep(0.01)
+            return result
+
+        with patch("cogs.media.browse._search_novelupdates_uncached", new=AsyncMock(side_effect=delayed_search)) as search:
+            first, second = await asyncio.gather(
+                search_novelupdates("same title"),
+                search_novelupdates("same title"),
+            )
+        self.assertEqual(first, result)
+        self.assertEqual(second, result)
+        search.assert_awaited_once()
 
 
 if __name__ == "__main__":
