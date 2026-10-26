@@ -163,7 +163,7 @@ async def fetch_media_by_id(media_id: int, media_type: str) -> Optional[Dict]:
             averageScore
             genres
             tags { id name rank isMediaSpoiler }
-            relations { edges { relationType node { id siteUrl title { romaji english native } coverImage { large } type status } } }
+            relations { edges { relationType node { id siteUrl title { romaji english native } coverImage { large } type status startDate { year month day } } } }
             characters(page:1, perPage:50) { edges { id role node { id name { full native } image { large } } } }
             staff(page:1, perPage:50) { edges { id role node { id name { full } language image { large } } } }
             stats { scoreDistribution { score amount } statusDistribution { status amount } }
