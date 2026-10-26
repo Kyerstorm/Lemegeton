@@ -33,6 +33,16 @@ class BrowseFilterTests(unittest.TestCase):
         )
         self.assertEqual(matched, [self.anilist_item])
 
+    def test_manga_subtypes_use_country_and_webtoon_metadata(self):
+        japanese = dict(self.anilist_item, countryOfOrigin="JP", format="MANGA")
+        korean = dict(self.anilist_item, countryOfOrigin="KR", format="MANGA")
+        chinese = dict(self.anilist_item, countryOfOrigin="CN", format="MANGA")
+        webtoon = dict(self.anilist_item, countryOfOrigin="KR", format="WEBTOON")
+        self.assertEqual(BrowseCog._filter_anilist_results([japanese, korean], subtype="manga"), [japanese])
+        self.assertEqual(BrowseCog._filter_anilist_results([japanese, korean], subtype="manhwa"), [korean])
+        self.assertEqual(BrowseCog._filter_anilist_results([chinese, korean], subtype="manhua"), [chinese])
+        self.assertEqual(BrowseCog._filter_anilist_results([japanese, webtoon], subtype="webtoon"), [webtoon])
+
     def test_anilist_rejects_adult_items_by_default(self):
         item = dict(self.anilist_item, isAdult=True)
         self.assertEqual(BrowseCog._filter_anilist_results([item]), [])
