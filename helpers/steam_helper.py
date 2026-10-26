@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Any, Tuple
 
 import aiohttp
 import discord
+from helpers.command_error_handler import FeedbackAwareView
 from bs4 import BeautifulSoup
 
 # Optional Pillow for friend-grid image rendering
@@ -568,12 +569,12 @@ async def batch_fetch_player_data(
 # ===== UI COMPONENTS AND HELPERS =====
 # Minimal stub implementations of View classes needed by steam.py
 
-class ComparisonView(discord.ui.View):
+class ComparisonView(FeedbackAwareView):
     """Minimal stub for steam game comparison view."""
     def __init__(self):
         super().__init__(timeout=300)
 
-class RecommendationView(discord.ui.View):
+class RecommendationView(FeedbackAwareView):
     """Interactive view for browsing game recommendations."""
 
     def __init__(self, recommendations, user):
@@ -697,7 +698,7 @@ class RecommendationView(discord.ui.View):
 
         return embed
 
-class EnhancedGameView(discord.ui.View):
+class EnhancedGameView(FeedbackAwareView):
     """Enhanced game view with detailed information and interactive buttons."""
     
     def __init__(self, app_data, appid, session, user):
@@ -1024,7 +1025,7 @@ class EnhancedGameView(discord.ui.View):
         
         return embed
 
-class ScreenshotView(discord.ui.View):
+class ScreenshotView(FeedbackAwareView):
     """Screenshot carousel view with navigation buttons."""
     
     def __init__(self, screenshots, game_name):
