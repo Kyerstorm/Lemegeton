@@ -16,7 +16,8 @@ from helpers.embed_helper import build_error_embed
 from helpers.anilist_helper import post_graphql
 from database import get_all_users_guild_aware
 from cogs_test.general_commands.dashboard import command_meta
-from cogs.media.browse import scrape_novelupdates
+from cogs.media.browse import search_novelupdates
+from helpers.web_scraper import ScrapeBlockedError
 from helpers.crypto_random import secure_choice, secure_randbelow
 
 # ------------------------------------------------------
@@ -540,10 +541,9 @@ class Random(commands.Cog):
         ])
         try:
             if media_type == "WEBNOVEL":
-                import asyncio
                 if year_from is not None or year_to is not None:
                     raise LookupError("Novel Updates results do not expose consistent publication-year data for filtering.")
-                results = await asyncio.to_thread(scrape_novelupdates, {"query": query}, output=None)
+                results = await search_novelupdates(query, require_genres=bool(genre))
                 if genre:
                     results = [
                         item for item in results
@@ -663,9 +663,15 @@ class Random(commands.Cog):
                 source_url=embed.url, seen_urls=seen_urls,
             )
             await interaction.followup.send(embed=embed, view=view)
+        except ScrapeBlockedError as exc:
+            logger.warning("Novel Updates blocked random search: %s", exc)
+            await interaction.followup.send(embed=build_error_embed(
+                "Novel Updates Temporarily Unavailable",
+                "Novel Updates blocked or rate-limited automated access. Please try again later.",
+            ), ephemeral=True)
         except LookupError as exc:
             await interaction.followup.send(embed=build_error_embed("No Random Results", str(exc)), ephemeral=True)
-        except Exception as e:
+        except Exception:
             logger.exception("Random %s lookup failed", media_type)
             await interaction.followup.send(embed=build_error_embed(
                 "Lookup Failed", application_error_message(e)
