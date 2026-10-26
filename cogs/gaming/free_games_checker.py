@@ -10,6 +10,7 @@ from typing import List, Dict, Optional
 import re
 
 import discord
+from helpers.command_error_handler import application_error_message, FeedbackAwareModal, FeedbackAwareView
 from discord.ext import commands, tasks
 from discord import app_commands
 import aiohttp
@@ -512,7 +513,7 @@ async def fetch_steam_free_games() -> List[Dict]:
 
 # ---------------------- Views and Modals ----------------------
 
-class FreeGamesManagementView(discord.ui.View):
+class FreeGamesManagementView(FeedbackAwareView):
     """Interactive view for managing free games notifications."""
     
     def __init__(self, guild_id: int, channel_id: Optional[int] = None):
@@ -614,7 +615,7 @@ class FreeGamesManagementView(discord.ui.View):
                 )
                 
                 # Create view with just the claim button
-                view = discord.ui.View()
+                view = FeedbackAwareView()
                 view.add_item(claim_button)
                 
                 # Send game embed with claim button
@@ -627,7 +628,7 @@ class FreeGamesManagementView(discord.ui.View):
             try:
                 embed = build_error_embed(
                     "Error Fetching Games",
-                    "An error occurred while fetching free games. Please try again later."
+                    application_error_message(e)
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
             except:
@@ -763,7 +764,7 @@ class FreeGamesManagementView(discord.ui.View):
             try:
                 embed = build_error_embed(
                     "Error",
-                    "An error occurred while getting status."
+                    application_error_message(e)
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
             except:
@@ -778,7 +779,7 @@ class FreeGamesManagementView(discord.ui.View):
             logger.error(f"Error handling view timeout: {e}")
 
 
-class ChannelSetupModal(discord.ui.Modal, title="Setup Free Games Notifications"):
+class ChannelSetupModal(FeedbackAwareModal, title="Setup Free Games Notifications"):
     """Modal for selecting notification channel."""
     
     channel_id_input = discord.ui.TextInput(
@@ -869,7 +870,7 @@ class ChannelSetupModal(discord.ui.Modal, title="Setup Free Games Notifications"
             try:
                 embed = build_error_embed(
                     "Error",
-                    "An error occurred while setting up notifications."
+                    application_error_message(e)
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
             except:
@@ -1010,7 +1011,7 @@ class FreeGamesCog(commands.Cog):
             try:
                 embed = build_error_embed(
                     "Error",
-                    "An error occurred while loading the free games management system."
+                    application_error_message(e)
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
             except:
@@ -1128,7 +1129,7 @@ class FreeGamesCog(commands.Cog):
                     url=game['url']
                 )
 
-                view = discord.ui.View()
+                view = FeedbackAwareView()
                 view.add_item(claim_button)
 
                 # Send game embed
@@ -1143,7 +1144,7 @@ class FreeGamesCog(commands.Cog):
             logger.error(f"Error in check_free_games_now command: {e}", exc_info=True)
             try:
                 await interaction.followup.send(
-                    "❌ An error occurred while checking for free games. Please try again later.",
+                    application_error_message(e),
                     ephemeral=True
                 )
             except:
@@ -1269,7 +1270,7 @@ class FreeGamesCog(commands.Cog):
                         )
                         
                         # Create view with just the claim button
-                        view = discord.ui.View()
+                        view = FeedbackAwareView()
                         view.add_item(claim_button)
                         
                         # Send game embed with claim button
