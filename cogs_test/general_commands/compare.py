@@ -20,6 +20,17 @@ from cogs_test.general_commands.dashboard import command_meta
 
 log = logging.getLogger(__name__)
 
+COMPARE_CATEGORY_CHOICES = [
+    app_commands.Choice(name="Anime", value="ANIME"),
+    app_commands.Choice(name="Manga", value="MANGA"),
+    app_commands.Choice(name="Light novels", value="LIGHT_NOVEL"),
+    app_commands.Choice(name="Books and novels", value="BOOK"),
+    app_commands.Choice(name="Webnovels (Novel Updates)", value="WEBNOVEL"),
+    app_commands.Choice(name="Movie", value="MOVIE"),
+    app_commands.Choice(name="TV show", value="TV"),
+    app_commands.Choice(name="Video game", value="GAME"),
+]
+
 def clean_igdb_query(value: str) -> str:
     """Keep user input from escaping IGDB's search expression."""
     return value.replace(chr(34), " ").replace(chr(59), " ").replace(chr(92), " ").strip()
@@ -40,19 +51,26 @@ def _rating_text(ratings: dict, key: str, label: str) -> str | None:
             return f"{label}: {score} (MDBList source)"
     return None
 
-def comparison_embed(category: str, first: dict, second: dict, *additional: dict) -> discord.Embed:
+def comparison_embed(category: str | list[str], first: dict, second: dict, *additional: dict) -> discord.Embed:
     items = (first, second, *additional)
+    categories = [category] * len(items) if isinstance(category, str) else list(category[:len(items)])
+    if not categories:
+        categories = ["ANIME"] * len(items)
+    while len(categories) < len(items):
+        categories.append(categories[-1])
+    mixed = len(set(categories)) > 1
+    heading = f"Cross-media Comparison · {len(items)} titles" if mixed else f"{categories[0].title()} Comparison · {len(items)} titles"
     embed = discord.Embed(
-        title=f"⚖️ Media Comparison · {category.title()} · {len(items)} titles",
+        title=f"⚖️ {heading}",
         description="Compare provider-reported details side by side. Missing data is marked unavailable; **no overall winner is calculated.**",
         color=discord.Color.blurple(),
     )
-    for item in items:
-        title = media_title(category, item)
+    for item, item_category in zip(items, categories):
+        title = media_title(item_category, item)
         lines: list[str] = []
         url = None
         cover = None
-        if category in ("ANIME", "MANGA", "LIGHT_NOVEL"):
+        if item_category in ("ANIME", "MANGA", "LIGHT_NOVEL"):
             if item.get("format"):
                 lines.append(f"Format: {item['format']}")
             if item.get("status"):
@@ -73,7 +91,7 @@ def comparison_embed(category: str, first: dict, second: dict, *additional: dict
                 lines.append("Studios: " + ", ".join(names[:5]))
             url = item.get("siteUrl")
             cover = (item.get("coverImage") or {}).get("large")
-        elif category == "BOOK":
+        elif item_category == "BOOK":
             info = item.get("volumeInfo") or {}
             for key, label in (("authors", "Authors"), ("publisher", "Publisher"), ("publishedDate", "Published"), ("language", "Language"), ("pageCount", "Pages")):
                 value = info.get(key)
@@ -91,7 +109,7 @@ def comparison_embed(category: str, first: dict, second: dict, *additional: dict
                 lines.append(info["description"][:300])
             url = info.get("infoLink")
             cover = (info.get("imageLinks") or {}).get("thumbnail")
-        elif category == "WEBNOVEL":
+        elif item_category == "WEBNOVEL":
             for key, label in (("author", "Author"), ("status", "Status"), ("rating", "Novel Updates rating")):
                 value = item.get(key)
                 if value:
@@ -102,8 +120,8 @@ def comparison_embed(category: str, first: dict, second: dict, *additional: dict
                 lines.append(str(item["description"])[:300])
             url = item.get("url")
             cover = item.get("image")
-        elif category in ("MOVIE", "TV"):
-            is_movie = category == "MOVIE"
+        elif item_category in ("MOVIE", "TV"):
+            is_movie = item_category == "MOVIE"
             date = item.get("release_date") if is_movie else item.get("first_air_date")
             if date:
                 lines.append(f"Release date: {date}")
@@ -169,7 +187,8 @@ def comparison_embed(category: str, first: dict, second: dict, *additional: dict
                     lines.append("Controller support: " + str(controller))
                 if steam.get("steam_appid"):
                     lines.append(f"[Steam store listing](https://store.steampowered.com/app/{steam['steam_appid']}/)")
-        embed.add_field(name=title[:256], value="\n".join(lines)[:1024] or "No additional provider metadata was supplied.", inline=True)
+        field_name = f"{item_category.title()} · {title}" if mixed else title
+        embed.add_field(name=field_name[:256], value="\n".join(lines)[:1024] or "No additional provider metadata was supplied.", inline=True)
         if url:
             embed.add_field(name="Provider page", value=f"[Open {title[:80]}]({url})", inline=False)
         if cover and not embed.thumbnail:
@@ -182,8 +201,9 @@ class CompareSelect(discord.ui.Select):
         self.owner_view = owner
         self.side = side
         self.results = results
+        selected_category = owner.category_by_side[side]
         options = [
-            discord.SelectOption(label=media_title(owner.category, item)[:100], value=str(index))
+            discord.SelectOption(label=media_title(selected_category, item)[:100], value=str(index))
             for index, item in enumerate(results[:25])
         ]
         super().__init__(placeholder=f"🔎 Choose the {side} title", options=options, min_values=1, max_values=1)
@@ -193,12 +213,12 @@ class CompareSelect(discord.ui.Select):
         await interaction.response.defer()
 
 class CompareView(FeedbackAwareView):
-    def __init__(self, cog: "Compare", owner_id: int, category: str, results: list[list[dict]]):
+    def __init__(self, cog: "Compare", owner_id: int, categories: list[str], results: list[list[dict]]):
         super().__init__(timeout=180)
         self.cog = cog
         self.owner_id = owner_id
-        self.category = category
         self.sides = ("first", "second", "third", "fourth")
+        self.category_by_side = {side: category for side, category in zip(self.sides, categories)}
         self.results = {side: entries[:25] for side, entries in zip(self.sides, results)}
         self.selected_indices = {side: 0 for side in self.results}
         for side, entries in self.results.items():
@@ -214,9 +234,10 @@ class CompareView(FeedbackAwareView):
     async def compare_selected(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await interaction.response.defer()
         selected = [
-            self.cog.enrich(self.category, entries[self.selected_indices[side]])
+            self.cog.enrich(self.category_by_side[side], entries[self.selected_indices[side]])
             for side, entries in self.results.items()
         ]
+        selected_categories = [self.category_by_side[side] for side in self.results]
         enriched = await asyncio.gather(*selected, return_exceptions=True)
         if any(isinstance(item, Exception) for item in enriched):
             log.warning("A selected title could not be enriched for comparison")
@@ -227,7 +248,7 @@ class CompareView(FeedbackAwareView):
             )
             return
         await interaction.edit_original_response(
-            embed=comparison_embed(self.category, enriched[0], enriched[1], *enriched[2:]),
+            embed=comparison_embed(selected_categories, enriched[0], enriched[1], *enriched[2:]),
             view=None,
         )
 
@@ -302,37 +323,54 @@ class Compare(commands.Cog):
 
     @app_commands.command(name="compare", description="Compare two to four titles through existing metadata providers")
     @app_commands.guild_only()
-    @app_commands.choices(category=[
-        app_commands.Choice(name="Anime", value="ANIME"),
-        app_commands.Choice(name="Manga", value="MANGA"),
-        app_commands.Choice(name="Light novels", value="LIGHT_NOVEL"),
-        app_commands.Choice(name="Books and novels", value="BOOK"),
-        app_commands.Choice(name="Webnovels (Novel Updates)", value="WEBNOVEL"),
-        app_commands.Choice(name="Movie", value="MOVIE"),
-        app_commands.Choice(name="TV show", value="TV"),
-        app_commands.Choice(name="Video game", value="GAME"),
-    ])
+    @app_commands.choices(
+        category=COMPARE_CATEGORY_CHOICES,
+        first_category=COMPARE_CATEGORY_CHOICES,
+        second_category=COMPARE_CATEGORY_CHOICES,
+        third_category=COMPARE_CATEGORY_CHOICES,
+        fourth_category=COMPARE_CATEGORY_CHOICES,
+    )
     @app_commands.describe(
         first="First title", second="Second title",
-        category="Category shared by every entry",
+        category="Default category used unless overridden for a title",
         third="Optional third title", fourth="Optional fourth title",
+        first_category="Optional category override for the first title",
+        second_category="Optional category override for the second title",
+        third_category="Optional category override (requires a third title)",
+        fourth_category="Optional category override (requires a fourth title)",
     )
     @command_meta(section="Media Discovery", name="Compare")
     async def compare(
         self, interaction: discord.Interaction, first: str, second: str, category: str,
         third: str | None = None, fourth: str | None = None,
+        first_category: str | None = None, second_category: str | None = None,
+        third_category: str | None = None, fourth_category: str | None = None,
     ) -> None:
         queries = [first, second, *[value for value in (third, fourth) if value and value.strip()]]
         if any(not value.strip() for value in queries):
             await interaction.response.send_message("Enter a title for every supplied comparison slot.", ephemeral=True)
             return
+        if fourth and fourth.strip() and not (third and third.strip()):
+            await interaction.response.send_message("A fourth title requires a third title.", ephemeral=True)
+            return
+        if third_category and not (third and third.strip()):
+            await interaction.response.send_message("A third-category override requires a third title.", ephemeral=True)
+            return
+        if fourth_category and not (fourth and fourth.strip()):
+            await interaction.response.send_message("A fourth-category override requires a fourth title.", ephemeral=True)
+            return
+        categories = [first_category or category, second_category or category]
+        if third and third.strip():
+            categories.append(third_category or category)
+        if fourth and fourth.strip():
+            categories.append(fourth_category or category)
         await interaction.response.defer(ephemeral=True, thinking=True)
         results = await asyncio.gather(
-            *(self.search_options(category, value.strip()) for value in queries),
+            *(self.search_options(item_category, value.strip()) for item_category, value in zip(categories, queries)),
             return_exceptions=True,
         )
         missing = [
-            f"{['first', 'second', 'third', 'fourth'][index]} title {queries[index]!r}"
+            f"{categories[index].title()} {['first', 'second', 'third', 'fourth'][index]} title {queries[index]!r}"
             for index, result in enumerate(results)
             if isinstance(result, Exception) or not result
         ]
@@ -342,7 +380,7 @@ class Compare(commands.Cog):
                 ephemeral=True,
             )
             return
-        view = CompareView(self, interaction.user.id, category, results)
+        view = CompareView(self, interaction.user.id, categories, results)
         await interaction.followup.send(
             "🔎 **Choose the exact result for each title**, then compare. Ratings retain their provider attribution.",
             view=view, ephemeral=True,
