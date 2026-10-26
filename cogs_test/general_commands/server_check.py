@@ -2,6 +2,7 @@
 from __future__ import annotations
 import logging
 import discord
+from helpers.command_error_handler import FeedbackAwareView
 from discord import app_commands
 from discord.ext import commands
 from database import execute_db_operation, get_guild_bot_update_channel
@@ -98,7 +99,7 @@ def diagnostic_text(embed: discord.Embed) -> str:
     return "\\n\\n".join(part for part in parts if part)[:1900]
 
 
-class ServerCheckView(discord.ui.View):
+class ServerCheckView(FeedbackAwareView):
     def __init__(self, guild_id: int, channel_id: int):
         super().__init__(timeout=180)
         self.guild_id = guild_id
