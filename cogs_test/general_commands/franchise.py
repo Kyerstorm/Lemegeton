@@ -8,6 +8,7 @@ import re
 
 import aiohttp
 import discord
+import database
 from discord import app_commands
 from discord.ext import commands
 
@@ -306,6 +307,10 @@ class FranchiseSelect(discord.ui.Select):
             await view.cog.enrich_cross_provider_matches(media, view.category)
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
             log.warning("Cross-provider franchise enrichment failed", exc_info=True)
+        try:
+            await view.cog.enrich_community_links(media, view.category, interaction.guild_id)
+        except Exception:
+            log.debug("Community relationship enrichment failed", exc_info=True)
         relation_view = RelationView(media, view.owner_id)
         await interaction.edit_original_response(content=None, embed=relation_embed(media), view=relation_view)
 
@@ -327,6 +332,92 @@ class Franchise(commands.Cog):
     @staticmethod
     def _normalized_title(value: str) -> str:
         return re.sub(r"\W+", " ", (value or "").casefold()).strip()
+
+    @staticmethod
+    def _relationship_url_key(value: str | None) -> str:
+        from urllib.parse import urlsplit
+        parsed = urlsplit(str(value or "").strip())
+        if parsed.scheme.lower() != "https" or not parsed.hostname:
+            return ""
+        host = (parsed.hostname or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+        return f"{host}{parsed.path.rstrip('/')}".casefold()
+
+    async def enrich_community_links(self, media: dict, category: str, guild_id: int | None) -> None:
+        """Add only this server's approved community links, clearly not provider-confirmed."""
+        if not guild_id:
+            return
+        try:
+            rows = await database.execute_db_operation(
+                "load approved community media links for guild",
+                """SELECT source_title, source_category, source_url, relationship_type,
+                          target_title, target_category, target_url
+                   FROM media_link_suggestions
+                   WHERE guild_id = ? AND status = 'approved'
+                   ORDER BY reviewed_at DESC NULLS LAST, id DESC LIMIT 100""",
+                (guild_id,), fetch_type="all",
+            ) or []
+        except Exception:
+            # The ConnectedMedia cog may not have initialized its table yet, or an
+            # older deployment may not have upgraded. Provider-backed relations still work.
+            log.debug("Community link suggestions table is unavailable", exc_info=True)
+            return
+
+        current_title = self._normalized_title(media_title(media))
+        current_category = str(category or "").upper()
+        current_url = self._relationship_url_key(media.get("_source_url") or media.get("siteUrl"))
+        if not current_title:
+            return
+        related = media.setdefault("_provider_related", [])
+        existing_urls = {
+            self._relationship_url_key(item.get("url"))
+            for item in related if item.get("url")
+        }
+        labels = {
+            "ANIME": "Anime", "MANGA": "Manga / manhwa / manhua",
+            "LIGHT_NOVEL": "Light novel", "WEBNOVEL": "Webnovel",
+            "BOOK": "Book / novel", "MOVIE": "Movie", "TV": "TV series",
+        }
+        added = 0
+        for row in rows:
+            item = dict(row)
+            src_title = str(item.get("source_title") or "")
+            dst_title = str(item.get("target_title") or "")
+            src_category = str(item.get("source_category") or "").upper()
+            dst_category = str(item.get("target_category") or "").upper()
+            src_url = self._relationship_url_key(item.get("source_url"))
+            dst_url = self._relationship_url_key(item.get("target_url"))
+            if (
+                self._normalized_title(src_title) == current_title
+                and src_category == current_category
+                and (not current_url or current_url == src_url)
+            ):
+                title, url, kind = dst_title, item.get("target_url"), dst_category
+            elif (
+                self._normalized_title(dst_title) == current_title
+                and dst_category == current_category
+                and (not current_url or current_url == dst_url)
+            ):
+                title, url, kind = src_title, item.get("source_url"), src_category
+            else:
+                continue
+            url_key = self._relationship_url_key(url)
+            if not title or not url or (url_key and url_key in existing_urls):
+                continue
+            related.append({
+                "title": title,
+                "url": url,
+                "relationType": f"Community-verified: {item.get('relationship_type') or 'related'} (not provider-confirmed)",
+                "type": labels.get(kind, kind.title()),
+                "status": None,
+                "date": None,
+                "source": "Community suggestion approved in this server",
+            })
+            existing_urls.add(url_key)
+            added += 1
+            if added >= 10 or len(related) >= 34:
+                break
 
     async def enrich_cross_provider_matches(self, media: dict, category: str) -> None:
         """Add exact-title matches from other providers, never claiming verified adaptations."""
