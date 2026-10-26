@@ -8,6 +8,7 @@ import asyncio
 from bs4 import BeautifulSoup
 import logging
 import os
+import time
 from typing import List, Dict, Optional, Tuple
 from urllib.parse import quote_plus, urljoin, urlsplit
 from botasaurus.browser import browser as botasaurus_browser, Driver, Wait
@@ -26,6 +27,9 @@ GOODREADS_AUTOCOMPLETE_URL = "https://www.goodreads.com/book/auto_complete"
 TMDB_API_BASE_URL = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p"
 MDBLIST_API_BASE_URL = "https://api.mdblist.com"
+_NOVELUPDATES_CACHE_TTL = 300
+_NOVELUPDATES_SEARCH_CACHE: Dict[tuple, tuple[float, List[Dict]]] = {}
+_NOVELUPDATES_CACHE_LOCK = asyncio.Lock()
 
 
 def _novelupdates_search_urls(query: str) -> List[str]:
@@ -162,6 +166,8 @@ def _novelupdates_parse_html(html: str, base_url: str) -> List[Dict]:
             ".series_synopsis", ".desc", "[class*='description']",
         )
         rating = first_text(".search_ratings", ".search_rating", ".rating")
+        author = first_text(".search_author", ".series_author", "[class*='author']")
+        status = first_text(".search_status", ".series_status", "[class*='status']")
         image_url = None
         image_node = None
         try:
@@ -197,6 +203,8 @@ def _novelupdates_parse_html(html: str, base_url: str) -> List[Dict]:
             "description": description,
             "image": image_url,
             "rating": rating,
+            "author": author,
+            "status": status,
             "genres": genres,
         })
         seen_urls.add(dedupe_url)
@@ -242,9 +250,11 @@ def _novelupdates_results_from_helper(payload: Dict) -> List[Dict]:
             "title": title[:256],
             "url": url,
             "description": field_at("descriptions", index),
-            "image": None,
+            "image": field_at("images", index),
             "rating": field_at("ratings", index),
-            "genres": [],
+            "author": field_at("authors", index),
+            "status": field_at("statuses", index),
+            "genres": [part.strip() for part in (field_at("genres", index) or "").split(",") if part.strip()],
         })
         seen_urls.add(normalized_url)
         if len(results) >= 10:
@@ -320,7 +330,7 @@ def scrape_novelupdates(driver: Driver, data: Dict) -> List[Dict]:
     return []
 
 
-async def search_novelupdates(
+async def _search_novelupdates_uncached(
     query: str,
     *,
     browser_fallback: bool = True,
@@ -339,6 +349,10 @@ async def search_novelupdates(
                   ".search_title a, a[href*='/series/']",
         "descriptions": ".search_body, .search_body_nu, .search_desc, .series_synopsis",
         "ratings": ".search_ratings, .search_rating, .rating",
+        "authors": ".search_author, .series_author, [class*='author']",
+        "statuses": ".search_status, .series_status, [class*='status']",
+        "genres": ".search_genre a, .search_genres a, a[href*='/genre/']",
+        "images": ".search_main_box_nu img, .search_main_box img, article img",
     }
     for url in urls[:max(1, min(max_http_urls, len(urls)))]:
         try:
@@ -375,6 +389,40 @@ async def search_novelupdates(
     return await asyncio.to_thread(
         scrape_novelupdates, {"query": query, "urls": urls}, output=None
     )
+
+
+async def search_novelupdates(
+    query: str,
+    *,
+    browser_fallback: bool = True,
+    http_timeout: int = 7,
+    max_http_urls: int = 2,
+    require_genres: bool = False,
+) -> List[Dict]:
+    """Cache successful Novel Updates searches briefly; never cache provider failures."""
+    normalized = " ".join((query or "").split())
+    if not normalized:
+        return []
+    key = (normalized.casefold(), bool(browser_fallback), max(1, min(int(max_http_urls), 3)), bool(require_genres))
+    now = time.monotonic()
+    cached = _NOVELUPDATES_SEARCH_CACHE.get(key)
+    if cached and cached[0] > now:
+        return [dict(item) for item in cached[1]]
+    results = await _search_novelupdates_uncached(
+        normalized,
+        browser_fallback=browser_fallback,
+        http_timeout=http_timeout,
+        max_http_urls=max_http_urls,
+        require_genres=require_genres,
+    )
+    if results:
+        async with _NOVELUPDATES_CACHE_LOCK:
+            now = time.monotonic()
+            expired = [cache_key for cache_key, value in _NOVELUPDATES_SEARCH_CACHE.items() if value[0] <= now]
+            for cache_key in expired:
+                _NOVELUPDATES_SEARCH_CACHE.pop(cache_key, None)
+            _NOVELUPDATES_SEARCH_CACHE[key] = (now + _NOVELUPDATES_CACHE_TTL, [dict(item) for item in results])
+    return results
 
 
 # Status order priority
