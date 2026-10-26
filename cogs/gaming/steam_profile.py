@@ -1,5 +1,6 @@
 from helpers.color_palette import PALETTE
 import discord
+from helpers.command_error_handler import FeedbackAwareView
 from discord.ext import commands
 from discord import app_commands
 import aiohttp
@@ -309,7 +310,7 @@ class SteamProfile(commands.Cog):
         embed.set_footer(text="ℹ️ Details • 👁 Toggle Visibility to make private")
 
         # View: Details button + Toggle Visibility (only if ephemeral)
-        view = discord.ui.View(timeout=180)
+        view = FeedbackAwareView(timeout=180)
         view.is_ephemeral = False
 
         details_button = discord.ui.Button(label="ℹ️ Details", style=discord.ButtonStyle.secondary)
@@ -328,7 +329,7 @@ class SteamProfile(commands.Cog):
             except Exception:
                 pass
             new_ephemeral = not getattr(view, "is_ephemeral", False)
-            new_view = discord.ui.View(timeout=180)
+            new_view = FeedbackAwareView(timeout=180)
             new_view.is_ephemeral = new_ephemeral
             # re-add details
             db = discord.ui.Button(label="ℹ️ Details", style=discord.ButtonStyle.secondary)
@@ -369,7 +370,7 @@ class SteamProfile(commands.Cog):
         Each selection will send new messages (keeps original profile message intact).
         """
         # build dropdown view
-        view = discord.ui.View(timeout=300)
+        view = FeedbackAwareView(timeout=300)
         select = discord.ui.Select(
             placeholder="Select details...",
             options=[
@@ -479,7 +480,7 @@ class SteamProfile(commands.Cog):
 
         # prepare first page embed
         first_embed = make_embed_for_page(pages[0], 0)
-        view = discord.ui.View(timeout=300)
+        view = FeedbackAwareView(timeout=300)
 
         # Prev / Next buttons
         prev_btn = discord.ui.Button(label="⬅️ Prev", style=discord.ButtonStyle.secondary)
@@ -619,7 +620,7 @@ class SteamProfile(commands.Cog):
                     pass
 
         # Create pagination view
-        view = discord.ui.View(timeout=300)
+        view = FeedbackAwareView(timeout=300)
         prev_btn = discord.ui.Button(label="⬅️ Prev", style=discord.ButtonStyle.secondary)
         next_btn = discord.ui.Button(label="Next ➡️", style=discord.ButtonStyle.secondary)
         page_label = discord.ui.Button(label=f"Page 1/{len(pages)}", style=discord.ButtonStyle.secondary, disabled=True)
@@ -734,7 +735,7 @@ class SteamProfile(commands.Cog):
             e.set_image(url=pages[idx][0])
             return e
 
-        view = discord.ui.View(timeout=300)
+        view = FeedbackAwareView(timeout=300)
         prev_btn = discord.ui.Button(label="⬅️ Prev", style=discord.ButtonStyle.secondary)
         next_btn = discord.ui.Button(label="Next ➡️", style=discord.ButtonStyle.secondary)
 
@@ -920,7 +921,7 @@ class SteamProfile(commands.Cog):
 
         # Send first embed and let user page through (prev/next)
         idx = 0
-        view = discord.ui.View(timeout=300)
+        view = FeedbackAwareView(timeout=300)
         prev_btn = discord.ui.Button(label="⬅️ Prev", style=discord.ButtonStyle.secondary)
         next_btn = discord.ui.Button(label="Next ➡️", style=discord.ButtonStyle.secondary)
 
