@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 
 import aiohttp
 import discord
@@ -21,7 +22,7 @@ log = logging.getLogger(__name__)
 def media_title(item: dict) -> str:
     title = item.get("title") or {}
     if isinstance(title, dict):
-        return title.get("english") or title.get("romaji") or title.get("native") or "Untitled"
+        return title.get("english") or title.get("romaji") or title.get("native") or item.get("name") or "Untitled"
     return str(title or item.get("name") or "Untitled")
 
 
@@ -35,7 +36,7 @@ def relation_embed(media: dict, page: int = 0) -> discord.Embed:
     provider = str(media.get("_provider") or "AniList")
     edges = _anilist_relation_edges(media)
     provider_related = media.get("_provider_related") or []
-    all_items = provider_related if provider_related else [
+    all_items = [
         {
             "title": media_title(edge.get("node") or {}),
             "url": (edge.get("node") or {}).get("siteUrl"),
@@ -46,11 +47,11 @@ def relation_embed(media: dict, page: int = 0) -> discord.Embed:
             "source": "AniList relationship",
         }
         for edge in edges
-    ]
+    ] + list(provider_related)
     embed = discord.Embed(
         title=f"🧬 Franchise · {title}"[:256],
         url=media.get("siteUrl"),
-        description="Related entries are grouped by their provider's own labels. Recommendation links are not treated as proof of a shared franchise, and no chapter-to-episode mapping is inferred.",
+        description="Related entries use their provider's own labels. Cross-provider title matches and recommendation-only links are explicitly unverified, and no chapter-to-episode mapping is inferred.",
         color=discord.Color.blurple(),
     )
     if media.get("description"):
@@ -112,7 +113,7 @@ class RelationView(FeedbackAwareView):
         super().__init__(timeout=180)
         self.media = media
         self.owner_id = owner_id
-        relation_count = max(len(_anilist_relation_edges(media)), len(media.get("_provider_related") or []))
+        relation_count = len(_anilist_relation_edges(media)) + len(media.get("_provider_related") or [])
         self.max_page = max(0, (relation_count - 1) // 8)
         self.page = 0
         self.previous.disabled = True
@@ -203,6 +204,10 @@ class FranchiseSelect(discord.ui.Select):
             log.exception("Franchise metadata request failed for category %s", view.category)
             await interaction.edit_original_response(content="The metadata provider failed while loading this title. Please try again later.", embed=None, view=None)
             return
+        try:
+            await view.cog.enrich_cross_provider_matches(media, view.category)
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+            log.warning("Cross-provider franchise enrichment failed", exc_info=True)
         relation_view = RelationView(media, view.owner_id)
         await interaction.edit_original_response(content=None, embed=relation_embed(media), view=relation_view)
 
