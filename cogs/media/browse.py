@@ -1149,7 +1149,14 @@ class BrowseCog(commands.Cog):
         cast_entries = credits.get("cast") or []
         if director and not any(
             director.casefold() in str(person.get("name") or "").casefold()
-            and str(person.get("job") or "").casefold() == "director"
+            and (
+                str(person.get("job") or "").casefold() == "director"
+                or any(
+                    director_role.casefold() == "director"
+                    for job in (person.get("jobs") or [])
+                    if (director_role := str((job or {}).get("job") or ""))
+                )
+            )
             for person in crew if isinstance(person, dict)
         ):
             return False
