@@ -30,6 +30,7 @@ MDBLIST_API_BASE_URL = "https://api.mdblist.com"
 _NOVELUPDATES_CACHE_TTL = 300
 _NOVELUPDATES_SEARCH_CACHE: Dict[tuple, tuple[float, List[Dict]]] = {}
 _NOVELUPDATES_CACHE_LOCK = asyncio.Lock()
+_NOVELUPDATES_KEY_LOCKS: Dict[tuple, asyncio.Lock] = {}
 
 
 def _novelupdates_search_urls(query: str) -> List[str]:
@@ -168,6 +169,7 @@ def _novelupdates_parse_html(html: str, base_url: str) -> List[Dict]:
         rating = first_text(".search_ratings", ".search_rating", ".rating")
         author = first_text(".search_author", ".series_author", "[class*='author']")
         status = first_text(".search_status", ".series_status", "[class*='status']")
+        platform = first_text(".series_platform", ".search_platform", ".search_original", "[class*='publisher']")
         image_url = None
         image_node = None
         try:
@@ -205,6 +207,7 @@ def _novelupdates_parse_html(html: str, base_url: str) -> List[Dict]:
             "rating": rating,
             "author": author,
             "status": status,
+            "platform": platform,
             "genres": genres,
         })
         seen_urls.add(dedupe_url)
@@ -254,6 +257,7 @@ def _novelupdates_results_from_helper(payload: Dict) -> List[Dict]:
             "rating": field_at("ratings", index),
             "author": field_at("authors", index),
             "status": field_at("statuses", index),
+            "platform": field_at("platforms", index),
             "genres": [part.strip() for part in (field_at("genres", index) or "").split(",") if part.strip()],
         })
         seen_urls.add(normalized_url)
@@ -351,6 +355,7 @@ async def _search_novelupdates_uncached(
         "ratings": ".search_ratings, .search_rating, .rating",
         "authors": ".search_author, .series_author, [class*='author']",
         "statuses": ".search_status, .series_status, [class*='status']",
+        "platforms": ".series_platform, .search_platform, .search_original, [class*='publisher']",
         "genres": ".search_genre a, .search_genres a, a[href*='/genre/']",
         "images": ".search_main_box_nu img, .search_main_box img, article img",
     }
@@ -568,6 +573,10 @@ class BrowseCog(commands.Cog):
         query_parts = [" ".join((query or "").split())]
         if genre:
             query_parts.insert(0, f"subject:{genre}")
+        if year_from is not None:
+            query_parts.append(f"after:{year_from}")
+        if year_to is not None:
+            query_parts.append(f"before:{year_to + 1}")
         if author:
             query_parts.append(f"inauthor:{author.strip()}")
         if publisher:
@@ -578,8 +587,6 @@ class BrowseCog(commands.Cog):
             "maxResults": 40,
             "orderBy": "relevance",
         }
-        if year_from is not None or year_to is not None:
-            params["publishedDate"] = f"{year_from or 1000}..{year_to or 2100}"
         if language:
             params["langRestrict"] = language.strip().lower()
         all_items = []
@@ -1242,8 +1249,8 @@ class BrowseCog(commands.Cog):
             if theme or artist or platform or status or runtime_min is not None or runtime_max is not None or director or cast:
                 unsupported.append("theme/artist/platform/status/runtime/director/cast")
         elif chosen_type == "WEBNOVEL":
-            if theme or artist or language or publisher or platform or year_from is not None or year_to is not None or runtime_min is not None or runtime_max is not None or director or cast:
-                unsupported.append("theme/artist/language/publisher/platform/year/runtime/director/cast")
+            if theme or artist or language or publisher or year_from is not None or year_to is not None or runtime_min is not None or runtime_max is not None or director or cast:
+                unsupported.append("theme/artist/language/publisher/year/runtime/director/cast")
         elif chosen_type in ("MOVIE", "TV"):
             if author or artist or publisher or platform:
                 unsupported.append("author/artist/publisher/platform")
@@ -1446,6 +1453,7 @@ class BrowseCog(commands.Cog):
                 and (not status or status.casefold() in str(novel.get("status") or "").casefold()
                      or (status.casefold() in ("completed", "complete") and "complete" in str(novel.get("status") or "").casefold())
                      or (status.casefold() in ("ongoing", "releasing") and "ongoing" in str(novel.get("status") or "").casefold()))
+                and (not platform or platform.casefold() in str(novel.get("platform") or "").casefold())
             ]
             if not results:
                 embed = build_error_embed(
