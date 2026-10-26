@@ -561,11 +561,17 @@ class BrowseCog(commands.Cog):
     async def fetch_book_results(
         self, query: str, book_type: str, genre: Optional[str] = None,
         year_from: Optional[int] = None, year_to: Optional[int] = None,
+        author: Optional[str] = None, language: Optional[str] = None,
+        publisher: Optional[str] = None,
     ) -> List[Dict]:
         """Search Google Books first, using supported subject and publication-year constraints."""
         query_parts = [" ".join((query or "").split())]
         if genre:
             query_parts.insert(0, f"subject:{genre}")
+        if author:
+            query_parts.append(f"inauthor:{author.strip()}")
+        if publisher:
+            query_parts.append(f"inpublisher:{publisher.strip()}")
         params = {
             "q": " ".join(part for part in query_parts if part),
             "printType": "books",
@@ -574,6 +580,8 @@ class BrowseCog(commands.Cog):
         }
         if year_from is not None or year_to is not None:
             params["publishedDate"] = f"{year_from or 1000}..{year_to or 2100}"
+        if language:
+            params["langRestrict"] = language.strip().lower()
         all_items = []
         filtered_items = []
         try:
@@ -605,8 +613,8 @@ class BrowseCog(commands.Cog):
 
         if filtered_items:
             return filtered_items[:10]
-        if genre or year_from is not None or year_to is not None:
-            # Goodreads autocomplete does not reliably expose subject/year constraints.
+        if genre or year_from is not None or year_to is not None or author or language or publisher:
+            # Goodreads autocomplete does not reliably expose all Google Books filters.
             return []
 
         # Google Books often omits categories or labels them too broadly to classify
@@ -631,7 +639,7 @@ class BrowseCog(commands.Cog):
         logger.info("No suitable Google Books result for %r; trying Goodreads", query)
         return await self.fetch_goodreads_results(query)
 
-    async def search_tmdb_titles(self, query: str, media_type: str) -> List[Dict]:
+    async def search_tmdb_titles(self, query: str, media_type: str, include_adult: bool = False) -> List[Dict]:
         """Search TMDB for movies or TV shows using the configured read-access token."""
         query = " ".join((query or "").split())
         if not query:
@@ -641,7 +649,7 @@ class BrowseCog(commands.Cog):
             return []
         endpoint = "movie" if media_type == "MOVIE" else "tv"
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-        params = {"query": query, "include_adult": "false", "language": "en-US", "page": 1}
+        params = {"query": query, "include_adult": str(bool(include_adult)).lower(), "language": "en-US", "page": 1}
         try:
             timeout = aiohttp.ClientTimeout(total=10)
             async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -657,13 +665,13 @@ class BrowseCog(commands.Cog):
             logger.warning("TMDB %s search failed for %r: %s", endpoint, query, exc)
             return []
 
-    async def fetch_tmdb_media(self, query: str, media_type: str) -> Optional[Dict]:
+    async def fetch_tmdb_media(self, query: str, media_type: str, include_adult: bool = False) -> Optional[Dict]:
         """Fetch a matching TMDB title and detailed metadata."""
         token = os.getenv("TMDB_BEARER_TOKEN", "").strip()
         if not token:
             return None
         endpoint = "movie" if media_type == "MOVIE" else "tv"
-        results = await self.search_tmdb_titles(query, media_type)
+        results = await self.search_tmdb_titles(query, media_type, include_adult=include_adult)
         if not results:
             return None
         best_match = self.choose_best_title_match(
@@ -802,6 +810,9 @@ class BrowseCog(commands.Cog):
                     startDate { year month day }
                     endDate { year month day }
                     genres
+                    tags { name rank isMediaSpoiler }
+                    staff(page: 1, perPage: 25) { edges { role node { name { full } } } }
+                    isAdult
                     coverImage { large medium }
                     bannerImage
                     externalLinks { site url }
