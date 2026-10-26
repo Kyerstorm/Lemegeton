@@ -204,21 +204,49 @@ class ReadingClub(commands.Cog):
     @club.command(name="select", description="Close nominations and select the community's next read")
     @app_commands.guild_only()
     @app_commands.checks.has_permissions(manage_guild=True)
-    @app_commands.describe(nomination_id="Nomination ID to select")
+    @app_commands.describe(nomination_id="Optional manual override; omit to select the highest-voted open nomination")
     @command_meta(section="Community", name="Reading Club Select")
-    async def select(self, interaction: discord.Interaction, nomination_id: str) -> None:
+    async def select(self, interaction: discord.Interaction, nomination_id: str | None = None) -> None:
         if interaction.guild is None:
             await interaction.response.send_message("This command is server-specific.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
-        selected = await execute_db_operation(
-            "find selected reading-club nomination",
-            "SELECT * FROM reading_club_nominations WHERE guild_id = ? AND nomination_id = ? AND status = 'open'",
-            (interaction.guild.id, nomination_id.strip()), fetch_type="one",
-        )
-        if not selected:
-            await interaction.followup.send("That open nomination was not found in this server.", ephemeral=True)
-            return
+        if nomination_id and nomination_id.strip():
+            selected = await execute_db_operation(
+                "find selected reading-club nomination",
+                "SELECT * FROM reading_club_nominations WHERE guild_id = ? AND nomination_id = ? AND status = 'open'",
+                (interaction.guild.id, nomination_id.strip()), fetch_type="one",
+            )
+            if not selected:
+                await interaction.followup.send("That open nomination was not found in this server.", ephemeral=True)
+                return
+        else:
+            nominations = await execute_db_operation(
+                "list nominations for reading-club vote winner",
+                "SELECT * FROM reading_club_nominations WHERE guild_id = ? AND status = 'open' ORDER BY created_at ASC",
+                (interaction.guild.id,), fetch_type="all",
+            )
+            if not nominations:
+                await interaction.followup.send("There are no open nominations to select.", ephemeral=True)
+                return
+            winner = None
+            winner_votes = -1
+            for nomination in nominations:
+                candidate = dict(nomination)
+                vote_row = await execute_db_operation(
+                    "count votes for reading-club winner",
+                    "SELECT COUNT(*) AS vote_count FROM reading_club_votes WHERE guild_id = ? AND nomination_id = ?",
+                    (interaction.guild.id, candidate["nomination_id"]), fetch_type="one",
+                )
+                votes = int(dict(vote_row).get("vote_count", 0)) if vote_row else 0
+                # Stable tie-break: the earliest nomination wins a tie.
+                if votes > winner_votes:
+                    winner = candidate
+                    winner_votes = votes
+            selected = winner
+            if not selected:
+                await interaction.followup.send("No nomination could be selected.", ephemeral=True)
+                return
         item = dict(selected)
         await execute_db_operation(
             "select and close reading-club nominations",
@@ -226,11 +254,16 @@ class ReadingClub(commands.Cog):
             (item["nomination_id"], interaction.guild.id),
         )
         source = f"\nSource: {item['source_url']}" if item.get("source_url") else ""
-        await interaction.channel.send(
-            f"🏆 **Community read selected:** {item.get('title', 'Untitled')} ({item.get('category', 'book')}){source}\nA moderator can schedule discussion with /reading-club schedule.",
-            allowed_mentions=discord.AllowedMentions.none(),
-        )
-        await interaction.followup.send("The selection is recorded and the other open nominations are closed.", ephemeral=True)
+        try:
+            await interaction.channel.send(
+                f"🏆 **Community read selected:** {item.get('title', 'Untitled')} ({item.get('category', 'book')}){source}\nA moderator can schedule discussion with /reading-club schedule.",
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except (discord.Forbidden, discord.HTTPException, AttributeError):
+            log.exception("Could not announce reading-club selection in guild %s", interaction.guild.id)
+            await interaction.followup.send("The selection was recorded, but I couldn't announce it in this channel. Check the bot's Send Messages permission.", ephemeral=True)
+            return
+        await interaction.followup.send(f"The selection is recorded ({winner_votes if not nomination_id else 'manual override'} votes). Other open nominations are closed.", ephemeral=True)
 
     @club.command(name="schedule", description="Schedule a spoiler-aware discussion for the selected read")
     @app_commands.guild_only()
