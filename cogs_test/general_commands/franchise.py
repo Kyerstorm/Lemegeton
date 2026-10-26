@@ -26,6 +26,29 @@ def media_title(item: dict) -> str:
     return str(title or item.get("name") or "Untitled")
 
 
+def _ani_release_date(item: dict) -> str | None:
+    value = item.get("startDate") or {}
+    year = value.get("year")
+    if not year:
+        return None
+    parts = [f"{int(year):04d}"]
+    if value.get("month"):
+        parts.append(f"{int(value['month']):02d}")
+        if value.get("day"):
+            parts.append(f"{int(value['day']):02d}")
+    return "-".join(parts)
+
+
+def _has_full_release_date(item: dict) -> bool:
+    value = item.get("startDate") or {}
+    return all(value.get(key) for key in ("year", "month", "day"))
+
+
+def _ani_release_sort(item: dict) -> tuple[int, int, int]:
+    value = item.get("startDate") or {}
+    return (int(value.get("year") or 0), int(value.get("month") or 0), int(value.get("day") or 0))
+
+
 def _anilist_relation_edges(media: dict) -> list[dict]:
     return ((media.get("relations") or {}).get("edges") or [])
 
@@ -43,7 +66,7 @@ def relation_embed(media: dict, page: int = 0) -> discord.Embed:
             "relationType": str(edge.get("relationType") or "RELATED").replace("_", " ").title(),
             "type": (edge.get("node") or {}).get("type") or "Unknown type",
             "status": (edge.get("node") or {}).get("status") or "Status unavailable",
-            "date": None,
+            "date": _ani_release_date(edge.get("node") or {}),
             "source": "AniList relationship",
         }
         for edge in edges
@@ -94,6 +117,45 @@ def relation_embed(media: dict, page: int = 0) -> discord.Embed:
             inline=False,
         )
         embed.set_footer(text=f"{provider} metadata · Page {page + 1}/{max(1, (len(all_items) - 1) // page_size + 1)}")
+
+    # A release order is shown only when every AniList entry has an exact release
+    # date. It is never presented as chronological story order.
+    if edges and _has_full_release_date(media) and all(_has_full_release_date(edge.get("node") or {}) for edge in edges):
+        order_items = [media] + [edge.get("node") or {} for edge in edges]
+        order_items.sort(key=lambda item: (_ani_release_sort(item), media_title(item).casefold()))
+        order_lines = []
+        for index, item in enumerate(order_items[:15], 1):
+            label = media_title(item)
+            url = item.get("siteUrl")
+            if url:
+                label = f"[{label}]({url})"
+            order_lines.append(f"{index}. {label} · {_ani_release_date(item)}")
+        if order_lines:
+            embed.add_field(
+                name="AniList release order · not story chronology",
+                value="\n".join(order_lines)[:1024],
+                inline=False,
+            )
+
+    collection_items = [
+        item for item in provider_related
+        if item.get("source") == "TMDB collection" and item.get("date")
+    ]
+    all_collection_items = [item for item in provider_related if item.get("source") == "TMDB collection"]
+    if len(all_collection_items) > 1 and len(collection_items) == len(all_collection_items) and all(len(str(item.get("date"))) >= 10 for item in collection_items):
+        collection_items.sort(key=lambda item: (str(item.get("date")), str(item.get("title") or "").casefold()))
+        order_lines = []
+        for index, item in enumerate(collection_items[:15], 1):
+            label = str(item.get("title") or "Untitled")
+            if item.get("url"):
+                label = f"[{label}]({item['url']})"
+            order_lines.append(f"{index}. {label} · {item['date']}")
+        if order_lines:
+            embed.add_field(
+                name="TMDB collection release order · not story chronology",
+                value="\n".join(order_lines)[:1024],
+                inline=False,
+            )
 
     links = media.get("externalLinks") or []
     link_lines = []
