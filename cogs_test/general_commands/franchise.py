@@ -221,7 +221,7 @@ class FranchiseSelect(discord.ui.Select):
                 description = subtitle
             else:
                 label = media_title(item)
-                if owner.category in ("ANIME", "MANGA"):
+                if owner.category in ("ANIME", "MANGA", "LIGHT_NOVEL"):
                     description = f"{item.get('format') or owner.category} · {item.get('status') or 'Status unavailable'}"
                 elif owner.category == "WEBNOVEL":
                     description = f"{item.get('author') or 'Author unavailable'} · {item.get('status') or 'Status unavailable'}"
@@ -242,8 +242,9 @@ class FranchiseSelect(discord.ui.Select):
             return
         await interaction.response.defer()
         try:
-            if view.category in ("ANIME", "MANGA"):
-                media = await fetch_media_by_id(int(selected["id"]), view.category)
+            if view.category in ("ANIME", "MANGA", "LIGHT_NOVEL"):
+                ani_type = "ANIME" if view.category == "ANIME" else "MANGA"
+                media = await fetch_media_by_id(int(selected["id"]), ani_type)
             elif view.category in ("MOVIE", "TV"):
                 media = await view.cog.fetch_tmdb_relationships(selected, view.category)
             elif view.category == "WEBNOVEL":
@@ -439,8 +440,14 @@ class Franchise(commands.Cog):
         media["_provider_related"] = existing
 
     async def search_options(self, title: str, category: str) -> list[dict]:
-        if category in ("ANIME", "MANGA"):
-            return await fetch_media_by_search(title, category, per_page=10)
+        if category in ("ANIME", "MANGA", "LIGHT_NOVEL"):
+            ani_type = "ANIME" if category == "ANIME" else "MANGA"
+            results = await fetch_media_by_search(title, ani_type, per_page=10)
+            if category == "LIGHT_NOVEL":
+                return [item for item in results if str(item.get("format") or "").upper() == "NOVEL"]
+            if category == "MANGA":
+                return [item for item in results if str(item.get("format") or "").upper() != "NOVEL"]
+            return results
         if category == "WEBNOVEL":
             return await asyncio.wait_for(search_novelupdates(title), timeout=45)
         if category in ("MOVIE", "TV"):
@@ -549,6 +556,7 @@ class Franchise(commands.Cog):
     @app_commands.choices(category=[
         app_commands.Choice(name="Anime", value="ANIME"),
         app_commands.Choice(name="Manga / manhwa / manhua", value="MANGA"),
+        app_commands.Choice(name="Light novels", value="LIGHT_NOVEL"),
         app_commands.Choice(name="Movies", value="MOVIE"),
         app_commands.Choice(name="TV shows", value="TV"),
         app_commands.Choice(name="Books and novels", value="BOOK"),
