@@ -31,6 +31,7 @@ _NOVELUPDATES_CACHE_TTL = 300
 _NOVELUPDATES_SEARCH_CACHE: Dict[tuple, tuple[float, List[Dict]]] = {}
 _NOVELUPDATES_CACHE_LOCK = asyncio.Lock()
 _NOVELUPDATES_KEY_LOCKS: Dict[tuple, asyncio.Lock] = {}
+_NOVELUPDATES_REQUEST_LIMIT = asyncio.Semaphore(2)
 
 
 def _novelupdates_search_urls(query: str) -> List[str]:
@@ -408,7 +409,7 @@ async def search_novelupdates(
     normalized = " ".join((query or "").split())
     if not normalized:
         return []
-    key = (normalized.casefold(), bool(browser_fallback), max(1, min(int(max_http_urls), 3)), bool(require_genres))
+    key = (normalized.casefold(), bool(browser_fallback), max(1, min(int(max_http_urls), 3)), max(1, min(int(http_timeout), 10)), bool(require_genres))
     async with _NOVELUPDATES_CACHE_LOCK:
         cached = _NOVELUPDATES_SEARCH_CACHE.get(key)
         if cached and cached[0] > time.monotonic():
@@ -423,13 +424,14 @@ async def search_novelupdates(
             if cached and cached[0] > time.monotonic():
                 return [dict(item) for item in cached[1]]
         try:
-            results = await _search_novelupdates_uncached(
-                normalized,
-                browser_fallback=browser_fallback,
-                http_timeout=http_timeout,
-                max_http_urls=max_http_urls,
-                require_genres=require_genres,
-            )
+            async with _NOVELUPDATES_REQUEST_LIMIT:
+                results = await _search_novelupdates_uncached(
+                    normalized,
+                    browser_fallback=browser_fallback,
+                    http_timeout=http_timeout,
+                    max_http_urls=max_http_urls,
+                    require_genres=require_genres,
+                )
             if results:
                 async with _NOVELUPDATES_CACHE_LOCK:
                     now = time.monotonic()
