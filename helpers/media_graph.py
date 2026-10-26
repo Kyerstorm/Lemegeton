@@ -282,6 +282,7 @@ async def find_linked_resources(
             (pattern, pattern),
         )
     ]
+    job_names = ["archives"]
     if media_id and _category(category) in {"MANGA", "LIGHT_NOVEL"}:
         jobs.append(_safe_rows(
             "find related safe manga panels by AniList identity",
@@ -291,6 +292,7 @@ async def find_linked_resources(
                ORDER BY created_at DESC LIMIT 40""",
             (media_id, title),
         ))
+        job_names.append("panels")
     else:
         jobs.append(_safe_rows(
             "find related safe manga panels by exact title",
@@ -300,6 +302,7 @@ async def find_linked_resources(
                ORDER BY created_at DESC LIMIT 40""",
             (title,),
         ))
+        job_names.append("panels")
     if guild_id is not None:
         jobs.extend((
             _safe_rows(
@@ -335,6 +338,7 @@ async def find_linked_resources(
                 (guild_id, title),
             ),
         ))
+        job_names.extend(("discussions", "polls", "quizzes", "brackets"))
         if safe_url:
             jobs.append(_safe_rows(
                 "find same-guild linked media discussions by source URL",
@@ -344,7 +348,27 @@ async def find_linked_resources(
                    ORDER BY created_at DESC LIMIT 10""",
                 (guild_id, safe_url),
             ))
+            job_names.append("discussions_by_url")
+        jobs.append(_safe_rows(
+            "find same-guild reading-club nominations",
+            """SELECT nomination_id, title, category, source_url, status, thread_id
+               FROM reading_club_nominations
+               WHERE guild_id = ? AND status IN ('open', 'selected') AND LOWER(title) = LOWER(?)
+               ORDER BY created_at DESC LIMIT 10""",
+            (guild_id, title),
+        ))
+        job_names.append("reading_club")
+        jobs.append(_safe_rows(
+            "find same-guild active media-night candidates",
+            """SELECT session_id, channel_id, message_id, category, candidates
+               FROM media_night_sessions
+               WHERE guild_id = ? AND status = 'open' AND expires_at > CURRENT_TIMESTAMP
+               ORDER BY created_at DESC LIMIT 25""",
+            (guild_id,),
+        ))
+        job_names.append("media_night")
     responses = await asyncio.gather(*jobs)
+    response_map = dict(zip(job_names, responses))
     resources: list[dict] = []
     seen: set[tuple] = set()
 
@@ -357,12 +381,12 @@ async def find_linked_resources(
         seen.add(key)
         resources.append({"kind": kind, "title": label, "url": target_url, "source": source})
 
-    for row in responses[0]:
+    for row in response_map.get("archives", []):
         if normalize_media_title(row[3]) != title_key and normalize_media_title(row[2]) != title_key:
             continue
         archive_type = str(row[1] or "archive").replace("-", " ").title()
         add(f"Community {archive_type}", f"{row[2]} · #{row[0]}", row[4], f"Shared /{str(row[1] or 'archive')} archive")
-    for row in responses[1]:
+    for row in response_map.get("panels", []):
         if normalize_media_title(row[1]) != title_key and not (media_id and _category(category) in {"MANGA", "LIGHT_NOVEL"}):
             continue
         panel_url = None
@@ -370,17 +394,51 @@ async def find_linked_resources(
             panel_url = f"https://discord.com/channels/{int(row[3])}/{int(row[4])}/{int(row[5])}"
         label = f"Panel #{row[0]}" + (f" · Chapter {row[2]}" if row[2] else "") + f" · {row[1]}"
         add("Manga panel", label, panel_url, "Shared Panels archive · safe entries only")
-    for response_index, rows in enumerate(responses[2:], start=2):
+    for rows in (response_map.get("discussions", []), response_map.get("discussions_by_url", [])):
         for row in rows:
-            if response_index in (2, 6):
-                resource_url = f"https://discord.com/channels/{int(row[0])}/{int(row[2])}" if row[0] and row[2] else None
-                add("Discussion", f"{row[3]} · {row[4]}", resource_url, "This server's connected discussion")
-            elif response_index == 3:
-                add("Adaptation poll", f"{row[1]} · #{row[0]}", None, "This server's adaptation votes")
-            elif response_index == 4:
-                add("Media quiz", f"Quiz question · #{row[0]}", None, "This server's source-linked media quiz")
-            elif response_index == 5:
-                add("Media bracket", f"{row[1]} · #{row[0]}", None, "This server's media bracket")
+            resource_url = f"https://discord.com/channels/{int(row[0])}/{int(row[2])}" if row[0] and row[2] else None
+            add("Discussion", f"{row[3]} · {row[4]}", resource_url, "This server's connected discussion")
+    for row in response_map.get("polls", []):
+        add("Adaptation poll", f"{row[1]} · #{row[0]}", None, "This server's adaptation votes")
+    for row in response_map.get("quizzes", []):
+        add("Media quiz", f"Quiz question · #{row[0]}", None, "This server's source-linked media quiz")
+    for row in response_map.get("brackets", []):
+        add("Media bracket", f"{row[1]} · #{row[0]}", None, "This server's media bracket")
+
+    for row in response_map.get("reading_club", []):
+        if normalize_media_title(row[1]) != title_key:
+            continue
+        resource_url = f"https://discord.com/channels/{int(guild_id)}/{int(row[5])}" if row[5] else row[3]
+        add(
+            "Reading Club",
+            f"{row[1]} · {row[2]} · {str(row[4]).title()} · #{row[0]}",
+            resource_url,
+            "This server's reading-club nomination",
+        )
+
+    for row in response_map.get("media_night", []):
+        try:
+            candidates = json.loads(row[4] or "[]")
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(candidates, list):
+            continue
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            candidate_title = candidate.get("title") or candidate.get("name") or ""
+            if isinstance(candidate_title, dict):
+                candidate_title = candidate_title.get("english") or candidate_title.get("romaji") or candidate_title.get("native") or ""
+            if normalize_media_title(str(candidate_title)) != title_key:
+                continue
+            resource_url = f"https://discord.com/channels/{int(guild_id)}/{int(row[1])}/{int(row[2])}" if row[1] and row[2] else None
+            add(
+                "Media Night",
+                f"{candidate_title} · {row[3]} · Session #{row[0]}",
+                resource_url,
+                "This server's active media-night vote",
+            )
+            break
     return resources[:max(1, min(limit, 12))]
 
 

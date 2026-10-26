@@ -1,8 +1,10 @@
 """Focused tests for the shared cross-system media relationship graph."""
+import json
 import unittest
 from unittest.mock import AsyncMock, patch
 
 from helpers.media_graph import (
+    find_linked_resources,
     find_media_relationships,
     normalize_media_title,
     record_media_relationship,
@@ -89,6 +91,43 @@ class MediaGraphPersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(stored)
         ensure.assert_not_awaited()
         execute.assert_not_awaited()
+
+    async def test_linked_resources_include_same_guild_reading_club_and_media_night(self):
+        captured = []
+
+        async def db_result(operation, query, params=None, fetch_type=None):
+            captured.append((query, params))
+            if "reading_club_nominations" in query:
+                return [
+                    ("nomination-1", "A Shared Title", "manga", "https://anilist.co/manga/3", "open", None),
+                    ("nomination-2", "Another Title", "book", None, "open", None),
+                ]
+            if "media_night_sessions" in query:
+                candidates = json.dumps([{"title": {"english": "A Shared Title"}}])
+                return [("session-1", 100, 200, "anime", candidates)]
+            return []
+
+        with patch(
+            "helpers.media_graph.database.execute_db_operation",
+            new_callable=AsyncMock,
+            side_effect=db_result,
+        ):
+            resources = await find_linked_resources(
+                "A Shared Title", "ANIME", 42, url="https://anilist.co/anime/1",
+            )
+
+        self.assertTrue(any(item["kind"] == "Reading Club" for item in resources))
+        self.assertTrue(any(item["kind"] == "Media Night" for item in resources))
+        media_night = next(item for item in resources if item["kind"] == "Media Night")
+        self.assertEqual(media_night["url"], "https://discord.com/channels/42/100/200")
+        guild_queries = [
+            (query, params) for query, params in captured
+            if "reading_club_nominations" in query or "media_night_sessions" in query
+        ]
+        self.assertEqual(len(guild_queries), 2)
+        for query, params in guild_queries:
+            self.assertIn("guild_id = ?", query)
+            self.assertEqual(params[0], 42)
 
     async def test_relationship_queries_include_global_and_current_guild_edges(self):
         with (
