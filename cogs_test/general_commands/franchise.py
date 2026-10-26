@@ -103,10 +103,17 @@ def relation_embed(media: dict, page: int = 0) -> discord.Embed:
             url = item.get("url")
             linked = f"[{name}]({url})" if url else name
             kind = item.get("type") or ""
-            status = item.get("status") or ""
+            status = item.get("status")
             date = item.get("date")
             relation = item.get("relationType") or "RELATED"
-            details = " · ".join(str(v) for v in (kind, status, date) if v)
+            details_parts = [str(kind)] if kind else []
+            if status:
+                details_parts.append(f"Status/date: {status}")
+            if date:
+                details_parts.append(f"Release: {date}")
+            if item.get("creators"):
+                details_parts.append(f"Creators: {item['creators']}")
+            details = " · ".join(details_parts)
             line = f"**{relation}**" + (f" · {details}" if details else "") + f"\n{linked}"
             if item.get("source"):
                 line += f"\nSource: {item['source']}"
@@ -389,7 +396,7 @@ class Franchise(commands.Cog):
                     candidate_title = info.get("title")
                     url = info.get("infoLink") or candidate.get("selfLink")
                     authors = info.get("authors") or []
-                    status = ", ".join(authors) if authors else None
+                    status = None
                     candidate_type = "Book / novel"
                     cover = (info.get("imageLinks") or {}).get("thumbnail")
                     source_name = "Google Books"
@@ -429,6 +436,9 @@ class Franchise(commands.Cog):
                     "status": status,
                     "date": None,
                     "source": f"{source_name} title match only",
+                    "creators": ", ".join(authors[:4]) if provider_key.startswith("books-") and authors else (
+                        str(candidate.get("author")) if provider_key == "novelupdates" and candidate.get("author") else None
+                    ),
                 }
                 if cover:
                     entry["image"] = cover
@@ -506,7 +516,6 @@ class Franchise(commands.Cog):
                         item.pop("_sort", None)
                     relation_source = "TMDB collection"
                 else:
-                    field = "recommendations" if is_movie else "recommendations"
                     results = await self._tmdb_recommendations(session, endpoint, media_id, headers)
                     for entry in results:
                         entry_title = entry.get("title") if is_movie else entry.get("name")
