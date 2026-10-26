@@ -25,7 +25,7 @@ query($from: Int, $to: Int) {
     airingSchedules(airingAt_greater: $from, airingAt_lesser: $to, sort: TIME) {
       airingAt
       episode
-      media { title { romaji english } siteUrl coverImage { large } }
+      media { title { romaji english } siteUrl coverImage { large } isAdult }
     }
   }
 }
@@ -124,6 +124,8 @@ class ReleaseCalendar(commands.Cog):
         items = []
         for entry in schedule:
             media = entry.get("media") or {}
+            if media.get("isAdult") is True:
+                continue
             title = _title({"title": (media.get("title") or {})})
             try:
                 when = datetime.fromtimestamp(int(entry["airingAt"]), timezone.utc)
@@ -222,7 +224,7 @@ class ReleaseCalendar(commands.Cog):
             items: list[dict[str, Any]] = []
             for result in resolved:
                 if isinstance(result, Exception):
-                    log.warning("One release-calendar provider failed", exc_info=result)
+                    log.warning("One release-calendar provider failed: %r", result)
                     continue
                 items.extend(result)
             items.sort(key=lambda item: (item["date"], item["category"], item["title"].casefold()))
