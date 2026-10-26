@@ -85,3 +85,51 @@ The family-friendly option is a best-effort metadata filter, not a parental-rati
 - Google Books and AniList use the existing helpers already used elsewhere in the bot.
 - Release-calendar settings, Reading Club nominations/votes, and Media Night sessions are persisted in the shared database and keyed by guild/channel as appropriate.
 - Provider failures, unavailable metadata and missing release dates are treated as missing data. The bot does not make a failed source appear operational or manufacture metadata to fill gaps.
+
+## Connected media commands and community archives
+
+The interactive /discovery-hub command is the entry point for media navigation and community features. /connections reuses the existing /franchise resolver and provider-specific relationship handling. /reading-order presents the same source-attributed relationships with an explicit warning that release order is not story chronology. Exact-title matches and recommendations remain unverified unless a provider declares a relationship.
+
+### TMDB tools
+
+- /where-to-watch reads the documented movie or TV watch-provider endpoint using the selected two-letter region. /media-region stores the server's default region in PostgreSQL; an individual query can override it.
+- /person-credits uses TMDB person search and combined credits to display movie and TV work.
+- /trailers uses the documented movie/TV videos endpoints and constructs links only for returned YouTube or Vimeo keys. Provider-returned video types and official flags are retained.
+- /collection-guide resolves a movie, loads its belongs_to_collection reference, then displays TMDB collection parts by release date. This is not an assertion of in-universe chronology.
+- /author-works queries Google Books by author. Results may include co-authored works and editions; this is not presented as a universal cross-provider bibliography.
+- /webnovel-updates reuses the existing Novel Updates scraper with a bounded command timeout. A scraper timeout/failure is shown as a provider failure rather than a confirmed empty search.
+
+TMDB watch-provider data is powered by JustWatch. /where-to-watch labels the queried region and links to the provider-details URL when supplied; it does not manufacture direct streaming links. TMDB requests require TMDB_BEARER_TOKEN. Availability changes and should be verified with the provider.
+
+/release-calendar configure accepts an optional region code for movie-release queries. Existing installations gain a release_region field using a non-destructive ALTER TABLE ADD COLUMN IF NOT EXISTS operation. The existing default remains US for compatibility. Anime airings still come from AniList and TV next-episode records from TMDB.
+
+### Link suggestions and discussions
+
+/link-suggest stores a pending relationship suggestion in PostgreSQL, including its guild, submitter, source/target categories, HTTPS source URLs and evidence. /link-review is limited to Manage Server or Manage Messages members and lists, inspects, approves or rejects suggestions created in the current guild. Approval is labelled community-verified, not provider-confirmed.
+
+/chapter-discussion and /episode-discussion create a public starter message and Discord thread. The provided chapter or episode reference acts as the spoiler cutoff; the bot does not infer cross-medium chapter/episode mappings. Discussion metadata is stored by guild and thread.
+
+### Community archives and events
+
+The following commands use PostgreSQL-backed records and support add, browse, search or random actions where applicable:
+
+- /quotes — short attributed excerpts with a 280-character limit; do not submit lyrics or long copyrighted passages.
+- /fanworks — credited links to fan art, edits, wallpapers or videos. Lemegeton stores submission metadata and URLs instead of rehosting submitted works.
+- /moodboards — themes and a submitted list of related works.
+- /soundtracks — links to legitimate music/video platforms; audio is not hosted by Lemegeton.
+- /scenes — captions and references to memorable moments.
+- /recommendation-board — member-written reasons for trying a title.
+- /theories — community theories, spoiler-wrapped by default.
+- /archive-mine — list your own submissions and whether they are pending, approved, rejected or removed.
+- /archive-report and /archive-report-review — submit a reasoned report and let server moderators resolve it. Only the source server's moderators can remove the original shared entry.
+- /archive-review — moderators review pending submissions originating in their own server before entries become visible in the shared archive.
+- /panel-of-the-day — selects a non-NSFW record from the existing Panels table and persists one selection per server per date instead of maintaining a second panel database.
+- /media-bracket, /adaptation-vote and /media-quiz — persist server-scoped votes, polls, trivia questions and user quiz sessions.
+
+New community archive submissions start pending. Approval takes place in the originating guild; approved entries are shared across servers. Moderation and votes remain guild-scoped. Fanworks and soundtrack submissions require HTTPS links, and user-supplied links are not treated as proof of a media relationship.
+
+### Database changes
+
+New tables are initialized by their cogs and use the existing PostgreSQL access layer. They include connected_media_guild_settings, media_link_suggestions, connected_media_discussions, community_archive_entries, community_archive_reports, community_panel_daily_log, community_media_brackets, community_media_bracket_votes, community_adaptation_polls, community_adaptation_votes, community_media_quiz_questions and community_media_quiz_sessions. Existing archive tables and records are not copied or replaced.
+
+These community features do not store personal reading or watching progress. Provider fields that are unavailable remain unavailable instead of being guessed.
