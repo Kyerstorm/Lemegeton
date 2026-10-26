@@ -1,8 +1,9 @@
 from helpers.color_palette import PALETTE
 import discord
+from helpers.command_error_handler import application_error_message, FeedbackAwareView
 from discord.ext import commands
 from discord import app_commands
-from discord.ui import View, Button
+from discord.ui import Button
 import asyncio
 import os
 import logging
@@ -92,7 +93,7 @@ MEDIA_TYPE_CHOICES = [
 ]
 
 
-class RandomResultView(View):
+class RandomResultView(FeedbackAwareView):
     """Private, invoking-user-scoped controls for a random media result."""
 
     def __init__(self, cog, owner_id: int, media_type: str, filters: Dict,
@@ -670,10 +671,10 @@ class Random(commands.Cog):
             ), ephemeral=True)
         except LookupError as exc:
             await interaction.followup.send(embed=build_error_embed("No Random Results", str(exc)), ephemeral=True)
-        except Exception:
+        except Exception as e:
             logger.exception("Random %s lookup failed", media_type)
             await interaction.followup.send(embed=build_error_embed(
-                "Lookup Failed", "Could not fetch a random suggestion right now. Please try again later."
+                "Lookup Failed", application_error_message(e)
             ), ephemeral=True)
 
     async def _process_random_request(
@@ -919,7 +920,7 @@ class Random(commands.Cog):
             # Create error embed
             error_embed = build_error_embed(
                 "Error",
-                "An error occurred while fetching random media. Please try again later!"
+                application_error_message(e)
             )
             
             # Send error response
@@ -928,7 +929,7 @@ class Random(commands.Cog):
             else:
                 await interaction.followup.send(embed=error_embed)
 
-    class PageView(View):
+    class PageView(FeedbackAwareView):
         """Interactive view for switching between media info and user progress."""
         
         def __init__(
