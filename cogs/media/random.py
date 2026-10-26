@@ -671,7 +671,7 @@ class Random(commands.Cog):
             ), ephemeral=True)
         except LookupError as exc:
             await interaction.followup.send(embed=build_error_embed("No Random Results", str(exc)), ephemeral=True)
-        except Exception:
+        except Exception as e:
             logger.exception("Random %s lookup failed", media_type)
             await interaction.followup.send(embed=build_error_embed(
                 "Lookup Failed", application_error_message(e)
