@@ -14,6 +14,7 @@ from typing import Any, Optional
 
 import discord
 from discord import app_commands, ui
+from helpers.command_error_handler import FeedbackAwareView
 from discord.ext import commands
 
 import database
@@ -278,7 +279,7 @@ def _has_dashboard_access(interaction: discord.Interaction, bot: commands.Bot) -
 # ---------------------------------------------------------------------------
 # Polished interactive dashboard
 # ---------------------------------------------------------------------------
-class DashboardView(ui.View):
+class DashboardView(FeedbackAwareView):
     def __init__(self, bot: commands.Bot, guild: discord.Guild, db: ConfigDB):
         super().__init__(timeout=300)
         self.bot = bot
@@ -538,7 +539,7 @@ class DashboardView(ui.View):
         )
 
 
-class ResetConfirmView(ui.View):
+class ResetConfirmView(FeedbackAwareView):
     def __init__(self, dashboard: DashboardView):
         super().__init__(timeout=45)
         self.dashboard = dashboard
