@@ -8,7 +8,7 @@ Use **/browse** with a media category and a title, then fill the optional filter
 
 | Category | Supported filters |
 | --- | --- |
-| Anime and manga | Genre, AniList theme/tag, provider status, year range. Author and artist filters are available for manga/light-novel records when AniList staff roles expose the credit. Adult-flagged titles are excluded unless the user explicitly opts in from a Discord channel marked NSFW. |
+| Anime and manga | Genre, AniList theme/tag, provider status, year range. Manga supports manga (Japan), manhwa (Korea), manhua (China), and provider-tagged webtoon subtypes using AniList origin/format metadata. Author and artist filters are available for manga/light-novel records when AniList staff roles expose the credit. Adult-flagged titles are excluded unless the user explicitly opts in from a Discord channel marked NSFW. |
 | General novels and books | Genre/subject, author, publisher, language code, publication year range through Google Books query parameters. |
 | Webnovels | Genre, author and status when those values can be parsed from Novel Updates results. |
 | Movies and TV | TMDB genre, keyword/theme, original language code, status, release year range, runtime, director and cast filters. |
@@ -22,7 +22,8 @@ AniList themes are rendered separately from genres. AniList spoiler-marked tags 
 **/franchise** supports AniList anime/manga relationships, Google Books entries, and TMDB movie/TV entries.
 
 - AniList relationship types are retained as provider metadata.
-- TMDB movie collection members are labelled as collection members. A release date is not presented as in-universe chronology.
+- TMDB movie collection members are labelled as collection members. When every collection member has a full release date, the bot shows a **release-order** list; it does not present that as in-universe chronology.
+- AniList relations retain prequel, sequel, side-story, spin-off and other provider relation labels. An AniList release-order list is shown only when every linked entry and the current title have full start dates; no story chronology is inferred.
 - TMDB movie/TV recommendations are labelled as recommendations, not confirmed sequels, prequels, adaptations, or a shared universe.
 - Exact title matches on a second provider are listed as **unverified title matches**. Matching names alone do not prove an adaptation relationship.
 - Google Books does not supply a dependable cross-media adaptation graph. In that case the result links to the book's metadata record rather than fabricating relationships.
@@ -54,7 +55,7 @@ The release calendar is configured separately by each Discord server.
 - **/release-calendar configure channel frequency categories** configures a daily or weekly digest for that guild.
 - **/release-calendar disable** disables that guild's digest.
 
-Currently supported sources are AniList airing schedules for anime, TMDB upcoming movie dates and TMDB TV next-episode dates. The feed has a short in-memory cache and bounded request timeouts, and each entry names its source. Adult-flagged anime is excluded. The calendar does not claim to contain manga chapter or novel volume announcements because the configured providers do not expose a dependable, unified release schedule for those categories.
+Currently supported sources are AniList airing schedules for anime, TMDB upcoming movie dates (US region) and TMDB TV next-episode dates. The feed has a short in-memory cache and bounded request timeouts, and each entry names its source. Adult-flagged anime is excluded. The calendar does not claim to contain manga chapter or novel volume announcements because the configured providers do not expose a dependable, unified release schedule for those categories.
 
 ## Reading Club
 
@@ -76,7 +77,7 @@ The family-friendly option is a best-effort metadata filter, not a parental-rati
 
 ## Comparison
 
-**/compare** compares two selected entries from the same category, now including Novel Updates webnovels as well as the existing AniList, Google Books, TMDB and game providers. Ratings keep their provider/scale labels; fields differ according to the category rather than assuming that every media type has the same attributes.
+**/compare** compares two to four selected entries from the same category, now including Novel Updates webnovels as well as the existing AniList, Google Books, TMDB and game providers. Ratings keep their provider/scale labels; fields differ according to the category rather than assuming that every media type has the same attributes.
 
 ## Configuration and operational notes
 
