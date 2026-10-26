@@ -1,5 +1,6 @@
 from helpers.color_palette import PALETTE
 import discord
+from helpers.command_error_handler import FeedbackAwareView
 from discord.ext import commands
 import logging
 from pathlib import Path
@@ -43,7 +44,7 @@ logger.info("AdminLogin cog logging initialized")
 # ────────────────────────────────────────────────────────────────
 # View for swapping AniList usernames
 # ────────────────────────────────────────────────────────────────
-class SwapAniListView(discord.ui.View):
+class SwapAniListView(FeedbackAwareView):
     def __init__(self, cog, target_user: discord.Member, new_username: str, guild_id: int):
         super().__init__(timeout=60)
         self.cog = cog
