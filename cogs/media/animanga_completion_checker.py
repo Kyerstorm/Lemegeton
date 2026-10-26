@@ -1,8 +1,9 @@
 from helpers.color_palette import PALETTE
 import discord
+from helpers.command_error_handler import FeedbackAwareView, application_error_message
 from discord.ext import commands, tasks
 from discord import app_commands
-from discord.ui import View, Button
+from discord.ui import Button
 import datetime
 import asyncio
 import logging
@@ -412,7 +413,7 @@ class Finisher(commands.Cog):
             try:
                 embed = build_error_embed(
                     "Configuration Failed",
-                    "Failed to set channel."
+                    application_error_message(e)
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
             except Exception:
@@ -543,7 +544,7 @@ class Finisher(commands.Cog):
 
             # Add a simple link button to AniList entry
             try:
-                view = View(timeout=None)
+                view = FeedbackAwareView(timeout=None)
                 btn = Button(label="View on AniList", url=m.get("siteUrl"))
                 view.add_item(btn)
             except Exception:
