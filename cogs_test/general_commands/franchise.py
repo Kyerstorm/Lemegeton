@@ -144,7 +144,7 @@ class FranchiseSelect(discord.ui.Select):
     def __init__(self, owner: "FranchiseSearchView", results: list[dict]):
         self.owner_view = owner
         self.results = {
-            str(item.get("id") or item.get("volumeInfo", {}).get("title") or (item.get("url") if owner.category == "WEBNOVEL" else item.get("title"))): item
+            str(item.get("id") or item.get("volumeInfo", {}).get("title") or (item.get("url") if owner.category == "WEBNOVEL" else item.get("title")) or "")[:100]: item
             for item in results
         }
         options = []
@@ -293,6 +293,9 @@ class Franchise(commands.Cog):
             job_descriptors.append(("books-fiction", "BOOK"))
             jobs.append(self.browse.fetch_book_results(source_title, "nonfiction"))
             job_descriptors.append(("books-nonfiction", "BOOK"))
+        if category != "WEBNOVEL":
+            jobs.append(asyncio.wait_for(search_novelupdates(source_title), timeout=45))
+            job_descriptors.append(("novelupdates", "WEBNOVEL"))
 
         results = await asyncio.gather(*jobs, return_exceptions=True)
         existing = list(media.get("_provider_related") or [])
@@ -327,6 +330,13 @@ class Franchise(commands.Cog):
                     candidate_type = "Book / novel"
                     cover = (info.get("imageLinks") or {}).get("thumbnail")
                     source_name = "Google Books"
+                elif provider_key == "novelupdates":
+                    candidate_title = candidate.get("title")
+                    url = candidate.get("url")
+                    status = candidate.get("status") or candidate.get("author")
+                    candidate_type = "Webnovel"
+                    cover = candidate.get("image")
+                    source_name = "Novel Updates"
                 else:
                     candidate_title = (
                         candidate.get("title") if target_type == "MOVIE" else candidate.get("name")
