@@ -1222,11 +1222,25 @@ class BrowseCog(commands.Cog):
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
 
-            media = await self.fetch_tmdb_media(title, chosen_type)
+            media = await self.fetch_tmdb_media(title, chosen_type, include_adult=include_adult)
             if not media:
                 label = "movie" if chosen_type == "MOVIE" else "TV show"
                 embed = build_error_embed("No Results Found", f"No {label} found matching {title!r}.")
                 await interaction.followup.send(embed=embed, ephemeral=True)
+                return
+
+            if not self._tmdb_matches(
+                media, chosen_type, genre=genre, theme=theme, language=language,
+                status=status, year_from=year_from, year_to=year_to,
+                runtime_min=runtime_min, runtime_max=runtime_max,
+                director=director, cast=cast, include_adult=include_adult,
+            ):
+                await interaction.followup.send(
+                    embed=build_error_embed(
+                        "No Filtered Match",
+                        "The best matching title did not satisfy every supplied filter, or TMDB did not provide a required field. Try a broader title/filter combination.",
+                    ), ephemeral=True,
+                )
                 return
 
             # Enrich TMDB metadata with optional Metacritic scores from MDBList.
@@ -1383,10 +1397,15 @@ class BrowseCog(commands.Cog):
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
 
+            results = [novel for novel in results if
+                (not genre or any(genre.casefold() in str(value).casefold() for value in (novel.get("genres") or [])))
+                and (not author or author.casefold() in str(novel.get("author") or "").casefold())
+                and (not status or status.casefold() in str(novel.get("status") or "").casefold())
+            ]
             if not results:
                 embed = build_error_embed(
                     "No Results Found",
-                    f"No webnovel results found on Novel Updates for {title!r}.",
+                    f"No webnovel results found on Novel Updates for {title!r} matching available metadata filters.",
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
@@ -1421,7 +1440,10 @@ class BrowseCog(commands.Cog):
                 # Keep provider delays/errors from leaving Discord's deferred response
                 # spinning indefinitely.
                 results = await asyncio.wait_for(
-                    self.fetch_book_results(title, book_type),
+                    self.fetch_book_results(
+                        title, book_type, genre=genre, year_from=year_from, year_to=year_to,
+                        author=author, language=language, publisher=publisher,
+                    ),
                     timeout=18,
                 )
             except asyncio.TimeoutError:
@@ -1514,10 +1536,15 @@ class BrowseCog(commands.Cog):
 
         # ✅ AniList Fetch
         results = await self.fetch_media(title, real_type)
+        results = self._filter_anilist_results(
+            results, genre=genre, theme=theme, author=author, artist=artist,
+            status=status, year_from=year_from, year_to=year_to,
+            include_adult=include_adult,
+        )
         if not results:
             embed = build_error_embed(
                 "No Results Found",
-                "No results found."
+                "No results matched the title and supported filters, or the provider omitted a required field. Try fewer filters or a different title."
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
             return
