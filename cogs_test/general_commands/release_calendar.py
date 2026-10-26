@@ -357,11 +357,15 @@ class ReleaseCalendar(commands.Cog):
 
     @tasks.loop(seconds=60)
     async def dispatch_due_digests(self) -> None:
-        rows = await execute_db_operation(
-            "find due release-calendar digests",
-            "SELECT * FROM media_release_calendar_settings WHERE enabled = 1 AND next_run <= CURRENT_TIMESTAMP",
-            fetch_type="all",
-        )
+        try:
+            rows = await execute_db_operation(
+                "find due release-calendar digests",
+                "SELECT * FROM media_release_calendar_settings WHERE enabled = 1 AND next_run <= CURRENT_TIMESTAMP",
+                fetch_type="all",
+            )
+        except Exception:
+            log.exception("Could not query due release-calendar digests")
+            return
         for row in rows or []:
             settings = dict(row)
             guild_id = int(settings["guild_id"])
@@ -382,11 +386,14 @@ class ReleaseCalendar(commands.Cog):
                 log.exception("Release digest delivery failed for guild %s", guild_id)
             finally:
                 delay = timedelta(days=1 if frequency == "daily" else 7)
-                await execute_db_operation(
-                    "advance guild release-calendar schedule",
-                    "UPDATE media_release_calendar_settings SET next_run = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?",
-                    (datetime.now(timezone.utc).replace(tzinfo=None) + delay, guild_id),
-                )
+                try:
+                    await execute_db_operation(
+                        "advance guild release-calendar schedule",
+                        "UPDATE media_release_calendar_settings SET next_run = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?",
+                        (datetime.now(timezone.utc).replace(tzinfo=None) + delay, guild_id),
+                    )
+                except Exception:
+                    log.exception("Could not advance release-calendar schedule for guild %s", guild_id)
 
     @dispatch_due_digests.before_loop
     async def before_dispatch_due_digests(self) -> None:
