@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import secrets
 from datetime import datetime, timedelta, timezone
 import aiohttp
@@ -25,10 +26,24 @@ query($type: MediaType, $perPage: Int) {
       coverImage { large }
       format
       genres
+      tags { name isMediaSpoiler }
+      startDate { year }
+      duration
+      isAdult
     }
   }
 }
 """
+
+MOOD_GENRES = {
+    "cozy": {"slice of life", "comedy", "family"},
+    "dark": {"horror", "thriller", "mystery", "psychological", "crime"},
+    "uplifting": {"comedy", "adventure", "family", "sports"},
+    "mind-bending": {"psychological", "mystery", "science fiction", "sci-fi", "thriller"},
+    "tense": {"thriller", "action", "horror", "crime"},
+}
+MATURE_MARKERS = {"hentai", "erotica", "pornography", "explicit sexual content"}
+
 
 def tally_votes(votes: dict[str, int], candidate_count: int) -> list[int]:
     totals = [0] * candidate_count
@@ -39,7 +54,28 @@ def tally_votes(votes: dict[str, int], candidate_count: int) -> list[int]:
 
 def title_of(item: dict) -> str:
     titles = item.get("title") or {}
-    return titles.get("english") or titles.get("romaji") or "Untitled media"
+    if isinstance(titles, dict):
+        return titles.get("english") or titles.get("romaji") or item.get("name") or "Untitled media"
+    return str(titles or item.get("name") or "Untitled media")
+
+
+def _matches_mood(item: dict, mood: str | None) -> bool:
+    if not mood:
+        return True
+    target = MOOD_GENRES.get(mood.casefold())
+    if not target:
+        return False
+    genres = {str(value).casefold() for value in (item.get("genres") or [])}
+    tags = {str((tag or {}).get("name") or "").casefold() for tag in (item.get("tags") or [])}
+    return bool(target.intersection(genres | tags))
+
+
+def _family_friendly(item: dict) -> bool:
+    if item.get("isAdult") is True or item.get("adult") is True:
+        return False
+    genres = {str(value).casefold() for value in (item.get("genres") or [])}
+    tags = {str((tag or {}).get("name") or "").casefold() for tag in (item.get("tags") or [])}
+    return not any(marker in value for value in genres | tags for marker in MATURE_MARKERS)
 
 class MediaNightView(FeedbackAwareView):
     """Persistent vote buttons encode a session ID and candidate index."""
@@ -247,6 +283,100 @@ class MediaNight(commands.Cog):
         )
         await message.edit(embed=self.session_embed(session), view=view)
         await interaction.followup.send(f"🎬 **Media Night is live!** Session ID: `{session_id}`\nUse `/media-night close` with this ID to close or cancel the vote. Voting closes in **{duration} minutes**.", ephemeral=True)
+
+    async def _candidate_pool(
+        self, category: str, *, genre: str | None = None, mood: str | None = None,
+        year_from: int | None = None, year_to: int | None = None,
+        max_runtime: int | None = None, suitability: str = "general",
+    ) -> list[dict]:
+        if category in ("ANIME", "MANGA"):
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
+                payload = await post_graphql(session, CANDIDATE_QUERY, {"type": category, "perPage": 50}, timeout=15)
+            media = ((payload or {}).get("Page") or {}).get("media") or []
+            filtered = []
+            for item in media:
+                if item.get("isAdult") is True:
+                    continue
+                genres = [str(value).casefold() for value in (item.get("genres") or [])]
+                tags = [str((tag or {}).get("name") or "").casefold() for tag in (item.get("tags") or [])]
+                if genre and not any(genre.casefold() in value for value in genres):
+                    continue
+                if not _matches_mood(item, mood):
+                    continue
+                year = ((item.get("startDate") or {}).get("year"))
+                if year_from is not None and (not year or int(year) < year_from):
+                    continue
+                if year_to is not None and (not year or int(year) > year_to):
+                    continue
+                if max_runtime is not None and category == "ANIME" and item.get("duration") and int(item["duration"]) > max_runtime:
+                    continue
+                if suitability == "family-friendly" and not _family_friendly(item):
+                    continue
+                filtered.append(item)
+            return filtered
+
+        token = os.getenv("TMDB_BEARER_TOKEN", "").strip()
+        if not token:
+            return []
+        endpoint = "movie" if category == "MOVIE" else "tv"
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with session.get(f"https://api.themoviedb.org/3/genre/{endpoint}/list", headers=headers, params={"language": "en-US"}) as response:
+                if response.status != 200:
+                    return []
+                genre_payload = await response.json(content_type=None)
+            genre_map = {str(entry.get("name") or "").casefold(): int(entry["id"]) for entry in genre_payload.get("genres", []) if entry.get("id") is not None}
+            wanted_genres = []
+            if genre:
+                genre_id = next((identifier for name, identifier in genre_map.items() if genre.casefold() in name), None)
+                if genre_id is None:
+                    return []
+                wanted_genres.append(genre_id)
+            if mood:
+                target_names = MOOD_GENRES.get(mood.casefold()) or set()
+                wanted_genres.extend(identifier for name, identifier in genre_map.items() if name in target_names)
+            params: dict[str, object] = {"language": "en-US", "include_adult": "false", "sort_by": "popularity.desc", "page": 1}
+            if wanted_genres:
+                params["with_genres"] = ",".join(str(value) for value in sorted(set(wanted_genres)))
+            prefix = "primary_release_date" if category == "MOVIE" else "first_air_date"
+            if year_from is not None:
+                params[f"{prefix}.gte"] = f"{year_from}-01-01"
+            if year_to is not None:
+                params[f"{prefix}.lte"] = f"{year_to}-12-31"
+            if max_runtime is not None:
+                params["with_runtime.lte"] = max_runtime
+            async with session.get(f"https://api.themoviedb.org/3/discover/{endpoint}", headers=headers, params=params) as response:
+                if response.status != 200:
+                    log.warning("TMDB media-night discover returned HTTP %s", response.status)
+                    return []
+                payload = await response.json(content_type=None)
+        normalized = []
+        id_to_genre = {identifier: name for name, identifier in genre_map.items()}
+        for item in (payload.get("results") or [])[:50]:
+            title = item.get("title") if category == "MOVIE" else item.get("name")
+            item_id = item.get("id")
+            if not title or not item_id:
+                continue
+            date = item.get("release_date") if category == "MOVIE" else item.get("first_air_date")
+            try:
+                year = int(date[:4]) if date else None
+            except (TypeError, ValueError):
+                year = None
+            genres = [id_to_genre[identifier] for identifier in item.get("genre_ids", []) if identifier in id_to_genre]
+            normalized_item = {
+                "id": item_id,
+                "title": title,
+                "siteUrl": f"https://www.themoviedb.org/{endpoint}/{item_id}",
+                "coverImage": {"large": f"https://image.tmdb.org/t/p/w500{item['poster_path']}"} if item.get("poster_path") else {},
+                "genres": genres,
+                "startDate": {"year": year} if year else {},
+                "adult": item.get("adult") is True,
+                "overview": item.get("overview") or "",
+            }
+            if suitability == "family-friendly" and (normalized_item["adult"] or any(value.casefold() in {"horror", "crime", "thriller"} for value in genres)):
+                continue
+            normalized.append(normalized_item)
+        return normalized
 
     async def cast_vote(self, interaction: discord.Interaction, session_id: str, choice: int) -> None:
         session = self.sessions.get(session_id)
