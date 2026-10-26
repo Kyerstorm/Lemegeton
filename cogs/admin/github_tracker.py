@@ -1,5 +1,6 @@
 from helpers.color_palette import PALETTE
 import discord
+from helpers.command_error_handler import application_error_message
 from discord.ext import commands, tasks
 from discord import app_commands
 from datetime import datetime
@@ -532,10 +533,10 @@ class GitHubTracker(commands.Cog):
             logger.error(f"Error setting bot updates channel: {e}", exc_info=True)
             embed = build_error_embed(
                 "Configuration Error",
-                "Failed to set bot updates channel."
+                application_error_message(e)
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
-            raise e
+            return
 
 
 async def setup(bot: commands.Bot):
