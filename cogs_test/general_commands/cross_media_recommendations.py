@@ -341,6 +341,8 @@ class CrossMediaRecommendations(commands.Cog):
             cover = (seed.get("coverImage") or {}).get("large")
         elif category == "BOOK":
             cover = ((seed.get("volumeInfo") or {}).get("imageLinks") or {}).get("thumbnail")
+        elif category == "WEBNOVEL":
+            cover = seed.get("image")
         else:
             cover_path = seed.get("poster_path")
             cover = f"{TMDB_IMAGE}{cover_path}" if cover_path else None
@@ -385,7 +387,7 @@ class CrossMediaRecommendations(commands.Cog):
             embed.add_field(name="Cross-media matches · local ranking", value="\n\n".join(lines)[:3900], inline=False)
         if not local_results and not provider_suggestions:
             embed.description += "\n\nNo comparable genre metadata or provider recommendations were returned. Try a different starting title or provider."
-        embed.set_footer(text="Sources: AniList · Google Books · TMDB · Provider recommendations are labelled separately")
+        embed.set_footer(text="Sources: AniList · Novel Updates · Google Books · TMDB · Provider recommendations are labelled separately")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
