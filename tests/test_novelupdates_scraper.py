@@ -1,4 +1,5 @@
 """Regression tests for Novel Updates' alternative search-page layouts."""
+import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -25,6 +26,7 @@ class NovelUpdatesParserTests(unittest.TestCase):
           <div class="search_genre"><a href="/genre/fantasy/">Fantasy</a></div>
           <div class="search_author">A. Writer</div>
           <div class="search_status">Ongoing</div>
+          <div class="search_original">Royal Road</div>
         </div>
         """
         results = _novelupdates_parse_html(html, BASE_URL)
@@ -37,6 +39,7 @@ class NovelUpdatesParserTests(unittest.TestCase):
         self.assertEqual(results[0]["genres"], ["Fantasy"])
         self.assertEqual(results[0]["author"], "A. Writer")
         self.assertEqual(results[0]["status"], "Ongoing")
+        self.assertEqual(results[0]["platform"], "Royal Road")
 
     def test_recovers_series_links_when_card_classes_change(self):
         html = """
@@ -85,6 +88,7 @@ class NovelUpdatesParserTests(unittest.TestCase):
                 "ratings": ["4.2"],
                 "authors": ["B. Author"],
                 "statuses": ["Completed"],
+                "platforms": ["Novel Updates"],
                 "genres": ["Fantasy, Adventure"],
             },
         }
@@ -95,6 +99,7 @@ class NovelUpdatesParserTests(unittest.TestCase):
         self.assertEqual(results[0]["rating"], "4.2")
         self.assertEqual(results[0]["author"], "B. Author")
         self.assertEqual(results[0]["status"], "Completed")
+        self.assertEqual(results[0]["platform"], "Novel Updates")
         self.assertEqual(results[0]["genres"], ["Fantasy", "Adventure"])
 
     def test_search_urls_include_encoded_fallback_routes(self):
@@ -126,6 +131,22 @@ class NovelUpdatesSearchCacheTests(unittest.IsolatedAsyncioTestCase):
             await search_novelupdates("Nothing here")
             await search_novelupdates("Nothing here")
         self.assertEqual(search.await_count, 2)
+
+    async def test_concurrent_identical_searches_are_coalesced(self):
+        result = [{"title": "One shared lookup", "url": "https://www.novelupdates.com/series/shared/"}]
+
+        async def delayed_search(*args, **kwargs):
+            await asyncio.sleep(0.01)
+            return result
+
+        with patch("cogs.media.browse._search_novelupdates_uncached", new=AsyncMock(side_effect=delayed_search)) as search:
+            first, second = await asyncio.gather(
+                search_novelupdates("same title"),
+                search_novelupdates("same title"),
+            )
+        self.assertEqual(first, result)
+        self.assertEqual(second, result)
+        search.assert_awaited_once()
 
 
 if __name__ == "__main__":
