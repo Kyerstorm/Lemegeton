@@ -1642,6 +1642,15 @@ class BrowseCog(commands.Cog):
             embed.add_field(name="📚 Volumes", value=media.get("volumes", '?'), inline=True)
 
         embed.add_field(name="🎭 Genres", value=genres, inline=False)
+        media_tags = media.get("tags") or []
+        visible_tags = [str(tag.get("name")) for tag in media_tags if tag.get("name") and not tag.get("isMediaSpoiler")]
+        spoiler_tags = [str(tag.get("name")) for tag in media_tags if tag.get("name") and tag.get("isMediaSpoiler")]
+        if visible_tags:
+            embed.add_field(name="🏷️ Themes & Tags", value=", ".join(visible_tags[:12])[:1024], inline=False)
+        if spoiler_tags:
+            embed.add_field(name="⚠️ Spoiler-marked tags", value="AniList flags some of these tags as spoilers: " + ", ".join(spoiler_tags[:8])[:800], inline=False)
+        if media.get("isAdult"):
+            embed.add_field(name="🔞 Content Suitability", value="AniList marks this title as adult. Check provider details before sharing.", inline=False)
         embed.add_field(name="📅 Published", value=f"**Start:** {start_str}\n**End:** {end_str}", inline=False)
 
         mal_link = None
