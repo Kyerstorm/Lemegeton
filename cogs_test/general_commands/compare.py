@@ -15,7 +15,7 @@ from helpers.steam_helper import search_steam_apps
 from helpers.gaming_utils import is_steam_deck_verified, get_controller_support
 from cogs.gaming.steam_game import fetch_game_details
 from cogs_test.general_commands.game import fetch_igdb_details
-from cogs.media.browse import BrowseCog
+from cogs.media.browse import BrowseCog, search_novelupdates
 from cogs_test.general_commands.dashboard import command_meta
 
 log = logging.getLogger(__name__)
@@ -90,6 +90,17 @@ def comparison_embed(category: str, first: dict, second: dict) -> discord.Embed:
                 lines.append(info["description"][:300])
             url = info.get("infoLink")
             cover = (info.get("imageLinks") or {}).get("thumbnail")
+        elif category == "WEBNOVEL":
+            for key, label in (("author", "Author"), ("status", "Status"), ("rating", "Novel Updates rating")):
+                value = item.get(key)
+                if value:
+                    lines.append(f"{label}: {value}")
+            if item.get("genres"):
+                lines.append("Genres: " + ", ".join(str(value) for value in item["genres"][:8]))
+            if item.get("description"):
+                lines.append(str(item["description"])[:300])
+            url = item.get("url")
+            cover = item.get("image")
         elif category in ("MOVIE", "TV"):
             is_movie = category == "MOVIE"
             date = item.get("release_date") if is_movie else item.get("first_air_date")
@@ -217,6 +228,8 @@ class Compare(commands.Cog):
     async def search_options(self, category: str, query: str) -> list[dict]:
         if category in ("ANIME", "MANGA"):
             return await fetch_media_by_search(query, category, per_page=8)
+        if category == "WEBNOVEL":
+            return await asyncio.wait_for(search_novelupdates(query), timeout=45)
         if category == "BOOK":
             fiction, nonfiction = await asyncio.gather(
                 self.browse.fetch_book_results(query, "fiction"),
@@ -276,6 +289,7 @@ class Compare(commands.Cog):
         app_commands.Choice(name="Anime", value="ANIME"),
         app_commands.Choice(name="Manga", value="MANGA"),
         app_commands.Choice(name="Books and novels", value="BOOK"),
+        app_commands.Choice(name="Webnovels (Novel Updates)", value="WEBNOVEL"),
         app_commands.Choice(name="Movie", value="MOVIE"),
         app_commands.Choice(name="TV show", value="TV"),
         app_commands.Choice(name="Video game", value="GAME"),
