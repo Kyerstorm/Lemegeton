@@ -1,7 +1,7 @@
 """Tests for transparent cross-media recommendation ranking."""
 import unittest
 
-from cogs_test.general_commands.cross_media_recommendations import genre_tokens, local_match_reason
+from cogs_test.general_commands.cross_media_recommendations import CrossMediaRecommendations, genre_tokens, local_match_reason
 
 
 class CrossMediaRecommendationTests(unittest.TestCase):
@@ -15,6 +15,17 @@ class CrossMediaRecommendationTests(unittest.TestCase):
         count, shared = local_match_reason({"fantasy", "romance"}, {"fantasy", "drama"})
         self.assertEqual(count, 1)
         self.assertEqual(shared, ["fantasy"])
+
+    def test_webnovel_seed_keeps_novel_updates_source_and_genres(self):
+        title, url, genres, tags, extra = CrossMediaRecommendations.seed_metadata(
+            {"title": "Novel Title", "url": "https://www.novelupdates.com/series/example/", "genres": ["Fantasy"]},
+            "WEBNOVEL",
+        )
+        self.assertEqual(title, "Novel Title")
+        self.assertEqual(url, "https://www.novelupdates.com/series/example/")
+        self.assertEqual(genres, ["Fantasy"])
+        self.assertEqual(tags, [])
+        self.assertEqual(extra, [])
 
     def test_no_shared_genres_does_not_create_a_match(self):
         self.assertEqual(local_match_reason({"horror"}, {"romance"}), (0, []))
