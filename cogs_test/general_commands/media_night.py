@@ -193,7 +193,7 @@ class MediaNight(commands.Cog):
         lines = []
         for index, item in enumerate(candidates):
             name = title_of(item)
-            link = item.get("siteUrl")
+            link = item.get("siteUrl") or item.get("url")
             label = f"[{name}]({link})" if link else name
             lines.append(f"**{index + 1}.** {label}\nVotes: **{totals[index]}**")
         embed = discord.Embed(title=f"🎬 Media Night · {session['category'].title()}", description="\n\n".join(lines)[:4000], color=discord.Color.blurple())
@@ -205,22 +205,59 @@ class MediaNight(commands.Cog):
             embed.add_field(name="🏆 Result", value=result[:1024], inline=False)
         elif session["status"] == "open":
             embed.add_field(name="⏳ Voting closes", value=f"<t:{int(session['expires_at'].timestamp())}:R>", inline=True)
-        embed.set_footer(text="🗳️ One vote per person · You can change your vote while voting is open")
+        note = " · Family-friendly mode is metadata-based, not a parental-rating guarantee" if session.get("suitability") == "family-friendly" else ""
+        embed.set_footer(text="🗳️ One vote per person · You can change your vote while voting is open" + note)
         return embed
 
     media_night = app_commands.Group(name="media-night", description="Start and manage community media voting")
 
-    @media_night.command(name="start", description="Start an interactive anime or manga vote in this channel")
+    @media_night.command(name="start", description="Start a filtered community vote for anime, manga, movies, or TV")
     @app_commands.guild_only()
     @app_commands.choices(category=[
         app_commands.Choice(name="Anime", value="ANIME"),
         app_commands.Choice(name="Manga", value="MANGA"),
+        app_commands.Choice(name="Movie", value="MOVIE"),
+        app_commands.Choice(name="TV show", value="TV"),
     ])
-    @app_commands.describe(category="Media category", candidates="Number of candidates", duration="Voting duration in minutes (5–240)")
+    @app_commands.choices(mood=[
+        app_commands.Choice(name="Cozy", value="cozy"),
+        app_commands.Choice(name="Dark", value="dark"),
+        app_commands.Choice(name="Uplifting", value="uplifting"),
+        app_commands.Choice(name="Mind-bending", value="mind-bending"),
+        app_commands.Choice(name="Tense", value="tense"),
+    ], suitability=[
+        app_commands.Choice(name="General", value="general"),
+        app_commands.Choice(name="Family-friendly best-effort", value="family-friendly"),
+    ])
+    @app_commands.describe(
+        category="Media category", candidates="Number of candidates",
+        duration="Voting duration in minutes (5–240)", genre="Optional provider genre filter",
+        mood="Optional mood inferred from provider genres/tags", year_from="Earliest release/publication year",
+        year_to="Latest release/publication year", max_runtime="Maximum runtime in minutes (TV runtime means per episode)",
+        suitability="Exclude adult-flagged titles; family-friendly is a best-effort metadata filter",
+    )
     @command_meta(section="Community", name="Media Night Start")
-    async def start(self, interaction: discord.Interaction, category: str, candidates: app_commands.Range[int, 2, 5] = 4, duration: app_commands.Range[int, 5, 240] = 30) -> None:
+    async def start(
+        self, interaction: discord.Interaction, category: str,
+        candidates: app_commands.Range[int, 2, 5] = 4,
+        duration: app_commands.Range[int, 5, 240] = 30,
+        genre: str | None = None, mood: str | None = None,
+        year_from: app_commands.Range[int, 1900, 2100] | None = None,
+        year_to: app_commands.Range[int, 1900, 2100] | None = None,
+        max_runtime: app_commands.Range[int, 1, 600] | None = None,
+        suitability: str = "general",
+    ) -> None:
         if interaction.guild is None or interaction.channel is None:
             await interaction.response.send_message("Media Night can only be started in a server channel.", ephemeral=True)
+            return
+        if year_from is not None and year_to is not None and year_from > year_to:
+            await interaction.response.send_message("The earliest year cannot be later than the latest year.", ephemeral=True)
+            return
+        if max_runtime is not None and category == "MANGA":
+            await interaction.response.send_message("Runtime filters do not apply to manga. Remove max_runtime or choose anime, movie, or TV.", ephemeral=True)
+            return
+        if category in ("MOVIE", "TV") and not os.getenv("TMDB_BEARER_TOKEN", "").strip():
+            await interaction.response.send_message("Movie and TV Media Night require TMDB_BEARER_TOKEN. Configure it before starting this vote.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         existing = await execute_db_operation(
@@ -233,15 +270,17 @@ class MediaNight(commands.Cog):
             await interaction.followup.send("This channel already has an open Media Night. Close it before starting another.", ephemeral=True)
             return
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
-                payload = await post_graphql(session, CANDIDATE_QUERY, {"type": category, "perPage": 30}, timeout=15)
-            pool = ((payload or {}).get("Page") or {}).get("media") or []
+            pool = await self._candidate_pool(
+                category, genre=genre, mood=mood, year_from=year_from, year_to=year_to,
+                max_runtime=max_runtime, suitability=suitability,
+            )
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+            log.warning("Media Night candidate search failed for %s", category, exc_info=True)
             pool = []
-        unique = {int(item["id"]): item for item in pool if item.get("id") and item.get("title")}
+        unique = {str(item.get("id") or title_of(item)).casefold(): item for item in pool if item.get("id") or item.get("title") or item.get("name")}
         pool = list(unique.values())
         if len(pool) < candidates:
-            await interaction.followup.send(f"AniList supplied only {len(pool)} distinct candidates; {candidates} are required. No session was created.", ephemeral=True)
+            await interaction.followup.send(f"The configured providers supplied only {len(pool)} distinct candidates matching these filters; {candidates} are required. Broaden the filters or try later. No session was created.", ephemeral=True)
             return
         chosen = secrets.SystemRandom().sample(pool, candidates)
         session_id = secrets.token_hex(5)
@@ -251,6 +290,7 @@ class MediaNight(commands.Cog):
             "session_id": session_id, "guild_id": interaction.guild.id, "channel_id": channel.id,
             "host_id": interaction.user.id, "message_id": None, "category": category.lower(),
             "candidates": chosen, "votes": {}, "status": "setup", "expires_at": expires_at,
+            "suitability": suitability,
         }
         try:
             await execute_db_operation(
@@ -282,7 +322,9 @@ class MediaNight(commands.Cog):
             (message.id, session_id, interaction.guild.id, channel.id),
         )
         await message.edit(embed=self.session_embed(session), view=view)
-        await interaction.followup.send(f"🎬 **Media Night is live!** Session ID: `{session_id}`\nUse `/media-night close` with this ID to close or cancel the vote. Voting closes in **{duration} minutes**.", ephemeral=True)
+        filters = [f"genre: {genre}" if genre else None, f"mood: {mood}" if mood else None, f"years: {year_from or 'any'}–{year_to or 'any'}" if year_from or year_to else None, f"runtime ≤ {max_runtime}m" if max_runtime else None]
+        filter_summary = " · Filters: " + ", ".join(value for value in filters if value) if any(filters) else ""
+        await interaction.followup.send(f"🎬 **Media Night is live!** Session ID: `{session_id}`\nUse `/media-night close` with this ID to close or cancel the vote. Voting closes in **{duration} minutes**.{filter_summary}", ephemeral=True)
 
     async def _candidate_pool(
         self, category: str, *, genre: str | None = None, mood: str | None = None,
