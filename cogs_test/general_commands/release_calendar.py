@@ -113,7 +113,7 @@ class ReleaseCalendar(commands.Cog):
             return None
 
     async def _anime_airings(self, start: datetime, end: datetime) -> list[dict[str, Any]]:
-        lower, upper = int(start.timestamp()), int((end + timedelta(days=1)).timestamp())
+        lower, upper = int(start.timestamp()), int(end.timestamp()) + 1
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12)) as session:
                 payload = await post_graphql(session, ANILIST_AIRINGS, {"from": lower, "to": upper}, timeout=12)
@@ -144,7 +144,7 @@ class ReleaseCalendar(commands.Cog):
         items = []
         for movie in (payload or {}).get("results", [])[:30]:
             release = movie.get("release_date")
-            if not date_is_in_window(release, start, end):
+            if movie.get("adult") is True or not date_is_in_window(release, start, end):
                 continue
             try:
                 when = datetime.strptime(release[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
@@ -181,7 +181,7 @@ class ReleaseCalendar(commands.Cog):
                 continue
             episode = details.get("next_episode_to_air") or {}
             release = episode.get("air_date")
-            if not date_is_in_window(release, start, end):
+            if details.get("adult") is True or not date_is_in_window(release, start, end):
                 continue
             try:
                 when = datetime.strptime(release[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
@@ -203,7 +203,8 @@ class ReleaseCalendar(commands.Cog):
 
     async def fetch_feed(self, categories: list[str] | str, days: int = 7) -> list[dict[str, Any]]:
         """Fetch and cache a bounded future window, retaining provider attribution."""
-        normalized = tuple(sorted(normalize_categories(categories)))
+        window_days = max(1, min(int(days), 14))
+        normalized = tuple(sorted(normalize_categories(categories))) + (f"days:{window_days}",)
         now = datetime.now(timezone.utc)
         cached = self._feed_cache.get(normalized)
         if cached and cached[0] > now.timestamp():
@@ -212,7 +213,7 @@ class ReleaseCalendar(commands.Cog):
             cached = self._feed_cache.get(normalized)
             if cached and cached[0] > now.timestamp():
                 return list(cached[1])
-            end = now + timedelta(days=max(1, min(int(days), 14)))
+            end = now + timedelta(days=window_days)
             jobs = []
             if "anime" in normalized:
                 jobs.append(self._anime_airings(now, end))
