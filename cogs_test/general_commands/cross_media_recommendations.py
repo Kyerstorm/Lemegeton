@@ -318,7 +318,7 @@ class CrossMediaRecommendations(commands.Cog):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             seed = await self.resolve_seed(title, category)
-        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError):
+        except Exception:
             log.exception("Cross-media seed lookup failed for %r (%s)", title, category)
             seed = None
         if not seed:
