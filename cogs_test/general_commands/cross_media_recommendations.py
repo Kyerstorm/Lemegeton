@@ -119,8 +119,15 @@ class CrossMediaRecommendations(commands.Cog):
         return title, source_url, genres, keywords, []
 
     async def _anilist_pool(self, category: str, genres: list[str], tags: list[str]) -> list[dict[str, Any]]:
-        allowed = {"Action", "Adventure", "Comedy", "Drama", "Fantasy", "Horror", "Mystery", "Romance", "Sci-Fi", "Slice of Life", "Sports", "Supernatural", "Thriller", "Psychological"}
-        genre_filter = sorted({genre for genre in genres if genre in allowed})[:3]
+        anilist_names = {
+            "action": "Action", "adventure": "Adventure", "comedy": "Comedy",
+            "drama": "Drama", "fantasy": "Fantasy", "horror": "Horror",
+            "mystery": "Mystery", "romance": "Romance", "sci-fi": "Sci-Fi",
+            "slice of life": "Slice of Life", "sports": "Sports",
+            "supernatural": "Supernatural", "thriller": "Thriller",
+            "psychological": "Psychological",
+        }
+        genre_filter = [anilist_names[key] for key in sorted(genre_tokens(genres)) if key in anilist_names][:3]
         tag_filter = list(dict.fromkeys(tags))[:3]
         if not genre_filter and not tag_filter:
             return []
