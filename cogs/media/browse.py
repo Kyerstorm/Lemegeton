@@ -8,6 +8,7 @@ import asyncio
 from bs4 import BeautifulSoup
 import logging
 import os
+import time
 from typing import List, Dict, Optional, Tuple
 from urllib.parse import quote_plus, urljoin, urlsplit
 from botasaurus.browser import browser as botasaurus_browser, Driver, Wait
@@ -26,6 +27,11 @@ GOODREADS_AUTOCOMPLETE_URL = "https://www.goodreads.com/book/auto_complete"
 TMDB_API_BASE_URL = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p"
 MDBLIST_API_BASE_URL = "https://api.mdblist.com"
+_NOVELUPDATES_CACHE_TTL = 300
+_NOVELUPDATES_SEARCH_CACHE: Dict[tuple, tuple[float, List[Dict]]] = {}
+_NOVELUPDATES_CACHE_LOCK = asyncio.Lock()
+_NOVELUPDATES_KEY_LOCKS: Dict[tuple, asyncio.Lock] = {}
+_NOVELUPDATES_REQUEST_LIMIT = asyncio.Semaphore(2)
 
 
 def _novelupdates_search_urls(query: str) -> List[str]:
@@ -162,6 +168,9 @@ def _novelupdates_parse_html(html: str, base_url: str) -> List[Dict]:
             ".series_synopsis", ".desc", "[class*='description']",
         )
         rating = first_text(".search_ratings", ".search_rating", ".rating")
+        author = first_text(".search_author", ".series_author", "[class*='author']")
+        status = first_text(".search_status", ".series_status", "[class*='status']")
+        platform = first_text(".series_platform", ".search_platform", ".search_original", "[class*='publisher']")
         image_url = None
         image_node = None
         try:
@@ -197,6 +206,9 @@ def _novelupdates_parse_html(html: str, base_url: str) -> List[Dict]:
             "description": description,
             "image": image_url,
             "rating": rating,
+            "author": author,
+            "status": status,
+            "platform": platform,
             "genres": genres,
         })
         seen_urls.add(dedupe_url)
@@ -242,9 +254,12 @@ def _novelupdates_results_from_helper(payload: Dict) -> List[Dict]:
             "title": title[:256],
             "url": url,
             "description": field_at("descriptions", index),
-            "image": None,
+            "image": field_at("images", index),
             "rating": field_at("ratings", index),
-            "genres": [],
+            "author": field_at("authors", index),
+            "status": field_at("statuses", index),
+            "platform": field_at("platforms", index),
+            "genres": [part.strip() for part in (field_at("genres", index) or "").split(",") if part.strip()],
         })
         seen_urls.add(normalized_url)
         if len(results) >= 10:
@@ -320,7 +335,7 @@ def scrape_novelupdates(driver: Driver, data: Dict) -> List[Dict]:
     return []
 
 
-async def search_novelupdates(
+async def _search_novelupdates_uncached(
     query: str,
     *,
     browser_fallback: bool = True,
@@ -339,6 +354,11 @@ async def search_novelupdates(
                   ".search_title a, a[href*='/series/']",
         "descriptions": ".search_body, .search_body_nu, .search_desc, .series_synopsis",
         "ratings": ".search_ratings, .search_rating, .rating",
+        "authors": ".search_author, .series_author, [class*='author']",
+        "statuses": ".search_status, .series_status, [class*='status']",
+        "platforms": ".series_platform, .search_platform, .search_original, [class*='publisher']",
+        "genres": ".search_genre a, .search_genres a, a[href*='/genre/']",
+        "images": ".search_main_box_nu img, .search_main_box img, article img",
     }
     for url in urls[:max(1, min(max_http_urls, len(urls)))]:
         try:
@@ -375,6 +395,55 @@ async def search_novelupdates(
     return await asyncio.to_thread(
         scrape_novelupdates, {"query": query, "urls": urls}, output=None
     )
+
+
+async def search_novelupdates(
+    query: str,
+    *,
+    browser_fallback: bool = True,
+    http_timeout: int = 7,
+    max_http_urls: int = 2,
+    require_genres: bool = False,
+) -> List[Dict]:
+    """Cache successful Novel Updates searches briefly; never cache provider failures."""
+    normalized = " ".join((query or "").split())
+    if not normalized:
+        return []
+    key = (normalized.casefold(), bool(browser_fallback), max(1, min(int(max_http_urls), 3)), max(1, min(int(http_timeout), 10)), bool(require_genres))
+    async with _NOVELUPDATES_CACHE_LOCK:
+        cached = _NOVELUPDATES_SEARCH_CACHE.get(key)
+        if cached and cached[0] > time.monotonic():
+            return [dict(item) for item in cached[1]]
+        key_lock = _NOVELUPDATES_KEY_LOCKS.setdefault(key, asyncio.Lock())
+
+    # Coalesce concurrent searches for the same title without serializing searches
+    # for unrelated titles.
+    async with key_lock:
+        async with _NOVELUPDATES_CACHE_LOCK:
+            cached = _NOVELUPDATES_SEARCH_CACHE.get(key)
+            if cached and cached[0] > time.monotonic():
+                return [dict(item) for item in cached[1]]
+        try:
+            async with _NOVELUPDATES_REQUEST_LIMIT:
+                results = await _search_novelupdates_uncached(
+                    normalized,
+                    browser_fallback=browser_fallback,
+                    http_timeout=http_timeout,
+                    max_http_urls=max_http_urls,
+                    require_genres=require_genres,
+                )
+            if results:
+                async with _NOVELUPDATES_CACHE_LOCK:
+                    now = time.monotonic()
+                    expired = [cache_key for cache_key, value in _NOVELUPDATES_SEARCH_CACHE.items() if value[0] <= now]
+                    for cache_key in expired:
+                        _NOVELUPDATES_SEARCH_CACHE.pop(cache_key, None)
+                    _NOVELUPDATES_SEARCH_CACHE[key] = (now + _NOVELUPDATES_CACHE_TTL, [dict(item) for item in results])
+            return results
+        finally:
+            async with _NOVELUPDATES_CACHE_LOCK:
+                if _NOVELUPDATES_KEY_LOCKS.get(key) is key_lock:
+                    _NOVELUPDATES_KEY_LOCKS.pop(key, None)
 
 
 # Status order priority
@@ -513,19 +582,29 @@ class BrowseCog(commands.Cog):
     async def fetch_book_results(
         self, query: str, book_type: str, genre: Optional[str] = None,
         year_from: Optional[int] = None, year_to: Optional[int] = None,
+        author: Optional[str] = None, language: Optional[str] = None,
+        publisher: Optional[str] = None,
     ) -> List[Dict]:
         """Search Google Books first, using supported subject and publication-year constraints."""
         query_parts = [" ".join((query or "").split())]
         if genre:
             query_parts.insert(0, f"subject:{genre}")
+        if year_from is not None:
+            query_parts.append(f"after:{year_from}")
+        if year_to is not None:
+            query_parts.append(f"before:{year_to + 1}")
+        if author:
+            query_parts.append(f"inauthor:{author.strip()}")
+        if publisher:
+            query_parts.append(f"inpublisher:{publisher.strip()}")
         params = {
             "q": " ".join(part for part in query_parts if part),
             "printType": "books",
             "maxResults": 40,
             "orderBy": "relevance",
         }
-        if year_from is not None or year_to is not None:
-            params["publishedDate"] = f"{year_from or 1000}..{year_to or 2100}"
+        if language:
+            params["langRestrict"] = language.strip().lower()
         all_items = []
         filtered_items = []
         try:
@@ -557,8 +636,8 @@ class BrowseCog(commands.Cog):
 
         if filtered_items:
             return filtered_items[:10]
-        if genre or year_from is not None or year_to is not None:
-            # Goodreads autocomplete does not reliably expose subject/year constraints.
+        if genre or year_from is not None or year_to is not None or author or language or publisher:
+            # Goodreads autocomplete does not reliably expose all Google Books filters.
             return []
 
         # Google Books often omits categories or labels them too broadly to classify
@@ -583,7 +662,7 @@ class BrowseCog(commands.Cog):
         logger.info("No suitable Google Books result for %r; trying Goodreads", query)
         return await self.fetch_goodreads_results(query)
 
-    async def search_tmdb_titles(self, query: str, media_type: str) -> List[Dict]:
+    async def search_tmdb_titles(self, query: str, media_type: str, include_adult: bool = False) -> List[Dict]:
         """Search TMDB for movies or TV shows using the configured read-access token."""
         query = " ".join((query or "").split())
         if not query:
@@ -593,7 +672,7 @@ class BrowseCog(commands.Cog):
             return []
         endpoint = "movie" if media_type == "MOVIE" else "tv"
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-        params = {"query": query, "include_adult": "false", "language": "en-US", "page": 1}
+        params = {"query": query, "include_adult": str(bool(include_adult)).lower(), "language": "en-US", "page": 1}
         try:
             timeout = aiohttp.ClientTimeout(total=10)
             async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -609,13 +688,13 @@ class BrowseCog(commands.Cog):
             logger.warning("TMDB %s search failed for %r: %s", endpoint, query, exc)
             return []
 
-    async def fetch_tmdb_media(self, query: str, media_type: str) -> Optional[Dict]:
+    async def fetch_tmdb_media(self, query: str, media_type: str, include_adult: bool = False) -> Optional[Dict]:
         """Fetch a matching TMDB title and detailed metadata."""
         token = os.getenv("TMDB_BEARER_TOKEN", "").strip()
         if not token:
             return None
         endpoint = "movie" if media_type == "MOVIE" else "tv"
-        results = await self.search_tmdb_titles(query, media_type)
+        results = await self.search_tmdb_titles(query, media_type, include_adult=include_adult)
         if not results:
             return None
         best_match = self.choose_best_title_match(
@@ -754,6 +833,10 @@ class BrowseCog(commands.Cog):
                     startDate { year month day }
                     endDate { year month day }
                     genres
+                    tags { name rank isMediaSpoiler }
+                    staff(page: 1, perPage: 25) { edges { role node { name { full } } } }
+                    isAdult
+                    countryOfOrigin
                     coverImage { large medium }
                     bannerImage
                     externalLinks { site url }
@@ -941,6 +1024,148 @@ class BrowseCog(commands.Cog):
 
         return user_progress_list
 
+    @staticmethod
+    def _filter_anilist_results(
+        results: List[Dict], *, genre: Optional[str] = None, theme: Optional[str] = None,
+        author: Optional[str] = None, artist: Optional[str] = None,
+        status: Optional[str] = None, year_from: Optional[int] = None,
+        year_to: Optional[int] = None, subtype: Optional[str] = None,
+        include_adult: bool = False,
+    ) -> List[Dict]:
+        """Apply only filters backed by AniList fields returned by the query."""
+        filtered = []
+        for item in results:
+            if item.get("isAdult") and not include_adult:
+                continue
+            genres = [str(value).casefold() for value in (item.get("genres") or [])]
+            tags = [str((tag or {}).get("name") or "").casefold() for tag in (item.get("tags") or [])]
+            subtype = (subtype or "").casefold().strip()
+            country = str(item.get("countryOfOrigin") or "").upper()
+            media_format = str(item.get("format") or "").upper()
+            if subtype == "manga" and country != "JP":
+                continue
+            if subtype == "manhwa" and country != "KR":
+                continue
+            if subtype == "manhua" and country != "CN":
+                continue
+            if subtype == "webtoon" and media_format != "WEBTOON" and not any("webtoon" in tag for tag in tags):
+                continue
+            if genre and not any(genre.casefold() in value for value in genres):
+                continue
+            if theme and not any(theme.casefold() in value for value in tags):
+                continue
+            item_status = str(item.get("status") or "").replace("_", " ").casefold()
+            status_filter = str(status or "").replace("_", " ").casefold()
+            status_aliases = {
+                "completed": "finished", "complete": "finished",
+                "ongoing": "releasing", "in progress": "releasing",
+                "upcoming": "not yet released", "cancelled": "cancelled",
+            }
+            if status_filter:
+                status_filter = status_aliases.get(status_filter, status_filter)
+                if status_filter not in item_status:
+                    continue
+            year = ((item.get("startDate") or {}).get("year"))
+            if year_from is not None and (not year or int(year) < year_from):
+                continue
+            if year_to is not None and (not year or int(year) > year_to):
+                continue
+            edges = ((item.get("staff") or {}).get("edges") or [])
+
+            def staff_matches(query: Optional[str], roles: tuple[str, ...]) -> bool:
+                if not query:
+                    return True
+                for edge in edges:
+                    if not isinstance(edge, dict):
+                        continue
+                    role = str(edge.get("role") or "").casefold()
+                    node = edge.get("node") or {}
+                    name = str((node.get("name") or {}).get("full") or "").casefold()
+                    if name and query.casefold() in name and any(term in role for term in roles):
+                        return True
+                return False
+
+            if not staff_matches(author, ("story", "author", "writer", "original", "novel")):
+                continue
+            if not staff_matches(artist, ("art", "illustrat", "artist", "drawing")):
+                continue
+            filtered.append(item)
+        return filtered
+
+    @staticmethod
+    def _tmdb_matches(
+        media: Dict, media_type: str, *, genre: Optional[str] = None,
+        theme: Optional[str] = None, language: Optional[str] = None,
+        status: Optional[str] = None, year_from: Optional[int] = None,
+        year_to: Optional[int] = None, runtime_min: Optional[int] = None,
+        runtime_max: Optional[int] = None, director: Optional[str] = None,
+        cast: Optional[str] = None, include_adult: bool = False,
+    ) -> bool:
+        """Match user filters against the selected TMDB record, without inventing fields."""
+        is_movie = media_type == "MOVIE"
+        release_date = media.get("release_date") if is_movie else media.get("first_air_date")
+        try:
+            year = int(str(release_date)[:4]) if release_date else None
+        except ValueError:
+            year = None
+        if year_from is not None and (year is None or year < year_from):
+            return False
+        if year_to is not None and (year is None or year > year_to):
+            return False
+        genres = [str((entry or {}).get("name") or "").casefold() for entry in (media.get("genres") or [])]
+        if genre and not any(genre.casefold() in value for value in genres):
+            return False
+        keywords_section = media.get("keywords") or {}
+        keywords = keywords_section.get("keywords" if is_movie else "results") or []
+        keyword_names = [str((entry or {}).get("name") or "").casefold() for entry in keywords]
+        if theme and not any(theme.casefold() in value for value in keyword_names):
+            return False
+        if language and str(media.get("original_language") or "").casefold() != language.casefold():
+            return False
+        if status:
+            status_filter = status.casefold().strip()
+            actual_status = str(media.get("status") or "").casefold()
+            if status_filter in ("completed", "complete"):
+                matched_status = ("ended" in actual_status) or (is_movie and "released" in actual_status)
+            elif status_filter in ("ongoing", "in progress"):
+                matched_status = ("returning" in actual_status) or ("in production" in actual_status)
+            elif status_filter in ("upcoming", "planned"):
+                matched_status = "planned" in actual_status or "upcoming" in actual_status
+            else:
+                matched_status = status_filter in actual_status
+            if not matched_status:
+                return False
+        runtimes = [media.get("runtime")] if is_movie else (media.get("episode_run_time") or [])
+        runtimes = [int(value) for value in runtimes if isinstance(value, (int, float)) and value > 0]
+        if runtime_min is not None or runtime_max is not None:
+            if not runtimes:
+                return False
+            if runtime_min is not None and max(runtimes) < runtime_min:
+                return False
+            if runtime_max is not None and min(runtimes) > runtime_max:
+                return False
+        credits = media.get("credits") or media.get("aggregate_credits") or {}
+        crew = credits.get("crew") or []
+        cast_entries = credits.get("cast") or []
+        if director and not any(
+            director.casefold() in str(person.get("name") or "").casefold()
+            and (
+                str(person.get("job") or "").casefold() == "director"
+                or any(str((job or {}).get("job") or "").casefold() == "director"
+                       for job in (person.get("jobs") or []))
+            )
+            for person in crew if isinstance(person, dict)
+        ):
+            return False
+        if cast and not any(
+            cast.casefold() in str(person.get("name") or "").casefold()
+            for person in cast_entries if isinstance(person, dict)
+        ):
+            return False
+        if not include_adult and media.get("adult") is True:
+            return False
+        return True
+
     # --------------------------------------------------
     # /Browse Command
     # --------------------------------------------------
@@ -951,7 +1176,23 @@ class BrowseCog(commands.Cog):
     @command_meta(section="Media", name="Browse")
     @app_commands.describe(
         media_type="Choose a media type",
-        title="Choose the title"
+        title="Title to search for",
+        genre="Genre filter (provider-supported categories only)",
+        theme="Theme/tag/keyword filter when the provider exposes it",
+        author="Author or writer filter (manga/books/webnovels where supported)",
+        artist="Artist/illustrator filter (manga only)",
+        language="Language code for books/TMDB, e.g. en or ja",
+        status="Provider-reported status, e.g. RELEASING or COMPLETED",
+        publisher="Publisher filter for Google Books",
+        platform="Publishing platform, where provider metadata supports it",
+        year_from="Earliest publication/release year",
+        year_to="Latest publication/release year",
+        runtime_min="Minimum movie or episode runtime in minutes",
+        runtime_max="Maximum movie or episode runtime in minutes",
+        director="Movie/TV director name",
+        cast="Movie/TV cast member name",
+        include_adult="Include provider-flagged adult titles (NSFW channel only)",
+        subtype="Filter manga by origin/category: manga (Japan), manhwa (Korea), manhua (China), or webtoon when provider metadata identifies it",
     )
     @app_commands.choices(media_type=[
         app_commands.Choice(name="Anime", value="ANIME"),
@@ -963,7 +1204,34 @@ class BrowseCog(commands.Cog):
         app_commands.Choice(name="TV Shows", value="TV"),
         app_commands.Choice(name="Webnovels", value="WEBNOVEL"),
     ])
-    async def search(self, interaction: discord.Interaction, media_type: app_commands.Choice[str], title: str):
+    @app_commands.choices(subtype=[
+        app_commands.Choice(name="Manga (Japan)", value="manga"),
+        app_commands.Choice(name="Manhwa (Korea)", value="manhwa"),
+        app_commands.Choice(name="Manhua (China)", value="manhua"),
+        app_commands.Choice(name="Webtoon", value="webtoon"),
+    ])
+    async def search(
+        self,
+        interaction: discord.Interaction,
+        media_type: app_commands.Choice[str],
+        title: str,
+        genre: Optional[str] = None,
+        theme: Optional[str] = None,
+        author: Optional[str] = None,
+        artist: Optional[str] = None,
+        language: Optional[str] = None,
+        status: Optional[str] = None,
+        publisher: Optional[str] = None,
+        platform: Optional[str] = None,
+        year_from: app_commands.Range[int, 1000, 2100] | None = None,
+        year_to: app_commands.Range[int, 1000, 2100] | None = None,
+        runtime_min: app_commands.Range[int, 1, 600] | None = None,
+        runtime_max: app_commands.Range[int, 1, 600] | None = None,
+        director: Optional[str] = None,
+        cast: Optional[str] = None,
+        include_adult: bool = False,
+        subtype: Optional[str] = None,
+    ):
         title = " ".join((title or "").split())
         if not title:
             await interaction.response.send_message(
@@ -971,10 +1239,49 @@ class BrowseCog(commands.Cog):
                 ephemeral=True,
             )
             return
-        await interaction.response.defer()
-
         chosen_type = media_type.value
         real_type = "MANGA" if chosen_type == "MANGA_NOVEL" else chosen_type
+        if year_from is not None and year_to is not None and year_from > year_to:
+            await interaction.response.send_message("The earliest year cannot be later than the latest year.", ephemeral=True)
+            return
+        if runtime_min is not None and runtime_max is not None and runtime_min > runtime_max:
+            await interaction.response.send_message("The minimum runtime cannot exceed the maximum runtime.", ephemeral=True)
+            return
+        if subtype and chosen_type != "MANGA":
+            await interaction.response.send_message("Manga/manhwa/manhua/webtoon subtypes can only be used with the Manga category.", ephemeral=True)
+            return
+        if include_adult:
+            channel_is_nsfw = bool(getattr(interaction.channel, "is_nsfw", lambda: False)())
+            if not channel_is_nsfw:
+                await interaction.response.send_message("Adult results can only be requested in a channel marked NSFW by Discord.", ephemeral=True)
+                return
+            if chosen_type not in ("ANIME", "MANGA", "MANGA_NOVEL", "MOVIE", "TV"):
+                await interaction.response.send_message("This provider does not expose a reliable adult-content flag for that category, so adult-inclusive results cannot be verified.", ephemeral=True)
+                return
+
+        unsupported = []
+        if chosen_type in ("ANIME", "MANGA", "MANGA_NOVEL"):
+            if language or publisher or platform or runtime_min is not None or runtime_max is not None or director or cast:
+                unsupported.append("language/publisher/platform/runtime/director/cast")
+            if chosen_type == "ANIME" and (author or artist):
+                unsupported.append("author/artist credits")
+        elif chosen_type in ("GENERAL_NOVEL", "BOOKS"):
+            if theme or artist or platform or status or runtime_min is not None or runtime_max is not None or director or cast:
+                unsupported.append("theme/artist/platform/status/runtime/director/cast")
+        elif chosen_type == "WEBNOVEL":
+            if theme or artist or language or publisher or year_from is not None or year_to is not None or runtime_min is not None or runtime_max is not None or director or cast:
+                unsupported.append("theme/artist/language/publisher/year/runtime/director/cast")
+        elif chosen_type in ("MOVIE", "TV"):
+            if author or artist or publisher or platform:
+                unsupported.append("author/artist/publisher/platform")
+        if unsupported:
+            await interaction.response.send_message(
+                "These filters are not available for the selected provider/category: " + ", ".join(unsupported) + ". Remove those filters rather than receiving unfiltered results.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
 
         if chosen_type in ("MOVIE", "TV"):
             if not os.getenv("TMDB_BEARER_TOKEN", "").strip():
@@ -985,11 +1292,25 @@ class BrowseCog(commands.Cog):
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
 
-            media = await self.fetch_tmdb_media(title, chosen_type)
+            media = await self.fetch_tmdb_media(title, chosen_type, include_adult=include_adult)
             if not media:
                 label = "movie" if chosen_type == "MOVIE" else "TV show"
                 embed = build_error_embed("No Results Found", f"No {label} found matching {title!r}.")
                 await interaction.followup.send(embed=embed, ephemeral=True)
+                return
+
+            if not self._tmdb_matches(
+                media, chosen_type, genre=genre, theme=theme, language=language,
+                status=status, year_from=year_from, year_to=year_to,
+                runtime_min=runtime_min, runtime_max=runtime_max,
+                director=director, cast=cast, include_adult=include_adult,
+            ):
+                await interaction.followup.send(
+                    embed=build_error_embed(
+                        "No Filtered Match",
+                        "The best matching title did not satisfy every supplied filter, or TMDB did not provide a required field. Try a broader title/filter combination.",
+                    ), ephemeral=True,
+                )
                 return
 
             # Enrich TMDB metadata with optional Metacritic scores from MDBList.
@@ -1146,10 +1467,18 @@ class BrowseCog(commands.Cog):
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
 
+            results = [novel for novel in results if
+                (not genre or any(genre.casefold() in str(value).casefold() for value in (novel.get("genres") or [])))
+                and (not author or author.casefold() in str(novel.get("author") or "").casefold())
+                and (not status or status.casefold() in str(novel.get("status") or "").casefold()
+                     or (status.casefold() in ("completed", "complete") and "complete" in str(novel.get("status") or "").casefold())
+                     or (status.casefold() in ("ongoing", "releasing") and "ongoing" in str(novel.get("status") or "").casefold()))
+                and (not platform or platform.casefold() in str(novel.get("platform") or "").casefold())
+            ]
             if not results:
                 embed = build_error_embed(
                     "No Results Found",
-                    f"No webnovel results found on Novel Updates for {title!r}.",
+                    f"No webnovel results found on Novel Updates for {title!r} matching available metadata filters.",
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
@@ -1165,12 +1494,16 @@ class BrowseCog(commands.Cog):
             )
             if novel.get("image"):
                 embed.set_thumbnail(url=novel["image"])
+            if novel.get("author"):
+                embed.add_field(name="✍️ Author", value=str(novel["author"])[:1024], inline=True)
+            if novel.get("status"):
+                embed.add_field(name="📌 Status", value=str(novel["status"])[:1024], inline=True)
             if novel.get("rating"):
-                embed.add_field(name="⭐ Rating", value=novel["rating"], inline=True)
+                embed.add_field(name="⭐ Rating", value=str(novel["rating"])[:1024], inline=True)
             if novel.get("genres"):
-                genres = ", ".join(novel["genres"])
+                genres = ", ".join(str(value) for value in novel["genres"])
                 embed.add_field(name="🎭 Genres", value=genres[:1024], inline=False)
-            embed.set_footer(text="Fetched from Novel Updates")
+            embed.set_footer(text="Fetched from Novel Updates · Source metadata may be incomplete when the provider changes its page layout")
             await interaction.followup.send(embed=embed)
             return
 
@@ -1180,7 +1513,10 @@ class BrowseCog(commands.Cog):
                 # Keep provider delays/errors from leaving Discord's deferred response
                 # spinning indefinitely.
                 results = await asyncio.wait_for(
-                    self.fetch_book_results(title, book_type),
+                    self.fetch_book_results(
+                        title, book_type, genre=genre, year_from=year_from, year_to=year_to,
+                        author=author, language=language, publisher=publisher,
+                    ),
                     timeout=18,
                 )
             except asyncio.TimeoutError:
@@ -1273,10 +1609,15 @@ class BrowseCog(commands.Cog):
 
         # ✅ AniList Fetch
         results = await self.fetch_media(title, real_type)
+        results = self._filter_anilist_results(
+            results, genre=genre, theme=theme, author=author, artist=artist,
+            status=status, year_from=year_from, year_to=year_to, subtype=subtype,
+            include_adult=include_adult,
+        )
         if not results:
             embed = build_error_embed(
                 "No Results Found",
-                "No results found."
+                "No results matched the title and supported filters, or the provider omitted a required field. Try fewer filters or a different title."
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
             return
@@ -1374,6 +1715,15 @@ class BrowseCog(commands.Cog):
             embed.add_field(name="📚 Volumes", value=media.get("volumes", '?'), inline=True)
 
         embed.add_field(name="🎭 Genres", value=genres, inline=False)
+        media_tags = media.get("tags") or []
+        visible_tags = [str(tag.get("name")) for tag in media_tags if tag.get("name") and not tag.get("isMediaSpoiler")]
+        spoiler_tags = [str(tag.get("name")) for tag in media_tags if tag.get("name") and tag.get("isMediaSpoiler")]
+        if visible_tags:
+            embed.add_field(name="🏷️ Themes & Tags", value=", ".join(visible_tags[:12])[:1024], inline=False)
+        if spoiler_tags:
+            embed.add_field(name="⚠️ Spoiler-marked tags", value="AniList flags some of these tags as spoilers: " + ", ".join(spoiler_tags[:8])[:800], inline=False)
+        if media.get("isAdult"):
+            embed.add_field(name="🔞 Content Suitability", value="AniList marks this title as adult. Check provider details before sharing.", inline=False)
         embed.add_field(name="📅 Published", value=f"**Start:** {start_str}\n**End:** {end_str}", inline=False)
 
         mal_link = None
