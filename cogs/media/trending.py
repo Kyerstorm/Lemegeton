@@ -1,4 +1,5 @@
 import discord
+from helpers.command_error_handler import FeedbackAwareView, application_error_message
 from discord.ext import commands
 from discord import app_commands
 import aiohttp
@@ -267,7 +268,7 @@ class Trending(commands.Cog):
             logger.error(f"Exception in trending command for {interaction.user} (ID: {interaction.user.id}): {e}", exc_info=True)
             embed = build_error_embed(
                 "Error",
-                "An error occurred while fetching trending data. Please try again later."
+                application_error_message(e)
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -465,7 +466,7 @@ class Trending(commands.Cog):
 # ------------------------------------------------------
 # Pagination View
 # ------------------------------------------------------
-class TrendingPaginatedView(discord.ui.View):
+class TrendingPaginatedView(FeedbackAwareView):
     def __init__(self, embeds, user_id: int):
         super().__init__(timeout=180)  # 3-minute timeout
         self.embeds = embeds
