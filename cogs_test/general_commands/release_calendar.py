@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -92,6 +93,10 @@ class ReleaseCalendar(commands.Cog):
                 updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )""",
         )
+        await execute_db_operation(
+            "add release-calendar region setting",
+            "ALTER TABLE media_release_calendar_settings ADD COLUMN IF NOT EXISTS release_region VARCHAR(2) NOT NULL DEFAULT 'US'",
+        )
         if not self.dispatch_due_digests.is_running():
             self.dispatch_due_digests.start()
 
@@ -142,8 +147,8 @@ class ReleaseCalendar(commands.Cog):
             })
         return items
 
-    async def _movie_releases(self, start: datetime, end: datetime) -> list[dict[str, Any]]:
-        payload = await self._get_json("/movie/upcoming", {"language": "en-US", "region": "US", "page": 1})
+    async def _movie_releases(self, start: datetime, end: datetime, region: str = "US") -> list[dict[str, Any]]:
+        payload = await self._get_json("/movie/upcoming", {"language": "en-US", "region": region.upper(), "page": 1})
         items = []
         for movie in (payload or {}).get("results", [])[:30]:
             release = movie.get("release_date")
@@ -204,10 +209,23 @@ class ReleaseCalendar(commands.Cog):
             })
         return items
 
-    async def fetch_feed(self, categories: list[str] | str, days: int = 7) -> list[dict[str, Any]]:
+    async def _guild_region(self, guild_id: int | None) -> str:
+        if guild_id is None:
+            return "US"
+        row = await execute_db_operation(
+            "get guild release-calendar movie region",
+            "SELECT release_region FROM media_release_calendar_settings WHERE guild_id = ?",
+            (guild_id,), fetch_type="one",
+        )
+        return str(row[0]).upper() if row and row[0] else "US"
+
+    async def fetch_feed(self, categories: list[str] | str, days: int = 7, region: str = "US") -> list[dict[str, Any]]:
         """Fetch and cache a bounded future window, retaining provider attribution."""
         window_days = max(1, min(int(days), 14))
-        normalized = tuple(sorted(normalize_categories(categories))) + (f"days:{window_days}",)
+        region = str(region or "US").strip().upper()
+        if not re.fullmatch(r"[A-Z]{2}", region):
+            region = "US"
+        normalized = tuple(sorted(normalize_categories(categories))) + (f"days:{window_days}", f"region:{region}")
         now = datetime.now(timezone.utc)
         cached = self._feed_cache.get(normalized)
         if cached and cached[0] > now.timestamp():
@@ -221,7 +239,7 @@ class ReleaseCalendar(commands.Cog):
             if "anime" in normalized:
                 jobs.append(self._anime_airings(now, end))
             if "movies" in normalized:
-                jobs.append(self._movie_releases(now, end))
+                jobs.append(self._movie_releases(now, end, region))
             if "tv" in normalized:
                 jobs.append(self._tv_episode_releases(now, end))
             resolved = await asyncio.gather(*jobs, return_exceptions=True)
@@ -277,15 +295,20 @@ class ReleaseCalendar(commands.Cog):
         channel="Channel where the digest should be sent",
         frequency="How often the server receives a digest",
         categories="Comma-separated categories: anime,movies,tv",
+        region="Two-letter region for movie release dates (for example IE, GB, or US)",
     )
     @app_commands.checks.has_permissions(manage_guild=True)
     @command_meta(section="Community", name="Release Calendar Configure")
-    async def configure(self, interaction: discord.Interaction, channel: discord.TextChannel, frequency: str = "weekly", categories: str = "anime,movies,tv") -> None:
+    async def configure(self, interaction: discord.Interaction, channel: discord.TextChannel, frequency: str = "weekly", categories: str = "anime,movies,tv", region: str = "US") -> None:
         if frequency not in {"daily", "weekly"}:
             await interaction.response.send_message("Frequency must be daily or weekly.", ephemeral=True)
             return
         if interaction.guild is None:
             await interaction.response.send_message("This setting is server-specific.", ephemeral=True)
+            return
+        region = (region or "US").strip().upper()
+        if not re.fullmatch(r"[A-Z]{2}", region):
+            await interaction.response.send_message("Region must be a two-letter country code, such as IE, GB, or US.", ephemeral=True)
             return
         try:
             normalized = normalize_categories(categories)
@@ -303,21 +326,21 @@ class ReleaseCalendar(commands.Cog):
             if existing:
                 await execute_db_operation(
                     "update guild release-calendar settings",
-                    "UPDATE media_release_calendar_settings SET channel_id = ?, frequency = ?, categories = ?, enabled = 1, next_run = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?",
-                    (channel.id, frequency, json.dumps(normalized), next_run, interaction.guild.id),
+                    "UPDATE media_release_calendar_settings SET channel_id = ?, frequency = ?, categories = ?, release_region = ?, enabled = 1, next_run = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?",
+                    (channel.id, frequency, json.dumps(normalized), region, next_run, interaction.guild.id),
                 )
             else:
                 await execute_db_operation(
                     "insert guild release-calendar settings",
-                    "INSERT INTO media_release_calendar_settings (guild_id, channel_id, frequency, categories, enabled, next_run) VALUES (?, ?, ?, ?, 1, ?)",
-                    (interaction.guild.id, channel.id, frequency, json.dumps(normalized), next_run),
+                    "INSERT INTO media_release_calendar_settings (guild_id, channel_id, frequency, categories, enabled, next_run, release_region) VALUES (?, ?, ?, ?, 1, ?, ?)",
+                    (interaction.guild.id, channel.id, frequency, json.dumps(normalized), next_run, region),
                 )
         except Exception:
             log.exception("Could not save release-calendar settings for guild %s", interaction.guild.id)
             await interaction.response.send_message("The release-calendar settings could not be saved. Check database availability and try again.", ephemeral=True)
             return
         await interaction.response.send_message(
-            f"✅ Release digests configured for <#{channel.id}> ({frequency}). Categories: {', '.join(normalized)}. The first digest is scheduled for <t:{int(next_run.replace(tzinfo=timezone.utc).timestamp())}:F>.",
+            f"✅ Release digests configured for <#{channel.id}> ({frequency}). Categories: {', '.join(normalized)}. Movie release region: {region}. The first digest is scheduled for <t:{int(next_run.replace(tzinfo=timezone.utc).timestamp())}:F>.",
             ephemeral=True,
         )
 
@@ -348,7 +371,8 @@ class ReleaseCalendar(commands.Cog):
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            items = await self.fetch_feed(normalized, 7)
+            region = await self._guild_region(interaction.guild_id)
+            items = await self.fetch_feed(normalized, 7, region)
         except Exception:
             log.exception("Release-calendar preview failed")
             await interaction.followup.send("The release providers could not be queried right now. Please try again later.", ephemeral=True)
@@ -373,7 +397,7 @@ class ReleaseCalendar(commands.Cog):
             frequency = str(settings.get("frequency") or "weekly")
             try:
                 categories = normalize_categories(json.loads(settings.get("categories") or "[]"))
-                items = await self.fetch_feed(categories, 7)
+                items = await self.fetch_feed(categories, 7, str(settings.get("release_region") or "US"))
                 channel = self.bot.get_channel(channel_id)
                 if channel is None:
                     guild = self.bot.get_guild(guild_id)
