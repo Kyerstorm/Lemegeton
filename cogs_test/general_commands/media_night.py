@@ -350,8 +350,10 @@ class MediaNight(commands.Cog):
                     continue
                 if year_to is not None and (not year or int(year) > year_to):
                     continue
-                if max_runtime is not None and category == "ANIME" and item.get("duration") and int(item["duration"]) > max_runtime:
-                    continue
+                if max_runtime is not None and category == "ANIME":
+                    duration_value = item.get("duration")
+                    if not isinstance(duration_value, int) or duration_value > max_runtime:
+                        continue
                 if suitability == "family-friendly" and not _family_friendly(item):
                     continue
                 filtered.append(item)
@@ -368,18 +370,20 @@ class MediaNight(commands.Cog):
                     return []
                 genre_payload = await response.json(content_type=None)
             genre_map = {str(entry.get("name") or "").casefold(): int(entry["id"]) for entry in genre_payload.get("genres", []) if entry.get("id") is not None}
-            wanted_genres = []
+            explicit_genre_id = None
             if genre:
-                genre_id = next((identifier for name, identifier in genre_map.items() if genre.casefold() in name), None)
-                if genre_id is None:
+                explicit_genre_id = next((identifier for name, identifier in genre_map.items() if genre.casefold() in name), None)
+                if explicit_genre_id is None:
                     return []
-                wanted_genres.append(genre_id)
-            if mood:
-                target_names = MOOD_GENRES.get(mood.casefold()) or set()
-                wanted_genres.extend(identifier for name, identifier in genre_map.items() if name in target_names)
+            mood_names = MOOD_GENRES.get(mood.casefold()) or set() if mood else set()
+            mood_ids = sorted({identifier for name, identifier in genre_map.items() if name in mood_names and identifier != explicit_genre_id})
             params: dict[str, object] = {"language": "en-US", "include_adult": "false", "sort_by": "popularity.desc", "page": 1}
-            if wanted_genres:
-                params["with_genres"] = ",".join(str(value) for value in sorted(set(wanted_genres)))
+            if explicit_genre_id is not None and mood_ids:
+                params["with_genres"] = f"{explicit_genre_id}," + "|".join(str(value) for value in mood_ids)
+            elif explicit_genre_id is not None:
+                params["with_genres"] = str(explicit_genre_id)
+            elif mood_ids:
+                params["with_genres"] = "|".join(str(value) for value in mood_ids)
             prefix = "primary_release_date" if category == "MOVIE" else "first_air_date"
             if year_from is not None:
                 params[f"{prefix}.gte"] = f"{year_from}-01-01"
