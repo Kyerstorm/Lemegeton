@@ -7,6 +7,7 @@ from cogs.media.browse import (
     _novelupdates_parse_html,
     _novelupdates_results_from_helper,
     _novelupdates_search_urls,
+    search_novelupdates,
 )
 
 
@@ -114,17 +115,16 @@ class NovelUpdatesSearchCacheTests(unittest.IsolatedAsyncioTestCase):
     async def test_successful_results_are_cached(self):
         result = [{"title": "Cached novel", "url": "https://www.novelupdates.com/series/cached-novel/"}]
         with patch("cogs.media.browse._search_novelupdates_uncached", new=AsyncMock(return_value=result)) as search:
-            first = await __import__("cogs.media.browse", fromlist=["search_novelupdates"]).search_novelupdates("Cache me")
-            second = await __import__("cogs.media.browse", fromlist=["search_novelupdates"]).search_novelupdates("  Cache me  ")
+            first = await search_novelupdates("Cache me")
+            second = await search_novelupdates("  Cache me  ")
         self.assertEqual(first, result)
         self.assertEqual(second, result)
         search.assert_awaited_once()
 
     async def test_empty_results_are_not_cached(self):
         with patch("cogs.media.browse._search_novelupdates_uncached", new=AsyncMock(return_value=[])) as search:
-            module = __import__("cogs.media.browse", fromlist=["search_novelupdates"])
-            await module.search_novelupdates("Nothing here")
-            await module.search_novelupdates("Nothing here")
+            await search_novelupdates("Nothing here")
+            await search_novelupdates("Nothing here")
         self.assertEqual(search.await_count, 2)
 
 
