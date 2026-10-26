@@ -1,5 +1,6 @@
 from helpers.color_palette import PALETTE
 import discord
+from helpers.command_error_handler import FeedbackAwareView, application_error_message
 from discord.ext import commands
 from discord import app_commands
 import aiohttp
@@ -521,7 +522,7 @@ class Affinity(commands.Cog):
     # ---------------------------------------------------------
     # Enhanced Paginated Embed View with Detailed Breakdowns
     # ---------------------------------------------------------
-    class AffinityView(discord.ui.View):
+    class AffinityView(FeedbackAwareView):
         def __init__(self, entries, user_name, detailed_data=None, is_cached=False):
             super().__init__(timeout=300)  # 5 minute timeout
             self.entries = entries
@@ -953,7 +954,7 @@ class Affinity(commands.Cog):
         except Exception as e:
             logger.error(f"Error in affinity command for {user_display}: {e}")
             await interaction.followup.send(
-                "❌ An error occurred while calculating affinities. Please try again later.", 
+                application_error_message(e), 
                 ephemeral=True
             )
 

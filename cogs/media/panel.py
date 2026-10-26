@@ -13,8 +13,8 @@ import secrets
 from typing import Any
 from urllib.parse import urlsplit
 
-import aiohttp
 import discord
+from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView, application_error_message
 from discord import app_commands
 from discord.ext import commands
 
@@ -28,14 +28,172 @@ log = logging.getLogger("Lemegeton.Panels")
 # Fallback only; use Discord's effective interaction/storage limits when available.
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"}
+# Discord string selects allow 25 options at a time, so the picker pages through
+# AniList's full non-adult tag collection and supplements it with MangaUpdates genres.
 PANEL_TAGS = (
-    "action", "adventure", "comedy", "drama", "fantasy", "horror", "mystery",
-    "psychological", "romance", "sci-fi", "slice of life", "supernatural",
-    "thriller", "tragedy", "isekai", "martial arts", "school life", "historical",
-    "shounen", "shoujo", "seinen", "josei", "manhwa", "manhua", "double spread",
+    "action", "adventure", "comedy", "drama", "fantasy",
+    "horror", "mystery", "psychological", "romance", "sci-fi",
+    "slice of life", "supernatural", "thriller", "tragedy", "isekai",
+    "martial arts", "school life", "historical", "shounen", "shoujo",
+    "seinen", "josei", "manhwa", "manhua", "manhua-style",
 )
+PANEL_MANGAUPDATES_TAGS = (
+    "doujinshi", "gender bender", "harem", "mecha", "shoujo ai",
+    "shounen ai", "sports", "yaoi", "yuri",
+)
+PANEL_ANILIST_TAGS = (
+    "4-koma", "achromatic", "achronological order", "acrobatics", "acting",
+    "adoption", "advertisement", "afterlife", "age gap", "age regression",
+    "agender", "agriculture", "airsoft", "alchemy", "aliens", "alternate universe",
+    "american football", "amnesia", "anachronism", "ancient china", "angels",
+    "animals", "anthology", "anthropomorphism", "anti-hero", "archery",
+    "aromantic", "arranged marriage", "artificial intelligence", "asexual",
+    "assassins", "astronomy", "athletics", "augmented reality", "autobiographical",
+    "aviation", "badminton", "ballet", "band", "bar", "baseball", "basketball",
+    "battle royale", "biographical", "bisexual", "blackmail", "body swapping",
+    "boxing", "bullying", "calligraphy", "card battle", "cars", "cgi", "chibi",
+    "chuunibyou", "classic literature", "college", "coming of age", "cosplay",
+    "crossdressing", "crossover", "cute girls doing cute things", "cycling",
+    "dancing", "delinquents", "demons", "development", "dragons", "drawing",
+    "dystopian", "economics", "educational", "ensemble cast", "environmental",
+    "episodic", "espionage", "fairy tale", "family life", "fashion",
+    "female protagonist", "fishing", "fitness", "flash", "food", "football",
+    "foreign", "fugitive", "full cgi", "full colour", "gangs", "gender bending",
+    "gender neutral", "ghost", "gods", "gyaru", "henshin", "hikikomori",
+    "ice skating", "idol", "iyashikei", "kaiju", "karuta", "kemonomimi", "kids",
+    "love triangle", "mafia", "mahjong", "maids", "male protagonist",
+    "memory manipulation", "meta", "military", "monster girl", "mopeds",
+    "motorcycles", "musical", "nekomimi", "ninja", "no dialogue", "noir",
+    "otaku culture", "outdoor", "philosophy", "photography", "pirates", "poker",
+    "police", "primarily female cast", "primarily male cast", "puppetry",
+    "real robot", "rehabilitation", "robots", "rural", "samurai", "satire",
+    "school", "school club", "ships", "shogi", "space", "space opera",
+    "steampunk", "stop motion", "super power", "super robot", "superhero",
+    "surreal comedy", "swimming", "swordplay", "table tennis", "tanks", "teacher",
+    "tennis", "time manipulation", "time skip", "trains", "triads", "tsundere",
+    "urban fantasy", "vampire", "video games", "virtual world", "volleyball",
+    "war", "witch", "work", "wrestling", "writing", "wuxia", "yakuza",
+    "yandere", "youkai", "zombie", "adaptation", "artbook", "award winning",
+    "based on a manga", "based on a novel", "biography", "character growth",
+    "classic", "combat", "coming-of-age", "conspiracy", "contemporary",
+    "courtroom", "crime", "detective", "disaster", "disguise", "dungeon",
+    "dystopia", "exorcists", "found family", "genius protagonist", "gothic",
+    "investigation", "journey", "legal", "lgbtq+ themes", "lost civilization",
+    "low fantasy", "magical girl", "management", "medicine", "mentor",
+    "modern fantasy", "morality", "multiverse", "music band", "mystic arts",
+    "natural disaster", "orphan", "parallel world", "pharmacy", "pilots",
+    "post-war", "prophecy", "quest", "rebellion", "school festival",
+    "secret identity", "secret organization", "siblings", "small town",
+    "space travel", "special forces", "spirit world", "sports team", "summoning",
+    "supernatural powers", "tournament", "training", "travel", "treasure hunt",
+    "undercover", "urban life", "vigilante", "villainess", "virtual reality",
+    "vampires", "werewolf", "world war", "workplace", "warring states",
+    "xianxia", "xuanhuan", "zombies", "academy", "adventure guild", "alchemist",
+    "ancient ruins", "angst", "anti-war", "archaeology", "artificial life",
+    "assassination", "boarding school", "bookworm", "business", "captivity",
+    "cat people", "childhood friends", "climate", "clone", "competition",
+    "construction", "cooking", "crafting", "cybernetics", "dark fantasy",
+    "demon lord", "desert", "diplomacy", "dreams", "elemental powers", "empires",
+    "escape", "family business", "farming", "fencing", "folklore", "food culture",
+    "friendship", "frontier", "genetics", "ghost hunting", "gladiators",
+    "gods and goddesses", "government", "guilds", "healing", "heroic fantasy",
+    "historical fantasy", "hunting", "immortality", "inheritance", "insects",
+    "island", "journalism", "kingdom building", "knights", "language", "life lessons",
+    "literature", "lone wolf", "loyalty", "magical artifacts", "magical academy",
+    "martial arts tournament", "mercenaries", "merchants", "military academy",
+    "mystical creatures", "naval", "necromancy", "nobility",
+    "non-human protagonist", "occult", "open world", "organized crime", "palace",
+    "parenthood", "performing arts", "philanthropy", "pirate crew",
+    "planetary exploration", "poetry", "prison", "reconstruction", "rescue",
+    "royalty", "rural life", "sailing", "school trip", "science", "scientists",
+    "sculpture", "seasonal", "secret past", "sentai", "shipbuilding", "siege",
+    "social issues", "sorcery", "street racing", "strategy", "subway",
+    "survival skills", "swordsmanship", "technology", "theater", "time loop",
+    "time paradox", "transformation", "underdog", "urban exploration", "veterans",
+    "warriors", "weather", "western", "witchcraft", "woodworking", "world travel",
+    "writing club", "zoology"
+)
+PANEL_NSFW_TAGS = ("nsfw",)
+MAX_PANEL_TAGS = 20
+MAX_TAG_LENGTH = 100
+
+NSFW_TAGS = frozenset({"nsfw", "mature"})
+PANEL_VISUAL_TAGS = (
+    "double spread", "splash page", "panel sequence", "iconic moment", "character close-up",
+    "fight scene", "comedy panel", "emotional scene", "flashback", "worldbuilding",
+    "monster / creature", "weapons", "magic", "cyberpunk", "post-apocalyptic",
+    "folklore", "mythology", "politics", "survival", "revenge",
+    "cultivation", "time travel", "reincarnation", "fan service", "mature",
+)
+PANEL_TAG_DESCRIPTIONS = {
+    "action": "Fast-paced movement, combat, or physical conflict.",
+    "adventure": "Journeys, quests, exploration, or discovery.",
+    "comedy": "Humorous scenes, jokes, or visual gags.",
+    "drama": "Character-focused conflict or serious emotional stakes.",
+    "fantasy": "Magic, mythical worlds, or supernatural fantasy settings.",
+    "horror": "Fear, dread, disturbing imagery, or horror themes.",
+    "mystery": "Clues, secrets, investigations, or unanswered questions.",
+    "psychological": "Mind games, inner conflict, or psychological tension.",
+    "romance": "Romantic relationships or affectionate moments.",
+    "sci-fi": "Science fiction, advanced technology, or space themes.",
+    "slice of life": "Everyday activities and ordinary life moments.",
+    "supernatural": "Ghosts, spirits, curses, or paranormal events.",
+    "thriller": "Suspense, danger, urgency, or high tension.",
+    "tragedy": "Loss, grief, suffering, or tragic developments.",
+    "isekai": "Transported, reincarnated, or trapped in another world.",
+    "martial arts": "Martial arts technique, tournaments, or hand-to-hand combat.",
+    "school life": "School, academy, classroom, or campus settings.",
+    "historical": "Historical eras, period clothing, or past civilizations.",
+    "shounen": "Shounen demographic or action-adventure storytelling.",
+    "shoujo": "Shoujo demographic or relationship-focused storytelling.",
+    "seinen": "Seinen demographic or mature-targeted storytelling.",
+    "josei": "Josei demographic or adult relationship-focused storytelling.",
+    "manhwa": "Korean comics or manhwa-specific visual conventions.",
+    "manhua": "Chinese comics or manhua-specific visual conventions.",
+    "manhua-style": "Art inspired by Chinese comic styling.",
+    "double spread": "Artwork spanning two facing pages.",
+    "splash page": "A single large panel or full-page illustration.",
+    "panel sequence": "A sequence of panels meant to be read together.",
+    "iconic moment": "A memorable or especially recognizable scene.",
+    "character close-up": "A close portrait or detailed character expression.",
+    "fight scene": "Combat, duels, battles, or action choreography.",
+    "comedy panel": "A standalone humorous panel or gag.",
+    "emotional scene": "A scene focused on a strong emotional reaction.",
+    "flashback": "A memory, flashback, or past-event scene.",
+    "worldbuilding": "World details, maps, lore, architecture, or setting reveals.",
+    "monster / creature": "Monsters, beasts, fantasy creatures, or unusual beings.",
+    "weapons": "Weapons, equipment, or weapon-focused artwork.",
+    "magic": "Spells, magical effects, rituals, or supernatural powers.",
+    "cyberpunk": "Neon-lit urban futures, cybernetics, or dystopian technology.",
+    "post-apocalyptic": "Ruined worlds, collapse, or post-disaster settings.",
+    "folklore": "Folk tales, legends, and regional traditional motifs.",
+    "mythology": "Gods, myths, divine beings, or myth-inspired imagery.",
+    "politics": "Royal courts, factions, diplomacy, or political conflict.",
+    "survival": "Endurance, harsh environments, or survival situations.",
+    "revenge": "Retribution, vengeance, or revenge-driven scenes.",
+    "cultivation": "Cultivation, martial progression, or xianxia/xuanhuan themes.",
+    "time travel": "Time loops, timelines, time jumps, or temporal travel.",
+    "reincarnation": "Rebirth, reincarnation, or a second-life premise.",
+    "fan service": "Fan-service imagery or suggestive presentation; use the mature tag when age-restricted.",
+    "mature": "Age-restricted content. Hidden outside NSFW channels.",
+    "nsfw": "Age-restricted content. Selecting this tag hides the panel outside NSFW channels.",
+    "doujinshi": "Self-published or independently produced comics.",
+    "gender bender": "Stories involving gender disguise, transformation, or role reversal.",
+    "harem": "Stories centered on one character and multiple potential partners.",
+    "mecha": "Robots, powered armor, or large mechanical vehicles.",
+    "shoujo ai": "Romantic relationships between female characters.",
+    "shounen ai": "Romantic relationships between male characters.",
+    "sports": "Sports, athletic competition, or training.",
+    "yaoi": "Male-male romance or relationships.",
+    "yuri": "Female-female romance or relationships.",
+}
+for _tag in PANEL_ANILIST_TAGS:
+    PANEL_TAG_DESCRIPTIONS.setdefault(_tag, f"Story, character, or setting tag: {_tag.strip()}.")
+for _tag in PANEL_NSFW_TAGS:
+    PANEL_TAG_DESCRIPTIONS.setdefault(_tag, "Age-restricted content; hidden outside NSFW channels.")
 CHAPTER_CAPTION_RE = re.compile(
-    r"^\s*(?:(?:chapter|ch\.?)\s*)?#?(\d+(?:\.\d+)?)\s*(?:[-–—:|]\s*|\s+)(.+?)\s*$",
+    r"^\s*(?:(?:chapter|ch\.?)\s*)?#?(\d+(?:\.\d+)?|N/A)"
+    r"(?:\s*(?:[-–—:|]\s*|\s+)(.*?))?\s*$",
     re.IGNORECASE,
 )
 BROWSER_TIMEOUT = 1800
@@ -85,10 +243,11 @@ async def _schema() -> None:
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS panel_tags (
                 panel_id BIGINT NOT NULL REFERENCES panels(id) ON DELETE CASCADE,
-                tag VARCHAR(30) NOT NULL,
+                tag VARCHAR(100) NOT NULL,
                 PRIMARY KEY (panel_id, tag)
             )
         """)
+        await conn.execute("ALTER TABLE panel_tags ALTER COLUMN tag TYPE VARCHAR(100)")
         await conn.execute("ALTER TABLE panels ADD COLUMN IF NOT EXISTS anilist_id BIGINT")
         await conn.execute("ALTER TABLE panels ADD COLUMN IF NOT EXISTS chapter_number VARCHAR(32)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_panels_created_at ON panels(created_at DESC)")
@@ -115,33 +274,59 @@ async def _schema() -> None:
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_mod_log_guild_created ON mod_log(guild_id, created_at DESC)")
 
 
-def _tags(raw: str | None) -> list[str]:
+def _normalise_tag_values(values: list[str] | tuple[str, ...]) -> list[str]:
     result: list[str] = []
-    for part in (raw or "").split(","):
-        tag = part.strip().lower()
+    for value in values:
+        tag = str(value).strip().lower()
         if not tag:
             continue
-        if len(tag) > 30:
-            raise ValueError("Each tag must be 30 characters or fewer.")
+        if len(tag) > MAX_TAG_LENGTH:
+            raise ValueError(f"Each tag must be {MAX_TAG_LENGTH} characters or fewer.")
         if tag not in result:
             result.append(tag)
-    if len(result) > 10:
-        raise ValueError("Use no more than 10 unique tags.")
+    if len(result) > MAX_PANEL_TAGS:
+        raise ValueError(f"Use no more than {MAX_PANEL_TAGS} unique tags.")
     return result
 
 
+def _tags(raw: str | None) -> list[str]:
+    return _normalise_tag_values((raw or "").split(","))
+
+
+def _build_panel_tag_catalogue() -> tuple[tuple[str, str], ...]:
+    """Return the hand-maintained AniList-inspired and MangaUpdates tag catalogue."""
+    catalogue: dict[str, str] = {}
+    for tag in (
+        *PANEL_TAGS,
+        *PANEL_VISUAL_TAGS,
+        *PANEL_MANGAUPDATES_TAGS,
+        *PANEL_ANILIST_TAGS,
+        *PANEL_NSFW_TAGS,
+    ):
+        catalogue[tag] = PANEL_TAG_DESCRIPTIONS.get(
+            tag, f"Story, character, or setting tag: {tag}."
+        )[:100]
+    return tuple(sorted(catalogue.items()))
+
+
+def _tags_require_nsfw(tags: list[str] | tuple[str, ...]) -> bool:
+    """Treat either explicit NSFW marker as an age-restriction flag."""
+    return any(tag.strip().lower() in NSFW_TAGS for tag in tags)
+
+
 def _parse_chapter_caption(value: str) -> tuple[str, str]:
-    """Require a chapter number and caption from one modal field."""
+    """Require a chapter number (or N/A) while allowing the caption to be omitted."""
     match = CHAPTER_CAPTION_RE.fullmatch(value.strip())
     if not match:
         raise ValueError(
-            "Enter both a chapter number and caption, for example "
-            "**Chapter 12 — The final battle begins**."
+            "Enter a chapter number, or **N/A** if unknown. A caption is optional. "
+            "Examples: **Chapter 12 — Final battle**, **Chapter 12**, or **N/A**."
         )
-    chapter_number, caption = match.group(1), match.group(2).strip()
-    # Reject separator-only remainders so "Chapter 12 —" doesn't store "—" as the caption.
-    if not caption.strip("-–—:| \t"):
-        raise ValueError("A caption is required after the chapter number.")
+    chapter_number = match.group(1).upper() if match.group(1).upper() == "N/A" else match.group(1)
+    caption = (match.group(2) or "").strip()
+    # Reject a dangling separator but accept a chapter number with no caption.
+    if value.strip().endswith(("-", "–", "—", ":", "|")):
+        raise ValueError("A caption may be omitted, but do not leave a separator at the end.")
     return chapter_number, caption
 
 
@@ -304,6 +489,17 @@ async def _count(allow_mature: bool, user_id: int | None = None) -> int:
     return int(row["n"])
 
 
+async def _count_from_guild(guild_id: int) -> int:
+    """Count all panels originally contributed from one Discord server."""
+    pool = await _pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT COUNT(*) AS n FROM panels WHERE uploader_guild_id=$1",
+            guild_id,
+        )
+    return int(row["n"])
+
+
 async def _fresh_attachment(bot: commands.Bot, panel: dict[str, Any]) -> str | None:
     url = str(panel["attachment_url"])
     match = re.search(r"(?:[?&])ex=([0-9a-fA-F]+)", url)
@@ -338,11 +534,12 @@ def _embed(panel: dict[str, Any], page: int, total: int, guild_name: str | None)
     anilist_url = f"https://anilist.co/manga/{int(anilist_id)}" if anilist_id else None
     caption = str(panel.get("caption") or "").strip()
     chapter_number = panel.get("chapter_number")
-    description = (
-        f"**Chapter {discord.utils.escape_markdown(str(chapter_number))}**\n{caption}"
-        if chapter_number and caption
-        else (caption or "*No caption provided.*")
-    )
+    description_lines = []
+    if chapter_number:
+        chapter_label = discord.utils.escape_markdown(str(chapter_number))
+        description_lines.append(f"**Chapter {chapter_label}**")
+    description_lines.append(caption or "*No caption provided.*")
+    description = "\n".join(description_lines)
     embed = discord.Embed(
         title=str(panel["title"])[:100],
         description=description[:4000],
@@ -399,13 +596,174 @@ async def _audit_delete(interaction: discord.Interaction, panel: dict[str, Any])
             log.warning("Could not post panel audit log to guild %s", interaction.guild_id)
 
 
-class PanelForm(discord.ui.Modal):
-    def __init__(self, cog: "PanelCog", *, mode: str, user_id: int, guild_id: int,
-                 panel: dict[str, Any] | None = None, source_url: str | None = None):
+class PanelTagPickerView(FeedbackAwareView):
+    """Paginated tag selector; every Discord select contains at most 25 options."""
+
+    def __init__(
+        self,
+        cog: "PanelCog",
+        *,
+        catalogue: tuple[tuple[str, str], ...],
+        mode: str,
+        user_id: int,
+        guild_id: int,
+        panel: dict[str, Any] | None = None,
+        source_url: str | None = None,
+    ):
+        super().__init__(timeout=300)
+        self.cog, self.mode = cog, mode
+        self.user_id, self.guild_id = user_id, guild_id
+        self.panel = panel
+        self.source_url = source_url
+        selected = list(panel.get("tags", [])) if panel else []
+        if panel and panel.get("is_nsfw") and "mature" not in selected:
+            selected.append("mature")
+
+        by_name = dict(catalogue)
+        for tag in selected:
+            by_name.setdefault(tag, "Previously saved tag retained for this panel.")
+        self.catalogue = tuple(sorted(by_name.items()))
+        self.selected_tags = selected[:MAX_PANEL_TAGS]
+        self.page = 0
+        self._tag_select: discord.ui.Select | None = None
+        self._build()
+
+    @property
+    def page_count(self) -> int:
+        return max(1, (len(self.catalogue) + 24) // 25)
+
+    def _page_entries(self) -> tuple[tuple[str, str], ...]:
+        start = self.page * 25
+        return self.catalogue[start:start + 25]
+
+    def _content(self) -> str:
+        return (
+            "🏷️ **Choose panel tags**\n"
+            f"Page **{self.page + 1}/{self.page_count}** · "
+            f"**{len(self.catalogue):,}** available tags · "
+            f"**{len(self.selected_tags)}/{MAX_PANEL_TAGS}** selected.\n"
+            "Selections on other pages are retained. Choose tags, browse with Previous/Next, "
+            "then press **Continue**."
+        )
+
+    def _build(self) -> None:
+        self.clear_items()
+        entries = self._page_entries()
+        visible_tags = {tag for tag, _ in entries}
+        other_selected = sum(tag not in visible_tags for tag in self.selected_tags)
+        capacity = max(1, min(MAX_PANEL_TAGS - other_selected, len(entries)))
+        select = discord.ui.Select(
+            placeholder=f"Select tags · page {self.page + 1}/{self.page_count}",
+            options=[
+                discord.SelectOption(
+                    label=tag.title()[:100],
+                    value=tag,
+                    description=description[:100],
+                    default=tag in self.selected_tags,
+                )
+                for tag, description in entries
+            ],
+            min_values=0,
+            max_values=capacity,
+            row=0,
+        )
+        select.callback = self._select_tags
+        self._tag_select = select
+        self.add_item(select)
+
+        previous = discord.ui.Button(
+            label="Previous", style=discord.ButtonStyle.secondary, row=1, disabled=self.page == 0
+        )
+        previous.callback = self._previous_page
+        self.add_item(previous)
+
+        page_label = discord.ui.Button(
+            label=f"{self.page + 1}/{self.page_count}",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+            disabled=True,
+        )
+        self.add_item(page_label)
+
+        next_page = discord.ui.Button(
+            label="Next", style=discord.ButtonStyle.secondary, row=1, disabled=self.page + 1 >= self.page_count
+        )
+        next_page.callback = self._next_page
+        self.add_item(next_page)
+
+        continue_button = discord.ui.Button(label="Continue", style=discord.ButtonStyle.success, row=2)
+        continue_button.callback = self._continue
+        self.add_item(continue_button)
+
+        cancel_button = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.danger, row=2)
+        cancel_button.callback = self._cancel
+        self.add_item(cancel_button)
+
+    async def _select_tags(self, interaction: discord.Interaction) -> None:
+        visible_tags = {tag for tag, _ in self._page_entries()}
+        selected_here = list(self._tag_select.values if self._tag_select else [])
+        updated = [tag for tag in self.selected_tags if tag not in visible_tags]
+        updated.extend(selected_here)
+        updated = list(dict.fromkeys(updated))
+        if len(updated) > MAX_PANEL_TAGS:
+            await interaction.response.send_message(
+                f"You can select at most {MAX_PANEL_TAGS} tags across all pages.",
+                ephemeral=True,
+            )
+            return
+        self.selected_tags = updated
+        self._build()
+        await interaction.response.edit_message(content=self._content(), view=self)
+
+    async def _previous_page(self, interaction: discord.Interaction) -> None:
+        self.page = max(0, self.page - 1)
+        self._build()
+        await interaction.response.edit_message(content=self._content(), view=self)
+
+    async def _next_page(self, interaction: discord.Interaction) -> None:
+        self.page = min(self.page_count - 1, self.page + 1)
+        self._build()
+        await interaction.response.edit_message(content=self._content(), view=self)
+
+    async def _continue(self, interaction: discord.Interaction) -> None:
+        if not self.selected_tags:
+            await interaction.response.send_message("Select at least one tag before continuing.", ephemeral=True)
+            return
+        await interaction.response.send_modal(
+            PanelForm(
+                self.cog,
+                mode=self.mode,
+                user_id=self.user_id,
+                guild_id=self.guild_id,
+                panel=self.panel,
+                source_url=self.source_url,
+                selected_tags=list(self.selected_tags),
+            )
+        )
+
+    async def _cancel(self, interaction: discord.Interaction) -> None:
+        await interaction.response.edit_message(content="Panel submission cancelled.", view=None)
+
+
+class PanelForm(FeedbackAwareModal):
+    def __init__(
+        self,
+        cog: "PanelCog",
+        *,
+        mode: str,
+        user_id: int,
+        guild_id: int,
+        panel: dict[str, Any] | None = None,
+        source_url: str | None = None,
+        selected_tags: list[str] | None = None,
+    ):
         super().__init__(title="Add Manga Panel" if mode == "add" else "Edit Manga Panel", timeout=300)
         self.cog, self.mode, self.user_id, self.guild_id = cog, mode, user_id, guild_id
         self.panel = panel
         self.source_url = source_url or (panel.get("source_url") if panel else None)
+        self.selected_tags = list(
+            selected_tags if selected_tags is not None else (panel.get("tags", []) if panel else [])
+        )
         self.image = discord.ui.Label(
             text="🖼️ Panel image",
             description="Discord's upload limit for this server applies. Optional when editing.",
@@ -416,53 +774,26 @@ class PanelForm(discord.ui.Modal):
             description="Enter a title, numeric AniList manga ID, or an AniList manga URL.",
             component=discord.ui.TextInput(default=panel["title"] if panel else None, max_length=300, required=True),
         )
-        selected_tags = list(panel.get("tags", [])) if panel else []
-        tag_values = list(dict.fromkeys([*selected_tags, *PANEL_TAGS]))[:25]
-        self.tags_field = discord.ui.Label(
-            text="🏷️ Tags (select 1–10)",
-            description="Choose at least one tag. Multiple tags are supported.",
-            component=discord.ui.Select(
-                placeholder="Select all tags that fit this panel",
-                options=[
-                    discord.SelectOption(
-                        label=tag.title()[:100],
-                        value=tag,
-                        default=tag in selected_tags,
-                    )
-                    for tag in tag_values
-                ],
-                min_values=1,
-                max_values=min(10, len(tag_values)),
-            ),
-        )
-        caption_default = None
+        if panel and panel.get("is_nsfw") and "mature" not in self.selected_tags:
+            self.selected_tags.append("mature")
+        caption_default = "N/A"
         if panel:
             old_caption = str(panel.get("caption") or "")
-            old_chapter = panel.get("chapter_number")
-            caption_default = f"Chapter {old_chapter} — {old_caption}" if old_chapter else old_caption
+            old_chapter = panel.get("chapter_number") or "N/A"
+            chapter_label = f"Chapter {old_chapter}" if str(old_chapter).upper() != "N/A" else "N/A"
+            caption_default = f"{chapter_label} — {old_caption}" if old_caption else chapter_label
         self.caption_field = discord.ui.Label(
-            text="📖 Chapter number & caption",
-            description="Required. Format: Chapter 12 — your caption.",
+            text="📖 Chapter number (required) • caption (optional)",
+            description="Enter a chapter number; if unknown, enter N/A. Caption is optional. Examples: Chapter 12 — Final battle; Chapter 12; N/A.",
             component=discord.ui.TextInput(
-                default=caption_default,
-                placeholder="Chapter 12 — The final battle begins",
+                default=caption_default if panel else None,
+                placeholder="Chapter 12 — final battle, or N/A",
                 style=discord.TextStyle.paragraph,
                 max_length=500,
                 required=True,
             ),
         )
-        self.rating_field = discord.ui.Label(
-            text="Content rating",
-            component=discord.ui.Select(
-                placeholder="Safe or Mature",
-                options=[
-                    discord.SelectOption(label="Safe", value="false", default=not bool(panel and panel["is_nsfw"])),
-                    discord.SelectOption(label="Mature", value="true", default=bool(panel and panel["is_nsfw"])),
-                ],
-                min_values=1, max_values=1,
-            ),
-        )
-        for item in (self.image, self.title_field, self.tags_field, self.caption_field, self.rating_field):
+        for item in (self.image, self.title_field, self.caption_field):
             self.add_item(item)
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -485,11 +816,10 @@ class PanelForm(discord.ui.Modal):
             anilist_id, source_url = _carry_anilist_link(
                 self.panel, title, requested_anilist_id, requested_anilist_url or self.source_url,
             )
-            selected_tags = list(self.tags_field.component.values or [])
-            if not selected_tags:
+            if not self.selected_tags:
                 await interaction.followup.send("Select at least one tag for this panel.", ephemeral=True)
                 return
-            tags = _tags(",".join(selected_tags))
+            tags = _normalise_tag_values(self.selected_tags)
             values = self.image.component.values or []
             upload = values[0] if values else None
             image_bytes = None
@@ -552,7 +882,7 @@ class PanelForm(discord.ui.Modal):
             elif self.mode == "add":
                 await interaction.followup.send("Please attach an image.", ephemeral=True)
                 return
-            mature = str(self.rating_field.component.values[0]).lower() == "true"
+            mature = _tags_require_nsfw(tags)
             pool = await _pool()
             async with pool.acquire() as conn:
                 async with conn.transaction():
@@ -597,14 +927,14 @@ class PanelForm(discord.ui.Modal):
             else:
                 message = "Discord could not store the panel image. Check the storage channel's Attach Files permission and try again."
             await interaction.followup.send(message, ephemeral=True)
-        except Exception:
+        except Exception as exc:
             log.exception("Panel form submit failed")
             if stored_message:
                 await self.cog._delete_message(stored_message.channel, stored_message.id)
-            await interaction.followup.send("Something went wrong while saving the panel.", ephemeral=True)
+            await interaction.followup.send(application_error_message(exc), ephemeral=True)
 
 
-class PanelSearchModal(discord.ui.Modal, title="Search Manga Panels"):
+class PanelSearchModal(FeedbackAwareModal, title="Search Manga Panels"):
     keyword = discord.ui.TextInput(label="Keyword (2–50 chars)", min_length=2, max_length=50, required=True)
     tags = discord.ui.TextInput(label="Tags (optional, comma-separated)", max_length=300, required=False)
 
@@ -623,12 +953,12 @@ class PanelSearchModal(discord.ui.Modal, title="Search Manga Panels"):
             await self.cog._post_browser(interaction, ids, tags=_tags(str(self.tags.value or "")), keyword=keyword)
         except ValueError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
-        except Exception:
+        except Exception as exc:
             log.exception("Panel search failed")
-            await interaction.followup.send("Something went wrong while searching.", ephemeral=True)
+            await interaction.followup.send(application_error_message(exc), ephemeral=True)
 
 
-class PanelConfigureModal(discord.ui.Modal, title="Configure Panel Archive"):
+class PanelConfigureModal(FeedbackAwareModal, title="Configure Panel Archive"):
     def __init__(self, cog: "PanelCog"):
         super().__init__(timeout=180)
         self.cog = cog
@@ -672,12 +1002,12 @@ class PanelConfigureModal(discord.ui.Modal, title="Configure Panel Archive"):
                     panel_mod_role_id=EXCLUDED.panel_mod_role_id
                 """, guild.id, storage.id, logs[0].id if logs else None, roles[0].id if roles else None)
             await interaction.followup.send("Archive settings saved for this server.", ephemeral=True)
-        except Exception:
+        except Exception as exc:
             log.exception("Panel configuration failed")
-            await interaction.followup.send("Something went wrong while saving settings.", ephemeral=True)
+            await interaction.followup.send(application_error_message(exc), ephemeral=True)
 
 
-class PanelJumpModal(discord.ui.Modal, title="Jump to Page"):
+class PanelJumpModal(FeedbackAwareModal, title="Jump to Page"):
     page_number = discord.ui.TextInput(label="Page number", min_length=1, max_length=7, required=True)
 
     def __init__(self, view: "PanelBrowserView"):
@@ -694,9 +1024,9 @@ class PanelJumpModal(discord.ui.Modal, title="Jump to Page"):
             await self.browser.cog._render(interaction, self.browser)
         except ValueError:
             await interaction.response.send_message("Enter a valid page number.", ephemeral=True)
-        except Exception:
+        except Exception as exc:
             log.exception("Panel jump failed")
-            await interaction.response.send_message("Something went wrong.", ephemeral=True)
+            await interaction.response.send_message(application_error_message(exc), ephemeral=True)
 
 
 class PanelTagFilter(discord.ui.Select):
@@ -730,15 +1060,15 @@ class PanelTagFilter(discord.ui.Select):
                         embed=None, view=self.browser
                     )
             await interaction.response.send_message("Filter applied to the public browser.", ephemeral=True)
-        except Exception:
+        except Exception as exc:
             log.exception("Panel filter failed")
             if interaction.response.is_done():
-                await interaction.followup.send("Something went wrong applying the filter.", ephemeral=True)
+                await interaction.followup.send(application_error_message(exc), ephemeral=True)
             else:
                 await interaction.response.send_message("Something went wrong applying the filter.", ephemeral=True)
 
 
-class PanelBrowserView(discord.ui.View):
+class PanelBrowserView(FeedbackAwareView):
     """Public single-message browser. Navigation re-queries against current channel NSFW status."""
     def __init__(self, cog: "PanelCog", ids: list[int], *, tags: list[str] | None = None,
                  keyword: str | None = None, user_id: int | None = None, fixed_ids: bool = False):
@@ -794,9 +1124,9 @@ class PanelBrowserView(discord.ui.View):
             elif action == "random" and self.panel_ids: self.page = secure_choice(range(len(self.panel_ids)))
             self.page = max(0, min(self.page, max(0, len(self.panel_ids)-1)))
             await self.cog._render(interaction, self)
-        except Exception:
+        except Exception as exc:
             log.exception("Panel navigation failed")
-            await interaction.response.send_message("Something went wrong.", ephemeral=True)
+            await interaction.response.send_message(application_error_message(exc), ephemeral=True)
 
     async def _jump(self, interaction: discord.Interaction):
         if self.panel_ids:
@@ -814,12 +1144,12 @@ class PanelBrowserView(discord.ui.View):
                 """)
             options = [discord.SelectOption(label=str(r["tag"])[:100], value=str(r["tag"])) for r in rows]
             options.append(discord.SelectOption(label="Other (search)", value="other"))
-            view = discord.ui.View(timeout=120)
+            view = FeedbackAwareView(timeout=120)
             view.add_item(PanelTagFilter(self, options))
             await interaction.response.send_message("Choose up to five tags; all selected tags must match.", view=view, ephemeral=True)
-        except Exception:
+        except Exception as exc:
             log.exception("Open panel filter failed")
-            await interaction.response.send_message("Something went wrong.", ephemeral=True)
+            await interaction.response.send_message(application_error_message(exc), ephemeral=True)
 
     async def _clear(self, interaction: discord.Interaction):
         try:
@@ -827,7 +1157,7 @@ class PanelBrowserView(discord.ui.View):
             self.panel_ids = await _panel_ids(_nsfw(interaction))
             self.page = 0
             await self.cog._render(interaction, self)
-        except Exception:
+        except Exception as exc:
             log.exception("Clear panel filter failed")
             await interaction.response.send_message("Something went wrong.", ephemeral=True)
 
@@ -840,9 +1170,11 @@ class PanelBrowserView(discord.ui.View):
                 await interaction.response.send_message("Image unavailable or hidden in this channel.", ephemeral=True); return
             if not await _can_manage(interaction, panel):
                 await interaction.response.send_message("Only the uploader or a moderator of this server can edit this panel.", ephemeral=True); return
-            await interaction.response.send_modal(PanelForm(self.cog, mode="edit", user_id=interaction.user.id,
-                                                            guild_id=interaction.guild_id or 0, panel=panel))
-        except Exception:
+            await self.cog._open_tag_picker(
+                interaction, mode="edit", user_id=interaction.user.id,
+                guild_id=interaction.guild_id or 0, panel=panel,
+            )
+        except Exception as exc:
             log.exception("Edit panel action failed")
             await interaction.response.send_message("Something went wrong.", ephemeral=True)
 
@@ -859,20 +1191,25 @@ class PanelBrowserView(discord.ui.View):
                 f"Delete panel **{discord.utils.escape_markdown(panel['title'])}** (#{panel['id']}) permanently?",
                 view=PanelDeleteConfirm(self.cog, panel, self), ephemeral=True,
             )
-        except Exception:
+        except Exception as exc:
             log.exception("Delete panel action failed")
-            await interaction.response.send_message("Something went wrong.", ephemeral=True)
+            if interaction.response.is_done():
+                await interaction.followup.send(application_error_message(exc), ephemeral=True)
+            else:
+                await interaction.response.send_message(application_error_message(exc), ephemeral=True)
 
     async def _close(self, interaction: discord.Interaction):
         try:
             await interaction.response.edit_message(content="Panel browser closed.", embed=None, view=None)
-        except Exception:
+        except Exception as exc:
             log.exception("Close panel browser failed")
-            if not interaction.response.is_done():
-                await interaction.response.send_message("Something went wrong.", ephemeral=True)
+            if interaction.response.is_done():
+                await interaction.followup.send(application_error_message(exc), ephemeral=True)
+            else:
+                await interaction.response.send_message(application_error_message(exc), ephemeral=True)
 
 
-class PanelDeleteConfirm(discord.ui.View):
+class PanelDeleteConfirm(FeedbackAwareView):
     def __init__(self, cog: "PanelCog", panel: dict[str, Any], browser: PanelBrowserView):
         super().__init__(timeout=60)
         self.cog, self.panel, self.browser = cog, panel, browser
@@ -903,16 +1240,16 @@ class PanelDeleteConfirm(discord.ui.View):
             await interaction.followup.send("Panel deleted.", ephemeral=True)
             self.browser.panel_ids = [pid for pid in self.browser.panel_ids if pid != int(panel["id"])]
             self.browser.page = min(self.browser.page, max(0, len(self.browser.panel_ids)-1))
-        except Exception:
+        except Exception as exc:
             log.exception("Confirm panel deletion failed")
-            await interaction.followup.send("Something went wrong deleting the panel.", ephemeral=True)
+            await interaction.followup.send(application_error_message(exc), ephemeral=True)
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(content="Deletion cancelled.", view=None)
 
 
-class PanelResultView(discord.ui.View):
+class PanelResultView(FeedbackAwareView):
     def __init__(self, cog: "PanelCog", panel_id: int):
         super().__init__(timeout=180)
         self.cog, self.panel_id = cog, panel_id
@@ -922,7 +1259,7 @@ class PanelResultView(discord.ui.View):
         try:
             ids = [self.panel_id] if await _get_panel(self.panel_id, _nsfw(interaction)) else []
             await self.cog._post_browser(interaction, ids)
-        except Exception:
+        except Exception as exc:
             log.exception("View saved panel failed")
             await interaction.response.send_message("Something went wrong.", ephemeral=True)
 
@@ -932,9 +1269,11 @@ class PanelResultView(discord.ui.View):
             panel = await _get_panel(self.panel_id, True)
             if not panel or not await _can_manage(interaction, panel):
                 await interaction.response.send_message("You cannot edit this panel.", ephemeral=True); return
-            await interaction.response.send_modal(PanelForm(self.cog, mode="edit", user_id=interaction.user.id,
-                                                            guild_id=interaction.guild_id or 0, panel=panel))
-        except Exception:
+            await self.cog._open_tag_picker(
+                interaction, mode="edit", user_id=interaction.user.id,
+                guild_id=interaction.guild_id or 0, panel=panel,
+            )
+        except Exception as exc:
             log.exception("Edit saved panel failed")
             await interaction.response.send_message("Something went wrong.", ephemeral=True)
 
@@ -943,7 +1282,7 @@ class PanelResultView(discord.ui.View):
         await interaction.response.edit_message(content="Done.", embed=None, view=None)
 
 
-class PanelHomeView(discord.ui.View):
+class PanelHomeView(FeedbackAwareView):
     def __init__(self, cog: "PanelCog"):
         super().__init__(timeout=300)
         self.cog = cog
@@ -968,7 +1307,9 @@ class PanelHomeView(discord.ui.View):
     async def add(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.guild_id is None:
             await interaction.response.send_message("Adding panels is only available in a server.", ephemeral=True); return
-        await interaction.response.send_modal(PanelForm(self.cog, mode="add", user_id=interaction.user.id, guild_id=interaction.guild_id))
+        await self.cog._open_tag_picker(
+            interaction, mode="add", user_id=interaction.user.id, guild_id=interaction.guild_id,
+        )
 
     @discord.ui.button(label="Configure", emoji="⚙️", style=discord.ButtonStyle.secondary, row=1)
     async def configure(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -990,13 +1331,13 @@ class PanelHomeView(discord.ui.View):
                 for r in rows
             ) or "No moderation actions have been logged for this server."
             await interaction.response.send_message(embed=embed, ephemeral=True)
-        except Exception:
+        except Exception as exc:
             log.exception("Moderation log view failed")
-            if interaction.response.is_done(): await interaction.followup.send("Something went wrong.", ephemeral=True)
-            else: await interaction.response.send_message("Something went wrong.", ephemeral=True)
+            if interaction.response.is_done(): await interaction.followup.send(application_error_message(exc), ephemeral=True)
+            else: await interaction.response.send_message(application_error_message(exc), ephemeral=True)
 
 
-class PanelAttachmentPicker(discord.ui.View):
+class PanelAttachmentPicker(FeedbackAwareView):
     def __init__(self, cog: "PanelCog", message: discord.Message, attachments: list[discord.Attachment]):
         super().__init__(timeout=120)
         self.cog, self.message, self.attachments = cog, message, attachments
@@ -1010,9 +1351,11 @@ class PanelAttachmentPicker(discord.ui.View):
     async def choose(self, interaction: discord.Interaction):
         try:
             selected = self.attachments[int(self.children[0].values[0])]
-            await interaction.response.send_modal(PanelForm(self.cog, mode="add", user_id=interaction.user.id,
-                                                            guild_id=interaction.guild_id or 0, source_url=self.message.jump_url))
-        except Exception:
+            await self.cog._open_tag_picker(
+                interaction, mode="add", user_id=interaction.user.id,
+                guild_id=interaction.guild_id or 0, source_url=self.message.jump_url,
+            )
+        except Exception as exc:
             log.exception("Attachment selection failed")
             await interaction.response.send_message("Something went wrong.", ephemeral=True)
 
@@ -1046,6 +1389,29 @@ class PanelCog(commands.Cog):
             except discord.HTTPException: return
         await self._delete_message(channel, int(panel["storage_message_id"]))
 
+    async def _open_tag_picker(
+        self,
+        interaction: discord.Interaction,
+        *,
+        mode: str,
+        user_id: int,
+        guild_id: int,
+        panel: dict[str, Any] | None = None,
+        source_url: str | None = None,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        catalogue = _build_panel_tag_catalogue()
+        view = PanelTagPickerView(
+            self,
+            catalogue=catalogue,
+            mode=mode,
+            user_id=user_id,
+            guild_id=guild_id,
+            panel=panel,
+            source_url=source_url,
+        )
+        await interaction.followup.send(content=view._content(), view=view, ephemeral=True)
+
     async def _post_browser(self, interaction: discord.Interaction, ids: list[int], tags: list[str] | None = None,
                             keyword: str | None = None, user_id: int | None = None, fixed_ids: bool = False):
         try:
@@ -1070,10 +1436,10 @@ class PanelCog(commands.Cog):
             msg = "Public panel browser posted in this channel."
             if interaction.response.is_done(): await interaction.followup.send(msg, ephemeral=True)
             else: await interaction.response.send_message(msg, ephemeral=True)
-        except Exception:
+        except Exception as exc:
             log.exception("Could not post panel browser")
-            if interaction.response.is_done(): await interaction.followup.send("Something went wrong opening the browser.", ephemeral=True)
-            else: await interaction.response.send_message("Something went wrong opening the browser.", ephemeral=True)
+            if interaction.response.is_done(): await interaction.followup.send(application_error_message(exc), ephemeral=True)
+            else: await interaction.response.send_message(application_error_message(exc), ephemeral=True)
 
     async def _resolved_embed(self, panel, page, total):
         url = await _fresh_attachment(self.bot, panel)
@@ -1107,7 +1473,7 @@ class PanelCog(commands.Cog):
                 await interaction.response.edit_message(content="No panels match this filter.", embed=None, view=browser); return
             embed = await self._resolved_embed(panel, browser.page+1, len(ids))
             await interaction.response.edit_message(content=None, embed=embed, view=browser)
-        except Exception:
+        except Exception as exc:
             log.exception("Rendering panel browser failed")
             if interaction.response.is_done(): await interaction.followup.send("Something went wrong.", ephemeral=True)
             else: await interaction.response.send_message("Something went wrong.", ephemeral=True)
@@ -1125,7 +1491,7 @@ class PanelCog(commands.Cog):
                 interaction, ids, user_id=interaction.user.id if action == "mine" else None,
                 fixed_ids=(action == "random"),
             )
-        except Exception:
+        except Exception as exc:
             log.exception("Panel home action failed")
             if interaction.response.is_done(): await interaction.followup.send("Something went wrong.", ephemeral=True)
             else: await interaction.response.send_message("Something went wrong.", ephemeral=True)
@@ -1135,12 +1501,19 @@ class PanelCog(commands.Cog):
     async def panels(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer(ephemeral=True, thinking=True)
-            count = await _count(_nsfw(interaction))
+            server_count = (
+                await _count_from_guild(interaction.guild_id)
+                if interaction.guild_id is not None else 0
+            )
+            global_count = await _count(True)
             embed = discord.Embed(
                 title="📚 Manga Panel Archive",
                 description=(
                     "A shared gallery of manga moments, double spreads, and standout artwork.\n"
-                    f"**{count:,}** panels are visible in this channel."
+                    + "```ansi\n"
+                    + f"\u001b[1;32m{server_count:,}\u001b[0m Panels are From This Server\n"
+                    + f"Total amount of Panels Globally \u001b[1;36m{global_count:,}\u001b[0m\n"
+                    + "```"
                 ),
                 colour=PALETTE.PRIMARY,
             )
@@ -1150,7 +1523,7 @@ class PanelCog(commands.Cog):
             if not _nsfw(interaction):
                 embed.add_field(name="🔞 Content visibility", value="Mature panels are hidden in channels that are not age-restricted.", inline=False)
             await interaction.followup.send(embed=embed, view=PanelHomeView(self), ephemeral=True)
-        except Exception:
+        except Exception as exc:
             log.exception("/panels failed")
             if interaction.response.is_done(): await interaction.followup.send("Something went wrong.", ephemeral=True)
             else: await interaction.response.send_message("Something went wrong.", ephemeral=True)
@@ -1163,11 +1536,13 @@ class PanelCog(commands.Cog):
             if not images:
                 await interaction.response.send_message("That message has no supported image attachments.", ephemeral=True); return
             if len(images) == 1:
-                await interaction.response.send_modal(PanelForm(self, mode="add", user_id=interaction.user.id,
-                                                                guild_id=interaction.guild_id, source_url=message.jump_url))
+                await self._open_tag_picker(
+                    interaction, mode="add", user_id=interaction.user.id,
+                    guild_id=interaction.guild_id, source_url=message.jump_url,
+                )
             else:
                 await interaction.response.send_message("Choose the image to save, then complete the Add Panel form.", view=PanelAttachmentPicker(self, message, images), ephemeral=True)
-        except Exception:
+        except Exception as exc:
             log.exception("Save to Panels context menu failed")
             if interaction.response.is_done(): await interaction.followup.send("Something went wrong.", ephemeral=True)
             else: await interaction.response.send_message("Something went wrong.", ephemeral=True)

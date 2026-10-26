@@ -1,5 +1,6 @@
 from helpers.color_palette import PALETTE
 import discord
+from helpers.command_error_handler import FeedbackAwareView, application_error_message
 from discord import app_commands
 from discord.ext import commands
 import logging
@@ -143,7 +144,7 @@ class InviteCog(commands.Cog):
             
             error_embed = discord.Embed(
                 title="❌ Error",
-                description="Failed to generate invite link. Please try again later.",
+                description=application_error_message(e),
                 color=PALETTE.DANGER
             )
             
@@ -153,7 +154,7 @@ class InviteCog(commands.Cog):
             )
 
 
-class InviteView(discord.ui.View):
+class InviteView(FeedbackAwareView):
     """View with invite button."""
     
     def __init__(self, invite_url):

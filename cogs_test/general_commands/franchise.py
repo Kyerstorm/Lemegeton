@@ -1,6 +1,7 @@
 """AniList relationship browser for source works, adaptations, sequels, and spin-offs."""
 from __future__ import annotations
 import discord
+from helpers.command_error_handler import FeedbackAwareView
 from discord import app_commands
 from discord.ext import commands
 from helpers.anilist_helper import fetch_media_by_id, fetch_media_by_search
@@ -45,7 +46,7 @@ def relation_embed(media: dict, page: int = 0) -> discord.Embed:
     embed.set_footer(text=f"📚 Source: AniList relationships · Page {page + 1}/{max(1, (len(relations) - 1) // page_size + 1)}")
     return embed
 
-class RelationView(discord.ui.View):
+class RelationView(FeedbackAwareView):
     def __init__(self, media: dict, owner_id: int):
         super().__init__(timeout=180)
         self.media = media
@@ -106,7 +107,7 @@ class FranchiseSelect(discord.ui.Select):
         relation_view = RelationView(media, view.owner_id)
         await interaction.edit_original_response(content=None, embed=relation_embed(media), view=relation_view)
 
-class FranchiseSearchView(discord.ui.View):
+class FranchiseSearchView(FeedbackAwareView):
     def __init__(self, owner_id: int, category: str, results: list[dict]):
         super().__init__(timeout=180)
         self.owner_id = owner_id

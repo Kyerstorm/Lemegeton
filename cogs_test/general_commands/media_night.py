@@ -7,6 +7,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 import aiohttp
 import discord
+from helpers.command_error_handler import FeedbackAwareView
 from discord import app_commands
 from discord.ext import commands, tasks
 from database import execute_db_operation
@@ -40,7 +41,7 @@ def title_of(item: dict) -> str:
     titles = item.get("title") or {}
     return titles.get("english") or titles.get("romaji") or "Untitled media"
 
-class MediaNightView(discord.ui.View):
+class MediaNightView(FeedbackAwareView):
     """Persistent vote buttons encode a session ID and candidate index."""
     def __init__(self, cog: "MediaNight", session_id: str, candidate_count: int):
         super().__init__(timeout=None)

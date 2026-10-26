@@ -1,5 +1,6 @@
 from helpers.color_palette import PALETTE
 import discord
+from helpers.command_error_handler import application_error_message, FeedbackAwareView
 from discord.ext import commands
 from discord import app_commands
 import aiohttp
@@ -204,7 +205,7 @@ def truncate_description(description: str, max_length: int = 200) -> str:
 # ------------------------------------------------------
 # PAGINATION VIEW CLASS - ONE TITLE PER PAGE
 # ------------------------------------------------------
-class RecommendationsView(discord.ui.View):
+class RecommendationsView(FeedbackAwareView):
     def __init__(
         self, user_id: int, recommendations_data: Dict[str, List],
         username: str, media_type: str = "MANGA",
@@ -407,7 +408,7 @@ class RecommendationsView(discord.ui.View):
             try:
                 embed = build_error_embed(
                     "Error",
-                    "An error occurred while switching categories. Please try again."
+                    application_error_message(e)
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
             except:
@@ -438,7 +439,7 @@ class RecommendationsView(discord.ui.View):
             try:
                 embed = build_error_embed(
                     "Error",
-                    "An error occurred while switching categories. Please try again."
+                    application_error_message(e)
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
             except:
@@ -514,7 +515,7 @@ class RecommendationsView(discord.ui.View):
             try:
                 embed = build_error_embed(
                     "Error",
-                    "An error occurred while navigating. Please try again."
+                    application_error_message(e)
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
             except:
@@ -546,7 +547,7 @@ class RecommendationsView(discord.ui.View):
             try:
                 embed = build_error_embed(
                     "Error",
-                    "An error occurred while navigating. Please try again."
+                    application_error_message(e)
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
             except:
@@ -850,7 +851,7 @@ class RecommendationsCog(commands.Cog):
                     logger.error(f"Error retrieving username from database: {e}", exc_info=True)
                     embed = build_error_embed(
                         "Database Error",
-                        "Error accessing database. Please provide an AniList username manually."
+                        "Automatic username lookup failed. You can enter an AniList username manually.\n\n" + application_error_message(e)
                     )
                     await interaction.followup.send(embed=embed, ephemeral=True)
                     return
@@ -910,7 +911,7 @@ class RecommendationsCog(commands.Cog):
                 logger.error(f"Error fetching manga list: {e}", exc_info=True)
                 embed = build_error_embed(
                     "Error",
-                    f"Could not fetch manga list for '{username}'. Please check the username and try again."
+                    f"Could not fetch manga list for '{username}'. Check the username, then try again.\n\n" + application_error_message(e)
                 )
                 await interaction.edit_original_response(embed=embed)
                 return
@@ -970,7 +971,7 @@ class RecommendationsCog(commands.Cog):
             logger.error(f"Error in recommendations command: {e}", exc_info=True)
             embed = build_error_embed(
                 "Error",
-                "An unexpected error occurred while generating recommendations. Please try again later."
+                application_error_message(e)
             )
             await interaction.edit_original_response(embed=embed)
 

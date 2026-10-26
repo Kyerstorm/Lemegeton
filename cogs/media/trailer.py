@@ -1,5 +1,6 @@
 # trailer_cog.py
 import discord
+from helpers.command_error_handler import FeedbackAwareView, application_error_message
 from discord import app_commands
 from discord.ext import commands
 import aiohttp
@@ -276,7 +277,7 @@ class TrailerCog(commands.Cog):
 
             parent_interaction = interaction  # preserve original interaction to post the final trailer publicly
 
-            class SelectMenu(discord.ui.View):
+            class SelectMenu(FeedbackAwareView):
                 def __init__(self, parent_cog: "TrailerCog", media_list: typing.List[dict], debug_flag: bool, allow_nsfw_flag: bool, parent_inter: discord.Interaction, method_used_str: str):
                     super().__init__(timeout=30)
                     self.parent_cog = parent_cog
@@ -351,7 +352,7 @@ class TrailerCog(commands.Cog):
             try:
                 embed = build_error_embed(
                     "Error",
-                    "An error occurred while sending the trailer."
+                    application_error_message(e)
                 )
                 await public_interaction.followup.send(embed=embed, ephemeral=True)
             except Exception as e2:

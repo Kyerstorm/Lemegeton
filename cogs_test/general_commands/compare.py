@@ -6,6 +6,7 @@ import os
 import re
 import aiohttp
 import discord
+from helpers.command_error_handler import FeedbackAwareView
 from discord import app_commands
 from discord.ext import commands
 from helpers.anilist_helper import fetch_media_by_search
@@ -182,7 +183,7 @@ class CompareSelect(discord.ui.Select):
             self.owner_view.second_index = int(self.values[0])
         await interaction.response.defer()
 
-class CompareView(discord.ui.View):
+class CompareView(FeedbackAwareView):
     def __init__(self, cog: "Compare", owner_id: int, category: str, first: list[dict], second: list[dict]):
         super().__init__(timeout=180)
         self.cog = cog

@@ -1,5 +1,6 @@
 from helpers.color_palette import PALETTE
 import discord
+from helpers.command_error_handler import application_error_message, FeedbackAwareModal, FeedbackAwareView
 from discord.ext import commands
 from discord import app_commands
 import logging
@@ -635,7 +636,7 @@ class InviteTracker(commands.Cog):
             await interaction.followup.send(
                 embed=build_error_embed(
                     title="Error",
-                    description="An error occurred while fetching statistics. Please try again."
+                    description=application_error_message(e)
                 ),
                 ephemeral=True
             )
@@ -926,7 +927,7 @@ class InviteTracker(commands.Cog):
             await interaction.followup.send(
                 embed=build_error_embed(
                     title="Error",
-                    description="An error occurred while fetching the leaderboard. Please try again."
+                    description=application_error_message(e)
                 ),
                 ephemeral=True
             )
@@ -972,7 +973,7 @@ class InviteTracker(commands.Cog):
             await interaction.followup.send(
                 embed=build_error_embed(
                     title="Error",
-                    description="An error occurred while loading theme settings. Please try again."
+                    description=application_error_message(e)
                 ),
                 ephemeral=True
             )
@@ -986,7 +987,7 @@ class InviteTracker(commands.Cog):
 # Interactive UI Components for Invite Theme Customization
 # ------------------------------------------------------
 
-class CustomMessageModal(discord.ui.Modal, title="Custom Message Editor"):
+class CustomMessageModal(FeedbackAwareModal, title="Custom Message Editor"):
     """Modal for editing custom join/leave messages"""
 
     def __init__(self, guild_id: int, message_type: str, existing_messages: List[str]):
@@ -1073,13 +1074,13 @@ class CustomMessageModal(discord.ui.Modal, title="Custom Message Editor"):
             await interaction.followup.send(
                 embed=build_error_embed(
                     title="Error",
-                    description="An error occurred while saving messages. Please try again."
+                    description=application_error_message(e)
                 ),
                 ephemeral=True
             )
 
 
-class InviteThemeView(discord.ui.View):
+class InviteThemeView(FeedbackAwareView):
     """Interactive view for invite theme customization"""
 
     def __init__(self, guild_id: int, xianxia_enabled: int, custom_join: List[str], custom_leave: List[str], owner_id: int):
@@ -1180,7 +1181,7 @@ class InviteThemeView(discord.ui.View):
             await interaction.followup.send(
                 embed=build_error_embed(
                     title="Error",
-                    description="An error occurred. Please try again."
+                    description=application_error_message(e)
                 ),
                 ephemeral=True
             )

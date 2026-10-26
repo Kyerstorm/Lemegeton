@@ -12,6 +12,7 @@ import aiohttp
 import discord
 from discord.ext import commands
 import config
+from helpers.command_error_handler import handle_application_command_error, handle_prefix_command_error
 from web.custom_role_picker_server import CustomRolePickerServer, loopback_bind_host as _loopback_bind_host
 
 # Suppress deprecation warning from discord.py's internal WebSocket connection code
@@ -499,6 +500,12 @@ intents.message_content = True
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents, application_id=config.BOT_ID)
+
+
+@bot.tree.error
+async def on_app_command_error(interaction, error):
+    """Report unhandled slash-command errors privately and log enough context to debug them."""
+    await handle_application_command_error(interaction, error)
 
 # Initialize webhook notifier with Discord webhook from config
 WEBHOOK_URLS = {
@@ -1458,10 +1465,10 @@ async def on_error(event, *args, **kwargs):
     """Log unhandled errors in bot events."""
     logger.error(f"Unhandled error in event '{event}': {args}, {kwargs}", exc_info=True)
 
-@bot.event 
+@bot.event
 async def on_command_error(ctx, error):
-    """Log command errors."""
-    logger.error(f"Command error in '{ctx.command}' by {ctx.author}: {error}", exc_info=True)
+    """Log prefix command errors and show users how to report unexpected failures."""
+    await handle_prefix_command_error(ctx, error)
 
 @bot.event
 async def on_guild_join(guild):

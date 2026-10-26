@@ -4,6 +4,7 @@ Consolidates all server management commands into a single interactive interface
 """
 
 import discord
+from helpers.command_error_handler import application_error_message, FeedbackAwareModal, FeedbackAwareView
 from discord.ext import commands
 from discord import app_commands
 import logging
@@ -69,7 +70,7 @@ def validate_config_channel(channel, guild_id: int, bot_member, is_text_channel:
     return None
 
 
-class ServerConfigMainView(discord.ui.View):
+class ServerConfigMainView(FeedbackAwareView):
     """Main menu view for unified server configuration system"""
     
     def __init__(self, cog, guild_id: int):
@@ -274,7 +275,7 @@ class ServerConfigMainView(discord.ui.View):
             await interaction.followup.send(
                 embed=build_error_embed(
                     title="Error",
-                    description="Failed to load server settings. Please try again."
+                    description=application_error_message(e)
                 ),
                 ephemeral=True
             )
@@ -345,13 +346,13 @@ class ServerConfigMainView(discord.ui.View):
             await interaction.followup.send(
                 embed=build_error_embed(
                     "Diagnostics Failed",
-                    "Could not read all settings. Check bot/database logs and try again.",
+                    application_error_message(exc),
                 ),
                 ephemeral=True,
             )
 
 
-class ConfirmChannelRemovalView(discord.ui.View):
+class ConfirmChannelRemovalView(FeedbackAwareView):
     """Require an explicit, guild-scoped confirmation before clearing a channel setting."""
 
     def __init__(self, cog, guild_id: int, setting: str):
@@ -396,7 +397,7 @@ class ConfirmChannelRemovalView(discord.ui.View):
         except Exception as exc:
             logger.error("Channel setting removal failed in guild %s: %s", self.guild_id, exc, exc_info=True)
             await interaction.edit_original_response(
-                embed=build_error_embed("Removal Failed", "The setting was not confirmed as removed. Check the database logs."),
+                embed=build_error_embed("Removal Failed", application_error_message(exc)),
                 view=None,
             )
 
@@ -408,7 +409,7 @@ class ConfirmChannelRemovalView(discord.ui.View):
         )
 
 
-class BotUpdatesConfigView(discord.ui.View):
+class BotUpdatesConfigView(FeedbackAwareView):
     """View for configuring bot updates channel"""
     
     def __init__(self, cog, current_channel_id, guild_id: int):
@@ -466,7 +467,7 @@ class BotUpdatesConfigView(discord.ui.View):
             view=ServerConfigMainView(self.cog, self.guild_id),
         )
 
-class InviteChannelConfigView(discord.ui.View):
+class InviteChannelConfigView(FeedbackAwareView):
     """View for configuring invite tracking channel"""
     
     def __init__(self, cog, current_channel_id, guild_id: int):
@@ -524,7 +525,7 @@ class InviteChannelConfigView(discord.ui.View):
             view=ServerConfigMainView(self.cog, self.guild_id),
         )
 
-class SetBotUpdatesChannelModal(discord.ui.Modal):
+class SetBotUpdatesChannelModal(FeedbackAwareModal):
     """Modal for setting bot updates channel"""
     
     def __init__(self, cog, guild_id: int):
@@ -612,13 +613,13 @@ class SetBotUpdatesChannelModal(discord.ui.Modal):
             await interaction.followup.send(
                 embed=build_error_embed(
                     title="Error",
-                    description="Failed to set bot updates channel. Please try again."
+                    description=application_error_message(e)
                 ),
                 ephemeral=True
             )
 
 
-class SetInviteChannelModal(discord.ui.Modal):
+class SetInviteChannelModal(FeedbackAwareModal):
     """Modal for setting invite tracking channel"""
     
     def __init__(self, cog, guild_id: int):
@@ -716,7 +717,7 @@ class SetInviteChannelModal(discord.ui.Modal):
             await interaction.followup.send(
                 embed=build_error_embed(
                     title="Error",
-                    description="Failed to set invite tracking channel. Please try again."
+                    description=application_error_message(e)
                 ),
                 ephemeral=True
             )
@@ -796,7 +797,7 @@ class ServerConfig(commands.Cog):
             await interaction.response.send_message(
                 embed=build_error_embed(
                     title="Error",
-                    description="Failed to open server configuration. Please try again."
+                    description=application_error_message(e)
                 ),
                 ephemeral=True
             )

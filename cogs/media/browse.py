@@ -1,5 +1,6 @@
 from helpers.color_palette import PALETTE
 import discord
+from helpers.command_error_handler import application_error_message, FeedbackAwareView
 from discord.ext import commands
 from discord import app_commands
 import aiohttp
@@ -13,7 +14,7 @@ from botasaurus.browser import browser as botasaurus_browser, Driver, Wait
 from helpers.web_scraper import (
     fetch_public_page, ScrapeBlockedError, ScrapeRequestError, detect_access_challenge,
 )
-from discord.ui import View, Button
+from discord.ui import Button
 from database import get_all_users_guild_aware
 from helpers.embed_helper import build_error_embed, build_info_embed
 from helpers.anilist_helper import post_graphql
@@ -1185,9 +1186,13 @@ class BrowseCog(commands.Cog):
             except asyncio.TimeoutError:
                 logger.warning("Book search timed out for %r (%s)", title, book_type)
                 results = []
-            except Exception:
+            except Exception as exc:
                 logger.exception("Book search failed for %r (%s)", title, book_type)
-                results = []
+                await interaction.followup.send(
+                    embed=build_error_embed("Book Search Failed", application_error_message(exc)),
+                    ephemeral=True,
+                )
+                return
             if not results:
                 category_name = "general novels" if book_type == "fiction" else "non-fiction books"
                 embed = build_error_embed(
@@ -1384,7 +1389,7 @@ class BrowseCog(commands.Cog):
         # --------------------------------------------------
         # PageView with Lazy-Loading
         # --------------------------------------------------
-        class PageView(View):
+        class PageView(FeedbackAwareView):
             def __init__(self, embed1, media_data, real_type_val, guild_id, bot):
                 super().__init__(timeout=300)
                 self.embed1 = embed1

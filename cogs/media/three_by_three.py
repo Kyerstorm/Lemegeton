@@ -1,5 +1,6 @@
 from helpers.color_palette import PALETTE
 import discord
+from helpers.command_error_handler import application_error_message, FeedbackAwareModal, FeedbackAwareView
 from discord.ext import commands
 from discord import app_commands
 import aiohttp
@@ -320,7 +321,7 @@ class CoverCache:
 
 
 
-class ThreeByThreeModal(discord.ui.Modal):
+class ThreeByThreeModal(FeedbackAwareModal):
     """Modal for collecting 9 AniList URLs or IGDB game URLs"""
     
     def __init__(self, media_type: str, cog):
@@ -397,7 +398,7 @@ class ThreeByThreeModal(discord.ui.Modal):
         await interaction.followup.send("", view=ContinueView(second_modal), ephemeral=True)
 
 
-class ThreeByThreeModalPart2(discord.ui.Modal):
+class ThreeByThreeModalPart2(FeedbackAwareModal):
     """Second modal for collecting remaining 4 inputs"""
     
     def __init__(self, media_type: str, previous_inputs: List[str], cog):
@@ -519,12 +520,12 @@ class ThreeByThreeModalPart2(discord.ui.Modal):
             logger.error(f"Error generating 3x3: {e}", exc_info=True)
             embed = build_error_embed(
                 "Error",
-                "An error occurred while generating your 3x3. Please try again."
+                application_error_message(e)
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
 
 
-class ContinueView(discord.ui.View):
+class ContinueView(FeedbackAwareView):
     """View with a button to show the second modal"""
     
     def __init__(self, modal: discord.ui.Modal):

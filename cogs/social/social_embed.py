@@ -1,6 +1,7 @@
 import discord
+from helpers.command_error_handler import FeedbackAwareView
 from discord.ext import commands
-from discord.ui import View, Button
+from discord.ui import Button
 import re
 import aiohttp
 from pathlib import Path
@@ -45,7 +46,7 @@ def rewrite_url(url: str):
 # Buttons
 # ------------------------------
 
-class SimpleView(View):
+class SimpleView(FeedbackAwareView):
     def __init__(self, url: str, author_id: int):
         super().__init__(timeout=7200)  # 2 hours
         self.add_item(Button(label="View", url=url, style=discord.ButtonStyle.link))
