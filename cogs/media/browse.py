@@ -1213,12 +1213,16 @@ class BrowseCog(commands.Cog):
             )
             if novel.get("image"):
                 embed.set_thumbnail(url=novel["image"])
+            if novel.get("author"):
+                embed.add_field(name="✍️ Author", value=str(novel["author"])[:1024], inline=True)
+            if novel.get("status"):
+                embed.add_field(name="📌 Status", value=str(novel["status"])[:1024], inline=True)
             if novel.get("rating"):
-                embed.add_field(name="⭐ Rating", value=novel["rating"], inline=True)
+                embed.add_field(name="⭐ Rating", value=str(novel["rating"])[:1024], inline=True)
             if novel.get("genres"):
-                genres = ", ".join(novel["genres"])
+                genres = ", ".join(str(value) for value in novel["genres"])
                 embed.add_field(name="🎭 Genres", value=genres[:1024], inline=False)
-            embed.set_footer(text="Fetched from Novel Updates")
+            embed.set_footer(text="Fetched from Novel Updates · Source metadata may be incomplete when the provider changes its page layout")
             await interaction.followup.send(embed=embed)
             return
 
