@@ -5,6 +5,7 @@ Consolidates bot moderator commands into a single interactive interface
 """
 
 import discord
+from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView, application_error_message, prefix_error_message, FEEDBACK_ERROR_GUIDANCE
 from discord.ext import commands
 import logging
 from pathlib import Path
@@ -48,7 +49,7 @@ if not any(isinstance(h, logging.FileHandler) and getattr(h, 'baseFilename', Non
 logger.info("Bot moderators logging initialized")
 
 
-class BotModeratorsMainView(discord.ui.View):
+class BotModeratorsMainView(FeedbackAwareView):
     """Main menu view for bot moderators management"""
     
     def __init__(self, cog):
@@ -117,7 +118,7 @@ class BotModeratorsMainView(discord.ui.View):
         
         except Exception as e:
             logger.error(f"Error viewing bot moderators: {e}", exc_info=True)
-            embed = build_error_embed("Error", "Failed to load bot moderators list.")
+            embed = build_error_embed("Error", application_error_message(e))
             await interaction.followup.send(embed=embed, ephemeral=True)
     
     @discord.ui.button(label="➕ Add Moderator", style=discord.ButtonStyle.success, row=0)
@@ -202,7 +203,7 @@ class BotModeratorsMainView(discord.ui.View):
         logger.info(f"Displayed bot moderator info to {interaction.user.id}")
 
 
-class AddBotModeratorModal(discord.ui.Modal):
+class AddBotModeratorModal(FeedbackAwareModal):
     """Modal for adding a bot moderator"""
     
     def __init__(self, cog):
@@ -284,11 +285,11 @@ class AddBotModeratorModal(discord.ui.Modal):
         
         except Exception as e:
             logger.error(f"Error adding bot moderator: {e}", exc_info=True)
-            embed = build_error_embed("Error", "An error occurred while adding bot moderator.")
+            embed = build_error_embed("Error", application_error_message(e))
             await interaction.followup.send(embed=embed, ephemeral=True)
 
 
-class RemoveBotModeratorModal(discord.ui.Modal):
+class RemoveBotModeratorModal(FeedbackAwareModal):
     """Modal for removing a bot moderator"""
     
     def __init__(self, cog):
@@ -356,7 +357,7 @@ class RemoveBotModeratorModal(discord.ui.Modal):
         
         except Exception as e:
             logger.error(f"Error removing bot moderator: {e}", exc_info=True)
-            embed = build_error_embed("Error", "An error occurred while removing bot moderator.")
+            embed = build_error_embed("Error", application_error_message(e))
             await interaction.followup.send(embed=embed, ephemeral=True)
 
 
@@ -425,7 +426,7 @@ class BotModerators(commands.Cog):
         
         except Exception as e:
             logger.error(f"Error in bot moderators command: {e}", exc_info=True)
-            embed = build_error_embed("Error", "Failed to open bot moderators management. Please try again.")
+            embed = build_error_embed("Error", prefix_error_message(e) or FEEDBACK_ERROR_GUIDANCE)
             try:
                 await ctx.send(embed=embed)
             except Exception:
