@@ -65,7 +65,10 @@ def date_is_in_window(value: str | None, start: datetime, end: datetime) -> bool
 
 
 def _title(record: dict[str, Any], tv: bool = False) -> str:
-    return str(record.get("name" if tv else "title") or record.get("original_name" if tv else "original_title") or "Untitled").strip()
+    value = record.get("name" if tv else "title") or record.get("original_name" if tv else "original_title")
+    if isinstance(value, dict):
+        value = value.get("english") or value.get("romaji") or value.get("native")
+    return str(value or "Untitled").strip()
 
 
 class ReleaseCalendar(commands.Cog):
@@ -278,6 +281,9 @@ class ReleaseCalendar(commands.Cog):
     @app_commands.checks.has_permissions(manage_guild=True)
     @command_meta(section="Community", name="Release Calendar Configure")
     async def configure(self, interaction: discord.Interaction, channel: discord.TextChannel, frequency: str = "weekly", categories: str = "anime,movies,tv") -> None:
+        if frequency not in {"daily", "weekly"}:
+            await interaction.response.send_message("Frequency must be daily or weekly.", ephemeral=True)
+            return
         if interaction.guild is None:
             await interaction.response.send_message("This setting is server-specific.", ephemeral=True)
             return
