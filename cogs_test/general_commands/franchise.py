@@ -16,6 +16,7 @@ from helpers.command_error_handler import FeedbackAwareView
 from helpers.anilist_helper import fetch_media_by_id, fetch_media_by_search
 from cogs.media.browse import BrowseCog, search_novelupdates
 from cogs_test.general_commands.dashboard import command_meta
+from helpers.media_graph import find_linked_resources, find_media_relationships, normalize_media_title, record_media_relationship
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +61,7 @@ def relation_embed(media: dict, page: int = 0) -> discord.Embed:
     provider = str(media.get("_provider") or "AniList")
     edges = _anilist_relation_edges(media)
     provider_related = media.get("_provider_related") or []
+    graph_related = media.get("_graph_related") or []
     all_items = [
         {
             "title": media_title(edge.get("node") or {}),
@@ -72,6 +74,15 @@ def relation_embed(media: dict, page: int = 0) -> discord.Embed:
         }
         for edge in edges
     ] + list(provider_related)
+    existing_relation_keys = {
+        (normalize_media_title(item.get("title")), str(item.get("type") or "").upper(), str(item.get("url") or ""))
+        for item in all_items
+    }
+    for item in graph_related:
+        key = (normalize_media_title(item.get("title")), str(item.get("type") or "").upper(), str(item.get("url") or ""))
+        if key not in existing_relation_keys:
+            all_items.append(item)
+            existing_relation_keys.add(key)
     embed = discord.Embed(
         title=f"🧬 Franchise · {title}"[:256],
         url=media.get("siteUrl"),
@@ -121,7 +132,7 @@ def relation_embed(media: dict, page: int = 0) -> discord.Embed:
             lines.append(line)
         embed.add_field(
             name=f"Related entries ({start + 1}–{start + len(visible)} of {len(all_items)})",
-            value="\n\n".join(lines)[:3900],
+            value="\n\n".join(lines)[:1024],
             inline=False,
         )
         embed.set_footer(text=f"{provider} metadata · Page {page + 1}/{max(1, (len(all_items) - 1) // page_size + 1)}")
@@ -175,6 +186,16 @@ def relation_embed(media: dict, page: int = 0) -> discord.Embed:
         link_lines.append(f"[{media['_source_label']}]({media['_source_url']})")
     if link_lines:
         embed.add_field(name="Provider and external links", value=" · ".join(link_lines)[:1024], inline=False)
+
+    resources = media.get("_community_resources") or []
+    if resources:
+        resource_lines = []
+        for resource in resources[:8]:
+            label = str(resource.get("title") or "Untitled resource").replace("[", "").replace("]", "").replace("(", "").replace(")", "")
+            if resource.get("url"):
+                label = f"[{label}]({resource['url']})"
+            resource_lines.append(f"**{str(resource.get('kind') or 'Community resource')[:60]}** · {label}\nSource: {resource.get('source') or 'Lemegeton'}")
+        embed.add_field(name="Connected community resources", value="\n\n".join(resource_lines)[:1024], inline=False)
     return embed
 
 
@@ -183,7 +204,11 @@ class RelationView(FeedbackAwareView):
         super().__init__(timeout=180)
         self.media = media
         self.owner_id = owner_id
-        relation_count = len(_anilist_relation_edges(media)) + len(media.get("_provider_related") or [])
+        relation_count = (
+            len(_anilist_relation_edges(media))
+            + len(media.get("_provider_related") or [])
+            + len(media.get("_graph_related") or [])
+        )
         self.max_page = max(0, (relation_count - 1) // 8)
         self.page = 0
         self.previous.disabled = True
@@ -311,6 +336,12 @@ class FranchiseSelect(discord.ui.Select):
             await view.cog.enrich_community_links(media, view.category, interaction.guild_id)
         except Exception:
             log.debug("Community relationship enrichment failed", exc_info=True)
+        try:
+            await view.cog.index_and_load_graph(media, view.category, interaction.guild_id)
+        except Exception:
+            log.warning("Cross-system relationship graph lookup failed", exc_info=True)
+            media["_graph_related"] = []
+            media["_community_resources"] = []
         relation_view = RelationView(media, view.owner_id)
         await interaction.edit_original_response(content=None, embed=relation_embed(media), view=relation_view)
 
@@ -539,6 +570,54 @@ class Franchise(commands.Cog):
             if len(existing) >= 24:
                 break
         media["_provider_related"] = existing
+
+    async def index_and_load_graph(self, media: dict, category: str, guild_id: int | None) -> None:
+        """Index only provider-declared relations and load safe, visible graph neighbors."""
+        source_title = media_title(media)
+        source_url = media.get("_source_url") or media.get("siteUrl")
+        for edge in _anilist_relation_edges(media):
+            node = edge.get("node") or {}
+            if not node:
+                continue
+            target_category = str(node.get("type") or "").upper()
+            if target_category == "MANGA" and str(node.get("format") or "").upper() == "NOVEL":
+                target_category = "LIGHT_NOVEL"
+            try:
+                await record_media_relationship(
+                    source_title, category, source_url,
+                    media_title(node), target_category, node.get("siteUrl"),
+                    str(edge.get("relationType") or "related"),
+                    source_kind="provider", source_label="AniList provider relationship",
+                )
+            except Exception:
+                log.debug("Could not index AniList relation for %s", source_title, exc_info=True)
+
+        for item in media.get("_provider_related") or []:
+            if item.get("source") != "TMDB collection":
+                continue
+            target_category = str(item.get("type") or "Movie").upper()
+            if target_category not in {"MOVIE", "TV"}:
+                target_category = "MOVIE" if "MOVIE" in target_category or "FILM" in target_category else "TV"
+            try:
+                await record_media_relationship(
+                    source_title, category, source_url,
+                    str(item.get("title") or ""), target_category, item.get("url"),
+                    str(item.get("relationType") or "collection member"),
+                    source_kind="provider", source_label="TMDB collection membership",
+                )
+            except Exception:
+                log.debug("Could not index TMDB collection member for %s", source_title, exc_info=True)
+
+        media["_graph_related"], media["_community_resources"] = await asyncio.gather(
+            find_media_relationships(source_title, category, source_url, guild_id),
+            find_linked_resources(
+                source_title,
+                category,
+                guild_id,
+                media_id=int(media["id"]) if str(media.get("id") or "").isdigit() and category in {"MANGA", "LIGHT_NOVEL"} else None,
+                url=source_url,
+            ),
+        )
 
     async def search_options(self, title: str, category: str) -> list[dict]:
         if category in ("ANIME", "MANGA", "LIGHT_NOVEL"):

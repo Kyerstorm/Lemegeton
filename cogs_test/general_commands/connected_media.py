@@ -14,6 +14,7 @@ from discord.ext import commands
 
 import database
 from cogs.media.browse import TMDB_API_BASE_URL, TMDB_IMAGE_BASE_URL, search_novelupdates
+from helpers.media_graph import record_media_relationship
 from cogs_test.general_commands.dashboard import command_meta
 
 log = logging.getLogger("Lemegeton.ConnectedMedia")
@@ -26,6 +27,7 @@ MEDIA_CATEGORIES = [
     app_commands.Choice(name="Webnovels", value="WEBNOVEL"),
     app_commands.Choice(name="Movies", value="MOVIE"),
     app_commands.Choice(name="TV series", value="TV"),
+    app_commands.Choice(name="Video games", value="GAME"),
 ]
 RELATION_TYPES = [
     app_commands.Choice(name="Adaptation", value="adaptation"),
@@ -696,6 +698,18 @@ class ConnectedMedia(commands.Cog):
             await interaction.response.send_message("That suggestion was reviewed by another moderator. Refresh the pending list.", ephemeral=True)
             return
         status = "approved as a community-verified suggestion (not provider-confirmed)" if decision == "approved" else "rejected"
+        if decision == "approved":
+            try:
+                await record_media_relationship(
+                    row[1], row[2], row[3], row[5], row[6], row[7], row[4],
+                    source_kind="community",
+                    source_label="Moderator-approved suggestion in this server",
+                    guild_id=interaction.guild_id,
+                    evidence=row[8],
+                    created_by=interaction.user.id,
+                )
+            except Exception:
+                log.warning("Approved media link #%s could not be indexed in the shared graph", suggestion_id, exc_info=True)
         await interaction.response.send_message(f"Suggestion **#{suggestion_id}** was {status}.", ephemeral=True)
 
     async def _create_discussion(self, interaction: discord.Interaction, media_type: str, title: str, reference: str, source_url: str | None) -> None:

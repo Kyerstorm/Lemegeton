@@ -66,6 +66,15 @@ HUB_SECTIONS = {
             "• /archive-report-review — triage archive reports"
         ),
     },
+    "gaming": {
+        "label": "Gaming",
+        "description": (
+            "**Discover games and connect them to other media**\n"
+            "• /game — IGDB metadata with exact-title Steam enrichment\n"
+            "• /link-suggest — submit a game-to-media relationship for moderator review\n"
+            "• Approved cross-media links and this server's community resources appear in game results"
+        ),
+    },
     "events": {
         "label": "Community events",
         "description": (
