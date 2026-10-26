@@ -40,13 +40,14 @@ def _rating_text(ratings: dict, key: str, label: str) -> str | None:
             return f"{label}: {score} (MDBList source)"
     return None
 
-def comparison_embed(category: str, first: dict, second: dict) -> discord.Embed:
+def comparison_embed(category: str, first: dict, second: dict, *additional: dict) -> discord.Embed:
+    items = (first, second, *additional)
     embed = discord.Embed(
-        title=f"⚖️ Media Comparison · {category.title()}",
+        title=f"⚖️ Media Comparison · {category.title()} · {len(items)} titles",
         description="Compare provider-reported details side by side. Missing data is marked unavailable; **no overall winner is calculated.**",
         color=discord.Color.blurple(),
     )
-    for item in (first, second):
+    for item in items:
         title = media_title(category, item)
         lines: list[str] = []
         url = None
@@ -173,7 +174,7 @@ def comparison_embed(category: str, first: dict, second: dict) -> discord.Embed:
             embed.add_field(name="Provider page", value=f"[Open {title[:80]}]({url})", inline=False)
         if cover and not embed.thumbnail:
             embed.set_thumbnail(url=cover)
-    embed.set_footer(text="📊 Sources: AniList · Google Books · Goodreads · TMDB · MDBList · IGDB · Steam")
+    embed.set_footer(text="📊 Sources: AniList · Novel Updates · Google Books · Goodreads · TMDB · MDBList · IGDB · Steam")
     return embed
 
 class CompareSelect(discord.ui.Select):
@@ -188,24 +189,20 @@ class CompareSelect(discord.ui.Select):
         super().__init__(placeholder=f"🔎 Choose the {side} title", options=options, min_values=1, max_values=1)
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        if self.side == "first":
-            self.owner_view.first_index = int(self.values[0])
-        else:
-            self.owner_view.second_index = int(self.values[0])
+        self.owner_view.selected_indices[self.side] = int(self.values[0])
         await interaction.response.defer()
 
 class CompareView(FeedbackAwareView):
-    def __init__(self, cog: "Compare", owner_id: int, category: str, first: list[dict], second: list[dict]):
+    def __init__(self, cog: "Compare", owner_id: int, category: str, results: list[list[dict]]):
         super().__init__(timeout=180)
         self.cog = cog
         self.owner_id = owner_id
         self.category = category
-        self.first = first[:25]
-        self.second = second[:25]
-        self.first_index = 0
-        self.second_index = 0
-        self.add_item(CompareSelect(self, "first", self.first))
-        self.add_item(CompareSelect(self, "second", self.second))
+        self.sides = ("first", "second", "third", "fourth")
+        self.results = {side: entries[:25] for side, entries in zip(self.sides, results)}
+        self.selected_indices = {side: 0 for side in self.results}
+        for side, entries in self.results.items():
+            self.add_item(CompareSelect(self, side, entries))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.owner_id:
@@ -216,9 +213,19 @@ class CompareView(FeedbackAwareView):
     @discord.ui.button(label="⚖️ Compare selected titles", style=discord.ButtonStyle.primary)
     async def compare_selected(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await interaction.response.defer()
-        first = await self.cog.enrich(self.category, self.first[self.first_index])
-        second = await self.cog.enrich(self.category, self.second[self.second_index])
-        await interaction.edit_original_response(embed=comparison_embed(self.category, first, second), view=None)
+        selected = [
+            self.cog.enrich(self.category, entries[self.selected_indices[side]])
+            for side, entries in self.results.items()
+        ]
+        enriched = await asyncio.gather(*selected, return_exceptions=True)
+        if any(isinstance(item, Exception) for item in enriched):
+            log.warning("A selected title could not be enriched for comparison")
+            await interaction.followup.send("At least one provider failed while loading the comparison. Try again with fewer titles or retry later.", ephemeral=True)
+            return
+        await interaction.edit_original_response(
+            embed=comparison_embed(self.category, enriched[0], enriched[1], *enriched[2:]),
+            view=None,
+        )
 
 class Compare(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -283,7 +290,7 @@ class Compare(commands.Cog):
                     item["_steam"] = await fetch_game_details(session, int(exact["appid"]))
         return item
 
-    @app_commands.command(name="compare", description="Compare two titles through their existing metadata providers")
+    @app_commands.command(name="compare", description="Compare two to four titles through existing metadata providers")
     @app_commands.guild_only()
     @app_commands.choices(category=[
         app_commands.Choice(name="Anime", value="ANIME"),
@@ -294,28 +301,39 @@ class Compare(commands.Cog):
         app_commands.Choice(name="TV show", value="TV"),
         app_commands.Choice(name="Video game", value="GAME"),
     ])
-    @app_commands.describe(first="First title", second="Second title", category="Category shared by both entries")
+    @app_commands.describe(
+        first="First title", second="Second title",
+        category="Category shared by every entry",
+        third="Optional third title", fourth="Optional fourth title",
+    )
     @command_meta(section="Media Discovery", name="Compare")
-    async def compare(self, interaction: discord.Interaction, first: str, second: str, category: str) -> None:
-        if not first.strip() or not second.strip():
-            await interaction.response.send_message("Enter a title for both sides of the comparison.", ephemeral=True)
+    async def compare(
+        self, interaction: discord.Interaction, first: str, second: str, category: str,
+        third: str | None = None, fourth: str | None = None,
+    ) -> None:
+        queries = [first, second, *[value for value in (third, fourth) if value and value.strip()]]
+        if any(not value.strip() for value in queries):
+            await interaction.response.send_message("Enter a title for every supplied comparison slot.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
-        try:
-            left, right = await asyncio.gather(self.search_options(category, first.strip()), self.search_options(category, second.strip()))
-        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
-            left, right = [], []
-        if not left or not right:
-            missing = []
-            if not left:
-                missing.append(f"the first title {first!r}")
-            if not right:
-                missing.append(f"the second title {second!r}")
-            await interaction.followup.send("Could not resolve " + " and ".join(missing) + ". Check provider configuration or try a more specific title.", ephemeral=True)
+        results = await asyncio.gather(
+            *(self.search_options(category, value.strip()) for value in queries),
+            return_exceptions=True,
+        )
+        missing = [
+            f"{['first', 'second', 'third', 'fourth'][index]} title {queries[index]!r}"
+            for index, result in enumerate(results)
+            if isinstance(result, Exception) or not result
+        ]
+        if missing:
+            await interaction.followup.send(
+                "Could not resolve " + ", ".join(missing) + ". Check provider configuration or try a more specific title.",
+                ephemeral=True,
+            )
             return
-        view = CompareView(self, interaction.user.id, category, left, right)
+        view = CompareView(self, interaction.user.id, category, results)
         await interaction.followup.send(
-            "🔎 **Choose the exact result for each side**, then compare. All ratings keep their original provider attribution.",
+            "🔎 **Choose the exact result for each title**, then compare. Ratings retain their provider attribution.",
             view=view, ephemeral=True,
         )
 
