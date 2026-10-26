@@ -409,25 +409,39 @@ async def search_novelupdates(
     if not normalized:
         return []
     key = (normalized.casefold(), bool(browser_fallback), max(1, min(int(max_http_urls), 3)), bool(require_genres))
-    now = time.monotonic()
-    cached = _NOVELUPDATES_SEARCH_CACHE.get(key)
-    if cached and cached[0] > now:
-        return [dict(item) for item in cached[1]]
-    results = await _search_novelupdates_uncached(
-        normalized,
-        browser_fallback=browser_fallback,
-        http_timeout=http_timeout,
-        max_http_urls=max_http_urls,
-        require_genres=require_genres,
-    )
-    if results:
+    async with _NOVELUPDATES_CACHE_LOCK:
+        cached = _NOVELUPDATES_SEARCH_CACHE.get(key)
+        if cached and cached[0] > time.monotonic():
+            return [dict(item) for item in cached[1]]
+        key_lock = _NOVELUPDATES_KEY_LOCKS.setdefault(key, asyncio.Lock())
+
+    # Coalesce concurrent searches for the same title without serializing searches
+    # for unrelated titles.
+    async with key_lock:
         async with _NOVELUPDATES_CACHE_LOCK:
-            now = time.monotonic()
-            expired = [cache_key for cache_key, value in _NOVELUPDATES_SEARCH_CACHE.items() if value[0] <= now]
-            for cache_key in expired:
-                _NOVELUPDATES_SEARCH_CACHE.pop(cache_key, None)
-            _NOVELUPDATES_SEARCH_CACHE[key] = (now + _NOVELUPDATES_CACHE_TTL, [dict(item) for item in results])
-    return results
+            cached = _NOVELUPDATES_SEARCH_CACHE.get(key)
+            if cached and cached[0] > time.monotonic():
+                return [dict(item) for item in cached[1]]
+        try:
+            results = await _search_novelupdates_uncached(
+                normalized,
+                browser_fallback=browser_fallback,
+                http_timeout=http_timeout,
+                max_http_urls=max_http_urls,
+                require_genres=require_genres,
+            )
+            if results:
+                async with _NOVELUPDATES_CACHE_LOCK:
+                    now = time.monotonic()
+                    expired = [cache_key for cache_key, value in _NOVELUPDATES_SEARCH_CACHE.items() if value[0] <= now]
+                    for cache_key in expired:
+                        _NOVELUPDATES_SEARCH_CACHE.pop(cache_key, None)
+                    _NOVELUPDATES_SEARCH_CACHE[key] = (now + _NOVELUPDATES_CACHE_TTL, [dict(item) for item in results])
+            return results
+        finally:
+            async with _NOVELUPDATES_CACHE_LOCK:
+                if _NOVELUPDATES_KEY_LOCKS.get(key) is key_lock:
+                    _NOVELUPDATES_KEY_LOCKS.pop(key, None)
 
 
 # Status order priority
