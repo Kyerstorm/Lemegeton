@@ -1019,8 +1019,16 @@ class BrowseCog(commands.Cog):
             if theme and not any(theme.casefold() in value for value in tags):
                 continue
             item_status = str(item.get("status") or "").replace("_", " ").casefold()
-            if status and status.casefold().replace("_", " ") not in item_status:
-                continue
+            status_filter = str(status or "").replace("_", " ").casefold()
+            status_aliases = {
+                "completed": "finished", "complete": "finished",
+                "ongoing": "releasing", "in progress": "releasing",
+                "upcoming": "not yet released", "cancelled": "cancelled",
+            }
+            if status_filter:
+                status_filter = status_aliases.get(status_filter, status_filter)
+                if status_filter not in item_status:
+                    continue
             year = ((item.get("startDate") or {}).get("year"))
             if year_from is not None and (not year or int(year) < year_from):
                 continue
@@ -1078,8 +1086,19 @@ class BrowseCog(commands.Cog):
             return False
         if language and str(media.get("original_language") or "").casefold() != language.casefold():
             return False
-        if status and status.casefold() not in str(media.get("status") or "").casefold():
-            return False
+        if status:
+            status_filter = status.casefold().strip()
+            actual_status = str(media.get("status") or "").casefold()
+            if status_filter in ("completed", "complete"):
+                matched_status = ("ended" in actual_status) or (is_movie and "released" in actual_status)
+            elif status_filter in ("ongoing", "in progress"):
+                matched_status = ("returning" in actual_status) or ("in production" in actual_status)
+            elif status_filter in ("upcoming", "planned"):
+                matched_status = "planned" in actual_status or "upcoming" in actual_status
+            else:
+                matched_status = status_filter in actual_status
+            if not matched_status:
+                return False
         runtimes = [media.get("runtime")] if is_movie else (media.get("episode_run_time") or [])
         runtimes = [int(value) for value in runtimes if isinstance(value, (int, float)) and value > 0]
         if runtime_min is not None or runtime_max is not None:
@@ -1400,7 +1419,9 @@ class BrowseCog(commands.Cog):
             results = [novel for novel in results if
                 (not genre or any(genre.casefold() in str(value).casefold() for value in (novel.get("genres") or [])))
                 and (not author or author.casefold() in str(novel.get("author") or "").casefold())
-                and (not status or status.casefold() in str(novel.get("status") or "").casefold())
+                and (not status or status.casefold() in str(novel.get("status") or "").casefold()
+                     or (status.casefold() in ("completed", "complete") and "complete" in str(novel.get("status") or "").casefold())
+                     or (status.casefold() in ("ongoing", "releasing") and "ongoing" in str(novel.get("status") or "").casefold()))
             ]
             if not results:
                 embed = build_error_embed(
