@@ -217,7 +217,7 @@ class ReadingClub(commands.Cog):
             (interaction.guild.id, nomination_id.strip()), fetch_type="one",
         )
         if not selected:
-            await interaction.response.send_message("That open nomination was not found in this server.", ephemeral=True)
+            await interaction.followup.send("That open nomination was not found in this server.", ephemeral=True)
             return
         item = dict(selected)
         await execute_db_operation(
@@ -246,13 +246,14 @@ class ReadingClub(commands.Cog):
         except ValueError as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
+        await interaction.response.defer(ephemeral=True, thinking=True)
         row = await execute_db_operation(
             "find selected reading-club nomination to schedule",
             "SELECT * FROM reading_club_nominations WHERE guild_id = ? AND nomination_id = ? AND status = 'selected'",
             (interaction.guild.id, nomination_id.strip()), fetch_type="one",
         )
         if not row:
-            await interaction.response.send_message("Select a nomination first with /reading-club select.", ephemeral=True)
+            await interaction.followup.send("Select a nomination first with /reading-club select.", ephemeral=True)
             return
         item = dict(row)
         thread_name = f"📚 {str(item.get('title') or 'Reading Club')} discussion"[:100]
@@ -268,14 +269,14 @@ class ReadingClub(commands.Cog):
             )
         except (discord.Forbidden, discord.HTTPException, AttributeError):
             log.exception("Could not create reading-club discussion thread")
-            await interaction.response.send_message("I couldn't create the discussion thread. Check Create Public Threads, Send Messages in Threads, and View Channel permissions.", ephemeral=True)
+            await interaction.followup.send("I couldn't create the discussion thread. Check Create Public Threads, Send Messages in Threads, and View Channel permissions.", ephemeral=True)
             return
         await execute_db_operation(
             "store scheduled reading-club discussion",
             "UPDATE reading_club_nominations SET scheduled_at = ?, thread_id = ?, reminder_sent = 0, channel_id = ? WHERE guild_id = ? AND nomination_id = ? AND status = 'selected'",
             (scheduled_at.replace(tzinfo=None), thread.id, interaction.channel.id, interaction.guild.id, item["nomination_id"]),
         )
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"📅 Discussion thread created: <#{thread.id}>. Scheduled for <t:{int(scheduled_at.timestamp())}:F>.",
             ephemeral=True,
         )
