@@ -14,8 +14,6 @@ from database import execute_db_operation
 from cogs_test.general_commands.dashboard import command_meta
 
 log = logging.getLogger(__name__)
-MEDIA_CATEGORIES = {"manga", "manhwa", "manhua", "webtoon", "light novel", "webnovel", "book"}
-
 
 def validate_source_url(value: str | None) -> str | None:
     """Allow optional HTTPS metadata links; reject malformed and credential-bearing URLs."""
@@ -212,6 +210,7 @@ class ReadingClub(commands.Cog):
         if interaction.guild is None:
             await interaction.response.send_message("This command is server-specific.", ephemeral=True)
             return
+        await interaction.response.defer(ephemeral=True, thinking=True)
         selected = await execute_db_operation(
             "find selected reading-club nomination",
             "SELECT * FROM reading_club_nominations WHERE guild_id = ? AND nomination_id = ? AND status = 'open'",
@@ -231,7 +230,7 @@ class ReadingClub(commands.Cog):
             f"🏆 **Community read selected:** {item.get('title', 'Untitled')} ({item.get('category', 'book')}){source}\nA moderator can schedule discussion with /reading-club schedule.",
             allowed_mentions=discord.AllowedMentions.none(),
         )
-        await interaction.response.send_message("The selection is recorded and the other open nominations are closed.", ephemeral=True)
+        await interaction.followup.send("The selection is recorded and the other open nominations are closed.", ephemeral=True)
 
     @club.command(name="schedule", description="Schedule a spoiler-aware discussion for the selected read")
     @app_commands.guild_only()
@@ -292,6 +291,11 @@ class ReadingClub(commands.Cog):
             item = dict(row)
             guild = self.bot.get_guild(int(item["guild_id"]))
             thread = guild.get_thread(int(item["thread_id"])) if guild and item.get("thread_id") else None
+            if thread is None and item.get("thread_id"):
+                try:
+                    thread = await self.bot.fetch_channel(int(item["thread_id"]))
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    thread = None
             try:
                 if thread is not None:
                     await thread.send(
