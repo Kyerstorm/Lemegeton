@@ -32,7 +32,7 @@ No chapter-to-episode or volume-to-season mapping is guessed. Release-order and 
 
 ## Cross-media similarity
 
-**/similar** resolves a title through AniList, Novel Updates, Google Books or TMDB, then searches anime, manga, books, movies and television for candidates with overlapping provider-reported genres.
+**/similar** resolves a title through AniList, Novel Updates, Google Books or TMDB, then searches anime, manga, light novels, webnovels, general books, movies and television for candidates with overlapping provider-reported genres.
 
 The result has separate sections for:
 - **Provider-generated recommendations**, where AniList or TMDB supplies them.
@@ -64,7 +64,7 @@ Reading Club data is stored per guild.
 1. **/reading-club nominate** records a title, category and optional HTTPS metadata/publisher link.
 2. **/reading-club list** lists the guild's open nominations and vote totals.
 3. **/reading-club vote** records or changes the member's active vote for that guild.
-4. A moderator uses **/reading-club select** to select a nomination and close the other open nominations.
+4. A moderator uses **/reading-club select** to choose the highest-voted open nomination automatically, or supplies a nomination ID to override the vote, then closes the other open nominations.
 5. **/reading-club schedule** creates a public discussion thread at a moderator-specified ISO-8601 time that must include a timezone offset. The bot posts a reminder at the scheduled time.
 
 Discussion threads explicitly ask users to mark plot spoilers with Discord's spoiler syntax (||spoiler||). This feature coordinates shared community events only; it does not store personal reading progress.
