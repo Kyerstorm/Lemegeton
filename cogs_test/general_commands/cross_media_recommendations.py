@@ -11,7 +11,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from cogs.media.browse import BrowseCog
+from cogs.media.browse import BrowseCog, search_novelupdates
 from helpers.anilist_helper import fetch_media_by_id
 from cogs_test.general_commands.dashboard import command_meta
 
@@ -79,6 +79,9 @@ class CrossMediaRecommendations(commands.Cog):
                 return None
             details = await fetch_media_by_id(int(seed["id"]), category)
             return details or seed
+        if category == "WEBNOVEL":
+            results = await asyncio.wait_for(search_novelupdates(query), timeout=45)
+            return self.browse.choose_best_title_match(results, query, lambda item: item.get("title"))
         if category == "BOOK":
             fiction, nonfiction = await asyncio.gather(
                 self.browse.fetch_book_results(query, "fiction"),
@@ -108,6 +111,8 @@ class CrossMediaRecommendations(commands.Cog):
         if category == "BOOK":
             info = seed.get("volumeInfo") or {}
             return title, info.get("infoLink") or seed.get("selfLink"), list(info.get("categories") or []), [], []
+        if category == "WEBNOVEL":
+            return title, seed.get("url"), list(seed.get("genres") or []), [], []
         is_movie = category == "MOVIE"
         endpoint = "movie" if is_movie else "tv"
         item_id = seed.get("id")
@@ -296,6 +301,7 @@ class CrossMediaRecommendations(commands.Cog):
         app_commands.Choice(name="Anime", value="ANIME"),
         app_commands.Choice(name="Manga / manhwa / manhua", value="MANGA"),
         app_commands.Choice(name="Books and novels", value="BOOK"),
+        app_commands.Choice(name="Webnovels (Novel Updates)", value="WEBNOVEL"),
         app_commands.Choice(name="Movie", value="MOVIE"),
         app_commands.Choice(name="TV show", value="TV"),
     ])
