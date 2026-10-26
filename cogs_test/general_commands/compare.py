@@ -25,7 +25,7 @@ def clean_igdb_query(value: str) -> str:
     return value.replace(chr(34), " ").replace(chr(59), " ").replace(chr(92), " ").strip()
 
 def media_title(category: str, item: dict) -> str:
-    if category in ("ANIME", "MANGA"):
+    if category in ("ANIME", "MANGA", "LIGHT_NOVEL"):
         title = item.get("title") or {}
         return title.get("english") or title.get("romaji") or "Untitled"
     if category == "BOOK":
@@ -52,7 +52,7 @@ def comparison_embed(category: str, first: dict, second: dict, *additional: dict
         lines: list[str] = []
         url = None
         cover = None
-        if category in ("ANIME", "MANGA"):
+        if category in ("ANIME", "MANGA", "LIGHT_NOVEL"):
             if item.get("format"):
                 lines.append(f"Format: {item['format']}")
             if item.get("status"):
@@ -233,8 +233,14 @@ class Compare(commands.Cog):
         self.browse = BrowseCog(bot)
 
     async def search_options(self, category: str, query: str) -> list[dict]:
-        if category in ("ANIME", "MANGA"):
-            return await fetch_media_by_search(query, category, per_page=8)
+        if category in ("ANIME", "MANGA", "LIGHT_NOVEL"):
+            ani_type = "ANIME" if category == "ANIME" else "MANGA"
+            results = await fetch_media_by_search(query, ani_type, per_page=8)
+            if category == "LIGHT_NOVEL":
+                return [item for item in results if str(item.get("format") or "").upper() == "NOVEL"]
+            if category == "MANGA":
+                return [item for item in results if str(item.get("format") or "").upper() != "NOVEL"]
+            return results
         if category == "WEBNOVEL":
             return await asyncio.wait_for(search_novelupdates(query), timeout=45)
         if category == "BOOK":
@@ -295,6 +301,7 @@ class Compare(commands.Cog):
     @app_commands.choices(category=[
         app_commands.Choice(name="Anime", value="ANIME"),
         app_commands.Choice(name="Manga", value="MANGA"),
+        app_commands.Choice(name="Light novels", value="LIGHT_NOVEL"),
         app_commands.Choice(name="Books and novels", value="BOOK"),
         app_commands.Choice(name="Webnovels (Novel Updates)", value="WEBNOVEL"),
         app_commands.Choice(name="Movie", value="MOVIE"),
