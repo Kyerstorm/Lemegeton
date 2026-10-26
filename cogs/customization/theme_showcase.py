@@ -4,6 +4,7 @@ Interactive views for theme preview and advanced theme management.
 """
 
 import discord
+from helpers.command_error_handler import FEEDBACK_ERROR_GUIDANCE, application_error_message, FeedbackAwareView
 from discord.ext import commands
 from discord import app_commands
 from typing import List, Optional, Dict, Any
@@ -40,7 +41,7 @@ if not any(isinstance(h, logging.FileHandler) and getattr(h, 'baseFilename', Non
 
 logger.info("Theme showcase logging initialized")
 
-class ThemePreviewView(discord.ui.View):
+class ThemePreviewView(FeedbackAwareView):
     """Interactive view for previewing themes"""
     
     def __init__(self, theme_manager, user_id: int, themes: List, current_index: int = 0):
@@ -180,7 +181,7 @@ class ThemePreviewView(discord.ui.View):
             logger.info(f"Successfully applied theme '{theme.name}' for user {interaction.user.id}")
         else:
             logger.error(f"Failed to apply theme '{theme.name}' for user {interaction.user.id}")
-            embed = build_error_embed("Failed to Apply Theme", "An error occurred while applying the theme.")
+            embed = build_error_embed("Failed to Apply Theme", FEEDBACK_ERROR_GUIDANCE)
             await interaction.response.send_message(embed=embed, ephemeral=True)
     
     @discord.ui.button(label="🎲 Random", style=discord.ButtonStyle.secondary)
@@ -297,11 +298,11 @@ class ThemeCategorySelect(discord.ui.Select):
             logger.error(f"Error in theme category callback: {e}", exc_info=True)
             embed = build_error_embed(
                 "Error",
-                "An error occurred while loading themes."
+                application_error_message(e)
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
-class ThemeCategoryView(discord.ui.View):
+class ThemeCategoryView(FeedbackAwareView):
     """View for theme category selection"""
     
     def __init__(self, theme_manager):
