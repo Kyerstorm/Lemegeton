@@ -813,6 +813,7 @@ class BrowseCog(commands.Cog):
                     tags { name rank isMediaSpoiler }
                     staff(page: 1, perPage: 25) { edges { role node { name { full } } } }
                     isAdult
+                    countryOfOrigin
                     coverImage { large medium }
                     bannerImage
                     externalLinks { site url }
@@ -1005,7 +1006,8 @@ class BrowseCog(commands.Cog):
         results: List[Dict], *, genre: Optional[str] = None, theme: Optional[str] = None,
         author: Optional[str] = None, artist: Optional[str] = None,
         status: Optional[str] = None, year_from: Optional[int] = None,
-        year_to: Optional[int] = None, include_adult: bool = False,
+        year_to: Optional[int] = None, subtype: Optional[str] = None,
+        include_adult: bool = False,
     ) -> List[Dict]:
         """Apply only filters backed by AniList fields returned by the query."""
         filtered = []
@@ -1014,6 +1016,17 @@ class BrowseCog(commands.Cog):
                 continue
             genres = [str(value).casefold() for value in (item.get("genres") or [])]
             tags = [str((tag or {}).get("name") or "").casefold() for tag in (item.get("tags") or [])]
+            subtype = (subtype or "").casefold().strip()
+            country = str(item.get("countryOfOrigin") or "").upper()
+            media_format = str(item.get("format") or "").upper()
+            if subtype == "manga" and country != "JP":
+                continue
+            if subtype == "manhwa" and country != "KR":
+                continue
+            if subtype == "manhua" and country != "CN":
+                continue
+            if subtype == "webtoon" and media_format != "WEBTOON" and not any("webtoon" in tag for tag in tags):
+                continue
             if genre and not any(genre.casefold() in value for value in genres):
                 continue
             if theme and not any(theme.casefold() in value for value in tags):
@@ -1152,6 +1165,7 @@ class BrowseCog(commands.Cog):
         director="Movie/TV director name",
         cast="Movie/TV cast member name",
         include_adult="Include provider-flagged adult titles (NSFW channel only)",
+        subtype="Filter manga by origin/category: manga (Japan), manhwa (Korea), manhua (China), or webtoon when provider metadata identifies it",
     )
     @app_commands.choices(media_type=[
         app_commands.Choice(name="Anime", value="ANIME"),
@@ -1162,6 +1176,12 @@ class BrowseCog(commands.Cog):
         app_commands.Choice(name="Movies", value="MOVIE"),
         app_commands.Choice(name="TV Shows", value="TV"),
         app_commands.Choice(name="Webnovels", value="WEBNOVEL"),
+    ])
+    @app_commands.choices(subtype=[
+        app_commands.Choice(name="Manga (Japan)", value="manga"),
+        app_commands.Choice(name="Manhwa (Korea)", value="manhwa"),
+        app_commands.Choice(name="Manhua (China)", value="manhua"),
+        app_commands.Choice(name="Webtoon", value="webtoon"),
     ])
     async def search(
         self,
@@ -1183,6 +1203,7 @@ class BrowseCog(commands.Cog):
         director: Optional[str] = None,
         cast: Optional[str] = None,
         include_adult: bool = False,
+        subtype: Optional[str] = None,
     ):
         title = " ".join((title or "").split())
         if not title:
@@ -1198,6 +1219,9 @@ class BrowseCog(commands.Cog):
             return
         if runtime_min is not None and runtime_max is not None and runtime_min > runtime_max:
             await interaction.response.send_message("The minimum runtime cannot exceed the maximum runtime.", ephemeral=True)
+            return
+        if subtype and chosen_type != "MANGA":
+            await interaction.response.send_message("Manga/manhwa/manhua/webtoon subtypes can only be used with the Manga category.", ephemeral=True)
             return
         if include_adult:
             channel_is_nsfw = bool(getattr(interaction.channel, "is_nsfw", lambda: False)())
@@ -1559,7 +1583,7 @@ class BrowseCog(commands.Cog):
         results = await self.fetch_media(title, real_type)
         results = self._filter_anilist_results(
             results, genre=genre, theme=theme, author=author, artist=artist,
-            status=status, year_from=year_from, year_to=year_to,
+            status=status, year_from=year_from, year_to=year_to, subtype=subtype,
             include_adult=include_adult,
         )
         if not results:
