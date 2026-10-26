@@ -283,11 +283,15 @@ class ReadingClub(commands.Cog):
 
     @tasks.loop(seconds=60)
     async def dispatch_scheduled_discussions(self) -> None:
-        rows = await execute_db_operation(
-            "find due reading-club discussions",
-            "SELECT * FROM reading_club_nominations WHERE status = 'selected' AND scheduled_at IS NOT NULL AND reminder_sent = 0 AND scheduled_at <= CURRENT_TIMESTAMP",
-            fetch_type="all",
-        )
+        try:
+            rows = await execute_db_operation(
+                "find due reading-club discussions",
+                "SELECT * FROM reading_club_nominations WHERE status = 'selected' AND scheduled_at IS NOT NULL AND reminder_sent = 0 AND scheduled_at <= CURRENT_TIMESTAMP",
+                fetch_type="all",
+            )
+        except Exception:
+            log.exception("Could not query due reading-club discussions")
+            return
         for row in rows or []:
             item = dict(row)
             guild = self.bot.get_guild(int(item["guild_id"]))
@@ -308,11 +312,14 @@ class ReadingClub(commands.Cog):
             except (discord.Forbidden, discord.HTTPException):
                 log.warning("Could not post scheduled reading-club reminder for nomination %s", item.get("nomination_id"), exc_info=True)
             finally:
-                await execute_db_operation(
-                    "mark reading-club reminder sent",
-                    "UPDATE reading_club_nominations SET reminder_sent = 1 WHERE guild_id = ? AND nomination_id = ?",
-                    (item["guild_id"], item["nomination_id"]),
-                )
+                try:
+                    await execute_db_operation(
+                        "mark reading-club reminder sent",
+                        "UPDATE reading_club_nominations SET reminder_sent = 1 WHERE guild_id = ? AND nomination_id = ?",
+                        (item["guild_id"], item["nomination_id"]),
+                    )
+                except Exception:
+                    log.exception("Could not mark reading-club reminder sent for nomination %s", item.get("nomination_id"))
 
     @dispatch_scheduled_discussions.before_loop
     async def before_dispatch_scheduled_discussions(self) -> None:
