@@ -1,4 +1,5 @@
 import discord
+from helpers.command_error_handler import prefix_error_message, FEEDBACK_ERROR_GUIDANCE
 from discord.ext import commands, tasks
 import logging
 import asyncio
@@ -300,7 +301,7 @@ class UserCleanup(commands.Cog):
             logger.error(f"Error in manual cleanup command: {e}", exc_info=True)
             embed = build_error_embed(
                 "Cleanup Error",
-                f"Error during cleanup: {str(e)}"
+                prefix_error_message(e) or FEEDBACK_ERROR_GUIDANCE
             )
             await ctx.send(embed=embed)
 
@@ -351,7 +352,7 @@ class UserCleanup(commands.Cog):
             logger.error(f"Error in manual full cleanup command: {e}", exc_info=True)
             embed = build_error_embed(
                 "Full Cleanup Error",
-                f"Error during full cleanup: {str(e)}"
+                prefix_error_message(e) or FEEDBACK_ERROR_GUIDANCE
             )
             await ctx.send(embed=embed)
 
@@ -409,7 +410,7 @@ class UserCleanup(commands.Cog):
             logger.error(f"Error in cleanup status command: {e}", exc_info=True)
             embed = build_error_embed(
                 "Status Error",
-                f"Error getting cleanup status: {str(e)}"
+                prefix_error_message(e) or FEEDBACK_ERROR_GUIDANCE
             )
             await ctx.send(embed=embed)
 
@@ -492,7 +493,7 @@ class UserCleanup(commands.Cog):
             logger.error(f"Error in cleanup test command: {e}", exc_info=True)
             embed = build_error_embed(
                 "Cleanup Test Error",
-                f"Error during cleanup test: {str(e)}"
+                prefix_error_message(e) or FEEDBACK_ERROR_GUIDANCE
             )
             await ctx.send(embed=embed)
 
