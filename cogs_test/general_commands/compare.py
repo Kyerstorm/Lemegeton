@@ -220,7 +220,11 @@ class CompareView(FeedbackAwareView):
         enriched = await asyncio.gather(*selected, return_exceptions=True)
         if any(isinstance(item, Exception) for item in enriched):
             log.warning("A selected title could not be enriched for comparison")
-            await interaction.followup.send("At least one provider failed while loading the comparison. Try again with fewer titles or retry later.", ephemeral=True)
+            await interaction.edit_original_response(
+                content="At least one provider failed while loading the comparison. Try again with fewer titles or retry later.",
+                embed=None,
+                view=None,
+            )
             return
         await interaction.edit_original_response(
             embed=comparison_embed(self.category, enriched[0], enriched[1], *enriched[2:]),
