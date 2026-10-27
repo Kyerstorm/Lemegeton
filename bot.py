@@ -1576,7 +1576,8 @@ def _effective_enabled(fullname: str, meta: dict[str, Any], cfg: dict[str, Any])
     section = meta.get("section") or "Other"
     if section in cfg.get("sections", {}):
         return cfg["sections"][section] is True
-    return False
+    # Unconfigured commands preserve their normal enabled state.
+    return True
 
 
 def _iso(value: Any) -> str | None:
