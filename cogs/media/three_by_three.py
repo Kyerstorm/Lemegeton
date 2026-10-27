@@ -1,4 +1,5 @@
 from helpers.color_palette import PALETTE
+from helpers import media_storage
 import discord
 from helpers.command_error_handler import application_error_message, FeedbackAwareModal, FeedbackAwareView
 from discord.ext import commands
@@ -497,18 +498,34 @@ class ThreeByThreeModalPart2(FeedbackAwareModal):
             image_bytes = await self.cog.generate_3x3(all_inputs, self.media_type, interaction.user)
             
             if image_bytes:
-                file = discord.File(fp=image_bytes, filename=f"3x3_{self.media_type}.png")
-                
+                filename = f"3x3_{self.media_type}.png"
+                public_url = None
+                try:
+                    public_url = await media_storage.store_public_image(
+                        image_bytes.getvalue(),
+                        namespace="generated/three-by-three",
+                        filename=filename,
+                        content_type="image/png",
+                        uploaded_by=interaction.user.id,
+                        guild_id=interaction.guild_id,
+                    )
+                except Exception:
+                    logger.warning("Could not store generated 3x3 in object storage; using Discord attachment", exc_info=True)
+
                 embed = discord.Embed(
                     title=f"🎨 {interaction.user.display_name}'s 3x3 {self.media_type.title()} Grid",
                     description=f"Your favorite {self.media_type}{'s' if self.media_type == 'character' else ''}!",
-                    color=PALETTE.PRIMARY  # Contextual color for grid display
+                    color=PALETTE.PRIMARY
                 )
-                embed.set_image(url=f"attachment://3x3_{self.media_type}.png")
-                embed.set_footer(text="Generated from AniList URLs" + (" character images" if self.media_type == "character" else " covers" if self.media_type != "games" else " IGDB game covers"))
-                
-                await interaction.followup.send(embed=embed, file=file)
-                
+                if public_url:
+                    embed.set_image(url=public_url)
+                    await interaction.followup.send(embed=embed)
+                else:
+                    image_bytes.seek(0)
+                    file = discord.File(fp=image_bytes, filename=filename)
+                    embed.set_image(url=f"attachment://{filename}")
+                    await interaction.followup.send(embed=embed, file=file)
+
                 logger.info(f"Successfully generated 3x3 for {interaction.user.name}")
             else:
                 embed = build_error_embed(
