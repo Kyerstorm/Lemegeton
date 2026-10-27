@@ -863,12 +863,12 @@ class HelpCog(commands.Cog):
                 name="📊 Repository statistics",
                 value=(
                     f"**Files:** {stats['tracked_files']:,} tracked · "
-                    f"{stats['text_files']:,} text · {stats['source_files']:,} source\\n"
+                    f"{stats['text_files']:,} text · {stats['source_files']:,} source\n"
                     f"**Source lines:** {stats['source_lines']:,} "
-                    f"({stats['nonblank_source_lines']:,} non-blank)\\n"
+                    f"({stats['nonblank_source_lines']:,} non-blank)\n"
                     f"**Text lines:** {stats['text_lines']:,} · "
-                    f"**Characters:** {stats['text_characters']:,} (excluding line breaks)\\n"
-                    f"**Text size:** {format_bytes(stats['text_bytes'])}\\n"
+                    f"**Characters:** {stats['text_characters']:,} (excluding line breaks)\n"
+                    f"**Text size:** {format_bytes(stats['text_bytes'])}\n"
                     f"**Source mix:** {language_breakdown}"
                 ),
                 inline=False,
