@@ -40,9 +40,11 @@ def is_configured(*, private: bool = True) -> bool:
     """Whether the private object store is configured and safe to use."""
     if not _setting("S3_BUCKET"):
         return False
-    if _setting("S3_ENDPOINT_URL") and not (
-        _setting("S3_ACCESS_KEY_ID") and _setting("S3_SECRET_ACCESS_KEY")
-    ):
+    access_key = _setting("S3_ACCESS_KEY_ID")
+    secret_key = _setting("S3_SECRET_ACCESS_KEY")
+    if bool(access_key) != bool(secret_key):
+        return False
+    if _setting("S3_ENDPOINT_URL") and not (access_key and secret_key):
         return False
     return True
 
