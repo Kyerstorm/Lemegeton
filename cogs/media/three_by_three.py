@@ -1,7 +1,7 @@
 from helpers.color_palette import PALETTE
 from helpers import media_storage
 import discord
-from helpers.command_error_handler import application_error_message, FeedbackAwareModal, FeedbackAwareView
+from helpers.command_error_handler import application_error_message, FeedbackAwareModal, FeedbackAwareView, handle_application_command_error
 from discord.ext import commands
 from discord import app_commands
 import aiohttp
@@ -999,6 +999,11 @@ class ThreeByThree(commands.Cog):
     async def cog_unload(self):
         """Called when the cog is unloaded"""
         logger.info("Enhanced 3x3 Generator cog unloaded")
+
+
+    async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+        """Report unexpected grid-generation and upload failures without exposing internals."""
+        await handle_application_command_error(interaction, error)
 
 
 async def setup(bot: commands.Bot):
