@@ -14,7 +14,6 @@ import os
 import re
 import uuid
 from dataclasses import dataclass
-from urllib.parse import quote
 
 import boto3
 from botocore.config import Config
@@ -39,7 +38,7 @@ def _setting(name: str, default: str = "") -> str:
 
 def is_configured(*, private: bool = True) -> bool:
     """Whether the private object store is configured and safe to use."""
-    if not _setting("S3_BUCKET") or not _setting("S3_PRIVATE_BUCKET"):
+    if not _setting("S3_BUCKET"):
         return False
     if _setting("S3_ENDPOINT_URL") and not (
         _setting("S3_ACCESS_KEY_ID") and _setting("S3_SECRET_ACCESS_KEY")
@@ -49,7 +48,7 @@ def is_configured(*, private: bool = True) -> bool:
 
 
 def _bucket() -> str:
-    return _setting("S3_PRIVATE_BUCKET")
+    return _setting("S3_BUCKET")
 
 
 def _url_ttl() -> int:
