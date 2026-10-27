@@ -104,7 +104,11 @@ class ReadingActionModal(discord.ui.Modal):
         if self.action == "nominate":
             category = self.category
             if category not in {"manga", "manhwa", "manhua", "webtoon", "light novel", "webnovel", "book"}:
-                category = "book"
+                await interaction.response.send_message(
+                    "Reading Club nominations support manga, manhwa, manhua, webtoons, light novels, webnovels, and books. Choose a supported reading category.",
+                    ephemeral=True,
+                )
+                return
             await self.cog.nominate(
                 interaction, self.title_input.value, category,
                 self.source_url.value or None,
@@ -219,6 +223,25 @@ class ReadingClub(commands.Cog):
     async def cog_unload(self) -> None:
         self.dispatch_scheduled_discussions.cancel()
 
+    @app_commands.command(name="reading", description="Open the unified reading club and reading-order hub")
+    @app_commands.guild_only()
+    @command_meta(section="Community", name="Reading Hub")
+    async def reading(self, interaction: discord.Interaction) -> None:
+        embed = discord.Embed(
+            title="Reading Hub",
+            description=(
+                "One interface for community nominations, voting, selecting the next read, scheduling spoiler-aware "
+                "discussions, and exploring known publication/adaptation relationships. Nomination and vote data is "
+                "isolated to this Discord server."
+            ),
+            color=discord.Color.blurple(),
+        )
+        embed.add_field(name="Community reading", value="Nominate, browse, vote, select, and schedule the next group discussion.", inline=False)
+        embed.add_field(name="Reading order", value="Explore provider-declared relationships without guessing chapter-to-episode mappings or story chronology.", inline=False)
+        embed.set_footer(text="Select an action and media category to continue")
+        await interaction.response.send_message(
+            embed=embed, view=ReadingHomeView(self, interaction.user.id), ephemeral=True,
+        )
     async def nominate(self, interaction: discord.Interaction, title: str, category: str, source_url: str | None = None) -> None:
         if interaction.guild is None or interaction.channel is None:
             await interaction.response.send_message("Reading Club is available in server channels.", ephemeral=True)
