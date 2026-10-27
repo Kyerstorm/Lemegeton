@@ -385,6 +385,9 @@ class ReleaseCalendar(commands.Cog):
             embed=embed, view=ReleaseCalendarView(self, interaction.user.id), ephemeral=True,
         )
     async def configure(self, interaction: discord.Interaction, channel: discord.TextChannel, frequency: str = "weekly", categories: str = "anime,movies,tv", region: str = "US") -> None:
+        if interaction.guild is None or not getattr(interaction.user.guild_permissions, "manage_guild", False):
+            await interaction.response.send_message("Manage Server permission is required to configure release digests.", ephemeral=True)
+            return
         if frequency not in {"daily", "weekly"}:
             await interaction.response.send_message("Frequency must be daily or weekly.", ephemeral=True)
             return
@@ -432,6 +435,9 @@ class ReleaseCalendar(commands.Cog):
     async def disable(self, interaction: discord.Interaction) -> None:
         if interaction.guild is None:
             await interaction.response.send_message("This setting is server-specific.", ephemeral=True)
+            return
+        if not getattr(interaction.user.guild_permissions, "manage_guild", False):
+            await interaction.response.send_message("Manage Server permission is required to disable release digests.", ephemeral=True)
             return
         await execute_db_operation(
             "disable guild release calendar",
