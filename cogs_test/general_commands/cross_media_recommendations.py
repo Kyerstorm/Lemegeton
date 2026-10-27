@@ -11,6 +11,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from helpers.command_error_handler import handle_application_command_error
 from cogs.media.browse import BrowseCog, search_novelupdates
 from helpers.anilist_helper import fetch_media_by_id
 from cogs_test.general_commands.dashboard import command_meta
@@ -465,6 +466,11 @@ class CrossMediaRecommendations(commands.Cog):
             embed.description += "\n\nNo comparable genre metadata, saved relationships or community resources were returned. Try a different starting title or provider."
         embed.set_footer(text="Sources: AniList · Novel Updates · Google Books · TMDB · Provider recommendations are labelled separately")
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+    async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+        """Route unexpected provider/database failures through the shared private reporter."""
+        await handle_application_command_error(interaction, error)
 
 
 async def setup(bot: commands.Bot) -> None:
