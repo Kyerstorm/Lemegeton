@@ -158,7 +158,7 @@ class HelpCog(commands.Cog):
                 },
                 "link-suggest": {
                     "desc": "Submit a proposed relationship between two works for review",
-                    "usage": "/link-suggest",
+                    "usage": "/link-suggest <source_title> <source_category> <source_url> <relationship> <target_title> <target_category> <target_url> <evidence>",
                     "note": "Submissions enter a review queue; this does not immediately make a proposed relationship trusted.",
                     "examples": ["/link-suggest"]
                 },
@@ -166,7 +166,7 @@ class HelpCog(commands.Cog):
                     "desc": "Inspect and review this server's proposed media relationships",
                     "usage": "/link-review [decision] [suggestion_id] [reason]",
                     "note": "Review actions are moderator-gated and scoped to this server. List suggestions first to obtain an ID.",
-                    "examples": ["/link-review", "/link-review decision:inspect suggestion_id:12", "/link-review decision:approve suggestion_id:12"]
+                    "examples": ["/link-review", "/link-review decision:inspect suggestion_id:12", "/link-review decision:approved suggestion_id:12"]
                 }
             },
             "📚 Books & Webnovels": {
@@ -997,18 +997,18 @@ class CategorySelect(discord.ui.Select):
             ),
         ]
         category_options = [
-            ("🔐 Account Management", "account", "Registration and account settings", "🔐"),
-            ("📺 Anime & Manga", "anime", "Browse and discover supported titles", "📺"),
-            ("🎮 Gaming", "gaming", "Game metadata and Steam integration", "🎮"),
-            ("🎨 Customization", "customization", "Themes and personalization", "🎨"),
-            ("⚙️ Server Management", "server", "Server configuration and moderation", "⚙️"),
-            ("👑 Admin", "admin", "Bot-wide administration and protected commands", "👑"),
-            ("👥 Social", "social", "Leaderboards, affinity, and feedback", "👥"),
-            ("🛠️ Utilities", "utilities", "Help, notifications, and everyday tools", "🛠️"),
-            ("🌐 Cross-Media Discovery", "cross_media", "Adaptations, connected titles, and suggestions", "🌐"),
-            ("📚 Books & Webnovels", "books", "Author records, webnovels, and reading order", "📚"),
-            ("🎬 Movies & TV", "screen", "Availability, credits, trailers, and discussions", "🎬"),
-            ("💻 Code", "code", "How commands, providers, database, and storage fit together", "💻"),
+            ("Account Management", "account", "Registration and account settings", "🔐"),
+            ("Anime & Manga", "anime", "Browse and discover supported titles", "📺"),
+            ("Gaming", "gaming", "Game metadata and Steam integration", "🎮"),
+            ("Customization", "customization", "Themes and personalization", "🎨"),
+            ("Server Management", "server", "Server configuration and moderation", "⚙️"),
+            ("Admin", "admin", "Bot-wide administration and protected commands", "👑"),
+            ("Social", "social", "Leaderboards, affinity, and feedback", "👥"),
+            ("Utilities", "utilities", "Help, notifications, and everyday tools", "🛠️"),
+            ("Cross-Media Discovery", "cross_media", "Adaptations, connected titles, and suggestions", "🌐"),
+            ("Books & Webnovels", "books", "Author records, webnovels, and reading order", "📚"),
+            ("Movies & TV", "screen", "Availability, credits, trailers, and discussions", "🎬"),
+            ("Code", "code", "How commands, providers, database, and storage fit together", "💻"),
         ]
         category_names_by_value = {
             "account": "🔐 Account Management",
@@ -1059,9 +1059,9 @@ class CategorySelect(discord.ui.Select):
         
         try:
             if selected_value == "overview":
-                embed = await self.help_cog._create_overview_embed(interaction, self.view.categories)
+                embed = await self.help_cog._create_overview_embed(interaction, self.categories)
             else:
-                embed = await self.help_cog._create_category_embed(selected_value, interaction, self.view.categories)
+                embed = await self.help_cog._create_category_embed(selected_value, interaction, self.categories)
             
             await interaction.response.edit_message(embed=embed, view=self.view)
             
