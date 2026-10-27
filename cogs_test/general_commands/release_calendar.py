@@ -366,6 +366,24 @@ class ReleaseCalendar(commands.Cog):
             embed.set_thumbnail(url=images)
         return embed
 
+    @app_commands.command(name="release-calendar", description="Open release discovery and per-server digest settings")
+    @app_commands.guild_only()
+    @command_meta(section="Community", name="Release Calendar")
+    async def release_calendar(self, interaction: discord.Interaction) -> None:
+        embed = discord.Embed(
+            title="Release Calendar",
+            description=(
+                "Preview supported upcoming anime airings, movie releases, and TV episode dates, or configure a daily "
+                "or weekly digest for this server. Dates are shown only when a provider supplies a usable date."
+            ),
+            color=discord.Color.blurple(),
+        )
+        embed.add_field(name="Preview", value="Browse supported releases from the next seven days.", inline=False)
+        embed.add_field(name="Server digests", value="Choose a channel, daily or weekly delivery, provider categories, and a movie region.", inline=False)
+        embed.set_footer(text="Digest settings are isolated to this server · Providers may not expose every release")
+        await interaction.response.send_message(
+            embed=embed, view=ReleaseCalendarView(self, interaction.user.id), ephemeral=True,
+        )
     async def configure(self, interaction: discord.Interaction, channel: discord.TextChannel, frequency: str = "weekly", categories: str = "anime,movies,tv", region: str = "US") -> None:
         if frequency not in {"daily", "weekly"}:
             await interaction.response.send_message("Frequency must be daily or weekly.", ephemeral=True)
