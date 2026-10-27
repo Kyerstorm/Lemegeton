@@ -260,7 +260,8 @@ def _is_enabled(fullname: str, meta: dict[str, Any], cfg: dict[str, Any]) -> boo
         return command_overrides[fullname] is True
     if section in cfg.get("sections", {}):
         return cfg["sections"][section] is True
-    return False
+    # No saved override means the command keeps its existing normal availability.
+    return True
 
 
 def _has_dashboard_access(interaction: discord.Interaction, bot: commands.Bot) -> bool:
@@ -375,7 +376,7 @@ class DashboardView(FeedbackAwareView):
                 icon = LOCK_EMOJI if protected else (ENABLED_EMOJI if enabled else DISABLED_EMOJI)
                 status = "Always on" if protected else ("Enabled" if enabled else "Disabled")
                 display_name = discord.utils.escape_markdown(str(meta["display_name"]))[:150]
-                description = discord.utils.escape_markdown(str(meta["description"] or "").strip())[:700]
+                description = discord.utils.escape_markdown(str(meta["description"] or "").strip())[:400]
                 embed.add_field(
                     name=f"{icon} {display_name} · /{fullname}"[:256],
                     value=f"{description or 'No description provided.'}\n\n**Status:** {status}",
