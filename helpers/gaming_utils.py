@@ -453,7 +453,11 @@ async def cleanup_expired_cache():
         gaming_cache.cleanup_expired()
 
 
-# Start cleanup task on import
-asyncio.create_task(cleanup_expired_cache())
+# Start cleanup task on import when a loop is running (cog loading); plain imports
+# from tests or scripts have no loop, and create_task would raise RuntimeError.
+try:
+    asyncio.get_running_loop().create_task(cleanup_expired_cache())
+except RuntimeError:
+    pass
 
 logger.info("Gaming utilities module loaded successfully")

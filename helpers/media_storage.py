@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import os
 import re
 import uuid
@@ -19,6 +20,8 @@ import boto3
 from botocore.config import Config
 
 import database
+
+log = logging.getLogger("Lemegeton.MediaStorage")
 
 @dataclass(frozen=True)
 class StoredImage:

@@ -1,6 +1,7 @@
 """Interactive entry point for Lemegeton's media discovery and community features."""
 from __future__ import annotations
 
+import logging
 import re
 
 import discord
@@ -9,6 +10,8 @@ from discord.ext import commands
 
 from helpers.command_error_handler import FeedbackAwareView, handle_application_command_error
 from cogs_test.general_commands.dashboard import command_meta
+
+log = logging.getLogger("Lemegeton.DiscoveryHub")
 
 HUB_SECTIONS = {
     "discovery": {

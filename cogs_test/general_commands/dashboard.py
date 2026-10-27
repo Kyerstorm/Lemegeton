@@ -817,7 +817,12 @@ async def _sync_guild_commands(bot: commands.Bot, guild: discord.Guild) -> bool:
             for command in previous_commands
             if isinstance(command, app_commands.ContextMenu) or command.name not in managed_roots
         ]
-        for root in managed_roots.values():
+        for name, root in managed_roots.items():
+            # A globally synced command is already visible in every guild; a guild copy
+            # only duplicates it in Discord's picker and cannot hide it. Disabled global
+            # commands are blocked at execution by _dashboard_execution_guard instead.
+            if name in global_roots:
+                continue
             if isinstance(root, app_commands.Group):
                 filtered = _filter_group_for_guild(root, cfg)
                 if filtered is not None:

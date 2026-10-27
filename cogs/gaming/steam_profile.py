@@ -344,11 +344,12 @@ class SteamProfile(commands.Cog):
                 view.is_ephemeral = new_ephemeral
             except Exception:
                 try:
-                    embed = build_warning_embed(
+                    # Separate name: assigning `embed` here would shadow the profile embed above.
+                    warning_embed = build_warning_embed(
                         "Toggle Failed",
                         "Could not toggle visibility."
                     )
-                    await btn_inter.followup.send(embed=embed)
+                    await btn_inter.followup.send(embed=warning_embed)
                 except Exception:
                     pass
         toggle_button.callback = toggle_cb
