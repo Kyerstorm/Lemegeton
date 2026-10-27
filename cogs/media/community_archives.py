@@ -690,14 +690,6 @@ class CommunityArchives(commands.Cog):
             message = "You have already reported this entry in this server. The existing report remains in the moderator queue."
         await interaction.response.send_message(message, ephemeral=True)
 
-    @app_commands.command(name="archive-report-review", description="Review community archive reports submitted in this server")
-    @app_commands.guild_only()
-    @app_commands.choices(decision=[
-        app_commands.Choice(name="List pending reports", value="list"),
-        app_commands.Choice(name="Mark reviewed", value="resolved"),
-        app_commands.Choice(name="Dismiss report", value="dismissed"),
-        app_commands.Choice(name="Remove entry (originating server only)", value="remove"),
-    ])
     async def archive_report_review(self, interaction: discord.Interaction, decision: str = "list", report_id: int | None = None, reason: str = "") -> None:
         if not interaction.guild_id:
             await interaction.response.send_message("Reports are server-scoped.", ephemeral=True)
@@ -761,14 +753,6 @@ class CommunityArchives(commands.Cog):
         )
         await interaction.response.send_message(f"Report **#{report_id}** marked **{new_status}**.", ephemeral=True)
 
-    @app_commands.command(name="archive-review", description="Review this server's pending community archive submissions")
-    @app_commands.guild_only()
-    @app_commands.choices(action=[
-        app_commands.Choice(name="List pending", value="list"),
-        app_commands.Choice(name="Approve", value="approve"),
-        app_commands.Choice(name="Reject", value="reject"),
-        app_commands.Choice(name="Remove approved entry", value="remove"),
-    ])
     async def archive_review(self, interaction: discord.Interaction, action: str, entry_id: int | None = None) -> None:
         await self._review_archive(interaction, action, entry_id)
 
