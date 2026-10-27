@@ -86,6 +86,12 @@ The family-friendly option is a best-effort metadata filter, not a parental-rati
 - Release-calendar settings, Reading Club nominations/votes, and Media Night sessions are persisted in the shared database and keyed by guild/channel as appropriate.
 - Provider failures, unavailable metadata and missing release dates are treated as missing data. The bot does not make a failed source appear operational or manufacture metadata to fill gaps.
 
+## Image asset storage
+
+The bot can store image bodies in a private S3-compatible bucket while keeping searchable metadata and ownership in PostgreSQL. Configure `S3_BUCKET`, `S3_REGION`, and credentials; `S3_ENDPOINT_URL` is optional for AWS S3 and can point to R2, MinIO, or another S3-compatible endpoint. Keep the bucket private. The bot stores object keys and metadata in the shared `media_assets` registry and generates short-lived signed URLs when a command needs to render an image.
+
+New Panels uploads use this store when configured, and `panels.media_asset_id` references their registry entries. Existing Discord-hosted panels continue to work without a bulk migration; when object storage is not configured, Panels retains its existing Discord-channel fallback. Custom Role original images also use object storage when configured and fall back to the current PostgreSQL storage otherwise. Image URLs are never intended to be public bucket URLs.
+
 ## Shared cross-system relationship graph
 
 Lemegeton uses a shared PostgreSQL relationship graph to connect the systems it already has instead of maintaining independent, command-only relationship lists.
