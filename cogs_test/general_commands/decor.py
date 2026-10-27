@@ -40,6 +40,7 @@ import asyncio
 import io
 import re
 import time
+from urllib.parse import urlsplit
 from dataclasses import dataclass
 from typing import Optional
 
@@ -170,11 +171,26 @@ class Decor(commands.Cog):
         )
 
     @staticmethod
+    def normalize_asset(value: str | None) -> str:
+        """Normalize an asset hash or an official Discord CDN asset URL."""
+        raw = (value or "").strip()
+        if not raw:
+            return ""
+        if "://" in raw:
+            parsed = urlsplit(raw)
+            if parsed.scheme.lower() != "https" or parsed.hostname not in DISCORD_CDN_HOSTS:
+                return ""
+            raw = parsed.path
+        if "/avatar-decoration-presets/" in raw:
+            raw = raw.split("/avatar-decoration-presets/", 1)[1]
+        raw = raw.rsplit("/", 1)[-1]
+        if raw.lower().endswith(".png"):
+            raw = raw[:-4]
+        return raw if ASSET_PATTERN.fullmatch(raw) else ""
+
+    @staticmethod
     def valid_asset(asset: str) -> bool:
-        return bool(
-            asset
-            and ASSET_PATTERN.fullmatch(asset.strip())
-        )
+        return bool(Decor.normalize_asset(asset))
 
     @staticmethod
     def valid_sku(sku: str) -> bool:
@@ -272,68 +288,39 @@ class Decor(commands.Cog):
         self,
         user: discord.abc.User,
     ) -> Optional[DecorationEntry]:
+        decoration = getattr(user, "avatar_decoration", None)
+        sku_id = getattr(user, "avatar_decoration_sku_id", None)
 
-        decoration = getattr(
-            user,
-            "avatar_decoration",
-            None,
-        )
-
-        sku_id = getattr(
-            user,
-            "avatar_decoration_sku_id",
-            None,
-        )
-
-        # discord.py >= 2.4 normally gives us the Asset directly.
+        # discord.py exposes an Asset on supported versions; accept either its
+        # key or URL so changes in the asset wrapper do not break retrieval.
         if decoration is not None:
-            asset = getattr(
-                decoration,
-                "key",
-                None,
-            )
-
-            if asset:
-                return self.remember(
-                    asset=str(asset),
-                    sku_id=sku_id,
-                )
-
-        # Fallback for situations where the library exposes the
-        # raw decoration data differently.
-        raw_user = getattr(
-            user,
-            "_user",
-            None,
-        )
-
-        raw_data = getattr(
-            raw_user,
-            "avatar_decoration_data",
-            None,
-        )
-
-        if isinstance(raw_data, dict):
-            asset = raw_data.get("asset")
-            raw_sku = raw_data.get("sku_id")
-
+            raw_asset = getattr(decoration, "key", None) or getattr(decoration, "url", None)
+            asset = self.normalize_asset(str(raw_asset or ""))
             if asset:
                 try:
-                    parsed_sku = (
-                        int(raw_sku)
-                        if raw_sku is not None
-                        else sku_id
-                    )
+                    parsed_sku = int(sku_id) if sku_id is not None else None
                 except (TypeError, ValueError):
-                    parsed_sku = sku_id
+                    parsed_sku = None
+                return self.remember(asset=asset, sku_id=parsed_sku)
 
-                return self.remember(
-                    asset=str(asset),
-                    sku_id=parsed_sku,
-                )
-
-        return None
-
+        # Older library versions or raw user payloads may expose decoration data
+        # as a mapping or an object with asset/sku_id attributes.
+        raw_user = getattr(user, "_user", None)
+        raw_data = getattr(raw_user, "avatar_decoration_data", None)
+        if isinstance(raw_data, dict):
+            raw_asset = raw_data.get("asset")
+            raw_sku = raw_data.get("sku_id", sku_id)
+        else:
+            raw_asset = getattr(raw_data, "asset", None)
+            raw_sku = getattr(raw_data, "sku_id", sku_id)
+        asset = self.normalize_asset(str(raw_asset or ""))
+        if not asset:
+            return None
+        try:
+            parsed_sku = int(raw_sku) if raw_sku is not None else None
+        except (TypeError, ValueError):
+            parsed_sku = None
+        return self.remember(asset=asset, sku_id=parsed_sku)
     # ========================================================
     # CDN
     # ========================================================
@@ -355,7 +342,7 @@ class Decor(commands.Cog):
         asset: str,
     ) -> tuple[bytes, str, str]:
 
-        asset = asset.strip()
+        asset = self.normalize_asset(asset)
 
         if not self.valid_asset(asset):
             raise ValueError(
@@ -683,28 +670,16 @@ class Decor(commands.Cog):
         # Exactly one source
         # ----------------------------------------------------
 
+        # With no explicit source, inspect the invoking user's decoration.
+        if all(value is None for value in (user, asset, sku, name)):
+            user = interaction.user
+
         supplied = [
             user is not None,
             asset is not None,
             sku is not None,
             name is not None,
         ]
-
-        if sum(supplied) == 0:
-            await interaction.response.send_message(
-                embed=self.error_embed(
-                    "No decoration specified",
-                    (
-                        "Choose one option:\n"
-                        "• `user` — retrieve their equipped decoration\n"
-                        "• `asset` — retrieve by asset hash\n"
-                        "• `sku` — retrieve a discovered SKU\n"
-                        "• `name` — search discovered decorations"
-                    ),
-                ),
-                ephemeral=True,
-            )
-            return
 
         if sum(supplied) > 1:
             await interaction.response.send_message(

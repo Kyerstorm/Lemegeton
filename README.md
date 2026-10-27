@@ -50,13 +50,13 @@ The figures below are generated from repository files and are refreshed automati
 | Tracked files | 231 |
 | Text files scanned | 227 |
 | Source code files | 193 |
-| Source lines (including blank lines) | 93,239 |
-| Non-blank source lines | 81,172 |
-| Text lines (code, docs, and configuration) | 97,102 |
-| Characters (excluding line breaks) | 4,344,421 |
-| Text file size | 4.2 MB |
-| Source line breakdown | Python: 86,740 lines; JavaScript / TypeScript: 3,996 lines; Rust: 938 lines; Shell: 749 lines; CSS / Sass: 564 lines; HTML / SVG: 252 lines |
-| Last refreshed (UTC) | 2026-10-27 16:44 UTC |
+| Source lines (including blank lines) | 93,755 |
+| Non-blank source lines | 81,610 |
+| Text lines (code, docs, and configuration) | 97,592 |
+| Characters (excluding line breaks) | 4,365,637 |
+| Text file size | 4.3 MB |
+| Source line breakdown | Python: 87,256 lines; JavaScript / TypeScript: 3,996 lines; Rust: 938 lines; Shell: 749 lines; CSS / Sass: 564 lines; HTML / SVG: 252 lines |
+| Last refreshed (UTC) | 2026-10-27 18:55 UTC |
 <!-- REPO-STATS:END -->
 
 ## ✦ What Lemegeton does
@@ -258,11 +258,10 @@ Type / in Discord or use **/help** to see commands registered in the running bot
 | **/browse** | Search supported media types with category-specific filters. |
 | **/franchise** | Explore provider-declared relationships, collections, and clearly labelled cross-provider matches. |
 | **/connections** | Resolve a selected title and navigate supported relationships. |
-| **/reading-order** | Inspect known release relationships without guessing in-universe chronology. |
 | **/similar** | Combine provider suggestions, shared-genre matches, saved links, and eligible community recommendations. |
 | **/compare** | Compare two to four media entries, including supported mixed-category comparisons. |
 | **/discovery-hub** | Open a dropdown guide to media discovery and community features. |
-| **/link-suggest** | Submit an HTTPS-linked relationship with evidence for moderation review. |
+| **/link-suggest** | Open a guided relationship selector and evidence modal for moderator review. |
 | **/link-review** | List, inspect, approve, or reject relationship suggestions in the current server. |
 
 ### 🎬 Movies and television
@@ -274,9 +273,9 @@ Type / in Discord or use **/help** to see commands registered in the running bot
 | **/trailers** | Browse TMDB-listed videos, trailers, and teasers. |
 | **/collection-guide** | Browse a movie's listed TMDB collection and films. |
 | **/tv-guide** | Show supported TV series, season, and episode details. |
-| **/release-calendar** | Preview or configure supported upcoming anime, movie, and TV release information. |
+| **/release-calendar** | Preview releases or configure/disable this server's digest through one interactive menu. |
 | **/media-region** | Set the guild's default country code for streaming availability. |
-| **/episode-discussion** | Start a spoiler-aware TV episode discussion thread. |
+| **/discussion** | Create a spoiler-aware chapter, volume, episode, season, or general media thread. |
 
 TMDB-powered features require TMDB_BEARER_TOKEN. Availability data changes, and a missing provider record is not proof that a title is unavailable.
 
@@ -286,9 +285,7 @@ TMDB-powered features require TMDB_BEARER_TOKEN. Availability data changes, and 
 |---|---|
 | **/author-works** | Search Google Books for titles attributed to an author. |
 | **/webnovel-updates** | Search metadata available through the existing Novel Updates scraper helper. |
-| **/reading-club** | Nominate, vote on, select, and schedule community reads in a guild. |
-| **/chapter-discussion** | Start a chapter- or volume-scoped spoiler-aware discussion. |
-| **/reading-order** | Explore known publication/release relationships across supported media categories. |
+| **/reading** | Open the unified Reading Hub for nominations, votes, selection, scheduled discussions, and reading order. |
 
 Novel Updates results depend on the scraper and the source page's current structure. An empty response may reflect a source failure or unsupported markup; it is not necessarily proof that a title does not exist.
 
@@ -311,17 +308,7 @@ Novel Updates results depend on the scraper and the source page's current struct
 |---|---|
 | **/panels** | Open the shared manga panel archive. |
 | **/panel-of-the-day** | Display the selected safe panel for the current server. |
-| **/quotes** | Browse, search, randomly discover, or submit attributed short quotes. |
-| **/fanworks** | Discover or submit credited fan art, edits, wallpapers, and videos. |
-| **/moodboards** | Create and explore themed boards containing multiple works. |
-| **/soundtracks** | Index links to legitimate music/video sources. |
-| **/scenes** | Save references and descriptions for memorable media scenes. |
-| **/recommendation-board** | Share human-written recommendations and reasons. |
-| **/theories** | Share and browse fan theories with spoiler marking and source links. |
-| **/archive-mine** | Check your submissions and their review status in the current server. |
-| **/archive-report** | Report an approved archive entry for moderation review. |
-| **/archive-review** | Moderate pending archive submissions from the current server. |
-| **/archive-report-review** | Triage reports of archive entries in the current server. |
+| **/archive** | Open the panel-style community archive for quotes, fanworks, moodboards, soundtracks, scenes, recommendations, and theories; search, submit, report, or moderate through its interactive modal flow. |
 | **/media-bracket** | Run a guild-local elimination poll for media candidates. |
 | **/adaptation-vote** | Compare community preferences between two versions or adaptations. |
 | **/media-quiz** | Add source-linked trivia, play a question, and submit an answer privately. |

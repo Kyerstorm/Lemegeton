@@ -152,71 +152,11 @@ class HelpCog(commands.Cog):
                     "note": "Uses the server's configured daily selection and existing panel archive; it does not create a new submission.",
                     "examples": ["/panel-of-the-day"]
                 },
-                "quotes": {
-                    "desc": "Browse, search, randomly discover, or contribute short attributed media quotes",
-                    "usage": "/quotes <action> [title] [content] [source_title] [creator] [url] [media_type] [tags] [spoiler] [keyword]",
-                    "note": "Actions: Add, Browse, Search, Random. Quotes are limited to 280 characters; entries can be tagged, attributed, and spoiler-marked. New submissions may require moderator review.",
-                    "examples": ["/quotes action:browse", "/quotes action:search keyword:hope"]
-                },
-                "fanworks": {
-                    "desc": "Discover or submit credited fan art, edits, wallpapers, and videos",
-                    "usage": "/fanworks <action> [title] [creator] [url] [source_title] [media_type] [tags]",
-                    "note": "Actions: Add, Browse, Search, Random. Credit the original creator and link to their work; external links must use HTTPS.",
-                    "examples": ["/fanworks action:browse", "/fanworks action:search keyword:wallpaper"]
-                },
-                "moodboards": {
-                    "desc": "Create or explore themed boards that bring multiple works together",
-                    "usage": "/moodboards <action> [title] [content] [url] [media_type] [tags] [keyword]",
-                    "note": "Use the content field to describe the mood and list included works. Actions: Add, Browse, Search, Random.",
-                    "examples": ["/moodboards action:browse", "/moodboards action:search keyword:celestial"]
-                },
-                "soundtracks": {
-                    "desc": "Index and discover soundtrack links from legitimate music or video platforms",
-                    "usage": "/soundtracks <action> [title] [creator] [url] [source_title] [media_type] [tags]",
-                    "note": "Prefer official artist, label, streaming, or video-platform links. Actions: Add, Browse, Search, Random.",
-                    "examples": ["/soundtracks action:browse", "/soundtracks action:search keyword:opening"]
-                },
-                "scenes": {
-                    "desc": "Save and browse memorable scenes, captions, references, and source links",
-                    "usage": "/scenes <action> [title] [content] [source_title] [url] [media_type] [tags] [spoiler]",
-                    "note": "Include the work and, where helpful, episode/chapter reference. Use the spoiler option when the description reveals plot details.",
-                    "examples": ["/scenes action:browse", "/scenes action:search keyword:finale"]
-                },
-                "recommendation-board": {
-                    "desc": "Share human-written recommendations with reasons and source metadata",
-                    "usage": "/recommendation-board <action> [title] [content] [url] [media_type] [tags] [keyword]",
-                    "note": "These are community-written recommendations, not provider recommendations or model-generated results. Actions: Add, Browse, Search, Random.",
-                    "examples": ["/recommendation-board action:browse", "/recommendation-board action:search keyword:fantasy"]
-                },
-                "theories": {
-                    "desc": "Share and browse fan theories with evidence links and spoiler marking",
-                    "usage": "/theories <action> [title] [content] [source_title] [url] [media_type] [tags] [spoiler]",
-                    "note": "Add a clear source work and mark spoilers. Submissions are community content and may require moderator review.",
-                    "examples": ["/theories action:browse", "/theories action:search keyword:ending"]
-                },
-                "archive-mine": {
-                    "desc": "Check your archive submissions and their review status in this server",
-                    "usage": "/archive-mine [archive_type]",
-                    "note": "Shows up to 20 recent submissions made by you in this server. Pending entries need local moderator review.",
-                    "examples": ["/archive-mine", "/archive-mine archive_type:quotes"]
-                },
-                "archive-report": {
-                    "desc": "Report an approved community archive entry for moderator review",
-                    "usage": "/archive-report <archive_type> <entry_id> <reason>",
-                    "note": "Explain the issue in 10–1,000 characters. Reports are scoped to your server; duplicate reports from the same user are not added twice.",
-                    "examples": ["/archive-report archive_type:quotes entry_id:12 reason:Missing source attribution"]
-                },
-                "archive-report-review": {
-                    "desc": "Triage archive reports submitted in this server",
-                    "usage": "/archive-report-review [decision] [report_id] [reason]",
-                    "note": "Requires Manage Server or Manage Messages. List, mark reviewed, dismiss, or remove an entry; removal is restricted to its originating server.",
-                    "examples": ["/archive-report-review", "/archive-report-review decision:dismissed report_id:12"]
-                },
-                "archive-review": {
-                    "desc": "Review pending archive submissions from this server",
-                    "usage": "/archive-review <action> [entry_id]",
-                    "note": "Requires Manage Server or Manage Messages. Actions: List, Approve, Reject, Remove. Moderation cannot edit another server's submission.",
-                    "examples": ["/archive-review action:list", "/archive-review action:approve entry_id:12"]
+                "archive": {
+                    "desc": "Open the unified panel-style community archive for quotes, fanworks, moodboards, soundtracks, scenes, recommendations, and theories",
+                    "usage": "/archive",
+                    "note": "Choose an archive and action in the interactive menu. Browse uses card-style entries; Submit, Search, Report, and moderation actions open focused modals. Review permissions and originating-server restrictions are preserved.",
+                    "examples": ["/archive"]
                 },
                 "media-bracket": {
                     "desc": "Create a server-specific elimination poll for media titles",
@@ -238,9 +178,15 @@ class HelpCog(commands.Cog):
                 },
                 "media-night": {
                     "desc": "Open or join this server's community media-night voting",
-                    "usage": "/media-night",
-                    "note": "Use the command's prompts to participate in a server-specific session. This entry is shown only if the command is registered.",
-                    "examples": ["/media-night"]
+                    "usage": "/media-night start | /media-night close",
+                    "note": "Start a server/channel-specific voting session with provider filters, title-labelled voting buttons, and live vote totals; the host or a moderator can close it.",
+                    "examples": ["/media-night start", "/media-night close"]
+                },
+                "discussion": {
+                    "desc": "Open one discussion modal for chapter, volume, episode, season, or general media threads",
+                    "usage": "/discussion",
+                    "note": "Choose the discussion scope, then enter a work title and explicit spoiler cutoff. A public starter message and server-local thread are created.",
+                    "examples": ["/discussion"]
                 }
             },
             "🌐 Cross-Media Discovery": {
@@ -275,10 +221,10 @@ class HelpCog(commands.Cog):
                     "examples": ["/connections The Apothecary Diaries", "/connections Lord of the Mysteries category:WEBNOVEL"]
                 },
                 "link-suggest": {
-                    "desc": "Submit a proposed relationship between two works for review",
-                    "usage": "/link-suggest <source_title> <source_category> <source_url> <relationship> <target_title> <target_category> <target_url> <evidence>",
-                    "note": "Submissions enter a review queue; this does not immediately make a proposed relationship trusted.",
-                    "note": "Provide distinct source and target titles, categories, HTTPS metadata URLs, a relationship type, and at least 15 characters of evidence. Submissions enter the moderator review queue for the current server; they are not immediately trusted."
+                    "desc": "Open a guided relationship menu and modal to suggest a connection between two media works",
+                    "usage": "/link-suggest",
+                    "note": "Choose source and target media categories and the relationship type first, then provide two HTTPS metadata URLs and evidence. Suggestions remain pending until moderators in the current server review them.",
+                    "examples": ["/link-suggest"]
                 },
                 "link-review": {
                     "desc": "Inspect and review this server's proposed media relationships",
@@ -288,17 +234,11 @@ class HelpCog(commands.Cog):
                 }
             },
             "📚 Books & Webnovels": {
-                "reading-club": {
-                    "desc": "Nominate, vote on, and schedule a community reading selection",
-                    "usage": "/reading-club",
-                    "note": "Use the command prompts to view available nomination and voting actions for your server.",
-                    "examples": ["/reading-club"]
-                },
-                "reading-order": {
-                    "desc": "Browse known release relationships for books, light novels, webnovels, manga, and anime",
-                    "usage": "/reading-order <title> [category]",
-                    "note": "Shows release relationships available from sources; it does not invent chapter-to-episode mappings or story chronology.",
-                    "examples": ["/reading-order The Apothecary Diaries", "/reading-order Lord of the Mysteries category:WEBNOVEL"]
+                "reading": {
+                    "desc": "Open the unified Reading Hub for nominations, votes, selection, scheduled group discussions, and reading-order exploration",
+                    "usage": "/reading",
+                    "note": "Choose an action and media category. Nominations and votes are server-local; discussion scheduling requires a moderator and a future ISO-8601 time with a timezone.",
+                    "examples": ["/reading"]
                 },
                 "author-works": {
                     "desc": "Search Google Books for titles attributed to an author",
@@ -312,13 +252,6 @@ class HelpCog(commands.Cog):
                     "note": "Results depend on the source scraper and page structure; no result does not prove a title is nonexistent.",
                     "examples": ["/webnovel-updates Lord of the Mysteries"]
                 },
-                "chapter-discussion": {
-                    "desc": "Start a chapter- or volume-scoped discussion thread",
-                    "usage": "/chapter-discussion <title> <chapter> [source_url]",
-                    "note": "The discussion is stored for this server. State a clear chapter or volume cutoff for spoiler context.",
-                    "examples": ["/chapter-discussion Dandadan chapter:12"]
-                }
-            },
             "🎬 Movies & TV": {
                 "tv-guide": {
                     "desc": "Browse supported TV seasons, episodes, and air-date information",
@@ -329,7 +262,7 @@ class HelpCog(commands.Cog):
                 "release-calendar": {
                     "desc": "Browse supported upcoming anime, movie, and TV release dates",
                     "usage": "/release-calendar",
-                    "note": "Calendar entries depend on provider availability and known dates; they may not be exhaustive.",
+                    "note": "The menu offers a seven-day preview, modal-based digest configuration, and per-server digest disabling. Dates depend on provider availability and may not be exhaustive.",
                     "examples": ["/release-calendar"]
                 },
                 "where-to-watch": {
@@ -355,12 +288,6 @@ class HelpCog(commands.Cog):
                     "usage": "/collection-guide <title>",
                     "note": "Uses source collection membership and release dates. Release order does not establish story chronology.",
                     "examples": ["/collection-guide Toy Story"]
-                },
-                "episode-discussion": {
-                    "desc": "Start a spoiler-aware discussion for a TV episode",
-                    "usage": "/episode-discussion <series> <episode> [source_url]",
-                    "note": "Discussion records and threads are created for this server; include a clear season/episode cutoff.",
-                    "examples": ["/episode-discussion Arcane episode:S2E4"]
                 },
                 "media-region": {
                     "desc": "Set this server's default country for streaming availability",

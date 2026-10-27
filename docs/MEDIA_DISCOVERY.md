@@ -48,24 +48,19 @@ The local ranking is a heuristic, not an AI-generated recommendation score. Prov
 
 ## Release calendar
 
-The release calendar is configured separately by each Discord server.
+Run **/release-calendar** to open one interactive menu for the seven-day preview and this server's digest settings. Use **Preview next 7 days** to inspect provider-backed dates, **Configure digests** to open a modal for channel, frequency, categories, and region, or **Disable digests** to stop delivery for the current server. Configuration and disable actions require Manage Server permission.
 
-- **/release-calendar preview** previews the next seven days.
-- **/release-calendar preview categories:anime,movies** limits a preview to named categories.
-- **/release-calendar configure channel frequency categories** configures a daily or weekly digest for that guild.
-- **/release-calendar disable** disables that guild's digest.
+Currently supported sources are AniList airing schedules for anime, TMDB upcoming movie dates (using the configured region), and TMDB TV next-episode dates. The feed has a short in-memory cache and bounded request timeouts, and each entry names its source. Adult-flagged anime is excluded. The calendar does not claim to contain manga chapter or novel volume announcements because the configured providers do not expose a dependable, unified release schedule for those categories.
 
-Currently supported sources are AniList airing schedules for anime, TMDB upcoming movie dates (US region) and TMDB TV next-episode dates. The feed has a short in-memory cache and bounded request timeouts, and each entry names its source. Adult-flagged anime is excluded. The calendar does not claim to contain manga chapter or novel volume announcements because the configured providers do not expose a dependable, unified release schedule for those categories.
+## Reading Hub
 
-## Reading Club
+Reading Club data is stored per guild. **/reading** is the single entry point for nominations, voting, selecting the next community read, scheduling a spoiler-aware discussion, and exploring reading order.
 
-Reading Club data is stored per guild.
-
-1. **/reading-club nominate** records a title, category and optional HTTPS metadata/publisher link.
-2. **/reading-club list** lists the guild's open nominations and vote totals.
-3. **/reading-club vote** records or changes the member's active vote for that guild.
-4. A moderator uses **/reading-club select** to choose the highest-voted open nomination automatically, or supplies a nomination ID to override the vote, then closes the other open nominations.
-5. **/reading-club schedule** creates a public discussion thread at a moderator-specified ISO-8601 time that must include a timezone offset. The bot posts a reminder at the scheduled time.
+1. **Nominate a title** opens a modal for the work title and optional HTTPS publisher/metadata link. Supported nomination categories are manga, manhwa, manhua, webtoon, light novels, webnovels, and general books.
+2. **View nominations** lists this guild's open nominations and vote totals. **Vote** records or changes the member's active vote in this guild.
+3. A moderator can use **Select the next read** to choose the highest-voted open nomination automatically, or supply a nomination ID to override the vote. Remaining open nominations are closed.
+4. **Schedule a discussion** creates a public thread for the selected read at a future ISO-8601 time that includes a timezone offset. The bot posts a reminder at the scheduled time.
+5. **Explore reading order** uses the existing provider relationship resolver. It displays supported relationships without guessing chapter-to-episode mappings or equating release order with story chronology.
 
 Discussion threads explicitly ask users to mark plot spoilers with Discord's spoiler syntax (||spoiler||). This feature coordinates shared community events only; it does not store personal reading progress.
 
@@ -110,7 +105,7 @@ The graph is intentionally an integration layer, not a promise that every provid
 
 ## Connected media commands and community archives
 
-The interactive /discovery-hub command is the entry point for media navigation and community features. /connections reuses the existing /franchise resolver and provider-specific relationship handling. /reading-order presents the same source-attributed relationships with an explicit warning that release order is not story chronology. Exact-title matches and recommendations remain unverified unless a provider declares a relationship.
+The interactive /discovery-hub command is the entry point for media navigation and community features. /connections reuses the existing /franchise resolver and provider-specific relationship handling. The /reading command's reading-order action presents source-attributed relationships with an explicit warning that release order is not story chronology. Exact-title matches and recommendations remain unverified unless a provider declares a relationship.
 
 ### TMDB tools
 
@@ -124,32 +119,24 @@ The interactive /discovery-hub command is the entry point for media navigation a
 
 TMDB watch-provider data is powered by JustWatch. /where-to-watch labels the queried region and links to the provider-details URL when supplied; it does not manufacture direct streaming links. TMDB requests require TMDB_BEARER_TOKEN. Availability changes and should be verified with the provider.
 
-/release-calendar configure accepts an optional region code for movie-release queries. Existing installations gain a release_region field using a non-destructive ALTER TABLE ADD COLUMN IF NOT EXISTS operation. The existing default remains US for compatibility. Anime airings still come from AniList and TV next-episode records from TMDB.
+/release-calendar's Configure digests modal accepts a two-letter region code for movie-release queries. Existing installations gain a release_region field using a non-destructive ALTER TABLE ADD COLUMN IF NOT EXISTS operation. The existing default remains US for compatibility. Anime airings still come from AniList and TV next-episode records from TMDB.
 
 ### Link suggestions and discussions
 
-/link-suggest stores a pending relationship suggestion in PostgreSQL, including its guild, submitter, source/target categories, HTTPS source URLs and evidence. /link-review is limited to Manage Server or Manage Messages members and lists, inspects, approves or rejects suggestions created in the current guild. Approval is labelled community-verified, not provider-confirmed.
+/link-suggest opens a guided menu for source category, target category, and relationship type, then opens a modal for both work titles, HTTPS metadata URLs, and evidence. The saved suggestion is scoped to the current guild. /link-review remains moderator-gated and supports listing, inspecting, approving, and rejecting pending suggestions. Approval is labelled community-verified, not provider-confirmed.
 
-/chapter-discussion and /episode-discussion create a public starter message and Discord thread. The provided chapter or episode reference acts as the spoiler cutoff; the bot does not infer cross-medium chapter/episode mappings. Discussion metadata is stored by guild and thread.
+/discussion is the single command for spoiler-aware chapter, volume, episode, season, or general discussion threads. Choose the scope in the interactive menu and then submit the work title, explicit spoiler cutoff, and optional metadata URL through a modal. It posts a starter message and stores the discussion thread against the current guild; it does not infer cross-medium chapter/episode mappings.
 
 ### Community archives and events
 
-The following commands use PostgreSQL-backed records and support add, browse, search or random actions where applicable:
+The interactive **/archive** command unifies the community contribution archives in a Panels-inspired, card-based browser. Select an archive type and action, then use its buttons or modal form.
 
-- /quotes — short attributed excerpts with a 280-character limit; do not submit lyrics or long copyrighted passages.
-- /fanworks — credited links to fan art, edits, wallpapers or videos. Lemegeton stores submission metadata and URLs instead of rehosting submitted works.
-- /moodboards — themes and a submitted list of related works.
-- /soundtracks — links to legitimate music/video platforms; audio is not hosted by Lemegeton.
-- /scenes — captions and references to memorable moments.
-- /recommendation-board — member-written reasons for trying a title.
-- /theories — community theories, spoiler-wrapped by default.
-- /archive-mine — list your own submissions and whether they are pending, approved, rejected or removed.
-- /archive-report and /archive-report-review — submit a reasoned report and let server moderators resolve it. Only the source server's moderators can remove the original shared entry.
-- /archive-review — moderators review pending submissions originating in their own server before entries become visible in the shared archive.
-- /panel-of-the-day — selects a non-NSFW record from the existing Panels table and persists one selection per server per date instead of maintaining a second panel database.
-- /media-bracket, /adaptation-vote and /media-quiz — persist server-scoped votes, polls, trivia questions and user quiz sessions.
+- **/archive** — browse, search, contribute, or randomly discover quotes, credited fanworks, moodboards, soundtracks, scenes, human-written recommendations, and spoiler-marked theories. The same menu provides personal submission history, entry reporting, submission review, and report moderation.
+- **/panels** — the dedicated manga-panel archive with its existing image, search, filtering, and moderation interface.
+- **/panel-of-the-day** — selects a non-NSFW record from the existing Panels table and persists one selection per server per date instead of maintaining a second panel database.
+- **/media-bracket**, **/adaptation-vote**, and **/media-quiz** — persist server-scoped votes, polls, trivia questions, and user quiz sessions.
 
-New community archive submissions start pending. Approval takes place in the originating guild; approved entries are shared across servers. Moderation and votes remain guild-scoped. Fanworks and soundtrack submissions require HTTPS links, and user-supplied links are not treated as proof of a media relationship.
+New community archive submissions start pending. Approval takes place in the originating guild; approved entries are shared across servers. Moderation and votes remain guild-scoped. Fanworks and soundtrack submissions require HTTPS links, and user-supplied links are not treated as proof of a media relationship. Quotes are limited to 280 characters; do not submit lyrics or long copyrighted passages. Archive entries link to external work and metadata rather than rehosting fan media or music.
 
 ### Database changes
 

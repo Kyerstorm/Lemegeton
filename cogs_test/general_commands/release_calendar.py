@@ -17,6 +17,7 @@ from discord.ext import commands, tasks
 from database import execute_db_operation
 from helpers.anilist_helper import post_graphql
 from cogs_test.general_commands.dashboard import command_meta
+from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView
 
 log = logging.getLogger(__name__)
 
@@ -70,6 +71,88 @@ def _title(record: dict[str, Any], tv: bool = False) -> str:
     if isinstance(value, dict):
         value = value.get("english") or value.get("romaji") or value.get("native")
     return str(value or "Untitled").strip()
+
+
+
+class ReleaseCalendarConfigureModal(FeedbackAwareModal):
+    def __init__(self, cog: "ReleaseCalendar"):
+        super().__init__(title="Configure Release Calendar", timeout=180)
+        self.cog = cog
+        self.channel_input = discord.ui.TextInput(
+            label="Digest channel mention or ID", max_length=100, required=True,
+            placeholder="e.g. #releases or the channel ID",
+        )
+        self.frequency = discord.ui.TextInput(label="Frequency: daily or weekly", max_length=10, required=True, default="weekly")
+        self.categories = discord.ui.TextInput(
+            label="Categories: anime, movies, tv", max_length=80, required=True,
+            default="anime,movies,tv",
+        )
+        self.region = discord.ui.TextInput(label="Movie region (two-letter code)", max_length=2, required=True, default="US")
+        for field in (self.channel_input, self.frequency, self.categories, self.region):
+            self.add_item(field)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message("Release calendar settings are server-specific.", ephemeral=True)
+            return
+        match = re.search(r"\d{15,25}", self.channel_input.value)
+        if not match:
+            await interaction.response.send_message("Provide a valid channel mention or numeric channel ID.", ephemeral=True)
+            return
+        channel = interaction.guild.get_channel(int(match.group(0)))
+        if channel is None:
+            try:
+                channel = await interaction.guild.fetch_channel(int(match.group(0)))
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                channel = None
+        if not isinstance(channel, discord.TextChannel):
+            await interaction.response.send_message("That ID does not resolve to a text channel in this server.", ephemeral=True)
+            return
+        await self.cog.configure(
+            interaction, channel, self.frequency.value.strip().casefold(),
+            self.categories.value.strip(), self.region.value.strip().upper(),
+        )
+
+
+class ReleaseCalendarView(FeedbackAwareView):
+    def __init__(self, cog: "ReleaseCalendar", owner_id: int):
+        super().__init__(timeout=240)
+        self.cog = cog
+        self.owner_id = owner_id
+        preview = discord.ui.Button(label="Preview next 7 days", style=discord.ButtonStyle.primary, emoji="🗓️", row=0)
+        configure = discord.ui.Button(label="Configure digests", style=discord.ButtonStyle.success, emoji="⚙️", row=0)
+        disable = discord.ui.Button(label="Disable digests", style=discord.ButtonStyle.secondary, emoji="⏸️", row=0)
+        close = discord.ui.Button(label="Close", style=discord.ButtonStyle.secondary, row=0)
+        preview.callback = self._preview
+        configure.callback = self._configure
+        disable.callback = self._disable
+        close.callback = self._close
+        for button in (preview, configure, disable, close):
+            self.add_item(button)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("Only the person who opened this calendar menu can control it.", ephemeral=True)
+            return False
+        return True
+
+    async def _preview(self, interaction: discord.Interaction) -> None:
+        await self.cog.preview(interaction, "anime,movies,tv")
+
+    async def _configure(self, interaction: discord.Interaction) -> None:
+        if interaction.guild is None or not getattr(interaction.user.guild_permissions, "manage_guild", False):
+            await interaction.response.send_message("Manage Server permission is required to configure release digests.", ephemeral=True)
+            return
+        await interaction.response.send_modal(ReleaseCalendarConfigureModal(self.cog))
+
+    async def _disable(self, interaction: discord.Interaction) -> None:
+        if interaction.guild is None or not getattr(interaction.user.guild_permissions, "manage_guild", False):
+            await interaction.response.send_message("Manage Server permission is required to disable release digests.", ephemeral=True)
+            return
+        await self.cog.disable(interaction)
+
+    async def _close(self, interaction: discord.Interaction) -> None:
+        await interaction.response.edit_message(content="Release calendar closed.", embed=None, view=None)
 
 
 class ReleaseCalendar(commands.Cog):
@@ -283,23 +366,28 @@ class ReleaseCalendar(commands.Cog):
             embed.set_thumbnail(url=images)
         return embed
 
-    calendar = app_commands.Group(name="release-calendar", description="Configure provider-backed release digests")
-
-    @calendar.command(name="configure", description="Set this server's release digest channel and schedule")
+    @app_commands.command(name="release-calendar", description="Open release discovery and per-server digest settings")
     @app_commands.guild_only()
-    @app_commands.choices(frequency=[
-        app_commands.Choice(name="Daily", value="daily"),
-        app_commands.Choice(name="Weekly", value="weekly"),
-    ])
-    @app_commands.describe(
-        channel="Channel where the digest should be sent",
-        frequency="How often the server receives a digest",
-        categories="Comma-separated categories: anime,movies,tv",
-        region="Two-letter region for movie release dates (for example IE, GB, or US)",
-    )
-    @app_commands.checks.has_permissions(manage_guild=True)
-    @command_meta(section="Community", name="Release Calendar Configure")
+    @command_meta(section="Community", name="Release Calendar")
+    async def release_calendar(self, interaction: discord.Interaction) -> None:
+        embed = discord.Embed(
+            title="Release Calendar",
+            description=(
+                "Preview supported upcoming anime airings, movie releases, and TV episode dates, or configure a daily "
+                "or weekly digest for this server. Dates are shown only when a provider supplies a usable date."
+            ),
+            color=discord.Color.blurple(),
+        )
+        embed.add_field(name="Preview", value="Browse supported releases from the next seven days.", inline=False)
+        embed.add_field(name="Server digests", value="Choose a channel, daily or weekly delivery, provider categories, and a movie region.", inline=False)
+        embed.set_footer(text="Digest settings are isolated to this server · Providers may not expose every release")
+        await interaction.response.send_message(
+            embed=embed, view=ReleaseCalendarView(self, interaction.user.id), ephemeral=True,
+        )
     async def configure(self, interaction: discord.Interaction, channel: discord.TextChannel, frequency: str = "weekly", categories: str = "anime,movies,tv", region: str = "US") -> None:
+        if interaction.guild is None or not getattr(interaction.user.guild_permissions, "manage_guild", False):
+            await interaction.response.send_message("Manage Server permission is required to configure release digests.", ephemeral=True)
+            return
         if frequency not in {"daily", "weekly"}:
             await interaction.response.send_message("Frequency must be daily or weekly.", ephemeral=True)
             return
@@ -344,13 +432,12 @@ class ReleaseCalendar(commands.Cog):
             ephemeral=True,
         )
 
-    @calendar.command(name="disable", description="Disable this server's release digest")
-    @app_commands.guild_only()
-    @app_commands.checks.has_permissions(manage_guild=True)
-    @command_meta(section="Community", name="Release Calendar Disable")
     async def disable(self, interaction: discord.Interaction) -> None:
         if interaction.guild is None:
             await interaction.response.send_message("This setting is server-specific.", ephemeral=True)
+            return
+        if not getattr(interaction.user.guild_permissions, "manage_guild", False):
+            await interaction.response.send_message("Manage Server permission is required to disable release digests.", ephemeral=True)
             return
         await execute_db_operation(
             "disable guild release calendar",
@@ -359,10 +446,6 @@ class ReleaseCalendar(commands.Cog):
         )
         await interaction.response.send_message("Release digests are disabled for this server.", ephemeral=True)
 
-    @calendar.command(name="preview", description="Preview the next seven days of supported release dates")
-    @app_commands.guild_only()
-    @app_commands.describe(categories="Comma-separated categories: anime,movies,tv")
-    @command_meta(section="Community", name="Release Calendar Preview")
     async def preview(self, interaction: discord.Interaction, categories: str = "anime,movies,tv") -> None:
         try:
             normalized = normalize_categories(categories)

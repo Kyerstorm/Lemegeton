@@ -46,6 +46,143 @@ def parse_schedule_time(value: str, now: datetime | None = None) -> datetime:
     return parsed
 
 
+
+READING_ACTIONS = [
+    ("Nominate a title", "nominate"), ("View nominations", "list"), ("Vote", "vote"),
+    ("Select the next read", "select"), ("Schedule a discussion", "schedule"),
+    ("Explore reading order", "order"),
+]
+READING_CATEGORIES = [
+    ("Manga", "manga"), ("Manhwa", "manhwa"), ("Manhua", "manhua"), ("Webtoon", "webtoon"),
+    ("Light novel", "light novel"), ("Webnovel", "webnovel"), ("General book", "book"),
+    ("Anime", "anime"), ("Movie", "movie"), ("TV series", "tv"), ("Video game", "game"),
+]
+READING_ORDER_CATEGORIES = {
+    "manga": "MANGA", "manhwa": "MANGA", "manhua": "MANGA", "webtoon": "MANGA",
+    "light novel": "LIGHT_NOVEL", "webnovel": "WEBNOVEL", "book": "BOOK",
+    "anime": "ANIME", "movie": "MOVIE", "tv": "TV", "game": "GAME",
+}
+
+
+class ReadingActionModal(discord.ui.Modal):
+    def __init__(self, cog: "ReadingClub", action: str, category: str):
+        labels = {
+            "nominate": "Nominate a Read", "vote": "Vote for a Read", "select": "Select Next Read",
+            "schedule": "Schedule Reading Discussion", "order": "Explore Reading Order",
+        }
+        super().__init__(title=labels.get(action, "Reading"), timeout=180)
+        self.cog = cog
+        self.action = action
+        self.category = category
+        self.title_input = None
+        self.source_url = None
+        self.nomination_id = None
+        self.when = None
+        if action in {"nominate", "order"}:
+            self.title_input = discord.ui.TextInput(
+                label="Title to nominate" if action == "nominate" else "Title to explore",
+                max_length=200, required=True,
+            )
+            self.add_item(self.title_input)
+        if action == "nominate":
+            self.source_url = discord.ui.TextInput(label="Publisher or metadata URL (optional)", max_length=1000, required=False)
+            self.add_item(self.source_url)
+        elif action in {"vote", "select", "schedule"}:
+            self.nomination_id = discord.ui.TextInput(
+                label="Nomination ID" + (" (leave blank for vote winner)" if action == "select" else ""),
+                max_length=100, required=action != "select",
+            )
+            self.add_item(self.nomination_id)
+        if action == "schedule":
+            self.when = discord.ui.TextInput(
+                label="Future date and time with timezone", max_length=40, required=True,
+                placeholder="2026-11-02T18:30+00:00",
+            )
+            self.add_item(self.when)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if self.action == "nominate":
+            category = self.category
+            if category not in {"manga", "manhwa", "manhua", "webtoon", "light novel", "webnovel", "book"}:
+                await interaction.response.send_message(
+                    "Reading Club nominations support manga, manhwa, manhua, webtoons, light novels, webnovels, and books. Choose a supported reading category.",
+                    ephemeral=True,
+                )
+                return
+            await self.cog.nominate(
+                interaction, self.title_input.value, category,
+                self.source_url.value or None,
+            )
+        elif self.action == "vote":
+            await self.cog.vote(interaction, self.nomination_id.value.strip())
+        elif self.action == "select":
+            await self.cog.select(interaction, self.nomination_id.value.strip() or None)
+        elif self.action == "schedule":
+            await self.cog.schedule(
+                interaction, self.nomination_id.value.strip(), self.when.value.strip(),
+            )
+        elif self.action == "order":
+            connected_media = self.cog.bot.get_cog("ConnectedMedia")
+            if connected_media is None:
+                await interaction.response.send_message("The media relationship resolver is unavailable right now.", ephemeral=True)
+                return
+            category = READING_ORDER_CATEGORIES.get(self.category, "LIGHT_NOVEL")
+            await connected_media._show_franchise_picker(
+                interaction, self.title_input.value, category, reading_order=True,
+            )
+
+
+class ReadingHomeView(FeedbackAwareView):
+    """Single entry point for nomination, voting, scheduling, and reading order."""
+    def __init__(self, cog: "ReadingClub", owner_id: int):
+        super().__init__(timeout=240)
+        self.cog = cog
+        self.owner_id = owner_id
+        self.action = "nominate"
+        self.category = "light novel"
+        action_select = discord.ui.Select(
+            placeholder="Choose a reading action", min_values=1, max_values=1, row=0,
+            options=[discord.SelectOption(label=label, value=value, default=value == self.action) for label, value in READING_ACTIONS],
+        )
+        category_select = discord.ui.Select(
+            placeholder="Choose a media category", min_values=1, max_values=1, row=1,
+            options=[discord.SelectOption(label=label, value=value, default=value == self.category) for label, value in READING_CATEGORIES],
+        )
+        action_select.callback = self._set_action
+        category_select.callback = self._set_category
+        self.add_item(action_select)
+        self.add_item(category_select)
+        continue_button = discord.ui.Button(label="Continue", style=discord.ButtonStyle.primary, emoji="📚", row=2)
+        close_button = discord.ui.Button(label="Close", style=discord.ButtonStyle.secondary, row=2)
+        continue_button.callback = self._continue
+        close_button.callback = self._close
+        self.add_item(continue_button)
+        self.add_item(close_button)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("Only the person who opened this reading menu can control it.", ephemeral=True)
+            return False
+        return True
+
+    async def _set_action(self, interaction: discord.Interaction) -> None:
+        self.action = self.children[0].values[0]
+        await interaction.response.edit_message(view=self)
+
+    async def _set_category(self, interaction: discord.Interaction) -> None:
+        self.category = self.children[1].values[0]
+        await interaction.response.edit_message(view=self)
+
+    async def _continue(self, interaction: discord.Interaction) -> None:
+        if self.action == "list":
+            await self.cog.list_nominations(interaction)
+            return
+        await interaction.response.send_modal(ReadingActionModal(self.cog, self.action, self.category))
+
+    async def _close(self, interaction: discord.Interaction) -> None:
+        await interaction.response.edit_message(content="Reading menu closed.", embed=None, view=None)
+
+
 class ReadingClub(commands.Cog):
     """Persist nomination and voting state with guild-scoped queries."""
 
@@ -86,21 +223,25 @@ class ReadingClub(commands.Cog):
     async def cog_unload(self) -> None:
         self.dispatch_scheduled_discussions.cancel()
 
-    club = app_commands.Group(name="reading-club", description="Nominate, vote for, and discuss community reads")
-
-    @club.command(name="nominate", description="Nominate a manga, webtoon, novel, or book")
+    @app_commands.command(name="reading", description="Open the unified reading club and reading-order hub")
     @app_commands.guild_only()
-    @app_commands.choices(category=[
-        app_commands.Choice(name="Manga", value="manga"),
-        app_commands.Choice(name="Manhwa", value="manhwa"),
-        app_commands.Choice(name="Manhua", value="manhua"),
-        app_commands.Choice(name="Webtoon", value="webtoon"),
-        app_commands.Choice(name="Light novel", value="light novel"),
-        app_commands.Choice(name="Webnovel", value="webnovel"),
-        app_commands.Choice(name="General book", value="book"),
-    ])
-    @app_commands.describe(title="Title to nominate", category="Media category", source_url="Optional metadata or publisher link")
-    @command_meta(section="Community", name="Reading Club Nominate")
+    @command_meta(section="Community", name="Reading Hub")
+    async def reading(self, interaction: discord.Interaction) -> None:
+        embed = discord.Embed(
+            title="Reading Hub",
+            description=(
+                "One interface for community nominations, voting, selecting the next read, scheduling spoiler-aware "
+                "discussions, and exploring known publication/adaptation relationships. Nomination and vote data is "
+                "isolated to this Discord server."
+            ),
+            color=discord.Color.blurple(),
+        )
+        embed.add_field(name="Community reading", value="Nominate, browse, vote, select, and schedule the next group discussion.", inline=False)
+        embed.add_field(name="Reading order", value="Explore provider-declared relationships without guessing chapter-to-episode mappings or story chronology.", inline=False)
+        embed.set_footer(text="Select an action and media category to continue")
+        await interaction.response.send_message(
+            embed=embed, view=ReadingHomeView(self, interaction.user.id), ephemeral=True,
+        )
     async def nominate(self, interaction: discord.Interaction, title: str, category: str, source_url: str | None = None) -> None:
         if interaction.guild is None or interaction.channel is None:
             await interaction.response.send_message("Reading Club is available in server channels.", ephemeral=True)
@@ -129,13 +270,10 @@ class ReadingClub(commands.Cog):
             return
         link = f"\nSource: {url}" if url else ""
         await interaction.response.send_message(
-            f"📚 **Nomination submitted:** {title[:200]} ({category})\nNomination ID: **{nomination_id}**{link}\nUse /reading-club list to see nominations and /reading-club vote to vote.",
+            f"📚 **Nomination submitted:** {title[:200]} ({category})\nNomination ID: **{nomination_id}**{link}\nUse /reading (View nominations) to see nominations and /reading (Vote) to vote.",
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
-    @club.command(name="list", description="List open nominations and vote totals")
-    @app_commands.guild_only()
-    @command_meta(section="Community", name="Reading Club List")
     async def list_nominations(self, interaction: discord.Interaction) -> None:
         if interaction.guild is None:
             await interaction.response.send_message("This command is server-specific.", ephemeral=True)
@@ -146,7 +284,7 @@ class ReadingClub(commands.Cog):
             (interaction.guild.id,), fetch_type="all",
         )
         if not rows:
-            await interaction.response.send_message("There are no open nominations yet. Use /reading-club nominate to suggest a title.", ephemeral=True)
+            await interaction.response.send_message("There are no open nominations yet. Use /reading (Nominate a title) to suggest a title.", ephemeral=True)
             return
         lines = []
         for row in (rows or [])[:15]:
@@ -165,10 +303,6 @@ class ReadingClub(commands.Cog):
         embed.set_footer(text="One active vote per person in this server · Votes can be changed")
         await interaction.response.send_message(embed=embed, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
-    @club.command(name="vote", description="Vote for the next community reading selection")
-    @app_commands.guild_only()
-    @app_commands.describe(nomination_id="ID shown in /reading-club list")
-    @command_meta(section="Community", name="Reading Club Vote")
     async def vote(self, interaction: discord.Interaction, nomination_id: str) -> None:
         if interaction.guild is None:
             await interaction.response.send_message("This command is server-specific.", ephemeral=True)
@@ -201,14 +335,12 @@ class ReadingClub(commands.Cog):
             )
         await interaction.response.send_message(f"✅ Your vote for **{dict(nomination)['title']}** has been recorded for this server.", ephemeral=True)
 
-    @club.command(name="select", description="Close nominations and select the community's next read")
-    @app_commands.guild_only()
-    @app_commands.checks.has_permissions(manage_guild=True)
-    @app_commands.describe(nomination_id="Optional manual override; omit to select the highest-voted open nomination")
-    @command_meta(section="Community", name="Reading Club Select")
     async def select(self, interaction: discord.Interaction, nomination_id: str | None = None) -> None:
         if interaction.guild is None:
             await interaction.response.send_message("This command is server-specific.", ephemeral=True)
+            return
+        if not getattr(interaction.user.guild_permissions, "manage_guild", False):
+            await interaction.response.send_message("Manage Server permission is required to select the next community read.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         if nomination_id and nomination_id.strip():
@@ -256,7 +388,7 @@ class ReadingClub(commands.Cog):
         source = f"\nSource: {item['source_url']}" if item.get("source_url") else ""
         try:
             await interaction.channel.send(
-                f"🏆 **Community read selected:** {item.get('title', 'Untitled')} ({item.get('category', 'book')}){source}\nA moderator can schedule discussion with /reading-club schedule.",
+                f"🏆 **Community read selected:** {item.get('title', 'Untitled')} ({item.get('category', 'book')}){source}\nA moderator can schedule discussion with /reading (Schedule a discussion).",
                 allowed_mentions=discord.AllowedMentions.none(),
             )
         except (discord.Forbidden, discord.HTTPException, AttributeError):
@@ -265,14 +397,12 @@ class ReadingClub(commands.Cog):
             return
         await interaction.followup.send(f"The selection is recorded ({winner_votes if not nomination_id else 'manual override'} votes). Other open nominations are closed.", ephemeral=True)
 
-    @club.command(name="schedule", description="Schedule a spoiler-aware discussion for the selected read")
-    @app_commands.guild_only()
-    @app_commands.checks.has_permissions(manage_guild=True)
-    @app_commands.describe(nomination_id="Selected title's ID", when="ISO-8601 time with timezone, e.g. 2026-11-02T18:30+00:00")
-    @command_meta(section="Community", name="Reading Club Schedule")
     async def schedule(self, interaction: discord.Interaction, nomination_id: str, when: str) -> None:
         if interaction.guild is None or not isinstance(interaction.channel, discord.TextChannel):
             await interaction.response.send_message("Schedule discussions from a server text channel that supports public threads.", ephemeral=True)
+            return
+        if not getattr(interaction.user.guild_permissions, "manage_guild", False):
+            await interaction.response.send_message("Manage Server permission is required to schedule the community read.", ephemeral=True)
             return
         try:
             scheduled_at = parse_schedule_time(when)
@@ -286,7 +416,7 @@ class ReadingClub(commands.Cog):
             (interaction.guild.id, nomination_id.strip()), fetch_type="one",
         )
         if not row:
-            await interaction.followup.send("Select a nomination first with /reading-club select.", ephemeral=True)
+            await interaction.followup.send("Select a nomination first with /reading (Select the next read).", ephemeral=True)
             return
         item = dict(row)
         thread_name = f"📚 {str(item.get('title') or 'Reading Club')} discussion"[:100]

@@ -23,7 +23,7 @@ HUB_SECTIONS = {
             "• /franchise — provider-attributed franchise relationships\n"
             "• /similar — provider recommendations and genre-overlap matches\n"
             "• /compare — compare two or more media entries\n"
-            "• /reading-order — inspect known relationships and release dates\n"
+            "• /reading — explore publication relationships and reading order\n"
             "• /link-suggest — submit a missing relationship for review"
         ),
     },
@@ -31,12 +31,11 @@ HUB_SECTIONS = {
         "label": "Novel readers",
         "description": (
             "**Books, light novels and webnovels**\n"
-            "• /reading-club — nominate, vote and schedule community reads\n"
+            "• /reading — nominations, votes, selection, scheduling and reading order\n"
+            "• /discussion — spoiler-aware chapter, volume, episode, season and general threads\n"
+            "• /archive — discover quotes, fanworks, moodboards, scenes, soundtracks, recommendations and theories\n"
             "• /webnovel-updates — query Novel Updates metadata\n"
-            "• /author-works — search Google Books by author\n"
-            "• /reading-order — follow supported publication/adaptation relations\n"
-            "• /chapter-discussion — start a spoiler-aware chapter thread\n"
-            "• /quotes — discover short, attributed excerpts"
+            "• /author-works — search Google Books by author"
         ),
     },
     "screen": {
@@ -50,7 +49,7 @@ HUB_SECTIONS = {
             "• /collection-guide — TMDB movie collections\n"
             "• /tv-guide — seasons, episodes and available air dates\n"
             "• /release-calendar — supported upcoming anime/movie/TV dates\n"
-            "• /episode-discussion — start an episode discussion\n"
+            "• /discussion — start a spoiler-aware episode or season thread\n"
             "• /media-region — set this server's default streaming region"
         ),
     },
@@ -59,18 +58,8 @@ HUB_SECTIONS = {
         "description": (
             "**Browse and contribute**\n"
             "• /panels — manga panel archive\n"
-            "• /quotes — short quotes with source attribution\n"
-            "• /fanworks — credited fan art, edits and wallpapers\n"
-            "• /moodboards — themed multi-work boards\n"
-            "• /soundtracks — legal platform links for music\n"
-            "• /scenes — memorable scenes and references\n"
-            "• /recommendation-board — member-written recommendations\n"
-            "• /theories — spoiler-marked fan theories\n"
-            "• /panel-of-the-day — feature a safe archived panel\n"
-            "• /archive-mine — check your submissions and review status\n"
-            "• /archive-report — flag an approved entry for review\n"
-            "• /archive-review — review submissions from this server\n"
-            "• /archive-report-review — triage archive reports"
+            "• /archive — quotes, fanworks, moodboards, soundtracks, scenes, recommendations and theories\n"
+            "• /panel-of-the-day — feature a safe archived panel"
         ),
     },
     "gaming": {
@@ -90,7 +79,7 @@ HUB_SECTIONS = {
             "• /media-bracket — title elimination poll\n"
             "• /adaptation-vote — vote between two versions\n"
             "• /media-quiz — source-linked community trivia\n"
-            "• /episode-discussion and /chapter-discussion — spoiler-aware threads"
+            "• /discussion — spoiler-aware chapter, volume, episode and season threads"
         ),
     },
 }

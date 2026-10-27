@@ -11,7 +11,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from helpers.command_error_handler import handle_application_command_error
+from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView, handle_application_command_error
 import database
 from helpers import media_storage
 from cogs_test.general_commands.dashboard import command_meta
@@ -96,6 +96,279 @@ def _https_url(value: str | None, required: bool = False) -> str | None:
     if parsed.scheme.lower() != "https" or not parsed.hostname or parsed.username or parsed.password or len(raw) > 1000:
         raise ValueError("Source links must be complete HTTPS URLs without embedded credentials.")
     return raw
+
+
+
+ARCHIVE_UI_TYPES = [
+    ("Quotes", "quotes"), ("Fanworks", "fanworks"), ("Moodboards", "moodboards"),
+    ("Soundtracks", "soundtracks"), ("Scenes", "scenes"),
+    ("Recommendations", "recommendation-board"), ("Theories", "theories"),
+]
+ARCHIVE_UI_ACTIONS = [
+    ("Browse", "browse"), ("Search", "search"), ("Submit", "add"), ("Random entry", "random"),
+    ("My submissions", "mine"), ("Report an entry", "report"),
+    ("Review submissions", "review"), ("Review a submission", "review-entry"),
+    ("View reports", "reports"), ("Review a report", "report-review"),
+]
+
+
+class ArchiveSubmissionModal(FeedbackAwareModal):
+    def __init__(self, cog: "CommunityArchives", archive_type: str, media_type: str = "Other"):
+        super().__init__(title=f"Submit {archive_type.replace('-', ' ').title()}", timeout=180)
+        self.cog = cog
+        self.archive_type = archive_type
+        self.media_type = media_type
+        self.entry_title = discord.ui.TextInput(label="Title", max_length=200, required=True)
+        self.content = discord.ui.TextInput(
+            label="Description / quote (max 280 for quotes)", style=discord.TextStyle.paragraph,
+            max_length=3000, required=True,
+        )
+        self.source_title = discord.ui.TextInput(label="Related work / source title", max_length=200, required=False)
+        self.creator = discord.ui.TextInput(label="Creator / speaker / composer", max_length=200, required=False)
+        self.url = discord.ui.TextInput(label="Source URL (HTTPS)", max_length=1000, required=False)
+        for field in (self.entry_title, self.content, self.source_title, self.creator, self.url):
+            self.add_item(field)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.cog._archive_action(
+            interaction, self.archive_type, "add",
+            self.entry_title.value, self.content.value, self.source_title.value or None,
+            self.creator.value or None, self.url.value or None, self.media_type, None,
+            self.archive_type == "theories", None,
+        )
+
+
+class ArchiveSearchModal(FeedbackAwareModal):
+    def __init__(self, cog: "CommunityArchives", archive_type: str):
+        super().__init__(title=f"Search {archive_type.replace('-', ' ').title()}", timeout=180)
+        self.cog = cog
+        self.archive_type = archive_type
+        self.keyword = discord.ui.TextInput(label="Search terms", max_length=100, required=True)
+        self.add_item(self.keyword)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.cog._archive_action(
+            interaction, self.archive_type, "search", None, None, None, None, None,
+            "Other", None, self.archive_type == "theories", self.keyword.value,
+        )
+
+
+class ArchiveReportModal(FeedbackAwareModal):
+    def __init__(self, cog: "CommunityArchives", archive_type: str):
+        super().__init__(title="Report archive entry", timeout=180)
+        self.cog = cog
+        self.archive_type = archive_type
+        self.entry_id = discord.ui.TextInput(label="Entry ID", max_length=20, required=True)
+        self.reason = discord.ui.TextInput(
+            label="Why should moderators review it?", style=discord.TextStyle.paragraph,
+            min_length=10, max_length=1000, required=True,
+        )
+        self.add_item(self.entry_id)
+        self.add_item(self.reason)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        try:
+            entry_id = int(self.entry_id.value.strip())
+        except ValueError:
+            await interaction.response.send_message("Entry ID must be a number.", ephemeral=True)
+            return
+        await self.cog.archive_report(interaction, self.archive_type, entry_id, self.reason.value)
+
+
+class ArchiveReviewModal(FeedbackAwareModal):
+    def __init__(self, cog: "CommunityArchives", archive_type: str):
+        super().__init__(title="Review archive submission", timeout=180)
+        self.cog = cog
+        self.archive_type = archive_type
+        self.action = discord.ui.TextInput(
+            label="Action: approve, reject, or remove", max_length=10, required=True,
+        )
+        self.entry_id = discord.ui.TextInput(label="Submission ID", max_length=20, required=True)
+        self.add_item(self.action)
+        self.add_item(self.entry_id)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        action = self.action.value.strip().casefold()
+        if action not in {"approve", "reject", "remove"}:
+            await interaction.response.send_message("Choose approve, reject, or remove.", ephemeral=True)
+            return
+        try:
+            entry_id = int(self.entry_id.value.strip())
+        except ValueError:
+            await interaction.response.send_message("Submission ID must be a number.", ephemeral=True)
+            return
+        await self.cog._review_archive(interaction, action, entry_id)
+
+
+class ArchiveReportReviewModal(FeedbackAwareModal):
+    def __init__(self, cog: "CommunityArchives"):
+        super().__init__(title="Review archive report", timeout=180)
+        self.cog = cog
+        self.decision = discord.ui.TextInput(
+            label="Decision (list, resolved, dismissed, remove)", max_length=12, required=False,
+            placeholder="list",
+        )
+        self.report_id = discord.ui.TextInput(label="Report ID (for a decision)", max_length=20, required=False)
+        self.reason = discord.ui.TextInput(label="Moderator note (optional)", max_length=1000, required=False)
+        for field in (self.decision, self.report_id, self.reason):
+            self.add_item(field)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        decision = self.decision.value.strip().casefold() or "list"
+        try:
+            report_id = int(self.report_id.value.strip()) if self.report_id.value.strip() else None
+        except ValueError:
+            await interaction.response.send_message("Report ID must be a number.", ephemeral=True)
+            return
+        await self.cog.archive_report_review(interaction, decision, report_id, self.reason.value or "")
+
+
+class ArchiveResultsView(FeedbackAwareView):
+    """Panel-style, one-entry-at-a-time browsing for community archives."""
+    def __init__(
+        self, cog: "CommunityArchives", owner_id: int, archive_type: str,
+        rows: list[Any], media_type: str = "Other",
+    ):
+        super().__init__(timeout=240)
+        self.cog = cog
+        self.owner_id = owner_id
+        self.archive_type = archive_type
+        self.rows = [dict(row) for row in rows]
+        self.media_type = media_type
+        self.index = 0
+        previous = discord.ui.Button(label="Previous", style=discord.ButtonStyle.secondary, row=0)
+        following = discord.ui.Button(label="Next", style=discord.ButtonStyle.secondary, row=0)
+        search = discord.ui.Button(label="Search", style=discord.ButtonStyle.primary, row=1)
+        submit = discord.ui.Button(label="Contribute", style=discord.ButtonStyle.success, row=1)
+        close = discord.ui.Button(label="Close", style=discord.ButtonStyle.secondary, row=1)
+        previous.callback = self._previous
+        following.callback = self._next
+        search.callback = self._search
+        submit.callback = self._submit
+        close.callback = self._close
+        self.add_item(previous)
+        self.add_item(following)
+        self.add_item(search)
+        self.add_item(submit)
+        self.add_item(close)
+        self._sync_buttons()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("Only the person who opened this archive view can control it.", ephemeral=True)
+            return False
+        return True
+
+    def _sync_buttons(self) -> None:
+        self.children[0].disabled = self.index <= 0
+        self.children[1].disabled = self.index >= len(self.rows) - 1
+
+    def build_embed(self) -> discord.Embed:
+        embed = self.cog._entry_embed(self.archive_type, self.rows[self.index])
+        embed.set_footer(text=f"Community archive · Entry {self.index + 1} of {len(self.rows)} · Use the buttons to browse or contribute")
+        return embed
+
+    async def _move(self, interaction: discord.Interaction, delta: int) -> None:
+        self.index = max(0, min(len(self.rows) - 1, self.index + delta))
+        self._sync_buttons()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    async def _previous(self, interaction: discord.Interaction) -> None:
+        await self._move(interaction, -1)
+
+    async def _next(self, interaction: discord.Interaction) -> None:
+        await self._move(interaction, 1)
+
+    async def _search(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(ArchiveSearchModal(self.cog, self.archive_type))
+
+    async def _submit(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(ArchiveSubmissionModal(self.cog, self.archive_type, self.media_type))
+
+    async def _close(self, interaction: discord.Interaction) -> None:
+        await interaction.response.edit_message(content="Archive view closed.", embed=None, view=None)
+
+
+class ArchiveHomeView(FeedbackAwareView):
+    """Unified archive launcher for browse, submissions, and guild-local moderation."""
+    def __init__(self, cog: "CommunityArchives", owner_id: int):
+        super().__init__(timeout=240)
+        self.cog = cog
+        self.owner_id = owner_id
+        self.archive_type = "quotes"
+        self.media_type = "Other"
+        self.action = "browse"
+
+        archive_select = discord.ui.Select(
+            placeholder="Choose an archive", min_values=1, max_values=1, row=0,
+            options=[discord.SelectOption(label=label, value=value, default=value == self.archive_type) for label, value in ARCHIVE_UI_TYPES],
+        )
+        media_select = discord.ui.Select(
+            placeholder="Related media type", min_values=1, max_values=1, row=1,
+            options=[discord.SelectOption(label=choice.name, value=choice.value, default=choice.value == self.media_type) for choice in MEDIA_TYPES],
+        )
+        action_select = discord.ui.Select(
+            placeholder="Choose an action", min_values=1, max_values=1, row=2,
+            options=[discord.SelectOption(label=label, value=value, default=value == self.action) for label, value in ARCHIVE_UI_ACTIONS],
+        )
+        archive_select.callback = self._set_archive
+        media_select.callback = self._set_media
+        action_select.callback = self._set_action
+        self.add_item(archive_select)
+        self.add_item(media_select)
+        self.add_item(action_select)
+        open_button = discord.ui.Button(label="Continue", style=discord.ButtonStyle.primary, emoji="↗️", row=3)
+        close_button = discord.ui.Button(label="Close", style=discord.ButtonStyle.secondary, row=3)
+        open_button.callback = self._open
+        close_button.callback = self._close
+        self.add_item(open_button)
+        self.add_item(close_button)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("Only the person who opened this archive menu can control it.", ephemeral=True)
+            return False
+        return True
+
+    async def _set_archive(self, interaction: discord.Interaction) -> None:
+        self.archive_type = self.children[0].values[0]
+        await interaction.response.edit_message(view=self)
+
+    async def _set_media(self, interaction: discord.Interaction) -> None:
+        self.media_type = self.children[1].values[0]
+        await interaction.response.edit_message(view=self)
+
+    async def _set_action(self, interaction: discord.Interaction) -> None:
+        self.action = self.children[2].values[0]
+        await interaction.response.edit_message(view=self)
+
+    async def _open(self, interaction: discord.Interaction) -> None:
+        if self.action in {"browse", "random"}:
+            await self.cog._archive_action(
+                interaction, self.archive_type, self.action, None, None, None, None, None,
+                self.media_type, None, self.archive_type == "theories", None,
+            )
+        elif self.action == "search":
+            await interaction.response.send_modal(ArchiveSearchModal(self.cog, self.archive_type))
+        elif self.action == "add":
+            await interaction.response.send_modal(ArchiveSubmissionModal(self.cog, self.archive_type, self.media_type))
+        elif self.action == "mine":
+            await self.cog.archive_mine(interaction, self.archive_type)
+        elif self.action == "report":
+            await interaction.response.send_modal(ArchiveReportModal(self.cog, self.archive_type))
+        elif self.action == "review":
+            await self.cog._review_archive(interaction, "list", None)
+        elif self.action == "review-entry":
+            await interaction.response.send_modal(ArchiveReviewModal(self.cog, self.archive_type))
+        elif self.action == "reports":
+            await self.cog.archive_report_review(interaction, "list", None, "")
+        elif self.action == "report-review":
+            await interaction.response.send_modal(ArchiveReportReviewModal(self.cog))
+        else:
+            await interaction.response.send_message("That archive action is not available.", ephemeral=True)
+
+    async def _close(self, interaction: discord.Interaction) -> None:
+        await interaction.response.edit_message(content="Community archive closed.", embed=None, view=None)
 
 
 class CommunityArchives(commands.Cog):
@@ -256,21 +529,11 @@ class CommunityArchives(commands.Cog):
             text = "No approved entries matched that search." if action == "search" else "No approved entries yet. Submit one with action Add; moderators review contributions."
             await interaction.response.send_message(text, ephemeral=True)
             return
-        if action == "random":
-            await interaction.response.send_message(embed=self._entry_embed(archive_type, rows[0]), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
-            return
-        lines = []
-        for row in rows[:12]:
-            item = dict(row)
-            title_text = _safe(item.get("title"), 160)
-            source_url = item.get("source_url")
-            label = f"[{title_text}]({source_url})" if source_url else f"**{title_text}**"
-            source = item.get("source_title")
-            creator_value = item.get("creator")
-            lines.append(f"• {label}" + (f" · {_safe(source, 100)}" if source else "") + (f" · by {_safe(creator_value, 80)}" if creator_value else "") + f" · ID {item.get('id')}")
-        embed = discord.Embed(title=f"{archive_type.replace('-', ' ').title()} Archive", description="\n".join(lines)[:4000], color=discord.Color.blurple())
-        embed.set_footer(text=f"{len(rows)} result(s) · shared archive · creators and source links remain attributed")
-        await interaction.response.send_message(embed=embed, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        view = ArchiveResultsView(self, interaction.user.id, archive_type, rows, media_type)
+        await interaction.response.send_message(
+            embed=view.build_embed(), view=view, ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
     @staticmethod
     def _entry_embed(archive_type: str, row: Any) -> discord.Embed:
@@ -334,67 +597,47 @@ class CommunityArchives(commands.Cog):
         )
         await interaction.response.send_message(f"Archive entry **#{entry_id}** is now **{new_status}**.", ephemeral=True)
 
-    @app_commands.command(name="quotes", description="Browse or contribute short, attributed media quotes")
+
+    @app_commands.command(name="archive", description="Open the unified community media archive")
     @app_commands.guild_only()
-    @app_commands.choices(action=ACTIONS, media_type=MEDIA_TYPES)
-    @app_commands.describe(action="Add, browse, search or random", title="Short label", content="Quote text (maximum 280 characters)", source_title="Book, episode, film or work title", creator="Character or speaker", url="Optional source metadata URL", media_type="Source media type", tags="Comma-separated tags", spoiler="Mark plot spoilers", keyword="Search keyword")
-    @command_meta(section="Community Archives", name="Quotes")
+    @command_meta(section="Community Archives", name="Community Archive")
+    async def archive(self, interaction: discord.Interaction) -> None:
+        embed = discord.Embed(
+            title="Community Archive",
+            description=(
+                "Browse a shared collection of fanworks, moodboards, scenes, soundtracks, quotes, "
+                "recommendations, and theories. Contributions enter moderator review in this server; "
+                "approved entries become discoverable across the community.\n\n"
+                "Choose an archive and action below. Search, submission, and moderation forms open in modals."
+            ),
+            color=discord.Color.blurple(),
+        )
+        embed.add_field(name="Browse", value="Explore approved entries one card at a time, with source attribution and spoiler marking.", inline=False)
+        embed.add_field(name="Contribute", value="Submit credited work and source links. Archive content is metadata and links; Lemegeton does not host fan media or music.", inline=False)
+        embed.set_footer(text="Review queues are server-scoped · Public entries retain their creator attribution")
+        await interaction.response.send_message(embed=embed, view=ArchiveHomeView(self, interaction.user.id), ephemeral=True)
+
     async def quotes(self, interaction: discord.Interaction, action: str, title: str | None = None, content: str | None = None, source_title: str | None = None, creator: str | None = None, url: str | None = None, media_type: str = "Other", tags: str | None = None, spoiler: bool = False, keyword: str | None = None) -> None:
         await self._archive_action(interaction, "quotes", action, title, content, source_title, creator, url, media_type, tags, spoiler, keyword)
 
-    @app_commands.command(name="fanworks", description="Discover or submit credited fan art, edits, wallpapers and videos")
-    @app_commands.guild_only()
-    @app_commands.choices(action=ACTIONS, media_type=MEDIA_TYPES)
-    @app_commands.describe(action="Add, browse, search or random", title="Fanwork title", content="Description", creator="Original creator / handle", url="HTTPS link to the creator or work", source_title="Related media title", media_type="Related media type", tags="Comma-separated tags", keyword="Search keyword")
-    @command_meta(section="Community Archives", name="Fanworks")
     async def fanworks(self, interaction: discord.Interaction, action: str, title: str | None = None, content: str | None = None, source_title: str | None = None, creator: str | None = None, url: str | None = None, media_type: str = "Other", tags: str | None = None, spoiler: bool = False, keyword: str | None = None) -> None:
         await self._archive_action(interaction, "fanworks", action, title, content, source_title, creator, url, media_type, tags, spoiler, keyword)
 
-    @app_commands.command(name="moodboards", description="Create or explore themed, multi-work media boards")
-    @app_commands.guild_only()
-    @app_commands.choices(action=ACTIONS, media_type=MEDIA_TYPES)
-    @app_commands.describe(action="Add, browse, search or random", title="Board title", content="Theme, mood and list of media titles", url="Optional public board link", media_type="Primary media category", tags="Comma-separated themes", keyword="Search keyword")
-    @command_meta(section="Community Archives", name="Moodboards")
     async def moodboards(self, interaction: discord.Interaction, action: str, title: str | None = None, content: str | None = None, source_title: str | None = None, creator: str | None = None, url: str | None = None, media_type: str = "Other", tags: str | None = None, spoiler: bool = False, keyword: str | None = None) -> None:
         await self._archive_action(interaction, "moodboards", action, title, content, source_title, creator, url, media_type, tags, spoiler, keyword)
 
-    @app_commands.command(name="soundtracks", description="Index soundtrack links from legitimate music/video platforms")
-    @app_commands.guild_only()
-    @app_commands.choices(action=ACTIONS, media_type=MEDIA_TYPES)
-    @app_commands.describe(action="Add, browse, search or random", title="Track or soundtrack title", content="Artist, album or notes", url="Legitimate platform URL", source_title="Associated anime, movie or series", creator="Artist or composer", media_type="Associated media type", tags="Comma-separated tags", keyword="Search keyword")
-    @command_meta(section="Community Archives", name="Soundtracks")
     async def soundtracks(self, interaction: discord.Interaction, action: str, title: str | None = None, content: str | None = None, source_title: str | None = None, creator: str | None = None, url: str | None = None, media_type: str = "Other", tags: str | None = None, spoiler: bool = False, keyword: str | None = None) -> None:
         await self._archive_action(interaction, "soundtracks", action, title, content, source_title, creator, url, media_type, tags, spoiler, keyword)
 
-    @app_commands.command(name="scenes", description="Save links and references to memorable media scenes")
-    @app_commands.guild_only()
-    @app_commands.choices(action=ACTIONS, media_type=MEDIA_TYPES)
-    @app_commands.describe(action="Add, browse, search or random", title="Scene label", content="Caption or scene description", source_title="Work title and optional episode/chapter reference", url="Optional legal/source link", media_type="Media category", tags="Comma-separated themes", spoiler="Mark the description as a spoiler", keyword="Search keyword")
-    @command_meta(section="Community Archives", name="Scenes")
     async def scenes(self, interaction: discord.Interaction, action: str, title: str | None = None, content: str | None = None, source_title: str | None = None, creator: str | None = None, url: str | None = None, media_type: str = "Other", tags: str | None = None, spoiler: bool = False, keyword: str | None = None) -> None:
         await self._archive_action(interaction, "scenes", action, title, content, source_title, creator, url, media_type, tags, spoiler, keyword)
 
-    @app_commands.command(name="recommendation-board", description="Share human-written media recommendations and reasons")
-    @app_commands.guild_only()
-    @app_commands.choices(action=ACTIONS, media_type=MEDIA_TYPES)
-    @app_commands.describe(action="Add, browse, search or random", title="Recommended work", content="Why you recommend it", url="Optional provider URL", media_type="Media category", tags="Comma-separated tags", keyword="Search keyword")
-    @command_meta(section="Community Archives", name="Recommendation Board")
     async def recommendation_board(self, interaction: discord.Interaction, action: str, title: str | None = None, content: str | None = None, source_title: str | None = None, creator: str | None = None, url: str | None = None, media_type: str = "Other", tags: str | None = None, spoiler: bool = False, keyword: str | None = None) -> None:
         await self._archive_action(interaction, "recommendation-board", action, title, content, source_title, creator, url, media_type, tags, spoiler, keyword)
 
-    @app_commands.command(name="theories", description="Share and browse spoiler-marked fan theories with source links")
-    @app_commands.guild_only()
-    @app_commands.choices(action=ACTIONS, media_type=MEDIA_TYPES)
-    @app_commands.describe(action="Add, browse, search or random", title="Theory title", content="Theory and supporting argument", source_title="Work title", url="Optional evidence/source link", media_type="Media category", tags="Comma-separated topics", spoiler="Spoiler-wrap theory text", keyword="Search keyword")
-    @command_meta(section="Community Archives", name="Theories")
     async def theories(self, interaction: discord.Interaction, action: str, title: str | None = None, content: str | None = None, source_title: str | None = None, creator: str | None = None, url: str | None = None, media_type: str = "Other", tags: str | None = None, spoiler: bool = True, keyword: str | None = None) -> None:
         await self._archive_action(interaction, "theories", action, title, content, source_title, creator, url, media_type, tags, spoiler, keyword)
 
-    @app_commands.command(name="archive-mine", description="View your submissions and their review status in this server")
-    @app_commands.guild_only()
-    @app_commands.choices(archive_type=ARCHIVE_TYPES)
-    @app_commands.describe(archive_type="Filter to one archive or show all your submissions")
-    @command_meta(section="Community Archives", name="My Archive Submissions")
     async def archive_mine(self, interaction: discord.Interaction, archive_type: str = "all") -> None:
         if not interaction.guild_id:
             await interaction.response.send_message("Submissions are scoped to the server where you made them.", ephemeral=True)
@@ -417,11 +660,6 @@ class CommunityArchives(commands.Cog):
         embed.set_footer(text="Pending entries need moderator review in the server where they were submitted.")
         await interaction.response.send_message(embed=embed, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
-    @app_commands.command(name="archive-report", description="Report an approved community archive entry to this server's moderators")
-    @app_commands.guild_only()
-    @app_commands.choices(archive_type=ARCHIVE_TYPES[1:])
-    @app_commands.describe(archive_type="Type of archive", entry_id="Entry ID shown by the archive", reason="Why this entry should be reviewed")
-    @command_meta(section="Community Archives", name="Report Archive Entry")
     async def archive_report(self, interaction: discord.Interaction, archive_type: str, entry_id: int, reason: str) -> None:
         if not interaction.guild_id:
             await interaction.response.send_message("Reports are server-scoped.", ephemeral=True)
@@ -452,16 +690,6 @@ class CommunityArchives(commands.Cog):
             message = "You have already reported this entry in this server. The existing report remains in the moderator queue."
         await interaction.response.send_message(message, ephemeral=True)
 
-    @app_commands.command(name="archive-report-review", description="Review community archive reports submitted in this server")
-    @app_commands.guild_only()
-    @app_commands.choices(decision=[
-        app_commands.Choice(name="List pending reports", value="list"),
-        app_commands.Choice(name="Mark reviewed", value="resolved"),
-        app_commands.Choice(name="Dismiss report", value="dismissed"),
-        app_commands.Choice(name="Remove entry (originating server only)", value="remove"),
-    ])
-    @app_commands.describe(decision="List, resolve, dismiss or remove", report_id="Report ID for an action", reason="Optional moderation note")
-    @command_meta(section="Community Archives", name="Review Archive Reports")
     async def archive_report_review(self, interaction: discord.Interaction, decision: str = "list", report_id: int | None = None, reason: str = "") -> None:
         if not interaction.guild_id:
             await interaction.response.send_message("Reports are server-scoped.", ephemeral=True)
@@ -525,16 +753,6 @@ class CommunityArchives(commands.Cog):
         )
         await interaction.response.send_message(f"Report **#{report_id}** marked **{new_status}**.", ephemeral=True)
 
-    @app_commands.command(name="archive-review", description="Review this server's pending community archive submissions")
-    @app_commands.guild_only()
-    @app_commands.choices(action=[
-        app_commands.Choice(name="List pending", value="list"),
-        app_commands.Choice(name="Approve", value="approve"),
-        app_commands.Choice(name="Reject", value="reject"),
-        app_commands.Choice(name="Remove approved entry", value="remove"),
-    ])
-    @app_commands.describe(action="Moderation action", entry_id="Submission ID for approve/reject/remove")
-    @command_meta(section="Community Archives", name="Archive Review")
     async def archive_review(self, interaction: discord.Interaction, action: str, entry_id: int | None = None) -> None:
         await self._review_archive(interaction, action, entry_id)
 
