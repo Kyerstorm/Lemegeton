@@ -11,6 +11,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from helpers.command_error_handler import handle_application_command_error
 import database
 from helpers import media_storage
 from cogs_test.general_commands.dashboard import command_meta
@@ -828,6 +829,11 @@ class CommunityArchives(commands.Cog):
         embed.set_footer(text="Today's selection is saved per server · Existing Panels archive · NSFW entries excluded")
         await interaction.response.send_message(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
+
+
+    async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+        """Route unexpected database and archive failures through the shared private reporter."""
+        await handle_application_command_error(interaction, error)
 
 
 async def setup(bot: commands.Bot) -> None:
