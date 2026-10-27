@@ -190,6 +190,29 @@ async def register_asset(
     return int(row["id"])
 
 
+async def create_asset(
+    stored: StoredImage,
+    *,
+    namespace: str,
+    uploaded_by: int | None = None,
+    guild_id: int | None = None,
+) -> int:
+    """Persist an already-uploaded object in the shared asset registry."""
+    await ensure_schema()
+    pool = getattr(database, "_pool", None)
+    if pool is None or getattr(pool, "_closed", False):
+        pool = await database.init_db_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            return await register_asset(
+                conn,
+                stored,
+                namespace=namespace,
+                uploaded_by=uploaded_by,
+                guild_id=guild_id,
+            )
+
+
 async def _asset_row(asset_id: int):
     pool = getattr(database, "_pool", None)
     if pool is None or getattr(pool, "_closed", False):
