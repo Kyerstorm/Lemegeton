@@ -36,6 +36,12 @@ class MediaStorageConfigurationTests(unittest.TestCase):
         }, clear=True):
             self.assertFalse(media_storage.is_configured(private=False))
         with patch.dict(os.environ, {
+            "S3_BUCKET": "same-bucket",
+            "S3_PUBLIC_BUCKET": "same-bucket",
+            "S3_PUBLIC_BASE_URL": "https://cdn.example.test/assets",
+        }, clear=True):
+            self.assertFalse(media_storage.is_configured(private=False))
+        with patch.dict(os.environ, {
             "S3_PUBLIC_BUCKET": "generated-public",
             "S3_PUBLIC_BASE_URL": "https://cdn.example.test/assets",
         }, clear=True):
