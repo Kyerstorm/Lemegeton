@@ -1,6 +1,6 @@
 from helpers.color_palette import PALETTE
 import discord
-from helpers.command_error_handler import FeedbackAwareView, application_error_message
+from helpers.command_error_handler import FeedbackAwareView, application_error_message, handle_component_error
 from discord import app_commands
 from discord.ext import commands
 import logging
@@ -685,12 +685,12 @@ class HelpCog(commands.Cog):
             title="🤖 Lemegeton Bot - Command Help",
             description=(
                 "**Welcome to Lemegeton!** Media discovery, community features, and gaming metadata connected through existing providers.\n\n"
-                "**🚀 Quick Start:**\n"
-                "1. Use `/login` to connect your AniList account\n"
-                "2. Explore commands by category below\n"
-                "3. Join our [Support Server](https://discord.gg/xUGD7krzws) for help\n"
-                "4. Use `/feedback` to suggest improvements\n\n"
-                "**📋 Command Categories:**"
+                "**✦ Get started**\n"
+                "1. Use `/help` and choose a category from the dropdown.\n"
+                "2. Use `/browse` to search supported media.\n"
+                "3. Open `/discovery-hub` for the guided discovery menu.\n"
+                "4. Use `/feedback` to suggest improvements or report a bug.\n\n"
+                "**✦ Browse the systems below**"
             ),
             color=PALETTE.PRIMARY
         )
@@ -699,7 +699,10 @@ class HelpCog(commands.Cog):
         category_overview = []
         for category_name, commands in categories.items():
             command_count = len(commands)
-            category_overview.append(f"{category_name} • **{command_count} commands**")
+            if category_name == "💻 Code & Systems":
+                category_overview.append(f"{category_name} • **Architecture guide**")
+            else:
+                category_overview.append(f"{category_name} • **{command_count} commands**")
         
         embed.add_field(
             name="Available Categories",
@@ -710,10 +713,10 @@ class HelpCog(commands.Cog):
         embed.add_field(
             name="💡 Pro Tips",
             value=(
-                "• Most commands work better after using `/login`\n"
-                "• Use the dropdown menu below to explore categories\n"
-                "• Commands marked with 🔒 require registration\n"
-                "• Some commands have optional parameters for flexibility"
+                "• Use the dropdown below to browse by feature\n"
+                "• Some AniList personal features require `/login`; public metadata searches may not\n"
+                "• Provider outages can temporarily affect results\n"
+                "• Use `/feedback` to report a reproducible issue"
             ),
             inline=False
         )
@@ -759,10 +762,58 @@ class HelpCog(commands.Cog):
             "admin": "👑 Admin",
             "social": "👥 Social",
             "utilities": "🛠️ Utilities",
+            "cross_media": "🌐 Cross-Media Discovery",
+            "books": "📚 Books & Webnovels",
+            "screen": "🎬 Movies & TV",
+            "code": "💻 Code & Systems",
             "owner": "🔒 Bot Owner — Prefix Commands",
         }
         category_name = category_mapping.get(category_key, "Unknown Category")
         command_items = categories.get(category_name, {})
+
+        if category_key == "code":
+            embed = discord.Embed(
+                title="💻 Code & Systems",
+                description=(
+                    "A maintainer-friendly guide to how Lemegeton's command, provider, database, and image-storage systems fit together. "
+                    "External providers can be incomplete or temporarily unavailable."
+                ),
+                color=PALETTE.PRIMARY,
+            )
+            sections = [
+                (
+                    "◇ Command layer",
+                    "Slash-command cogs validate input, collect provider data, and render embeds or selection menus. This help menu filters curated descriptions against commands registered at runtime, so unloaded commands are not presented as available.",
+                ),
+                (
+                    "◇ Cross-media command map",
+                    "/franchise explores provider-declared relationships and labels recommendations separately. /connections and /reading-order reuse the title resolver. /similar combines provider suggestions, genre overlap, saved links, and eligible human-written community recommendations. /game starts with IGDB and only adds Steam details for a suitable exact title match.",
+                ),
+                (
+                    "◇ Metadata providers",
+                    "AniList supplies supported anime/manga metadata and relationships; TMDB supplies movie/TV information, credits, videos, collections, and region availability; Google Books supplies book/author records; Novel Updates uses the existing scraper helper; IGDB supplies game metadata, with Steam used for optional store enrichment.",
+                ),
+                (
+                    "◇ Relationship graph",
+                    "helpers/media_graph.py records and retrieves linked media with provenance. Provider-confirmed relationships, provider recommendations, locally calculated genre overlap, and moderator-approved community links remain distinct. A similar title or shared genre is not proof of an adaptation.",
+                ),
+                (
+                    "◇ PostgreSQL and server boundaries",
+                    "media_relationship_graph stores deduplicated relationships and provenance. Other systems retain their existing tables, while media_assets stores object metadata rather than image bytes. Community discussions, suggestions, and server-owned resources are queried using the invoking guild ID.",
+                ),
+                (
+                    "◇ Image storage and privacy",
+                    "S3_BUCKET is for private originals such as uploaded Panels and Custom Role source images; private links use short-lived signed URLs. Generated /3x3 grids and staff-character collages can use a separate S3_PUBLIC_BUCKET and HTTPS S3_PUBLIC_BASE_URL. Public output is disabled unless that separate destination is configured; Discord attachments remain the fallback. Never reuse the private bucket as the public bucket.",
+                ),
+                (
+                    "◇ Errors and reporting",
+                    "Provider calls use timeouts and fallbacks where implemented. Unhandled slash-command failures go through the shared private error reporter, and component failures are captured by FeedbackAwareView. Detailed exceptions stay in logs instead of chat. Report repeatable problems with /feedback, including the command, expected result, actual result, and source link.",
+                ),
+            ]
+            for section_title, section_text in sections:
+                embed.add_field(name=section_title, value=section_text[:1024], inline=False)
+            embed.set_footer(text="System guide · Use /feedback to report mismatches with the running bot")
+            return embed
 
         embed = discord.Embed(
             title=category_name,
@@ -857,6 +908,24 @@ class HelpCog(commands.Cog):
                 "• Submit feedback to help improve the bot\n"
                 "• Leaderboards are server-specific and update automatically"
             ),
+            "cross_media": (
+                "• Choose the exact work when a search offers a selection menu\n"
+                "• Provider relationships, recommendations, and community suggestions are different evidence types\n"
+                "• /link-suggest submits a proposal; moderators decide whether it is approved\n"
+                "• /discovery-hub is the guided entry point for this group"
+            ),
+            "books": (
+                "• /author-works searches Google Books by author\n"
+                "• /webnovel-updates depends on source-page structure and may return no result temporarily\n"
+                "• /reading-order shows available release relationships, not assumed story chronology\n"
+                "• Add a clear chapter/volume cutoff when starting /chapter-discussion"
+            ),
+            "screen": (
+                "• TMDB-based commands require TMDB_BEARER_TOKEN\n"
+                "• Set a default region with /media-region (Manage Server permission)\n"
+                "• Provider availability can change; use its displayed source link to verify\n"
+                "• Release dates and collection membership do not prove story chronology"
+            ),
             "utilities": (
                 "• Manage your notification preferences\n"
                 "• View planned features and vote on upcoming updates\n"
@@ -886,11 +955,11 @@ class HelpNavigationView(FeedbackAwareView):
         self.user = user
         self.categories = categories
         self.is_owner = is_owner
-        self.add_item(CategorySelect(help_cog, is_owner=is_owner))
+        self.add_item(CategorySelect(help_cog, categories, is_owner=is_owner))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """Only allow the original user to interact with the view."""
-        if interaction.user != self.user:
+        if interaction.user.id != self.user.id:
             await interaction.response.send_message(
                 embed=build_warning_embed(
                     description="You can't use this menu. Use `/help` to get your own help interface!"
@@ -901,74 +970,72 @@ class HelpNavigationView(FeedbackAwareView):
         return True
 
     async def on_timeout(self):
-        """Disable all items when the view times out."""
+        """Disable the expired dropdown so the message reflects its timeout state."""
         for item in self.children:
             item.disabled = True
+        message = getattr(self, "message", None)
+        if message is not None:
+            try:
+                await message.edit(view=self)
+            except discord.HTTPException:
+                logger.debug("Could not disable the expired help menu", exc_info=True)
 
 
 class CategorySelect(discord.ui.Select):
     """Dropdown select menu for choosing help categories."""
     
-    def __init__(self, help_cog: HelpCog, *, is_owner: bool = False):
+    def __init__(self, help_cog: HelpCog, categories: dict, *, is_owner: bool = False):
         self.help_cog = help_cog
+        self.categories = categories
 
         options = [
             discord.SelectOption(
-                label="📋 Overview",
+                label="Overview",
                 value="overview",
-                description="Show all categories and getting started info",
-                emoji="📋"
+                description="Quick start, command totals, and support links",
+                emoji="📋",
             ),
-            discord.SelectOption(
-                label="Account Management",
-                value="account",
-                description="Registration and account settings",
-                emoji="🔐"
-            ),
-            discord.SelectOption(
-                label="Anime & Manga",
-                value="anime", 
-                description="Browse, track, and discover titles",
-                emoji="📺"
-            ),
-            discord.SelectOption(
-                label="Gaming",
-                value="gaming",
-                description="Steam integration and game recommendations",
-                emoji="🎮"
-            ),
-            discord.SelectOption(
-                label="Customization",
-                value="customization",
-                description="Themes and personalization",
-                emoji="🎨"
-            ),
-            discord.SelectOption(
-                label="Server Management",
-                value="server",
-                description="Server configuration and moderation",
-                emoji="⚙️"
-            ),
-            discord.SelectOption(
-                label="Admin",
-                value="admin",
-                description="Bot moderation and admin commands",
-                emoji="👑"
-            ),
-            discord.SelectOption(
-                label="Social",
-                value="social",
-                description="Leaderboards, affinity, and feedback",
-                emoji="👥"
-            ),
-            discord.SelectOption(
-                label="Utilities",
-                value="utilities",
-                description="Help, notifications, and utility commands",
-                emoji="🛠️"
-            )
         ]
-        if is_owner:
+        category_options = [
+            ("🔐 Account Management", "account", "Registration and account settings", "🔐"),
+            ("📺 Anime & Manga", "anime", "Browse and discover supported titles", "📺"),
+            ("🎮 Gaming", "gaming", "Game metadata and Steam integration", "🎮"),
+            ("🎨 Customization", "customization", "Themes and personalization", "🎨"),
+            ("⚙️ Server Management", "server", "Server configuration and moderation", "⚙️"),
+            ("👑 Admin", "admin", "Bot-wide administration and protected commands", "👑"),
+            ("👥 Social", "social", "Leaderboards, affinity, and feedback", "👥"),
+            ("🛠️ Utilities", "utilities", "Help, notifications, and everyday tools", "🛠️"),
+            ("🌐 Cross-Media Discovery", "cross_media", "Adaptations, connected titles, and suggestions", "🌐"),
+            ("📚 Books & Webnovels", "books", "Author records, webnovels, and reading order", "📚"),
+            ("🎬 Movies & TV", "screen", "Availability, credits, trailers, and discussions", "🎬"),
+            ("💻 Code & Systems", "code", "How commands, providers, database, and storage fit together", "💻"),
+        ]
+        category_names_by_value = {
+            "account": "🔐 Account Management",
+            "anime": "📺 Anime & Manga",
+            "gaming": "🎮 Gaming",
+            "customization": "🎨 Customization",
+            "server": "⚙️ Server Management",
+            "admin": "👑 Admin",
+            "social": "👥 Social",
+            "utilities": "🛠️ Utilities",
+            "cross_media": "🌐 Cross-Media Discovery",
+            "books": "📚 Books & Webnovels",
+            "screen": "🎬 Movies & TV",
+            "code": "💻 Code & Systems",
+        }
+        for label, value, description, emoji in category_options:
+            if value == "code" or category_names_by_value[value] in categories:
+                options.append(
+                    discord.SelectOption(
+                        label=label,
+                        value=value,
+                        description=description[:100],
+                        emoji=emoji,
+                    )
+                )
+
+        if is_owner and "🔒 Bot Owner — Prefix Commands" in categories:
             options.append(
                 discord.SelectOption(
                     label="Bot Owner Prefix Commands",
@@ -979,10 +1046,10 @@ class CategorySelect(discord.ui.Select):
             )
 
         super().__init__(
-            placeholder="Choose a help category...",
+            placeholder="Choose a help category…",
             min_values=1,
             max_values=1,
-            options=options
+            options=options,
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -1001,13 +1068,12 @@ class CategorySelect(discord.ui.Select):
             logger.info(f"Help category '{selected_value}' displayed for {interaction.user.display_name}")
             
         except Exception as e:
-            logger.error(f"Error in category selection: {e}", exc_info=True)
-            
-            await interaction.response.send_message(
-                embed=build_error_embed(
-                    description=application_error_message(e)
-                ),
-                ephemeral=True
+            logger.error("Error in help category selection", exc_info=True)
+            await handle_component_error(
+                interaction,
+                e,
+                component=f"help-category:{selected_value}",
+                source=self,
             )
 
 
