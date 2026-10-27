@@ -77,6 +77,32 @@ function errorMessage(value: unknown): string {
   return value instanceof Error ? value.message : "Something went wrong. Please retry.";
 }
 
+function commandGuideUrl(command: Command): string {
+  const name = (command.fullname || command.name || "").trim().toLowerCase().split(/\s+/)[0];
+  const mediaGuide = "https://github.com/Kyerstorm/Lemegeton/blob/multi_guild/docs/MEDIA_DISCOVERY.md";
+  const readmeGuide = "https://github.com/Kyerstorm/Lemegeton/blob/multi_guild/README.md#command-map";
+  const guideAnchors: Record<string, string> = {
+    franchise: "#franchise-exploration",
+    similar: "#cross-media-similarity",
+    "tv-guide": "#tv-season-and-episode-guide",
+    "release-calendar": "#release-calendar",
+    "reading-club": "#reading-club",
+    "media-night": "#media-night",
+    compare: "#comparison",
+  };
+  if (name === "dashboard" || name === "dashboard-section-toggle") {
+    return "https://github.com/Kyerstorm/Lemegeton/blob/multi_guild/docs/DASHBOARD.md#capabilities-and-boundaries";
+  }
+  if (name === "custom-role" || name === "custom-role-admin") {
+    return "https://github.com/Kyerstorm/Lemegeton/blob/multi_guild/docs/HANDOFF_NOTES.md";
+  }
+  if (guideAnchors[name]) return mediaGuide + guideAnchors[name];
+  if (["browse", "connections", "reading-order", "where-to-watch", "trailers", "collection-guide", "media-region", "episode-discussion", "chapter-discussion", "author-works", "webnovel-updates"].includes(name)) {
+    return mediaGuide;
+  }
+  return readmeGuide;
+}
+
 function SectionHeading(props: { eyebrow: string; title: React.ReactNode; subtitle: string; actions?: React.ReactNode }) {
   return <div className="page-heading">
     <div className="page-heading-copy">
@@ -331,6 +357,20 @@ export default function App() {
     finally { setBusyCommand(""); }
   };
 
+  const copyCommandInvocation = async (command: Command) => {
+    const invocation = "/" + (command.fullname || command.name || "").trim();
+    if (invocation.length < 2) {
+      pushToast("This registry entry has no command name to copy.", true);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(invocation);
+      pushToast("Copied " + invocation + " — paste it into Discord to run the command.");
+    } catch {
+      pushToast("Clipboard access is unavailable. Command: " + invocation, true);
+    }
+  };
+
   const logout = async () => {
     try {
       await api("/api/logout", csrf, { method: "POST", body: "{}" });
@@ -414,7 +454,7 @@ export default function App() {
         <div className="command-toolbar"><label className="search-field"><span aria-hidden="true">⌕</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, description, category…" autoComplete="off" /></label><label className="filter-control"><span>CATEGORY</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option value="All">All categories</option>{categories.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label className="filter-control"><span>STATE</span><select value={commandState} onChange={(event) => setCommandState(event.target.value)}><option value="All">All states</option><option value="Enabled">Enabled</option><option value="Disabled">Disabled</option><option value="Protected">Protected</option></select></label></div>
         <div className="command-summary"><span>{filteredCommands.length} of {commands.length} registered commands</span><span>PER-GUILD CONFIGURATION</span></div>
         <div className="command-list">{commands.length === 0 ? (commandError ? <Empty>{commandError}</Empty> : refreshing ? <Empty loading>Reading the live command registry…</Empty> : <Empty>No dashboard-managed commands were returned.</Empty>) : filteredCommands.length === 0 ? <Empty>No commands match this search and filter.</Empty> : filteredCommands.map((command) => <article className="command-row" key={command.fullname}>
-          <div className="command-main"><div className="command-name"><span className="command-prefix">/</span>{command.fullname || command.name}</div><p className="command-description">{command.description || "No description provided."}</p><div className="command-tags"><span className="tag">{command.section || "Other"}</span><span className="tag">{command.type || "slash"}</span><span className="tag">{command.scope || "guild"}</span>{command.protected ? <span className="tag tag-protected">Protected</span> : null}{command.required_permissions ? <span className="tag">Discord permission gate</span> : null}</div></div>
+          <div className="command-main"><a className="command-name command-name-link" href={commandGuideUrl(command)} target="_blank" rel="noreferrer" aria-label={"Open usage guide for /" + (command.fullname || command.name)} title="Open the relevant command guide"><span className="command-prefix">/</span>{command.fullname || command.name}<span className="command-link-glyph" aria-hidden="true">↗</span></a><p className="command-description">{command.description || "No description provided."}</p><div className="command-tags"><span className="tag">{command.section || "Other"}</span><span className="tag">{command.type || "slash"}</span><span className="tag">{command.scope || "guild"}</span>{command.protected ? <span className="tag tag-protected">Protected</span> : null}{command.required_permissions ? <span className="tag">Discord permission gate</span> : null}</div><div className="command-actions"><button className="command-copy" type="button" onClick={() => void copyCommandInvocation(command)} title={"Copy /" + (command.fullname || command.name)} aria-label={"Copy invocation for /" + (command.fullname || command.name)}>▣ <span>Copy command</span></button><a className="command-guide" href={commandGuideUrl(command)} target="_blank" rel="noreferrer">Usage guide <span aria-hidden="true">↗</span></a></div></div>
           <div className="command-state"><StatusPill ok={command.enabled && !command.protected}>{command.protected ? "Protected / always on" : command.enabled ? "Enabled" : "Disabled"}</StatusPill></div>
           <button className={"switch" + (command.enabled ? " checked" : "")} role="switch" type="button" aria-checked={Boolean(command.enabled)} aria-label={"Toggle " + command.fullname} disabled={Boolean(command.protected) || busyCommand === command.fullname || operationBusy} onClick={() => void toggleCommand(command)}><span /></button>
         </article>)}</div>
