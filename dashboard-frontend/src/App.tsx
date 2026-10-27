@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type Page = "overview" | "commands" | "extensions" | "audit" | "diagnostics" | "logs" | "integrations" | "database";
 type User = { id: string; username: string; global_name?: string | null; avatar?: string | null };
@@ -137,7 +137,7 @@ function LoginPage() {
     <div className="login-orbit orbit-one" aria-hidden="true" /><div className="login-orbit orbit-two" aria-hidden="true" />
     <section className="login-card">
       <a className="brand login-brand" href="/" aria-label="Lemegeton home"><span className="brand-mark">L.</span><span className="brand-copy"><strong>LEMEGETON</strong><small>CONTROL PLANE</small></span></a>
-      <div className="login-kicker"><span className="signal-dot online" /> PRIVATE ADMINISTRATION</div>
+      <div className="login-kicker"><span className="signal-dot online" /> PRIVATE ADMINISTRATION <span className="braille-mini" aria-hidden="true">⠿⠗⠿⠿⠿</span></div>
       <h1>Control the<br /><span>moving parts.</span></h1>
       <p className="login-copy">Manage command access, review server activity, and inspect runtime health through your existing Discord permissions.</p>
       {cancelled ? <div className="inline-notice">Sign-in was cancelled. Nothing has been changed.</div> : null}
@@ -177,6 +177,8 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [operationBusy, setOperationBusy] = useState(false);
+  const refreshGeneration = useRef(0);
+  const activeGuildIdRef = useRef("");
 
   const pushToast = useCallback((message: string, error = false) => {
     const id = Date.now() + Math.floor(Math.random() * 1000);
@@ -185,6 +187,20 @@ export default function App() {
   }, []);
 
   const currentGuild = useMemo(() => guilds.find((item) => String(item.id) === String(guildId)), [guilds, guildId]);
+  const selectGuild = useCallback((nextId: string) => {
+    if (!guilds.some((guild) => String(guild.id) === String(nextId))) return;
+    activeGuildIdRef.current = String(nextId);
+    refreshGeneration.current += 1;
+    try { window.localStorage.setItem("lemegeton:selected-guild", String(nextId)); } catch { /* storage may be disabled */ }
+    setGuildId(String(nextId));
+    setOverview({});
+    setCommands([]);
+    setCommandError("");
+    setAudit([]);
+    setResources([]);
+    setUpdatedAt(null);
+    setRefreshing(false);
+  }, [guilds]);
   const categories = useMemo(() => Array.from(new Set(commands.map((item) => item.section || "Other"))).sort((a, b) => a.localeCompare(b)), [commands]);
   const filteredCommands = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -199,9 +215,10 @@ export default function App() {
   }, [commands, search, category, commandState]);
 
   const loadAudit = useCallback(async (id = guildId, quiet = false) => {
-    if (!id) return;
+    if (!id || (activeGuildIdRef.current && activeGuildIdRef.current !== String(id))) return;
     try {
       const data = await api<ListResponse<AuditEntry>>("/api/guilds/" + encodeURIComponent(id) + "/audit", csrf);
+      if (activeGuildIdRef.current && activeGuildIdRef.current !== String(id)) return;
       setAudit(data.entries || []);
     } catch (error) {
       if (!quiet) pushToast(errorMessage(error), true);
@@ -209,7 +226,8 @@ export default function App() {
   }, [csrf, guildId, pushToast]);
 
   const refreshData = useCallback(async (id = guildId, quiet = false) => {
-    if (!id) return;
+    if (!id || (activeGuildIdRef.current && activeGuildIdRef.current !== String(id))) return;
+    const requestGeneration = ++refreshGeneration.current;
     setRefreshing(true);
     const results = await Promise.allSettled([
       api<Overview>("/api/guilds/" + encodeURIComponent(id) + "/overview", csrf),
@@ -217,6 +235,7 @@ export default function App() {
       api<SystemStatus>("/api/system", csrf),
       api<ListResponse<AuditEntry>>("/api/guilds/" + encodeURIComponent(id) + "/audit", csrf)
     ] as const);
+    if (requestGeneration !== refreshGeneration.current || activeGuildIdRef.current !== String(id)) return;
     const [overviewResult, commandsResult, systemResult, auditResult] = results;
     if (overviewResult.status === "fulfilled") setOverview(overviewResult.value || {});
     else if (!quiet) pushToast(errorMessage(overviewResult.reason), true);
@@ -243,7 +262,9 @@ export default function App() {
   const loadDatabase = useCallback(async () => {
     if (!guildId) return;
     try {
-      const data = await api<{ resources?: Resource[] }>("/api/guilds/" + encodeURIComponent(guildId) + "/database", csrf);
+      const requestedGuild = guildId;
+      const data = await api<{ resources?: Resource[] }>("/api/guilds/" + encodeURIComponent(requestedGuild) + "/database", csrf);
+      if (activeGuildIdRef.current && activeGuildIdRef.current !== String(requestedGuild)) return;
       setResources(data.resources || []);
     } catch (error) { pushToast(errorMessage(error), true); setResources([]); }
   }, [csrf, guildId, pushToast]);
@@ -269,9 +290,14 @@ export default function App() {
     api<Bootstrap>("/api/bootstrap").then((data) => {
       if (!active) return;
       setUser(data.user);
-      setGuilds(data.guilds || []);
+      const availableGuilds = data.guilds || [];
+      setGuilds(availableGuilds);
       setCsrf(data.csrf_token || "");
-      const selected = String(data.selected_guild_id || (data.guilds || [])[0]?.id || "");
+      let rememberedGuild = "";
+      try { rememberedGuild = window.localStorage.getItem("lemegeton:selected-guild") || ""; } catch { /* storage may be disabled */ }
+      const canSelect = (candidate: unknown) => candidate != null && availableGuilds.some((guild) => String(guild.id) === String(candidate));
+      const selected = String([rememberedGuild, data.selected_guild_id, availableGuilds[0]?.id].find(canSelect) || "");
+      activeGuildIdRef.current = selected;
       setGuildId(selected);
       if (!selected) pushToast("No server is available where the bot is present and you have Manage Server or Administrator permission.", true);
     }).catch((error) => {
@@ -344,15 +370,17 @@ export default function App() {
 
   const toggleCommand = async (command: Command) => {
     if (!guildId || command.protected || busyCommand) return;
+    const requestedGuild = guildId;
     setBusyCommand(command.fullname);
     const desired = !command.enabled;
     try {
-      const result = await api<{ enabled?: boolean }>("/api/guilds/" + encodeURIComponent(guildId) + "/commands/" + encodeURIComponent(command.fullname), csrf, {
+      const result = await api<{ enabled?: boolean }>("/api/guilds/" + encodeURIComponent(requestedGuild) + "/commands/" + encodeURIComponent(command.fullname), csrf, {
         method: "PUT", body: JSON.stringify({ enabled: desired })
       });
+      if (activeGuildIdRef.current !== requestedGuild) return;
       setCommands((items) => items.map((item) => item.fullname === command.fullname ? { ...item, enabled: result.enabled == null ? desired : Boolean(result.enabled) } : item));
       pushToast("/" + command.fullname + " " + (result.enabled == null ? (desired ? "enabled" : "disabled") : (result.enabled ? "enabled" : "disabled")) + " and synchronized.");
-      void loadAudit(guildId, true);
+      void loadAudit(requestedGuild, true);
     } catch (error) { pushToast(errorMessage(error), true); }
     finally { setBusyCommand(""); }
   };
@@ -414,13 +442,18 @@ export default function App() {
         <button className="icon-button mobile-menu" type="button" aria-label="Open navigation" aria-expanded={mobileNav} onClick={() => setMobileNav((value) => !value)}>☰</button>
         <div className="breadcrumb"><span>CONTROL</span><span className="breadcrumb-divider">/</span><strong>{selectedPage.label}</strong></div>
         <div className="topbar-right">
-          <label className="guild-control"><span>SERVER</span><select value={guildId} onChange={(event) => setGuildId(event.target.value)} aria-label="Select Discord server" disabled={!guilds.length}>
+          <label className="guild-control"><span>SERVER</span><select value={guildId} onChange={(event) => selectGuild(event.target.value)} aria-label="Select Discord server" disabled={!guilds.length}>
             {!guilds.length ? <option value="">No manageable servers</option> : guilds.map((guild) => <option key={guild.id} value={guild.id}>{guild.name}</option>)}
           </select></label>
           <button className={"icon-button" + (refreshing ? " spinning" : "")} type="button" onClick={() => void refreshData(guildId)} aria-label="Refresh dashboard" title="Refresh dashboard" disabled={!guildId || refreshing}>↻</button>
           <div className="account" aria-label="Signed-in Discord account"><span className="avatar">{(user?.global_name || user?.username || "?").slice(0, 1).toUpperCase()}</span><span className="account-copy"><strong>{user?.global_name || user?.username || "Discord account"}</strong><small>DISCORD / VERIFIED</small></span></div>
         </div>
       </header>
+      <div className="braille-band" aria-hidden="true">
+        <span className="braille-track braille-track-a">⠿⠗⠿⠿⠶⠿⠿⠾⠿⠿⠿⠷⠿⠿⠿⠿⠿⠿</span>
+        <span className="braille-band-label">LEMEGETON / LIVE SIGNAL</span>
+        <span className="braille-track braille-track-b">⠿⠿⠷⠿⠿⠿⠿⠗⠿⠿⠶⠿⠿⠿⠾⠿⠿</span>
+      </div>
 
       {page === "overview" ? <section className="page">
         <SectionHeading eyebrow={selectedPage.eyebrow} title={<>Bot <span>overview.</span></>} subtitle={selectedPage.subtitle} actions={<><Button onClick={() => navigate("audit")}>View activity <span aria-hidden="true">↗</span></Button><Button tone="primary" onClick={() => void synchronizeCommands()} disabled={operationBusy || !guildId}>Publish commands <span aria-hidden="true">↗</span></Button></>} />
