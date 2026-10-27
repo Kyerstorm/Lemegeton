@@ -5,7 +5,7 @@ import logging
 from difflib import SequenceMatcher
 import aiohttp
 import discord
-from helpers.command_error_handler import FeedbackAwareView
+from helpers.command_error_handler import FeedbackAwareView, handle_application_command_error
 from discord import app_commands
 from discord.ext import commands
 import helpers.igdb_helper as igdb
@@ -179,7 +179,8 @@ class Game(commands.Cog):
     @app_commands.describe(title="Game title to search for")
     @command_meta(section="Gaming", name="Game")
     async def game(self, interaction: discord.Interaction, title: str) -> None:
-        if len(title.strip()) < 2:
+        title = " ".join((title or "").split())
+        if len(title) < 2:
             await interaction.response.send_message("Enter at least two characters for the game title.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -207,6 +208,11 @@ class Game(commands.Cog):
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
             log.warning("Game search failed: %s", exc)
             await interaction.followup.send("Game search is temporarily unavailable. Please try again later.", ephemeral=True)
+
+    async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+        """Handle unexpected IGDB/Steam/graph failures through the common reporter."""
+        await handle_application_command_error(interaction, error)
+
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Game(bot))
