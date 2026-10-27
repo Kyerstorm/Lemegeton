@@ -13,6 +13,7 @@ import os
 import re
 import uuid
 from dataclasses import dataclass
+from urllib.parse import quote, urlsplit
 
 import boto3
 from botocore.config import Config
@@ -26,15 +27,27 @@ class StoredImage:
     content_type: str
     size_bytes: int
     sha256: str
+    is_private: bool = True
 
 
 def _setting(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
 
 
+def _public_base_url() -> str | None:
+    value = _setting("S3_PUBLIC_BASE_URL").rstrip("/")
+    parsed = urlsplit(value)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        return None
+    return value
+
+
 def is_configured(*, private: bool = True) -> bool:
-    """Whether the private object store is configured and safe to use."""
-    if not private or not _setting("S3_BUCKET"):
+    """Whether the requested private or explicitly public object store is configured."""
+    if private:
+        if not _setting("S3_BUCKET"):
+            return False
+    elif not _setting("S3_PUBLIC_BUCKET") or not _public_base_url():
         return False
     access_key = _setting("S3_ACCESS_KEY_ID")
     secret_key = _setting("S3_SECRET_ACCESS_KEY")
@@ -45,8 +58,8 @@ def is_configured(*, private: bool = True) -> bool:
     return True
 
 
-def _bucket() -> str:
-    return _setting("S3_BUCKET")
+def _bucket(*, private: bool = True) -> str:
+    return _setting("S3_BUCKET" if private else "S3_PUBLIC_BUCKET")
 
 
 def _url_ttl() -> int:
@@ -114,7 +127,7 @@ async def store_image(
         return None
     if not data or not str(content_type or "").lower().startswith("image/"):
         raise ValueError("Only non-empty image files can be stored.")
-    bucket = _bucket()
+    bucket = _bucket(private=private)
     key = f"{_namespace(namespace)}/{uuid.uuid4().hex}{_extension(filename)}"
     payload = bytes(data)
 
@@ -134,6 +147,7 @@ async def store_image(
         content_type=str(content_type)[:128],
         size_bytes=len(payload),
         sha256=hashlib.sha256(payload).hexdigest(),
+        is_private=private,
     )
 
 
@@ -181,10 +195,10 @@ async def register_asset(
         INSERT INTO media_assets(
             provider, namespace, bucket_name, object_key, content_type,
             size_bytes, sha256, is_private, uploaded_by, guild_id
-        ) VALUES('s3', $1, $2, $3, $4, $5, $6, TRUE, $7, $8)
+        ) VALUES('s3', $1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING id
     """, _namespace(namespace), stored.bucket, stored.key, stored.content_type,
-         stored.size_bytes, stored.sha256, uploaded_by, guild_id)
+         stored.size_bytes, stored.sha256, stored.is_private, uploaded_by, guild_id)
     return int(row["id"])
 
 
@@ -223,10 +237,15 @@ async def _asset_row(asset_id: int):
 
 
 async def asset_url(asset_id: int) -> str | None:
-    """Create a fresh, short-lived URL for one private object."""
+    """Return a stable URL for explicitly public objects, or a short-lived URL for private ones."""
     row = await _asset_row(asset_id)
     if not row:
         return None
+    if not row["is_private"]:
+        base_url = _public_base_url()
+        if not base_url:
+            return None
+        return f"{base_url}/{quote(str(row['object_key']), safe='/')}"
     return await asyncio.to_thread(
         _client().generate_presigned_url,
         "get_object",
@@ -251,6 +270,56 @@ async def download_asset_bytes(asset_id: int) -> bytes | None:
             response["Body"].close()
 
     return await asyncio.to_thread(get)
+
+
+async def store_public_image(
+    data: bytes,
+    *,
+    namespace: str,
+    filename: str,
+    content_type: str,
+    uploaded_by: int | None = None,
+    guild_id: int | None = None,
+) -> str | None:
+    """Publish generated, non-sensitive imagery to the explicitly configured public bucket.
+
+    Returns a stable URL. If public storage is not configured or fails, callers
+    can keep using their existing Discord attachment flow.
+    """
+    if not is_configured(private=False):
+        return None
+    stored = None
+    asset_id = None
+    try:
+        stored = await store_image(
+            data,
+            namespace=namespace,
+            filename=filename,
+            content_type=content_type,
+            private=False,
+        )
+        if stored is None:
+            return None
+        asset_id = await create_asset(
+            stored,
+            namespace=namespace,
+            uploaded_by=uploaded_by,
+            guild_id=guild_id,
+        )
+        return await asset_url(asset_id)
+    except Exception:
+        log.warning("Could not store public generated image in object storage", exc_info=True)
+        if asset_id is not None:
+            try:
+                await delete_asset(asset_id)
+            except Exception:
+                log.warning("Could not clean up failed public image asset %s", asset_id, exc_info=True)
+        elif stored is not None:
+            try:
+                await delete_uploaded_object(stored)
+            except Exception:
+                log.warning("Could not clean up uploaded public image", exc_info=True)
+        return None
 
 
 async def delete_uploaded_object(stored: StoredImage) -> None:
