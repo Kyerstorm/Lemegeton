@@ -1,13 +1,20 @@
 """Regression tests for dashboard-managed application-command execution policy."""
 from __future__ import annotations
 
+import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import discord
+from discord import app_commands
+
 from cogs_test.general_commands.dashboard import (
     COMMAND_REGISTRY,
+    ConfigDB,
     DashboardCog,
+    _copy_app_command,
+    _filter_group_for_guild,
     _is_enabled,
     _restore_dashboard_config,
 )
@@ -45,6 +52,58 @@ class DashboardCommandPolicyTests(unittest.TestCase):
         self.assertTrue(_is_enabled("browse", meta, {"sections": {}, "commands": {}}))
 
 
+class DashboardGroupFilteringTests(unittest.TestCase):
+    def setUp(self):
+        self.original = COMMAND_REGISTRY._commands.copy()
+        COMMAND_REGISTRY._commands.clear()
+
+    def tearDown(self):
+        COMMAND_REGISTRY._commands.clear()
+        COMMAND_REGISTRY._commands.update(self.original)
+
+    def test_unannotated_leaf_is_indexed_with_an_inferred_category(self):
+        async def callback(interaction: discord.Interaction):
+            return None
+
+        callback.__module__ = "cogs_test.general_commands.screen_discovery"
+        command = app_commands.Command(name="screen-discover", description="Discover", callback=callback)
+        DashboardCog._register_if_annotated(command)
+        meta = COMMAND_REGISTRY.get_meta("screen-discover")
+        self.assertIsNotNone(meta)
+        self.assertEqual(meta["section"], "Media Discovery")
+
+    def test_disabled_nested_command_is_removed_without_flattening_group(self):
+        group = app_commands.Group(name="media", description="Media tools")
+
+        async def callback(interaction: discord.Interaction):
+            return None
+
+        browse = app_commands.Command(name="browse", description="Browse media", callback=callback)
+        trending = app_commands.Command(name="trending", description="Trending media", callback=callback)
+        group.add_command(browse)
+        group.add_command(trending)
+        COMMAND_REGISTRY.register(browse.qualified_name, browse, "Media")
+        COMMAND_REGISTRY.register(trending.qualified_name, trending, "Media")
+
+        filtered = _filter_group_for_guild(
+            group,
+            {"sections": {}, "commands": {browse.qualified_name: False}},
+        )
+        self.assertIsNotNone(filtered)
+        self.assertEqual([command.name for command in filtered.commands], ["trending"])
+        self.assertEqual([command.name for command in group.commands], ["browse", "trending"])
+
+    def test_context_menu_is_preserved_without_slash_command_fields(self):
+        async def inspect_message(interaction: discord.Interaction, message: discord.Message):
+            return None
+
+        menu = app_commands.ContextMenu(name="Inspect message", callback=inspect_message)
+        cloned = _copy_app_command(menu)
+        self.assertIsInstance(cloned, app_commands.ContextMenu)
+        self.assertEqual(cloned.name, menu.name)
+        self.assertIs(cloned.callback, menu.callback)
+        self.assertFalse(hasattr(cloned, "parent"))
+
 class DashboardCommandExecutionGuardTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.original = COMMAND_REGISTRY._commands.copy()
@@ -76,12 +135,31 @@ class DashboardCommandExecutionGuardTests(unittest.IsolatedAsyncioTestCase):
 
 
 class DashboardRollbackTests(unittest.IsolatedAsyncioTestCase):
+    async def test_config_mutations_initialize_before_taking_the_shared_lock(self):
+        async def fake_execute(operation, query, params=(), fetch_type=None):
+            if operation == "load dashboard guild config":
+                return ('{"sections":{},"commands":{}}',)
+            return None
+
+        with patch("cogs_test.general_commands.dashboard.database.execute_db_operation", new_callable=AsyncMock) as execute:
+            execute.side_effect = fake_execute
+            for method in ("set_command", "set_section", "reset_guild"):
+                db = ConfigDB()
+                with self.subTest(method=method):
+                    if method == "set_command":
+                        mutation = db.set_command(42, "browse", False)
+                    elif method == "set_section":
+                        mutation = db.set_section(42, "Media", False)
+                    else:
+                        mutation = db.reset_guild(42)
+                    await asyncio.wait_for(mutation, timeout=1)
+
     async def test_rollback_persists_snapshot_and_attempts_resynchronization(self):
         class FakeRestoreDB:
             def __init__(self):
                 self.saved = None
 
-            async def _set_guild_config(self, guild_id, config):
+            async def replace_guild_config(self, guild_id, config):
                 self.saved = (guild_id, dict(config))
 
         db = FakeRestoreDB()
@@ -104,7 +182,7 @@ class DashboardRollbackTests(unittest.IsolatedAsyncioTestCase):
             def __init__(self):
                 self.saved = None
 
-            async def _set_guild_config(self, guild_id, config):
+            async def replace_guild_config(self, guild_id, config):
                 self.saved = (guild_id, dict(config))
 
         db = FakeRestoreDB()

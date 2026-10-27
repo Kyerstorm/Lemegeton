@@ -1182,6 +1182,15 @@ async def _load_cogs_impl():
                 logger.error(f"Unexpected error processing cog {cog_name}: {cog_error}", exc_info=True)
                 failed_count += 1
         
+        # Keep both dashboards aligned after extensions are loaded or hot-reloaded.
+        dashboard_cog = bot.get_cog("DashboardCog")
+        refresh_registry = getattr(dashboard_cog, "_refresh_command_registry", None)
+        if callable(refresh_registry):
+            try:
+                refresh_registry()
+            except Exception:
+                logger.exception("Could not refresh the dashboard command registry after cog loading")
+
         # Summary logging
         total_operations = loaded_count + reloaded_count + failed_count
         if total_operations > 0:
@@ -1547,7 +1556,7 @@ import asyncio
 
 dashboard_bridge_logger = logging.getLogger("web.dashboard_bridge")
 ROOT = Path(__file__).resolve().parent
-PROTECTED_NAMES = {"help", "feedback"}
+PROTECTED_NAMES = {"help", "feedback", "dashboard"}
 LOG_FILES = {"bot.log", "dashboard.log"}
 
 
@@ -1807,7 +1816,7 @@ class DashboardBotBridge:
         try:
             await cog.db.set_command(guild.id, fullname, data["enabled"])
             if not await attempt_sync_for_guild(self.bot, guild):
-                await cog.db._set_guild_config(guild.id, before)
+                await cog.db.replace_guild_config(guild.id, before)
                 await attempt_sync_for_guild(self.bot, guild)
                 return _error("Discord did not confirm command synchronization. The previous configuration was restored.", 502)
             await cog.db.log_action(guild.id, int(actor_id), "toggle_command",
@@ -1815,7 +1824,7 @@ class DashboardBotBridge:
         except Exception:
             dashboard_bridge_logger.exception("Command update failed for guild %s command %s", guild.id, fullname)
             try:
-                await cog.db._set_guild_config(guild.id, before)
+                await cog.db.replace_guild_config(guild.id, before)
                 await attempt_sync_for_guild(self.bot, guild)
             except Exception:
                 dashboard_bridge_logger.exception("Could not restore the previous command configuration for guild %s", guild.id)
@@ -1858,14 +1867,14 @@ class DashboardBotBridge:
         try:
             await cog.db.reset_guild(guild.id)
             if not await attempt_sync_for_guild(self.bot, guild):
-                await cog.db._set_guild_config(guild.id, before)
+                await cog.db.replace_guild_config(guild.id, before)
                 await attempt_sync_for_guild(self.bot, guild)
                 return _error("Discord did not confirm synchronization. The previous configuration was restored.", 502)
             await cog.db.log_action(guild.id, int(actor_id), "reset_dashboard", "Reset per-server command settings from the web dashboard.")
         except Exception:
             dashboard_bridge_logger.exception("Dashboard reset failed for guild %s", guild.id)
             try:
-                await cog.db._set_guild_config(guild.id, before)
+                await cog.db.replace_guild_config(guild.id, before)
                 await attempt_sync_for_guild(self.bot, guild)
             except Exception:
                 dashboard_bridge_logger.exception("Could not restore the previous guild configuration for %s", guild.id)

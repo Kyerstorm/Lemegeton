@@ -40,6 +40,7 @@ HUB_SECTIONS = {
         "label": "Movies and television",
         "description": (
             "**Explore films and TV series**\n"
+            "• /browse — leave the title blank for multi-result movie/TV discovery and advanced filters\n"
             "• /where-to-watch — region-specific TMDB availability\n"
             "• /person-credits — cast and crew filmography\n"
             "• /trailers — TMDB-listed videos and trailers\n"

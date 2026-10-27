@@ -79,16 +79,16 @@ class HelpCog(commands.Cog):
             },
             "📺 Anime & Manga": {
                 "browse": {
-                    "desc": "Search Anime, Manga, Light Novels and General Novels",
-                    "usage": "/browse",
-                    "note": "Interactive browsing with advanced filtering and sorting options. Filter by genre, year, format, and more.",
-                    "examples": ["/browse"]
+                    "desc": "Search or discover anime, manga, novels, books, webnovels, movies, and TV shows",
+                    "usage": "/browse <media_type> [title] [filters]",
+                    "note": "Title searches show detailed metadata. Leave title blank for multi-result TMDB movie/TV discovery with genre, keyword, year, runtime, language, director/cast, rating, and sort filters.",
+                    "examples": ["/browse media_type:Movies", "/browse media_type:TV Shows genre:Drama year_from:2020", "/browse media_type:Movies genre:Science fiction minimum_rating:7.5 sort_by:Highest rated"]
                 },
                 "trending": {
-                    "desc": "🔥 View the currently trending anime, manga, or light novels on AniList",
-                    "usage": "/trending [media_type]",
-                    "note": "See what's popular right now on AniList. Supports Anime, Manga, Light Novels, or All.",
-                    "examples": ["/trending", "/trending anime", "/trending manga"]
+                    "desc": "View trending anime, manga, light novels, movies, and TV shows",
+                    "usage": "/trending [media_type] [time_window] [genre] [media_format]",
+                    "note": "AniList powers anime/manga rankings; TMDB powers movie/TV trends. Day/week windows apply to TMDB and require TMDB_BEARER_TOKEN.",
+                    "examples": ["/trending", "/trending media_type:Movies time_window:This Week", "/trending media_type:TV Shows genre:Drama"]
                 },
                 "recommendations": {
                     "desc": "Get personalized manga recommendations based on your highly-rated library",

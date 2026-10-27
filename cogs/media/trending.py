@@ -94,7 +94,7 @@ class Trending(commands.Cog):
 
     @app_commands.command(
         name="trending",
-        description="🔥 View the currently trending anime, manga, or light novels on AniList"
+        description="🔥 View trending anime, manga, light novels, movies, and TV shows"
     )
     @command_meta(section="Media", name="Trending")
     @app_commands.describe(
