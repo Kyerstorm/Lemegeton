@@ -12,7 +12,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from helpers.command_error_handler import FeedbackAwareView, handle_application_command_error
+from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView, handle_application_command_error
 import database
 from cogs.media.browse import TMDB_API_BASE_URL, TMDB_IMAGE_BASE_URL, search_novelupdates
 from helpers.media_graph import record_media_relationship
@@ -171,6 +171,159 @@ class _TMDBPicker(FeedbackAwareView):
             await self.cog._show_watch_providers(interaction, selected, self.kind, self.region)
 
 
+
+DISCUSSION_TYPES = [
+    ("Chapter", "chapter"), ("Volume", "volume"), ("Episode", "episode"),
+    ("Season", "season"), ("General discussion", "general"),
+]
+
+
+class DiscussionModal(FeedbackAwareModal):
+    def __init__(self, cog: "ConnectedMedia", discussion_type: str):
+        super().__init__(title=f"Start {discussion_type.title()} Discussion", timeout=180)
+        self.cog = cog
+        self.discussion_type = discussion_type
+        self.work_title = discord.ui.TextInput(label="Work or series title", max_length=200, required=True)
+        self.reference = discord.ui.TextInput(
+            label="Spoiler cutoff (chapter / volume / episode)", max_length=100, required=True,
+            placeholder="e.g. Chapter 42, Volume 5, or S2E4",
+        )
+        self.source_url = discord.ui.TextInput(label="Official or metadata URL (optional)", max_length=1000, required=False)
+        for field in (self.work_title, self.reference, self.source_url):
+            self.add_item(field)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.cog._create_discussion(
+            interaction, self.discussion_type, self.work_title.value,
+            self.reference.value, self.source_url.value or None,
+        )
+
+
+class DiscussionHomeView(FeedbackAwareView):
+    def __init__(self, cog: "ConnectedMedia", owner_id: int):
+        super().__init__(timeout=240)
+        self.cog = cog
+        self.owner_id = owner_id
+        self.discussion_type = "chapter"
+        select = discord.ui.Select(
+            placeholder="Choose a discussion type", min_values=1, max_values=1, row=0,
+            options=[discord.SelectOption(label=label, value=value, default=value == self.discussion_type) for label, value in DISCUSSION_TYPES],
+        )
+        select.callback = self._select_type
+        self.add_item(select)
+        create = discord.ui.Button(label="Open discussion form", style=discord.ButtonStyle.primary, emoji="📝", row=1)
+        close = discord.ui.Button(label="Close", style=discord.ButtonStyle.secondary, row=1)
+        create.callback = self._create
+        close.callback = self._close
+        self.add_item(create)
+        self.add_item(close)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("Only the person who opened this menu can control it.", ephemeral=True)
+            return False
+        return True
+
+    async def _select_type(self, interaction: discord.Interaction) -> None:
+        self.discussion_type = self.children[0].values[0]
+        await interaction.response.edit_message(view=self)
+
+    async def _create(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(DiscussionModal(self.cog, self.discussion_type))
+
+    async def _close(self, interaction: discord.Interaction) -> None:
+        await interaction.response.edit_message(content="Discussion menu closed.", embed=None, view=None)
+
+
+class LinkSuggestionModal(FeedbackAwareModal):
+    def __init__(
+        self, cog: "ConnectedMedia", source_category: str,
+        target_category: str, relationship: str,
+    ):
+        super().__init__(title="Suggest a Media Relationship", timeout=180)
+        self.cog = cog
+        self.source_category = source_category
+        self.target_category = target_category
+        self.relationship = relationship
+        self.source_title = discord.ui.TextInput(label="Source title", max_length=200, required=True)
+        self.source_url = discord.ui.TextInput(label="Source HTTPS URL", max_length=1000, required=True)
+        self.target_title = discord.ui.TextInput(label="Related title", max_length=200, required=True)
+        self.target_url = discord.ui.TextInput(label="Related title HTTPS URL", max_length=1000, required=True)
+        self.evidence = discord.ui.TextInput(
+            label="Evidence for the proposed relationship", style=discord.TextStyle.paragraph,
+            min_length=15, max_length=1500, required=True,
+        )
+        for field in (self.source_title, self.source_url, self.target_title, self.target_url, self.evidence):
+            self.add_item(field)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.cog._save_link_suggestion(
+            interaction, self.source_title.value, self.source_category, self.source_url.value,
+            self.relationship, self.target_title.value, self.target_category,
+            self.target_url.value, self.evidence.value,
+        )
+
+
+class LinkSuggestionView(FeedbackAwareView):
+    def __init__(self, cog: "ConnectedMedia", owner_id: int):
+        super().__init__(timeout=240)
+        self.cog = cog
+        self.owner_id = owner_id
+        self.source_category = "ANIME"
+        self.target_category = "MANGA"
+        self.relationship = "adaptation"
+        source_select = discord.ui.Select(
+            placeholder="Source category", min_values=1, max_values=1, row=0,
+            options=[discord.SelectOption(label=choice.name, value=choice.value, default=choice.value == self.source_category) for choice in MEDIA_CATEGORIES],
+        )
+        target_select = discord.ui.Select(
+            placeholder="Related category", min_values=1, max_values=1, row=1,
+            options=[discord.SelectOption(label=choice.name, value=choice.value, default=choice.value == self.target_category) for choice in MEDIA_CATEGORIES],
+        )
+        relationship_select = discord.ui.Select(
+            placeholder="Relationship type", min_values=1, max_values=1, row=2,
+            options=[discord.SelectOption(label=choice.name, value=choice.value, default=choice.value == self.relationship) for choice in RELATION_TYPES],
+        )
+        source_select.callback = self._set_source
+        target_select.callback = self._set_target
+        relationship_select.callback = self._set_relationship
+        self.add_item(source_select)
+        self.add_item(target_select)
+        self.add_item(relationship_select)
+        open_button = discord.ui.Button(label="Open suggestion form", style=discord.ButtonStyle.primary, emoji="🔗", row=3)
+        close_button = discord.ui.Button(label="Close", style=discord.ButtonStyle.secondary, row=3)
+        open_button.callback = self._open_form
+        close_button.callback = self._close
+        self.add_item(open_button)
+        self.add_item(close_button)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("Only the person who opened this menu can control it.", ephemeral=True)
+            return False
+        return True
+
+    async def _set_source(self, interaction: discord.Interaction) -> None:
+        self.source_category = self.children[0].values[0]
+        await interaction.response.edit_message(view=self)
+
+    async def _set_target(self, interaction: discord.Interaction) -> None:
+        self.target_category = self.children[1].values[0]
+        await interaction.response.edit_message(view=self)
+
+    async def _set_relationship(self, interaction: discord.Interaction) -> None:
+        self.relationship = self.children[2].values[0]
+        await interaction.response.edit_message(view=self)
+
+    async def _open_form(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(
+            LinkSuggestionModal(self.cog, self.source_category, self.target_category, self.relationship)
+        )
+
+    async def _close(self, interaction: discord.Interaction) -> None:
+        await interaction.response.edit_message(content="Media-link suggestion closed.", embed=None, view=None)
+
+
 class ConnectedMedia(commands.Cog):
     """Navigation and TMDB utilities layered over existing Lemegeton provider helpers."""
     def __init__(self, bot: commands.Bot):
@@ -279,11 +432,6 @@ class ConnectedMedia(commands.Cog):
     async def connections(self, interaction: discord.Interaction, title: str, category: str = "ANIME") -> None:
         await self._show_franchise_picker(interaction, title, category, reading_order=False)
 
-    @app_commands.command(name="reading-order", description="Explore known release relationships without guessing story chronology")
-    @app_commands.guild_only()
-    @app_commands.choices(category=MEDIA_CATEGORIES)
-    @app_commands.describe(title="Book, webnovel, manga, anime, movie or TV title", category="Provider/category to search")
-    @command_meta(section="Media Discovery", name="Reading Order")
     async def reading_order(self, interaction: discord.Interaction, title: str, category: str = "LIGHT_NOVEL") -> None:
         await self._show_franchise_picker(interaction, title, category, reading_order=True)
 
@@ -596,18 +744,28 @@ class ConnectedMedia(commands.Cog):
         embed.set_footer(text="Source: Novel Updates · Only fields supplied by the current scraper are shown")
         await interaction.followup.send(embed=embed, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
-    @app_commands.command(name="link-suggest", description="Suggest a cross-media relationship for moderator review")
+    @app_commands.command(name="link-suggest", description="Open a guided modal to suggest a cross-media relationship")
     @app_commands.guild_only()
-    @app_commands.choices(source_category=MEDIA_CATEGORIES, target_category=MEDIA_CATEGORIES, relationship=RELATION_TYPES)
-    @app_commands.describe(
-        source_title="First work title", source_category="First work category", source_url="HTTPS metadata URL for the first work",
-        relationship="Proposed relationship", target_title="Related work title", target_category="Related work category",
-        target_url="HTTPS metadata URL for the related work", evidence="Why the relationship should be accepted",
-    )
     @command_meta(section="Media Discovery", name="Suggest Media Link")
-    async def link_suggest(
-        self, interaction: discord.Interaction, source_title: str, source_category: str, source_url: str,
-        relationship: str, target_title: str, target_category: str, target_url: str, evidence: str,
+    async def link_suggest(self, interaction: discord.Interaction) -> None:
+        embed = discord.Embed(
+            title="Suggest a Media Relationship",
+            description=(
+                "Propose a relationship between two works, such as an adaptation, sequel, prequel, or source material. "
+                "Choose both media categories and the relationship type, then complete the modal with HTTPS source links "
+                "and a short evidence explanation. Suggestions remain pending until moderators in this server review them."
+            ),
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text="Community-reviewed suggestions are not provider-confirmed metadata")
+        await interaction.response.send_message(
+            embed=embed, view=LinkSuggestionView(self, interaction.user.id), ephemeral=True,
+        )
+
+    async def _save_link_suggestion(
+        self, interaction: discord.Interaction, source_title: str, source_category: str,
+        source_url: str, relationship: str, target_title: str, target_category: str,
+        target_url: str, evidence: str,
     ) -> None:
         if not interaction.guild_id:
             await interaction.response.send_message("Link suggestions are server-scoped.", ephemeral=True)
@@ -618,7 +776,9 @@ class ConnectedMedia(commands.Cog):
         except ValueError as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
-        source_title, target_title, evidence = " ".join(source_title.split()), " ".join(target_title.split()), " ".join(evidence.split())
+        source_title = " ".join((source_title or "").split())
+        target_title = " ".join((target_title or "").split())
+        evidence = " ".join((evidence or "").split())
         if not source_title or not target_title or normalize_title(source_title) == normalize_title(target_title):
             await interaction.response.send_message("Provide two distinct media titles.", ephemeral=True)
             return
@@ -729,6 +889,24 @@ class ConnectedMedia(commands.Cog):
                 log.warning("Approved media link #%s could not be indexed in the shared graph", suggestion_id, exc_info=True)
         await interaction.response.send_message(f"Suggestion **#{suggestion_id}** was {status}.", ephemeral=True)
 
+    @app_commands.command(name="discussion", description="Open a spoiler-aware chapter, volume, episode, or general discussion")
+    @app_commands.guild_only()
+    @command_meta(section="Community", name="Media Discussion")
+    async def discussion(self, interaction: discord.Interaction) -> None:
+        embed = discord.Embed(
+            title="Spoiler-aware Media Discussion",
+            description=(
+                "Create a thread with a clear chapter, volume, episode, or season cutoff. "
+                "The bot posts a starter message and keeps the discussion inside this server. "
+                "Readers and viewers should mark spoilers beyond the stated cutoff."
+            ),
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text="Choose the scope first, then submit the modal")
+        await interaction.response.send_message(
+            embed=embed, view=DiscussionHomeView(self, interaction.user.id), ephemeral=True,
+        )
+
     async def _create_discussion(self, interaction: discord.Interaction, media_type: str, title: str, reference: str, source_url: str | None) -> None:
         if not interaction.guild or not isinstance(interaction.channel, discord.TextChannel):
             await interaction.response.send_message("Create discussions in a server text channel.", ephemeral=True)
@@ -763,17 +941,9 @@ class ConnectedMedia(commands.Cog):
         )
         await interaction.followup.send(f"Discussion thread created: {thread.mention}", ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
-    @app_commands.command(name="chapter-discussion", description="Start a spoiler-aware novel or manga chapter discussion thread")
-    @app_commands.guild_only()
-    @app_commands.describe(title="Work being discussed", chapter="Chapter or volume cutoff", source_url="Optional official or metadata URL")
-    @command_meta(section="Community", name="Chapter Discussion")
     async def chapter_discussion(self, interaction: discord.Interaction, title: str, chapter: str, source_url: str | None = None) -> None:
         await self._create_discussion(interaction, "chapter", title, chapter, source_url)
 
-    @app_commands.command(name="episode-discussion", description="Start a spoiler-aware TV episode discussion thread")
-    @app_commands.guild_only()
-    @app_commands.describe(series="TV series title", episode="Season/episode reference, for example S2E4", source_url="Optional TMDB or metadata URL")
-    @command_meta(section="Community", name="Episode Discussion")
     async def episode_discussion(self, interaction: discord.Interaction, series: str, episode: str, source_url: str | None = None) -> None:
         await self._create_discussion(interaction, "episode", series, episode, source_url)
 
