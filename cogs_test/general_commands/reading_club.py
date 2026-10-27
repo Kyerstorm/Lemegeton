@@ -339,6 +339,9 @@ class ReadingClub(commands.Cog):
         if interaction.guild is None:
             await interaction.response.send_message("This command is server-specific.", ephemeral=True)
             return
+        if not getattr(interaction.user.guild_permissions, "manage_guild", False):
+            await interaction.response.send_message("Manage Server permission is required to select the next community read.", ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True, thinking=True)
         if nomination_id and nomination_id.strip():
             selected = await execute_db_operation(
@@ -397,6 +400,9 @@ class ReadingClub(commands.Cog):
     async def schedule(self, interaction: discord.Interaction, nomination_id: str, when: str) -> None:
         if interaction.guild is None or not isinstance(interaction.channel, discord.TextChannel):
             await interaction.response.send_message("Schedule discussions from a server text channel that supports public threads.", ephemeral=True)
+            return
+        if not getattr(interaction.user.guild_permissions, "manage_guild", False):
+            await interaction.response.send_message("Manage Server permission is required to schedule the community read.", ephemeral=True)
             return
         try:
             scheduled_at = parse_schedule_time(when)
