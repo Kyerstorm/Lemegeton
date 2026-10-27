@@ -8,6 +8,7 @@ import asyncio
 from bs4 import BeautifulSoup
 import logging
 import os
+import re
 import time
 from typing import List, Dict, Optional, Tuple
 from urllib.parse import quote_plus, urljoin, urlsplit
@@ -27,6 +28,125 @@ GOODREADS_AUTOCOMPLETE_URL = "https://www.goodreads.com/book/auto_complete"
 TMDB_API_BASE_URL = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p"
 MDBLIST_API_BASE_URL = "https://api.mdblist.com"
+
+TMDB_MOVIE_GENRES = {
+    "action": 28, "adventure": 12, "animation": 16, "comedy": 35,
+    "crime": 80, "documentary": 99, "drama": 18, "family": 10751,
+    "fantasy": 14, "history": 36, "horror": 27, "music": 10402,
+    "mystery": 9648, "romance": 10749, "science fiction": 878,
+    "sci fi": 878, "thriller": 53, "war": 10752, "western": 37,
+    "tv movie": 10770,
+}
+TMDB_TV_GENRES = {
+    "action": 10759, "action and adventure": 10759, "adventure": 10759,
+    "animation": 16, "comedy": 35, "crime": 80, "documentary": 99,
+    "drama": 18, "family": 10751, "kids": 10762, "mystery": 9648,
+    "news": 10763, "reality": 10764, "science fiction and fantasy": 10765,
+    "sci fi and fantasy": 10765, "soap": 10766, "talk": 10767,
+    "war and politics": 10768, "western": 37,
+}
+TMDB_SORT_OPTIONS = {
+    "popularity": "popularity.desc",
+    "rating": "vote_average.desc",
+    "votes": "vote_count.desc",
+}
+TMDB_TV_STATUS_IDS = {
+    "returning": 0, "returning series": 0, "ongoing": 0, "in progress": 0,
+    "planned": 1, "upcoming": 1, "in production": 2,
+    "ended": 3, "completed": 3, "complete": 3,
+    "cancelled": 4, "canceled": 4, "pilot": 5,
+}
+
+
+def build_tmdb_discover_params(
+    media_type: str,
+    *,
+    genre: Optional[str] = None,
+    language: Optional[str] = None,
+    status: Optional[str] = None,
+    year_from: Optional[int] = None,
+    year_to: Optional[int] = None,
+    runtime_min: Optional[int] = None,
+    runtime_max: Optional[int] = None,
+    minimum_rating: Optional[float] = None,
+    sort_by: str = "popularity",
+    include_adult: bool = False,
+    region: str = "IE",
+    keyword_id: Optional[int] = None,
+    director_id: Optional[int] = None,
+    cast_id: Optional[int] = None,
+) -> Dict:
+    """Build a validated TMDB discover query for the /browse title-free flow."""
+    category = (media_type or "").strip().upper()
+    if category not in {"MOVIE", "TV"}:
+        raise ValueError("Title-free discovery supports Movies and TV Shows only.")
+    sort_key = (sort_by or "popularity").strip().casefold()
+    if sort_key not in {*TMDB_SORT_OPTIONS, "newest"}:
+        raise ValueError("Choose a sort order: popularity, rating, votes, or newest.")
+
+    params: Dict = {
+        "language": "en-US",
+        "page": 1,
+        "include_adult": str(bool(include_adult)).lower(),
+        "sort_by": (
+            "primary_release_date.desc" if category == "MOVIE" else "first_air_date.desc"
+        ) if sort_key == "newest" else TMDB_SORT_OPTIONS[sort_key],
+    }
+    if genre and genre.strip():
+        normalized_genre = re.sub(
+            r"[\s-]+", " ", genre.strip().casefold().replace("&", " and ")
+        ).strip()
+        genres = TMDB_MOVIE_GENRES if category == "MOVIE" else TMDB_TV_GENRES
+        genre_id = genres.get(normalized_genre)
+        if genre_id is None:
+            raise ValueError(f"TMDB does not expose {genre!r} as a supported {category.lower()} genre.")
+        params["with_genres"] = genre_id
+    if keyword_id is not None:
+        params["with_keywords"] = int(keyword_id)
+    if director_id is not None:
+        params["with_crew"] = int(director_id)
+    if cast_id is not None:
+        params["with_cast"] = int(cast_id)
+    if year_from is not None and year_to is not None and year_from > year_to:
+        raise ValueError("The earliest year cannot be later than the latest year.")
+    date_key = "primary_release_date" if category == "MOVIE" else "first_air_date"
+    if year_from is not None:
+        params[f"{date_key}.gte"] = f"{int(year_from):04d}-01-01"
+    if year_to is not None:
+        params[f"{date_key}.lte"] = f"{int(year_to):04d}-12-31"
+    if language and language.strip():
+        language_code = language.strip().casefold()
+        if not re.fullmatch(r"[a-z]{2}", language_code):
+            raise ValueError("Original language must be a two-letter code, such as en, ja, ko, or fr.")
+        params["with_original_language"] = language_code
+    if runtime_min is not None:
+        params["with_runtime.gte"] = int(runtime_min)
+    if runtime_max is not None:
+        params["with_runtime.lte"] = int(runtime_max)
+    if runtime_min is not None and runtime_max is not None and runtime_min > runtime_max:
+        raise ValueError("The minimum runtime cannot exceed the maximum runtime.")
+    if minimum_rating is not None:
+        rating = float(minimum_rating)
+        if not 0 <= rating <= 10:
+            raise ValueError("Minimum rating must be between 0 and 10.")
+        params["vote_average.gte"] = rating
+    if sort_key == "rating":
+        params["vote_count.gte"] = 50
+    if status:
+        if category == "MOVIE":
+            raise ValueError("TMDB movie discovery does not expose a direct status filter. Use the release-year filters instead.")
+        status_key = re.sub(r"[\s-]+", " ", status.strip().casefold())
+        status_id = TMDB_TV_STATUS_IDS.get(status_key)
+        if status_id is None:
+            raise ValueError("Unsupported TV status. Use returning, planned, in production, ended, cancelled, or pilot.")
+        params["with_status"] = status_id
+    country = (region or "IE").strip().upper()
+    if not re.fullmatch(r"[A-Z]{2}", country):
+        raise ValueError("Region must be a two-letter country code, such as IE, GB, or US.")
+    if category == "MOVIE":
+        params["region"] = country
+    return params
+
 _NOVELUPDATES_CACHE_TTL = 300
 _NOVELUPDATES_SEARCH_CACHE: Dict[tuple, tuple[float, List[Dict]]] = {}
 _NOVELUPDATES_CACHE_LOCK = asyncio.Lock()
@@ -688,6 +808,104 @@ class BrowseCog(commands.Cog):
             logger.warning("TMDB %s search failed for %r: %s", endpoint, query, exc)
             return []
 
+    async def _resolve_tmdb_filter_id(self, kind: str, query: str) -> Optional[int]:
+        """Resolve an explicit keyword/person filter to a provider ID, never a guessed ID."""
+        query = " ".join((query or "").split())
+        if not query or kind not in {"keyword", "person"}:
+            return None
+        token = os.getenv("TMDB_BEARER_TOKEN", "").strip()
+        if not token:
+            return None
+        endpoint = "search/keyword" if kind == "keyword" else "search/person"
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+                async with session.get(
+                    f"{TMDB_API_BASE_URL}/{endpoint}",
+                    params={"query": query, "page": 1, "include_adult": "false"},
+                    headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                ) as response:
+                    if response.status != 200:
+                        return None
+                    payload = await response.json(content_type=None)
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+            logger.warning("TMDB %s filter lookup failed for %r", kind, query, exc_info=True)
+            return None
+        results = payload.get("results") if isinstance(payload, dict) else None
+        if not isinstance(results, list):
+            return None
+        key = re.sub(r"[^a-z0-9]+", "", query.casefold())
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            label = item.get("name") or item.get("original_name") or ""
+            if re.sub(r"[^a-z0-9]+", "", str(label).casefold()) == key and item.get("id"):
+                try:
+                    return int(item["id"])
+                except (TypeError, ValueError):
+                    return None
+        if len(results) == 1 and isinstance(results[0], dict) and results[0].get("id"):
+            try:
+                return int(results[0]["id"])
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    async def discover_tmdb_media(
+        self,
+        media_type: str,
+        *,
+        genre: Optional[str] = None,
+        theme: Optional[str] = None,
+        language: Optional[str] = None,
+        status: Optional[str] = None,
+        year_from: Optional[int] = None,
+        year_to: Optional[int] = None,
+        runtime_min: Optional[int] = None,
+        runtime_max: Optional[int] = None,
+        minimum_rating: Optional[float] = None,
+        sort_by: str = "popularity",
+        director: Optional[str] = None,
+        cast: Optional[str] = None,
+        include_adult: bool = False,
+        region: str = "IE",
+    ) -> List[Dict]:
+        """Discover multiple titles using provider-supported metadata filters."""
+        token = os.getenv("TMDB_BEARER_TOKEN", "").strip()
+        if not token:
+            return []
+        keyword_id = await self._resolve_tmdb_filter_id("keyword", theme) if theme else None
+        director_id = await self._resolve_tmdb_filter_id("person", director) if director else None
+        cast_id = await self._resolve_tmdb_filter_id("person", cast) if cast else None
+        if theme and keyword_id is None or director and director_id is None or cast and cast_id is None:
+            return []
+        try:
+            params = build_tmdb_discover_params(
+                media_type, genre=genre, language=language, status=status,
+                year_from=year_from, year_to=year_to, runtime_min=runtime_min,
+                runtime_max=runtime_max, minimum_rating=minimum_rating, sort_by=sort_by,
+                include_adult=include_adult, region=region,
+                keyword_id=keyword_id, director_id=director_id, cast_id=cast_id,
+            )
+        except ValueError:
+            raise
+        endpoint = "movie" if media_type == "MOVIE" else "tv"
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                async with session.get(
+                    f"{TMDB_API_BASE_URL}/discover/{endpoint}",
+                    params=params,
+                    headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                ) as response:
+                    if response.status != 200:
+                        logger.warning("TMDB discover/%s returned HTTP %s", endpoint, response.status)
+                        return []
+                    payload = await response.json(content_type=None)
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+            logger.warning("TMDB discover/%s request failed", endpoint, exc_info=True)
+            return []
+        results = payload.get("results") if isinstance(payload, dict) else None
+        return [item for item in results if isinstance(item, dict) and item.get("id")][:10] if isinstance(results, list) else []
+
     async def fetch_tmdb_media(self, query: str, media_type: str, include_adult: bool = False) -> Optional[Dict]:
         """Fetch a matching TMDB title and detailed metadata."""
         token = os.getenv("TMDB_BEARER_TOKEN", "").strip()
@@ -1100,6 +1318,7 @@ class BrowseCog(commands.Cog):
         year_to: Optional[int] = None, runtime_min: Optional[int] = None,
         runtime_max: Optional[int] = None, director: Optional[str] = None,
         cast: Optional[str] = None, include_adult: bool = False,
+        minimum_rating: Optional[float] = None,
     ) -> bool:
         """Match user filters against the selected TMDB record, without inventing fields."""
         is_movie = media_type == "MOVIE"
@@ -1162,6 +1381,12 @@ class BrowseCog(commands.Cog):
             for person in cast_entries if isinstance(person, dict)
         ):
             return False
+        if minimum_rating is not None:
+            try:
+                if float(media.get("vote_average")) < minimum_rating:
+                    return False
+            except (TypeError, ValueError):
+                return False
         if not include_adult and media.get("adult") is True:
             return False
         return True
@@ -1176,7 +1401,7 @@ class BrowseCog(commands.Cog):
     @command_meta(section="Media", name="Browse")
     @app_commands.describe(
         media_type="Choose a media type",
-        title="Title to search for",
+        title="Leave blank to discover movies or TV shows using the supplied filters.",
         genre="Genre filter (provider-supported categories only)",
         theme="Theme/tag/keyword filter when the provider exposes it",
         author="Author or writer filter (manga/books/webnovels where supported)",
@@ -1192,6 +1417,8 @@ class BrowseCog(commands.Cog):
         director="Movie/TV director name",
         cast="Movie/TV cast member name",
         include_adult="Include provider-flagged adult titles (NSFW channel only)",
+        sort_by="Sort title-free Movie/TV discovery results",
+        minimum_rating="Minimum TMDB user rating from 0 to 10",
         subtype="Filter manga by origin/category: manga (Japan), manhwa (Korea), manhua (China), or webtoon when provider metadata identifies it",
     )
     @app_commands.choices(media_type=[
@@ -1204,6 +1431,12 @@ class BrowseCog(commands.Cog):
         app_commands.Choice(name="TV Shows", value="TV"),
         app_commands.Choice(name="Webnovels", value="WEBNOVEL"),
     ])
+    @app_commands.choices(sort_by=[
+        app_commands.Choice(name="Most popular", value="popularity"),
+        app_commands.Choice(name="Highest rated", value="rating"),
+        app_commands.Choice(name="Most votes", value="votes"),
+        app_commands.Choice(name="Newest first", value="newest"),
+    ])
     @app_commands.choices(subtype=[
         app_commands.Choice(name="Manga (Japan)", value="manga"),
         app_commands.Choice(name="Manhwa (Korea)", value="manhwa"),
@@ -1214,7 +1447,7 @@ class BrowseCog(commands.Cog):
         self,
         interaction: discord.Interaction,
         media_type: app_commands.Choice[str],
-        title: str,
+        title: Optional[str] = None,
         genre: Optional[str] = None,
         theme: Optional[str] = None,
         author: Optional[str] = None,
@@ -1231,15 +1464,26 @@ class BrowseCog(commands.Cog):
         cast: Optional[str] = None,
         include_adult: bool = False,
         subtype: Optional[str] = None,
+        sort_by: str = "popularity",
+        minimum_rating: app_commands.Range[float, 0.0, 10.0] | None = None,
     ):
         title = " ".join((title or "").split())
-        if not title:
+        chosen_type = media_type.value
+        if not title and chosen_type not in ("MOVIE", "TV"):
             await interaction.response.send_message(
-                embed=build_error_embed("Search Required", "Enter a title to search for."),
+                embed=build_error_embed(
+                    "Title Required",
+                    "Leave the title blank to discover multiple Movies or TV Shows. Other categories still need a title.",
+                ),
                 ephemeral=True,
             )
             return
-        chosen_type = media_type.value
+        if title and sort_by != "popularity":
+            await interaction.response.send_message(
+                "Sort order is for title-free discovery. Leave the title blank to use it.",
+                ephemeral=True,
+            )
+            return
         real_type = "MANGA" if chosen_type == "MANGA_NOVEL" else chosen_type
         if year_from is not None and year_to is not None and year_from > year_to:
             await interaction.response.send_message("The earliest year cannot be later than the latest year.", ephemeral=True)
@@ -1283,6 +1527,80 @@ class BrowseCog(commands.Cog):
 
         await interaction.response.defer()
 
+        if not title and chosen_type in ("MOVIE", "TV"):
+            if not os.getenv("TMDB_BEARER_TOKEN", "").strip():
+                await interaction.followup.send(
+                    embed=build_error_embed(
+                        "TMDB Setup Required",
+                        "Movie and TV discovery requires TMDB_BEARER_TOKEN in the bot environment.",
+                    ), ephemeral=True,
+                )
+                return
+            region = "IE"
+            if chosen_type == "MOVIE" and interaction.guild_id:
+                region_cog = self.bot.get_cog("ConnectedMedia")
+                region_getter = getattr(region_cog, "_default_region", None)
+                if callable(region_getter):
+                    try:
+                        saved_region = await region_getter(interaction.guild_id)
+                        if isinstance(saved_region, str) and re.fullmatch(r"[A-Za-z]{2}", saved_region.strip()):
+                            region = saved_region.strip().upper()
+                    except Exception:
+                        logger.warning("Could not load guild %s movie region; using IE", interaction.guild_id, exc_info=True)
+            try:
+                results = await self.discover_tmdb_media(
+                    chosen_type, genre=genre, theme=theme, language=language, status=status,
+                    year_from=year_from, year_to=year_to, runtime_min=runtime_min,
+                    runtime_max=runtime_max, minimum_rating=minimum_rating, sort_by=sort_by,
+                    director=director, cast=cast, include_adult=include_adult, region=region,
+                )
+            except ValueError as exc:
+                await interaction.followup.send(str(exc), ephemeral=True)
+                return
+            if not results:
+                await interaction.followup.send(
+                    embed=build_error_embed(
+                        "No Discover Matches",
+                        "TMDB returned no titles for these filters, or a keyword/person filter did not resolve to a unique provider record. Broaden the filters and try again.",
+                    ), ephemeral=True,
+                )
+                return
+
+            heading = "Movies" if chosen_type == "MOVIE" else "TV Shows"
+            sort_label = {"popularity": "Most popular", "rating": "Highest rated", "votes": "Most votes", "newest": "Newest first"}.get(sort_by, "Most popular")
+            embed = discord.Embed(
+                title=f"{'🎬' if chosen_type == 'MOVIE' else '📺'} Browse Discovery · {heading}",
+                description=(
+                    f"Filtered through TMDB · Sorted by **{sort_label}**"
+                    + (f" · movie release region **{region}**" if chosen_type == "MOVIE" else "")
+                ),
+                color=PALETTE.PRIMARY,
+            )
+            for index, item in enumerate(results[:6], 1):
+                is_movie = chosen_type == "MOVIE"
+                name = str(item.get("title") if is_movie else item.get("name") or "Untitled")
+                if is_movie:
+                    name = str(item.get("title") or "Untitled")
+                date_value = item.get("release_date") if is_movie else item.get("first_air_date")
+                year = str(date_value)[:4] if date_value else "Year unknown"
+                score = item.get("vote_average")
+                try:
+                    rating_text = f"{float(score):.1f}/10 · {int(item.get('vote_count') or 0):,} votes"
+                except (TypeError, ValueError):
+                    rating_text = "Rating unavailable"
+                overview = discord.utils.escape_markdown(str(item.get("overview") or "No overview is available.").strip())[:500]
+                url = f"https://www.themoviedb.org/{'movie' if is_movie else 'tv'}/{item['id']}"
+                embed.add_field(
+                    name=f"{index}. {discord.utils.escape_markdown(name)} ({year})"[:256],
+                    value=f"[Open on TMDB]({url}) · {rating_text}\n{overview}"[:1024],
+                    inline=False,
+                )
+                if index == 1 and item.get("poster_path"):
+                    embed.set_thumbnail(url=f"{TMDB_IMAGE_BASE_URL}/w500{item['poster_path']}")
+            embed.set_footer(text=f"TMDB metadata · {len(results)} matching records on the first results page")
+            await interaction.followup.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+            return
+
         if chosen_type in ("MOVIE", "TV"):
             if not os.getenv("TMDB_BEARER_TOKEN", "").strip():
                 embed = build_error_embed(
@@ -1304,6 +1622,7 @@ class BrowseCog(commands.Cog):
                 status=status, year_from=year_from, year_to=year_to,
                 runtime_min=runtime_min, runtime_max=runtime_max,
                 director=director, cast=cast, include_adult=include_adult,
+                minimum_rating=minimum_rating,
             ):
                 await interaction.followup.send(
                     embed=build_error_embed(
