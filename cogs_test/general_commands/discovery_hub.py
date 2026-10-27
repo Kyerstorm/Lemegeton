@@ -28,12 +28,11 @@ HUB_SECTIONS = {
         "label": "Novel readers",
         "description": (
             "**Books, light novels and webnovels**\n"
-            "• /reading — nominate, vote, select, schedule and explore reading order\n"
+            "• /reading — nominations, votes, selection, scheduling and reading order\n"
+            "• /discussion — spoiler-aware chapter, volume, episode, season and general threads\n"
+            "• /archive — discover quotes, fanworks, moodboards, scenes, soundtracks, recommendations and theories\n"
             "• /webnovel-updates — query Novel Updates metadata\n"
-            "• /author-works — search Google Books by author\n"
-            ""
-            "• /discussion — spoiler-aware chapter, volume, episode and season threads\n"
-            "• /archive — quotes, fanworks, moodboards, scenes, soundtracks, recommendations and theories"
+            "• /author-works — search Google Books by author"
         ),
     },
     "screen": {
@@ -56,18 +55,8 @@ HUB_SECTIONS = {
         "description": (
             "**Browse and contribute**\n"
             "• /panels — manga panel archive\n"
-            "• /quotes — short quotes with source attribution\n"
-            ""
-            ""
-            ""
-            ""
-            ""
-            ""
-            "• /panel-of-the-day — feature a safe archived panel\n"
-            ""
-            ""
-            ""
-            "• /archive-report-review — triage archive reports"
+            "• /archive — quotes, fanworks, moodboards, soundtracks, scenes, recommendations and theories\n"
+            "• /panel-of-the-day — feature a safe archived panel"
         ),
     },
     "gaming": {
