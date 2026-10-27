@@ -12,7 +12,7 @@ import database
 from discord import app_commands
 from discord.ext import commands
 
-from helpers.command_error_handler import FeedbackAwareView
+from helpers.command_error_handler import FeedbackAwareView, handle_application_command_error
 from helpers.anilist_helper import fetch_media_by_id, fetch_media_by_search
 from cogs.media.browse import BrowseCog, search_novelupdates
 from cogs_test.general_commands.dashboard import command_meta
@@ -768,6 +768,11 @@ class Franchise(commands.Cog):
             "🧬 **Choose the exact title.** AniList relationships and TMDB collection membership are shown as provider metadata; TMDB recommendations and exact-title cross-provider matches are labelled separately. Google Books and Novel Updates do not expose a reliable adaptation graph, so those entries link to source metadata without invented relationships.",
             view=view, ephemeral=True,
         )
+
+
+    async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+        """Report unexpected provider and graph failures without exposing internals."""
+        await handle_application_command_error(interaction, error)
 
 
 async def setup(bot: commands.Bot) -> None:
