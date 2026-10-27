@@ -1,7 +1,7 @@
 """Offline tests for TMDB discovery integrated into /browse."""
 import unittest
 
-from cogs.media.browse import build_tmdb_discover_params
+from helpers.tmdb_discovery import build_tmdb_discover_params
 
 
 class BrowseTMDBDiscoveryTests(unittest.TestCase):
