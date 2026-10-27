@@ -4,7 +4,7 @@ This guide documents the provider-backed media discovery features. Providers rem
 
 ## Browse filters
 
-Use **/browse** with a media category and a title, then fill the optional filters that apply to that category.
+Use **/browse** with a media category and a title for a detailed record. For TMDB movie/TV discovery, leave the title blank to receive a filtered list instead.
 
 | Category | Supported filters |
 | --- | --- |
@@ -114,7 +114,7 @@ The interactive /discovery-hub command is the entry point for media navigation a
 
 ### TMDB tools
 
-- /screen-discover queries TMDB's movie or TV discover endpoint with supported genre, year, minimum user-rating, original-language, and ordering filters. Movie queries reuse the calling guild's /media-region setting; TV queries use the TV-specific first-air date fields. Results are bounded to the first page and retain TMDB as their source.
+- /browse supports title-free TMDB discovery with genre, theme/keyword, language, TV status, year range, runtime, director/cast, minimum rating, and sorting filters. Movie queries reuse the calling guild's /media-region setting; TV queries use TMDB's first-air date fields. Discovery results are bounded to the first results page and retain TMDB as their source.
 - /where-to-watch reads the documented movie or TV watch-provider endpoint using the selected two-letter region. /media-region stores the server's default region in PostgreSQL; an individual query can override it.
 - /person-credits uses TMDB person search and combined credits to display movie and TV work.
 - /trailers uses the documented movie/TV videos endpoints and constructs links only for returned YouTube or Vimeo keys. Provider-returned video types and official flags are retained.
