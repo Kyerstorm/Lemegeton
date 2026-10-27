@@ -50,12 +50,12 @@ The figures below are generated from repository files and are refreshed automati
 | Tracked files | 231 |
 | Text files scanned | 227 |
 | Source code files | 193 |
-| Source lines (including blank lines) | 93,754 |
-| Non-blank source lines | 81,609 |
-| Text lines (code, docs, and configuration) | 97,591 |
-| Characters (excluding line breaks) | 4,364,797 |
+| Source lines (including blank lines) | 93,743 |
+| Non-blank source lines | 81,598 |
+| Text lines (code, docs, and configuration) | 97,580 |
+| Characters (excluding line breaks) | 4,364,655 |
 | Text file size | 4.3 MB |
-| Source line breakdown | Python: 87,255 lines; JavaScript / TypeScript: 3,996 lines; Rust: 938 lines; Shell: 749 lines; CSS / Sass: 564 lines; HTML / SVG: 252 lines |
+| Source line breakdown | Python: 87,244 lines; JavaScript / TypeScript: 3,996 lines; Rust: 938 lines; Shell: 749 lines; CSS / Sass: 564 lines; HTML / SVG: 252 lines |
 | Last refreshed (UTC) | 2026-10-27 18:54 UTC |
 <!-- REPO-STATS:END -->
 
