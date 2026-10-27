@@ -798,8 +798,16 @@ async def _sync_guild_commands(bot: commands.Bot, guild: discord.Guild) -> bool:
             root = _root_app_command(meta["command"])
             roots[root.name] = root
 
-        global_roots = {command.name: command for command in bot.tree.get_commands()}
-        current_roots = {command.name: command for command in previous_commands}
+        global_roots = {
+            command.name: command
+            for command in bot.tree.get_commands()
+            if isinstance(command, (app_commands.Command, app_commands.Group))
+        }
+        current_roots = {
+            command.name: command
+            for command in previous_commands
+            if isinstance(command, (app_commands.Command, app_commands.Group))
+        }
         managed_roots = {
             name: global_roots.get(name) or current_roots.get(name) or root
             for name, root in roots.items()
@@ -807,7 +815,7 @@ async def _sync_guild_commands(bot: commands.Bot, guild: discord.Guild) -> bool:
         desired_commands = [
             _copy_app_command(command)
             for command in previous_commands
-            if command.name not in managed_roots
+            if isinstance(command, app_commands.ContextMenu) or command.name not in managed_roots
         ]
         for root in managed_roots.values():
             if isinstance(root, app_commands.Group):
