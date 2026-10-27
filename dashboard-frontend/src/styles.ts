@@ -10,7 +10,7 @@ button{color:inherit}
 a{color:inherit;text-decoration:none}
 button:disabled{opacity:.45;cursor:not-allowed!important}
 .app-shell{min-height:100vh}
-.sidebar{position:fixed;inset:0 auto 0 0;width:248px;display:flex;flex-direction:column;padding:27px 17px 17px;background:rgba(12,14,12,.94);border-right:1px solid var(--line-soft);z-index:30;backdrop-filter:blur(18px)}
+.sidebar{position:fixed;inset:0 auto 0 0;width:248px;display:flex;flex-direction:column;padding:27px 17px 17px;background:rgba(0,0,0,.96);border-right:1px solid var(--line-soft);z-index:30;backdrop-filter:blur(18px)}
 .brand{display:flex;align-items:center;gap:12px;padding:0 9px 24px}
 .brand-mark{display:grid;place-items:center;width:41px;height:41px;border:1px solid #545454;border-radius:12px;background:linear-gradient(145deg,#282828,#131313);color:var(--accent);font-size:20px;font-weight:750;letter-spacing:-2px}
 .brand-copy{display:flex;flex-direction:column;gap:3px}
