@@ -1308,6 +1308,11 @@ class PanelDeleteConfirm(FeedbackAwareView):
                             "INSERT INTO mod_log(guild_id,moderator_id,panel_id,panel_title,uploader_id) VALUES($1,$2,$3,$4,$5)",
                             interaction.guild_id, interaction.user.id, panel["id"], panel["title"], panel["uploader_id"],
                         )
+            if panel.get("media_asset_id"):
+                try:
+                    await media_storage.delete_asset(int(panel["media_asset_id"]))
+                except Exception:
+                    log.warning("Could not delete removed panel image asset %s", panel["media_asset_id"], exc_info=True)
             if is_mod_delete:
                 try: await _audit_delete(interaction, panel)
                 except Exception: log.exception("Could not send moderation log notification")
