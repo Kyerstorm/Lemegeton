@@ -79,10 +79,10 @@ class HelpCog(commands.Cog):
             },
             "📺 Anime & Manga": {
                 "browse": {
-                    "desc": "Search Anime, Manga, Light Novels and General Novels",
-                    "usage": "/browse",
-                    "note": "Interactive browsing with advanced filtering and sorting options. Filter by genre, year, format, and more.",
-                    "examples": ["/browse"]
+                    "desc": "Search or discover anime, manga, novels, books, webnovels, movies, and TV shows",
+                    "usage": "/browse <media_type> [title] [filters]",
+                    "note": "Title searches show detailed metadata. Leave title blank for multi-result TMDB movie/TV discovery with genre, keyword, year, runtime, language, director/cast, rating, and sort filters.",
+                    "examples": ["/browse media_type:Movies", "/browse media_type:TV Shows genre:Drama year_from:2020", "/browse media_type:Movies genre:Science fiction minimum_rating:7.5 sort_by:Highest rated"]
                 },
                 "trending": {
                     "desc": "View trending anime, manga, light novels, movies, and TV shows",
@@ -320,12 +320,6 @@ class HelpCog(commands.Cog):
                 }
             },
             "🎬 Movies & TV": {
-                "screen-discover": {
-                    "desc": "Discover movies and TV using TMDB genre, year, rating, original language, and sorting filters",
-                    "usage": "/screen-discover <media_type> [sort_by] [genre] [year] [minimum_rating] [language]",
-                    "note": "Requires TMDB_BEARER_TOKEN. Movie region defaults to this server's /media-region setting. Results and ratings come from TMDB.",
-                    "examples": ["/screen-discover Movies sort_by:Highest rated genre:Science fiction year:2024", "/screen-discover TV sort_by:Newest genre:Drama"]
-                },
                 "tv-guide": {
                     "desc": "Browse supported TV seasons, episodes, and air-date information",
                     "usage": "/tv-guide",
