@@ -257,6 +257,7 @@ async def _schema() -> None:
         await conn.execute("ALTER TABLE panels ALTER COLUMN attachment_url DROP NOT NULL")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_panels_created_at ON panels(created_at DESC)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_panels_uploader_id ON panels(uploader_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_panels_media_asset_id ON panels(media_asset_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_panel_tags_tag ON panel_tags(tag)")
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS guild_settings (
