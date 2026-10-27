@@ -743,27 +743,14 @@ class DashboardCog(commands.Cog):
         setattr(self.bot, "_dashboard_db", self.db)
 
     async def _startup_tasks(self):
+        """Initialize persistence and the live command registry; leave retry enabled on failure."""
         try:
             await self.db.open()
-            COMMAND_REGISTRY._commands.clear()
-            # walk_commands recurses into nested groups (e.g. /group subgroup command).
-            for command in list(self.bot.tree.walk_commands()):
-                self._register_if_annotated(command)
-                fullname = getattr(command, "qualified_name", getattr(command, "name", ""))
-                meta = COMMAND_REGISTRY.get_meta(fullname)
-                checks = getattr(command, "checks", None)
-                add_check = getattr(command, "add_check", None)
-                if meta and checks is not None and callable(add_check) and self._dashboard_execution_guard not in checks:
-                    add_check(self._dashboard_execution_guard)
-            logger.info(
-                "Dashboard registry initialized: %s commands across %s categories",
-                len(COMMAND_REGISTRY.all_commands()),
-                len(COMMAND_REGISTRY.get_sections()),
-            )
-        except Exception:
-            logger.exception("Dashboard startup initialization failed")
-        finally:
+            self._refresh_command_registry()
             self._ready = True
+        except Exception:
+            self._ready = False
+            logger.exception("Dashboard startup initialization failed; the next ready event will retry")
 
     @staticmethod
     def _register_if_annotated(command: app_commands.Command | app_commands.Group) -> None:
@@ -776,6 +763,28 @@ class DashboardCog(commands.Cog):
         name = getattr(callback, "__dashboard_name__", None) or command.name
         fullname = getattr(command, "qualified_name", command.name)
         COMMAND_REGISTRY.register(fullname, command, section, name)
+
+    def _refresh_command_registry(self) -> None:
+        """Rebuild the dashboard index from the command tree as it exists right now."""
+        COMMAND_REGISTRY._commands.clear()
+        for command in list(self.bot.tree.walk_commands()):
+            self._register_if_annotated(command)
+            fullname = getattr(command, "qualified_name", getattr(command, "name", ""))
+            meta = COMMAND_REGISTRY.get_meta(fullname)
+            checks = getattr(command, "checks", None)
+            add_check = getattr(command, "add_check", None)
+            if (
+                meta
+                and checks is not None
+                and callable(add_check)
+                and self._dashboard_execution_guard not in checks
+            ):
+                add_check(self._dashboard_execution_guard)
+        logger.info(
+            "Dashboard registry refreshed: %s commands across %s categories",
+            len(COMMAND_REGISTRY.all_commands()),
+            len(COMMAND_REGISTRY.get_sections()),
+        )
 
     async def _dashboard_execution_guard(self, interaction: discord.Interaction) -> bool:
         """Enforce persisted guild command state before executing managed slash commands.
@@ -816,14 +825,24 @@ class DashboardCog(commands.Cog):
             )
             return
         try:
+            await interaction.response.defer(ephemeral=True, thinking=True)
             await self.db.open()
+            self._refresh_command_registry()
             view = DashboardView(self.bot, interaction.guild, self.db)
             embed = await view.render(interaction.user)
-            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
         except Exception:
             logger.exception("Failed to open dashboard for guild %s", interaction.guild.id)
-            if not interaction.response.is_done():
-                await interaction.response.send_message("The dashboard couldn't load. Please try again shortly.", ephemeral=True)
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "The dashboard couldn't load. Please retry shortly; the failure was logged.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    "The dashboard couldn't load. Please retry shortly; the failure was logged.",
+                    ephemeral=True,
+                )
 
     @app_commands.command(name="dashboard-section-toggle", description="Admin: enable or disable a dashboard category")
     @app_commands.describe(section="Exact dashboard category name", enabled="Whether this category should be enabled")
@@ -834,28 +853,45 @@ class DashboardCog(commands.Cog):
         if not _has_dashboard_access(interaction, self.bot):
             await interaction.response.send_message("You don't have permission to change dashboard settings.", ephemeral=True)
             return
-        if section not in COMMAND_REGISTRY.get_sections():
-            await interaction.response.send_message(
-                f"Unknown category. Available categories: {', '.join(COMMAND_REGISTRY.get_sections()) or 'none'}",
-                ephemeral=True,
-            )
-            return
+        before: dict[str, Any] | None = None
         try:
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            await self.db.open()
+            self._refresh_command_registry()
+            sections = COMMAND_REGISTRY.get_sections()
+            if section not in sections:
+                await interaction.followup.send(
+                    f"Unknown category. Available categories: {', '.join(sections) or 'none'}",
+                    ephemeral=True,
+                )
+                return
+            before = await self.db.get_guild_config(interaction.guild.id)
             await self.db.set_section(interaction.guild.id, section, enabled)
+            if not await attempt_sync_for_guild(self.bot, interaction.guild):
+                await _restore_dashboard_config(self.db, self.bot, interaction.guild, before, f"section command {section}")
+                await interaction.followup.send(
+                    "Discord did not confirm that category change. Previous settings were restored where possible.",
+                    ephemeral=True,
+                )
+                return
             await self.db.log_action(
                 interaction.guild.id,
                 interaction.user.id,
                 "section_toggle",
                 format_commit_message(interaction.user, f"{section} → {'enabled' if enabled else 'disabled'}"),
             )
-            await attempt_sync_for_guild(self.bot, interaction.guild)
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"{'🟢' if enabled else '⚪'} **{section}** is now {'enabled' if enabled else 'disabled'}.",
                 ephemeral=True,
             )
         except Exception:
             logger.exception("Failed setting dashboard section for guild %s", interaction.guild.id)
-            await interaction.response.send_message("Couldn't update that category. Check the bot logs.", ephemeral=True)
+            if before is not None:
+                await _restore_dashboard_config(self.db, self.bot, interaction.guild, before, f"failed section command {section}")
+            if interaction.response.is_done():
+                await interaction.followup.send("Couldn't update that category. Previous settings were restored where possible; check the bot logs.", ephemeral=True)
+            else:
+                await interaction.response.send_message("Couldn't update that category. Check the bot logs.", ephemeral=True)
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild):
@@ -870,6 +906,8 @@ class DashboardCog(commands.Cog):
         if self._ready:
             return
         await self._startup_tasks()
+        if not self._ready:
+            return
         for guild in self.bot.guilds:
             try:
                 await attempt_sync_for_guild(self.bot, guild)
