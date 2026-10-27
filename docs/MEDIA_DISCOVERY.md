@@ -114,6 +114,7 @@ The interactive /discovery-hub command is the entry point for media navigation a
 
 ### TMDB tools
 
+- /screen-discover queries TMDB's movie or TV discover endpoint with supported genre, year, minimum user-rating, original-language, and ordering filters. Movie queries reuse the calling guild's /media-region setting; TV queries use the TV-specific first-air date fields. Results are bounded to the first page and retain TMDB as their source.
 - /where-to-watch reads the documented movie or TV watch-provider endpoint using the selected two-letter region. /media-region stores the server's default region in PostgreSQL; an individual query can override it.
 - /person-credits uses TMDB person search and combined credits to display movie and TV work.
 - /trailers uses the documented movie/TV videos endpoints and constructs links only for returned YouTube or Vimeo keys. Provider-returned video types and official flags are retained.
