@@ -3,8 +3,14 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
-from cogs_test.general_commands.dashboard import COMMAND_REGISTRY, DashboardCog, _is_enabled
+from cogs_test.general_commands.dashboard import (
+    COMMAND_REGISTRY,
+    DashboardCog,
+    _is_enabled,
+    _restore_dashboard_config,
+)
 
 
 class FakeConfigDB:
@@ -67,6 +73,53 @@ class DashboardCommandExecutionGuardTests(unittest.IsolatedAsyncioTestCase):
     async def test_direct_messages_do_not_inherit_a_guild_override(self):
         self.interaction.guild = None
         self.assertTrue(await self.cog._dashboard_execution_guard(self.interaction))
+
+
+class DashboardRollbackTests(unittest.IsolatedAsyncioTestCase):
+    async def test_rollback_persists_snapshot_and_attempts_resynchronization(self):
+        class FakeRestoreDB:
+            def __init__(self):
+                self.saved = None
+
+            async def _set_guild_config(self, guild_id, config):
+                self.saved = (guild_id, dict(config))
+
+        db = FakeRestoreDB()
+        bot = SimpleNamespace()
+        guild = SimpleNamespace(id=42)
+        snapshot = {"sections": {"Media": False}, "commands": {"browse": True}}
+
+        with patch(
+            "cogs_test.general_commands.dashboard.attempt_sync_for_guild",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as sync:
+            await _restore_dashboard_config(db, bot, guild, snapshot, "test operation")
+
+        self.assertEqual(db.saved, (42, snapshot))
+        sync.assert_awaited_once_with(bot, guild)
+
+    async def test_rollback_keeps_saved_snapshot_when_resync_is_unavailable(self):
+        class FakeRestoreDB:
+            def __init__(self):
+                self.saved = None
+
+            async def _set_guild_config(self, guild_id, config):
+                self.saved = (guild_id, dict(config))
+
+        db = FakeRestoreDB()
+        bot = SimpleNamespace()
+        guild = SimpleNamespace(id=73)
+        snapshot = {"sections": {}, "commands": {"example": False}}
+
+        with patch(
+            "cogs_test.general_commands.dashboard.attempt_sync_for_guild",
+            new_callable=AsyncMock,
+            return_value=False,
+        ):
+            await _restore_dashboard_config(db, bot, guild, snapshot, "sync unavailable")
+
+        self.assertEqual(db.saved, (73, snapshot))
 
 
 if __name__ == "__main__":
