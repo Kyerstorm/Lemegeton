@@ -111,573 +111,102 @@ This architecture map connects command entry points, provider integrations, rela
 
 ~~~mermaid
 flowchart TB
-    %% ═══════════════════════════════════════════════════════════════════════
-    %% 01 · HUMAN AND DISCORD SURFACES
-    %% ═══════════════════════════════════════════════════════════════════════
-    subgraph HUMAN["01 · People, permissions, and Discord surfaces"]
-        MEMBER["👤 Discord member<br/>search · compare · contribute"]
-        MOD["🛡️ Guild moderator<br/>review · archive reports · configuration"]
-        ADMIN["⚙️ Guild administrator<br/>roles · dashboard · region settings"]
-        OWNER["👑 Bot owner<br/>owner-only operational views"]
-        GUILDCTX["🏠 Guild context<br/>guild ID · channel · member permissions"]
-        SLASHUI["⌨️ Slash-command invocation<br/>autocomplete · typed options"]
-        COMPONENTUI["🧩 Interactive components<br/>dropdowns · buttons · modals"]
-        CHATOUT["💬 Discord response<br/>embeds · links · ephemeral reports"]
-    end
-
-    %% ═══════════════════════════════════════════════════════════════════════
-    %% 02 · LIVE PYTHON BOT
-    %% ═══════════════════════════════════════════════════════════════════════
-    subgraph RUNTIME["02 · Live Python / discord.py runtime"]
-        BOTPY["🤖 bot.py<br/>single Discord gateway owner"]
-        GATEWAY["🔌 Discord gateway<br/>events · guild lifecycle · interactions"]
-        TREE["🌳 Application command tree<br/>registered slash commands"]
-        LOADER["🔄 Recursive cog loader<br/>load · reload · development watcher"]
-        CMDMETA["🏷️ Command metadata<br/>section · display name · description"]
-        DASHREG["📚 Dashboard command registry<br/>actual registered + annotated commands"]
-        CMDGUARD["🚦 Per-guild command execution guard<br/>enforced before managed commands run"]
-        ERRORS["🚨 Shared error handler<br/>safe user response · private details in logs"]
-        BG["⏱️ Background work<br/>scheduled refresh · cleanup · status"]
-        SHUTDOWN["🧹 Startup and shutdown lifecycle<br/>database init · task cancellation · listeners"]
-        HTTPCLIENT["🌐 Async provider requests<br/>bounded timeouts · response validation"]
-    end
-
-    %% ═══════════════════════════════════════════════════════════════════════
-    %% 03 · COMMAND DOMAINS
-    %% ═══════════════════════════════════════════════════════════════════════
-    subgraph MEDIA_COMMANDS["03A · Media discovery commands"]
-        BROWSE["🔎 /browse<br/>category-aware search and filters"]
-        FRANCHISE["🧬 /franchise<br/>provider-declared relationships"]
-        CONNECTIONS["🔗 /connections<br/>select and follow known links"]
-        READINGORDER["📚 /reading-order<br/>supported release relationships"]
-        SIMILAR["✨ /similar<br/>provider suggestions + genre overlap"]
-        COMPARE["⚖️ /compare<br/>mixed-category comparison"]
-        HUB["🧭 /discovery-hub<br/>registered-command-aware dropdown"]
-        LINKADD["📝 /link-suggest<br/>source URLs + relationship evidence"]
-        LINKREVIEW["🔍 /link-review<br/>server-scoped moderator review"]
-    end
-
-    subgraph SCREEN_COMMANDS["03B · Movies and television"]
-        WATCH["📡 /where-to-watch<br/>listed providers by region"]
-        CREDITS["🎬 /person-credits<br/>TMDB credits and filmography"]
-        TRAILERS["▶️ /trailers<br/>listed video and trailer links"]
-        COLLECTION["🎞️ /collection-guide<br/>TMDB movie collections"]
-        TVGUIDE["📺 /tv-guide<br/>series · season · episode details"]
-        CALENDAR["🗓️ /release-calendar<br/>supported upcoming dates and digest"]
-        REGION["🌍 /media-region<br/>guild-specific default country"]
-        EPDISC["💬 /episode-discussion<br/>episode-scoped spoiler discussion"]
-    end
-
-    subgraph BOOK_COMMANDS["03C · Books, novels, and reading"]
-        AUTHOR["✍️ /author-works<br/>Google Books author search"]
-        WEBNOVEL["📖 /webnovel-updates<br/>existing Novel Updates scraper"]
-        READCLUB["📕 /reading-club<br/>guild nominations · voting · schedule"]
-        CHAPTERDISC["🗨️ /chapter-discussion<br/>chapter and volume cutoff"]
-        BOOKBROWSE["📚 Book and novel browse filters<br/>author · subject · language · publisher"]
-    end
-
-    subgraph GAME_COMMANDS["03D · Games and generated media"]
-        GAME["🎮 /game<br/>IGDB search + optional Steam enrichment"]
-        STEAMPROFILE["🕹️ /steam-profile<br/>profile and available library data"]
-        STEAMSEARCH["🎯 /steam-game<br/>Steam store search"]
-        GAMERECS["🧩 /steam-recommendation<br/>existing Steam recommendation logic"]
-        FREEGAMES["🎁 /free-games<br/>supported free-game sources"]
-        GRID["🖼️ /3x3<br/>anime · manga · characters · games"]
-        ANILISTCOLLAGE["🧑‍🎨 AniList staff/character collage<br/>generated image output"]
-    end
-
-    subgraph COMMUNITY_COMMANDS["03E · Shared archives and community events"]
-        PANELS["🖼️ /panels<br/>shared manga panel archive"]
-        POTD["🌤️ /panel-of-the-day<br/>guild-selected safe panel"]
-        QUOTES["💬 /quotes<br/>attributed short quotes"]
-        FANWORKS["🎨 /fanworks<br/>credited art · edits · wallpapers"]
-        MOODBOARDS["🌌 /moodboards<br/>themed multi-work boards"]
-        SOUNDTRACKS["🎵 /soundtracks<br/>legitimate source links"]
-        SCENES["🎞️ /scenes<br/>memorable scenes and references"]
-        RECBOARD["💡 /recommendation-board<br/>human-written recommendations"]
-        THEORIES["🔎 /theories<br/>spoiler-marked fan theories"]
-        ARCHIVEMINE["📦 /archive-mine<br/>own submissions and review status"]
-        ARCHIVEREPORT["🚩 /archive-report<br/>report archive entry"]
-        ARCHIVEREVIEW["🛡️ /archive-review + /archive-report-review<br/>server-scoped moderation"]
-        BRACKET["🏆 /media-bracket<br/>guild-local elimination poll"]
-        ADAPT["🗳️ /adaptation-vote<br/>compare two versions"]
-        QUIZ["🧠 /media-quiz<br/>source-linked trivia"]
-        MEDIANIGHT["🍿 /media-night<br/>community media voting"]
-    end
-
-    subgraph PROFILE_COMMANDS["03F · Account, profile, and server systems"]
-        LOGIN["🔐 /login<br/>AniList account connection"]
-        PROFILE["👤 /profile<br/>supported AniList profile display"]
-        AFFINITY["🤝 /affinity<br/>preference comparison"]
-        LEADERBOARD["📊 /anilist-leaderboard<br/>guild-facing statistics"]
-        THEMES["🎨 /theme<br/>theme browse and preview"]
-        CUSTOMROLE["🎭 /custom-role<br/>member role controls"]
-        CUSTOMADMIN["🛠️ /custom-role-admin<br/>server Custom Roles setup"]
-        SERVERCFG["⚙️ /server-config<br/>guild settings"]
-        DASHCOMMAND["🎛️ /dashboard<br/>ephemeral command control center"]
-        WEBCTRL["🖥️ Optional web dashboard<br/>authenticated server control plane"]
-        FEEDBACK["🗣️ /feedback<br/>bug reports and feature requests"]
-    end
-
-    %% ═══════════════════════════════════════════════════════════════════════
-    %% 04 · PROVIDERS AND INTEGRATION HELPERS
-    %% ═══════════════════════════════════════════════════════════════════════
-    subgraph PROVIDERS["04 · Existing provider adapters"]
-        ANILIST["🟣 AniList GraphQL<br/>anime · manga · staff · tags · relations"]
-        TMDB["🎞️ TMDB API<br/>movies · TV · people · collections · watch providers"]
-        GBOOKS["📚 Google Books<br/>book and author metadata"]
-        NUAPI["📖 Novel Updates helper<br/>scraped listing metadata"]
-        IGDB["🎮 IGDB API<br/>game records · developer · platform · cover"]
-        STEAM["🕹️ Steam Web API/store<br/>profile · game store enrichment"]
-        SOCIALAPI["📰 Existing social/news helpers<br/>configured external source feeds"]
-        PROVIDERFAIL["⚠️ Provider failure outcomes<br/>timeout · empty metadata · missing credentials"]
-        CANDIDATES["🧾 Provider candidate sets<br/>bounded lists · metadata URLs · IDs"]
-    end
-
-    %% ═══════════════════════════════════════════════════════════════════════
-    %% 05 · CROSS-MEDIA DATA PROCESSING AND PROVENANCE
-    %% ═══════════════════════════════════════════════════════════════════════
-    subgraph DISCOVERY["05 · Connected discovery pipeline"]
-        INPUTVALID["🧹 Input normalization<br/>trim · validate options · HTTPS URL checks"]
-        SEARCHROUTE["🧭 Category router<br/>choose supported provider path"]
-        TITLEMATCH["🎯 Candidate/title matching<br/>prefer exact identity over fuzzy guesses"]
-        PICKER["🪄 Owner-bound selection view<br/>member chooses the exact result"]
-        SHAPE["🧱 Provider-shaped result handling<br/>keep source-specific fields"]
-        MEDIAREF["🏷️ Metadata references<br/>provider ID · canonical URL · category"]
-        RELPROVIDER["🔗 Provider relationships<br/>provider relation type preserved"]
-        RECPROVIDER["⭐ Provider recommendations<br/>identified as recommendations"]
-        GENRE["🧮 Local genre-overlap heuristic<br/>shared normalized labels and reasons"]
-        COMMUNITYLINK["📝 Community link proposal<br/>evidence · target/source metadata"]
-        MODQUEUE["🛂 Human review boundary<br/>approve · reject · reviewer · reason"]
-        GRAPHHELPER["🕸️ helpers/media_graph.py<br/>record · query · deduplicate relationship edges"]
-        RESOURCEJOIN["🧷 Linked-resource lookup<br/>archives · panels · guild discussions"]
-        SOURCEBADGE["🔎 Provenance display<br/>origin labels · reasons · source URLs"]
-        RESULTBUILDER["🧰 Embed and result builder<br/>limits · escaped text · clear empty states"]
-    end
-
-    %% ═══════════════════════════════════════════════════════════════════════
-    %% 06 · DATABASE AND PERSISTENCE BOUNDARIES
-    %% ═══════════════════════════════════════════════════════════════════════
-    subgraph PERSISTENCE["06 · PostgreSQL via database.py / asyncpg"]
-        DBPOOL["🛢️ Shared PostgreSQL pool<br/>initialized by the existing database layer"]
-        DBGRAPH[("🕸️ media_relationship_graph<br/>relationships + provenance")]
-        DBASSETS[("🗃️ media_assets<br/>object key + content metadata + privacy mode")]
-        DBSUGGEST[("📝 Media link suggestions<br/>source + target + reviewer state")]
-        DBPANELS[("🖼️ Panel archive tables<br/>panels · tags · source metadata")]
-        DBARCHIVE[("🗂️ Archive entries and reports<br/>attribution · tags · review status")]
-        DBGUILD[("🏠 Guild-owned feature records<br/>regions · discussions · polls · events")]
-        DBCONFIG[("🎛️ Guild command configuration<br/>section overrides + command overrides")]
-        DBAUDIT[("🧾 Dashboard audit history<br/>actor · timestamp · action · details")]
-        DBUSER[("👤 Existing profile/account records<br/>AniList linkage and supported profile data")]
-        DBROLE[("🎭 Custom Roles records<br/>per-guild rules and member role state")]
-    end
-
-    %% ═══════════════════════════════════════════════════════════════════════
-    %% 07 · IMAGE STORAGE, PRIVATE ASSETS, AND FALLBACKS
-    %% ═══════════════════════════════════════════════════════════════════════
-    subgraph FILES["07 · helpers/media_storage.py and file destinations"]
-        STORAGEHELPER["🗄️ Shared S3-compatible storage helper<br/>upload · registry · cleanup · URL resolution"]
-        PRIVBUCKET["🔒 Private S3 bucket<br/>panel images · original role icons"]
-        SIGNEDURL["⏳ Short-lived signed URL<br/>private object display"]
-        PUBBUCKET["🌐 Separate public S3 bucket<br/>generated non-sensitive composite images"]
-        CDN["🔗 HTTPS public base/CDN URL<br/>generated grid/collage delivery"]
-        DISCORDATTACH["📎 Discord attachment fallback<br/>unconfigured public storage or legacy paths"]
-        DBBYTEA["🧱 Existing database-byte fallback<br/>supported Custom Role originals when needed"]
-        IMAGEGEN["🖼️ Image generation/resize paths<br/>bounded Pillow output"]
-        OBJECTMETA["🏷️ Object metadata<br/>MIME · length · checksum · namespace"]
-    end
-
-    %% ═══════════════════════════════════════════════════════════════════════
-    %% 08 · OPTIONAL WEB DASHBOARD AND PYTHON BRIDGE
-    %% ═══════════════════════════════════════════════════════════════════════
-    subgraph WEB["08 · Optional web control plane"]
-        WEBUSER["🧑‍💻 Authorized browser session"]
-        REACTUI["⚛️ React + TypeScript UI<br/>dashboard-frontend/src"]
-        WEBSTYLES["🎨 styles.ts + Vite build<br/>responsive app.js/app.css"]
-        RUSTAPI["🦀 Rust/Axum service<br/>browser-facing API + static assets"]
-        OAUTH["🔑 Discord OAuth2<br/>identify + guilds"]
-        SESSION["🍪 Server-side session<br/>expiry · logout · CSRF token"]
-        GUILDAUTH["🛡️ Live guild authorization<br/>member + Manage Server/Admin + bot membership"]
-        APIROUTES["🛣️ Dashboard API routes<br/>overview · commands · sync · reset · audit"]
-        BRIDGE["🔐 Private Python bridge<br/>loopback URL + shared secret"]
-        LIVEBOT["🤖 Existing bot runtime<br/>live command tree and persistence"]
-        COMMANDLINKS["🔗 Command references<br/>guide links + copy slash invocation"]
-        LOGVIEW["📜 Owner-only logs/integration data<br/>no credential values"]
-        ROLEPICKER["🎭 Private Custom Role picker<br/>Rust reverse proxy to Python service"]
-    end
-
-    %% ═══════════════════════════════════════════════════════════════════════
-    %% 09 · SECURITY AND OPERATIONAL SAFEGUARDS
-    %% ═══════════════════════════════════════════════════════════════════════
-    subgraph CONTROLS["09 · Cross-cutting safeguards"]
-        GUILDSCOPE["🏠 Guild-scope policy<br/>guild IDs on server-owned reads/writes"]
-        PERMGATE["🔒 Permission checks<br/>server context + actual permissions"]
-        URLSAFE["🔗 URL and input validation<br/>HTTPS-only where required · bounded lengths"]
-        RATE["⏳ Bounded network and UI operations<br/>timeouts · pagination · request limits"]
-        RESILIENCE["🧯 Failure handling<br/>rollback where supported · no false success"]
-        LOGGING["📓 Runtime logging<br/>command · provider · storage · database"]
-        NOSECRET["🔐 Secret boundaries<br/>tokens and provider credentials server-side"]
-        PRIVACY["🗝️ Private/public storage separation<br/>signed private URLs · explicit public config"]
-        EVIDENCE["🧪 Evidence boundaries<br/>fact ≠ recommendation ≠ heuristic"]
-    end
-
-    %% ═══════════════════════════════════════════════════════════════════════
-    %% 10 · DEPLOYMENT AND VERIFICATION
-    %% ═══════════════════════════════════════════════════════════════════════
-    subgraph OPERATIONS["10 · Operations and delivery"]
-        ENV["🧰 .env.example + config.py<br/>core settings · optional providers"]
-        POSTGRESENV["🛢️ PostgreSQL credentials<br/>pool and connectivity"]
-        PROVIDERENV["🔌 Provider credentials<br/>TMDB · IGDB · Steam · OAuth"]
-        S3ENV["🗝️ S3 configuration<br/>private bucket + optional separate public bucket"]
-        DEPLOYRAILWAY["🚂 Railway deployment<br/>existing scripted service startup"]
-        DEPLOYDOCKER["🐳 Docker / Compose<br/>optional container deployment"]
-        DEPLOYVPS["🖥️ VPS / systemd / Nginx<br/>TLS · loopback services"]
-        PYTEST["🐍 Python checks<br/>compileall + focused unittest suites"]
-        FRONTTEST["⚛️ Frontend checks<br/>TypeScript · npm audit · Vite build"]
-        RUSTTEST["🦀 Rust checks<br/>cargo test + cargo audit"]
-        GHCI["✅ GitHub Actions<br/>workflow-based validation"]
-        BACKUP["💾 Operator responsibilities<br/>database backup · logs · bucket lifecycle"]
-    end
-
-    %% PEOPLE → LIVE RUNTIME
-    MEMBER --> SLASHUI
-    MEMBER --> COMPONENTUI
-    MOD --> COMPONENTUI
-    ADMIN --> GUILDCTX
-    OWNER --> GUILDCTX
-    GUILDCTX --> TREE
-    SLASHUI --> GATEWAY
-    COMPONENTUI --> GATEWAY
-    GATEWAY --> BOTPY
-    BOTPY --> TREE
-    LOADER --> TREE
-    LOADER --> CMDMETA
-    CMDMETA --> DASHREG
-    TREE --> DASHREG
-    TREE --> CMDGUARD
-    TREE --> ERRORS
-    TREE --> CHATOUT
-    BG --> BOTPY
-    SHUTDOWN --> BOTPY
-
-    %% LIVE RUNTIME → COMMAND GROUPS
-    TREE --> BROWSE
-    TREE --> FRANCHISE
-    TREE --> CONNECTIONS
-    TREE --> READINGORDER
-    TREE --> SIMILAR
-    TREE --> COMPARE
-    TREE --> HUB
-    TREE --> WATCH
-    TREE --> CREDITS
-    TREE --> TRAILERS
-    TREE --> COLLECTION
-    TREE --> TVGUIDE
-    TREE --> CALENDAR
-    TREE --> REGION
-    TREE --> EPDISC
-    TREE --> AUTHOR
-    TREE --> WEBNOVEL
-    TREE --> READCLUB
-    TREE --> CHAPTERDISC
-    TREE --> GAME
-    TREE --> STEAMPROFILE
-    TREE --> STEAMSEARCH
-    TREE --> GAMERECS
-    TREE --> FREEGAMES
-    TREE --> GRID
-    TREE --> ANILISTCOLLAGE
-    TREE --> PANELS
-    TREE --> POTD
-    TREE --> QUOTES
-    TREE --> FANWORKS
-    TREE --> MOODBOARDS
-    TREE --> SOUNDTRACKS
-    TREE --> SCENES
-    TREE --> RECBOARD
-    TREE --> THEORIES
-    TREE --> ARCHIVEMINE
-    TREE --> ARCHIVEREPORT
-    TREE --> ARCHIVEREVIEW
-    TREE --> BRACKET
-    TREE --> ADAPT
-    TREE --> QUIZ
-    TREE --> MEDIANIGHT
-    TREE --> LOGIN
-    TREE --> PROFILE
-    TREE --> AFFINITY
-    TREE --> LEADERBOARD
-    TREE --> THEMES
-    TREE --> CUSTOMROLE
-    TREE --> CUSTOMADMIN
-    TREE --> SERVERCFG
-    TREE --> DASHCOMMAND
-    TREE --> FEEDBACK
-
-    %% COMMANDS → PROVIDER ROUTING AND SHARED PIPELINE
-    BROWSE --> INPUTVALID
-    FRANCHISE --> INPUTVALID
-    CONNECTIONS --> INPUTVALID
-    READINGORDER --> INPUTVALID
-    SIMILAR --> INPUTVALID
-    COMPARE --> INPUTVALID
-    WATCH --> INPUTVALID
-    CREDITS --> INPUTVALID
-    TRAILERS --> INPUTVALID
-    GAME --> INPUTVALID
-    LINKADD --> INPUTVALID
-    INPUTVALID --> SEARCHROUTE
-    SEARCHROUTE --> TITLEMATCH
-    TITLEMATCH --> CANDIDATES
-    CANDIDATES --> PICKER
-    PICKER --> SHAPE
-    SEARCHROUTE --> ANILIST
-    SEARCHROUTE --> TMDB
-    SEARCHROUTE --> GBOOKS
-    SEARCHROUTE --> NUAPI
-    SEARCHROUTE --> IGDB
-    GAME --> STEAM
-    STEAMPROFILE --> STEAM
-    STEAMSEARCH --> STEAM
-    GAMERECS --> STEAM
-    FREEGAMES --> STEAM
-    BOOKBROWSE --> GBOOKS
-    AUTHOR --> GBOOKS
-    WEBNOVEL --> NUAPI
-    BROWSE --> ANILIST
-    PROFILE --> ANILIST
-    LOGIN --> ANILIST
-    AFFINITY --> ANILIST
-    LEADERBOARD --> ANILIST
-    THEMES --> DBUSER
-    CALENDAR --> ANILIST
-    CALENDAR --> TMDB
-    WATCH --> TMDB
-    CREDITS --> TMDB
-    TRAILERS --> TMDB
-    COLLECTION --> TMDB
-    TVGUIDE --> TMDB
-    REGION --> TMDB
-    ANILIST --> HTTPCLIENT
-    TMDB --> HTTPCLIENT
-    GBOOKS --> HTTPCLIENT
-    NUAPI --> HTTPCLIENT
-    IGDB --> HTTPCLIENT
-    STEAM --> HTTPCLIENT
-    HTTPCLIENT --> PROVIDERFAIL
-    HTTPCLIENT --> CANDIDATES
-
-    %% PROVIDER RESPONSES → PROVENANCE AND RESULT BUILDING
-    SHAPE --> MEDIAREF
-    SHAPE --> RELPROVIDER
-    SHAPE --> RECPROVIDER
-    MEDIAREF --> GRAPHHELPER
-    RELPROVIDER --> GRAPHHELPER
-    RECPROVIDER --> SOURCEBADGE
-    SHAPE --> GENRE
-    GENRE --> SOURCEBADGE
-    LINKADD --> COMMUNITYLINK
-    COMMUNITYLINK --> MODQUEUE
-    LINKREVIEW --> MODQUEUE
-    MODQUEUE --> GRAPHHELPER
-    GRAPHHELPER --> RESOURCEJOIN
-    RESOURCEJOIN --> SOURCEBADGE
-    SOURCEBADGE --> EVIDENCE
-    EVIDENCE --> RESULTBUILDER
-    PROVIDERFAIL --> RESULTBUILDER
-    RESULTBUILDER --> CHATOUT
-    FRANCHISE --> GRAPHHELPER
-    CONNECTIONS --> GRAPHHELPER
-    READINGORDER --> GRAPHHELPER
-    SIMILAR --> GENRE
-    SIMILAR --> RECPROVIDER
-    COMPARE --> MEDIAREF
-    COMPARE --> SOURCEBADGE
-
-    %% COMMUNITY SURFACES → SHARED ARCHIVES AND GUILD-LOCAL EVENTS
-    PANELS --> DBPANELS
-    POTD --> DBPANELS
-    QUOTES --> DBARCHIVE
-    FANWORKS --> DBARCHIVE
-    MOODBOARDS --> DBARCHIVE
-    SOUNDTRACKS --> DBARCHIVE
-    SCENES --> DBARCHIVE
-    RECBOARD --> DBARCHIVE
-    THEORIES --> DBARCHIVE
-    ARCHIVEMINE --> DBARCHIVE
-    ARCHIVEREPORT --> DBARCHIVE
-    ARCHIVEREVIEW --> DBARCHIVE
-    BRACKET --> DBGUILD
-    ADAPT --> DBGUILD
-    QUIZ --> DBGUILD
-    MEDIANIGHT --> DBGUILD
-    READCLUB --> DBGUILD
-    EPDISC --> DBGUILD
-    CHAPTERDISC --> DBGUILD
-    RESOURCEJOIN --> DBPANELS
-    RESOURCEJOIN --> DBARCHIVE
-    RESOURCEJOIN --> DBGUILD
-    GUILDSCOPE --> DBGUILD
-    GUILDSCOPE --> DBARCHIVE
-
-    %% COMMAND PERSISTENCE
-    DBPOOL --> DBGRAPH
-    DBPOOL --> DBASSETS
-    DBPOOL --> DBSUGGEST
-    DBPOOL --> DBPANELS
-    DBPOOL --> DBARCHIVE
-    DBPOOL --> DBGUILD
-    DBPOOL --> DBCONFIG
-    DBPOOL --> DBAUDIT
-    DBPOOL --> DBUSER
-    DBPOOL --> DBROLE
-    GRAPHHELPER --> DBGRAPH
-    GRAPHHELPER --> DBSUGGEST
-    INPUTVALID --> URLSAFE
-    TREE --> DBPOOL
-    DBPOOL --> POSTGRESENV
-
-    %% PRIVATE AND PUBLIC FILE FLOWS
-    PANELS --> STORAGEHELPER
-    POTD --> STORAGEHELPER
-    CUSTOMROLE --> STORAGEHELPER
-    GRID --> IMAGEGEN
-    ANILISTCOLLAGE --> IMAGEGEN
-    IMAGEGEN --> STORAGEHELPER
-    STORAGEHELPER --> OBJECTMETA
-    STORAGEHELPER --> DBASSETS
-    STORAGEHELPER --> PRIVBUCKET
-    PRIVBUCKET --> SIGNEDURL
-    SIGNEDURL --> PANELS
-    SIGNEDURL --> POTD
-    STORAGEHELPER --> PUBBUCKET
-    PUBBUCKET --> CDN
-    CDN --> GRID
-    CDN --> ANILISTCOLLAGE
-    STORAGEHELPER -. "no public bucket or upload fails" .-> DISCORDATTACH
-    STORAGEHELPER -. "legacy/unavailable object store fallback" .-> DBBYTEA
-    DISCORDATTACH --> CHATOUT
-    PRIVACY --> STORAGEHELPER
-    PRIVBUCKET --> NOSECRET
-    S3ENV --> STORAGEHELPER
-
-    %% HELP, DISCOVERY HUB AND COMMAND REFERENCES
-    HUB --> DASHREG
-    HUB --> CHATOUT
-    DASHREG --> HUB
-    DASHCOMMAND --> DASHREG
-    DASHCOMMAND --> DBCONFIG
-    DASHCOMMAND --> DBAUDIT
-    DASHCOMMAND --> CMDGUARD
-    CMDGUARD --> GUILDSCOPE
-    FEEDBACK --> ERRORS
-    ERRORS --> LOGGING
-    RESULTBUILDER --> CHATOUT
-
-    %% WEB CONTROL PLANE: AUTHENTICATED, GUILD-BOUND, SAME LIVE BOT
-    WEBUSER --> OAUTH
-    OAUTH --> SESSION
-    SESSION --> GUILDAUTH
-    WEBUSER --> REACTUI
-    REACTUI --> WEBSTYLES
-    WEBSTYLES --> RUSTAPI
-    RUSTAPI --> APIROUTES
-    APIROUTES --> GUILDAUTH
-    GUILDAUTH --> PERMGATE
-    GUILDAUTH --> BRIDGE
-    BRIDGE --> LIVEBOT
-    LIVEBOT --> DASHREG
-    LIVEBOT --> DBCONFIG
-    LIVEBOT --> DBAUDIT
-    DBCONFIG --> CMDGUARD
-    COMMANDLINKS --> REACTUI
-    COMMANDLINKS --> DOCS["📚 README + docs<br/>usage guide and category references"]
-    APIROUTES --> LOGVIEW
-    LOGVIEW --> NOSECRET
-    REACTUI --> ROLEPICKER
-    ROLEPICKER --> CUSTOMADMIN
-    ROLEPICKER --> PRIVBUCKET
-    WEBCTRL --> REACTUI
-    WEBCTRL --> RUSTAPI
-
-    %% SECURITY, LOGGING AND DEPLOYMENT
-    PERMGATE --> GUILDSCOPE
-    URLSAFE --> INPUTVALID
-    RATE --> HTTPCLIENT
-    RATE --> PICKER
-    RESILIENCE --> ERRORS
-    RESILIENCE --> DASHCOMMAND
-    RESILIENCE --> WEBCTRL
-    NOSECRET --> PROVIDERENV
-    ENV --> BOTPY
-    ENV --> POSTGRESENV
-    ENV --> PROVIDERENV
-    ENV --> S3ENV
-    ENV --> RUSTAPI
-    BOTPY --> LOGGING
-    HTTPCLIENT --> LOGGING
-    STORAGEHELPER --> LOGGING
-    DBPOOL --> LOGGING
-    LOGGING --> BACKUP
-    DEPLOYRAILWAY --> BOTPY
-    DEPLOYRAILWAY --> RUSTAPI
-    DEPLOYDOCKER --> BOTPY
-    DEPLOYDOCKER --> RUSTAPI
-    DEPLOYVPS --> BOTPY
-    DEPLOYVPS --> RUSTAPI
-    GHCI --> PYTEST
-    GHCI --> FRONTTEST
-    GHCI --> RUSTTEST
-    PYTEST --> BOTPY
-    FRONTTEST --> REACTUI
-    RUSTTEST --> RUSTAPI
+    MEMBER["Discord members and moderators"] --> DISCORD["Discord interactions"]
+    DISCORD --> BOT["bot.py · discord.py runtime"]
+    BOT --> TREE["Application command tree and cog loader"]
+    TREE --> COMMANDS["Media and community commands"]
+    TREE --> ADMIN["Guild configuration and moderation"]
+    COMMANDS --> SERVICES["Provider helpers and domain services"]
+    SERVICES --> ANILIST["AniList"]
+    SERVICES --> TMDB["TMDB"]
+    SERVICES --> BOOKS["Google Books and Novel Updates"]
+    SERVICES --> GAMES["IGDB and Steam"]
+    SERVICES --> DB["PostgreSQL · asyncpg"]
+    COMMANDS --> STORAGE["S3-compatible media storage"]
+    ADMIN --> DB
+    ADMIN --> DASH["Optional web dashboard"]
+    DASH --> BRIDGE["Authenticated bot bridge"]
+    BRIDGE --> BOT
+    DB --> SHARED["Shared public resources"]
+    DB --> GUILD["Guild-scoped settings, votes and moderation"]
+    classDef surface fill:#e8f1ff,stroke:#4676b8,color:#17243a
+    classDef core fill:#eee8ff,stroke:#7857b5,color:#25163b
+    classDef data fill:#e5f6ed,stroke:#39845d,color:#153b28
+    class MEMBER,DISCORD surface
+    class BOT,TREE,COMMANDS,ADMIN,SERVICES,DASH,BRIDGE core
+    class ANILIST,TMDB,BOOKS,GAMES,DB,STORAGE,SHARED,GUILD data
 ~~~
 
-### 🧠 Read the architecture from the outside in
-
-1. **Discord is the entry point.** The Python process owns the live gateway, slash-command tree, cog loading, interactions, and command errors.
-2. **Commands reuse providers.** Search and selection code call the existing AniList, TMDB, Google Books, Novel Updates, IGDB, and Steam integrations instead of inventing a universal metadata source.
-3. **The graph records evidence, not certainty.** Relationship edges, provider recommendations, local genre overlap, and reviewed community submissions keep separate provenance.
-4. **PostgreSQL stores structured data; S3 stores selected image files.** The media-assets registry connects records to object keys and privacy mode, while private and public objects follow separate access rules.
-5. **The web dashboard is a control plane, not a second bot.** Rust handles the public browser-facing service and authorization; private loopback services connect authenticated operations to the existing Python bot.
-6. **Runtime state wins over README assumptions.** /help and the Discovery Hub aim to list commands that are actually registered, while credentials, guild settings, and Discord permissions can still limit an individual operation.
-
----
-
-## 🔗 How media becomes connected
-
-A typical cross-media lookup follows this path:
+### Runtime and command execution
 
 ~~~mermaid
-sequenceDiagram
-    autonumber
-    actor User as Discord member
-    participant Cmd as Command cog
-    participant Provider as Metadata provider
-    participant Graph as Media graph helper
-    participant DB as PostgreSQL
-    participant Resources as Community resource lookup
-    participant Discord as Discord response
-
-    User->>Cmd: /franchise, /similar, /connections, or /game
-    Cmd->>Provider: Search using the selected media category
-    Provider-->>Cmd: Candidate metadata or provider error
-    alt Multiple plausible titles
-        Cmd-->>Discord: Owner-bound title selection menu
-        User->>Cmd: Select exact candidate
-        Cmd->>Graph: Resolve supported relationship lookups
-    else One usable candidate
-        Cmd->>Graph: Resolve supported relationship lookups
-    end
-    Cmd->>Graph: Preserve source type and provenance
-    Graph->>DB: Read/write eligible relationships
-    DB-->>Graph: Saved edges and provenance
-    Graph->>Resources: Look up linked archive items and guild-local context
-    Resources->>DB: Read applicable shared or guild-scoped records
-    DB-->>Resources: Matching resources and event references
-    Resources-->>Cmd: Structured linked resources
-    Cmd-->>Discord: Embed with separate evidence labels and source links
+flowchart TD
+    EVENT["Discord interaction"] --> GATEWAY["discord.py gateway"]
+    GATEWAY --> TREE["Application command tree"]
+    TREE --> LOADER["Cog and command registration"]
+    LOADER --> GUARD["Per-guild command guard"]
+    GUARD --> HANDLER["Command callback"]
+    HANDLER --> PROVIDER["Async provider/helper calls"]
+    HANDLER --> DATABASE["Database operations"]
+    PROVIDER --> RESPONSE["Validated results"]
+    DATABASE --> RESPONSE
+    RESPONSE --> ERROR["Shared error handling when needed"]
+    ERROR --> REPLY["Discord response or embed"]
+    RESPONSE --> REPLY
 ~~~
+
+### Media discovery and evidence
+
+~~~mermaid
+flowchart LR
+    BROWSE["/browse"] --> DOMAIN["Category-aware search"]
+    FRANCHISE["/franchise and /connections"] --> RELATIONS["Relationship resolution"]
+    SIMILAR["/similar and /compare"] --> MATCH["Provider suggestions or genre overlap"]
+    DOMAIN --> PROVIDERS["Provider adapters"]
+    RELATIONS --> PROVIDERS
+    MATCH --> PROVIDERS
+    PROVIDERS --> ANILIST["AniList"]
+    PROVIDERS --> TMDB["TMDB"]
+    PROVIDERS --> BOOKS["Google Books / Novel Updates"]
+    PROVIDERS --> GAMES["IGDB / Steam"]
+    RELATIONS --> EVIDENCE["Relationship provenance"]
+    MATCH --> EVIDENCE
+    EVIDENCE --> OUTPUT["Results labelled by evidence type"]
+    PROVIDERS --> OUTPUT
+~~~
+
+### Database, media storage, and multi-guild boundaries
+
+~~~mermaid
+flowchart TB
+    COMMANDS["Commands and background jobs"] --> DATA["Existing database helpers"]
+    DATA --> PG["PostgreSQL"]
+    PG --> GLOBAL["Shared approved resources"]
+    PG --> GUILD["Guild-owned configuration and activity"]
+    GUILD --> SCOPE["Guild ID and permission checks"]
+    SCOPE --> MOD["Guild-scoped review and moderation"]
+    COMMANDS --> MEDIA["Media upload / retrieval helpers"]
+    MEDIA --> OBJECTS["S3-compatible object storage"]
+    MEDIA --> VALIDATE["URL and metadata validation"]
+    VALIDATE --> OBJECTS
+~~~
+
+### Dashboard and control plane
+
+~~~mermaid
+flowchart LR
+    ADMIN["Guild administrator"] --> DC["Discord /dashboard command"]
+    ADMIN --> WEB["Optional web dashboard"]
+    DC --> REGISTRY["Live command registry and configuration"]
+    WEB --> AUTH["Dashboard authentication and authorization"]
+    AUTH --> BRIDGE["Authenticated bot bridge"]
+    BRIDGE --> REGISTRY
+    REGISTRY --> SYNC["Discord command synchronization"]
+    REGISTRY --> CONFIG["Existing configuration and database layer"]
+    SYNC --> RESULT["Report actual success or failure"]
+    CONFIG --> RESULT
+~~~
+
 
 ### 🔎 Evidence types
 
