@@ -15,7 +15,7 @@ Discover anime, manga, novels, webnovels, films, television, and video games —
 
 **Lemegeton is a multi-guild Discord bot built around media discovery, cross-provider relationships, community features, and per-server control.**
 
-[Features](#-what-lemegeton-does) · [Architecture](#-system-architecture) · [Commands](#-command-map) · [Getting started](#-getting-started) · [Configuration](#-configuration) · [Dashboard](#-web-dashboard) · [Development](#-development--verification)
+[Features](#-what-lemegeton-does) · [Statistics](#-repository-statistics) · [Architecture](#-system-architecture) · [Commands](#-command-map) · [Getting started](#-getting-started) · [Configuration](#-configuration) · [Dashboard](#-web-dashboard) · [Development](#-development--verification)
 
 </div>
 
@@ -24,6 +24,7 @@ Discover anime, manga, novels, webnovels, films, television, and video games —
 ## 🧾 Contents
 
 - [What Lemegeton does](#-what-lemegeton-does)
+- [Repository statistics](#-repository-statistics)
 - [System architecture](#-system-architecture)
 - [How media becomes connected](#-how-media-becomes-connected)
 - [Command map](#-command-map)
@@ -38,6 +39,14 @@ Discover anime, manga, novels, webnovels, films, television, and video games —
 - [Documentation](#-documentation)
 - [Contributing](#-contributing)
 - [License and support](#-license-and-support)
+
+## 📊 Repository statistics
+
+The figures below are generated from repository files and are refreshed automatically by GitHub Actions after pushes to `multi_guild` and on a weekly schedule. Source lines are counted separately from documentation/configuration text; character counts exclude line breaks.
+
+<!-- REPO-STATS:START -->
+_Initial figures will be populated by the first successful statistics workflow run._
+<!-- REPO-STATS:END -->
 
 ## ✦ What Lemegeton does
 
