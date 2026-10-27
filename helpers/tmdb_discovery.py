@@ -82,8 +82,14 @@ def build_tmdb_discover_params(
         params["with_crew"] = int(director_id)
     if cast_id is not None:
         params["with_cast"] = int(cast_id)
+    for year in (year_from, year_to):
+        if year is not None and (isinstance(year, bool) or not 1000 <= int(year) <= 2100):
+            raise ValueError("Years must be between 1000 and 2100.")
     if year_from is not None and year_to is not None and year_from > year_to:
         raise ValueError("The earliest year cannot be later than the latest year.")
+    for runtime in (runtime_min, runtime_max):
+        if runtime is not None and (isinstance(runtime, bool) or not 1 <= int(runtime) <= 600):
+            raise ValueError("Runtime filters must be between 1 and 600 minutes.")
     date_key = "primary_release_date" if category == "MOVIE" else "first_air_date"
     if year_from is not None:
         params[f"{date_key}.gte"] = f"{int(year_from):04d}-01-01"
