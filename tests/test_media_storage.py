@@ -27,6 +27,10 @@ class MediaStorageConfigurationTests(unittest.TestCase):
         }, clear=True):
             self.assertTrue(media_storage.is_configured())
 
+    def test_public_asset_mode_is_refused(self):
+        with patch.dict(os.environ, {"S3_BUCKET": "private-assets"}, clear=True):
+            self.assertFalse(media_storage.is_configured(private=False))
+
     def test_aws_bucket_can_use_runtime_credentials(self):
         with patch.dict(os.environ, {"S3_BUCKET": "private-assets"}, clear=True):
             self.assertTrue(media_storage.is_configured())
