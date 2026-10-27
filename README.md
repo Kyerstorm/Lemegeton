@@ -109,104 +109,129 @@ The Discord **/dashboard** command and optional web dashboard operate on the liv
 
 This architecture map connects command entry points, provider integrations, relationship evidence, PostgreSQL, image storage, and the optional web control plane.
 
-~~~mermaid
+```mermaid
 flowchart TB
-    MEMBER["Discord members and moderators"] --> DISCORD["Discord interactions"]
-    DISCORD --> BOT["bot.py · discord.py runtime"]
-    BOT --> TREE["Application command tree and cog loader"]
-    TREE --> COMMANDS["Media and community commands"]
-    TREE --> ADMIN["Guild configuration and moderation"]
-    COMMANDS --> SERVICES["Provider helpers and domain services"]
-    SERVICES --> ANILIST["AniList"]
-    SERVICES --> TMDB["TMDB"]
-    SERVICES --> BOOKS["Google Books and Novel Updates"]
-    SERVICES --> GAMES["IGDB and Steam"]
-    SERVICES --> DB["PostgreSQL · asyncpg"]
-    COMMANDS --> STORAGE["S3-compatible media storage"]
-    ADMIN --> DB
-    ADMIN --> DASH["Optional web dashboard"]
-    DASH --> BRIDGE["Authenticated bot bridge"]
-    BRIDGE --> BOT
-    DB --> SHARED["Shared public resources"]
-    DB --> GUILD["Guild-scoped settings, votes and moderation"]
-    classDef surface fill:#e8f1ff,stroke:#4676b8,color:#17243a
-    classDef core fill:#eee8ff,stroke:#7857b5,color:#25163b
-    classDef data fill:#e5f6ed,stroke:#39845d,color:#153b28
-    class MEMBER,DISCORD surface
-    class BOT,TREE,COMMANDS,ADMIN,SERVICES,DASH,BRIDGE core
-    class ANILIST,TMDB,BOOKS,GAMES,DB,STORAGE,SHARED,GUILD data
-~~~
+    Members["Discord members and moderators"] --> Discord["Discord interactions"]
+    Discord --> Bot["bot.py / discord.py runtime"]
+    Bot --> Commands["Registered commands and cogs"]
+    Commands --> Providers["Provider helpers and domain services"]
+    Providers --> Sources["AniList / TMDB / Books / IGDB / Steam"]
+    Commands --> Database["PostgreSQL through database.py"]
+    Commands --> Storage["S3-compatible media storage"]
+    Commands --> GuildSettings["Guild settings and moderation"]
+    GuildSettings --> Database
+    Dashboard["Optional web dashboard"] --> Bridge["Authenticated bot bridge"]
+    Bridge --> Bot
+    Database --> Shared["Shared approved resources"]
+    Database --> GuildRecords["Guild-scoped records"]
+```
 
 ### Runtime and command execution
 
-~~~mermaid
+```mermaid
 flowchart TD
-    EVENT["Discord interaction"] --> GATEWAY["discord.py gateway"]
-    GATEWAY --> TREE["Application command tree"]
-    TREE --> LOADER["Cog and command registration"]
-    LOADER --> GUARD["Per-guild command guard"]
-    GUARD --> HANDLER["Command callback"]
-    HANDLER --> PROVIDER["Async provider/helper calls"]
-    HANDLER --> DATABASE["Database operations"]
-    PROVIDER --> RESPONSE["Validated results"]
-    DATABASE --> RESPONSE
-    RESPONSE --> ERROR["Shared error handling when needed"]
-    ERROR --> REPLY["Discord response or embed"]
-    RESPONSE --> REPLY
-~~~
+    Interaction["Discord interaction"] --> Runtime["bot.py / discord.py gateway"]
+    Runtime --> Registry["Application command tree and cog loader"]
+    Registry --> Guard["Guild and permission checks"]
+    Guard --> Callback["Command callback"]
+    Callback --> Provider["Async provider helper"]
+    Callback --> Database["database.py / asyncpg"]
+    Provider --> Result["Validated result or clear error"]
+    Database --> Result
+    Result --> Response["Discord embed or message"]
+```
 
 ### Media discovery and evidence
 
-~~~mermaid
+```mermaid
 flowchart LR
-    BROWSE["/browse"] --> DOMAIN["Category-aware search"]
-    FRANCHISE["/franchise and /connections"] --> RELATIONS["Relationship resolution"]
-    SIMILAR["/similar and /compare"] --> MATCH["Provider suggestions or genre overlap"]
-    DOMAIN --> PROVIDERS["Provider adapters"]
-    RELATIONS --> PROVIDERS
-    MATCH --> PROVIDERS
-    PROVIDERS --> ANILIST["AniList"]
-    PROVIDERS --> TMDB["TMDB"]
-    PROVIDERS --> BOOKS["Google Books / Novel Updates"]
-    PROVIDERS --> GAMES["IGDB / Steam"]
-    RELATIONS --> EVIDENCE["Relationship provenance"]
-    MATCH --> EVIDENCE
-    EVIDENCE --> OUTPUT["Results labelled by evidence type"]
-    PROVIDERS --> OUTPUT
-~~~
+    Search["Category-aware /browse"] --> Router["Provider selection"]
+    Franchise["/franchise and /connections"] --> Relations["Resolve known relationships"]
+    Similar["/similar and /compare"] --> Signals["Recommendations or genre overlap"]
+    Router --> Providers["AniList / TMDB / Google Books / Novel Updates / IGDB / Steam"]
+    Relations --> Evidence["Preserve relationship provenance"]
+    Signals --> Evidence
+    Providers --> Results["Results with source labels"]
+    Evidence --> Results
+```
 
 ### Database, media storage, and multi-guild boundaries
 
-~~~mermaid
+```mermaid
 flowchart TB
-    COMMANDS["Commands and background jobs"] --> DATA["Existing database helpers"]
-    DATA --> PG["PostgreSQL"]
-    PG --> GLOBAL["Shared approved resources"]
-    PG --> GUILD["Guild-owned configuration and activity"]
-    GUILD --> SCOPE["Guild ID and permission checks"]
-    SCOPE --> MOD["Guild-scoped review and moderation"]
-    COMMANDS --> MEDIA["Media upload / retrieval helpers"]
-    MEDIA --> OBJECTS["S3-compatible object storage"]
-    MEDIA --> VALIDATE["URL and metadata validation"]
-    VALIDATE --> OBJECTS
-~~~
+    Commands["Commands and background jobs"] --> DBHelper["Existing database helpers"]
+    DBHelper --> Postgres["PostgreSQL"]
+    Postgres --> Shared["Shared approved resources"]
+    Postgres --> Guild["Guild-owned settings, events, and moderation"]
+    Guild --> Scope["Invoking guild ID and permission checks"]
+    Scope --> Review["Guild-scoped review actions"]
+    Commands --> MediaHelper["Media upload and retrieval helpers"]
+    MediaHelper --> Private["Private originals and signed URLs"]
+    MediaHelper --> Public["Separate public bucket for generated, non-sensitive output"]
+    MediaHelper --> Fallback["Existing fallback paths when supported"]
+```
 
 ### Dashboard and control plane
 
-~~~mermaid
+```mermaid
 flowchart LR
-    ADMIN["Guild administrator"] --> DC["Discord /dashboard command"]
-    ADMIN --> WEB["Optional web dashboard"]
-    DC --> REGISTRY["Live command registry and configuration"]
-    WEB --> AUTH["Dashboard authentication and authorization"]
-    AUTH --> BRIDGE["Authenticated bot bridge"]
-    BRIDGE --> REGISTRY
-    REGISTRY --> SYNC["Discord command synchronization"]
-    REGISTRY --> CONFIG["Existing configuration and database layer"]
-    SYNC --> RESULT["Report actual success or failure"]
-    CONFIG --> RESULT
-~~~
+    Admin["Guild administrator"] --> Web["Optional web dashboard"]
+    Admin --> DiscordCommand["Discord /dashboard command"]
+    Web --> Auth["Discord OAuth and guild authorization"]
+    Auth --> Bridge["Authenticated private bot bridge"]
+    DiscordCommand --> Registry["Live command registry and configuration"]
+    Bridge --> Registry
+    Registry --> Sync["Discord command synchronization"]
+    Registry --> Config["Existing configuration and database layer"]
+    Sync --> Outcome["Report actual success or failure"]
+    Config --> Outcome
+```
 
+### 🧠 Read the architecture from the outside in
+
+1. **Discord is the entry point.** The Python process owns the live gateway, slash-command tree, cog loading, interactions, and command errors.
+2. **Commands reuse providers.** Search and selection code call the existing AniList, TMDB, Google Books, Novel Updates, IGDB, and Steam integrations instead of inventing a universal metadata source.
+3. **The graph records evidence, not certainty.** Relationship edges, provider recommendations, local genre overlap, and reviewed community submissions keep separate provenance.
+4. **PostgreSQL stores structured data; S3 stores selected image files.** The media-assets registry connects records to object keys and privacy mode, while private and public objects follow separate access rules.
+5. **The web dashboard is a control plane, not a second bot.** Rust handles the public browser-facing service and authorization; private loopback services connect authenticated operations to the existing Python bot.
+6. **Runtime state wins over README assumptions.** /help and the Discovery Hub aim to list commands that are actually registered, while credentials, guild settings, and Discord permissions can still limit an individual operation.
+
+---
+
+## 🔗 How media becomes connected
+
+A typical cross-media lookup follows this path:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Discord member
+    participant Cmd as Command cog
+    participant Provider as Metadata provider
+    participant Graph as Media graph helper
+    participant DB as PostgreSQL
+    participant Resources as Community resource lookup
+    participant Discord as Discord response
+
+    User->>Cmd: /franchise, /similar, /connections, or /game
+    Cmd->>Provider: Search using the selected media category
+    Provider-->>Cmd: Candidate metadata or provider error
+    alt Multiple plausible titles
+        Cmd-->>Discord: Owner-bound title selection menu
+        User->>Cmd: Select exact candidate
+        Cmd->>Graph: Resolve supported relationship lookups
+    else One usable candidate
+        Cmd->>Graph: Resolve supported relationship lookups
+    end
+    Cmd->>Graph: Preserve source type and provenance
+    Graph->>DB: Read/write eligible relationships
+    DB-->>Graph: Saved edges and provenance
+    Graph->>Resources: Look up linked archive items and guild-local context
+    Resources->>DB: Read applicable shared or guild-scoped records
+    DB-->>Resources: Matching resources and event references
+    Resources-->>Cmd: Structured linked resources
+    Cmd-->>Discord: Embed with separate evidence labels and source links
+```
 
 ### 🔎 Evidence types
 
@@ -683,7 +708,7 @@ Lemegeton/                                                                 🏰 
 
 ### 🧩 Main runtime relationship
 
-~~~mermaid
+```mermaid
 flowchart LR
     subgraph USER["👤 Member journey"]
         U["Member opens Discord"]
@@ -737,9 +762,9 @@ flowchart LR
     SERVICE -. "public storage unavailable" .-> FALLBACK --> RESPONSE
     GRAPH --> SERVICE
     ARCHIVE --> SERVICE
-~~~
+```
 
-~~~mermaid
+```mermaid
 flowchart TB
     subgraph AUTH["🔐 Browser authorization"]
         BROWSER["Browser"]
@@ -775,9 +800,9 @@ flowchart TB
     ROUTES --> OWNER
     ROUTES --> PRIVATEPICKER
     UI --> NOEXEC
-~~~
+```
 
-~~~mermaid
+```mermaid
 flowchart LR
     subgraph PRIVATEFLOW["🔒 Private image flow"]
         PANELUPLOAD["/panels upload"]
@@ -805,7 +830,7 @@ flowchart LR
         PUBLICHELPER -. "unconfigured or failed" .-> ATTACH
     end
     REGISTRY -. "private/public mode is recorded" .-> OBJECTHELPER
-~~~
+```
 
 ### 🧭 How to read these maps
 
