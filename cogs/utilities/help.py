@@ -879,7 +879,7 @@ class HelpCog(commands.Cog):
                 ),
                 (
                     "◇ Cross-media command map",
-                    "/franchise explores provider-declared relationships and labels recommendations separately. /connections and /reading-order reuse the title resolver. /similar combines provider suggestions, genre overlap, saved links, and eligible human-written community recommendations. /game starts with IGDB and only adds Steam details for a suitable exact title match.",
+                    "/franchise explores provider-declared relationships and labels recommendations separately. /connections and the Reading Hub reuse the title resolver. /similar combines provider suggestions, genre overlap, saved links, and eligible human-written community recommendations. /game starts with IGDB and only adds Steam details for a suitable exact title match.",
                 ),
                 (
                     "◇ Metadata providers",
@@ -1002,7 +1002,7 @@ class HelpCog(commands.Cog):
             ),
             "community": (
                 "• Archive submissions may wait for local moderator approval\n"
-                "• Use /archive-mine to check your entries and /archive-report to flag approved content\n"
+                "• Use /archive to check your submissions, report approved content, or review server-local queues\n"
                 "• Archive reports and review actions are scoped to their originating server\n"
                 "• Brackets, adaptation polls, and quiz sessions are server-specific"
             ),
@@ -1015,8 +1015,8 @@ class HelpCog(commands.Cog):
             "books": (
                 "• /author-works searches Google Books by author\n"
                 "• /webnovel-updates depends on source-page structure and may return no result temporarily\n"
-                "• /reading-order shows available release relationships, not assumed story chronology\n"
-                "• Add a clear chapter/volume cutoff when starting /chapter-discussion"
+                "• The /reading menu shows available release relationships, not assumed story chronology\n"
+                "• Use /discussion and add a clear chapter/volume or episode cutoff"
             ),
             "screen": (
                 "• TMDB-based commands require TMDB_BEARER_TOKEN\n"
