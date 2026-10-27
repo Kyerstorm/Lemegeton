@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from copy import copy as shallow_copy
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -302,9 +303,21 @@ def _root_app_command(command: app_commands.Command | app_commands.Group):
     return command
 
 
-def _copy_app_command(command: app_commands.Command | app_commands.Group):
-    copier = getattr(command, "copy", None)
-    return copier() if callable(copier) else command
+def _copy_app_command(
+    command: app_commands.Command | app_commands.Group,
+    parent: app_commands.Group | None = None,
+):
+    """Copy a slash command and its parents without sharing mutable child maps."""
+    cloned = shallow_copy(command)
+    cloned.parent = parent
+    if isinstance(command, app_commands.Group):
+        cloned._children = {}
+        for child in command.commands:
+            child_copy = _copy_app_command(child, cloned)
+            cloned._children[child_copy.name] = child_copy
+    else:
+        cloned._params = command._params.copy()
+    return cloned
 
 
 def _filter_group_for_guild(group: app_commands.Group, cfg: dict[str, Any]) -> app_commands.Group | None:
