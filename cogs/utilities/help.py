@@ -188,7 +188,6 @@ class HelpCog(commands.Cog):
                     "note": "Choose the discussion scope, then enter a work title and explicit spoiler cutoff. A public starter message and server-local thread are created.",
                     "examples": ["/discussion"]
                 }
-                }
             },
             "🌐 Cross-Media Discovery": {
                 "discovery-hub": {
