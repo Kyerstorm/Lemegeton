@@ -21,7 +21,7 @@ Discover anime, manga, novels, webnovels, films, television, and video games —
 
 ---
 
-## Contents
+## 🧾 Contents
 
 - [What Lemegeton does](#-what-lemegeton-does)
 - [System architecture](#-system-architecture)
@@ -473,7 +473,6 @@ flowchart TB
     SIMILAR --> RECPROVIDER
     COMPARE --> METADATA
     COMPARE --> SOURCEBADGE
-    JOIN --> RESOURCEJOIN
 
     %% COMMUNITY SURFACES → SHARED ARCHIVES AND GUILD-LOCAL EVENTS
     PANELS --> DBPANELS
@@ -678,7 +677,7 @@ See [Media Discovery documentation](docs/MEDIA_DISCOVERY.md) for browse filters,
 
 Type / in Discord or use **/help** to see commands registered in the running bot. The table below describes the principal command families; exact visibility depends on loaded cogs, provider configuration, and server permissions.
 
-### Media search and cross-media discovery
+### 🧬 Media search and cross-media discovery
 
 | Command | Purpose |
 |---|---|
@@ -692,7 +691,7 @@ Type / in Discord or use **/help** to see commands registered in the running bot
 | **/link-suggest** | Submit an HTTPS-linked relationship with evidence for moderation review. |
 | **/link-review** | List, inspect, approve, or reject relationship suggestions in the current server. |
 
-### Movies and television
+### 🎬 Movies and television
 
 | Command | Purpose |
 |---|---|
@@ -707,7 +706,7 @@ Type / in Discord or use **/help** to see commands registered in the running bot
 
 TMDB-powered features require TMDB_BEARER_TOKEN. Availability data changes, and a missing provider record is not proof that a title is unavailable.
 
-### Books, novels, and webnovels
+### 📚 Books, novels, and webnovels
 
 | Command | Purpose |
 |---|---|
@@ -719,7 +718,7 @@ TMDB-powered features require TMDB_BEARER_TOKEN. Availability data changes, and 
 
 Novel Updates results depend on the scraper and the source page's current structure. An empty response may reflect a source failure or unsupported markup; it is not necessarily proof that a title does not exist.
 
-### Games and generated images
+### 🎮 Games and generated images
 
 | Command | Purpose |
 |---|---|
@@ -732,7 +731,7 @@ Novel Updates results depend on the scraper and the source page's current struct
 
 /game begins with IGDB. Steam enrichment is optional, and failure to find an exact Steam listing does not prove that a game is unavailable on Steam.
 
-### Community archives and events
+### 🗂️ Community archives and events
 
 | Command | Purpose |
 |---|---|
@@ -756,7 +755,7 @@ Novel Updates results depend on the scraper and the source page's current struct
 
 Community-submitted resources retain attribution and review status. Some commands require moderator permission, and discussions or voting sessions are stored in the relevant guild context.
 
-### Account, customization, and server tools
+### 👥 Account, customization, and server tools
 
 Lemegeton also retains its established account and community commands, including:
 
@@ -1028,174 +1027,246 @@ The repository's GitHub Actions workflow also checks the dashboard frontend, per
 This map focuses on principal runtime and feature paths. It is a guide to responsibilities, not a full inventory of every module.
 
 ~~~text
-Lemegeton/                                                                    🏰 Multi-guild Discord media platform
+Lemegeton/                                                                 🏰 Multi-guild Discord media platform
 │
-├── 🤖 bot.py                                                                  # Gateway owner, command tree, cog loading, events
-│   ├── 🛰️ Discord client lifecycle                                             # Login, ready/disconnect, command sync
-│   ├── 🔄 Recursive cog watcher                                               # Extension discovery and reload attempts
-│   ├── 🧯 Slash/prefix error routing                                           # Shared safe responses and contextual logs
-│   ├── 🧷 Runtime dashboard bridge                                            # Authenticated local API for Rust
-│   └── 🎭 Custom Role picker server bootstrap                                 # Private local listener and shutdown
+├── 🤖 bot.py                                                              # Gateway owner, command tree, cog loader, events, error routing
+├── 🧭 config.py                                                           # Core environment parsing and runtime defaults
+├── 🗄️ database.py                                                        # PostgreSQL DSN, asyncpg pool, shared database operations
+├── 📦 requirements.txt                                                   # Python and provider/helper dependencies
+├── 🐍 runtime.txt                                                        # Hosted Python runtime declaration
+├── 🚂 Procfile                                                           # Hosted process entry point
+├── 🚀 railpack.json                                                      # Build/runtime configuration where used
+├── 🐳 Dockerfile                                                         # Optional container image
+├── 🐳 docker-compose.yml                                                 # Optional Compose deployment
+├── 🙈 .dockerignore                                                      # Container build exclusions
+├── 🔐 .env.example                                                       # Variable template; no production secrets
 │
-├── 🧭 config.py                                                               # Environment parsing and core configuration
-├── 🗄️ database.py                                                            # PostgreSQL DSN, asyncpg pool, safe DB wrapper
-├── 📦 requirements.txt                                                       # Python runtime and provider dependencies
-├── 🐍 runtime.txt                                                            # Hosted Python runtime declaration
-├── 🚂 Procfile                                                               # Hosted process entry point
-├── 🚀 railpack.json                                                          # Build/runtime configuration where used
-├── 🐳 Dockerfile                                                             # Optional container image
-├── 🐳 docker-compose.yml                                                     # Optional Compose deployment
-├── 🙈 .dockerignore                                                          # Container build exclusions
-├── 🔐 .env.example                                                           # Variable template; never stores production secrets
-│
-├── 🧩 cogs/                                                                   # Existing Discord command extensions
-│   │
-│   ├── 🔐 account/                                                           # Account linking and profile entry points
-│   │   ├── 🪪 AniList login/link flows                                         # OAuth/login and linked-account behavior
-│   │   ├── 👤 Profile presentation                                             # Provider-backed user profile surfaces
-│   │   └── 🛠️ Account administration                                           # Existing moderated account utilities
-│   │
-│   ├── 👑 admin/                                                             # Owner and bot-moderator utilities
-│   │   ├── 🧰 Bot moderator controls                                          # Bot-wide privileges and administration
-│   │   ├── 🐙 GitHub update tracking                                           # Existing commit/status helpers
-│   │   └── 🧹 User/data maintenance                                            # Cleanup and maintenance tools
-│   │
-│   ├── 🎨 customization/                                                     # Theme and Custom Role entry points
-│   │   ├── 🌈 Theme browser                                                   # Theme selection and preview surfaces
-│   │   ├── 🎭 Custom Role panel                                                # Member role controls
-│   │   └── 🛠️ Custom Role admin panel                                          # Per-server setup and moderation
-│   │
-│   ├── 🎮 gaming/                                                            # Existing Steam/gaming commands
-│   │   ├── 🕹️ Steam profile and store commands                                 # Profile/library/game views
-│   │   ├── 🎯 Game discovery/recommendation paths                              # Existing Steam functionality
-│   │   └── 🎁 Free-game notifications                                          # Supported store/source updates
-│   │
+├── 🧩 cogs/                                                               # Discord command extensions grouped by domain
+│   ├── 🔐 account/                                                       # Existing account linking and profile commands
+│   ├── 👑 admin/                                                         # Bot-wide administration and moderator tools
+│   ├── 🎨 customization/                                                 # Theme management and Custom Roles entry points
+│   ├── 🎮 gaming/                                                        # Existing Steam/game/free-game commands
 │   ├── 🖼️ media/
-│   │   ├── 🔎 browse.py                                                       # Multi-provider search, filtering, title selection
-│   │   ├── 🖼️ panel.py                                                       # Shared manga panel archive and UI
-│   │   ├── 🗂️ community_archives.py                                           # Quotes, fanworks, theories, reports, polls, quiz
-│   │   └── 🎨 three_by_three.py                                               # Generated 3×3 collage workflows
-│   │
-│   ├── 🏠 server_management/                                                 # Guild-specific management tools
-│   │   ├── ⚙️ Server configuration                                            # Per-guild settings
-│   │   ├── 👋 Welcome-DM workflows                                            # Configured join messaging
-│   │   ├── 📨 Invite statistics/leaderboards                                   # Existing invite tracking
-│   │   └── 🏷️ Completion/update channel controls                              # Supported notification configuration
-│   │
+│   │   ├── 🔎 browse.py                                                  # Multi-provider browse, filters, title matching
+│   │   ├── 🖼️ panel.py                                                  # Shared manga panel archive and interaction views
+│   │   ├── 🗂️ community_archives.py                                      # Archives, moderation, polls, brackets and quiz
+│   │   └── 🎨 three_by_three.py                                          # Generated 3×3 media grids
+│   ├── 🏠 server_management/                                             # Server configuration, invites and welcome tools
 │   ├── 👥 social/
-│   │   ├── 🔗 anilist_site_embed.py                                           # AniList embeds and staff/character image outputs
-│   │   ├── 🤝 Affinity and comparison surfaces                                 # Existing profile comparison
-│   │   └── 📊 Leaderboards and community-facing statistics                     # Existing social views
-│   │
+│   │   └── 🟣 anilist_site_embed.py                                      # AniList embeds and staff/character collage output
 │   └── 🧰 utilities/
-│       ├── 📖 help.py                                                        # Emoji-aided dropdown, command reference, Code guide
-│       ├── 🗣️ feedback.py                                                    # User reports and suggestions where registered
-│       ├── 🔔 Notifications                                                   # User notification settings
-│       ├── 🕒 Timestamp utility                                               # Discord timestamp formatting
-│       └── 🧑 User/server utilities                                           # Existing convenience commands
+│       └── 📖 help.py                                                    # Category dropdown, command references, Code guide
 │
-├── 🧪 cogs_test/general_commands/                                             # General command integrations currently in this area
-│   ├── 🎛️ dashboard.py                                                       # CommandRegistry, ConfigDB, /dashboard UI, sync/guard
-│   ├── 🔗 connected_media.py                                                 # TMDB tools, media links, discussion entry points
-│   ├── ✨ cross_media_recommendations.py                                     # Provider suggestions + local genre overlap
-│   ├── 🧭 discovery_hub.py                                                   # Registered-command-aware dropdown
-│   ├── 🧬 franchise.py                                                      # AniList/TMDB relation resolver and embed flow
-│   ├── 🎮 game.py                                                           # IGDB metadata + optional exact Steam enrichment
-│   ├── 📚 Book metadata                                                     # Existing author and novel/provider paths
-│   ├── 🗓️ TV and release tools                                                # TV guide/calendar-related command surfaces
-│   └── 🧪 Existing general integrations                                       # Other loaded modules stay provider-specific
+├── 🧪 cogs_test/general_commands/                                        # Cross-media and dashboard command extensions
+│   ├── 🎛️ dashboard.py                                                  # CommandRegistry, ConfigDB, /dashboard and sync/guard
+│   ├── 🔗 connected_media.py                                             # Cross-media links, TMDB tools, discussions and regions
+│   ├── ✨ cross_media_recommendations.py                                 # Provider recommendations + local genre overlap
+│   ├── 🧭 discovery_hub.py                                               # Registered-command-aware discovery dropdown
+│   ├── 🧬 franchise.py                                                  # Provider relationship resolver and linked resources
+│   └── 🎮 game.py                                                        # IGDB metadata and optional exact Steam enrichment
 │
-├── 🧠 helpers/                                                               # Shared application logic; no second bot runtime
-│   ├── 🟣 anilist_helper.py                                                  # AniList requests, mapping and title fetches
-│   ├── 🕹️ steam_helper.py                                                     # Existing Steam API/store logic
-│   ├── 🕸️ media_graph.py                                                     # Relationship persistence, provenance, linked resources
-│   ├── 🗄️ media_storage.py                                                   # S3-compatible upload, metadata, privacy and URL resolver
-│   ├── 🧯 command_error_handler.py                                           # Shared slash/prefix/component reporting
-│   ├── 🎨 embed_helper.py                                                    # Shared Discord embed formatting
-│   ├── 🧑 profile_helper.py                                                  # Profile display and cleanup logic
-│   ├── 🧊 cache_helper.py                                                    # Existing cache helpers
+├── 🧠 helpers/                                                            # Reusable provider, storage and presentation logic
+│   ├── 🟣 anilist_helper.py                                              # AniList queries, mappings, and media lookup
+│   ├── 🕹️ steam_helper.py                                                # Existing Steam integration
+│   ├── 🕸️ media_graph.py                                                 # Relationship persistence and resource resolution
+│   ├── 🗄️ media_storage.py                                               # S3-compatible objects, URLs, privacy mode and cleanup
+│   ├── 🧯 command_error_handler.py                                       # Shared slash/prefix/component error handling
+│   ├── 🎨 embed_helper.py                                                # Shared embed formatting helpers
+│   ├── 👤 profile_helper.py                                              # Profile construction and cleanup
+│   ├── 🧊 cache_helper.py                                                # Existing cache helpers
+│   ├── 🎨 theme_helper.py                                                # Shared theme application
 │   ├── 🎭 custom_roles/
-│   │   ├── ⚙️ service.py                                                     # Role rules, permissions, persistence, audit
-│   │   ├── 🗄️ storage.py                                                     # Original icon files and supported fallback handling
-│   │   ├── 🖼️ Images and crop helpers                                          # Icon validation, crop, resize
-│   │   └── 🔑 Picker tokens and safe URL helpers                              # Short-lived tokens and bounded image fetching
-│   └── 🧩 Other provider/domain helpers                                      # Reuse before adding parallel abstractions
+│   │   ├── ⚙️ service.py                                                 # Role rules, permissions and persistence
+│   │   └── 🗄️ storage.py                                                 # Original icon image storage and fallbacks
+│   └── 🧩 Other domain helpers                                           # Reuse provider-specific helpers before adding new layers
 │
-├── 🌐 web/                                                                   # Python-side web adapters and picker assets
-│   ├── 🔌 dashboard.py                                                      # Runtime adapter/helper functions
-│   ├── 🎭 custom_role_picker_server.py                                       # Private Python listener behind Rust proxy
-│   └── 🎨 static/custom_roles/                                               # Existing picker HTML/CSS/JS assets
+├── 🌐 web/                                                               # Python-side web adapters; not a second bot
+│   ├── 🔌 dashboard.py                                                  # Runtime adapter/helper functions
+│   ├── 🎭 custom_role_picker_server.py                                   # Private picker listener behind the Rust proxy
+│   └── 🎨 static/custom_roles/                                           # Existing picker static assets
 │
-├── 🦀 dashboard-rs/                                                         # Public-facing optional dashboard control plane
-│   ├── 📦 Cargo.toml                                                        # Rust dependency/configuration manifest
+├── 🦀 dashboard-rs/                                                      # Optional browser-facing dashboard control plane
+│   ├── 📦 Cargo.toml                                                     # Rust dependency manifest
 │   └── src/
-│       ├── 🚦 main.rs                                                       # Router, bind policy, security headers
-│       ├── 🔐 auth.rs                                                       # Discord OAuth, bootstrap, login/logout
-│       ├── 🛣️ api.rs                                                        # Authenticated guild API and picker proxy
-│       ├── 🧠 state.rs                                                      # Sessions, OAuth state, guild authorization, bridge
-│       └── 🖥️ ui.rs                                                         # App shell and allow-listed static assets
+│       ├── 🚦 main.rs                                                    # Router, bind policy, security headers and startup
+│       ├── 🔐 auth.rs                                                    # Discord OAuth, session bootstrap, login/logout
+│       ├── 🛣️ api.rs                                                     # Authenticated guild API and picker reverse proxy
+│       ├── 🧠 state.rs                                                   # Sessions, OAuth state, guild auth, bot bridge
+│       └── 🖥️ ui.rs                                                      # HTML shell and allow-listed static assets
 │
-├── ⚛️ dashboard-frontend/                                                   # Browser UI for the same running bot
-│   ├── 📦 package.json                                                      # React/TypeScript/Vite scripts and dependencies
-│   ├── 🧭 vite.config.ts                                                    # Frontend build configuration where present
+├── ⚛️ dashboard-frontend/                                                # React/TypeScript UI for the same running bot
+│   ├── 📦 package.json                                                   # Build and typecheck scripts
 │   └── src/
-│       ├── 🪟 App.tsx                                                       # Pages, state, API calls, command controls
-│       ├── 🚀 main.tsx                                                      # React root
-│       └── 🎨 styles.ts                                                     # Responsive visual system and component styling
+│       ├── 🪟 App.tsx                                                    # Dashboard pages, data loading and command controls
+│       ├── 🚀 main.tsx                                                   # React root
+│       └── 🎨 styles.ts                                                  # Responsive dashboard and login design system
 │
-├── 📚 docs/                                                                  # Implementation, operations and security guides
-│   ├── 🌐 MEDIA_DISCOVERY.md                                                # Browse, relationship graph, TV, calendar, events
-│   ├── 🖥️ DASHBOARD.md                                                      # OAuth, bridge, setup and operations
-│   ├── 🛡️ SECURITY_AUDIT.md                                                 # Fixed findings and residual operational risks
-│   ├── 🎭 CUSTOM_ROLES_SPEC.md                                              # Custom Roles design and behavior
-│   ├── 🧾 HANDOFF_NOTES.md                                                  # Custom Roles setup and deployment notes
-│   ├── 🧰 structured_changelog.txt                                           # Project change record where maintained
-│   └── 📄 LICENSE                                                           # MIT license text
+├── 📚 docs/                                                               # Feature, architecture, setup and security references
+│   ├── 🌐 MEDIA_DISCOVERY.md                                             # Search filters, relationships, calendar and events
+│   ├── 🖥️ DASHBOARD.md                                                   # OAuth, bridge, permissions and deployment
+│   ├── 🛡️ SECURITY_AUDIT.md                                              # Fixed findings and residual control-plane risks
+│   ├── 🎭 CUSTOM_ROLES_SPEC.md                                           # Custom Roles behavior and design notes
+│   ├── 🧾 HANDOFF_NOTES.md                                               # Custom Roles setup and deploy handoff
+│   └── 📄 LICENSE                                                        # MIT license
 │
 ├── 🚢 deploy/
 │   └── 🖥️ vps/
-│       └── 📖 README.md                                                     # systemd/Nginx/TLS/firewall deployment steps
+│       └── 📖 README.md                                                  # systemd, Nginx, TLS, firewall and secret setup
 │
-├── 🧪 tests/                                                                 # Offline/focused regression tests
-│   ├── 🕸️ test_media_graph.py                                                # Graph/provenance helper behavior
-│   ├── 🗄️ test_media_storage.py                                              # Private/public S3 configuration and uploads
-│   ├── 🔌 test_dashboard_bridge.py                                           # Private bridge boundaries
-│   ├── 🎭 test_custom_role_picker_server.py                                  # Picker web regressions
-│   ├── ⏱️ test_rate_limit_memory.py                                          # In-memory rate-limit behavior
-│   ├── 🎨 test_dashboard_assets.py                                           # Dashboard asset response behavior
-│   └── 🛡️ test_dashboard_command_policy.py                                  # Protected commands and authorization rules
+├── 🧪 tests/                                                              # Offline and focused regression tests
+│   ├── 🕸️ test_media_graph.py                                            # Relationship graph/provenance behavior
+│   ├── 🗄️ test_media_storage.py                                          # Private/public storage configuration and uploads
+│   ├── 🔌 test_dashboard_bridge.py                                       # Private bridge boundaries
+│   ├── 🎭 test_custom_role_picker_server.py                              # Picker web regression tests
+│   ├── ⏱️ test_rate_limit_memory.py                                      # In-memory rate-limit behavior
+│   ├── 🎨 test_dashboard_assets.py                                       # Dashboard asset responses
+│   └── 🛡️ test_dashboard_command_policy.py                               # Protected command and policy regression tests
 │
-├── 🧰 scripts/                                                               # Operational and combined-start scripts
-│   └── 🚀 start.sh                                                          # Combined deployment entry point where configured
+├── 🧰 scripts/                                                            # Operational and combined-start helpers
+│   └── 🚀 start.sh                                                       # Combined service start entry point where configured
 │
-├── ⚙️ .github/workflows/                                                    # Continuous integration and scheduled checks
-│   └── ✅ dashboard.yml                                                     # Python tests + frontend/Rust build and audit
+├── ⚙️ .github/workflows/
+│   └── ✅ dashboard.yml                                                  # Python tests + frontend/Rust build and audit gates
 │
-└── 🧾 README.md                                                              # This architecture and operator guide
+└── 🧾 README.md                                                          # System architecture, operator guide and development map
 ~~~
 
 
 ### 🧩 Main runtime relationship
 
-~~~text
-Discord interaction
-    │
-    ▼
-bot.py ───────────────► command tree / loaded cogs
-    │                           │
-    │                           ├──► provider helpers ──► AniList / TMDB / Books / NU / IGDB / Steam
-    │                           │
-    │                           ├──► media_graph.py ─────► relationship and resource lookups
-    │                           │                               │
-    │                           └──► media_storage.py ◄─────────┘
-    │                                     │
-    ▼                                     ▼
-database.py / asyncpg ────────────► PostgreSQL + media-assets registry
-    │
-    └──► per-guild configuration, community activity, provenance and audit data
-
-Browser ─► Rust/Axum dashboard ─► authenticated private bridge ─► the same running bot
+~~~mermaid
+flowchart LR
+    subgraph USER["👤 Member journey"]
+        U["Member opens Discord"]
+        H["/help or /discovery-hub"]
+        CMD["Selects a command"]
+        RESPONSE["Embed / menu / link"]
+        U --> H --> CMD --> RESPONSE
+    end
+    subgraph PYTHON["🤖 Python command runtime"]
+        GATE["Gateway and interaction"]
+        GUARD["Guild + permission checks"]
+        COG["Loaded command cog"]
+        SERVICE["Existing helper/service"]
+        FAIL["Safe failure path"]
+        GATE --> GUARD --> COG --> SERVICE
+        SERVICE -. "provider/database exception" .-> FAIL
+        FAIL --> RESPONSE
+    end
+    subgraph SOURCES["🌐 External metadata"]
+        ANI["AniList"]
+        TMDB["TMDB"]
+        GOOGLE["Google Books"]
+        NOVEL["Novel Updates helper"]
+        IGDB["IGDB"]
+        STEAM["Steam"]
+    end
+    subgraph STORAGE["🧱 Persistence and media"]
+        DB["database.py / asyncpg"]
+        GRAPH[("Relationship graph + provenance")]
+        GUILD[("Guild-owned state")]
+        ARCHIVE[("Community archives")]
+        ASSET[("media_assets registry")]
+        PRIVATE["Private S3 originals"]
+        SIGNED["Signed private image URL"]
+        PUBLIC["Separate public bucket/CDN"]
+        FALLBACK["Discord attachment / existing fallback"]
+    end
+    SERVICE --> ANI
+    SERVICE --> TMDB
+    SERVICE --> GOOGLE
+    SERVICE --> NOVEL
+    SERVICE --> IGDB
+    SERVICE --> STEAM
+    SERVICE --> DB
+    DB --> GRAPH
+    DB --> GUILD
+    DB --> ARCHIVE
+    DB --> ASSET
+    ASSET --> PRIVATE --> SIGNED --> RESPONSE
+    SERVICE --> PUBLIC --> RESPONSE
+    SERVICE -. "public storage unavailable" .-> FALLBACK --> RESPONSE
+    GRAPH --> SERVICE
+    ARCHIVE --> SERVICE
 ~~~
+
+~~~mermaid
+flowchart TB
+    subgraph AUTH["🔐 Browser authorization"]
+        BROWSER["Browser"]
+        OAUTH["Discord OAuth2"]
+        SESSION["Server-side session"]
+        CSRF["Origin + CSRF verification"]
+        LIVEGUILDS["Live guild membership"]
+        MANAGE["Manage Server/Admin check"]
+        BROWSER --> OAUTH --> SESSION --> CSRF --> LIVEGUILDS --> MANAGE
+    end
+    subgraph CONTROL["🎛️ Dashboard operations"]
+        UI["React + TypeScript UI"]
+        ROUTES["Rust/Axum API routes"]
+        BRIDGE["Private loopback Python bridge"]
+        REGISTRY["Live command registry"]
+        SETTINGS["Per-guild command settings"]
+        SYNC["Discord guild command sync"]
+        ROLLBACK["Rollback previous config when sync fails"]
+        AUDIT["Per-guild audit history"]
+        UI --> ROUTES --> BRIDGE --> REGISTRY
+        BRIDGE --> SETTINGS --> SYNC
+        SYNC -. "sync not confirmed" .-> ROLLBACK
+        SYNC --> AUDIT
+    end
+    subgraph LIMITS["🛡️ Operational boundaries"]
+        OWNER["Owner-only logs/integration status"]
+        PRIVATEPICKER["Private Custom Role picker"]
+        SAMEBOT["Same existing discord.py client"]
+        NOEXEC["No arbitrary shell / raw SQL controls"]
+    end
+    MANAGE --> ROUTES
+    BRIDGE --> SAMEBOT
+    ROUTES --> OWNER
+    ROUTES --> PRIVATEPICKER
+    UI --> NOEXEC
+~~~
+
+~~~mermaid
+flowchart LR
+    subgraph PRIVATEFLOW["🔒 Private image flow"]
+        PANELUPLOAD["/panels upload"]
+        ROLEUPLOAD["Custom Role original icon"]
+        OBJECTHELPER["helpers/media_storage.py"]
+        PRIVOBJ[("S3_BUCKET")]
+        REGISTRY[("media_assets: private")]
+        URL["Short-lived signed URL"]
+        PANELUPLOAD --> OBJECTHELPER
+        ROLEUPLOAD --> OBJECTHELPER
+        OBJECTHELPER --> PRIVOBJ
+        OBJECTHELPER --> REGISTRY
+        REGISTRY --> URL
+    end
+    subgraph PUBLICFLOW["🌐 Generated public-image flow"]
+        GRID["/3x3 output"]
+        COLLAGE["AniList staff/character collage"]
+        PUBLICHELPER["Store only non-sensitive generated output"]
+        PUBOBJ[("Separate S3_PUBLIC_BUCKET")]
+        HTTPS["S3_PUBLIC_BASE_URL / HTTPS CDN"]
+        ATTACH["Discord attachment fallback"]
+        GRID --> PUBLICHELPER
+        COLLAGE --> PUBLICHELPER
+        PUBLICHELPER --> PUBOBJ --> HTTPS
+        PUBLICHELPER -. "unconfigured or failed" .-> ATTACH
+    end
+    REGISTRY -. "private/public mode is recorded" .-> OBJECTHELPER
+~~~
+
+### 🧭 How to read these maps
+
+- **Command execution** begins in the one live Discord gateway and flows through the registered command tree; the dashboard is not a second bot.
+- **Provider calls** are routed through the current provider-specific helpers. Missing credentials, empty metadata, timeouts, and bad source markup are failure states, not a reason to fabricate a result.
+- **Relationship persistence** keeps provider relations, provider recommendations, local genre overlap, and reviewed community links as separate provenance classes.
+- **Guild-owned state** is queried with the current guild context. Sharing an approved archive item does not grant cross-server moderation powers.
+- **Private image originals** remain private. The public bucket is a separate, explicit destination for generated non-sensitive output; attachment/fallback paths remain available.
+- **Browser actions** require live authorization and are routed through Rust to the same running Python bot. A configuration mutation is not treated as successful unless the live synchronization confirms it.
+
 
 ---
 
