@@ -79,14 +79,16 @@ def _family_friendly(item: dict) -> bool:
 
 class MediaNightView(FeedbackAwareView):
     """Persistent vote buttons encode a session ID and candidate index."""
-    def __init__(self, cog: "MediaNight", session_id: str, candidate_count: int):
+    def __init__(self, cog: "MediaNight", session_id: str, candidates: list[dict] | int):
         super().__init__(timeout=None)
         self.cog = cog
         self.session_id = session_id
-        for index in range(candidate_count):
+        candidate_items = candidates if isinstance(candidates, list) else [{} for _ in range(candidates)]
+        for index, candidate in enumerate(candidate_items):
             button = discord.ui.Button(
-                label=f"Vote {index + 1}",
+                label=(title_of(candidate)[:80] if candidate else f"Vote {index + 1}"),
                 style=discord.ButtonStyle.primary,
+                emoji="🗳️",
                 custom_id=f"media-night:{session_id}:vote:{index}",
             )
             async def callback(interaction: discord.Interaction, chosen: int = index) -> None:
@@ -145,7 +147,7 @@ class MediaNight(commands.Cog):
             self.sessions[session_id] = data
             self.vote_locks[session_id] = asyncio.Lock()
             if data.get("message_id"):
-                self.bot.add_view(MediaNightView(self, session_id, len(data["candidates"])), message_id=int(data["message_id"]))
+                self.bot.add_view(MediaNightView(self, session_id, data["candidates"]), message_id=int(data["message_id"]))
         if not self.expire_sessions.is_running():
             self.expire_sessions.start()
 
@@ -190,25 +192,47 @@ class MediaNight(commands.Cog):
     def session_embed(self, session: dict, final: bool = False) -> discord.Embed:
         candidates = session["candidates"]
         totals = tally_votes(session["votes"], len(candidates))
+        max_votes = max(totals, default=0)
         lines = []
         for index, item in enumerate(candidates):
-            name = title_of(item)
+            name = discord.utils.escape_markdown(title_of(item))
             link = item.get("siteUrl") or item.get("url")
             label = f"[{name}]({link})" if link else name
-            lines.append(f"**{index + 1}.** {label}\nVotes: **{totals[index]}**")
-        embed = discord.Embed(title=f"🎬 Media Night · {session['category'].title()}", description="\n\n".join(lines)[:4000], color=discord.Color.blurple())
-        embed.add_field(name="🗳️ Votes cast", value=str(sum(totals)), inline=True)
+            filled = round((totals[index] / max_votes) * 10) if max_votes else 0
+            bar = "▰" * filled + "▱" * (10 - filled)
+            lines.append(f"**{index + 1}. {label}**\n{bar} **{totals[index]}** vote(s)")
+        embed = discord.Embed(
+            title=f"🎬 Media Night · {session['category'].replace('-', ' ').title()}",
+            description=(
+                "Vote for the title your server should watch or read next. Select a title with the buttons below; "
+                "you can change your vote while the session is open.\n\n"
+                + "\n\n".join(lines)
+            )[:4000],
+            color=discord.Color.blurple(),
+        )
+        embed.add_field(name="Hosted by", value=f"<@{session['host_id']}>", inline=True)
+        embed.add_field(name="Votes cast", value=str(sum(totals)), inline=True)
+        status = "Voting open" if session["status"] == "open" else session["status"].title()
+        embed.add_field(name="Status", value=status, inline=True)
         if final:
             highest = max(totals, default=0)
             winners = [title_of(item) for i, item in enumerate(candidates) if totals[i] == highest]
             result = "No votes were cast." if highest == 0 else ("Tie: " + ", ".join(winners) if len(winners) > 1 else winners[0])
             embed.add_field(name="🏆 Result", value=result[:1024], inline=False)
         elif session["status"] == "open":
-            embed.add_field(name="⏳ Voting closes", value=f"<t:{int(session['expires_at'].timestamp())}:R>", inline=True)
+            embed.add_field(name="⏳ Voting closes", value=f"<t:{int(session['expires_at'].timestamp())}:R>", inline=False)
+        image = None
+        for item in candidates:
+            cover = item.get("coverImage") or {}
+            candidate_image = cover.get("large") if isinstance(cover, dict) else item.get("image")
+            if candidate_image:
+                image = candidate_image
+                break
+        if image and str(image).startswith("https://"):
+            embed.set_thumbnail(url=image)
         note = " · Family-friendly mode is metadata-based, not a parental-rating guarantee" if session.get("suitability") == "family-friendly" else ""
-        embed.set_footer(text="🗳️ One vote per person · You can change your vote while voting is open" + note)
+        embed.set_footer(text="Server-local vote · One vote per person · Votes can be changed while open" + note)
         return embed
-
     media_night = app_commands.Group(name="media-night", description="Start and manage community media voting")
 
     @media_night.command(name="start", description="Start a filtered community vote for anime, manga, movies, or TV")
@@ -306,7 +330,7 @@ class MediaNight(commands.Cog):
             return
         self.sessions[session_id] = session
         self.vote_locks[session_id] = asyncio.Lock()
-        view = MediaNightView(self, session_id, len(chosen))
+        view = MediaNightView(self, session_id, chosen)
         try:
             message = await channel.send(embed=self.session_embed(session), view=view, allowed_mentions=discord.AllowedMentions.none())
         except (discord.Forbidden, discord.HTTPException):
@@ -450,7 +474,7 @@ class MediaNight(commands.Cog):
                 "UPDATE media_night_sessions SET votes = ? WHERE session_id = ? AND guild_id = ? AND channel_id = ? AND status = 'open'",
                 (json.dumps(session["votes"]), session_id, interaction.guild_id, interaction.channel_id),
             )
-            await interaction.edit_original_response(embed=self.session_embed(session), view=MediaNightView(self, session_id, len(session["candidates"])))
+            await interaction.edit_original_response(embed=self.session_embed(session), view=MediaNightView(self, session_id, session["candidates"]))
 
     @media_night.command(name="close", description="Close or cancel a Media Night session")
     @app_commands.guild_only()
