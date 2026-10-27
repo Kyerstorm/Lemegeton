@@ -348,7 +348,7 @@ class DashboardView(FeedbackAwareView):
         section_enabled = cfg.get("sections", {}).get(self.current_section, True)
 
         embed = discord.Embed(
-            title="LEMEGETON  /  CONTROL CENTER",
+            title="🎛️  LEMEGETON / SERVER CONTROL CENTER",
             description=(
                 f"### {GEAR} {discord.utils.escape_markdown(self.current_section)}\n"
                 f"Configure this category for **{discord.utils.escape_markdown(self.guild.name)}**. "
@@ -358,32 +358,40 @@ class DashboardView(FeedbackAwareView):
             timestamp=discord.utils.utcnow(),
         )
         embed.set_thumbnail(url=self.bot.user.display_avatar.url if self.bot.user else discord.Embed.Empty)
-        embed.add_field(name="CATEGORY STATUS", value="🟢 Enabled" if section_enabled else "🔴 Disabled", inline=True)
-        embed.add_field(name="ACTIVE COMMANDS", value=f"**{enabled_count}** / {total}", inline=True)
-        embed.add_field(name="LOCKED", value=f"**{protected_count}**", inline=True)
+        embed.add_field(name="⚙️ CATEGORY STATUS", value="🟢 Enabled" if section_enabled else "🔴 Disabled", inline=True)
+        embed.add_field(name="🟢 ACTIVE COMMANDS", value=f"**{enabled_count}** / {total}", inline=True)
+        embed.add_field(name="🔒 LOCKED", value=f"**{protected_count}**", inline=True)
 
         if page_items:
-            lines = []
+            embed.add_field(
+                name=f"📚 COMMANDS · PAGE {self.current_page + 1}/{pages}",
+                value=f"Showing {len(page_items)} of {total} registered commands in this category.",
+                inline=False,
+            )
             for fullname, meta in page_items:
                 command = meta["command"]
                 protected = _is_protected(command)
                 enabled = _is_enabled(fullname, meta, cfg)
                 icon = LOCK_EMOJI if protected else (ENABLED_EMOJI if enabled else DISABLED_EMOJI)
                 status = "Always on" if protected else ("Enabled" if enabled else "Disabled")
-                description = discord.utils.escape_markdown(meta["description"].strip())[:110]
-                lines.append(f"{icon} **{discord.utils.escape_markdown(meta['display_name'])}**  ·  `/{fullname}`\n{description or 'No description provided.'}\n*{status}*")
+                display_name = discord.utils.escape_markdown(str(meta["display_name"]))[:150]
+                description = discord.utils.escape_markdown(str(meta["description"] or "").strip())[:700]
+                embed.add_field(
+                    name=f"{icon} {display_name} · /{fullname}"[:256],
+                    value=f"{description or 'No description provided.'}\n\n**Status:** {status}",
+                    inline=False,
+                )
+        else:
             embed.add_field(
-                name=f"COMMANDS  ·  PAGE {self.current_page + 1}/{pages}",
-                value="\n\n".join(lines)[:1024],
+                name="📭 COMMANDS",
+                value="No dashboard-managed commands were found in this category.",
                 inline=False,
             )
-        else:
-            embed.add_field(name="COMMANDS", value="No dashboard-managed commands were found in this category.", inline=False)
 
         all_commands = COMMAND_REGISTRY.all_commands()
         all_enabled = sum(_is_enabled(name, meta, cfg) for name, meta in all_commands)
         embed.add_field(
-            name="SERVER OVERVIEW",
+            name="🌐 SERVER OVERVIEW",
             value=f"**{all_enabled} / {len(all_commands)}** commands enabled across **{len(self.sections)}** categories",
             inline=False,
         )
