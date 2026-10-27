@@ -748,7 +748,7 @@ class Decor(commands.Cog):
 
             elif asset is not None:
 
-                asset = asset.strip()
+                asset = self.normalize_asset(asset)
 
                 if not self.valid_asset(asset):
                     await interaction.followup.send(
