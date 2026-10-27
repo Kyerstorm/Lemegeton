@@ -85,7 +85,7 @@ class HelpCog(commands.Cog):
                 "recommendations": {
                     "desc": "Get personalized manga recommendations based on your highly-rated library",
                     "usage": "/recommendations [username]",
-                    "note": "AI-powered recommendations with interactive browsing by category. Based on titles rated ≥8.0/10.",
+                    "note": "Uses available AniList library and rating data; it does not call an AI model. Results depend on the linked account and provider data.",
                     "examples": ["/recommendations", "/recommendations @friend"]
                 },
                 "random": {
@@ -103,7 +103,7 @@ class HelpCog(commands.Cog):
                 "3x3": {
                     "desc": "🎨 Create a 3x3 grid of your favorite anime, manga, or characters",
                     "usage": "/3x3 <media_type>",
-                    "note": "Generate shareable 3x3 grids with custom selections. Supports anime, manga, characters, and games. Fetches covers/images from AniList automatically.",
+                    "note": "Generate grids for anime, manga, characters, or games. By default images are sent as Discord attachments; generated files can use a separately configured public S3/CDN bucket.",
                     "examples": ["/3x3 anime", "/3x3 manga", "/3x3 character", "/3x3 games"]
                 },
                 "news": {
@@ -131,7 +131,115 @@ class HelpCog(commands.Cog):
                     "examples": ["/show_manga_channel"]
                 }
             },
+            "🌐 Cross-Media Discovery": {
+                "discovery-hub": {
+                    "desc": "Open the guided menu for media discovery and community features",
+                    "usage": "/discovery-hub",
+                    "note": "Choose a section from the private dropdown. This is a guide, not a title search.",
+                    "examples": ["/discovery-hub"]
+                },
+                "franchise": {
+                    "desc": "Explore provider-declared relationships and supported adaptations",
+                    "usage": "/franchise <title> [category]",
+                    "note": "AniList relationships, TMDB collection membership, recommendations, and cross-provider matches are labelled separately. Similar titles are not confirmed adaptations.",
+                    "examples": ["/franchise Re:Zero", "/franchise Dune category:BOOK"]
+                },
+                "similar": {
+                    "desc": "Find related media across supported providers",
+                    "usage": "/similar <title> <category>",
+                    "note": "Combines provider suggestions, conservative genre overlap, saved links, and eligible human-written community recommendations. Sources remain distinct.",
+                    "examples": ["/similar Frieren category:ANIME", "/similar Dune category:BOOK"]
+                },
+                "connections": {
+                    "desc": "Resolve a title and browse its known media relationships",
+                    "usage": "/connections <title> [category]",
+                    "note": "Reuses the franchise resolver and title-selection menu to keep similarly named works separate.",
+                    "examples": ["/connections The Apothecary Diaries", "/connections Lord of the Mysteries category:WEBNOVEL"]
+                },
+                "link-suggest": {
+                    "desc": "Submit a proposed relationship between two works for review",
+                    "usage": "/link-suggest",
+                    "note": "Submissions enter a review queue; this does not immediately make a proposed relationship trusted.",
+                    "examples": ["/link-suggest"]
+                },
+                "link-review": {
+                    "desc": "Inspect and review this server's proposed media relationships",
+                    "usage": "/link-review [decision] [suggestion_id] [reason]",
+                    "note": "Review actions are moderator-gated and scoped to this server. List suggestions first to obtain an ID.",
+                    "examples": ["/link-review", "/link-review decision:inspect suggestion_id:12", "/link-review decision:approve suggestion_id:12"]
+                }
+            },
+            "📚 Books & Webnovels": {
+                "reading-order": {
+                    "desc": "Browse known release relationships for books, light novels, webnovels, manga, and anime",
+                    "usage": "/reading-order <title> [category]",
+                    "note": "Shows release relationships available from sources; it does not invent chapter-to-episode mappings or story chronology.",
+                    "examples": ["/reading-order The Apothecary Diaries", "/reading-order Lord of the Mysteries category:WEBNOVEL"]
+                },
+                "author-works": {
+                    "desc": "Search Google Books for titles attributed to an author",
+                    "usage": "/author-works <author>",
+                    "note": "Attribution and edition coverage depend on Google Books records.",
+                    "examples": ["/author-works Ursula K. Le Guin"]
+                },
+                "webnovel-updates": {
+                    "desc": "Look up webnovel metadata through the existing Novel Updates search helper",
+                    "usage": "/webnovel-updates <title>",
+                    "note": "Results depend on the source scraper and page structure; no result does not prove a title is nonexistent.",
+                    "examples": ["/webnovel-updates Lord of the Mysteries"]
+                },
+                "chapter-discussion": {
+                    "desc": "Start a chapter- or volume-scoped discussion thread",
+                    "usage": "/chapter-discussion <title> <chapter> [source_url]",
+                    "note": "The discussion is stored for this server. State a clear chapter or volume cutoff for spoiler context.",
+                    "examples": ["/chapter-discussion Dandadan chapter:12"]
+                }
+            },
+            "🎬 Movies & TV": {
+                "where-to-watch": {
+                    "desc": "Find listed streaming, rental, and purchase providers for a movie or TV series",
+                    "usage": "/where-to-watch <title> <media_type> [region]",
+                    "note": "Requires TMDB_BEARER_TOKEN. Region defaults to this server's configured country; availability can change.",
+                    "examples": ["/where-to-watch Dune media_type:Movie", "/where-to-watch Severance media_type:TV region:IE"]
+                },
+                "person-credits": {
+                    "desc": "Browse a TMDB person's combined film and television credits",
+                    "usage": "/person-credits <name>",
+                    "note": "Choose the exact person from results to avoid mixing people with similar names. Requires TMDB_BEARER_TOKEN.",
+                    "examples": ["/person-credits Denis Villeneuve"]
+                },
+                "trailers": {
+                    "desc": "Find TMDB-listed videos, trailers, and teasers",
+                    "usage": "/trailers <title> <media_type>",
+                    "note": "Choose the exact movie or series first. Only supported YouTube and Vimeo links are displayed. Requires TMDB_BEARER_TOKEN.",
+                    "examples": ["/trailers Dune media_type:Movie", "/trailers Arcane media_type:TV"]
+                },
+                "collection-guide": {
+                    "desc": "Explore a movie's TMDB collection and listed films",
+                    "usage": "/collection-guide <title>",
+                    "note": "Uses source collection membership and release dates. Release order does not establish story chronology.",
+                    "examples": ["/collection-guide Toy Story"]
+                },
+                "episode-discussion": {
+                    "desc": "Start a spoiler-aware discussion for a TV episode",
+                    "usage": "/episode-discussion <series> <episode> [source_url]",
+                    "note": "Discussion records and threads are created for this server; include a clear season/episode cutoff.",
+                    "examples": ["/episode-discussion Arcane episode:S2E4"]
+                },
+                "media-region": {
+                    "desc": "Set this server's default country for streaming availability",
+                    "usage": "/media-region <region>",
+                    "note": "Requires Manage Server permission. Enter a two-letter country code such as IE, GB, US, or JP.",
+                    "examples": ["/media-region IE"]
+                }
+            },
             "🎮 Gaming": {
+                "game": {
+                    "desc": "Search IGDB for game metadata and enrich exact matches with Steam store details",
+                    "usage": "/game <title>",
+                    "note": "Shows developers, publishers, platforms, release information, and available Steam data. Ambiguous results use a selection menu; Steam matches are not inferred from fuzzy titles.",
+                    "examples": ["/game Hades", "/game Baldur's Gate 3"]
+                },
                 "steam-profile": {
                     "desc": "Show detailed Steam profile with library stats and analytics",
                     "usage": "/steam-profile [user]",
@@ -386,6 +494,8 @@ class HelpCog(commands.Cog):
             if kept:
                 filtered[category] = kept
 
+        # Documentation page, not a slash-command category; always keep it in the menu.
+        filtered["💻 Code & Systems"] = {}
         return filtered
 
     async def _is_bot_owner(self, user: discord.abc.User) -> bool:
@@ -516,6 +626,10 @@ class HelpCog(commands.Cog):
         app_commands.Choice(name="👑 Admin", value="admin"),
         app_commands.Choice(name="👥 Social", value="social"),
         app_commands.Choice(name="🛠️ Utilities", value="utilities"),
+        app_commands.Choice(name="🌐 Cross-Media Discovery", value="cross_media"),
+        app_commands.Choice(name="📚 Books & Webnovels", value="books"),
+        app_commands.Choice(name="🎬 Movies & TV", value="screen"),
+        app_commands.Choice(name="💻 Code & Systems", value="code"),
     ])
     async def help(self, interaction: discord.Interaction, category: app_commands.Choice[str] = None):
         """Display comprehensive help information for bot commands."""
@@ -570,7 +684,7 @@ class HelpCog(commands.Cog):
         embed = discord.Embed(
             title="🤖 Lemegeton Bot - Command Help",
             description=(
-                "**Welcome to Lemegeton!** Your ultimate anime/manga tracking companion with AI-powered features.\n\n"
+                "**Welcome to Lemegeton!** Media discovery, community features, and gaming metadata connected through existing providers.\n\n"
                 "**🚀 Quick Start:**\n"
                 "1. Use `/login` to connect your AniList account\n"
                 "2. Explore commands by category below\n"
@@ -700,7 +814,7 @@ class HelpCog(commands.Cog):
             ),
             "anime": (
                 "• Most commands work with both anime and manga\n"
-                "• Recommendations use advanced AI filtering for quality results\n"
+                "• Use /similar for cross-provider discovery; recommendations use available provider and library data\n"
                 "• Rate titles 8.0+ for best recommendation accuracy\n"
                 "• Browse supports advanced filtering by genre, year, format\n"
                 "• News monitoring tracks Twitter/X accounts for updates (Bot Moderator only)\n"
