@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -45,6 +46,7 @@ class CustomRole:
     icon_emoji: Optional[str] = None  # a Unicode emoji icon; only one of icon_png / icon_emoji is set
     icon_source: Optional[bytes] = None  # the original image as uploaded (icon_png is cut from it)
     icon_crop: Optional[str] = None      # JSON {"x", "y", "size"}: the square cut from icon_source
+    icon_source_asset_id: Optional[int] = None  # private object-store reference for the original
 
 
 _SETTINGS_COLUMNS = (
@@ -77,6 +79,7 @@ _ROLE_COLUMNS = (
     "icon_emoji",
     "icon_source",
     "icon_crop",
+    "icon_source_asset_id",
 )
 _ROLE_SELECT = ", ".join(_ROLE_COLUMNS)
 # Lists never need the images (an original can be several MB), so they read NULL instead.
@@ -84,7 +87,7 @@ _ROLE_SELECT = ", ".join(_ROLE_COLUMNS)
 _IMAGE_COLUMNS = {"icon_png", "icon_source"}
 _ROLE_SELECT_LIGHT = ", ".join(f"NULL AS {c}" if c in _IMAGE_COLUMNS else c for c in _ROLE_COLUMNS)
 # Only update_custom_role writes these (upserts keep whatever is stored).
-_UPSERT_SKIP = {"created_at", "updated_at", "last_changed_at", "icon_source", "icon_crop"}
+_UPSERT_SKIP = {"created_at", "updated_at", "last_changed_at", "icon_source", "icon_crop", "icon_source_asset_id"}
 _ROLE_UPDATABLE = set(_ROLE_COLUMNS) - {"guild_id", "user_id", "created_at", "updated_at"}
 
 
@@ -175,6 +178,7 @@ async def get_custom_role(guild_id: int, user_id: int) -> Optional[CustomRole]:
         (guild_id, user_id),
         fetch_type="one",
     )
+    # Large original images are fetched lazily by service.icon_source(), not for every role lookup.
     return _row_to_role(row) if row else None
 
 
@@ -212,11 +216,25 @@ async def upsert_custom_role(record: CustomRole) -> None:
 
 
 async def delete_custom_role(guild_id: int, user_id: int) -> None:
+    row = await execute_db_operation(
+        "get custom-role source asset before deletion",
+        "SELECT icon_source_asset_id FROM custom_role_records WHERE guild_id = ? AND user_id = ?",
+        (guild_id, user_id),
+        fetch_type="one",
+    )
     await execute_db_operation(
         "delete custom role",
         "DELETE FROM custom_role_records WHERE guild_id = ? AND user_id = ?",
         (guild_id, user_id),
     )
+    if row and row[0]:
+        try:
+            from helpers import media_storage
+            await media_storage.delete_asset(int(row[0]))
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "Could not remove private custom-role source image asset %s", row[0], exc_info=True
+            )
 
 
 async def seconds_since_change(guild_id: int, user_id: int) -> Optional[float]:
@@ -270,21 +288,99 @@ async def list_active_role_ids(guild_id: int) -> set:
 
 
 async def update_custom_role(guild_id: int, user_id: int, changed: bool = False, **fields) -> None:
-    """Update columns on an existing record. changed=True also stamps last_changed_at."""
+    """Update columns and keep large original images outside PostgreSQL when S3 is configured."""
     unknown = set(fields) - _ROLE_UPDATABLE
     if unknown:
         raise ValueError(f"Unknown custom role columns: {', '.join(sorted(unknown))}")
     if not fields and not changed:
         return
+
+    old_asset_id = None
+    new_asset_id = None
+    stored = None
+    migrate_source = "icon_source" in fields
+    if migrate_source:
+        old_row = await execute_db_operation(
+            "get custom-role source asset before update",
+            "SELECT icon_source_asset_id FROM custom_role_records WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+            fetch_type="one",
+        )
+        old_asset_id = int(old_row[0]) if old_row and old_row[0] else None
+        source = fields["icon_source"]
+        fields["icon_source_asset_id"] = None
+        if source is not None:
+            try:
+                from helpers import media_storage
+                from helpers.custom_roles import images
+                if media_storage.is_configured(private=True):
+                    await media_storage.ensure_schema()
+                    kind = images.sniff_type(bytes(source))
+                    content_type = "image/png" if kind == "PNG" else "image/jpeg"
+                    stored = await media_storage.store_image(
+                        bytes(source),
+                        namespace="custom-role-icons",
+                        filename=f"role-icon.{kind.lower()}",
+                        content_type=content_type,
+                        private=True,
+                    )
+                    if stored is not None:
+                        new_asset_id = await media_storage.create_asset(
+                            stored,
+                            namespace="custom-role-icons",
+                            uploaded_by=user_id,
+                            guild_id=guild_id,
+                        )
+                        fields["icon_source"] = None
+                        fields["icon_source_asset_id"] = new_asset_id
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    "Object storage for custom-role source image failed; retaining the original in PostgreSQL",
+                    exc_info=True,
+                )
+                if new_asset_id is not None:
+                    try:
+                        from helpers import media_storage
+                        await media_storage.delete_asset(new_asset_id)
+                    except Exception:
+                        logging.getLogger(__name__).warning("Could not clean up failed custom-role asset", exc_info=True)
+                elif stored is not None:
+                    try:
+                        from helpers import media_storage
+                        await media_storage.delete_uploaded_object(stored)
+                    except Exception:
+                        logging.getLogger(__name__).warning("Could not clean up uploaded custom-role image", exc_info=True)
+                new_asset_id = None
+                fields["icon_source"] = source
+                fields["icon_source_asset_id"] = None
+
     assignments = [f"{column} = ?" for column in fields]
     if changed:
         assignments.append("last_changed_at = CURRENT_TIMESTAMP")
-    await execute_db_operation(
-        "update custom role",
-        f"UPDATE custom_role_records SET {', '.join(assignments)}, updated_at = CURRENT_TIMESTAMP "
-        "WHERE guild_id = ? AND user_id = ?",
-        (*fields.values(), guild_id, user_id),
-    )
+    try:
+        await execute_db_operation(
+            "update custom role",
+            f"UPDATE custom_role_records SET {', '.join(assignments)}, updated_at = CURRENT_TIMESTAMP "
+            "WHERE guild_id = ? AND user_id = ?",
+            (*fields.values(), guild_id, user_id),
+        )
+    except Exception:
+        if new_asset_id is not None:
+            try:
+                from helpers import media_storage
+                await media_storage.delete_asset(new_asset_id)
+            except Exception:
+                logging.getLogger(__name__).warning("Could not clean up failed custom-role update asset", exc_info=True)
+        raise
+
+    if migrate_source and old_asset_id and old_asset_id != new_asset_id:
+        try:
+            from helpers import media_storage
+            await media_storage.delete_asset(old_asset_id)
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "Could not remove replaced custom-role source image asset %s", old_asset_id, exc_info=True
+            )
 
 
 async def list_unhydrated_roles() -> List[CustomRole]:

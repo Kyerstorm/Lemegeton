@@ -2237,7 +2237,17 @@ async def icon_source(member: discord.Member) -> Optional[bytes]:
     record = await storage.get_custom_role(member.guild.id, member.id)
     if record is None:
         return None
-    return record.icon_source or record.icon_png
+    if record.icon_source is not None:
+        return record.icon_source
+    if record.icon_source_asset_id:
+        try:
+            from helpers import media_storage
+            original = await media_storage.download_asset_bytes(record.icon_source_asset_id)
+            if original is not None:
+                return original
+        except Exception:
+            logger.warning("Could not load private custom-role source image asset %s", record.icon_source_asset_id, exc_info=True)
+    return record.icon_png
 
 
 def icons_usable(guild: discord.Guild) -> bool:

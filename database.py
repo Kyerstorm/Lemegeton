@@ -2105,6 +2105,11 @@ async def init_custom_roles_tables():
         "add custom role icon_crop column",
         "ALTER TABLE custom_role_records ADD COLUMN IF NOT EXISTS icon_crop TEXT",
     )
+    # The original upload can live in the shared private media store instead of BYTEA.
+    await execute_db_operation(
+        "add custom role icon_source_asset_id column",
+        "ALTER TABLE custom_role_records ADD COLUMN IF NOT EXISTS icon_source_asset_id BIGINT",
+    )
     # A Discord role can belong to at most one tracked record.
     await execute_db_operation(
         "create custom roles role_id index",

@@ -1,4 +1,5 @@
 from helpers.color_palette import PALETTE
+from helpers import media_storage
 # anilist.py
 
 import re
@@ -1886,7 +1887,11 @@ class AniListCog(commands.Cog):
                 await message.channel.send(embed=_anilist_error(f"Failed to fetch AniList {entity_kind} profile."))
                 return
             try:
-                embeds, files = await self.build_entity_embeds(entity_kind, entity)
+                embeds, files = await self.build_entity_embeds(
+                    entity_kind, entity,
+                    uploaded_by=message.author.id,
+                    guild_id=message.guild.id if message.guild else None,
+                )
                 file_kwargs = {"files": files} if files else {}
                 if entity_kind == "studio":
                     studio_view = self.StudioProjectsView(self, entity, embeds[0])
@@ -2200,7 +2205,9 @@ class AniListCog(commands.Cog):
         output.seek(0)
         return discord.File(output, filename="staff-characters.png")
 
-    async def build_entity_embeds(self, entity_kind: str, entity: dict) -> tuple[List[discord.Embed], List[discord.File]]:
+    async def build_entity_embeds(
+        self, entity_kind: str, entity: dict, *, uploaded_by: int | None = None, guild_id: int | None = None
+    ) -> tuple[List[discord.Embed], List[discord.File]]:
         """Build a profile overview and paginated media/character-role pages."""
         files: List[discord.File] = []
         name_data = entity.get("name") or {}
@@ -2278,7 +2285,24 @@ class AniListCog(commands.Cog):
                     existing["roles"].append(f"[{media_title}]({media_url})" + (f" — {'; '.join(role_bits)}" if role_bits else ""))
             characters = list(character_map.values())
             collage_file = await self._build_staff_character_collage([item["character"] for item in characters])
-            if collage_file:
+            collage_url = None
+            if collage_file and media_storage.is_configured(private=False):
+                try:
+                    position = collage_file.fp.tell()
+                    collage_file.fp.seek(0)
+                    image_data = collage_file.fp.read()
+                    collage_file.fp.seek(position)
+                    collage_url = await media_storage.store_public_image(
+                        image_data,
+                        namespace="generated/anilist-staff-collages",
+                        filename="staff-characters.png",
+                        content_type="image/png",
+                        uploaded_by=uploaded_by,
+                        guild_id=guild_id,
+                    )
+                except Exception:
+                    logger.warning("Could not store AniList staff collage in object storage", exc_info=True)
+            if collage_file and not collage_url:
                 files.append(collage_file)
             if characters:
                 for offset in range(0, len(characters), 6):
@@ -2297,7 +2321,7 @@ class AniListCog(commands.Cog):
                         role_text = "\n".join(f"• {role}" for role in roles) or "*Character listed without a media-specific role.*"
                         role_embed.add_field(name=f"[{char_name[:200]}]({char_url})", value=role_text[:1000], inline=False)
                     if offset == 0 and collage_file:
-                        role_embed.set_image(url="attachment://staff-characters.png")
+                        role_embed.set_image(url=collage_url or "attachment://staff-characters.png")
                     role_embed.set_footer(text=f"AniList • Character roles • Page {offset // 6 + 1}/{math.ceil(len(characters) / 6)}")
                     embeds.append(role_embed)
 

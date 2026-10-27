@@ -19,6 +19,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import database
+from helpers import media_storage
 from cogs_test.general_commands.dashboard import command_meta
 from helpers.anilist_helper import fetch_media_by_id
 from helpers.color_palette import PALETTE
@@ -219,6 +220,7 @@ async def _pool():
 
 
 async def _schema() -> None:
+    await media_storage.ensure_schema()
     pool = await _pool()
     async with pool.acquire() as conn:
         await conn.execute("""
@@ -228,7 +230,8 @@ async def _schema() -> None:
                 uploader_guild_id BIGINT,
                 storage_message_id BIGINT,
                 storage_channel_id BIGINT,
-                attachment_url TEXT NOT NULL,
+                attachment_url TEXT,
+                media_asset_id BIGINT REFERENCES media_assets(id) ON DELETE SET NULL,
                 filename TEXT NOT NULL,
                 title VARCHAR(100) NOT NULL,
                 anilist_id BIGINT,
@@ -250,8 +253,11 @@ async def _schema() -> None:
         await conn.execute("ALTER TABLE panel_tags ALTER COLUMN tag TYPE VARCHAR(100)")
         await conn.execute("ALTER TABLE panels ADD COLUMN IF NOT EXISTS anilist_id BIGINT")
         await conn.execute("ALTER TABLE panels ADD COLUMN IF NOT EXISTS chapter_number VARCHAR(32)")
+        await conn.execute("ALTER TABLE panels ADD COLUMN IF NOT EXISTS media_asset_id BIGINT REFERENCES media_assets(id) ON DELETE SET NULL")
+        await conn.execute("ALTER TABLE panels ALTER COLUMN attachment_url DROP NOT NULL")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_panels_created_at ON panels(created_at DESC)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_panels_uploader_id ON panels(uploader_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_panels_media_asset_id ON panels(media_asset_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_panel_tags_tag ON panel_tags(tag)")
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS guild_settings (
@@ -501,7 +507,19 @@ async def _count_from_guild(guild_id: int) -> int:
 
 
 async def _fresh_attachment(bot: commands.Bot, panel: dict[str, Any]) -> str | None:
-    url = str(panel["attachment_url"])
+    asset_id = panel.get("media_asset_id")
+    if asset_id:
+        try:
+            url = await media_storage.asset_url(int(asset_id))
+        except Exception:
+            log.warning("Could not sign private panel image asset %s", asset_id, exc_info=True)
+            return None
+        panel["attachment_url"] = url
+        return url
+
+    url = str(panel.get("attachment_url") or "")
+    if not url:
+        return None
     match = re.search(r"(?:[?&])ex=([0-9a-fA-F]+)", url)
     if not match or int(match.group(1), 16) > __import__("time").time():
         return url
@@ -799,6 +817,10 @@ class PanelForm(FeedbackAwareModal):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
         stored_message = None
+        stored_asset = None
+        asset_committed = False
+        media_asset_id = None
+        old_asset_id = None
         try:
             if interaction.user.id != self.user_id:
                 await interaction.followup.send("This form belongs to another user.", ephemeral=True)
@@ -836,19 +858,22 @@ class PanelForm(FeedbackAwareModal):
             if guild is None or guild.id != self.guild_id:
                 await interaction.followup.send("This form must be submitted in the server where it was opened.", ephemeral=True)
                 return
-            settings = await _settings(guild.id)
-            channel_id = settings.get("panel_storage_channel_id") or DEFAULT_STORAGE_CHANNEL_ID
-            storage = await _storage_channel(self.cog.bot, guild)
-            if storage is None:
-                await interaction.followup.send(
-                    "No panel storage channel is configured. Ask a Manage Server member to open /panels and select Configure.",
-                    ephemeral=True,
-                )
-                return
-            if channel_id and storage.id != int(channel_id) and not DEFAULT_STORAGE_CHANNEL_ID:
-                await interaction.followup.send("Configured storage channel is unavailable; ask an admin to reconfigure it.", ephemeral=True)
-                return
-            max_image_bytes = _max_upload_bytes(interaction, storage)
+            use_s3 = media_storage.is_configured(private=True)
+            storage = None
+            if not use_s3:
+                settings = await _settings(guild.id)
+                channel_id = settings.get("panel_storage_channel_id") or DEFAULT_STORAGE_CHANNEL_ID
+                storage = await _storage_channel(self.cog.bot, guild)
+                if storage is None:
+                    await interaction.followup.send(
+                        "No panel storage channel is configured. Configure S3 object storage or select a Panels storage channel.",
+                        ephemeral=True,
+                    )
+                    return
+                if channel_id and storage.id != int(channel_id) and not DEFAULT_STORAGE_CHANNEL_ID:
+                    await interaction.followup.send("Configured storage channel is unavailable; ask an admin to reconfigure it.", ephemeral=True)
+                    return
+            max_image_bytes = _max_upload_bytes(interaction, storage) if storage else MAX_IMAGE_BYTES
             if upload and upload_size > max_image_bytes:
                 uploaded_mib = upload_size / (1024 * 1024)
                 limit_mib = max_image_bytes / (1024 * 1024)
@@ -870,15 +895,31 @@ class PanelForm(FeedbackAwareModal):
                     )
                     return
 
-            attachment_url = self.panel["attachment_url"] if self.panel else None
+            attachment_url = self.panel.get("attachment_url") if self.panel else None
+            media_asset_id = self.panel.get("media_asset_id") if self.panel else None
+            old_asset_id = int(media_asset_id) if media_asset_id else None
             storage_message_id = self.panel.get("storage_message_id") if self.panel else None
             storage_channel_id = self.panel.get("storage_channel_id") if self.panel else None
             if image_bytes is not None:
-                stored_message = await storage.send(file=discord.File(io.BytesIO(image_bytes), filename=filename))
-                if not stored_message.attachments:
-                    raise RuntimeError("Discord storage message returned no attachment")
-                attachment_url = stored_message.attachments[0].url
-                storage_message_id, storage_channel_id = stored_message.id, storage.id
+                media_asset_id = None
+                if use_s3:
+                    stored_asset = await media_storage.store_image(
+                        image_bytes,
+                        namespace="panels",
+                        filename=filename,
+                        content_type=(getattr(upload, "content_type", None) or "application/octet-stream"),
+                        private=True,
+                    )
+                    if stored_asset is None:
+                        raise RuntimeError("Private image storage is not available. Check the S3 configuration.")
+                    attachment_url = None
+                    storage_message_id = storage_channel_id = None
+                else:
+                    stored_message = await storage.send(file=discord.File(io.BytesIO(image_bytes), filename=filename))
+                    if not stored_message.attachments:
+                        raise RuntimeError("Discord storage message returned no attachment")
+                    attachment_url = stored_message.attachments[0].url
+                    storage_message_id, storage_channel_id = stored_message.id, storage.id
             elif self.mode == "add":
                 await interaction.followup.send("Please attach an image.", ephemeral=True)
                 return
@@ -886,39 +927,68 @@ class PanelForm(FeedbackAwareModal):
             pool = await _pool()
             async with pool.acquire() as conn:
                 async with conn.transaction():
+                    if stored_asset is not None:
+                        media_asset_id = await media_storage.register_asset(
+                            conn, stored_asset, namespace="panels",
+                            uploaded_by=interaction.user.id, guild_id=guild.id,
+                        )
                     if self.mode == "add":
                         row = await conn.fetchrow("""
                             INSERT INTO panels(uploader_id,uploader_guild_id,storage_message_id,storage_channel_id,
-                                attachment_url,filename,title,anilist_id,chapter_number,caption,source_url,is_nsfw)
-                            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id
+                                attachment_url,media_asset_id,filename,title,anilist_id,chapter_number,caption,source_url,is_nsfw)
+                            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id
                         """, interaction.user.id, guild.id, storage_message_id, storage_channel_id,
-                             attachment_url, filename, title, anilist_id, chapter_number, caption, source_url, mature)
+                             attachment_url, media_asset_id, filename, title, anilist_id,
+                             chapter_number, caption, source_url, mature)
                         panel_id = int(row["id"])
                     else:
                         panel_id = int(self.panel["id"])
                         await conn.execute("""
                             UPDATE panels SET storage_message_id=$1,storage_channel_id=$2,attachment_url=$3,
-                                filename=$4,title=$5,anilist_id=$6,chapter_number=$7,caption=$8,source_url=$9,is_nsfw=$10,updated_at=NOW()
-                            WHERE id=$11
-                        """, storage_message_id, storage_channel_id, attachment_url, filename, title,
-                             anilist_id, chapter_number, caption, source_url, mature, panel_id)
+                                media_asset_id=$4,filename=$5,title=$6,anilist_id=$7,chapter_number=$8,
+                                caption=$9,source_url=$10,is_nsfw=$11,updated_at=NOW()
+                            WHERE id=$12
+                        """, storage_message_id, storage_channel_id, attachment_url, media_asset_id,
+                             filename, title, anilist_id, chapter_number, caption, source_url, mature, panel_id)
                         await conn.execute("DELETE FROM panel_tags WHERE panel_id=$1", panel_id)
                     for tag in tags:
                         await conn.execute("INSERT INTO panel_tags(panel_id,tag) VALUES($1,$2) ON CONFLICT DO NOTHING", panel_id, tag)
+            asset_committed = stored_asset is not None
             if image_bytes is not None and self.mode == "edit" and self.panel.get("storage_message_id"):
                 await self.cog._delete_storage_message(self.panel)
+            if old_asset_id and old_asset_id != media_asset_id:
+                try:
+                    await media_storage.delete_asset(old_asset_id)
+                except Exception:
+                    log.warning("Could not delete replaced panel asset %s", old_asset_id, exc_info=True)
             panel = await _get_panel(panel_id, True)
-            embed = _embed(panel, 1, 1, guild.name) if panel else discord.Embed(title=title)
+            if panel and (not panel["is_nsfw"] or _nsfw(interaction)):
+                embed = await self.cog._resolved_embed(panel, 1, 1)
+            else:
+                embed = _embed(panel, 1, 1, guild.name) if panel else discord.Embed(title=title)
+                embed.set_image(url=None)
+                if panel and panel["is_nsfw"]:
+                    embed.description = (embed.description or "") + "\n\nAge-restricted image hidden outside NSFW channels."
             view = PanelResultView(self.cog, panel_id)
-            await interaction.followup.send(content=f"Panel #{panel_id} {'saved' if self.mode == 'add' else 'updated'}.", embed=embed, view=view, ephemeral=True)
+            await interaction.followup.send(content=f"Panel #{panel_id} {'saved' if self.mode == "add" else 'updated'}.", embed=embed, view=view, ephemeral=True)
         except ValueError as exc:
             if stored_message:
                 await self.cog._delete_message(stored_message.channel, stored_message.id)
+            if stored_asset and not asset_committed:
+                try:
+                    await media_storage.delete_uploaded_object(stored_asset)
+                except Exception:
+                    log.warning("Could not clean up uncommitted panel image", exc_info=True)
             await interaction.followup.send(str(exc), ephemeral=True)
         except discord.HTTPException as exc:
             log.warning("Discord rejected panel storage upload/update: %s", exc)
             if stored_message:
                 await self.cog._delete_message(stored_message.channel, stored_message.id)
+            if stored_asset and not asset_committed:
+                try:
+                    await media_storage.delete_uploaded_object(stored_asset)
+                except Exception:
+                    log.warning("Could not clean up uncommitted panel image", exc_info=True)
             if getattr(exc, "code", None) == 40005:
                 message = (
                     "Discord rejected the image because it exceeds the storage server's upload limit. "
@@ -931,6 +1001,11 @@ class PanelForm(FeedbackAwareModal):
             log.exception("Panel form submit failed")
             if stored_message:
                 await self.cog._delete_message(stored_message.channel, stored_message.id)
+            if stored_asset and not asset_committed:
+                try:
+                    await media_storage.delete_uploaded_object(stored_asset)
+                except Exception:
+                    log.warning("Could not clean up uncommitted panel image", exc_info=True)
             await interaction.followup.send(application_error_message(exc), ephemeral=True)
 
 
@@ -1234,6 +1309,11 @@ class PanelDeleteConfirm(FeedbackAwareView):
                             "INSERT INTO mod_log(guild_id,moderator_id,panel_id,panel_title,uploader_id) VALUES($1,$2,$3,$4,$5)",
                             interaction.guild_id, interaction.user.id, panel["id"], panel["title"], panel["uploader_id"],
                         )
+            if panel.get("media_asset_id"):
+                try:
+                    await media_storage.delete_asset(int(panel["media_asset_id"]))
+                except Exception:
+                    log.warning("Could not delete removed panel image asset %s", panel["media_asset_id"], exc_info=True)
             if is_mod_delete:
                 try: await _audit_delete(interaction, panel)
                 except Exception: log.exception("Could not send moderation log notification")

@@ -11,9 +11,16 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from helpers.command_error_handler import handle_application_command_error
 from cogs.media.browse import BrowseCog, search_novelupdates
 from helpers.anilist_helper import fetch_media_by_id
 from cogs_test.general_commands.dashboard import command_meta
+from helpers.media_graph import (
+    find_community_recommendations,
+    find_linked_resources,
+    find_media_relationships,
+    record_media_relationship,
+)
 
 log = logging.getLogger(__name__)
 TMDB_BASE = "https://api.themoviedb.org/3"
@@ -334,6 +341,16 @@ class CrossMediaRecommendations(commands.Cog):
             return
         seed_title, seed_url, seed_genres, seed_tags, _ = self.seed_metadata(seed, category)
         local_results = await self.local_candidates(seed_genres, seed_tags)
+        seed_id = int(seed["id"]) if str(seed.get("id") or "").isdigit() and category in {"MANGA", "LIGHT_NOVEL"} else None
+        try:
+            graph_related, linked_resources, community_recommendations = await asyncio.gather(
+                find_media_relationships(seed_title, category, seed_url, interaction.guild_id),
+                find_linked_resources(seed_title, category, interaction.guild_id, media_id=seed_id, url=seed_url),
+                find_community_recommendations(seed_title, seed_genres, seed_tags),
+            )
+        except Exception:
+            log.warning("Cross-system graph lookup failed for %s", seed_title, exc_info=True)
+            graph_related, linked_resources, community_recommendations = [], [], []
 
         embed = discord.Embed(
             title=f"✨ Similar to {seed_title}"[:256],
@@ -380,23 +397,80 @@ class CrossMediaRecommendations(commands.Cog):
                         "source": "TMDB provider recommendation",
                         "cover": f"{TMDB_IMAGE}{rec['poster_path']}" if rec.get("poster_path") else None,
                     })
+        persisted_recommendations = [
+            {
+                **recommendation,
+                "category": recommendation.get("category") or category,
+            }
+            for recommendation in [*provider_suggestions, *local_results]
+        ]
+        graph_writes = await asyncio.gather(*(
+            record_media_relationship(
+                seed_title, category, seed_url,
+                str(recommendation.get("title") or ""),
+                str(recommendation.get("category") or category),
+                recommendation.get("url"),
+                "provider recommendation" if "provider" in str(recommendation.get("source") or "").casefold()
+                else "genre overlap recommendation",
+                source_kind="recommendation",
+                source_label=str(recommendation.get("source") or "Lemegeton recommendation"),
+            )
+            for recommendation in persisted_recommendations
+        ), return_exceptions=True)
+        for result in graph_writes:
+            if isinstance(result, Exception):
+                log.debug("Could not persist a cross-media recommendation: %r", result)
+
         if provider_suggestions:
             lines = []
             for rec in provider_suggestions:
                 label = f"[{rec['title']}]({rec['url']})" if rec.get("url") else rec["title"]
                 lines.append(f"**{label}** — {rec['source']}")
             embed.add_field(name="Provider-generated recommendations", value="\n".join(lines)[:1024], inline=False)
+        current_urls = {
+            str(item.get("url") or "").casefold()
+            for item in [*provider_suggestions, *local_results] if item.get("url")
+        }
+        graph_lines = []
+        for item in graph_related:
+            if item.get("url") and str(item["url"]).casefold() in current_urls:
+                continue
+            label = f"[{item['title']}]({item['url']})" if item.get("url") else item["title"]
+            graph_lines.append(f"**{item.get('type') or 'Media'} · {label}** — {item.get('relationType') or 'Related'}\nSource: {item.get('source') or 'Saved relationship graph'}")
+        if graph_lines:
+            embed.add_field(name="Connected relationship graph", value="\n\n".join(graph_lines[:8])[:1024], inline=False)
+
+        if community_recommendations:
+            lines = []
+            for item in community_recommendations:
+                label = f"[{item['title']}]({item['url']})" if item.get("url") else item["title"]
+                lines.append(f"**{item.get('category') or 'Media'} · {label}**\nShared tags: {', '.join(item['shared'])}\n{item.get('content') or item['source']}")
+            embed.add_field(name="Community recommendations", value="\n\n".join(lines[:5])[:1024], inline=False)
+
+        if linked_resources:
+            lines = []
+            for item in linked_resources[:8]:
+                label = str(item.get("title") or "Untitled").replace("[", "").replace("]", "").replace("(", "").replace(")", "")
+                label = f"[{label}]({item['url']})" if item.get("url") else label
+                lines.append(f"**{item.get('kind') or 'Community resource'}** · {label}")
+            embed.add_field(name="Connected community resources", value="\n".join(lines)[:1024], inline=False)
+
         if local_results:
             lines = []
             for rec in local_results:
                 label = f"[{rec['title']}]({rec['url']})" if rec.get("url") else rec["title"]
                 overlap = ", ".join(rec["shared"])
                 lines.append(f"**{rec['category']} · {label}**\nShared genres: {overlap} · Source: {rec['source']}")
-            embed.add_field(name="Cross-media matches · local ranking", value="\n\n".join(lines)[:3900], inline=False)
-        if not local_results and not provider_suggestions:
-            embed.description += "\n\nNo comparable genre metadata or provider recommendations were returned. Try a different starting title or provider."
+            embed.add_field(name="Cross-media matches · local ranking", value="\n\n".join(lines)[:1024], inline=False)
+        if not any((local_results, provider_suggestions, graph_lines, community_recommendations, linked_resources)):
+            embed.description += "\n\nNo comparable genre metadata, saved relationships or community resources were returned. Try a different starting title or provider."
         embed.set_footer(text="Sources: AniList · Novel Updates · Google Books · TMDB · Provider recommendations are labelled separately")
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+    async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+        """Route unexpected provider/database failures through the shared private reporter."""
+        await handle_application_command_error(interaction, error)
 
 
 async def setup(bot: commands.Bot) -> None:

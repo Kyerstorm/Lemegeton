@@ -86,6 +86,28 @@ The family-friendly option is a best-effort metadata filter, not a parental-rati
 - Release-calendar settings, Reading Club nominations/votes, and Media Night sessions are persisted in the shared database and keyed by guild/channel as appropriate.
 - Provider failures, unavailable metadata and missing release dates are treated as missing data. The bot does not make a failed source appear operational or manufacture metadata to fill gaps.
 
+## Image asset storage
+
+The bot uses a shared S3-compatible asset store and PostgreSQL `media_assets` registry. Configure `S3_BUCKET`, `S3_REGION`, and credentials; `S3_ENDPOINT_URL` is optional for AWS S3 and can point to R2, MinIO, or another S3-compatible endpoint. Keep this primary bucket private. Private images use short-lived signed URLs.
+
+New Panels uploads use this store when configured, and `panels.media_asset_id` references their registry entries. Existing Discord-hosted panels continue to work without a bulk migration; when object storage is not configured, Panels retains its existing Discord-channel fallback. Newly uploaded Custom Role original images also use private object storage when configured and fall back to PostgreSQL otherwise. Existing records are retained; historical images are not automatically re-uploaded.
+
+The `/3x3` generator and AniList staff-character collage can optionally publish their generated, non-sensitive composite images to a **separate** public bucket. Enable this only by setting both `S3_PUBLIC_BUCKET` and an HTTPS `S3_PUBLIC_BASE_URL` (usually a CDN URL). Never use that public bucket for custom-role source images, private uploads, or feedback attachments. Apply a lifecycle policy to generated-image prefixes to control retention. If public output storage is not configured, these commands continue sending Discord attachments.
+
+## Shared cross-system relationship graph
+
+Lemegeton uses a shared PostgreSQL relationship graph to connect the systems it already has instead of maintaining independent, command-only relationship lists.
+
+- /franchise indexes relationships explicitly declared by AniList and TMDB collection membership. It then reads saved graph neighbors, approved links for the current server, safe title-linked Panels, approved public archive entries, and matching discussions or events from the current server.
+- /similar stores provider recommendations and transparent genre-overlap recommendations as recommendation edges. It displays saved graph links separately from current provider results and from human-written entries in the approved recommendation board.
+- /link-review adds an edge to the community graph only after a moderator approves a suggestion. Community edges remain scoped to the approving guild; global provider edges and recommendation edges are stored separately. The /link-suggest category list includes video games, and /game reads approved cross-media edges and matched community resources alongside its existing IGDB/Steam metadata.
+- Approved archive entries and non-NSFW panel metadata are joined to a title when a conservative title or provider ID match is available. Reading Club nominations and active Media Night votes are also linked by exact title matches, with every nomination/session lookup restricted to the invoking guild. The graph does not copy or replace data from the existing archives.
+- Discussions, adaptation polls, quizzes, and brackets are resolved only inside the invoking guild. A result from one guild cannot expose another guild's private event links.
+- Missing optional archive tables do not take down the discovery command. Existing provider metadata remains the source of truth, and exact-title matches or recommendations are never promoted to confirmed adaptations.
+- The graph schema is created idempotently through the existing PostgreSQL access layer. It uses indexes and a uniqueness constraint to avoid repeatedly adding the same relationship.
+
+The graph is intentionally an integration layer, not a promise that every provider exposes every category or relation. AniList, TMDB, Google Books, Novel Updates, Steam/IGDB, and community archives keep their own authoritative metadata and limitations.
+
 ## Connected media commands and community archives
 
 The interactive /discovery-hub command is the entry point for media navigation and community features. /connections reuses the existing /franchise resolver and provider-specific relationship handling. /reading-order presents the same source-attributed relationships with an explicit warning that release order is not story chronology. Exact-title matches and recommendations remain unverified unless a provider declares a relationship.

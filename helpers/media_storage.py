@@ -1,0 +1,353 @@
+"""Private, S3-compatible storage for image assets.
+
+The database stores object metadata and foreign keys, never large image bodies.
+Objects remain private; callers receive short-lived presigned URLs only when
+rendering an image. Without complete S3 configuration, callers can retain their
+existing storage path (for example, the legacy Discord Panels channel).
+"""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import os
+import re
+import uuid
+from dataclasses import dataclass
+from urllib.parse import quote, urlsplit
+
+import boto3
+from botocore.config import Config
+
+import database
+
+@dataclass(frozen=True)
+class StoredImage:
+    bucket: str
+    key: str
+    content_type: str
+    size_bytes: int
+    sha256: str
+    is_private: bool = True
+
+
+def _setting(name: str, default: str = "") -> str:
+    return os.getenv(name, default).strip()
+
+
+def _public_base_url() -> str | None:
+    value = _setting("S3_PUBLIC_BASE_URL").rstrip("/")
+    parsed = urlsplit(value)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        return None
+    return value
+
+
+def is_configured(*, private: bool = True) -> bool:
+    """Whether the requested private or explicitly public object store is configured."""
+    if private:
+        if not _setting("S3_BUCKET"):
+            return False
+    else:
+        public_bucket = _setting("S3_PUBLIC_BUCKET")
+        if not public_bucket or public_bucket == _setting("S3_BUCKET") or not _public_base_url():
+            return False
+    access_key = _setting("S3_ACCESS_KEY_ID")
+    secret_key = _setting("S3_SECRET_ACCESS_KEY")
+    if bool(access_key) != bool(secret_key):
+        return False
+    if _setting("S3_ENDPOINT_URL") and not (access_key and secret_key):
+        return False
+    return True
+
+
+def _bucket(*, private: bool = True) -> str:
+    return _setting("S3_BUCKET" if private else "S3_PUBLIC_BUCKET")
+
+
+def _url_ttl() -> int:
+    try:
+        value = int(_setting("S3_SIGNED_URL_TTL_SECONDS", "900"))
+    except ValueError:
+        value = 900
+    return max(60, min(value, 3600))
+
+
+_client_instance = None
+_client_signature = None
+
+
+def _client():
+    global _client_instance, _client_signature
+    signature = (
+        _setting("S3_ENDPOINT_URL"), _setting("S3_REGION", "us-east-1"),
+        _setting("S3_ACCESS_KEY_ID"), _setting("S3_SECRET_ACCESS_KEY"),
+    )
+    if _client_instance is None or signature != _client_signature:
+        options = {
+            "service_name": "s3",
+            "region_name": signature[1],
+            "endpoint_url": signature[0] or None,
+            "config": Config(
+                signature_version="s3v4",
+                s3={"addressing_style": "path"},
+                retries={"max_attempts": 3, "mode": "standard"},
+            ),
+        }
+        if signature[2]:
+            options["aws_access_key_id"] = signature[2]
+        if signature[3]:
+            options["aws_secret_access_key"] = signature[3]
+        _client_instance = boto3.client(**options)
+        _client_signature = signature
+    return _client_instance
+
+
+def _namespace(value: str) -> str:
+    parts = [
+        re.sub(r"[^A-Za-z0-9_-]", "", part)
+        for part in str(value or "media").split("/")
+    ]
+    clean = "/".join(part for part in parts if part)
+    return clean[:120] or "media"
+
+
+def _extension(filename: str) -> str:
+    match = re.search(r"\.([A-Za-z0-9]{1,8})$", str(filename or ""))
+    return f".{match.group(1).lower()}" if match else ".img"
+
+
+async def store_image(
+    data: bytes,
+    *,
+    namespace: str,
+    filename: str,
+    content_type: str,
+    private: bool = True,
+) -> StoredImage | None:
+    """Upload image bytes and return database-ready metadata, or None if disabled."""
+    if not is_configured(private=private):
+        return None
+    if not data or not str(content_type or "").lower().startswith("image/"):
+        raise ValueError("Only non-empty image files can be stored.")
+    bucket = _bucket(private=private)
+    key = f"{_namespace(namespace)}/{uuid.uuid4().hex}{_extension(filename)}"
+    payload = bytes(data)
+
+    def put() -> None:
+        _client().put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=payload,
+            ContentType=content_type,
+            CacheControl="private, no-store",
+        )
+
+    await asyncio.to_thread(put)
+    return StoredImage(
+        bucket=bucket,
+        key=key,
+        content_type=str(content_type)[:128],
+        size_bytes=len(payload),
+        sha256=hashlib.sha256(payload).hexdigest(),
+        is_private=private,
+    )
+
+
+async def ensure_schema() -> None:
+    """Create the shared asset registry idempotently using the existing DB pool."""
+    pool = getattr(database, "_pool", None)
+    if pool is None or getattr(pool, "_closed", False):
+        pool = await database.init_db_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS media_assets (
+                id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                provider VARCHAR(32) NOT NULL,
+                namespace VARCHAR(120) NOT NULL,
+                bucket_name TEXT NOT NULL,
+                object_key TEXT NOT NULL,
+                content_type VARCHAR(128) NOT NULL,
+                size_bytes BIGINT NOT NULL CHECK (size_bytes > 0),
+                sha256 CHAR(64) NOT NULL,
+                is_private BOOLEAN NOT NULL DEFAULT TRUE,
+                uploaded_by BIGINT,
+                guild_id BIGINT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (provider, bucket_name, object_key)
+            )
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_media_assets_sha256 ON media_assets(sha256)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_media_assets_namespace_created ON media_assets(namespace, created_at DESC)"
+        )
+
+
+async def register_asset(
+    conn,
+    stored: StoredImage,
+    *,
+    namespace: str,
+    uploaded_by: int | None = None,
+    guild_id: int | None = None,
+) -> int:
+    """Register an uploaded object inside the caller's existing DB transaction."""
+    row = await conn.fetchrow("""
+        INSERT INTO media_assets(
+            provider, namespace, bucket_name, object_key, content_type,
+            size_bytes, sha256, is_private, uploaded_by, guild_id
+        ) VALUES('s3', $1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING id
+    """, _namespace(namespace), stored.bucket, stored.key, stored.content_type,
+         stored.size_bytes, stored.sha256, stored.is_private, uploaded_by, guild_id)
+    return int(row["id"])
+
+
+async def create_asset(
+    stored: StoredImage,
+    *,
+    namespace: str,
+    uploaded_by: int | None = None,
+    guild_id: int | None = None,
+) -> int:
+    """Persist an already-uploaded object in the shared asset registry."""
+    await ensure_schema()
+    pool = getattr(database, "_pool", None)
+    if pool is None or getattr(pool, "_closed", False):
+        pool = await database.init_db_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            return await register_asset(
+                conn,
+                stored,
+                namespace=namespace,
+                uploaded_by=uploaded_by,
+                guild_id=guild_id,
+            )
+
+
+async def _asset_row(asset_id: int):
+    pool = getattr(database, "_pool", None)
+    if pool is None or getattr(pool, "_closed", False):
+        pool = await database.init_db_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetchrow(
+            "SELECT id, bucket_name, object_key, content_type, is_private FROM media_assets WHERE id=$1",
+            asset_id,
+        )
+
+
+async def asset_url(asset_id: int) -> str | None:
+    """Return a stable URL for explicitly public objects, or a short-lived URL for private ones."""
+    row = await _asset_row(asset_id)
+    if not row:
+        return None
+    if not row["is_private"]:
+        base_url = _public_base_url()
+        if not base_url:
+            return None
+        return f"{base_url}/{quote(str(row['object_key']), safe='/')}"
+    return await asyncio.to_thread(
+        _client().generate_presigned_url,
+        "get_object",
+        Params={"Bucket": row["bucket_name"], "Key": row["object_key"]},
+        ExpiresIn=_url_ttl(),
+    )
+
+
+async def download_asset_bytes(asset_id: int) -> bytes | None:
+    """Read a private original for trusted server-side processing."""
+    row = await _asset_row(asset_id)
+    if not row:
+        return None
+
+    def get() -> bytes:
+        response = _client().get_object(
+            Bucket=row["bucket_name"], Key=row["object_key"]
+        )
+        try:
+            return response["Body"].read()
+        finally:
+            response["Body"].close()
+
+    return await asyncio.to_thread(get)
+
+
+async def store_public_image(
+    data: bytes,
+    *,
+    namespace: str,
+    filename: str,
+    content_type: str,
+    uploaded_by: int | None = None,
+    guild_id: int | None = None,
+) -> str | None:
+    """Publish generated, non-sensitive imagery to the explicitly configured public bucket.
+
+    Returns a stable URL. If public storage is not configured or fails, callers
+    can keep using their existing Discord attachment flow.
+    """
+    if not is_configured(private=False):
+        return None
+    stored = None
+    asset_id = None
+    try:
+        stored = await store_image(
+            data,
+            namespace=namespace,
+            filename=filename,
+            content_type=content_type,
+            private=False,
+        )
+        if stored is None:
+            return None
+        asset_id = await create_asset(
+            stored,
+            namespace=namespace,
+            uploaded_by=uploaded_by,
+            guild_id=guild_id,
+        )
+        url = await asset_url(asset_id)
+        if url:
+            return url
+        await delete_asset(asset_id)
+        return None
+    except Exception:
+        log.warning("Could not store public generated image in object storage", exc_info=True)
+        if asset_id is not None:
+            try:
+                await delete_asset(asset_id)
+            except Exception:
+                log.warning("Could not clean up failed public image asset %s", asset_id, exc_info=True)
+        elif stored is not None:
+            try:
+                await delete_uploaded_object(stored)
+            except Exception:
+                log.warning("Could not clean up uploaded public image", exc_info=True)
+        return None
+
+
+async def delete_uploaded_object(stored: StoredImage) -> None:
+    """Compensate for an upload when its database transaction did not commit."""
+    await asyncio.to_thread(
+        _client().delete_object, Bucket=stored.bucket, Key=stored.key
+    )
+
+
+async def delete_asset(asset_id: int) -> bool:
+    """Delete an object and its registry row. Leave metadata if object deletion fails."""
+    row = await _asset_row(asset_id)
+    if not row:
+        return False
+    await asyncio.to_thread(
+        _client().delete_object,
+        Bucket=row["bucket_name"],
+        Key=row["object_key"],
+    )
+    pool = getattr(database, "_pool", None)
+    if pool is None or getattr(pool, "_closed", False):
+        pool = await database.init_db_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM media_assets WHERE id=$1", asset_id)
+    return True

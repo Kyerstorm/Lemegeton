@@ -12,8 +12,10 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from helpers.command_error_handler import FeedbackAwareView, handle_application_command_error
 import database
 from cogs.media.browse import TMDB_API_BASE_URL, TMDB_IMAGE_BASE_URL, search_novelupdates
+from helpers.media_graph import record_media_relationship
 from cogs_test.general_commands.dashboard import command_meta
 
 log = logging.getLogger("Lemegeton.ConnectedMedia")
@@ -26,6 +28,7 @@ MEDIA_CATEGORIES = [
     app_commands.Choice(name="Webnovels", value="WEBNOVEL"),
     app_commands.Choice(name="Movies", value="MOVIE"),
     app_commands.Choice(name="TV series", value="TV"),
+    app_commands.Choice(name="Video games", value="GAME"),
 ]
 RELATION_TYPES = [
     app_commands.Choice(name="Adaptation", value="adaptation"),
@@ -125,7 +128,7 @@ def _display_year(item: dict, media_type: str) -> str:
     return value[:4] if value else "year unknown"
 
 
-class _TMDBPicker(discord.ui.View):
+class _TMDBPicker(FeedbackAwareView):
     """Owner-bound title selection shared by TMDB commands."""
     def __init__(self, cog: "ConnectedMedia", owner_id: int, kind: str, results: list[dict], region: str = "IE"):
         super().__init__(timeout=150)
@@ -324,6 +327,10 @@ class ConnectedMedia(commands.Cog):
     @app_commands.describe(title="Movie or TV title", media_type="Select the type", region="Optional two-letter country code; defaults to this server's media region")
     @command_meta(section="Media Discovery", name="Where to Watch")
     async def where_to_watch(self, interaction: discord.Interaction, title: str, media_type: str, region: str | None = None) -> None:
+        title = " ".join((title or "").split())
+        if len(title) < 2:
+            await interaction.response.send_message("Enter at least two characters for the title.", ephemeral=True)
+            return
         if not _tmdb_token():
             await interaction.response.send_message("Streaming discovery requires TMDB_BEARER_TOKEN.", ephemeral=True)
             return
@@ -374,6 +381,10 @@ class ConnectedMedia(commands.Cog):
     @app_commands.describe(name="Person to search in TMDB")
     @command_meta(section="Media Discovery", name="Person Credits")
     async def person_credits(self, interaction: discord.Interaction, name: str) -> None:
+        name = " ".join((name or "").split())
+        if len(name) < 2:
+            await interaction.response.send_message("Enter at least two characters for the person's name.", ephemeral=True)
+            return
         if not _tmdb_token():
             await interaction.response.send_message("Person discovery requires TMDB_BEARER_TOKEN.", ephemeral=True)
             return
@@ -423,6 +434,10 @@ class ConnectedMedia(commands.Cog):
     @app_commands.describe(title="Title to search", media_type="Movie or TV series")
     @command_meta(section="Media Discovery", name="Trailers")
     async def trailers(self, interaction: discord.Interaction, title: str, media_type: str) -> None:
+        title = " ".join((title or "").split())
+        if len(title) < 2:
+            await interaction.response.send_message("Enter at least two characters for the title.", ephemeral=True)
+            return
         if not _tmdb_token():
             await interaction.response.send_message("Video discovery requires TMDB_BEARER_TOKEN.", ephemeral=True)
             return
@@ -465,6 +480,10 @@ class ConnectedMedia(commands.Cog):
     @app_commands.describe(title="Movie title used to locate its collection")
     @command_meta(section="Media Discovery", name="Collection Guide")
     async def collection_guide(self, interaction: discord.Interaction, title: str) -> None:
+        title = " ".join((title or "").split())
+        if len(title) < 2:
+            await interaction.response.send_message("Enter at least two characters for the movie title.", ephemeral=True)
+            return
         if not _tmdb_token():
             await interaction.response.send_message("Collection discovery requires TMDB_BEARER_TOKEN.", ephemeral=True)
             return
@@ -696,6 +715,18 @@ class ConnectedMedia(commands.Cog):
             await interaction.response.send_message("That suggestion was reviewed by another moderator. Refresh the pending list.", ephemeral=True)
             return
         status = "approved as a community-verified suggestion (not provider-confirmed)" if decision == "approved" else "rejected"
+        if decision == "approved":
+            try:
+                await record_media_relationship(
+                    row[1], row[2], row[3], row[5], row[6], row[7], row[4],
+                    source_kind="community",
+                    source_label="Moderator-approved suggestion in this server",
+                    guild_id=interaction.guild_id,
+                    evidence=row[8],
+                    created_by=interaction.user.id,
+                )
+            except Exception:
+                log.warning("Approved media link #%s could not be indexed in the shared graph", suggestion_id, exc_info=True)
         await interaction.response.send_message(f"Suggestion **#{suggestion_id}** was {status}.", ephemeral=True)
 
     async def _create_discussion(self, interaction: discord.Interaction, media_type: str, title: str, reference: str, source_url: str | None) -> None:
@@ -745,6 +776,11 @@ class ConnectedMedia(commands.Cog):
     @command_meta(section="Community", name="Episode Discussion")
     async def episode_discussion(self, interaction: discord.Interaction, series: str, episode: str, source_url: str | None = None) -> None:
         await self._create_discussion(interaction, "episode", series, episode, source_url)
+
+
+    async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+        """Handle unexpected provider, database, and Discord interaction failures privately."""
+        await handle_application_command_error(interaction, error)
 
 
 async def setup(bot: commands.Bot) -> None:

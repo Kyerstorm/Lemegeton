@@ -1,6 +1,6 @@
 from helpers.color_palette import PALETTE
 import discord
-from helpers.command_error_handler import FeedbackAwareView, application_error_message
+from helpers.command_error_handler import FeedbackAwareView, application_error_message, handle_component_error
 from discord import app_commands
 from discord.ext import commands
 import logging
@@ -85,7 +85,7 @@ class HelpCog(commands.Cog):
                 "recommendations": {
                     "desc": "Get personalized manga recommendations based on your highly-rated library",
                     "usage": "/recommendations [username]",
-                    "note": "AI-powered recommendations with interactive browsing by category. Based on titles rated ≥8.0/10.",
+                    "note": "Uses available AniList library and rating data; it does not call an AI model. Results depend on the linked account and provider data.",
                     "examples": ["/recommendations", "/recommendations @friend"]
                 },
                 "random": {
@@ -103,7 +103,7 @@ class HelpCog(commands.Cog):
                 "3x3": {
                     "desc": "🎨 Create a 3x3 grid of your favorite anime, manga, or characters",
                     "usage": "/3x3 <media_type>",
-                    "note": "Generate shareable 3x3 grids with custom selections. Supports anime, manga, characters, and games. Fetches covers/images from AniList automatically.",
+                    "note": "Generate grids for anime, manga, characters, or games. By default images are sent as Discord attachments; generated files can use a separately configured public S3/CDN bucket.",
                     "examples": ["/3x3 anime", "/3x3 manga", "/3x3 character", "/3x3 games"]
                 },
                 "news": {
@@ -131,7 +131,243 @@ class HelpCog(commands.Cog):
                     "examples": ["/show_manga_channel"]
                 }
             },
+            "👥 Community Archives & Events": {
+                "panels": {
+                    "desc": "Open the shared manga panel archive to browse, search, contribute, or manage your submissions",
+                    "usage": "/panels",
+                    "note": "Panel records are shared across servers, but archive settings and moderation are server-specific. Mature panels are hidden outside age-restricted channels. Private S3 originals are used when configured; the existing Discord-backed path remains supported.",
+                    "examples": ["/panels"]
+                },
+                "panel-of-the-day": {
+                    "desc": "View this server's selected safe panel for today",
+                    "usage": "/panel-of-the-day",
+                    "note": "Uses the server's configured daily selection and existing panel archive; it does not create a new submission.",
+                    "examples": ["/panel-of-the-day"]
+                },
+                "quotes": {
+                    "desc": "Browse, search, randomly discover, or contribute short attributed media quotes",
+                    "usage": "/quotes <action> [title] [content] [source_title] [creator] [url] [media_type] [tags] [spoiler] [keyword]",
+                    "note": "Actions: Add, Browse, Search, Random. Quotes are limited to 280 characters; entries can be tagged, attributed, and spoiler-marked. New submissions may require moderator review.",
+                    "examples": ["/quotes action:browse", "/quotes action:search keyword:hope"]
+                },
+                "fanworks": {
+                    "desc": "Discover or submit credited fan art, edits, wallpapers, and videos",
+                    "usage": "/fanworks <action> [title] [creator] [url] [source_title] [media_type] [tags]",
+                    "note": "Actions: Add, Browse, Search, Random. Credit the original creator and link to their work; external links must use HTTPS.",
+                    "examples": ["/fanworks action:browse", "/fanworks action:search keyword:wallpaper"]
+                },
+                "moodboards": {
+                    "desc": "Create or explore themed boards that bring multiple works together",
+                    "usage": "/moodboards <action> [title] [content] [url] [media_type] [tags] [keyword]",
+                    "note": "Use the content field to describe the mood and list included works. Actions: Add, Browse, Search, Random.",
+                    "examples": ["/moodboards action:browse", "/moodboards action:search keyword:celestial"]
+                },
+                "soundtracks": {
+                    "desc": "Index and discover soundtrack links from legitimate music or video platforms",
+                    "usage": "/soundtracks <action> [title] [creator] [url] [source_title] [media_type] [tags]",
+                    "note": "Prefer official artist, label, streaming, or video-platform links. Actions: Add, Browse, Search, Random.",
+                    "examples": ["/soundtracks action:browse", "/soundtracks action:search keyword:opening"]
+                },
+                "scenes": {
+                    "desc": "Save and browse memorable scenes, captions, references, and source links",
+                    "usage": "/scenes <action> [title] [content] [source_title] [url] [media_type] [tags] [spoiler]",
+                    "note": "Include the work and, where helpful, episode/chapter reference. Use the spoiler option when the description reveals plot details.",
+                    "examples": ["/scenes action:browse", "/scenes action:search keyword:finale"]
+                },
+                "recommendation-board": {
+                    "desc": "Share human-written recommendations with reasons and source metadata",
+                    "usage": "/recommendation-board <action> [title] [content] [url] [media_type] [tags] [keyword]",
+                    "note": "These are community-written recommendations, not provider recommendations or model-generated results. Actions: Add, Browse, Search, Random.",
+                    "examples": ["/recommendation-board action:browse", "/recommendation-board action:search keyword:fantasy"]
+                },
+                "theories": {
+                    "desc": "Share and browse fan theories with evidence links and spoiler marking",
+                    "usage": "/theories <action> [title] [content] [source_title] [url] [media_type] [tags] [spoiler]",
+                    "note": "Add a clear source work and mark spoilers. Submissions are community content and may require moderator review.",
+                    "examples": ["/theories action:browse", "/theories action:search keyword:ending"]
+                },
+                "archive-mine": {
+                    "desc": "Check your archive submissions and their review status in this server",
+                    "usage": "/archive-mine [archive_type]",
+                    "note": "Shows up to 20 recent submissions made by you in this server. Pending entries need local moderator review.",
+                    "examples": ["/archive-mine", "/archive-mine archive_type:quotes"]
+                },
+                "archive-report": {
+                    "desc": "Report an approved community archive entry for moderator review",
+                    "usage": "/archive-report <archive_type> <entry_id> <reason>",
+                    "note": "Explain the issue in 10–1,000 characters. Reports are scoped to your server; duplicate reports from the same user are not added twice.",
+                    "examples": ["/archive-report archive_type:quotes entry_id:12 reason:Missing source attribution"]
+                },
+                "archive-report-review": {
+                    "desc": "Triage archive reports submitted in this server",
+                    "usage": "/archive-report-review [decision] [report_id] [reason]",
+                    "note": "Requires Manage Server or Manage Messages. List, mark reviewed, dismiss, or remove an entry; removal is restricted to its originating server.",
+                    "examples": ["/archive-report-review", "/archive-report-review decision:dismissed report_id:12"]
+                },
+                "archive-review": {
+                    "desc": "Review pending archive submissions from this server",
+                    "usage": "/archive-review <action> [entry_id]",
+                    "note": "Requires Manage Server or Manage Messages. Actions: List, Approve, Reject, Remove. Moderation cannot edit another server's submission.",
+                    "examples": ["/archive-review action:list", "/archive-review action:approve entry_id:12"]
+                },
+                "media-bracket": {
+                    "desc": "Create a server-specific elimination poll for media titles",
+                    "usage": "/media-bracket <action> [title] [candidates] [bracket_id] [choice] [media_type]",
+                    "note": "Actions: Start, Vote, Results. A new bracket needs 2–16 distinct candidates separated by |. Votes are server-specific and can be changed while open.",
+                    "examples": ["/media-bracket action:results bracket_id:ABC123"]
+                },
+                "adaptation-vote": {
+                    "desc": "Create a poll and compare community preferences between two adaptations or versions",
+                    "usage": "/adaptation-vote <action> [title] [option_a] [option_b] [poll_id] [choice] [media_type] [source_url]",
+                    "note": "Actions: Create, Vote, Results. Vote with A or B. Results represent community preference, not an objective quality score; polls are server-specific.",
+                    "examples": ["/adaptation-vote action:results poll_id:ABC123", "/adaptation-vote action:vote poll_id:ABC123 choice:A"]
+                },
+                "media-quiz": {
+                    "desc": "Add source-linked trivia, play a random question, or submit an answer privately",
+                    "usage": "/media-quiz <action> [question] [answer] [source_url]",
+                    "note": "Actions: Add, Play, Answer. Questions belong to the current server; answering requires an active quiz session in the same channel.",
+                    "examples": ["/media-quiz action:play", "/media-quiz action:answer answer:Example"]
+                },
+                "media-night": {
+                    "desc": "Open or join this server's community media-night voting",
+                    "usage": "/media-night",
+                    "note": "Use the command's prompts to participate in a server-specific session. This entry is shown only if the command is registered.",
+                    "examples": ["/media-night"]
+                }
+            },
+            "🌐 Cross-Media Discovery": {
+                "discovery-hub": {
+                    "desc": "Open the guided menu for media discovery and community features",
+                    "usage": "/discovery-hub",
+                    "note": "Choose a section from the private dropdown. This is a guide, not a title search.",
+                    "examples": ["/discovery-hub"]
+                },
+                "compare": {
+                    "desc": "Compare two or more media entries side-by-side",
+                    "usage": "/compare",
+                    "note": "Shows fields supported by the selected media categories; available metadata varies by provider.",
+                    "examples": ["/compare"]
+                },
+                "franchise": {
+                    "desc": "Explore provider-declared relationships and supported adaptations",
+                    "usage": "/franchise <title> [category]",
+                    "note": "AniList relationships, TMDB collection membership, recommendations, and cross-provider matches are labelled separately. Similar titles are not confirmed adaptations.",
+                    "examples": ["/franchise Re:Zero", "/franchise Dune category:BOOK"]
+                },
+                "similar": {
+                    "desc": "Find related media across supported providers",
+                    "usage": "/similar <title> <category>",
+                    "note": "Combines provider suggestions, conservative genre overlap, saved links, and eligible human-written community recommendations. Sources remain distinct.",
+                    "examples": ["/similar Frieren category:ANIME", "/similar Dune category:BOOK"]
+                },
+                "connections": {
+                    "desc": "Resolve a title and browse its known media relationships",
+                    "usage": "/connections <title> [category]",
+                    "note": "Reuses the franchise resolver and title-selection menu to keep similarly named works separate.",
+                    "examples": ["/connections The Apothecary Diaries", "/connections Lord of the Mysteries category:WEBNOVEL"]
+                },
+                "link-suggest": {
+                    "desc": "Submit a proposed relationship between two works for review",
+                    "usage": "/link-suggest <source_title> <source_category> <source_url> <relationship> <target_title> <target_category> <target_url> <evidence>",
+                    "note": "Submissions enter a review queue; this does not immediately make a proposed relationship trusted.",
+                    "note": "Provide distinct source and target titles, categories, HTTPS metadata URLs, a relationship type, and at least 15 characters of evidence. Submissions enter the moderator review queue for the current server; they are not immediately trusted."
+                },
+                "link-review": {
+                    "desc": "Inspect and review this server's proposed media relationships",
+                    "usage": "/link-review [decision] [suggestion_id] [reason]",
+                    "note": "Review actions are moderator-gated and scoped to this server. List suggestions first to obtain an ID.",
+                    "examples": ["/link-review", "/link-review decision:inspect suggestion_id:12", "/link-review decision:approved suggestion_id:12"]
+                }
+            },
+            "📚 Books & Webnovels": {
+                "reading-club": {
+                    "desc": "Nominate, vote on, and schedule a community reading selection",
+                    "usage": "/reading-club",
+                    "note": "Use the command prompts to view available nomination and voting actions for your server.",
+                    "examples": ["/reading-club"]
+                },
+                "reading-order": {
+                    "desc": "Browse known release relationships for books, light novels, webnovels, manga, and anime",
+                    "usage": "/reading-order <title> [category]",
+                    "note": "Shows release relationships available from sources; it does not invent chapter-to-episode mappings or story chronology.",
+                    "examples": ["/reading-order The Apothecary Diaries", "/reading-order Lord of the Mysteries category:WEBNOVEL"]
+                },
+                "author-works": {
+                    "desc": "Search Google Books for titles attributed to an author",
+                    "usage": "/author-works <author>",
+                    "note": "Attribution and edition coverage depend on Google Books records.",
+                    "examples": ["/author-works Ursula K. Le Guin"]
+                },
+                "webnovel-updates": {
+                    "desc": "Look up webnovel metadata through the existing Novel Updates search helper",
+                    "usage": "/webnovel-updates <title>",
+                    "note": "Results depend on the source scraper and page structure; no result does not prove a title is nonexistent.",
+                    "examples": ["/webnovel-updates Lord of the Mysteries"]
+                },
+                "chapter-discussion": {
+                    "desc": "Start a chapter- or volume-scoped discussion thread",
+                    "usage": "/chapter-discussion <title> <chapter> [source_url]",
+                    "note": "The discussion is stored for this server. State a clear chapter or volume cutoff for spoiler context.",
+                    "examples": ["/chapter-discussion Dandadan chapter:12"]
+                }
+            },
+            "🎬 Movies & TV": {
+                "tv-guide": {
+                    "desc": "Browse supported TV seasons, episodes, and air-date information",
+                    "usage": "/tv-guide",
+                    "note": "Shows season and episode metadata returned by supported providers; missing episode data is not inferred.",
+                    "examples": ["/tv-guide"]
+                },
+                "release-calendar": {
+                    "desc": "Browse supported upcoming anime, movie, and TV release dates",
+                    "usage": "/release-calendar",
+                    "note": "Calendar entries depend on provider availability and known dates; they may not be exhaustive.",
+                    "examples": ["/release-calendar"]
+                },
+                "where-to-watch": {
+                    "desc": "Find listed streaming, rental, and purchase providers for a movie or TV series",
+                    "usage": "/where-to-watch <title> <media_type> [region]",
+                    "note": "Requires TMDB_BEARER_TOKEN. Region defaults to this server's configured country; availability can change.",
+                    "examples": ["/where-to-watch Dune media_type:Movie", "/where-to-watch Severance media_type:TV region:IE"]
+                },
+                "person-credits": {
+                    "desc": "Browse a TMDB person's combined film and television credits",
+                    "usage": "/person-credits <name>",
+                    "note": "Choose the exact person from results to avoid mixing people with similar names. Requires TMDB_BEARER_TOKEN.",
+                    "examples": ["/person-credits Denis Villeneuve"]
+                },
+                "trailers": {
+                    "desc": "Find TMDB-listed videos, trailers, and teasers",
+                    "usage": "/trailers <title> <media_type>",
+                    "note": "Choose the exact movie or series first. Only supported YouTube and Vimeo links are displayed. Requires TMDB_BEARER_TOKEN.",
+                    "examples": ["/trailers Dune media_type:Movie", "/trailers Arcane media_type:TV"]
+                },
+                "collection-guide": {
+                    "desc": "Explore a movie's TMDB collection and listed films",
+                    "usage": "/collection-guide <title>",
+                    "note": "Uses source collection membership and release dates. Release order does not establish story chronology.",
+                    "examples": ["/collection-guide Toy Story"]
+                },
+                "episode-discussion": {
+                    "desc": "Start a spoiler-aware discussion for a TV episode",
+                    "usage": "/episode-discussion <series> <episode> [source_url]",
+                    "note": "Discussion records and threads are created for this server; include a clear season/episode cutoff.",
+                    "examples": ["/episode-discussion Arcane episode:S2E4"]
+                },
+                "media-region": {
+                    "desc": "Set this server's default country for streaming availability",
+                    "usage": "/media-region <region>",
+                    "note": "Requires Manage Server permission. Enter a two-letter country code such as IE, GB, US, or JP.",
+                    "examples": ["/media-region IE"]
+                }
+            },
             "🎮 Gaming": {
+                "game": {
+                    "desc": "Search IGDB for game metadata and enrich exact matches with Steam store details",
+                    "usage": "/game <title>",
+                    "note": "Shows developers, publishers, platforms, release information, and available Steam data. Ambiguous results use a selection menu; Steam matches are not inferred from fuzzy titles.",
+                    "examples": ["/game Hades", "/game Baldur's Gate 3"]
+                },
                 "steam-profile": {
                     "desc": "Show detailed Steam profile with library stats and analytics",
                     "usage": "/steam-profile [user]",
@@ -386,6 +622,8 @@ class HelpCog(commands.Cog):
             if kept:
                 filtered[category] = kept
 
+        # Documentation page, not a slash-command category; always keep it in the menu.
+        filtered["💻 Code"] = {}
         return filtered
 
     async def _is_bot_owner(self, user: discord.abc.User) -> bool:
@@ -516,6 +754,11 @@ class HelpCog(commands.Cog):
         app_commands.Choice(name="👑 Admin", value="admin"),
         app_commands.Choice(name="👥 Social", value="social"),
         app_commands.Choice(name="🛠️ Utilities", value="utilities"),
+        app_commands.Choice(name="🌐 Cross-Media Discovery", value="cross_media"),
+        app_commands.Choice(name="📚 Books & Webnovels", value="books"),
+        app_commands.Choice(name="🎬 Movies & TV", value="screen"),
+        app_commands.Choice(name="👥 Community Archives & Events", value="community"),
+        app_commands.Choice(name="💻 Code", value="code"),
     ])
     async def help(self, interaction: discord.Interaction, category: app_commands.Choice[str] = None):
         """Display comprehensive help information for bot commands."""
@@ -570,13 +813,13 @@ class HelpCog(commands.Cog):
         embed = discord.Embed(
             title="🤖 Lemegeton Bot - Command Help",
             description=(
-                "**Welcome to Lemegeton!** Your ultimate anime/manga tracking companion with AI-powered features.\n\n"
-                "**🚀 Quick Start:**\n"
-                "1. Use `/login` to connect your AniList account\n"
-                "2. Explore commands by category below\n"
-                "3. Join our [Support Server](https://discord.gg/xUGD7krzws) for help\n"
-                "4. Use `/feedback` to suggest improvements\n\n"
-                "**📋 Command Categories:**"
+                "**Welcome to Lemegeton!** Media discovery, community features, and gaming metadata connected through existing providers.\n\n"
+                "**✦ Get started**\n"
+                "1. Use `/help` and choose a category from the dropdown.\n"
+                "2. Use `/browse` to search supported media.\n"
+                "3. Open `/discovery-hub` for the guided discovery menu.\n"
+                "4. Use `/feedback` to suggest improvements or report a bug.\n\n"
+                "**✦ Browse the systems below**"
             ),
             color=PALETTE.PRIMARY
         )
@@ -585,7 +828,10 @@ class HelpCog(commands.Cog):
         category_overview = []
         for category_name, commands in categories.items():
             command_count = len(commands)
-            category_overview.append(f"{category_name} • **{command_count} commands**")
+            if category_name == "💻 Code":
+                category_overview.append(f"{category_name} • **Architecture guide**")
+            else:
+                category_overview.append(f"{category_name} • **{command_count} commands**")
         
         embed.add_field(
             name="Available Categories",
@@ -596,10 +842,10 @@ class HelpCog(commands.Cog):
         embed.add_field(
             name="💡 Pro Tips",
             value=(
-                "• Most commands work better after using `/login`\n"
-                "• Use the dropdown menu below to explore categories\n"
-                "• Commands marked with 🔒 require registration\n"
-                "• Some commands have optional parameters for flexibility"
+                "• Use the dropdown below to browse by feature\n"
+                "• Some AniList personal features require `/login`; public metadata searches may not\n"
+                "• Provider outages can temporarily affect results\n"
+                "• Use `/feedback` to report a reproducible issue"
             ),
             inline=False
         )
@@ -645,10 +891,59 @@ class HelpCog(commands.Cog):
             "admin": "👑 Admin",
             "social": "👥 Social",
             "utilities": "🛠️ Utilities",
+            "cross_media": "🌐 Cross-Media Discovery",
+            "books": "📚 Books & Webnovels",
+            "screen": "🎬 Movies & TV",
+            "community": "👥 Community Archives & Events",
+            "code": "💻 Code",
             "owner": "🔒 Bot Owner — Prefix Commands",
         }
         category_name = category_mapping.get(category_key, "Unknown Category")
         command_items = categories.get(category_name, {})
+
+        if category_key == "code":
+            embed = discord.Embed(
+                title="💻 Code",
+                description=(
+                    "A maintainer-friendly guide to how Lemegeton's command, provider, database, and image-storage systems fit together. "
+                    "External providers can be incomplete or temporarily unavailable."
+                ),
+                color=PALETTE.PRIMARY,
+            )
+            sections = [
+                (
+                    "◇ Command layer",
+                    "Slash-command cogs validate input, collect provider data, and render embeds or selection menus. This help menu filters curated descriptions against commands registered at runtime, so unloaded commands are not presented as available.",
+                ),
+                (
+                    "◇ Cross-media command map",
+                    "/franchise explores provider-declared relationships and labels recommendations separately. /connections and /reading-order reuse the title resolver. /similar combines provider suggestions, genre overlap, saved links, and eligible human-written community recommendations. /game starts with IGDB and only adds Steam details for a suitable exact title match.",
+                ),
+                (
+                    "◇ Metadata providers",
+                    "AniList supplies supported anime/manga metadata and relationships; TMDB supplies movie/TV information, credits, videos, collections, and region availability; Google Books supplies book/author records; Novel Updates uses the existing scraper helper; IGDB supplies game metadata, with Steam used for optional store enrichment.",
+                ),
+                (
+                    "◇ Relationship graph",
+                    "helpers/media_graph.py records and retrieves linked media with provenance. Provider-confirmed relationships, provider recommendations, locally calculated genre overlap, and moderator-approved community links remain distinct. A similar title or shared genre is not proof of an adaptation.",
+                ),
+                (
+                    "◇ PostgreSQL and server boundaries",
+                    "media_relationship_graph stores deduplicated relationships and provenance. Other systems retain their existing tables, while media_assets stores object metadata rather than image bytes. Community discussions, suggestions, and server-owned resources are queried using the invoking guild ID.",
+                ),
+                (
+                    "◇ Image storage and privacy",
+                    "S3_BUCKET stores private originals such as uploaded Panels and Custom Role source images; private links use short-lived signed URLs. /panel-of-the-day reads the shared panel asset without making private originals public. Generated /3x3 grids and staff-character collages can use a separate S3_PUBLIC_BUCKET and HTTPS S3_PUBLIC_BASE_URL. Public output is disabled unless that separate destination is configured; Discord attachments remain the fallback. Never reuse the private bucket as the public bucket.",
+                ),
+                (
+                    "◇ Errors and reporting",
+                    "Provider calls use timeouts and fallbacks where implemented. Unhandled slash-command failures go through the shared private error reporter, and component failures are captured by FeedbackAwareView. Detailed exceptions stay in logs instead of chat. Report repeatable problems with /feedback, including the command, expected result, actual result, and source link.",
+                ),
+            ]
+            for section_title, section_text in sections:
+                embed.add_field(name=section_title, value=section_text[:1024], inline=False)
+            embed.set_footer(text="System guide · Use /feedback to report mismatches with the running bot")
+            return embed
 
         embed = discord.Embed(
             title=category_name,
@@ -700,7 +995,7 @@ class HelpCog(commands.Cog):
             ),
             "anime": (
                 "• Most commands work with both anime and manga\n"
-                "• Recommendations use advanced AI filtering for quality results\n"
+                "• Use /similar for cross-provider discovery; recommendations use available provider and library data\n"
                 "• Rate titles 8.0+ for best recommendation accuracy\n"
                 "• Browse supports advanced filtering by genre, year, format\n"
                 "• News monitoring tracks Twitter/X accounts for updates (Bot Moderator only)\n"
@@ -743,6 +1038,30 @@ class HelpCog(commands.Cog):
                 "• Submit feedback to help improve the bot\n"
                 "• Leaderboards are server-specific and update automatically"
             ),
+            "community": (
+                "• Archive submissions may wait for local moderator approval\n"
+                "• Use /archive-mine to check your entries and /archive-report to flag approved content\n"
+                "• Archive reports and review actions are scoped to their originating server\n"
+                "• Brackets, adaptation polls, and quiz sessions are server-specific"
+            ),
+            "cross_media": (
+                "• Choose the exact work when a search offers a selection menu\n"
+                "• Provider relationships, recommendations, and community suggestions are different evidence types\n"
+                "• /link-suggest submits a proposal; moderators decide whether it is approved\n"
+                "• /discovery-hub is the guided entry point for this group"
+            ),
+            "books": (
+                "• /author-works searches Google Books by author\n"
+                "• /webnovel-updates depends on source-page structure and may return no result temporarily\n"
+                "• /reading-order shows available release relationships, not assumed story chronology\n"
+                "• Add a clear chapter/volume cutoff when starting /chapter-discussion"
+            ),
+            "screen": (
+                "• TMDB-based commands require TMDB_BEARER_TOKEN\n"
+                "• Set a default region with /media-region (Manage Server permission)\n"
+                "• Provider availability can change; use its displayed source link to verify\n"
+                "• Release dates and collection membership do not prove story chronology"
+            ),
             "utilities": (
                 "• Manage your notification preferences\n"
                 "• View planned features and vote on upcoming updates\n"
@@ -772,11 +1091,11 @@ class HelpNavigationView(FeedbackAwareView):
         self.user = user
         self.categories = categories
         self.is_owner = is_owner
-        self.add_item(CategorySelect(help_cog, is_owner=is_owner))
+        self.add_item(CategorySelect(help_cog, categories, is_owner=is_owner))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """Only allow the original user to interact with the view."""
-        if interaction.user != self.user:
+        if interaction.user.id != self.user.id:
             await interaction.response.send_message(
                 embed=build_warning_embed(
                     description="You can't use this menu. Use `/help` to get your own help interface!"
@@ -787,74 +1106,74 @@ class HelpNavigationView(FeedbackAwareView):
         return True
 
     async def on_timeout(self):
-        """Disable all items when the view times out."""
+        """Disable the expired dropdown so the message reflects its timeout state."""
         for item in self.children:
             item.disabled = True
+        message = getattr(self, "message", None)
+        if message is not None:
+            try:
+                await message.edit(view=self)
+            except discord.HTTPException:
+                logger.debug("Could not disable the expired help menu", exc_info=True)
 
 
 class CategorySelect(discord.ui.Select):
     """Dropdown select menu for choosing help categories."""
     
-    def __init__(self, help_cog: HelpCog, *, is_owner: bool = False):
+    def __init__(self, help_cog: HelpCog, categories: dict, *, is_owner: bool = False):
         self.help_cog = help_cog
+        self.categories = categories
 
         options = [
             discord.SelectOption(
-                label="📋 Overview",
+                label="Overview",
                 value="overview",
-                description="Show all categories and getting started info",
-                emoji="📋"
+                description="Quick start, command totals, and support links",
+                emoji="📋",
             ),
-            discord.SelectOption(
-                label="Account Management",
-                value="account",
-                description="Registration and account settings",
-                emoji="🔐"
-            ),
-            discord.SelectOption(
-                label="Anime & Manga",
-                value="anime", 
-                description="Browse, track, and discover titles",
-                emoji="📺"
-            ),
-            discord.SelectOption(
-                label="Gaming",
-                value="gaming",
-                description="Steam integration and game recommendations",
-                emoji="🎮"
-            ),
-            discord.SelectOption(
-                label="Customization",
-                value="customization",
-                description="Themes and personalization",
-                emoji="🎨"
-            ),
-            discord.SelectOption(
-                label="Server Management",
-                value="server",
-                description="Server configuration and moderation",
-                emoji="⚙️"
-            ),
-            discord.SelectOption(
-                label="Admin",
-                value="admin",
-                description="Bot moderation and admin commands",
-                emoji="👑"
-            ),
-            discord.SelectOption(
-                label="Social",
-                value="social",
-                description="Leaderboards, affinity, and feedback",
-                emoji="👥"
-            ),
-            discord.SelectOption(
-                label="Utilities",
-                value="utilities",
-                description="Help, notifications, and utility commands",
-                emoji="🛠️"
-            )
         ]
-        if is_owner:
+        category_options = [
+            ("Account Management", "account", "Registration and account settings", "🔐"),
+            ("Anime & Manga", "anime", "Browse and discover supported titles", "📺"),
+            ("Gaming", "gaming", "Game metadata and Steam integration", "🎮"),
+            ("Customization", "customization", "Themes and personalization", "🎨"),
+            ("Server Management", "server", "Server configuration and moderation", "⚙️"),
+            ("Admin", "admin", "Bot-wide administration and protected commands", "👑"),
+            ("Social", "social", "Leaderboards, affinity, and feedback", "👥"),
+            ("Utilities", "utilities", "Help, notifications, and everyday tools", "🛠️"),
+            ("Cross-Media Discovery", "cross_media", "Adaptations, connected titles, and suggestions", "🌐"),
+            ("Books & Webnovels", "books", "Author records, webnovels, and reading order", "📚"),
+            ("Movies & TV", "screen", "Availability, credits, trailers, and discussions", "🎬"),
+            ("Community Archives & Events", "community", "Archives, moderation, polls, and community trivia", "👥"),
+            ("Code", "code", "How commands, providers, database, and storage fit together", "💻"),
+        ]
+        category_names_by_value = {
+            "account": "🔐 Account Management",
+            "anime": "📺 Anime & Manga",
+            "gaming": "🎮 Gaming",
+            "customization": "🎨 Customization",
+            "server": "⚙️ Server Management",
+            "admin": "👑 Admin",
+            "social": "👥 Social",
+            "utilities": "🛠️ Utilities",
+            "cross_media": "🌐 Cross-Media Discovery",
+            "books": "📚 Books & Webnovels",
+            "screen": "🎬 Movies & TV",
+            "community": "👥 Community Archives & Events",
+            "code": "💻 Code",
+        }
+        for label, value, description, emoji in category_options:
+            if value == "code" or category_names_by_value[value] in categories:
+                options.append(
+                    discord.SelectOption(
+                        label=label,
+                        value=value,
+                        description=description[:100],
+                        emoji=emoji,
+                    )
+                )
+
+        if is_owner and "🔒 Bot Owner — Prefix Commands" in categories:
             options.append(
                 discord.SelectOption(
                     label="Bot Owner Prefix Commands",
@@ -865,10 +1184,10 @@ class CategorySelect(discord.ui.Select):
             )
 
         super().__init__(
-            placeholder="Choose a help category...",
+            placeholder="Choose a help category…",
             min_values=1,
             max_values=1,
-            options=options
+            options=options,
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -878,22 +1197,21 @@ class CategorySelect(discord.ui.Select):
         
         try:
             if selected_value == "overview":
-                embed = await self.help_cog._create_overview_embed(interaction, self.view.categories)
+                embed = await self.help_cog._create_overview_embed(interaction, self.categories)
             else:
-                embed = await self.help_cog._create_category_embed(selected_value, interaction, self.view.categories)
+                embed = await self.help_cog._create_category_embed(selected_value, interaction, self.categories)
             
             await interaction.response.edit_message(embed=embed, view=self.view)
             
             logger.info(f"Help category '{selected_value}' displayed for {interaction.user.display_name}")
             
         except Exception as e:
-            logger.error(f"Error in category selection: {e}", exc_info=True)
-            
-            await interaction.response.send_message(
-                embed=build_error_embed(
-                    description=application_error_message(e)
-                ),
-                ephemeral=True
+            logger.error("Error in help category selection", exc_info=True)
+            await handle_component_error(
+                interaction,
+                e,
+                component=f"help-category:{selected_value}",
+                source=self,
             )
 
 

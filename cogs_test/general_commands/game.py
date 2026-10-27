@@ -5,7 +5,7 @@ import logging
 from difflib import SequenceMatcher
 import aiohttp
 import discord
-from helpers.command_error_handler import FeedbackAwareView
+from helpers.command_error_handler import FeedbackAwareView, handle_application_command_error
 from discord import app_commands
 from discord.ext import commands
 import helpers.igdb_helper as igdb
@@ -13,6 +13,7 @@ from helpers.steam_helper import search_steam_apps
 from cogs.gaming.steam_game import fetch_game_details
 from helpers.gaming_utils import is_steam_deck_verified, get_controller_support
 from cogs_test.general_commands.dashboard import command_meta
+from helpers.media_graph import find_linked_resources, find_media_relationships
 
 log = logging.getLogger(__name__)
 
@@ -114,7 +115,7 @@ class GameSelect(discord.ui.Select):
             await interaction.response.send_message("That search result is no longer available.", ephemeral=True)
             return
         await interaction.response.defer()
-        embed = await self.cog.resolve_embed(selected)
+        embed = await self.cog.resolve_embed(selected, interaction.guild_id)
         await interaction.edit_original_response(embed=embed, view=None)
 
 class GameSelectView(FeedbackAwareView):
@@ -126,7 +127,7 @@ class Game(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    async def resolve_embed(self, game: dict) -> discord.Embed:
+    async def resolve_embed(self, game: dict, guild_id: int | None = None) -> discord.Embed:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
             token = await igdb.get_access_token(session)
             details = await fetch_igdb_details(session, str(game.get("slug") or ""), token) if token else None
@@ -141,14 +142,45 @@ class Game(commands.Cog):
                         steam_data = await fetch_game_details(session, int(app_id))
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError):
                 log.info("Steam enrichment unavailable for selected game")
-        return game_embed(game, details, steam_data)
+        data = details or game
+        title = str(data.get("name") or game.get("name") or "Unknown game")
+        slug = str(data.get("slug") or game.get("slug") or "").strip()
+        source_url = f"https://www.igdb.com/games/{slug}" if slug else None
+        embed = game_embed(game, details, steam_data)
+        try:
+            graph_related, linked_resources = await asyncio.gather(
+                find_media_relationships(title, "GAME", source_url, guild_id),
+                find_linked_resources(title, "GAME", guild_id, url=source_url),
+            )
+        except Exception:
+            log.debug("Could not load cross-system game links for %s", title, exc_info=True)
+            graph_related, linked_resources = [], []
+
+        if graph_related:
+            lines = []
+            for item in graph_related[:8]:
+                label = str(item.get("title") or "Untitled").replace("[", "").replace("]", "").replace("(", "").replace(")", "")
+                if item.get("url"):
+                    label = f"[{label}]({item['url']})"
+                lines.append(f"**{item.get('type') or 'Media'} · {label}** — {item.get('relationType') or 'Related'}\nSource: {item.get('source') or 'Saved relationship graph'}")
+            embed.add_field(name="Cross-media connections", value="\n\n".join(lines)[:1024], inline=False)
+        if linked_resources:
+            lines = []
+            for item in linked_resources[:6]:
+                label = str(item.get("title") or "Untitled").replace("[", "").replace("]", "").replace("(", "").replace(")", "")
+                if item.get("url"):
+                    label = f"[{label}]({item['url']})"
+                lines.append(f"**{item.get('kind') or 'Community resource'}** · {label}")
+            embed.add_field(name="Connected community resources", value="\n".join(lines)[:1024], inline=False)
+        return embed
 
     @app_commands.command(name="game", description="Search IGDB game metadata and matching Steam store details")
     @app_commands.guild_only()
     @app_commands.describe(title="Game title to search for")
     @command_meta(section="Gaming", name="Game")
     async def game(self, interaction: discord.Interaction, title: str) -> None:
-        if len(title.strip()) < 2:
+        title = " ".join((title or "").split())
+        if len(title) < 2:
             await interaction.response.send_message("Enter at least two characters for the game title.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -166,7 +198,7 @@ class Game(commands.Cog):
             best = max(results, key=lambda item: SequenceMatcher(None, title.casefold(), str(item.get("name", "")).casefold()).ratio())
             ratio = SequenceMatcher(None, title.casefold(), str(best.get("name", "")).casefold()).ratio()
             if len(results) == 1 or ratio >= 0.92:
-                await interaction.followup.send(embed=await self.resolve_embed(best), ephemeral=True)
+                await interaction.followup.send(embed=await self.resolve_embed(best, interaction.guild_id), ephemeral=True)
                 return
             selectable = [item for item in results if item.get("slug")]
             if not selectable:
@@ -176,6 +208,11 @@ class Game(commands.Cog):
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
             log.warning("Game search failed: %s", exc)
             await interaction.followup.send("Game search is temporarily unavailable. Please try again later.", ephemeral=True)
+
+    async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+        """Handle unexpected IGDB/Steam/graph failures through the common reporter."""
+        await handle_application_command_error(interaction, error)
+
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Game(bot))
