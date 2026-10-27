@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import logging
 import os
 import re
 import uuid
@@ -19,9 +18,6 @@ import boto3
 from botocore.config import Config
 
 import database
-
-log = logging.getLogger("Lemegeton.MediaStorage")
-
 
 @dataclass(frozen=True)
 class StoredImage:
@@ -38,7 +34,7 @@ def _setting(name: str, default: str = "") -> str:
 
 def is_configured(*, private: bool = True) -> bool:
     """Whether the private object store is configured and safe to use."""
-    if not _setting("S3_BUCKET"):
+    if not private or not _setting("S3_BUCKET"):
         return False
     access_key = _setting("S3_ACCESS_KEY_ID")
     secret_key = _setting("S3_SECRET_ACCESS_KEY")
