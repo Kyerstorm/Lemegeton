@@ -37,7 +37,7 @@ def _setting(name: str, default: str = "") -> str:
 def _public_base_url() -> str | None:
     value = _setting("S3_PUBLIC_BASE_URL").rstrip("/")
     parsed = urlsplit(value)
-    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
         return None
     return value
 
@@ -47,8 +47,10 @@ def is_configured(*, private: bool = True) -> bool:
     if private:
         if not _setting("S3_BUCKET"):
             return False
-    elif not _setting("S3_PUBLIC_BUCKET") or not _public_base_url():
-        return False
+    else:
+        public_bucket = _setting("S3_PUBLIC_BUCKET")
+        if not public_bucket or public_bucket == _setting("S3_BUCKET") or not _public_base_url():
+            return False
     access_key = _setting("S3_ACCESS_KEY_ID")
     secret_key = _setting("S3_SECRET_ACCESS_KEY")
     if bool(access_key) != bool(secret_key):
