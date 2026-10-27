@@ -12,6 +12,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import database
+from helpers import media_storage
 from cogs_test.general_commands.dashboard import command_meta
 
 log = logging.getLogger("Lemegeton.CommunityArchives")
@@ -763,16 +764,16 @@ class CommunityArchives(commands.Cog):
             if logged:
                 row = await database.execute_db_operation(
                     "load today's previously selected panel",
-                    """SELECT id, title, attachment_url, caption, chapter_number, source_url
-                       FROM panels WHERE id = ? AND is_nsfw = FALSE AND attachment_url IS NOT NULL""",
+                    """SELECT id, title, attachment_url, caption, chapter_number, source_url, media_asset_id
+                       FROM panels WHERE id = ? AND is_nsfw = FALSE AND (attachment_url IS NOT NULL OR media_asset_id IS NOT NULL)""",
                     (logged[0],), fetch_type="one",
                 )
             else:
                 row = await database.execute_db_operation(
                     "choose panel of the day",
-                    """SELECT id, title, attachment_url, caption, chapter_number, source_url
+                    """SELECT id, title, attachment_url, caption, chapter_number, source_url, media_asset_id
                        FROM panels p
-                       WHERE is_nsfw = FALSE AND attachment_url IS NOT NULL
+                       WHERE is_nsfw = FALSE AND (attachment_url IS NOT NULL OR media_asset_id IS NOT NULL)
                          AND NOT EXISTS (
                            SELECT 1 FROM community_panel_daily_log d
                            WHERE d.guild_id = ? AND d.feature_date = CURRENT_DATE AND d.panel_id = p.id
@@ -797,8 +798,8 @@ class CommunityArchives(commands.Cog):
                         if logged:
                             row = await database.execute_db_operation(
                                 "load concurrent panel of the day selection",
-                                """SELECT id, title, attachment_url, caption, chapter_number, source_url
-                                   FROM panels WHERE id = ? AND is_nsfw = FALSE AND attachment_url IS NOT NULL""",
+                                """SELECT id, title, attachment_url, caption, chapter_number, source_url, media_asset_id
+                                   FROM panels WHERE id = ? AND is_nsfw = FALSE AND (attachment_url IS NOT NULL OR media_asset_id IS NOT NULL)""",
                                 (logged[0],), fetch_type="one",
                             )
         except Exception:
@@ -808,13 +809,22 @@ class CommunityArchives(commands.Cog):
         if not row:
             await interaction.response.send_message("No public-safe panels are available to feature today.", ephemeral=True)
             return
+        image_url = row[2]
+        if not image_url and row[6]:
+            try:
+                image_url = await media_storage.asset_url(int(row[6]))
+            except Exception:
+                log.warning("Could not sign Panel of the Day image asset %s", row[6], exc_info=True)
         embed = discord.Embed(
             title=f"Panel of the Day · {_safe(row[1], 220)}",
             description=_safe(row[3] or "No caption provided.", 1500),
             url=row[5], color=discord.Color.blurple(),
         )
         embed.add_field(name="Panel", value=f"#{row[0]}" + (f" · Chapter {row[4]}" if row[4] else ""), inline=False)
-        embed.set_image(url=row[2])
+        if image_url:
+            embed.set_image(url=image_url)
+        else:
+            embed.description = (embed.description or "") + "\n\n**Image unavailable right now.**"
         embed.set_footer(text="Today's selection is saved per server · Existing Panels archive · NSFW entries excluded")
         await interaction.response.send_message(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
