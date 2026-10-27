@@ -495,7 +495,7 @@ class HelpCog(commands.Cog):
                 filtered[category] = kept
 
         # Documentation page, not a slash-command category; always keep it in the menu.
-        filtered["💻 Code & Systems"] = {}
+        filtered["💻 Code"] = {}
         return filtered
 
     async def _is_bot_owner(self, user: discord.abc.User) -> bool:
@@ -629,7 +629,7 @@ class HelpCog(commands.Cog):
         app_commands.Choice(name="🌐 Cross-Media Discovery", value="cross_media"),
         app_commands.Choice(name="📚 Books & Webnovels", value="books"),
         app_commands.Choice(name="🎬 Movies & TV", value="screen"),
-        app_commands.Choice(name="💻 Code & Systems", value="code"),
+        app_commands.Choice(name="💻 Code", value="code"),
     ])
     async def help(self, interaction: discord.Interaction, category: app_commands.Choice[str] = None):
         """Display comprehensive help information for bot commands."""
@@ -699,7 +699,7 @@ class HelpCog(commands.Cog):
         category_overview = []
         for category_name, commands in categories.items():
             command_count = len(commands)
-            if category_name == "💻 Code & Systems":
+            if category_name == "💻 Code":
                 category_overview.append(f"{category_name} • **Architecture guide**")
             else:
                 category_overview.append(f"{category_name} • **{command_count} commands**")
@@ -765,7 +765,7 @@ class HelpCog(commands.Cog):
             "cross_media": "🌐 Cross-Media Discovery",
             "books": "📚 Books & Webnovels",
             "screen": "🎬 Movies & TV",
-            "code": "💻 Code & Systems",
+            "code": "💻 Code",
             "owner": "🔒 Bot Owner — Prefix Commands",
         }
         category_name = category_mapping.get(category_key, "Unknown Category")
@@ -773,7 +773,7 @@ class HelpCog(commands.Cog):
 
         if category_key == "code":
             embed = discord.Embed(
-                title="💻 Code & Systems",
+                title="💻 Code",
                 description=(
                     "A maintainer-friendly guide to how Lemegeton's command, provider, database, and image-storage systems fit together. "
                     "External providers can be incomplete or temporarily unavailable."
@@ -1008,7 +1008,7 @@ class CategorySelect(discord.ui.Select):
             ("🌐 Cross-Media Discovery", "cross_media", "Adaptations, connected titles, and suggestions", "🌐"),
             ("📚 Books & Webnovels", "books", "Author records, webnovels, and reading order", "📚"),
             ("🎬 Movies & TV", "screen", "Availability, credits, trailers, and discussions", "🎬"),
-            ("💻 Code & Systems", "code", "How commands, providers, database, and storage fit together", "💻"),
+            ("💻 Code", "code", "How commands, providers, database, and storage fit together", "💻"),
         ]
         category_names_by_value = {
             "account": "🔐 Account Management",
@@ -1022,7 +1022,7 @@ class CategorySelect(discord.ui.Select):
             "cross_media": "🌐 Cross-Media Discovery",
             "books": "📚 Books & Webnovels",
             "screen": "🎬 Movies & TV",
-            "code": "💻 Code & Systems",
+            "code": "💻 Code",
         }
         for label, value, description, emoji in category_options:
             if value == "code" or category_names_by_value[value] in categories:
