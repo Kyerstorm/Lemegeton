@@ -131,12 +131,122 @@ class HelpCog(commands.Cog):
                     "examples": ["/show_manga_channel"]
                 }
             },
+            "👥 Community Archives & Events": {
+                "panels": {
+                    "desc": "Open the shared manga panel archive to browse, search, contribute, or manage your submissions",
+                    "usage": "/panels",
+                    "note": "Panel records are shared across servers, but archive settings and moderation are server-specific. Mature panels are hidden outside age-restricted channels. Private S3 originals are used when configured; the existing Discord-backed path remains supported.",
+                    "examples": ["/panels"]
+                },
+                "panel-of-the-day": {
+                    "desc": "View this server's selected safe panel for today",
+                    "usage": "/panel-of-the-day",
+                    "note": "Uses the server's configured daily selection and existing panel archive; it does not create a new submission.",
+                    "examples": ["/panel-of-the-day"]
+                },
+                "quotes": {
+                    "desc": "Browse, search, randomly discover, or contribute short attributed media quotes",
+                    "usage": "/quotes <action> [title] [content] [source_title] [creator] [url] [media_type] [tags] [spoiler] [keyword]",
+                    "note": "Actions: Add, Browse, Search, Random. Quotes are limited to 280 characters; entries can be tagged, attributed, and spoiler-marked. New submissions may require moderator review.",
+                    "examples": ["/quotes action:browse", "/quotes action:search keyword:hope"]
+                },
+                "fanworks": {
+                    "desc": "Discover or submit credited fan art, edits, wallpapers, and videos",
+                    "usage": "/fanworks <action> [title] [creator] [url] [source_title] [media_type] [tags]",
+                    "note": "Actions: Add, Browse, Search, Random. Credit the original creator and link to their work; external links must use HTTPS.",
+                    "examples": ["/fanworks action:browse", "/fanworks action:search keyword:wallpaper"]
+                },
+                "moodboards": {
+                    "desc": "Create or explore themed boards that bring multiple works together",
+                    "usage": "/moodboards <action> [title] [content] [url] [media_type] [tags] [keyword]",
+                    "note": "Use the content field to describe the mood and list included works. Actions: Add, Browse, Search, Random.",
+                    "examples": ["/moodboards action:browse", "/moodboards action:search keyword:celestial"]
+                },
+                "soundtracks": {
+                    "desc": "Index and discover soundtrack links from legitimate music or video platforms",
+                    "usage": "/soundtracks <action> [title] [creator] [url] [source_title] [media_type] [tags]",
+                    "note": "Prefer official artist, label, streaming, or video-platform links. Actions: Add, Browse, Search, Random.",
+                    "examples": ["/soundtracks action:browse", "/soundtracks action:search keyword:opening"]
+                },
+                "scenes": {
+                    "desc": "Save and browse memorable scenes, captions, references, and source links",
+                    "usage": "/scenes <action> [title] [content] [source_title] [url] [media_type] [tags] [spoiler]",
+                    "note": "Include the work and, where helpful, episode/chapter reference. Use the spoiler option when the description reveals plot details.",
+                    "examples": ["/scenes action:browse", "/scenes action:search keyword:finale"]
+                },
+                "recommendation-board": {
+                    "desc": "Share human-written recommendations with reasons and source metadata",
+                    "usage": "/recommendation-board <action> [title] [content] [url] [media_type] [tags] [keyword]",
+                    "note": "These are community-written recommendations, not provider recommendations or model-generated results. Actions: Add, Browse, Search, Random.",
+                    "examples": ["/recommendation-board action:browse", "/recommendation-board action:search keyword:fantasy"]
+                },
+                "theories": {
+                    "desc": "Share and browse fan theories with evidence links and spoiler marking",
+                    "usage": "/theories <action> [title] [content] [source_title] [url] [media_type] [tags] [spoiler]",
+                    "note": "Add a clear source work and mark spoilers. Submissions are community content and may require moderator review.",
+                    "examples": ["/theories action:browse", "/theories action:search keyword:ending"]
+                },
+                "archive-mine": {
+                    "desc": "Check your archive submissions and their review status in this server",
+                    "usage": "/archive-mine [archive_type]",
+                    "note": "Shows up to 20 recent submissions made by you in this server. Pending entries need local moderator review.",
+                    "examples": ["/archive-mine", "/archive-mine archive_type:quotes"]
+                },
+                "archive-report": {
+                    "desc": "Report an approved community archive entry for moderator review",
+                    "usage": "/archive-report <archive_type> <entry_id> <reason>",
+                    "note": "Explain the issue in 10–1,000 characters. Reports are scoped to your server; duplicate reports from the same user are not added twice.",
+                    "examples": ["/archive-report archive_type:quotes entry_id:12 reason:Missing source attribution"]
+                },
+                "archive-report-review": {
+                    "desc": "Triage archive reports submitted in this server",
+                    "usage": "/archive-report-review [decision] [report_id] [reason]",
+                    "note": "Requires Manage Server or Manage Messages. List, mark reviewed, dismiss, or remove an entry; removal is restricted to its originating server.",
+                    "examples": ["/archive-report-review", "/archive-report-review decision:dismissed report_id:12"]
+                },
+                "archive-review": {
+                    "desc": "Review pending archive submissions from this server",
+                    "usage": "/archive-review <action> [entry_id]",
+                    "note": "Requires Manage Server or Manage Messages. Actions: List, Approve, Reject, Remove. Moderation cannot edit another server's submission.",
+                    "examples": ["/archive-review action:list", "/archive-review action:approve entry_id:12"]
+                },
+                "media-bracket": {
+                    "desc": "Create a server-specific elimination poll for media titles",
+                    "usage": "/media-bracket <action> [title] [candidates] [bracket_id] [choice] [media_type]",
+                    "note": "Actions: Start, Vote, Results. A new bracket needs 2–16 distinct candidates separated by |. Votes are server-specific and can be changed while open.",
+                    "examples": ["/media-bracket action:results bracket_id:ABC123"]
+                },
+                "adaptation-vote": {
+                    "desc": "Create a poll and compare community preferences between two adaptations or versions",
+                    "usage": "/adaptation-vote <action> [title] [option_a] [option_b] [poll_id] [choice] [media_type] [source_url]",
+                    "note": "Actions: Create, Vote, Results. Vote with A or B. Results represent community preference, not an objective quality score; polls are server-specific.",
+                    "examples": ["/adaptation-vote action:results poll_id:ABC123", "/adaptation-vote action:vote poll_id:ABC123 choice:A"]
+                },
+                "media-quiz": {
+                    "desc": "Add source-linked trivia, play a random question, or submit an answer privately",
+                    "usage": "/media-quiz <action> [question] [answer] [source_url]",
+                    "note": "Actions: Add, Play, Answer. Questions belong to the current server; answering requires an active quiz session in the same channel.",
+                    "examples": ["/media-quiz action:play", "/media-quiz action:answer answer:Example"]
+                },
+                "media-night": {
+                    "desc": "Open or join this server's community media-night voting",
+                    "usage": "/media-night",
+                    "note": "Use the command's prompts to participate in a server-specific session. This entry is shown only if the command is registered.",
+                    "examples": ["/media-night"]
+                }
+            },
             "🌐 Cross-Media Discovery": {
                 "discovery-hub": {
                     "desc": "Open the guided menu for media discovery and community features",
                     "usage": "/discovery-hub",
                     "note": "Choose a section from the private dropdown. This is a guide, not a title search.",
                     "examples": ["/discovery-hub"]
+                },
+                "compare": {
+                    "desc": "Compare two or more media entries side-by-side",
+                    "usage": "/compare",
+                    "note": "Shows fields supported by the selected media categories; available metadata varies by provider.",
+                    "examples": ["/compare"]
                 },
                 "franchise": {
                     "desc": "Explore provider-declared relationships and supported adaptations",
@@ -170,6 +280,12 @@ class HelpCog(commands.Cog):
                 }
             },
             "📚 Books & Webnovels": {
+                "reading-club": {
+                    "desc": "Nominate, vote on, and schedule a community reading selection",
+                    "usage": "/reading-club",
+                    "note": "Use the command prompts to view available nomination and voting actions for your server.",
+                    "examples": ["/reading-club"]
+                },
                 "reading-order": {
                     "desc": "Browse known release relationships for books, light novels, webnovels, manga, and anime",
                     "usage": "/reading-order <title> [category]",
@@ -196,6 +312,18 @@ class HelpCog(commands.Cog):
                 }
             },
             "🎬 Movies & TV": {
+                "tv-guide": {
+                    "desc": "Browse supported TV seasons, episodes, and air-date information",
+                    "usage": "/tv-guide",
+                    "note": "Shows season and episode metadata returned by supported providers; missing episode data is not inferred.",
+                    "examples": ["/tv-guide"]
+                },
+                "release-calendar": {
+                    "desc": "Browse supported upcoming anime, movie, and TV release dates",
+                    "usage": "/release-calendar",
+                    "note": "Calendar entries depend on provider availability and known dates; they may not be exhaustive.",
+                    "examples": ["/release-calendar"]
+                },
                 "where-to-watch": {
                     "desc": "Find listed streaming, rental, and purchase providers for a movie or TV series",
                     "usage": "/where-to-watch <title> <media_type> [region]",
@@ -629,6 +757,7 @@ class HelpCog(commands.Cog):
         app_commands.Choice(name="🌐 Cross-Media Discovery", value="cross_media"),
         app_commands.Choice(name="📚 Books & Webnovels", value="books"),
         app_commands.Choice(name="🎬 Movies & TV", value="screen"),
+        app_commands.Choice(name="👥 Community Archives & Events", value="community"),
         app_commands.Choice(name="💻 Code", value="code"),
     ])
     async def help(self, interaction: discord.Interaction, category: app_commands.Choice[str] = None):
@@ -765,6 +894,7 @@ class HelpCog(commands.Cog):
             "cross_media": "🌐 Cross-Media Discovery",
             "books": "📚 Books & Webnovels",
             "screen": "🎬 Movies & TV",
+            "community": "👥 Community Archives & Events",
             "code": "💻 Code",
             "owner": "🔒 Bot Owner — Prefix Commands",
         }
@@ -803,7 +933,7 @@ class HelpCog(commands.Cog):
                 ),
                 (
                     "◇ Image storage and privacy",
-                    "S3_BUCKET is for private originals such as uploaded Panels and Custom Role source images; private links use short-lived signed URLs. Generated /3x3 grids and staff-character collages can use a separate S3_PUBLIC_BUCKET and HTTPS S3_PUBLIC_BASE_URL. Public output is disabled unless that separate destination is configured; Discord attachments remain the fallback. Never reuse the private bucket as the public bucket.",
+                    "S3_BUCKET stores private originals such as uploaded Panels and Custom Role source images; private links use short-lived signed URLs. /panel-of-the-day reads the shared panel asset without making private originals public. Generated /3x3 grids and staff-character collages can use a separate S3_PUBLIC_BUCKET and HTTPS S3_PUBLIC_BASE_URL. Public output is disabled unless that separate destination is configured; Discord attachments remain the fallback. Never reuse the private bucket as the public bucket.",
                 ),
                 (
                     "◇ Errors and reporting",
@@ -908,6 +1038,12 @@ class HelpCog(commands.Cog):
                 "• Submit feedback to help improve the bot\n"
                 "• Leaderboards are server-specific and update automatically"
             ),
+            "community": (
+                "• Archive submissions may wait for local moderator approval\n"
+                "• Use /archive-mine to check your entries and /archive-report to flag approved content\n"
+                "• Archive reports and review actions are scoped to their originating server\n"
+                "• Brackets, adaptation polls, and quiz sessions are server-specific"
+            ),
             "cross_media": (
                 "• Choose the exact work when a search offers a selection menu\n"
                 "• Provider relationships, recommendations, and community suggestions are different evidence types\n"
@@ -1008,6 +1144,7 @@ class CategorySelect(discord.ui.Select):
             ("Cross-Media Discovery", "cross_media", "Adaptations, connected titles, and suggestions", "🌐"),
             ("Books & Webnovels", "books", "Author records, webnovels, and reading order", "📚"),
             ("Movies & TV", "screen", "Availability, credits, trailers, and discussions", "🎬"),
+            ("Community Archives & Events", "community", "Archives, moderation, polls, and community trivia", "👥"),
             ("Code", "code", "How commands, providers, database, and storage fit together", "💻"),
         ]
         category_names_by_value = {
@@ -1022,6 +1159,7 @@ class CategorySelect(discord.ui.Select):
             "cross_media": "🌐 Cross-Media Discovery",
             "books": "📚 Books & Webnovels",
             "screen": "🎬 Movies & TV",
+            "community": "👥 Community Archives & Events",
             "code": "💻 Code",
         }
         for label, value, description, emoji in category_options:
