@@ -35,7 +35,7 @@ ENABLED_EMOJI = "🟢"
 DISABLED_EMOJI = "⚪"
 LOCK_EMOJI = "🔒"
 GEAR = "⚙️"
-PROTECTED_CMD_NAMES = {"help", "feedback"}
+PROTECTED_CMD_NAMES = {"help", "feedback", "dashboard"}
 COMMANDS_PER_PAGE = 8
 MAX_AUDIT_ENTRIES = 8
 
@@ -79,6 +79,9 @@ class CommandRegistry:
         return self._commands.get(fullname)
 
     def find_fullname_by_cmd(self, cmd_obj: app_commands.Command) -> Optional[str]:
+        qualified_name = getattr(cmd_obj, "qualified_name", None)
+        if qualified_name in self._commands:
+            return qualified_name
         return next(
             (fullname for fullname, meta in self._commands.items() if meta["command"] is cmd_obj),
             None,
@@ -193,12 +196,15 @@ class ConfigDB:
         )
 
     async def set_command(self, guild_id: int, fullname: str, enabled: bool) -> None:
+        # Initialize before taking the mutation lock: open() uses that same lock.
+        await self.open()
         async with self._lock:
             cfg = await self.get_guild_config(guild_id)
             cfg.setdefault("commands", {})[fullname] = bool(enabled)
             await self._set_guild_config(guild_id, cfg)
 
     async def set_section(self, guild_id: int, section: str, enabled: bool) -> None:
+        await self.open()
         async with self._lock:
             cfg = await self.get_guild_config(guild_id)
             cfg.setdefault("sections", {})[section] = bool(enabled)
@@ -208,8 +214,18 @@ class ConfigDB:
             await self._set_guild_config(guild_id, cfg)
 
     async def reset_guild(self, guild_id: int) -> None:
+        await self.open()
         async with self._lock:
             await self._set_guild_config(guild_id, {"sections": {}, "commands": {}})
+
+    async def replace_guild_config(self, guild_id: int, data: dict[str, Any]) -> None:
+        """Atomically replace one guild's saved settings, used for failed-sync rollback."""
+        await self.open()
+        async with self._lock:
+            await self._set_guild_config(guild_id, {
+                "sections": dict(data.get("sections") or {}),
+                "commands": dict(data.get("commands") or {}),
+            })
 
     async def log_action(self, guild_id: int, actor_id: int, action: str, details: str = "") -> None:
         await self.open()
@@ -249,6 +265,66 @@ def format_commit_message(actor: discord.abc.User, action: str, details: str = "
 
 def _is_protected(command: app_commands.Command) -> bool:
     return command.name in PROTECTED_CMD_NAMES
+
+
+def _infer_command_section(command: app_commands.Command) -> str:
+    """Give every registered slash-command leaf a useful dashboard category."""
+    module = str(getattr(getattr(command, "callback", None), "__module__", ""))
+    leaf = module.rsplit(".", 1)[-1]
+    if module.startswith("cogs.account."):
+        return "Account"
+    if module.startswith("cogs.admin."):
+        return "Administration"
+    if module.startswith("cogs.customization."):
+        return "Customization"
+    if module.startswith("cogs.gaming.") or leaf == "game":
+        return "Gaming"
+    if module.startswith("cogs.media."):
+        return "Media"
+    if module.startswith("cogs.server_management.") or leaf in {"server_check", "server_taste"}:
+        return "Server Management"
+    if module.startswith("cogs.social."):
+        return "Social"
+    if module.startswith("cogs.utilities.") or leaf in {"dashboard", "gpt"}:
+        return "Utilities"
+    if module.startswith("cogs_test.general_commands."):
+        if leaf in {"community_archives", "media_night", "reading_club", "release_calendar"}:
+            return "Community"
+        if leaf in {"server_check", "server_taste"}:
+            return "Server Management"
+        return "Media Discovery"
+    return "Other"
+
+
+def _root_app_command(command: app_commands.Command | app_commands.Group):
+    while getattr(command, "parent", None) is not None:
+        command = command.parent
+    return command
+
+
+def _copy_app_command(command: app_commands.Command | app_commands.Group):
+    copier = getattr(command, "copy", None)
+    return copier() if callable(copier) else command
+
+
+def _filter_group_for_guild(group: app_commands.Group, cfg: dict[str, Any]) -> app_commands.Group | None:
+    """Copy a command group and remove disabled managed leaves without flattening it."""
+    cloned = group.copy()
+
+    def prune(parent: app_commands.Group) -> None:
+        for child in list(parent.commands):
+            if isinstance(child, app_commands.Group):
+                prune(child)
+                if not child.commands:
+                    parent.remove_command(child.name)
+                continue
+            fullname = getattr(child, "qualified_name", child.name)
+            meta = COMMAND_REGISTRY.get_meta(fullname)
+            if meta is not None and not _is_enabled(fullname, meta, cfg):
+                parent.remove_command(child.name)
+
+    prune(cloned)
+    return cloned if cloned.commands else None
 
 
 def _is_enabled(fullname: str, meta: dict[str, Any], cfg: dict[str, Any]) -> bool:
@@ -683,35 +759,67 @@ class ResetConfirmView(FeedbackAwareView):
 # ---------------------------------------------------------------------------
 # Command synchronization
 # ---------------------------------------------------------------------------
+_GUILD_SYNC_LOCKS: dict[int, asyncio.Lock] = {}
+
+
 async def attempt_sync_for_guild(bot: commands.Bot, guild: discord.Guild):
-    """Sync dashboard-managed commands without deleting unrelated guild commands."""
+    """Serialize per-guild command publications and retain grouped command structure."""
+    lock = _GUILD_SYNC_LOCKS.setdefault(guild.id, asyncio.Lock())
+    async with lock:
+        return await _sync_guild_commands(bot, guild)
+
+
+async def _sync_guild_commands(bot: commands.Bot, guild: discord.Guild) -> bool:
     db: ConfigDB | None = getattr(bot, "_dashboard_db", None)
     if db is None:
         return False
+    previous_commands = None
     try:
         cfg = await db.get_guild_config(guild.id)
-        managed_names = {meta["command"].name for _, meta in COMMAND_REGISTRY.all_commands()}
-        current_guild_commands = bot.tree.get_commands(guild=guild)
-        preserved_commands = [cmd for cmd in current_guild_commands if cmd.name not in managed_names]
-        enabled_commands = [
-            meta["command"]
-            for fullname, meta in COMMAND_REGISTRY.all_commands()
-            if _is_enabled(fullname, meta, cfg)
+        previous_commands = list(bot.tree.get_commands(guild=guild))
+        roots: dict[str, app_commands.Command | app_commands.Group] = {}
+        for _, meta in COMMAND_REGISTRY.all_commands():
+            root = _root_app_command(meta["command"])
+            roots[root.name] = root
+
+        global_roots = {command.name: command for command in bot.tree.get_commands()}
+        current_roots = {command.name: command for command in previous_commands}
+        managed_roots = {
+            name: global_roots.get(name) or current_roots.get(name) or root
+            for name, root in roots.items()
+        }
+        desired_commands = [
+            _copy_app_command(command)
+            for command in previous_commands
+            if command.name not in managed_roots
         ]
+        for root in managed_roots.values():
+            if isinstance(root, app_commands.Group):
+                filtered = _filter_group_for_guild(root, cfg)
+                if filtered is not None:
+                    desired_commands.append(filtered)
+                continue
+            fullname = getattr(root, "qualified_name", root.name)
+            meta = COMMAND_REGISTRY.get_meta(fullname)
+            if meta is None or _is_enabled(fullname, meta, cfg):
+                desired_commands.append(_copy_app_command(root))
 
         bot.tree.clear_commands(guild=guild)
-        for command in preserved_commands:
+        for command in desired_commands:
             bot.tree.add_command(command, guild=guild)
-        for command in enabled_commands:
-            try:
-                bot.tree.add_command(command, guild=guild)
-            except (app_commands.CommandAlreadyRegistered, ValueError):
-                logger.warning("Skipping already registered command %s for guild %s", command.name, guild.id)
         await bot.tree.sync(guild=guild)
-        logger.info("Synced %s dashboard-managed commands for guild %s", len(enabled_commands), guild.id)
+        logger.info("Synced %s dashboard-managed command roots for guild %s", len(managed_roots), guild.id)
         return True
     except Exception:
         logger.exception("Dashboard command sync failed for guild %s", guild.id)
+        if previous_commands is not None:
+            try:
+                bot.tree.clear_commands(guild=guild)
+                for command in previous_commands:
+                    bot.tree.add_command(_copy_app_command(command), guild=guild)
+                await bot.tree.sync(guild=guild)
+            except Exception:
+                logger.exception("Could not restore the previous command tree for guild %s", guild.id)
         return False
 
 
@@ -724,7 +832,7 @@ async def _restore_dashboard_config(
 ) -> None:
     """Restore the pre-change guild settings and try to republish them after a failed sync."""
     try:
-        await db._set_guild_config(guild.id, snapshot)
+        await db.replace_guild_config(guild.id, snapshot)
         if not await attempt_sync_for_guild(bot, guild):
             logger.error(
                 "Rollback settings were saved but Discord did not confirm command restoration "
@@ -762,32 +870,29 @@ class DashboardCog(commands.Cog):
             logger.exception("Dashboard startup initialization failed; the next ready event will retry")
 
     @staticmethod
-    def _register_if_annotated(command: app_commands.Command | app_commands.Group) -> None:
+    def _register_if_annotated(command: app_commands.Command) -> None:
         callback = getattr(command, "callback", None)
         if callback is None:
             return
-        section = getattr(callback, "__dashboard_section__", None)
-        if not section:
-            return
-        name = getattr(callback, "__dashboard_name__", None) or command.name
         fullname = getattr(command, "qualified_name", command.name)
+        section = getattr(callback, "__dashboard_section__", None) or _infer_command_section(command)
+        name = getattr(callback, "__dashboard_name__", None) or fullname.replace("-", " ").replace("_", " ").title()
         COMMAND_REGISTRY.register(fullname, command, section, name)
 
     def _refresh_command_registry(self) -> None:
-        """Rebuild the dashboard index from the command tree as it exists right now."""
+        """Index every eligible slash-command leaf and install its execution guard."""
         COMMAND_REGISTRY._commands.clear()
         for command in list(self.bot.tree.walk_commands()):
+            if isinstance(command, app_commands.Group):
+                continue
+            if not isinstance(command, app_commands.Command):
+                continue
             self._register_if_annotated(command)
             fullname = getattr(command, "qualified_name", getattr(command, "name", ""))
             meta = COMMAND_REGISTRY.get_meta(fullname)
             checks = getattr(command, "checks", None)
             add_check = getattr(command, "add_check", None)
-            if (
-                meta
-                and checks is not None
-                and callable(add_check)
-                and self._dashboard_execution_guard not in checks
-            ):
+            if meta and checks is not None and callable(add_check) and self._dashboard_execution_guard not in checks:
                 add_check(self._dashboard_execution_guard)
         logger.info(
             "Dashboard registry refreshed: %s commands across %s categories",
