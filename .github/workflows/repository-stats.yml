@@ -1,0 +1,40 @@
+name: Repository statistics
+
+on:
+  push:
+    branches: [multi_guild]
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    name: Refresh generated README metrics
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Test repository statistics
+        run: python -m unittest discover -s tests -p "test_repo_stats.py"
+
+      - name: Refresh README statistics
+        run: python -m helpers.repo_stats --update-readme
+
+      - name: Commit updated statistics
+        run: |
+          if git diff --quiet -- README.md; then
+            echo "README statistics already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "chore: refresh repository statistics"
+          git push origin HEAD:multi_guild
