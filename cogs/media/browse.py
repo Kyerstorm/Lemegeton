@@ -21,6 +21,7 @@ from database import get_all_users_guild_aware
 from helpers.embed_helper import build_error_embed, build_info_embed
 from helpers.anilist_helper import post_graphql
 from cogs_test.general_commands.dashboard import command_meta
+from helpers.tmdb_discovery import build_tmdb_discover_params
 
 logger = logging.getLogger("BrowseCog")
 GOOGLE_BOOKS_URL = "https://www.googleapis.com/books/v1/volumes"
@@ -29,7 +30,6 @@ TMDB_API_BASE_URL = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p"
 MDBLIST_API_BASE_URL = "https://api.mdblist.com"
 
-from helpers.tmdb_discovery import build_tmdb_discover_params
 
 _NOVELUPDATES_CACHE_TTL = 300
 _NOVELUPDATES_SEARCH_CACHE: Dict[tuple, tuple[float, List[Dict]]] = {}
@@ -1470,9 +1470,8 @@ class BrowseCog(commands.Cog):
             )
             for index, item in enumerate(results[:6], 1):
                 is_movie = chosen_type == "MOVIE"
-                name = str(item.get("title") if is_movie else item.get("name") or "Untitled")
-                if is_movie:
-                    name = str(item.get("title") or "Untitled")
+                name_value = item.get("title") if is_movie else item.get("name")
+                name = str(name_value or "Untitled")
                 date_value = item.get("release_date") if is_movie else item.get("first_air_date")
                 year = str(date_value)[:4] if date_value else "Year unknown"
                 score = item.get("vote_average")
