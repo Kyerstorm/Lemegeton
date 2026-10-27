@@ -13,6 +13,7 @@ import re
 from urllib.parse import urlsplit
 
 import database
+from helpers import media_storage
 
 log = logging.getLogger("Lemegeton.MediaGraph")
 _SCHEMA_READY = False
@@ -286,7 +287,7 @@ async def find_linked_resources(
     if media_id and _category(category) in {"MANGA", "LIGHT_NOVEL"}:
         jobs.append(_safe_rows(
             "find related safe manga panels by AniList identity",
-            """SELECT id, title, chapter_number, uploader_guild_id, storage_channel_id, storage_message_id
+            """SELECT id, title, chapter_number, uploader_guild_id, storage_channel_id, storage_message_id, attachment_url, media_asset_id
                FROM panels
                WHERE is_nsfw = FALSE AND (anilist_id = ? OR LOWER(title) = LOWER(?))
                ORDER BY created_at DESC LIMIT 40""",
@@ -296,7 +297,7 @@ async def find_linked_resources(
     else:
         jobs.append(_safe_rows(
             "find related safe manga panels by exact title",
-            """SELECT id, title, chapter_number, uploader_guild_id, storage_channel_id, storage_message_id
+            """SELECT id, title, chapter_number, uploader_guild_id, storage_channel_id, storage_message_id, attachment_url, media_asset_id
                FROM panels
                WHERE is_nsfw = FALSE AND LOWER(title) = LOWER(?)
                ORDER BY created_at DESC LIMIT 40""",
@@ -392,6 +393,13 @@ async def find_linked_resources(
         panel_url = None
         if row[3] and row[4] and row[5]:
             panel_url = f"https://discord.com/channels/{int(row[3])}/{int(row[4])}/{int(row[5])}"
+        elif row[7]:
+            try:
+                panel_url = await media_storage.asset_url(int(row[7]))
+            except Exception:
+                log.debug("Could not sign linked panel asset %s", row[7], exc_info=True)
+        elif row[6]:
+            panel_url = safe_media_url(row[6])
         label = f"Panel #{row[0]}" + (f" · Chapter {row[2]}" if row[2] else "") + f" · {row[1]}"
         add("Manga panel", label, panel_url, "Shared Panels archive · safe entries only")
     for rows in (response_map.get("discussions", []), response_map.get("discussions_by_url", [])):
