@@ -424,27 +424,54 @@ class DashboardView(FeedbackAwareView):
                 await interaction.response.send_message("A dashboard update is already in progress. Try again in a moment.", ephemeral=True)
                 return
             self._busy = True
+            before: dict[str, Any] | None = None
             try:
+                await interaction.response.defer()
+                before = await self.db.get_guild_config(self.guild.id)
                 meta = COMMAND_REGISTRY.get_meta(fullname)
                 if meta is None or _is_protected(meta["command"]):
-                    await interaction.response.send_message("This command is protected and cannot be disabled.", ephemeral=True)
+                    await interaction.edit_original_response(content="This command is protected or is no longer registered.")
                     return
-                cfg = await self.db.get_guild_config(self.guild.id)
-                new_value = not _is_enabled(fullname, meta, cfg)
+                new_value = not _is_enabled(fullname, meta, before)
                 await self.db.set_command(self.guild.id, fullname, new_value)
+                if not await attempt_sync_for_guild(self.bot, self.guild):
+                    await _restore_dashboard_config(self.db, self.bot, self.guild, before, f"toggle command {fullname}")
+                    embed = await self.render(interaction.user)
+                    await interaction.edit_original_response(
+                        content="Discord did not confirm the command change. The previous settings were restored where possible.",
+                        embed=embed,
+                        view=self,
+                    )
+                    return
                 await self.db.log_action(
                     self.guild.id,
                     interaction.user.id,
                     "command_toggle",
                     format_commit_message(interaction.user, f"{fullname} → {'enabled' if new_value else 'disabled'}"),
                 )
-                await attempt_sync_for_guild(self.bot, self.guild)
                 embed = await self.render(interaction.user)
-                await interaction.response.edit_message(embed=embed, view=self)
+                await interaction.edit_original_response(
+                    content=None,
+                    embed=embed,
+                    view=self,
+                )
             except Exception:
                 logger.exception("Failed toggling dashboard command %s for guild %s", fullname, self.guild.id)
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("Couldn't update that command. Check the bot logs and try again.", ephemeral=True)
+                if before is not None:
+                    await _restore_dashboard_config(self.db, self.bot, self.guild, before, f"failed toggle {fullname}")
+                try:
+                    embed = await self.render(interaction.user)
+                    await interaction.edit_original_response(
+                        content="Couldn't apply that command change. The previous settings were restored where possible; check the bot logs if the issue continues.",
+                        embed=embed,
+                        view=self,
+                    )
+                except Exception:
+                    logger.exception("Could not refresh dashboard message after failed toggle")
+                    try:
+                        await interaction.followup.send("The command change failed. Check the bot logs and try again.", ephemeral=True)
+                    except discord.HTTPException:
+                        pass
             finally:
                 self._busy = False
         return callback
@@ -459,8 +486,9 @@ class DashboardView(FeedbackAwareView):
         return True
 
     async def _refresh(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
         embed = await self.render(interaction.user)
-        await interaction.response.edit_message(embed=embed, view=self)
+        await interaction.edit_original_response(embed=embed, view=self)
 
     async def _on_section_select(self, interaction: discord.Interaction):
         if not await self._authorize_component(interaction):
@@ -488,26 +516,62 @@ class DashboardView(FeedbackAwareView):
     async def _on_toggle_section(self, interaction: discord.Interaction):
         if not await self._authorize_component(interaction):
             return
-        cfg = await self.db.get_guild_config(self.guild.id)
-        currently_enabled = cfg.get("sections", {}).get(self.current_section, True)
-        new_value = not currently_enabled
-        await self.db.set_section(self.guild.id, self.current_section, new_value)
-        await self.db.log_action(
-            self.guild.id,
-            interaction.user.id,
-            "section_toggle",
-            format_commit_message(interaction.user, f"{self.current_section} → {'enabled' if new_value else 'disabled'}"),
-        )
-        await attempt_sync_for_guild(self.bot, self.guild)
-        await self._refresh(interaction)
+        if self._busy:
+            await interaction.response.send_message("A dashboard update is already in progress. Try again in a moment.", ephemeral=True)
+            return
+        self._busy = True
+        before: dict[str, Any] | None = None
+        try:
+            await interaction.response.defer()
+            before = await self.db.get_guild_config(self.guild.id)
+            currently_enabled = before.get("sections", {}).get(self.current_section, True)
+            new_value = not currently_enabled
+            await self.db.set_section(self.guild.id, self.current_section, new_value)
+            if not await attempt_sync_for_guild(self.bot, self.guild):
+                await _restore_dashboard_config(self.db, self.bot, self.guild, before, f"toggle section {self.current_section}")
+                embed = await self.render(interaction.user)
+                await interaction.edit_original_response(
+                    content="Discord did not confirm this category change. The previous settings were restored where possible.",
+                    embed=embed,
+                    view=self,
+                )
+                return
+            await self.db.log_action(
+                self.guild.id,
+                interaction.user.id,
+                "section_toggle",
+                format_commit_message(interaction.user, f"{self.current_section} → {'enabled' if new_value else 'disabled'}"),
+            )
+            embed = await self.render(interaction.user)
+            await interaction.edit_original_response(content=None, embed=embed, view=self)
+        except Exception:
+            logger.exception("Failed changing dashboard section %s for guild %s", self.current_section, self.guild.id)
+            if before is not None:
+                await _restore_dashboard_config(self.db, self.bot, self.guild, before, f"failed section toggle {self.current_section}")
+            try:
+                embed = await self.render(interaction.user)
+                await interaction.edit_original_response(
+                    content="Couldn't apply the category change. The previous settings were restored where possible.",
+                    embed=embed,
+                    view=self,
+                )
+            except Exception:
+                logger.exception("Could not refresh dashboard message after failed section toggle")
+                try:
+                    await interaction.followup.send("The category change failed. Check the bot logs and try again.", ephemeral=True)
+                except discord.HTTPException:
+                    pass
+        finally:
+            self._busy = False
 
     async def _on_audit(self, interaction: discord.Interaction):
         if not await self._authorize_component(interaction):
             return
         try:
+            await interaction.response.defer(ephemeral=True, thinking=True)
             entries = await self.db.last_audit_entries(self.guild.id)
             embed = discord.Embed(
-                title="DASHBOARD  /  AUDIT TRAIL",
+                title="🧾  DASHBOARD / AUDIT TRAIL",
                 description="Recent configuration changes for this server.",
                 color=PALETTE["panel"],
             )
@@ -519,15 +583,18 @@ class DashboardView(FeedbackAwareView):
                     if hasattr(timestamp, "strftime"):
                         timestamp = timestamp.strftime("%Y-%m-%d %H:%M UTC")
                     embed.add_field(
-                        name=f"#{entry['id']} · {entry['action'][:200]}",
-                        value=f"Actor: <@{entry['actor_id']}>\n{str(timestamp)}\n{entry['details'][:400] or '—'}",
+                        name=f"#{entry['id']} · {str(entry['action'])[:180]}",
+                        value=f"Actor: <@{entry['actor_id']}>\n{str(timestamp)}\n{str(entry['details'])[:350] or '—'}",
                         inline=False,
                     )
-            embed.set_footer(text=f"{self.guild.name} • Private administrator view")
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            embed.set_footer(text=f"🔒 {self.guild.name} • Private administrator view")
+            await interaction.followup.send(embed=embed, ephemeral=True)
         except Exception:
             logger.exception("Failed loading dashboard audit log")
-            await interaction.response.send_message("The audit log couldn't be loaded.", ephemeral=True)
+            if interaction.response.is_done():
+                await interaction.followup.send("The audit log couldn't be loaded. Please retry.", ephemeral=True)
+            else:
+                await interaction.response.send_message("The audit log couldn't be loaded. Please retry.", ephemeral=True)
 
     async def _on_reset(self, interaction: discord.Interaction):
         if not await self._authorize_component(interaction):
@@ -549,20 +616,53 @@ class ResetConfirmView(FeedbackAwareView):
         dashboard = self.dashboard
         if not await dashboard._authorize_component(interaction):
             return
+        before: dict[str, Any] | None = None
         try:
+            await interaction.response.defer()
+            before = await dashboard.db.get_guild_config(dashboard.guild.id)
             await dashboard.db.reset_guild(dashboard.guild.id)
+            if not await attempt_sync_for_guild(dashboard.bot, dashboard.guild):
+                await _restore_dashboard_config(
+                    dashboard.db, dashboard.bot, dashboard.guild, before, "confirm reset"
+                )
+                embed = await dashboard.render(interaction.user)
+                await interaction.edit_original_response(
+                    content="Discord did not confirm the reset. Previous settings were restored where possible.",
+                    embed=embed,
+                    view=dashboard,
+                )
+                return
             await dashboard.db.log_action(
                 dashboard.guild.id,
                 interaction.user.id,
                 "reset_guild",
                 format_commit_message(interaction.user, "Reset command configuration"),
             )
-            await attempt_sync_for_guild(dashboard.bot, dashboard.guild)
             embed = await dashboard.render(interaction.user)
-            await interaction.response.edit_message(content="Settings reset successfully.", embed=embed, view=dashboard)
+            await interaction.edit_original_response(
+                content="✅ Server command settings reset and synchronized.",
+                embed=embed,
+                view=dashboard,
+            )
         except Exception:
             logger.exception("Failed resetting dashboard config for guild %s", dashboard.guild.id)
-            await interaction.response.send_message("Reset failed. Check the bot logs and try again.", ephemeral=True)
+            if before is not None:
+                await _restore_dashboard_config(
+                    dashboard.db, dashboard.bot, dashboard.guild, before, "failed reset"
+                )
+            try:
+                embed = await dashboard.render(interaction.user)
+                await interaction.edit_original_response(
+                    content="Reset failed. Previous settings were restored where possible; check the bot logs if the issue continues.",
+                    embed=embed,
+                    view=dashboard,
+                )
+            except Exception:
+                logger.exception("Could not refresh dashboard message after failed reset")
+                try:
+                    await interaction.followup.send("Reset failed. Please retry after checking the bot logs.", ephemeral=True)
+                except discord.HTTPException:
+                    pass
 
     @ui.button(label="Cancel", emoji="✕", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: ui.Button):
@@ -604,6 +704,32 @@ async def attempt_sync_for_guild(bot: commands.Bot, guild: discord.Guild):
     except Exception:
         logger.exception("Dashboard command sync failed for guild %s", guild.id)
         return False
+
+
+async def _restore_dashboard_config(
+    db: ConfigDB,
+    bot: commands.Bot,
+    guild: discord.Guild,
+    snapshot: dict[str, Any],
+    operation: str,
+) -> None:
+    """Restore the pre-change guild settings and try to republish them after a failed sync."""
+    try:
+        await db._set_guild_config(guild.id, snapshot)
+        if not await attempt_sync_for_guild(bot, guild):
+            logger.error(
+                "Rollback settings were saved but Discord did not confirm command restoration "
+                "for guild %s after %s",
+                guild.id,
+                operation,
+            )
+    except Exception:
+        logger.exception(
+            "Could not restore dashboard settings for guild %s after %s",
+            guild.id,
+            operation,
+        )
+
 
 
 # ---------------------------------------------------------------------------
