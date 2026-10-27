@@ -27,9 +27,19 @@ class MediaStorageConfigurationTests(unittest.TestCase):
         }, clear=True):
             self.assertTrue(media_storage.is_configured())
 
-    def test_public_asset_mode_is_refused(self):
+    def test_public_assets_need_a_separate_bucket_and_https_base(self):
         with patch.dict(os.environ, {"S3_BUCKET": "private-assets"}, clear=True):
             self.assertFalse(media_storage.is_configured(private=False))
+        with patch.dict(os.environ, {
+            "S3_PUBLIC_BUCKET": "generated-public",
+            "S3_PUBLIC_BASE_URL": "http://cdn.example.test",
+        }, clear=True):
+            self.assertFalse(media_storage.is_configured(private=False))
+        with patch.dict(os.environ, {
+            "S3_PUBLIC_BUCKET": "generated-public",
+            "S3_PUBLIC_BASE_URL": "https://cdn.example.test/assets",
+        }, clear=True):
+            self.assertTrue(media_storage.is_configured(private=False))
 
     def test_aws_bucket_can_use_runtime_credentials(self):
         with patch.dict(os.environ, {"S3_BUCKET": "private-assets"}, clear=True):
@@ -71,8 +81,33 @@ class MediaStorageUploadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored.content_type, "image/png")
         self.assertEqual(stored.size_bytes, len(data))
         self.assertEqual(stored.sha256, hashlib.sha256(data).hexdigest())
+        self.assertTrue(stored.is_private)
         client.put_object.assert_called_once()
         self.assertEqual(client.put_object.call_args.kwargs["CacheControl"], "private, no-store")
+
+    async def test_public_upload_uses_public_bucket(self):
+        client = Mock()
+        data = b"generated-grid-bytes"
+        with (
+            patch.dict(os.environ, {
+                "S3_PUBLIC_BUCKET": "generated-public",
+                "S3_PUBLIC_BASE_URL": "https://cdn.example.test/assets",
+            }, clear=True),
+            patch("helpers.media_storage._client", return_value=client),
+        ):
+            stored = await media_storage.store_image(
+                data,
+                namespace="generated/three-by-three",
+                filename="grid.png",
+                content_type="image/png",
+                private=False,
+            )
+
+        self.assertEqual(stored.bucket, "generated-public")
+        self.assertFalse(stored.is_private)
+        self.assertTrue(stored.key.startswith("generated/three-by-three/"))
+        client.put_object.assert_called_once()
+        self.assertEqual(client.put_object.call_args.kwargs["Bucket"], "generated-public")
 
     async def test_non_image_payload_is_rejected(self):
         with patch.dict(os.environ, {"S3_BUCKET": "private-assets"}, clear=True):
