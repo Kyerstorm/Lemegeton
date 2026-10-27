@@ -53,7 +53,7 @@ The figures below are generated from repository files and are refreshed automati
 | Source lines (including blank lines) | 92,500 |
 | Non-blank source lines | 80,484 |
 | Text lines (code, docs, and configuration) | 96,800 |
-| Characters (excluding line breaks) | 4,324,311 |
+| Characters (excluding line breaks) | 4,324,307 |
 | Text file size | 4.2 MB |
 | Source line breakdown | Python: 86,106 lines; JavaScript / TypeScript: 3,892 lines; Rust: 937 lines; Shell: 749 lines; CSS / Sass: 564 lines; HTML / SVG: 252 lines |
 | Last refreshed (UTC) | 2026-10-27 12:25 UTC |
