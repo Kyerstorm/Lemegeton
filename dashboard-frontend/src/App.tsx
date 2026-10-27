@@ -196,6 +196,7 @@ export default function App() {
     setOverview({});
     setCommands([]);
     setCommandError("");
+    setBusyCommand("");
     setAudit([]);
     setResources([]);
     setUpdatedAt(null);
@@ -261,12 +262,16 @@ export default function App() {
 
   const loadDatabase = useCallback(async () => {
     if (!guildId) return;
+    const requestedGuild = guildId;
     try {
-      const requestedGuild = guildId;
       const data = await api<{ resources?: Resource[] }>("/api/guilds/" + encodeURIComponent(requestedGuild) + "/database", csrf);
       if (activeGuildIdRef.current && activeGuildIdRef.current !== String(requestedGuild)) return;
       setResources(data.resources || []);
-    } catch (error) { pushToast(errorMessage(error), true); setResources([]); }
+    } catch (error) {
+      if (activeGuildIdRef.current && activeGuildIdRef.current !== String(requestedGuild)) return;
+      pushToast(errorMessage(error), true);
+      setResources([]);
+    }
   }, [csrf, guildId, pushToast]);
 
   const loadIntegrations = useCallback(async () => {
@@ -382,7 +387,7 @@ export default function App() {
       pushToast("/" + command.fullname + " " + (result.enabled == null ? (desired ? "enabled" : "disabled") : (result.enabled ? "enabled" : "disabled")) + " and synchronized.");
       void loadAudit(requestedGuild, true);
     } catch (error) { pushToast(errorMessage(error), true); }
-    finally { setBusyCommand(""); }
+    finally { if (activeGuildIdRef.current === requestedGuild) setBusyCommand(""); }
   };
 
   const copyCommandInvocation = async (command: Command) => {
