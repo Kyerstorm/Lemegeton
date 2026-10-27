@@ -36,7 +36,7 @@ class DashboardCommandPolicyTests(unittest.TestCase):
         meta = {"command": command, "section": "Media"}
         self.assertTrue(_is_enabled("browse", meta, {"sections": {"Media": True}, "commands": {}}))
         self.assertFalse(_is_enabled("browse", meta, {"sections": {"Media": False}, "commands": {}}))
-        self.assertFalse(_is_enabled("browse", meta, {"sections": {}, "commands": {}}))
+        self.assertTrue(_is_enabled("browse", meta, {"sections": {}, "commands": {}}))
 
 
 class DashboardCommandExecutionGuardTests(unittest.IsolatedAsyncioTestCase):
