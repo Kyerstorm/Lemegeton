@@ -85,6 +85,41 @@ class MediaStorageUploadTests(unittest.IsolatedAsyncioTestCase):
         client.put_object.assert_called_once()
         self.assertEqual(client.put_object.call_args.kwargs["CacheControl"], "private, no-store")
 
+    async def test_public_image_returns_stable_registered_url(self):
+        stored = media_storage.StoredImage(
+            bucket="generated-public",
+            key="generated/three-by-three/asset.png",
+            content_type="image/png",
+            size_bytes=123,
+            sha256="a" * 64,
+            is_private=False,
+        )
+        with (
+            patch("helpers.media_storage.is_configured", return_value=True),
+            patch("helpers.media_storage.store_image", new_callable=__import__("unittest").mock.AsyncMock, return_value=stored) as store,
+            patch("helpers.media_storage.create_asset", new_callable=__import__("unittest").mock.AsyncMock, return_value=42) as create,
+            patch("helpers.media_storage.asset_url", new_callable=__import__("unittest").mock.AsyncMock, return_value="https://cdn.example.test/generated/asset.png") as asset_url,
+        ):
+            url = await media_storage.store_public_image(
+                b"generated-grid-bytes",
+                namespace="generated/three-by-three",
+                filename="grid.png",
+                content_type="image/png",
+                uploaded_by=7,
+                guild_id=9,
+            )
+
+        self.assertEqual(url, "https://cdn.example.test/generated/asset.png")
+        store.assert_awaited_once()
+        self.assertFalse(store.await_args.kwargs["private"])
+        create.assert_awaited_once_with(
+            stored,
+            namespace="generated/three-by-three",
+            uploaded_by=7,
+            guild_id=9,
+        )
+        asset_url.assert_awaited_once_with(42)
+
     async def test_public_upload_uses_public_bucket(self):
         client = Mock()
         data = b"generated-grid-bytes"
