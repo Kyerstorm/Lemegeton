@@ -270,7 +270,7 @@ class HelpCog(commands.Cog):
                     "desc": "Submit a proposed relationship between two works for review",
                     "usage": "/link-suggest <source_title> <source_category> <source_url> <relationship> <target_title> <target_category> <target_url> <evidence>",
                     "note": "Submissions enter a review queue; this does not immediately make a proposed relationship trusted.",
-                    "examples": ["/link-suggest"]
+                    "note": "Provide distinct source and target titles, categories, HTTPS metadata URLs, a relationship type, and at least 15 characters of evidence. Submissions enter the moderator review queue for the current server; they are not immediately trusted."
                 },
                 "link-review": {
                     "desc": "Inspect and review this server's proposed media relationships",
