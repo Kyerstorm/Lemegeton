@@ -193,6 +193,7 @@ export default function App() {
     refreshGeneration.current += 1;
     try { window.localStorage.setItem("lemegeton:selected-guild", String(nextId)); } catch { /* storage may be disabled */ }
     setGuildId(String(nextId));
+    setConfirmation(null);
     setOverview({});
     setCommands([]);
     setCommandError("");
