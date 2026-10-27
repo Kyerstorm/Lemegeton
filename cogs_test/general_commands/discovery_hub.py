@@ -5,6 +5,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from helpers.command_error_handler import FeedbackAwareView, handle_application_command_error
 from cogs_test.general_commands.dashboard import command_meta
 
 HUB_SECTIONS = {
@@ -89,7 +90,7 @@ HUB_SECTIONS = {
 }
 
 
-class DiscoveryHubView(discord.ui.View):
+class DiscoveryHubView(FeedbackAwareView):
     def __init__(self, owner_id: int):
         super().__init__(timeout=240)
         self.owner_id = owner_id
@@ -144,6 +145,11 @@ class DiscoveryHub(commands.Cog):
         embed.add_field(name="Community content", value="Contributions are stored in the database; archive submissions wait for a moderator from the originating server.", inline=False)
         embed.set_footer(text="Provider relationships, recommendations and community suggestions are labelled separately.")
         await interaction.response.send_message(embed=embed, view=DiscoveryHubView(interaction.user.id), ephemeral=True)
+
+
+    async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+        """Keep unexpected discovery UI failures private and traceable."""
+        await handle_application_command_error(interaction, error)
 
 
 async def setup(bot: commands.Bot) -> None:
