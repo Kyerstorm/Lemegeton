@@ -13,6 +13,7 @@ from cogs_test.general_commands.dashboard import (
     COMMAND_REGISTRY,
     ConfigDB,
     DashboardCog,
+    _copy_app_command,
     _filter_group_for_guild,
     _is_enabled,
     _restore_dashboard_config,
@@ -92,6 +93,16 @@ class DashboardGroupFilteringTests(unittest.TestCase):
         self.assertEqual([command.name for command in filtered.commands], ["trending"])
         self.assertEqual([command.name for command in group.commands], ["browse", "trending"])
 
+    def test_context_menu_is_preserved_without_slash_command_fields(self):
+        async def inspect_message(interaction: discord.Interaction, message: discord.Message):
+            return None
+
+        menu = app_commands.ContextMenu(name="Inspect message", callback=inspect_message)
+        cloned = _copy_app_command(menu)
+        self.assertIsInstance(cloned, app_commands.ContextMenu)
+        self.assertEqual(cloned.name, menu.name)
+        self.assertIs(cloned.callback, menu.callback)
+        self.assertFalse(hasattr(cloned, "parent"))
 
 class DashboardCommandExecutionGuardTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
