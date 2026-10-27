@@ -308,7 +308,11 @@ async def store_public_image(
             uploaded_by=uploaded_by,
             guild_id=guild_id,
         )
-        return await asset_url(asset_id)
+        url = await asset_url(asset_id)
+        if url:
+            return url
+        await delete_asset(asset_id)
+        return None
     except Exception:
         log.warning("Could not store public generated image in object storage", exc_info=True)
         if asset_id is not None:
