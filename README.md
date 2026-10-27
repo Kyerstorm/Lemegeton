@@ -1,944 +1,723 @@
-# 🎌 Lemegeton - Multi-Guild Discord Anime & Gaming Bot
+# Lemegeton
 
-A production-ready Discord bot that combines anime/manga tracking with AI-powered recommendations, Steam gaming integration, and comprehensive community features. Built with **full multi-guild support** and an **interactive dashboard management system** for server administrators.
+### A multi-guild Discord bot for connected media discovery, community systems, and server tooling.
 
-![Python](https://img.shields.io/badge/python-3.13+-blue.svg)
-![Discord.py](https://img.shields.io/badge/discord.py-2.6.0-blue.svg)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Status](https://img.shields.io/badge/status-production--ready-success.svg)
-![Multi-Guild](https://img.shields.io/badge/multi--guild-ready-brightgreen.svg)
-![Railway](https://img.shields.io/badge/railway-deployable-purple.svg)
-![Commands](https://img.shields.io/badge/commands-44-brightgreen.svg)
+Lemegeton brings anime, manga, light novels, books, webnovels, movies, television, and video games into one Discord-native discovery experience. It connects provider metadata with a provenance-aware relationship graph, community-curated archives, server-specific events, account features, customization, and an optional web dashboard.
 
----
+<p align="center">
+  <img alt="Python" src="https://img.shields.io/badge/Python-3.13%2B-3776AB?logo=python&logoColor=white">
+  <img alt="discord.py" src="https://img.shields.io/badge/discord.py-2.7.1-5865F2?logo=discord&logoColor=white">
+  <img alt="Database" src="https://img.shields.io/badge/Database-PostgreSQL-4169E1?logo=postgresql&logoColor=white">
+  <img alt="Dashboard" src="https://img.shields.io/badge/Dashboard-Rust%20%2B%20React-111827">
+  <img alt="Multi-guild" src="https://img.shields.io/badge/Architecture-Multi--guild-0F766E">
+  <img alt="License" src="https://img.shields.io/badge/License-MIT-16A34A">
+</p>
 
-## 📋 Table of Contents
-
-- [Features](#-features)
-- [Quick Start](#-quick-start)
-- [Commands](#-commands)
-- [Dashboard System](#-dashboard-system)
-- [Custom Roles](#-custom-roles)
-- [Installation](#-installation)
-- [Configuration](#-configuration)
-- [Project Structure](#-project-structure)
-- [Deployment](#-deployment)
-- [Development](#-development)
-- [Database](#-database)
-- [Contributing](#-contributing)
-- [Support](#-support)
+> **Project principle:** connect systems without pretending their data is interchangeable. A provider-confirmed adaptation, a provider recommendation, a genre-overlap match, and a moderator-approved community suggestion are different kinds of evidence.
 
 ---
 
-## ✨ Features
+## Contents
 
-### 🎯 Account & Profile System
-
-- **AniList OAuth Integration** - Secure account linking with OAuth flow
-- **Rich Profile Displays** - Comprehensive profiles with 12-hour caching for performance
-  - 🖼️ **Bio Gallery** - Browse all bio images in a paginated gallery view
-  - 🏅 **Achievements** - View unlocked achievements and progress tracking
-  - ⭐ **Favorites** - Browse favorite anime, manga, characters, and studios
-  - 📝 **Auto-Cleaned Bio** - Automatic markdown and HTML cleanup for readability
-  - 👥 **Social Stats** - Followers and following counts
-  - 📅 **Account Age** - See how long users have been on AniList
-  - ⚡ **12-Hour Cache** - Faster loading with intelligent caching system
-- **Admin Login Management** - Troubleshooting tools for bot moderators
-- **User Statistics** - Comprehensive tracking of anime/manga consumption
-
-### 📊 Media Tracking & Discovery
-
-- **Interactive Browsing** - Advanced filtering and sorting for:
-  - Anime
-  - Manga
-  - Light Novels
-  - General Novels
-- **AI-Powered Recommendations** - Personalized suggestions based on highly-rated titles (8.0+)
-  - Analyzes user preferences
-  - Cross-media recommendations
-  - Similar title discovery
-- **Trending Lists** - Stay updated with currently popular series
-- **Random Discovery** - Get random anime/manga suggestions
-- **Trailer Viewing** - Watch trailers directly through AniList integration
-- **3x3 Favorite Grids** - Generate beautiful 3x3 grids of favorite media
-- **Twitter/X News Monitoring** - Track anime/manga news from Twitter accounts
-- **AniList Site Embeds** - Direct links and embeds to AniList pages
-- **Library Backup** - Export and backup your AniList library
-- **Completion Tracking** - Automatic notifications for completed anime/manga
-
-### 🎮 Gaming Integration
-
-- **Steam Profile Display** - View Steam profiles with library statistics
-- **Steam Game Recommendations** - Personalized game suggestions based on your Steam library
-- **Steam Game Search** - Search and view detailed information about Steam games
-- **Free Games Tracker** - Automatic notifications for free games from:
-  - Epic Games Store
-  - Steam
-  - GOG
-  - Other platforms
-- **Cross-Platform Discovery** - Connect your anime/manga and gaming interests
-
-### 👥 Social Features
-
-- **AniList Affinity Calculator** - Calculate compatibility with friends based on preferences
-- **Server-Wide Leaderboards** - Compete with other users across various metrics:
-  - Anime count
-  - Manga count
-  - Mean score
-  - Episodes watched
-  - Chapters read
-- **Feedback System** - Report bugs and suggest improvements
-- **Invite Tracking** - Recruitment statistics and leaderboards
-- **Social Embeds** - Rich social interaction displays
-
-### 🎨 Customization
-
-- **Theme System** - 30+ beautiful themes including:
-  - Dark Luxury (default)
-  - Cyberpunk
-  - Sunset
-  - Ocean
-  - Forest
-  - Midnight
-  - Royal
-  - And 23+ more!
-- **Guild-Wide Themes** - Server moderators can set server-wide default themes
-- **User-Specific Themes** - Individual preferences override guild settings
-- **Theme Preview** - Preview themes before applying
-- **Custom Roles** - One custom role per server booster: name, solid/gradient/holographic color and
-  icon, set from the `/custom-role` panel or a private web color picker (see [Custom Roles](#-custom-roles))
-
-### 🏰 Server Management
-
-- **Interactive Dashboard** - Command management system (`/dashboard`)
-  - Per-command enable/disable
-  - Section-based organization
-  - Git-style audit logging
-  - Real-time status indicators
-- **Server Configuration** - Centralized server settings (`/server-config`)
-- **Invite Analytics** - Track invite usage and recruitment statistics
-- **Welcome DM System** - Automated welcome messages for new members
-- **Moderator Role Management** - Configure moderator roles per server
-- **Bot Updates Channel** - Configure channels for bot update notifications
-- **Completion Channels** - Set channels for anime/manga completion notifications
-
-### 🔧 Utilities
-
-- **Comprehensive Help System** - Interactive help with category browsing
-- **Reminder System** - Natural language parsing for reminders (under maintenance)
-- **Multi-Type Notifications** - Subscribe to various update types
-- **Planned Features** - View upcoming features and vote on priorities
-- **Timestamp Generator** - Create Discord timestamps
-- **User Information Display** - View detailed Discord user information
-- **Say Command** - Moderators can make the bot send messages
-- **Invite Link** - Share the bot with other servers
-- **Server Info** - Display comprehensive server information
-
-### 👑 Admin Features
-
-- **Bot Moderator System** - Global permissions management
-- **GitHub Commit Tracker** - New commits are posted to bot update channels automatically
-- **Command Enable/Disable** - Per-server command management via dashboard
-- **Audit Logging** - Git-style history of all configuration changes
-- **User Cleanup** - Maintenance tools for inactive users
-
-### 🌐 Multi-Guild Support
-
-- **Full Multi-Server Deployment** - Deploy across unlimited Discord servers
-- **Guild-Aware Data Isolation** - All database operations scoped to guild context
-- **Per-Guild Configuration** - Independent settings for each server
-- **Cross-Guild User Profiles** - Users maintain a single profile across all servers
-- **Guild-Specific Challenges** - Independent challenge systems per server
-- **Flexible Role Management** - Configure different roles for each server
+- [Architecture map](#architecture-map)
+- [What Lemegeton does](#what-lemegeton-does)
+- [Connected media discovery](#connected-media-discovery)
+- [Community archives and events](#community-archives-and-events)
+- [Accounts, gaming, and customization](#accounts-gaming-and-customization)
+- [Dashboard and web surfaces](#dashboard-and-web-surfaces)
+- [Image storage and privacy](#image-storage-and-privacy)
+- [Multi-guild data boundaries](#multi-guild-data-boundaries)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Development and verification](#development-and-verification)
+- [Repository map](#repository-map)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
-## 🚀 Quick Start
+## Architecture map
 
-### Prerequisites
+This is the high-level architecture of the implemented application. It deliberately shows the main execution paths and the connections between command interfaces, business logic, external metadata providers, PostgreSQL, object storage, and the optional web control plane. It is a system map, not a claim that every optional integration is configured or available in every deployment.
 
-- **Python 3.13+** (required)
-- **Discord Bot Token** (from [Discord Developer Portal](https://discord.com/developers/applications))
-- **AniList Account** (optional, but recommended for full functionality)
-- **Steam API Key** (optional, for gaming features)
+~~~mermaid
+flowchart TB
+    %% ============================================================
+    %% LEMEGETON — CONNECTED COMMAND AND DATA ARCHITECTURE
+    %% ============================================================
 
-### Installation
+    subgraph ACTORS["01 · People and client surfaces"]
+        MEMBER["Discord member"]
+        MOD["Server moderator / administrator"]
+        OWNER["Bot owner"]
+        DISCORD["Discord client<br/>Slash commands · Selects · Modals · Buttons"]
+        BROWSER["Web browser"]
+    end
 
-**Windows:**
-```powershell
-# Clone the repository
+    subgraph GATEWAY["02 · Discord runtime and routing"]
+        GATEWAY_API["Discord Gateway / Interactions API"]
+        BOT["bot.py<br/>Bot lifecycle · Extension loading · Runtime hooks"]
+        TREE["Application-command tree"]
+        META["Command metadata registry<br/>command_meta · Sections · Enable policy"]
+        ERRORS["Shared error handling<br/>Private response · Structured log context"]
+        FEEDBACK["/feedback<br/>Bug reports and feature requests"]
+    end
+
+    subgraph COMMANDS["03 · Command and interaction layer"]
+        HELP["/help<br/>Runtime-filtered dropdown"]
+        HUB["/discovery-hub<br/>Guided command directory"]
+        BROWSE["/browse<br/>Search · Filters · Sort"]
+        FRANCHISE["/franchise<br/>Provider-attributed relationships"]
+        CONNECTIONS["/connections<br/>Resolved title relationship view"]
+        ORDER["/reading-order<br/>Known release relationships"]
+        SIMILAR["/similar<br/>Related media and recommendations"]
+        GAME["/game<br/>IGDB result + optional Steam enrichment"]
+        TMDB_CMDS["Movie / TV commands<br/>Watch providers · Credits · Trailers<br/>Collections · Region"]
+        BOOK_CMDS["Book / webnovel commands<br/>Author works · Novel Updates lookup"]
+        COMMUNITY["Community commands<br/>Archives · Discussions · Polls · Quizzes"]
+        PANELS["/panels<br/>Shared manga panel archive"]
+        POTD["/panel-of-the-day<br/>Server's daily safe selection"]
+        GRID["/3x3<br/>Generated image grids"]
+        ANILIST_EMBED["AniList site embeds<br/>Entities · Staff / character collage"]
+        CUSTOM_ROLE_UI["/custom-role<br/>Member role panel"]
+        CUSTOM_ROLE_ADMIN["/custom-role-admin<br/>Server role administration"]
+    end
+
+    subgraph DOMAIN["04 · Shared application services"]
+        ANILIST_HELPER["AniList helpers<br/>GraphQL · Search · Media details"]
+        TMDB_HELPER["TMDB request helpers<br/>Search · Metadata · Availability"]
+        BOOKS_HELPER["Google Books lookup"]
+        NU_HELPER["Novel Updates scraper helper"]
+        IGDB_HELPER["IGDB / Twitch authentication + search"]
+        STEAM_HELPER["Steam search and store details"]
+        MEDIA_GRAPH["helpers/media_graph.py<br/>Normalize titles · Store / query edges<br/>Retain relationship provenance"]
+        MEDIA_STORAGE["helpers/media_storage.py<br/>S3-compatible upload · Registry<br/>Private signing · Public URL policy"]
+        ROLE_SERVICE["Custom Roles service<br/>Role eligibility · Validation · Audit"]
+        ERROR_SERVICE["command_error_handler.py<br/>Slash and component failure guidance"]
+        COMMAND_POLICY["Guild command policy<br/>Runtime authorization and overrides"]
+    end
+
+    subgraph PROVIDERS["05 · External services and media sources"]
+        ANILIST["AniList GraphQL API"]
+        TMDB["The Movie Database API"]
+        GOOGLE_BOOKS["Google Books API"]
+        NOVEL_UPDATES["Novel Updates website / scraper"]
+        IGDB["IGDB API"]
+        STEAM["Steam Web API / Store"]
+        DISCORD_CDN["Discord attachment / media delivery"]
+        LLM["Optional configured model providers<br/>Only used by features that implement them"]
+    end
+
+    subgraph DATA["06 · PostgreSQL and application records"]
+        DB["database.py<br/>Shared async PostgreSQL pool"]
+        USERS["Account and user data<br/>Guild-aware records and preferences"]
+        GUILD_CONFIG["Guild configuration<br/>Command settings · Roles · Channels"]
+        GRAPH_TABLE[("media_relationship_graph")]
+        SUGGESTIONS[("media_link_suggestions")]
+        DISCUSSIONS[("connected_media_discussions")]
+        ARCHIVE_TABLES[("Community archive / event tables")]
+        PANEL_TABLES[("Panels · Tags · Moderation records")]
+        ASSET_TABLE[("media_assets<br/>Object metadata and storage references")]
+        CUSTOM_ROLE_TABLES[("Custom Role configuration<br/>Saved state and audit data")]
+    end
+
+    subgraph OBJECTS["07 · Image object storage"]
+        PRIVATE_S3[("Private S3-compatible bucket<br/>Panel originals · Role icon originals")]
+        PUBLIC_S3[("Separate public output bucket")]
+        CDN["HTTPS public base URL / CDN"]
+        FALLBACK["Legacy Discord-backed image path<br/>Used where the existing flow supports it"]
+    end
+
+    subgraph WEB["08 · Optional web control plane"]
+        DASH_UI["dashboard-frontend/<br/>React + TypeScript + Vite"]
+        RUST["dashboard-rs/<br/>Rust / Axum · OAuth session · CSRF"]
+        BRIDGE["Narrow bot runtime bridge<br/>Live command registry and guild state"]
+        PICKER["Python Custom Role picker<br/>Private listener behind dashboard proxy"]
+        OAUTH["Discord OAuth2<br/>Identity and current guild permissions"]
+    end
+
+    subgraph OPS["09 · Operations and feedback"]
+        LOGS["Module and runtime logs"]
+        CI["GitHub Actions<br/>Python checks · Frontend checks<br/>Rust tests and audit"]
+        DOCS["Documentation<br/>Media discovery · Dashboard · Deployment<br/>Security review · Custom Roles"]
+    end
+
+    %% User entry and runtime
+    MEMBER --> DISCORD
+    MOD --> DISCORD
+    OWNER --> DISCORD
+    DISCORD --> GATEWAY_API
+    GATEWAY_API --> BOT
+    BOT --> TREE
+    TREE --> META
+    TREE --> COMMANDS
+    META --> COMMAND_POLICY
+    HELP --> TREE
+    HUB --> TREE
+    COMMUNITY --> ERRORS
+
+    %% Discovery command to domain flows
+    BROWSE --> ANILIST_HELPER
+    BROWSE --> TMDB_HELPER
+    BROWSE --> BOOKS_HELPER
+    BROWSE --> NU_HELPER
+    FRANCHISE --> ANILIST_HELPER
+    FRANCHISE --> TMDB_HELPER
+    FRANCHISE --> MEDIA_GRAPH
+    CONNECTIONS --> FRANCHISE
+    ORDER --> FRANCHISE
+    SIMILAR --> ANILIST_HELPER
+    SIMILAR --> TMDB_HELPER
+    SIMILAR --> BOOKS_HELPER
+    SIMILAR --> NU_HELPER
+    SIMILAR --> MEDIA_GRAPH
+    GAME --> IGDB_HELPER
+    GAME --> STEAM_HELPER
+    GAME --> MEDIA_GRAPH
+    TMDB_CMDS --> TMDB_HELPER
+    BOOK_CMDS --> BOOKS_HELPER
+    BOOK_CMDS --> NU_HELPER
+    COMMUNITY --> MEDIA_GRAPH
+    PANELS --> MEDIA_STORAGE
+    PANELS --> PANEL_TABLES
+    POTD --> PANEL_TABLES
+    POTD --> MEDIA_STORAGE
+    GRID --> MEDIA_STORAGE
+    ANILIST_EMBED --> MEDIA_STORAGE
+    CUSTOM_ROLE_UI --> ROLE_SERVICE
+    CUSTOM_ROLE_ADMIN --> ROLE_SERVICE
+
+    %% Provider boundaries
+    ANILIST_HELPER --> ANILIST
+    TMDB_HELPER --> TMDB
+    BOOKS_HELPER --> GOOGLE_BOOKS
+    NU_HELPER --> NOVEL_UPDATES
+    IGDB_HELPER --> IGDB
+    STEAM_HELPER --> STEAM
+    ANILIST_EMBED --> ANILIST
+    COMMUNITY -. "only when an implemented feature uses a model" .-> LLM
+
+    %% Shared persistence
+    MEDIA_GRAPH --> DB
+    MEDIA_STORAGE --> DB
+    ROLE_SERVICE --> DB
+    PANELS --> DB
+    COMMUNITY --> DB
+    ANILIST_HELPER --> DB
+    DB --> USERS
+    DB --> GUILD_CONFIG
+    DB --> GRAPH_TABLE
+    DB --> SUGGESTIONS
+    DB --> DISCUSSIONS
+    DB --> ARCHIVE_TABLES
+    DB --> PANEL_TABLES
+    DB --> ASSET_TABLE
+    DB --> CUSTOM_ROLE_TABLES
+    MEDIA_GRAPH --> GRAPH_TABLE
+    MEDIA_GRAPH --> SUGGESTIONS
+    MEDIA_GRAPH --> DISCUSSIONS
+    MEDIA_GRAPH --> ARCHIVE_TABLES
+    MEDIA_STORAGE --> ASSET_TABLE
+
+    %% Object storage and fallback paths
+    MEDIA_STORAGE --> PRIVATE_S3
+    MEDIA_STORAGE --> PUBLIC_S3
+    PUBLIC_S3 --> CDN
+    PANELS -. "legacy uploads / existing records" .-> FALLBACK
+    FALLBACK --> DISCORD_CDN
+    POTD -. "legacy attachment URL when present" .-> DISCORD_CDN
+    PRIVATE_S3 -. "short-lived signed URL" .-> DISCORD_CDN
+
+    %% Web control plane
+    BROWSER --> DASH_UI
+    DASH_UI --> RUST
+    RUST --> OAUTH
+    RUST --> BRIDGE
+    BRIDGE --> BOT
+    RUST --> PICKER
+    PICKER --> ROLE_SERVICE
+    ROLE_SERVICE --> CUSTOM_ROLE_TABLES
+    ROLE_SERVICE --> PRIVATE_S3
+
+    %% Diagnostics
+    BOT --> ERRORS
+    ERRORS --> ERROR_SERVICE
+    ERROR_SERVICE --> LOGS
+    ERRORS --> FEEDBACK
+    MEDIA_GRAPH --> LOGS
+    MEDIA_STORAGE --> LOGS
+    ROLE_SERVICE --> LOGS
+    CI --> DOCS
+
+    %% Visual grouping
+    classDef interaction fill:#111827,stroke:#64748b,color:#f8fafc
+    classDef service fill:#172554,stroke:#60a5fa,color:#eff6ff
+    classDef provider fill:#1f2937,stroke:#a78bfa,color:#f5f3ff
+    classDef database fill:#052e2b,stroke:#2dd4bf,color:#ecfdf5
+    classDef storage fill:#3f1d0b,stroke:#fb923c,color:#fff7ed
+    classDef operations fill:#27272a,stroke:#a1a1aa,color:#fafafa
+
+    class MEMBER,MOD,OWNER,DISCORD,BROWSER,GATEWAY_API interaction
+    class BOT,TREE,META,HELP,HUB,BROWSE,FRANCHISE,CONNECTIONS,ORDER,SIMILAR,GAME,TMDB_CMDS,BOOK_CMDS,COMMUNITY,PANELS,POTD,GRID,ANILIST_EMBED,CUSTOM_ROLE_UI,CUSTOM_ROLE_ADMIN,DASH_UI,RUST,BRIDGE,PICKER,ERRORS,ERROR_SERVICE,COMMAND_POLICY service
+    class ANILIST_HELPER,TMDB_HELPER,BOOKS_HELPER,NU_HELPER,IGDB_HELPER,STEAM_HELPER,ANILIST,TMDB,GOOGLE_BOOKS,NOVEL_UPDATES,IGDB,STEAM,DISCORD_CDN,LLM provider
+    class DB,USERS,GUILD_CONFIG,GRAPH_TABLE,SUGGESTIONS,DISCUSSIONS,ARCHIVE_TABLES,PANEL_TABLES,ASSET_TABLE,CUSTOM_ROLE_TABLES database
+    class MEDIA_STORAGE,PRIVATE_S3,PUBLIC_S3,CDN,FALLBACK storage
+    class LOGS,CI,DOCS,FEEDBACK,OAUTH,MEDIA_GRAPH,ROLE_SERVICE,ANILIST_EMBED service
+~~~
+
+### How a cross-media lookup moves through the system
+
+The relationship graph helps different systems discover links without replacing each provider's metadata model. The command resolves a title, calls the provider appropriate to the selected category, stores source-labeled relationships, and then adds eligible stored links and community resources. Errors or missing provider records should produce a limitation or no-result message, not fabricated relationships.
+
+~~~mermaid
+sequenceDiagram
+    autonumber
+    actor User as Discord member
+    participant Cmd as Slash-command cog
+    participant Provider as Metadata provider helper
+    participant Graph as Media relationship graph
+    participant DB as PostgreSQL
+    participant UI as Discord response
+
+    User->>Cmd: /franchise, /connections, /reading-order, /similar, or /game
+    Cmd->>Provider: Search the selected media category
+    alt Provider returns several plausible matches
+        Provider-->>Cmd: Candidate records
+        Cmd-->>User: Owner-bound title picker
+        User->>Cmd: Select exact title
+    else Provider returns one usable match
+        Provider-->>Cmd: Resolved metadata
+    end
+    Cmd->>Provider: Fetch supported details and relationships
+    Provider-->>Cmd: Provider metadata / relationships
+    Cmd->>Graph: Record relationships with source provenance
+    Graph->>DB: Deduplicated write and/or graph lookup
+    DB-->>Graph: Saved links
+    Graph-->>Cmd: Related titles and eligible community resources
+    Cmd->>UI: Embed labels provider data vs recommendations/community links
+    UI-->>User: Result plus source URLs and stated limitations
+
+    opt Provider unavailable or unexpected failure
+        Provider-->>Cmd: Timeout, invalid response, or no usable record
+        Cmd->>UI: Safe error / fallback message
+    end
+~~~
+
+### Image storage decisions
+
+The storage path is deliberately different for private originals and generated, non-sensitive composites.
+
+~~~mermaid
+flowchart TD
+    START["Image-producing or image-uploading command"]
+    KIND{"What kind of image?"}
+    ORIGINAL["User-supplied original<br/>Panel / Custom Role icon source"]
+    GENERATED["Generated image<br/>3x3 grid / staff-character collage"]
+    PVT{"Private S3 configuration valid?"}
+    PUB{"Separate public bucket + HTTPS base URL valid?"}
+    PRIVATE[("Private S3 bucket")]
+    PUBLIC[("Public generated-output bucket")]
+    SIGN["Short-lived signed URL"]
+    CDN["Configured HTTPS base URL / CDN"]
+    LEGACY["Existing Discord attachment path<br/>where supported"]
+    META[("media_assets registry")]
+    PRIVATE_RESPONSE["Render private asset reference"]
+    PUBLIC_RESPONSE["Render public generated image"]
+    FALLBACK["Keep existing Discord file attachment"]
+    DENY["Do not expose private originals as public content"]
+
+    START --> KIND
+    KIND -->|Original upload| ORIGINAL
+    KIND -->|Generated composite| GENERATED
+    ORIGINAL --> PVT
+    PVT -->|Yes| PRIVATE
+    PRIVATE --> META
+    META --> SIGN
+    SIGN --> PRIVATE_RESPONSE
+    PVT -->|No| LEGACY
+    LEGACY --> PRIVATE_RESPONSE
+    GENERATED --> PUB
+    PUB -->|Yes| PUBLIC
+    PUBLIC --> META
+    PUBLIC --> CDN
+    CDN --> PUBLIC_RESPONSE
+    PUB -->|No| FALLBACK
+    ORIGINAL -. "Must never be copied to public output by default" .-> DENY
+~~~
+
+---
+
+## What Lemegeton does
+
+### Connected media discovery
+
+- **Anime and manga:** AniList-backed search, browsing, title details, supported relationships, and account-linked features.
+- **Light novels, books, and webnovels:** category-aware discovery using the existing metadata providers and Novel Updates scraper path where supported.
+- **Movies and television:** TMDB metadata, listed watch availability by region, credited-person filmographies, videos, collections, and available release information.
+- **Video games:** IGDB metadata with optional Steam store enrichment. Steam data is added only when the game matching logic can identify a suitable result.
+- **Cross-media links:** a shared relationship graph connects results and community resources while keeping provider evidence, recommendations, locally calculated similarity, and community-approved links distinct.
+- **Interactive resolution:** title pickers help users choose between similarly named works instead of silently joining the wrong entries.
+
+### Accounts and community features
+
+- AniList account linking and rich user/profile displays.
+- AniList activity and affinity tools and available leaderboard features.
+- Shared manga Panels, attributed quotes, credited fanworks, moodboards, soundtrack links, memorable scenes, member-written recommendations, and spoiler-aware theories.
+- Server-specific reading/discussion features, polls, brackets, adaptation votes, and source-linked quizzes where the relevant command is loaded.
+- Feedback and bug-report submission through <code>/feedback</code>.
+
+### Gaming and server management
+
+- Steam profiles, game search, library-aware game features, and free-game checks where configured.
+- Guild command configuration and the Discord <code>/dashboard</code>.
+- Theme customization and per-server defaults.
+- Custom Roles for eligible members, with a private role editor and web color picker.
+- Invite analytics, server information, notification settings, and administrator/moderator tools.
+
+> The running bot's <code>/help</code> dropdown is the best source for the exact commands that are registered and enabled in a particular deployment. This README describes the main systems, not a hard-coded command count.
+
+---
+
+## Connected media discovery
+
+The cross-media commands reuse provider helpers and the shared relationship graph rather than creating independent data silos.
+
+| Command | What it does | Important boundary |
+| --- | --- | --- |
+| <code>/browse</code> | Interactive search across supported media categories and metadata sources. | Filters and returned fields depend on the chosen media type and provider. |
+| <code>/franchise</code> | Explore provider-declared relationships and supported franchise / collection information. | Provider recommendations and cross-provider title matches are labelled separately from confirmed relationships. |
+| <code>/connections</code> | Resolve a title and browse its known related works. | Reuses the title resolver and a selection menu where needed. |
+| <code>/reading-order</code> | Browse available publication/release relationships for books, webnovels, manga, anime, and related formats. | Release order is not automatically story chronology; chapter-to-episode mappings are not invented. |
+| <code>/similar</code> | Find related works using available provider suggestions, local genre overlap, saved links, and eligible human-written community recommendations. | Different source types stay labelled; a shared genre is not proof of an adaptation. |
+| <code>/link-suggest</code> | Submit a proposed relationship between two media entries. | A suggestion enters review; it is not trusted immediately. Metadata URLs must be HTTPS and the evidence explanation must meet the command's validation. |
+| <code>/link-review</code> | List, inspect, approve, or reject relationship suggestions. | Requires Manage Server or Manage Messages. Community approval is not the same as provider confirmation. |
+| <code>/discovery-hub</code> | Open a sectioned guide to discovery, novels, movies/TV, gaming, archives, and community events. | The hub filters command references against the commands currently registered. |
+| <code>/game</code> | Search IGDB and add Steam store details when a suitable exact title match is available. | Fuzzy similarity alone does not establish that a Steam listing is the same game. |
+
+### Movie, TV, book, and webnovel commands
+
+- <code>/where-to-watch</code> queries listed streaming, rental, and purchase availability for a movie or TV title in the selected region. Availability can change and should be verified at the provider.
+- <code>/person-credits</code> displays the TMDB filmography for a selected person.
+- <code>/trailers</code> shows supported TMDB-listed YouTube and Vimeo videos for a selected movie or series.
+- <code>/collection-guide</code> lists a TMDB movie collection and its available release dates.
+- <code>/media-region</code> changes the server's default two-letter streaming region and requires Manage Server permission.
+- <code>/author-works</code> searches Google Books for works attributed to an author.
+- <code>/webnovel-updates</code> uses the existing Novel Updates scraper helper. Results depend on the source page and scraper remaining compatible.
+- <code>/chapter-discussion</code> and <code>/episode-discussion</code> create spoiler-aware discussions for the current server.
+
+Provider credentials and source availability vary. TMDB commands require <code>TMDB_BEARER_TOKEN</code>; game enrichment uses the available IGDB and Steam configuration. Missing provider data should be explained rather than guessed.
+
+---
+
+## Community archives and events
+
+The archive layer makes community contributions discoverable while keeping the approval and reporting flows explicit.
+
+| Command | Purpose |
+| --- | --- |
+| <code>/panels</code> | Browse, search, contribute to, or manage the shared manga Panel archive. |
+| <code>/panel-of-the-day</code> | View the selected safe Panel for the current server's daily feature. |
+| <code>/quotes</code> | Browse, search, randomize, or submit short attributed quotes. |
+| <code>/fanworks</code> | Discover or submit credited fan art, edits, wallpapers, and videos. |
+| <code>/moodboards</code> | Share themed boards built around multiple works. |
+| <code>/soundtracks</code> | Index soundtrack links from legitimate music/video platforms. |
+| <code>/scenes</code> | Save memorable scene references and optional source links. |
+| <code>/recommendation-board</code> | Share human-written recommendations and reasons. |
+| <code>/theories</code> | Share spoiler-marked theories with source attribution. |
+| <code>/archive-mine</code> | Check your own submissions and their review state in the current server. |
+| <code>/archive-review</code> | Review submissions from the server where they were submitted. |
+| <code>/archive-report</code> | Report an approved entry to the current server's moderators. |
+| <code>/archive-report-review</code> | Triage reports; removal is restricted to the originating server. |
+| <code>/media-bracket</code> | Create a server-specific media bracket, vote, or view results. |
+| <code>/adaptation-vote</code> | Poll between two versions and inspect community preferences. |
+| <code>/media-quiz</code> | Add source-linked trivia, play a question, and submit an answer privately. |
+
+Archive and event writes are backed by database records. Moderation decisions and event participation are scoped to the originating guild where applicable. A community-submitted relationship remains distinct from data asserted by AniList, TMDB, or another provider.
+
+---
+
+## Accounts, gaming, and customization
+
+### AniList
+
+Lemegeton uses the existing AniList integration for supported anime/manga data, profiles, personal-list features, and relationship metadata. Account linking is needed for commands that rely on a user's own AniList account; public provider searches do not necessarily require it.
+
+### Gaming
+
+- Steam profile, search, store enrichment, and available library-aware discovery.
+- IGDB-first game metadata through the configured Twitch/IGDB API credentials.
+- Free-game checks and notifications where the associated providers and configuration are available.
+- Cross-media graph links can connect game results to related media and eligible community resources.
+
+### Custom Roles
+
+Custom Roles let eligible members style their own role and give administrators a controlled server setup panel. The feature includes name/color/icon editing, a private web color picker, eligibility and permission checks, saved state, audit information, and explicit confirmation for large removal operations.
+
+- <code>/custom-role</code> opens the member's private panel.
+- <code>/custom-role-admin</code> provides server setup, eligibility, anchor-role, channel, cooldown, moderation-log, and maintenance controls.
+- The bot requires Manage Roles, and its role must be positioned correctly relative to the configured anchor.
+- Enhanced role colors and icons depend on the server's actual Discord entitlements.
+- Uploaded icon originals can use private S3 storage when it is configured; database fallback remains available where implemented.
+
+Full setup details: [Custom Roles handoff guide](docs/HANDOFF_NOTES.md) · [Custom Roles specification](docs/CUSTOM_ROLES_SPEC.md).
+
+---
+
+## Dashboard and web surfaces
+
+Lemegeton has separate but connected management interfaces.
+
+### Discord dashboard
+
+The <code>/dashboard</code> command organizes dashboard-managed application commands by section and can change a guild's command configuration. The inventory is built from the live command metadata registry; it is not supposed to be an independent, static list of commands.
+
+### Web dashboard
+
+The optional web control plane uses:
+
+- **Rust / Axum** in <code>dashboard-rs/</code> for the public same-origin service, Discord OAuth2 session handling, CSRF/origin protections, and server-side authorization checks.
+- **React + TypeScript + Vite** in <code>dashboard-frontend/</code> for the browser interface.
+- A narrow internal bridge so the Rust service can request live bot operations without creating a second Discord client or command registry.
+- The existing Python Custom Role picker behind a private listener and the Rust service's reverse-proxy path.
+
+The dashboard revalidates current guild permissions and bot membership for guild-specific operations. It does not offer arbitrary shell execution, raw SQL, unrestricted code execution, or general-purpose cog reload controls. Keep internal bridge and picker listeners private.
+
+Read [Web dashboard setup and security boundaries](docs/DASHBOARD.md), [security review](docs/SECURITY_AUDIT.md), or the [VPS/systemd/Nginx guide](deploy/vps/README.md).
+
+---
+
+## Image storage and privacy
+
+The image-storage service is shared by the Panel archive, Custom Roles, generated grids, staff/character collages, and media-resource displays where integrated.
+
+### Private originals
+
+Configure <code>S3_BUCKET</code> with S3-compatible credentials for new Panel images and Custom Role icon originals. The PostgreSQL <code>media_assets</code> table stores metadata and references; the actual image bytes remain in object storage. Private assets are displayed through short-lived signed URLs, subject to the configured TTL.
+
+Existing Discord-hosted Panels remain supported. Existing Custom Role image records are not automatically bulk-migrated just because S3 is added.
+
+### Generated public output
+
+The <code>/3x3</code> grid generator and the AniList staff/character collage output may use a **separate** public output destination:
+
+- <code>S3_PUBLIC_BUCKET</code> — public or CDN-served destination for generated, non-sensitive imagery only.
+- <code>S3_PUBLIC_BASE_URL</code> — valid HTTPS base URL for that destination.
+
+The public output path is disabled unless the separate bucket and HTTPS base URL are valid. Generated outputs fall back to the prior Discord attachment path where implemented. The private and public bucket names must not be the same. Do not upload private originals or role icons to the public generated-output bucket.
+
+| Setting | Purpose |
+| --- | --- |
+| <code>S3_BUCKET</code> | Private originals bucket. |
+| <code>S3_ENDPOINT_URL</code> | Optional endpoint for Cloudflare R2, MinIO, or another S3-compatible service. |
+| <code>S3_REGION</code> | S3 region; defaults to <code>us-east-1</code> in the current environment template. |
+| <code>S3_ACCESS_KEY_ID</code> / <code>S3_SECRET_ACCESS_KEY</code> | Optional explicit access credentials; set both or neither. |
+| <code>S3_SIGNED_URL_TTL_SECONDS</code> | Private signed-URL TTL; current storage helper bounds it to 60–3,600 seconds. |
+| <code>S3_PUBLIC_BUCKET</code> | Separate output bucket for generated public imagery only. |
+| <code>S3_PUBLIC_BASE_URL</code> | HTTPS base URL/CDN for the public output destination. |
+
+Configure object lifecycle rules according to the retention requirements of your deployment, and keep credentials out of source control.
+
+---
+
+## Multi-guild data boundaries
+
+Lemegeton is intended to run in multiple Discord servers from one bot process.
+
+- **Guild configuration stays independent.** Role/channel settings, command overrides, discussion threads, polls, brackets, quiz sessions, and moderation queues use the current guild context where applicable.
+- **Shared provider data stays attributed.** Provider records and public archive records can be discovered across features without becoming server-specific source facts.
+- **Community-approved relationships stay scoped.** The graph stores provenance and guild ownership for community links so one server's approval is not represented as a global provider fact.
+- **Shared media assets stay referenced.** The asset registry stores object metadata and foreign keys instead of large image bodies.
+- **Live command visibility is runtime-based.** Help and the Discovery Hub avoid presenting unloaded commands as available, while the command policy and dashboard use the actual registry/implemented configuration paths.
+
+Developers must pass guild context for guild-owned actions and avoid making moderation or event decisions using records from another server. Run isolation checks before accepting a change that alters data ownership or lookup queries.
+
+---
+
+## Quick start
+
+### Requirements
+
+- Python 3.13+.
+- A Discord application and bot token.
+- PostgreSQL connection access.
+- Optional API credentials for the media providers or features you intend to use.
+- Optional Node.js 22+ and a Rust toolchain if you intend to build the web dashboard.
+
+### Run the bot locally
+
+1. Clone the repository and enter its directory.
+2. Create and activate a virtual environment.
+3. Install Python dependencies.
+4. Copy <code>.env.example</code> to <code>.env</code>.
+5. Configure the Discord token and PostgreSQL connection.
+6. Add optional provider credentials as required.
+7. Run <code>python bot.py</code>.
+
+~~~bash
 git clone https://github.com/Kyerstorm/Lemegeton.git
 cd Lemegeton
 
-# Create virtual environment
-python -m venv venv
-venv\Scripts\Activate.ps1
+python3 -m venv .venv
+source .venv/bin/activate
 
-# Install dependencies
-pip install -r requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 
-# Create .env file
-copy .env.example .env
-# Edit .env with your configuration (see Configuration section)
-
-# Run the bot
-python bot.py
-```
-
-**Linux/Mac:**
-```bash
-# Clone the repository
-git clone https://github.com/Kyerstorm/Lemegeton.git
-cd Lemegeton
-
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Create .env file
 cp .env.example .env
-# Edit .env with your configuration (see Configuration section)
-
-# Run the bot
+# Edit .env; keep credentials private.
 python bot.py
-```
+~~~
+
+On Windows PowerShell, use <code>.venv\Scripts\Activate.ps1</code> to activate the virtual environment and copy the template with <code>Copy-Item .env.example .env</code>.
+
+The bot needs a reachable PostgreSQL instance. <code>DATABASE_URL</code>, <code>POSTGRES_DSN</code>, or <code>POSTGRES_URL</code> can supply the connection URL; alternatively configure the individual <code>POSTGRES_HOST</code>, <code>POSTGRES_PORT</code>, <code>POSTGRES_DB</code>, <code>POSTGRES_USER</code>, and <code>POSTGRES_PASSWORD</code> values. The shared database layer creates the async PostgreSQL pool during startup.
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
-Create a `.env` file in the project root:
+Use <code>.env.example</code> as the complete reference for the current environment variable names. The table below highlights the main settings, not every optional tuning flag.
 
-```env
-# Required
-DISCORD_TOKEN=your_discord_bot_token_here
-PRIMARY_GUILD_ID=123456789012345678
+| Variable | Required for | Notes |
+| --- | --- | --- |
+| <code>DISCORD_TOKEN</code> | Bot startup | Secret from the Discord Developer Portal. Never commit it. |
+| <code>DATABASE_URL</code> or <code>POSTGRES_DSN</code> | Persistent database features | PostgreSQL connection string. The supported PostgreSQL environment variables are also listed above. |
+| <code>BOT_ID</code> | Optional bot identity configuration | Bot's Discord user/application ID where needed. |
+| <code>GUILD_ID</code> | Optional primary-guild defaults | Do not use it as a substitute for runtime guild context. |
+| <code>ADMIN_DISCORD_ID</code> | Owner/admin controls | Discord ID used by configured owner/admin checks. |
+| <code>STEAM_API_KEY</code> | Steam API features | Optional Steam Web API key. |
+| <code>IGDB_CLIENT_ID</code> + <code>IGDB_CLIENT_SECRET</code> | IGDB game metadata | Twitch/IGDB API application credentials. |
+| <code>TMDB_BEARER_TOKEN</code> | TMDB movie/TV features | Read-access token; keep private. |
+| <code>MDBLIST_API_KEY</code> | Optional enriched TMDB display | Adds supported Metacritic score fields where integrated. |
+| <code>OPENAI_API_KEY</code>, <code>OPENROUTER_API_KEY</code>, <code>GEMINI_API_KEY</code>, <code>OLLAMA_HOST</code> | Only features that support the configured model provider | These variables do not mean every recommendation or graph operation is LLM-generated. |
+| <code>S3_*</code> | Object-backed private originals / public generated output | Read the [storage section](#image-storage-and-privacy) before enabling a public bucket. |
+| <code>DASHBOARD_*</code> | Optional web dashboard | Configure OAuth callback, public origin, cookie security, bridge secret, and internal listeners as documented in [docs/DASHBOARD.md](docs/DASHBOARD.md). |
+| <code>CUSTOM_ROLES_*</code> | Custom Role settings | Feature limits and picker settings are documented in [docs/HANDOFF_NOTES.md](docs/HANDOFF_NOTES.md). |
 
-# Optional
-BOT_ID=your_bot_user_id
-DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DATABASE
-ENVIRONMENT=development
-STEAM_API_KEY=your_steam_api_key_here
-```
-
-### Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DISCORD_TOKEN` | ✅ Yes | Your Discord bot token from the Developer Portal |
-| `PRIMARY_GUILD_ID` | ✅ Yes | Primary guild ID for backward compatibility |
-| `BOT_ID` | ❌ No | Your bot's user ID (auto-detected if not set) |
-| `DATABASE_URL` | ❌ No | PostgreSQL connection URL (preferred) |
-| `ENVIRONMENT` | ❌ No | `development` or `production` (affects cog watch interval) |
-| `STEAM_API_KEY` | ❌ No | Steam API key for gaming features (get from [Steam Web API](https://steamcommunity.com/dev/apikey)) |
+In production, use HTTPS for the public dashboard and color picker, enable secure cookies, use a strong bridge secret, and keep internal service listeners inaccessible from the public network.
 
 ---
 
-## 🎯 Commands
+## Development and verification
 
-> All commands are slash commands. Type `/` in Discord to see available commands.
+Run commands from the repository root unless a tool's guide says otherwise. Do not treat a command listed here as evidence that it passed; use the actual command output or CI result.
 
-### Total: **44 Commands** across **8 Sections**
+### Python
 
-### 🔐 Account Management (3 commands)
+~~~bash
+python -m compileall -q bot.py web config.py cogs/utilities/help.py   cogs_test/general_commands/dashboard.py   cogs_test/general_commands/connected_media.py   cogs_test/general_commands/cross_media_recommendations.py   cogs_test/general_commands/discovery_hub.py   cogs_test/general_commands/franchise.py   cogs_test/general_commands/game.py   cogs/media/panel.py cogs/media/community_archives.py   cogs/media/three_by_three.py cogs/social/anilist_site_embed.py   helpers/media_storage.py helpers/media_graph.py   helpers/custom_roles/service.py helpers/custom_roles/storage.py   tests/test_media_storage.py tests/test_media_graph.py
 
-- `/login` - Register or update your AniList account connection
-- `/profile [user]` - View comprehensive AniList profile with gallery, achievements, and favorites
-- `/admin-login` - Admin login management for troubleshooting (Bot Moderator only)
+python -m unittest discover -s tests -p "test_media_storage.py"
+python -m unittest discover -s tests -p "test_media_graph.py"
+python -m unittest discover -s tests -p "test_dashboard_bridge.py"
+python -m unittest discover -s tests -p "test_custom_role_picker_server.py"
+python -m unittest discover -s tests -p "test_rate_limit_memory.py"
+python -m unittest discover -s tests -p "test_dashboard_assets.py"
+python -m unittest discover -s tests -p "test_dashboard_command_policy.py"
+~~~
 
-### 📺 Media (11 commands)
+### Web dashboard
 
-- `/browse` - Interactive browsing with advanced filtering and sorting
-- `/recommendations [member]` - AI-powered personalized recommendations
-- `/trending` - View currently trending anime and manga
-- `/random` - Get random anime/manga suggestions
-- `/trailer <media>` - Watch trailers for anime/manga
-- `/three-by-three [user]` - Generate 3x3 favorite grids
-- `/news` - Manage Twitter/X news monitoring (Bot Moderator)
-- `/test-twitter-scrape` - Test Twitter scraping functionality (Bot Moderator)
-- `/set-manga-completion-channel` - Configure completion notifications (Admin)
-- `/show-manga-completion-channel` - View configured completion channel (Admin)
-- `/library-backup` - Export and backup your AniList library
+~~~bash
+npm install --prefix dashboard-frontend
+npm run typecheck --prefix dashboard-frontend
+npm audit --prefix dashboard-frontend --audit-level=high
+npm run build --prefix dashboard-frontend
+cargo test --workspace
+cargo audit
+~~~
 
-### 🎮 Gaming (5 commands)
+The repository CI workflow runs applicable frontend checks, Rust tests/audit, Python compilation, and the focused regression suites when relevant files change.
 
-- `/steam-profile <username>` - Show Steam profile and library stats
-- `/steam-recommendation <username>` - Get personalized game recommendations
-- `/steam-game <query>` - Search and view Steam game information
-- `/free-games` - Check free games and manage notifications
-- `/check-free-games` - Manually trigger free games check (Bot Moderator)
+### Engineering conventions
 
-### 🎨 Customization (4 commands)
-
-- `/theme` - Browse, preview, and apply custom themes
-- `/admin-guild-theme` - Manage server-wide theme settings (Bot Moderator)
-- `/custom-role` - Your own custom booster role: one panel to create, style and wear it (see [Custom Roles](#-custom-roles))
-- `/custom-role-admin` - Set up Custom Roles from one panel (Manage Roles; see [Custom Roles](#-custom-roles))
-
-### 🏰 Server Management (8 commands)
-
-- `/serverinfo` - Display comprehensive server information
-- `/server-config` - Centralized server configuration interface
-- `/invite-stats` - View invite usage statistics
-- `/invite-leaderboard` - View recruitment leaderboard
-- `/invite-theme` - Customize invite embed theme
-- `/set-welcome-dm` - Configure welcome DM messages (Admin)
-- `/welcome-dm-status` - View welcome DM configuration (Admin)
-- `/dashboard` - Interactive command management dashboard (Admin)
-
-### 👥 Social (3 commands)
-
-- `/anilist-leaderboard` - View server-wide AniList leaderboards
-- `/affinity [member]` - Calculate AniList compatibility with friends
-- `/feedback` - Submit ideas or report bugs
-
-### 🛠️ Utilities (7 commands)
-
-- `/help [category]` - Interactive help system with category browsing
-- `/notifications` - Manage your notification preferences
-- `/say <message>` - Make the bot send a message (Moderator)
-- `/userinfo [user]` - View detailed Discord user information
-- `/timestamp` - Generate Discord timestamps
-- `/invite` - Get bot invite link
-- `/planned-features` - View planned bot features and vote
-
-### 👑 Admin (3 commands)
-
-- `/bot-moderators` - Manage bot moderators (Bot Moderator)
-- `/github recent|status|check` - GitHub commit tracker (Bot Moderator)
-- `/set-bot-updates-channel` - Configure bot update notifications (Admin)
+- Prefer asynchronous I/O for network and database operations.
+- Reuse the existing provider helpers instead of implementing duplicate clients.
+- Keep API/provider parsing separate from Discord response code where the existing architecture supports it.
+- Pass the current guild ID to guild-owned data and permission-sensitive actions.
+- Preserve provenance between provider data, recommendations, local ranking, and community submissions.
+- Treat missing metadata, rate limits, malformed responses, timeouts, permission failures, and expired interactions as normal failure cases.
+- Add focused tests when a change meaningfully alters data handling, authorization, provider parsing, persistence, or interaction behavior.
+- Update <code>/help</code>, this README, and the relevant feature guide when a change adds commands or alters user-visible behavior.
 
 ---
 
-## 🎛️ Dashboard System
+## Repository map
 
-Lemegeton has two related control surfaces: the existing ephemeral Discord `/dashboard` command and the separate authenticated web control plane documented in [docs/DASHBOARD.md](docs/DASHBOARD.md). Both use the bot's actual dashboard command registry and the existing PostgreSQL-backed guild configuration.
-
-### Discord dashboard features
-
-- Category-based command browser and per-command state.
-- Guild-specific command overrides saved by the existing `ConfigDB`.
-- Confirmation for resetting guild settings and a recent audit trail.
-- Protected system commands that cannot be disabled through the dashboard.
-- A runtime command check which enforces stored overrides before registered dashboard-managed application commands execute.
-
-The command inventory is discovered from `@command_meta` annotations at runtime. It is intentionally not hard-coded here because the live registry can change as extensions are added.
-
-### Using the Discord dashboard
-
-1. Run `/dashboard` in a server where you have an appropriate administrative permission.
-2. Navigate the registered command categories and toggle a supported command.
-3. Use the audit view to inspect recorded configuration changes.
-4. Use the confirmed reset action to restore the defaults for that guild.
-
-### For Developers
-
-Commands are automatically registered with the dashboard using the `@command_meta` decorator:
-
-```python
-from cogs_test.general_commands.dashboard import command_meta
-
-@app_commands.command(name="mycommand", description="...")
-@command_meta(section="Utilities", name="My Command")
-async def mycommand(self, interaction: discord.Interaction):
-    # Command implementation
-```
-
-The dashboard automatically discovers decorated commands at bot startup.
-
----
-
-## 🎨 Custom Roles
-
-**Custom Roles** gives every server booster one custom role of their own: its name, its color
-(solid, gradient or holographic) and its icon. Members manage it from one panel, `/custom-role`,
-or on a private web page, the **color picker**. Admins set it up from another panel,
-`/custom-role-admin`.
-
-- **Who gets one:** server boosters, plus members with a role an admin allows
-  (**Allowed roles** in `/custom-role-admin`).
-- **When they stop qualifying** (or leave), the role is deleted but its settings are saved.
-  When they qualify again, it comes back as it was, near its old spot. While Custom Roles is off
-  in a server, nothing is removed automatically.
-- **Old `/nitro-role-set` roles** are taken over, never duplicated: an admin imports them with
-  **Import old roles** in `/custom-role-admin`, and a member who uses `/custom-role` first takes
-  over their own.
-- **Safe by default:** it's off until an admin sets an anchor role and turns it on. Names go
-  through a filter (built-in protected words like "admin" or "mod", plus the server's own
-  blocked words). Removing many roles at once needs an admin to confirm.
-- **Server perks:** gradient and holographic styles need **3 server boosts** (Discord's Enhanced
-  Role Styles, no Boost Level needed), and role icons need **Boost Level 2**. Without them,
-  members get a clear "not available here" message.
-- **Bot permissions:** the bot needs **Manage Roles**, and its own role must be above the anchor
-  role.
-
-Setup, deployment and the full behaviour notes are in
-[docs/HANDOFF_NOTES.md](docs/HANDOFF_NOTES.md). The design spec is
-[docs/CUSTOM_ROLES_SPEC.md](docs/CUSTOM_ROLES_SPEC.md).
-
-### The member panel (`/custom-role`)
-
-`/custom-role` opens a private panel showing your role. Its buttons open short forms:
-
-| Button | What it does |
-|---|---|
-| **Create role** | Create your custom role (or bring back your saved one). Shown until you have one. |
-| **Rename** | Rename your role. |
-| **Color** | Set a color by hex (`#A78BFA`, `A78BFA`, `#ABC`). With 3 server boosts, also choose Solid, Gradient (two colors) or Holographic. |
-| **Icon** | Upload a PNG/JPEG, type one standard emoji, or remove the icon. |
-| **Palette** | Pick colors from your avatar, from a menu with a swatch image. |
-| **Put on** / **Take off** | Wear your role or take it off (you keep it either way). |
-| **Move** | Put your role directly above or below another member's custom role. |
-| **Color picker** | Get a private link to the color picker page (see below). |
-| **Look up a member** | Show another member's custom role: name, colors and icon. |
-
-The panel updates in place after each change and shows the result at the top. It works for
-15 minutes (Discord's limit for a reply); after that, pressing a button says "This panel expired,
-run /custom-role again".
-
-### The admin panel (`/custom-role-admin`, needs Manage Roles)
-
-`/custom-role-admin` shows everything at a glance (setup, server features, role counts, problems,
-pending removals), with buttons to change it. It expires after 15 minutes too.
-
-| Button | What it does |
-|---|---|
-| **Turn on** / **Turn off** | Turn Custom Roles on or off for the server. Turning it on needs a valid anchor. |
-| **Anchor** | The role new custom roles are placed next to: directly above it (recommended) or below. |
-| **Log channel** | Where events and errors are posted (empty = off). |
-| **Command channel** | Only allow `/custom-role` in one channel and its threads (empty = anywhere). |
-| **Cooldown** | How long members wait between changes (0 = off, at most 1 day). |
-| **Allowed roles** | Roles that qualify for a custom role besides boosting. |
-| **Blocked words** | Words that can't be used in role names. Built-in words can be switched off and on. |
-| **Members** | Every custom role with its owner and status (active, saved, missing), with a status filter. |
-| **Remove a member** | Delete a member's role and saved settings (also for someone who left, by user ID). With a reason, they get a DM. |
-| **Pending removal** | See and confirm or cancel a large removal waiting for approval. |
-| **Import old roles** | Bring old `/nitro-role-set` roles into Custom Roles. Shows a preview first; roles are taken over as they are (name, color, position), never recreated. |
-| **Refresh** | Reload the panel. |
-
-### The color picker
-
-The panel's **Color picker** button replies with a private link to a page served by the bot
-itself. On it a member can:
-
-- **Preview** their role in Discord's dark and light themes, with a contrast warning.
-- **Color tab:** choose Solid, Gradient or Holographic, use a color square and hue slider or a
-  hex code, or pick from their avatar's colors.
-- **Role Icon tab:** upload a PNG/JPEG, paste an image link, or type one emoji, then crop it
-  (drag, zoom or use the keyboard). "Edit current crop" reopens the stored original.
-- **Name tab:** rename the role.
-
-How it works:
-
-- **The link:** it lasts 1 hour without use, 3 hours at most, and pressing **Color picker** again
-  replaces it. The token sits after `#`, so it's never sent in an address or logged; the page
-  sends it only in a header.
-- **Same rules as the panel:** every change goes through the same checks (name filter,
-  cooldown, server perks) and is logged the same way. Every request checks again that the member
-  still qualifies.
-- **Images:**
-  - Originals up to 8 MB, 8192 px a side and 16 million pixels are accepted. The icon sent to
-    Discord is a 256, 128 or 64 px PNG under 256 KB.
-  - Image links are fetched by the bot with strict rules: https only, public addresses only, no
-    redirects, 10 seconds.
-  - iPhone HEIC photos aren't supported; members are asked to save them as JPEG or PNG first.
-- **Hosting:** the page needs a public `https://` address in production (`CUSTOM_ROLES_PUBLIC_URL`). The
-  settings are listed in `.env.example`, and the look is set in
-  `web/static/custom_roles/theme.css`.
-
----
-
-## 🏗️ Project Structure
-
-```
+~~~text
 Lemegeton/
-├── bot.py                          # Main bot entry point
-├── config.py                       # Environment configuration
-├── database.py                     # Database wrapper with execute_db_operation()
-├── requirements.txt                # Python dependencies
-├── runtime.txt                     # Python version for Railway
-├── Procfile                        # Railway deployment configuration
-├── .env.example                    # Environment template
-│
-├── cogs/                           # Command modules (44+ commands)
-│   ├── account/                    # Login, profile, admin login
-│   ├── admin/                      # Bot moderators, GitHub tracker, user cleanup
-│   ├── customization/              # Themes, Custom Roles
-│   ├── gaming/                     # Steam integration, free games
-│   ├── media/                      # Browse, recommendations, trending, news
-│   ├── server_management/          # Server info, config, invites, welcome DMs
-│   ├── social/                     # Leaderboards, affinity, feedback
-│   └── utilities/                  # Help, notifications, say, userinfo, etc.
-│
-├── cogs_test/                      # Test cogs (dashboard system)
+├── bot.py                              # Discord runtime, event/error routing, private service adapters
+├── config.py                           # Environment-backed runtime defaults
+├── database.py                         # Shared async PostgreSQL connection pool and query helpers
+├── cogs/
+│   ├── media/
+│   │   ├── browse.py                   # Media browsing
+│   │   ├── panel.py                    # Shared manga Panel archive
+│   │   ├── community_archives.py       # Quotes, fanworks, polls, quizzes, reports, Panel of the Day
+│   │   └── three_by_three.py           # Generated 3x3 grids
+│   ├── social/
+│   │   └── anilist_site_embed.py       # AniList URLs, entity embeds and staff/character output
+│   └── utilities/                      # Help and utility command surfaces
+├── cogs_test/
 │   └── general_commands/
-│       ├── dashboard.py            # Command management dashboard
-│       ├── alfiles.py              # AniList file operations
-│       ├── birthday.py             # Birthday tracking
-│       ├── hltb.py                 # HowLongToBeat integration
-│       └── metacritic.py           # Metacritic integration
-│
-├── helpers/                        # Shared utility functions
-│   ├── anilist_helper.py           # AniList API integration (90 req/min rate limit)
-│   ├── cache_helper.py             # Profile caching (12-hour TTL)
-│   ├── command_logger.py           # Command execution logging
-│   ├── embed_helper.py             # Discord embed formatting
-│   ├── profile_helper.py           # Profile rendering with bio cleanup
-│   ├── steam_helper.py             # Steam API integration
-│   ├── theme_helper.py             # Theme application
-│   ├── custom_roles/                # Custom Roles: service, storage, images, safe link fetch, tokens
-│   └── ...                         # Additional helpers
-│
-├── web/                            # Built-in web server
-│   ├── dashboard.py                # Web server and dashboard
-│   ├── custom_role_picker.py             # Custom Roles color picker routes and API
-│   └── static/custom_roles/               # Color picker page (theme.css holds the look)
-│
-├── tests/
-│   └── custom_roles/                # Custom Roles offline tests (local PostgreSQL, no Discord)
-│
-├── data/                           # Data storage
-│   ├── database.db                 # Main SQLite database
-│   ├── dashboard_guilds.db         # Dashboard configurations
-│   ├── profile_cache.json          # Profile cache (12-hour TTL)
-│   └── ...                         # Additional data files
-│
-├── logs/                           # Log files (auto-rotate at 50MB)
-│   ├── bot.log                     # Main bot log
-│   ├── database.log                # Database operations
-│   └── {module}.log                # Module-specific logs
-│
-├── tools/                          # Database maintenance scripts
-│   ├── analyze_db.py               # Database structure analysis
-│   ├── verify_guild_isolation.py   # Multi-guild verification
-│   ├── test_multi_guild.py         # Multi-guild testing
-│   └── ...                         # Additional maintenance tools
-│
-└── docs/                           # Documentation
-    ├── README.md                   # Extended documentation
-    ├── HANDOFF_NOTES.md            # Custom Roles setup and deploy guide
-    ├── CUSTOM_ROLES_SPEC.md         # Custom Roles design spec
-    ├── LICENSE                     # License file
-    └── bugs.md                     # Known issues tracker
-```
+│       ├── connected_media.py          # TMDB utilities, relationships, discussions and link review
+│       ├── cross_media_recommendations.py # Similarity and cross-provider recommendations
+│       ├── discovery_hub.py             # Interactive media-discovery entry point
+│       ├── franchise.py                # Provider-backed franchise resolver
+│       ├── game.py                     # IGDB + optional Steam enrichment
+│       └── dashboard.py                # Dashboard command registry and command metadata
+├── helpers/
+│   ├── anilist_helper.py               # AniList API helpers
+│   ├── media_graph.py                  # Shared relationship graph
+│   ├── media_storage.py                # Private/public S3-aware image storage
+│   ├── command_error_handler.py        # Shared command/component failure reporting
+│   ├── custom_roles/                   # Custom Role validation, persistence and storage
+│   ├── igdb_helper.py                  # IGDB/Twitch API helper
+│   └── steam_helper.py                 # Steam API helpers
+├── dashboard-rs/                       # Rust/Axum web control plane
+├── dashboard-frontend/                 # React + TypeScript + Vite source
+├── web/                                # Python private web helpers and Custom Role picker
+├── tests/                              # Focused regression and infrastructure tests
+├── docs/                               # Feature, handoff, security and deployment guides
+├── deploy/vps/                         # VPS/systemd/Nginx deployment notes
+├── .env.example                        # Configuration template
+└── requirements.txt                    # Python dependencies
+~~~
+
+The exact file inventory changes as extensions are added. Use the live command registry and each feature guide when in doubt.
 
 ---
 
-## 🚂 Railway Deployment
+## Documentation
 
-Deploy to Railway for 24/7 hosting:
-
-### Step 1: Prepare Your Repository
-
-1. Fork this repository
-2. Ensure all files are committed
-
-### Step 2: Create Railway Project
-
-1. Create a [Railway](https://railway.app) account
-2. Click "New Project"
-3. Select "Deploy from GitHub repo"
-4. Choose your forked repository
-
-### Step 3: Configure Environment Variables
-
-In the Railway dashboard, add these environment variables:
-
-```
-DISCORD_TOKEN=your_discord_bot_token
-PRIMARY_GUILD_ID=123456789012345678
-BOT_ID=your_bot_user_id
-DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DATABASE
-ENVIRONMENT=production
-STEAM_API_KEY=your_steam_api_key (optional)
-```
-
-For the Custom Roles color picker's public address and settings, see
-[docs/HANDOFF_NOTES.md](docs/HANDOFF_NOTES.md#2-railway-setup).
-
-### Step 4: Configure Persistent Storage
-
-1. Go to your service settings
-2. Add a volume mount at `/data` for database persistence
-3. Railway will automatically create the volume
-
-### Step 5: Deploy
-
-Railway automatically:
-- ✅ Installs dependencies from `requirements.txt`
-- ✅ Uses `Procfile` to start the bot
-- ✅ Creates persistent volume for database
-- ✅ Provides 24/7 uptime
-- ✅ Auto-restarts on crashes
-
-### Monitoring
-
-Check your Railway dashboard for:
-- Logs and error messages
-- Resource usage (CPU, memory)
-- Deployment status
+| Guide | Contents |
+| --- | --- |
+| [Media discovery and community events](docs/MEDIA_DISCOVERY.md) | Cross-media relationships, source labels, recommendations, and community event boundaries. |
+| [Dashboard guide](docs/DASHBOARD.md) | Dashboard architecture, configuration, local development, and deployment. |
+| [Security review](docs/SECURITY_AUDIT.md) | Web dashboard trust boundaries and residual risks. |
+| [Custom Roles setup](docs/HANDOFF_NOTES.md) | Role eligibility, server setup, color picker, deployment, and validation. |
+| [Custom Roles specification](docs/CUSTOM_ROLES_SPEC.md) | Expected Custom Roles behavior and implementation contract. |
+| [VPS deployment](deploy/vps/README.md) | systemd services, Nginx, TLS, and private listeners. |
+| [Environment template](.env.example) | Current environment variable names and defaults. |
 
 ---
 
-## 🔧 Development
+## Contributing
 
-### Running Locally
+1. Inspect the existing implementation and related helpers before changing behavior.
+2. Keep changes focused; do not refactor unrelated subsystems as part of a feature fix.
+3. Preserve multi-guild authorization and scope checks.
+4. Add or update focused tests for meaningful changes and run the relevant checks.
+5. Update the Help dropdown and feature documentation if user-facing behavior changes.
+6. Describe verification honestly in the pull request and list any provider credentials or external services that could not be tested.
 
-**Windows:**
-```powershell
-.venv\Scripts\Activate.ps1
-python bot.py
-```
-
-**Linux/Mac:**
-```bash
-source venv/bin/activate
-python bot.py
-```
-
-### Development Tools
-
-Run all tools from project root for correct `DATABASE_PATH` resolution:
-
-```bash
-# Database analysis
-python tools/analyze_db.py
-
-# Multi-guild testing
-python tools/test_multi_guild.py
-
-# Verify guild isolation
-python tools/verify_guild_isolation.py
-
-# Database usage statistics
-python tools/analyze_db_usage.py
-
-# Database integrity check
-python tools/check_db.py
-```
-
-### Adding New Commands
-
-1. Create a new file in the appropriate `cogs/` subdirectory
-2. Use `@app_commands.command()` decorator for slash commands
-3. Add `@command_meta(section="SectionName", name="Display Name")` for dashboard integration
-4. Always pass `interaction.guild_id` to database functions
-5. Add command to `help.py` command categories
-6. Update `README.md` and changelog
-
-### Code Structure
-
-```python
-from discord.ext import commands
-from discord import app_commands
-import discord
-from database import execute_db_operation
-from helpers.command_logger import log_command
-from cogs_test.general_commands.dashboard import command_meta
-
-class MyCog(commands.Cog):
-    def __init__(self, bot: commands.Bot):
-        self.bot = bot
-
-    @app_commands.command(name="mycommand", description="...")
-    @command_meta(section="Utilities", name="My Command")
-    @log_command
-    async def mycommand(self, interaction: discord.Interaction):
-        guild_id = interaction.guild_id  # Always get guild context first
-        
-        await interaction.response.defer(ephemeral=True)
-        
-        # Use guild-aware database functions
-        user = await execute_db_operation(
-            "get user",
-            "SELECT * FROM users WHERE discord_id = ? AND guild_id = ?",
-            (interaction.user.id, guild_id),
-            fetch_type='one'
-        )
-        
-        # Command logic...
-
-async def setup(bot: commands.Bot):
-    await bot.add_cog(MyCog(bot))
-```
-
-### Critical Conventions
-
-1. ✅ **Always use guild-aware database functions** - Pass `interaction.guild_id`
-2. ✅ **Async-first** - Use `aiohttp` for HTTP and the shared PostgreSQL layer in `database.py` for persistence (never open SQLite databases from cogs)
-3. ✅ **Defer long operations** - Always `await interaction.response.defer()` for operations >3 seconds
-4. ✅ **Error handling** - Wrap responses in try/except for `discord.NotFound`
-5. ✅ **Command logging** - Use `@log_command` decorator
-6. ✅ **Dashboard integration** - Add `@command_meta` to all commands
-7. ✅ **File logging** - Create module-specific loggers in `logs/`
+Do not commit tokens, OAuth secrets, database URLs, S3 credentials, private signed URLs, or production logs.
 
 ---
 
-## 💾 Database
+## License
 
-### Architecture
+Lemegeton is released under the MIT License. See [docs/LICENSE](docs/LICENSE).
 
-- **Main Database:** `data/database.db` (SQLite with aiosqlite)
-- **Dashboard Database:** `data/dashboard_guilds.db` (guild configurations)
-- **Connection Pooling:** Automatic retry logic (3 attempts, 1s delay)
-- **Multi-Guild Isolation:** All tables use `(discord_id, guild_id)` composite keys
-
-### Shared Visual System
-
-- `helpers/color_palette.py` defines Lemegeton's shared violet/navy brand colors and semantic success, warning, danger, info, and neutral tokens.
-- Standard command embeds should use `PALETTE` rather than hard-coded colors; user-selected theme colors and role colors are intentional exceptions.
-
-### Key Tables
-
-| Table | Purpose |
-|-------|---------|
-| `users` | User profiles with AniList usernames |
-| `user_stats` | User statistics per guild |
-| `guild_challenges` | Challenge configurations per guild |
-| `guild_mod_roles` | Moderator roles per guild |
-| `reminders` | User reminders with recurrence support |
-| `planned_features` | Feature planning and voting |
-| `themes` | Theme customization data |
-| `recruitment_stats` | Invite tracking statistics |
-| `invite_events` | Invite event history |
-| `say_command_logs` | Moderation command logs |
-
-### Database Operations
-
-Always use `execute_db_operation()` wrapper:
-
-```python
-# Fetch single row
-user = await execute_db_operation(
-    "get user",
-    "SELECT * FROM users WHERE discord_id = ? AND guild_id = ?",
-    (discord_id, guild_id),
-    fetch_type='one'
-)
-
-# Fetch multiple rows
-users = await execute_db_operation(
-    "get all users",
-    "SELECT * FROM users WHERE guild_id = ?",
-    (guild_id,),
-    fetch_type='all'
-)
-
-# Insert with last row ID
-row_id = await execute_db_operation(
-    "insert reminder",
-    "INSERT INTO reminders (user_id, message, remind_at) VALUES (?, ?, ?)",
-    (user_id, message, remind_at),
-    fetch_type='lastrowid'
-)
-
-# Update (no return)
-await execute_db_operation(
-    "update user",
-    "UPDATE users SET anilist_username = ? WHERE discord_id = ? AND guild_id = ?",
-    (username, discord_id, guild_id)
-)
-```
-
-### Database Maintenance
-
-```bash
-# Backup database
-python tools/backup_database.py
-
-# Analyze structure
-python tools/analyze_db.py
-
-# Verify integrity
-python tools/check_db.py
-
-# Cleanup old data
-python tools/cleanup_database.py --reminders --days 30
-```
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please follow these guidelines:
-
-### Development Workflow
-
-1. **Fork the repository**
-2. **Create a feature branch** (`git checkout -b feature/AmazingFeature`)
-3. **Make your changes** following the code conventions
-4. **Test thoroughly** with multiple guilds
-5. **Commit your changes** (`git commit -m 'Add some AmazingFeature'`)
-6. **Push to the branch** (`git push origin feature/AmazingFeature`)
-7. **Open a Pull Request**
-
-### Development Guidelines
-
-- ✅ Follow existing code structure and patterns
-- ✅ Use async/await for all I/O operations
-- ✅ Always use guild-aware database functions
-- ✅ Add `@command_meta` decorator for dashboard integration
-- ✅ Update `help.py` and `README.md` for new commands
-- ✅ Add entries to `docs/structured_changelog.txt`
-- ✅ Test with multiple guilds before submitting
-- ✅ Use `@log_command` decorator for command logging
-- ✅ Create module-specific loggers in `logs/`
-
-### Code Style
-
-- **Async-first** - Never use blocking libraries
-- **Guild-aware** - Always pass `guild_id` to database functions
-- **Error handling** - Wrap interactions in try/except
-- **Logging** - Log important state changes
-- **Documentation** - Add docstrings for new functions
-
----
-
-## 🐛 Troubleshooting
-
-### Bot not responding to commands
-
-- ✅ Check Discord bot token is correct
-- ✅ Verify bot has necessary permissions in Discord server
-- ✅ Wait up to 1 hour for slash commands to sync on new guilds
-- ✅ Check logs in `logs/bot.log`
-- ✅ Verify bot is online in Discord
-
-### Database errors
-
-- ✅ Ensure `data/` directory exists and is writable
-- ✅ Check `DATABASE_PATH` environment variable
-- ✅ Run tools from project root
-- ✅ Verify database file permissions
-- ✅ Check `logs/database.log` for detailed errors
-
-### AniList API errors
-
-- ✅ AniList has rate limits (90 requests/minute) - wait and retry
-- ✅ Check internet connectivity
-- ✅ Verify AniList username exists (use "Check AniList" button in `/login`)
-- ✅ Check `logs/anilist_helper.log` for API errors
-
-### Multi-Guild configuration issues
-
-- ✅ Use `/server-config` in each server to configure server-specific settings
-- ✅ Use `/dashboard` to manage commands per server
-- ✅ Ensure users have appropriate permissions (Admin/Moderator)
-- ✅ User data is shared across guilds, but guild configurations are independent
-- ✅ Run `python tools/verify_guild_isolation.py` to verify isolation
-
-### Dashboard not working
-
-- ✅ Ensure you have Administrator permissions
-- ✅ Check `logs/dashboard.log` for errors
-- ✅ Verify `data/dashboard_guilds.db` exists and is writable
-- ✅ Try resetting configuration via "Reset Config" button
-
----
-
-## 📊 Statistics
-
-- **Commands**: 44 slash commands
-- **Cogs**: 40+ command modules
-- **Database Tables**: 20+ tables with multi-guild support
-- **Themes**: 30+ customizable themes
-- **Sections**: 8 dashboard sections
-- **Active Development**: Regular updates and bug fixes
-- **Multi-Guild**: Fully tested across multiple Discord servers
-- **Rate Limits**: AniList (90 req/min), Discord API (automatic handling)
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](docs/LICENSE) file for details.
-
----
-
-## 🆘 Support
-
-- **Discord Server**: [Join our Support Server](https://discord.gg/xUGD7krzws)
-- **Documentation**: See `docs/README.md` for extended documentation
-- **Issues**: [GitHub Issues](https://github.com/Kyerstorm/Lemegeton/issues)
-- **Feature Requests**: Use the `/feedback` command in Discord
-- **Bug Reports**: Use `/feedback` or create a GitHub issue
-
----
-
-## 🙏 Acknowledgments
-
-- **AniList API** - Comprehensive anime/manga data
-- **Discord.py** - Excellent Discord bot framework
-- **Railway** - Reliable hosting platform
-- **Community** - Thank you to all contributors and users!
-
----
-
-## 🎯 Roadmap
-
-- [ ] Reminder system enhancements
-- [ ] Additional gaming platform integrations
-- [ ] Advanced analytics dashboard
-- [ ] Mobile app integration
-- [ ] Community events system
-- [ ] More customization options
-
----
-
-Made with ❤️ for the anime community by [Kyerstorm](https://github.com/Kyerstorm) & [Vireon](https://github.com/VireonNoctis)
-
-**Deploy once, use everywhere!** 🚀
-
----
-
-**Last Updated**: 2025-11-02  
-**Bot Version**: Multi-Guild with Dashboard System  
-**Python Version**: 3.13+  
-**Discord.py Version**: 2.6.0
-
-
-## Web management dashboard
-
-The public web control plane is a Rust/Axum application under `dashboard-rs/`, with a React + TypeScript frontend under `dashboard-frontend/src/`. Components live in `.tsx`, styling is authored from `styles.ts`, and Vite builds the production `app.js` and `app.css` assets served by Rust. No handwritten dashboard HTML, standalone CSS, or standalone JavaScript source files are needed. The runtime adapter stays consolidated in `bot.py` because only the live Python bot owns the command tree and Discord gateway. The custom-role picker remains a Python feature behind a private loopback listener and is reverse-proxied through Rust.
-
-**Full setup and deployment guide:** [docs/DASHBOARD.md](docs/DASHBOARD.md).
-
-**VPS/systemd/Nginx, Docker, and security review:** [deploy/vps/README.md](deploy/vps/README.md) · [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md).
-
-The Rust service supports Discord OAuth2 sign-in, server-side sessions with CSRF protection, guild-permission revalidation, live runtime status, the actual dashboard-managed slash-command registry, per-guild overrides, confirmed command synchronization, audit history, diagnostics, owner-only logs and integration status, and persisted-resource reporting. The interface is monochrome and responsive, with reduced-motion support and restrained Unicode/numeric transitions.
-
-The dashboard deliberately does not expose arbitrary code, shell commands, raw SQL, or cog unload/reload buttons. Prefix commands are not presented as web-configurable unless they have an explicit, enforced registry implementation. When the Python bridge or Discord synchronization is unavailable, the dashboard reports the failure instead of claiming an operation succeeded.
-
-
-## Shared Manga Panel Archive
-
-The optional `cogs_test.panel` extension adds a cross-guild Manga Panel Archive.
-Panel rows and tags are global: a panel uploaded in one server is searchable from
-other servers. Only storage/log/moderator-role settings and moderation audit rows
-are scoped to a guild.
-
-- Run `/panels` to open the ephemeral home menu.
-- A Manage Server member can use **Configure** to select the storage channel,
-  optional moderation-log channel, and optional moderator role.
-- Use **Add Panel** to upload an image (PNG/JPEG/GIF/WebP/AVIF) within the
-  effective Discord upload limit for the user and configured storage server.
-  Enter a manga title, AniList manga ID, or AniList manga URL. Tags are required
-  and support multi-select; the required chapter/caption field stores the chapter
-  number separately and displays it with the caption. Oversized images receive a
-  specific size-limit message.
-- The **Save to Panels** message context menu opens the add flow for image messages.
-- Browsing and search results are posted publicly in the current channel; mature
-  panels are excluded unless that channel is marked NSFW by Discord.
-- Uploaders can edit/delete their own panels. Moderators (configured role or
-  Manage Messages in the server where they act) can moderate any panel. Moderator
-  deletions are recorded against the guild where the action occurred.
-
-The cog creates its archive tables and indexes idempotently on load using the
-existing PostgreSQL pool from `database.py`. Before production rollout, verify
-the bot has View Channel, Send Messages, and Attach Files in the configured
-storage channel, and test the modal component APIs against the installed Discord
-client/library version. The archive requires the PostgreSQL pool to be initialized
-before the cog loads.
+<p align="center"><strong>One Discord bot. Connected media. Server-scoped community systems.</strong></p>
