@@ -2,7 +2,7 @@
 import hashlib
 import os
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from helpers import media_storage
 
@@ -96,7 +96,7 @@ class MediaStorageUploadTests(unittest.IsolatedAsyncioTestCase):
         )
         with (
             patch("helpers.media_storage.is_configured", return_value=True),
-            patch("helpers.media_storage.store_image", new_callable=__import__("unittest").mock.AsyncMock, return_value=stored) as store,
+            patch("helpers.media_storage.store_image", new_callable=AsyncMock, return_value=stored) as store,
             patch("helpers.media_storage.create_asset", new_callable=__import__("unittest").mock.AsyncMock, return_value=42) as create,
             patch("helpers.media_storage.asset_url", new_callable=__import__("unittest").mock.AsyncMock, return_value="https://cdn.example.test/generated/asset.png") as asset_url,
         ):
