@@ -322,7 +322,7 @@ def _copy_app_command(
 
 def _filter_group_for_guild(group: app_commands.Group, cfg: dict[str, Any]) -> app_commands.Group | None:
     """Copy a command group and remove disabled managed leaves without flattening it."""
-    cloned = group.copy()
+    cloned = _copy_app_command(group)
 
     def prune(parent: app_commands.Group) -> None:
         for child in list(parent.commands):
