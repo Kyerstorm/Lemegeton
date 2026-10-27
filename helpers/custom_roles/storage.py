@@ -178,17 +178,8 @@ async def get_custom_role(guild_id: int, user_id: int) -> Optional[CustomRole]:
         (guild_id, user_id),
         fetch_type="one",
     )
-    record = _row_to_role(row) if row else None
-    if record and record.icon_source_asset_id and record.icon_source is None:
-        try:
-            from helpers import media_storage
-            record.icon_source = await media_storage.download_asset_bytes(record.icon_source_asset_id)
-        except Exception:
-            logging.getLogger(__name__).warning(
-                "Could not load private custom-role source image for guild %s user %s",
-                guild_id, user_id, exc_info=True,
-            )
-    return record
+    # Large original images are fetched lazily by service.icon_source(), not for every role lookup.
+    return _row_to_role(row) if row else None
 
 
 async def get_custom_role_by_role_id(guild_id: int, role_id: int) -> Optional[CustomRole]:
