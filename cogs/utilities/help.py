@@ -8,6 +8,7 @@ from pathlib import Path
 from config import ADMIN_DISCORD_ID, BOT_ID
 from cogs_test.general_commands.dashboard import command_meta
 from helpers.embed_helper import build_error_embed, build_warning_embed
+from helpers.repo_stats import collect_repository_stats, format_bytes
 
 # ------------------------------------------------------
 # Logging Setup - Safe handling
@@ -46,6 +47,13 @@ class HelpCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         logger.info("Help cog initialized")
+
+        # Cache repository metrics once; the README updater uses the same calculation.
+        try:
+            self.repository_stats = collect_repository_stats()
+        except Exception:
+            logger.warning("Could not calculate repository statistics", exc_info=True)
+            self.repository_stats = None
         
         # Command categories and details
         self.command_categories = {
@@ -839,6 +847,33 @@ class HelpCog(commands.Cog):
             inline=False
         )
         
+        if self.repository_stats:
+            stats = self.repository_stats
+            language_breakdown = " · ".join(
+                f"{name}: {count:,}"
+                for name, count in sorted(
+                    stats["language_lines"].items(),
+                    key=lambda item: (-item[1], item[0]),
+                )
+            ) or "No source files detected"
+            if len(language_breakdown) > 500:
+                language_breakdown = language_breakdown[:497] + "..."
+
+            embed.add_field(
+                name="📊 Repository statistics",
+                value=(
+                    f"**Files:** {stats['tracked_files']:,} tracked · "
+                    f"{stats['text_files']:,} text · {stats['source_files']:,} source\\n"
+                    f"**Source lines:** {stats['source_lines']:,} "
+                    f"({stats['nonblank_source_lines']:,} non-blank)\\n"
+                    f"**Text lines:** {stats['text_lines']:,} · "
+                    f"**Characters:** {stats['text_characters']:,} (excluding line breaks)\\n"
+                    f"**Text size:** {format_bytes(stats['text_bytes'])}\\n"
+                    f"**Source mix:** {language_breakdown}"
+                ),
+                inline=False,
+            )
+
         embed.add_field(
             name="💡 Pro Tips",
             value=(
