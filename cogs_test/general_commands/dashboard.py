@@ -304,19 +304,22 @@ def _root_app_command(command: app_commands.Command | app_commands.Group):
 
 
 def _copy_app_command(
-    command: app_commands.Command | app_commands.Group,
+    command: app_commands.Command | app_commands.Group | app_commands.ContextMenu,
     parent: app_commands.Group | None = None,
 ):
-    """Copy a slash command and its parents without sharing mutable child maps."""
+    """Copy a command root without sharing mutable slash-group children."""
     cloned = shallow_copy(command)
-    cloned.parent = parent
     if isinstance(command, app_commands.Group):
+        cloned.parent = parent
         cloned._children = {}
         for child in command.commands:
             child_copy = _copy_app_command(child, cloned)
             cloned._children[child_copy.name] = child_copy
-    else:
+    elif isinstance(command, app_commands.Command):
+        cloned.parent = parent
         cloned._params = command._params.copy()
+    # ContextMenu has neither a parent, child map, nor slash-command params.
+    # A shallow copy preserves its callback and configuration without altering its shape.
     return cloned
 
 
