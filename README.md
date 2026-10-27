@@ -113,7 +113,7 @@ flowchart TB
         GATEWAY["🔌 Discord gateway<br/>events · guild lifecycle · interactions"]
         TREE["🌳 Application command tree<br/>registered slash commands"]
         LOADER["🔄 Recursive cog loader<br/>load · reload · development watcher"]
-        METADATA["🏷️ Command metadata<br/>section · display name · description"]
+        CMDMETA["🏷️ Command metadata<br/>section · display name · description"]
         DASHREG["📚 Dashboard command registry<br/>actual registered + annotated commands"]
         CMDGUARD["🚦 Per-guild command execution guard<br/>enforced before managed commands run"]
         ERRORS["🚨 Shared error handler<br/>safe user response · private details in logs"]
@@ -223,7 +223,7 @@ flowchart TB
         TITLEMATCH["🎯 Candidate/title matching<br/>prefer exact identity over fuzzy guesses"]
         PICKER["🪄 Owner-bound selection view<br/>member chooses the exact result"]
         SHAPE["🧱 Provider-shaped result handling<br/>keep source-specific fields"]
-        METADATA["🏷️ Metadata references<br/>provider ID · canonical URL · category"]
+        MEDIAREF["🏷️ Metadata references<br/>provider ID · canonical URL · category"]
         RELPROVIDER["🔗 Provider relationships<br/>provider relation type preserved"]
         RECPROVIDER["⭐ Provider recommendations<br/>identified as recommendations"]
         GENRE["🧮 Local genre-overlap heuristic<br/>shared normalized labels and reasons"]
@@ -331,7 +331,7 @@ flowchart TB
     GATEWAY --> BOTPY
     BOTPY --> TREE
     LOADER --> TREE
-    LOADER --> METADATA
+    LOADER --> CMDMETA
     METADATA --> DASHREG
     TREE --> DASHREG
     TREE --> CMDGUARD
@@ -448,7 +448,7 @@ flowchart TB
     HTTPCLIENT --> CANDIDATES
 
     %% PROVIDER RESPONSES → PROVENANCE AND RESULT BUILDING
-    SHAPE --> METADATA
+    SHAPE --> MEDIAREF
     SHAPE --> RELPROVIDER
     SHAPE --> RECPROVIDER
     METADATA --> GRAPHHELPER
@@ -471,7 +471,7 @@ flowchart TB
     READINGORDER --> GRAPHHELPER
     SIMILAR --> GENRE
     SIMILAR --> RECPROVIDER
-    COMPARE --> METADATA
+    COMPARE --> MEDIAREF
     COMPARE --> SOURCEBADGE
 
     %% COMMUNITY SURFACES → SHARED ARCHIVES AND GUILD-LOCAL EVENTS
