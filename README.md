@@ -69,7 +69,7 @@ Lemegeton brings media search and community interaction into the same Discord ex
 |---|---|---|
 | Anime and manga | Search, browse filters, airing/publication metadata, tags, themes, and supported relationships | AniList |
 | Light novels, books, and general novels | Title and author search, available edition information, and supported metadata links | AniList where applicable; Google Books |
-| Webnovels | Search and metadata fields available through the existing Novel Updates scraper | Novel Updates |
+| Webnovels | Live search and public metadata from Novel Updates and Novel Phoenix | Novel Updates + Novel Phoenix |
 | Movies and television | Search, genre filters, series/season/episode data, credits, videos, collections, and listed watch providers | TMDB |
 | Video games | Game metadata with optional store enrichment | IGDB; Steam |
 | Community-created resources | Attributed quotes, fanworks, moodboards, soundtrack links, scenes, theories, and member-written recommendations | Lemegeton's database-backed archive |
@@ -148,7 +148,7 @@ flowchart LR
     Search["Category-aware /browse"] --> Router["Provider selection"]
     Franchise["/franchise and /connections"] --> Relations["Resolve known relationships"]
     Similar["/similar and /compare"] --> Signals["Recommendations or genre overlap"]
-    Router --> Providers["AniList / TMDB / Google Books / Novel Updates / IGDB / Steam"]
+    Router --> Providers["AniList / TMDB / Google Books / Novel Updates / Novel Phoenix / IGDB / Steam"]
     Relations --> Evidence["Preserve relationship provenance"]
     Signals --> Evidence
     Providers --> Results["Results with source labels"]
@@ -190,7 +190,7 @@ flowchart LR
 ### 🧠 Read the architecture from the outside in
 
 1. **Discord is the entry point.** The Python process owns the live gateway, slash-command tree, cog loading, interactions, and command errors.
-2. **Commands reuse providers.** Search and selection code call the existing AniList, TMDB, Google Books, Novel Updates, IGDB, and Steam integrations instead of inventing a universal metadata source.
+2. **Commands reuse providers.** Search and selection code reuse the AniList, TMDB, Google Books, Novel Updates, Novel Phoenix, IGDB, and Steam integrations instead of inventing a universal metadata source.
 3. **The graph records evidence, not certainty.** Relationship edges, provider recommendations, local genre overlap, and reviewed community submissions keep separate provenance.
 4. **PostgreSQL stores structured data; S3 stores selected image files.** The media-assets registry connects records to object keys and privacy mode, while private and public objects follow separate access rules.
 5. **The web dashboard is a control plane, not a second bot.** Rust handles the public browser-facing service and authorization; private loopback services connect authenticated operations to the existing Python bot.
@@ -284,12 +284,12 @@ TMDB-powered features require TMDB_BEARER_TOKEN. Availability data changes, and 
 | Command | Purpose |
 |---|---|
 | **/author-works** | Search Google Books for titles attributed to an author. |
-| **/webnovel-updates** | Search the optional Novel Updates dataset first, with live-scraper fallback and chapter, rating, release, rank, and relationship metadata. |
+| **/webnovel-updates** | Search live Novel Updates and Novel Phoenix pages for current public webnovel metadata. |
 | **/reading** | Open the unified Reading Hub for nominations, votes, selection, scheduled discussions, and reading order. |
 
-Novel Updates results depend on the scraper and the source page's current structure. An empty response may reflect a source failure or unsupported markup; it is not necessarily proof that a title does not exist.
+Live webnovel search reads public result pages from Novel Updates and Novel Phoenix instead of relying on a bundled catalog. Results depend on each provider's current page structure and availability; an empty response is not necessarily proof that a title does not exist.
 
-For a faster local catalog, set `NOVELUPDATES_DATASET_PATH` to the upstream CSV/JSON file or place it at `data/novelupdates/novels_0.1.5.csv` / `.json`. Lemegeton does not bundle the data. Dataset version 0.1.5 is dated 2025-08-21, so its chapter counts and rankings may be stale; live scraping remains the fallback for misses. Review the [upstream repository](https://github.com/shaido987/novel-dataset) usage terms before downloading or redistributing it.
+Results explicitly marked adult-rated or sexually explicit are excluded.
 
 ### 🎮 Games and generated images
 
@@ -720,7 +720,7 @@ flowchart LR
         ANI["AniList"]
         TMDB["TMDB"]
         GOOGLE["Google Books"]
-        NOVEL["Novel Updates helper"]
+        NOVEL["Live Novel Updates + Novel Phoenix scraper"]
         IGDB["IGDB"]
         STEAM["Steam"]
     end
