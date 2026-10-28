@@ -14,6 +14,12 @@ from cogs.media.browse import (
     search_novelupdates,
     search_webnovels,
     _NOVELPHOENIX_SEARCH_CACHE,
+    _NOVELFIRE_SEARCH_CACHE,
+    _NOVELIST_SEARCH_CACHE,
+    _novelfire_results_from_helper,
+    _novelfire_search_urls,
+    _novelist_results_from_helper,
+    _novelist_search_urls,
 )
 
 
@@ -192,10 +198,78 @@ class NovelPhoenixParserTests(unittest.TestCase):
         self.assertFalse(_is_safe_webnovel_result({"title": "Another Story 18+"}))
 
 
+
+class NovelFireParserTests(unittest.TestCase):
+    def test_parses_book_cards_and_excludes_mature_or_non_book_links(self):
+        payload = {
+            "url": "https://novelfire.net/search?keyword=chronicle",
+            "links": [
+                {"text": "The Safe Chronicle", "url": "https://novelfire.net/book/the-safe-chronicle/"},
+                {"text": "Hidden Garden", "url": "https://novelfire.net/book/hidden-garden/"},
+                {"text": "Chapter link", "url": "https://novelfire.net/book/the-safe-chronicle/chapter-1"},
+                {"text": "Off-site", "url": "https://example.com/book/fake/"},
+            ],
+            "fields": {
+                "cards": [
+                    "The Safe Chronicle Fantasy Adventure 120 Chapters 4.7 Ongoing by A. Writer",
+                    "Hidden Garden Mature Romance 200 Chapters 4.5 Completed",
+                ]
+            },
+        }
+        results = _novelfire_results_from_helper(payload)
+        self.assertEqual([item["title"] for item in results], ["The Safe Chronicle"])
+        self.assertEqual(results[0]["source"], "NovelFire")
+        self.assertEqual(results[0]["provider"], "novelfire")
+        self.assertEqual(results[0]["chapters"], "120")
+        self.assertEqual(results[0]["rating"], "4.7")
+        self.assertIn("Fantasy", results[0]["genres"])
+
+    def test_search_urls_encode_query_and_ignore_blank_query(self):
+        urls = _novelfire_search_urls("A Novel & More")
+        self.assertTrue(urls)
+        self.assertIn("A+Novel+%26+More", urls[0])
+        self.assertEqual(_novelfire_search_urls("  "), [])
+
+
+class NovelistParserTests(unittest.TestCase):
+    def test_parses_public_story_cards_and_filters_explicit_content(self):
+        payload = {
+            "url": "https://novelist.info/stories?search=chronicle",
+            "links": [
+                {"text": "The Platform Story", "url": "https://novelist.info/stories/platform-story"},
+                {"text": "Explicit Story", "url": "https://novelist.info/stories/explicit-story"},
+                {"text": "Login", "url": "https://novelist.info/login"},
+                {"text": "External Story", "url": "https://example.com/stories/external"},
+            ],
+            "fields": {
+                "cards": [
+                    "The Platform Story Fantasy 14 Chapters 4.6 Ongoing by A. Writer",
+                    "Explicit Story Adult Romance 9 Chapters 4.8",
+                ]
+            },
+        }
+        results = _novelist_results_from_helper(payload)
+        self.assertEqual([item["title"] for item in results], ["The Platform Story"])
+        self.assertEqual(results[0]["source"], "Novelist")
+        self.assertEqual(results[0]["provider"], "novelist")
+        self.assertEqual(results[0]["chapters"], "14")
+        self.assertEqual(results[0]["rating"], "4.6")
+        self.assertIn("Fantasy", results[0]["genres"])
+
+    def test_search_urls_include_both_public_site_hosts(self):
+        urls = _novelist_search_urls("A Novel & More")
+        self.assertTrue(any("novelist.info" in url for url in urls))
+        self.assertTrue(any("novelist.ws" in url for url in urls))
+        self.assertIn("A+Novel+%26+More", urls[0])
+        self.assertEqual(_novelist_search_urls(" "), [])
+
+
 class CombinedWebnovelSearchTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         _NOVELUPDATES_SEARCH_CACHE.clear()
         _NOVELPHOENIX_SEARCH_CACHE.clear()
+        _NOVELFIRE_SEARCH_CACHE.clear()
+        _NOVELIST_SEARCH_CACHE.clear()
 
     async def test_merges_live_providers_deduplicates_titles_and_filters_flagged_results(self):
         updates_results = [
@@ -208,6 +282,8 @@ class CombinedWebnovelSearchTests(unittest.IsolatedAsyncioTestCase):
         ]
         with patch("cogs.media.browse.search_novelupdates", new=AsyncMock(return_value=updates_results)), patch(
             "cogs.media.browse.search_novelphoenix", new=AsyncMock(return_value=phoenix_results)
+        ), patch("cogs.media.browse.search_novelfire", new=AsyncMock(return_value=[])), patch(
+            "cogs.media.browse.search_novelist", new=AsyncMock(return_value=[])
         ):
             results = await search_webnovels("Chronicle")
         self.assertEqual([item["title"] for item in results], ["Shared Chronicle", "Phoenix Chronicle"])
