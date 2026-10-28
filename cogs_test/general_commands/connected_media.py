@@ -750,6 +750,13 @@ class ConnectedMedia(commands.Cog):
                 details.append("chapters " + " / ".join(chapters))
             if item.get("release_frequency"):
                 details.append(f"release: {item['release_frequency']}")
+            if item.get("reading_lists") not in (None, ""):
+                details.append(f"reading lists: {item['reading_lists']}")
+            if item.get("licensed") is not None:
+                details.append("licensed" if item["licensed"] else "not marked licensed")
+            for field, label in (("original_publisher", "original publisher"), ("english_publisher", "English publisher")):
+                if item.get(field):
+                    details.append(f"{label}: {item[field]}")
             if item.get("genres"):
                 details.append("genres: " + ", ".join(str(value) for value in item["genres"][:5]))
             if item.get("tags"):
@@ -776,7 +783,7 @@ class ConnectedMedia(commands.Cog):
         embed = discord.Embed(title=f"Novel Updates · {query}"[:256], description="\n".join(lines)[:4000] or "Novel Updates returned no matching records.", color=discord.Color.blurple())
         dataset_results = [item for item in results if item.get("metadata_source") == "novel-dataset"]
         if dataset_results:
-            embed.set_footer(text=f"Novel Updates dataset snapshot · Updated {dataset_results[0].get('metadata_as_of', 'date unknown')} · Details may be stale; title links may open a provider search")
+            embed.set_footer(text=f"Novel Updates dataset v{dataset_results[0].get('dataset_version', 'unknown')} · Updated {dataset_results[0].get('metadata_as_of', 'date unknown')} · Details may be stale; links may open a provider search")
         else:
             embed.set_footer(text="Source: Novel Updates · Only fields supplied by the current scraper are shown")
         await interaction.followup.send(embed=embed, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
