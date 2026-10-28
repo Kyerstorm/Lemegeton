@@ -856,7 +856,7 @@ def _novelist_search_urls(query: str, *, max_urls: int = 4) -> List[str]:
             f"{base_url}/stories?search={term}",
             f"{base_url}/stories?q={term}",
         ])
-    return urls[:max(1, min(int(max_urls), len(urls))]
+    return urls[:max(1, min(int(max_urls), len(urls)))]
 
 
 def _novelist_is_story_url(url: str, base_url: str) -> bool:
