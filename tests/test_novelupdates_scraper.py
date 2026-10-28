@@ -23,9 +23,28 @@ from cogs.media.browse import (
     _search_novelist_uncached,
     _enrich_aggregator_detail,
 )
+from helpers.web_scraper import _extract_page_data
 
 
 BASE_URL = "https://www.novelupdates.com/series-finder/?sf=1&sh=test"
+
+
+
+class SharedWebScraperExtractionTests(unittest.TestCase):
+    def test_link_title_attribute_is_used_when_visible_text_is_empty(self):
+        payload = _extract_page_data(
+            "https://novelfire.net/search?keyword=safe",
+            '<html><body><a href="/book/safe-story/" title="The Safe Story"></a></body></html>',
+            {
+                "include_text": False,
+                "include_links": True,
+                "link_selector": "a[href]",
+            },
+            status_code=200,
+            engine="test",
+        )
+        self.assertEqual(payload["links"][0]["text"], "The Safe Story")
+        self.assertEqual(payload["links"][0]["url"], "https://novelfire.net/book/safe-story/")
 
 
 class NovelUpdatesParserTests(unittest.TestCase):
