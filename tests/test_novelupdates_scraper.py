@@ -20,6 +20,8 @@ from cogs.media.browse import (
     _novelfire_search_urls,
     _novelist_results_from_helper,
     _novelist_search_urls,
+    _search_novelist_uncached,
+    _enrich_aggregator_detail,
 )
 
 
@@ -260,8 +262,59 @@ class NovelistParserTests(unittest.TestCase):
         urls = _novelist_search_urls("A Novel & More")
         self.assertTrue(any("novelist.info" in url for url in urls))
         self.assertTrue(any("novelist.ws" in url for url in urls))
-        self.assertIn("A+Novel+%26+More", urls[0])
+        self.assertTrue(urls[0].endswith("/stories"))
+        self.assertTrue(any("A+Novel+%26+More" in url for url in urls))
         self.assertEqual(_novelist_search_urls(" "), [])
+
+
+
+class NovelistAvailabilityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_closed_public_catalog_returns_empty_without_fake_results(self):
+        closed_page = {
+            "url": "https://novelist.ws/stories",
+            "text": "Stories are coming soon. The public catalog will open once there is enough to explore.",
+            "fields": {"cards": []},
+            "links": [],
+        }
+        with patch(
+            "cogs.media.browse.fetch_public_page",
+            new=AsyncMock(side_effect=[closed_page, dict(closed_page, url="https://novelist.info/stories")]),
+        ) as fetch:
+            results = await _search_novelist_uncached("Chronicle")
+        self.assertEqual(results, [])
+        self.assertEqual(fetch.await_count, 2)
+
+
+class AggregatorDetailEnrichmentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_novelfire_detail_metadata_enriches_a_search_card(self):
+        item = {
+            "title": "Safe Story",
+            "url": "https://novelfire.net/book/safe-story/",
+            "source": "NovelFire",
+            "provider": "novelfire",
+            "genres": [],
+        }
+        detail = {
+            "url": item["url"],
+            "description": "A proper story synopsis.",
+            "fields": {
+                "detail_title": ["The Safe Story"],
+                "authors": ["A. Writer"],
+                "synopsis": ["A proper story synopsis."],
+                "stats": ["3,200 Chapters", "Ongoing Status"],
+                "rating": ["4.8"],
+                "genres": ["Fantasy", "Adventure"],
+            },
+        }
+        with patch("cogs.media.browse.fetch_public_page", new=AsyncMock(return_value=detail)):
+            result = await _enrich_aggregator_detail(item, provider="novelfire")
+        self.assertEqual(result["title"], "The Safe Story")
+        self.assertEqual(result["author"], "A. Writer")
+        self.assertEqual(result["description"], "A proper story synopsis.")
+        self.assertEqual(result["chapters"], "3200")
+        self.assertEqual(result["status"], "Ongoing")
+        self.assertEqual(result["rating"], "4.8")
+        self.assertEqual(result["genres"], ["Fantasy", "Adventure"])
 
 
 class CombinedWebnovelSearchTests(unittest.IsolatedAsyncioTestCase):
