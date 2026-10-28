@@ -15,7 +15,7 @@ from helpers.steam_helper import search_steam_apps
 from helpers.gaming_utils import is_steam_deck_verified, get_controller_support
 from cogs.gaming.steam_game import fetch_game_details
 from cogs_test.general_commands.game import fetch_igdb_details
-from cogs.media.browse import BrowseCog, search_novelupdates
+from cogs.media.browse import BrowseCog, search_webnovels
 from cogs_test.general_commands.dashboard import command_meta
 
 log = logging.getLogger(__name__)
@@ -267,7 +267,7 @@ class Compare(commands.Cog):
                 return [item for item in results if str(item.get("format") or "").upper() != "NOVEL"]
             return results
         if category == "WEBNOVEL":
-            return await asyncio.wait_for(search_novelupdates(query), timeout=45)
+            return await asyncio.wait_for(search_webnovels(query), timeout=45)
         if category == "BOOK":
             fiction, nonfiction = await asyncio.gather(
                 self.browse.fetch_book_results(query, "fiction"),
