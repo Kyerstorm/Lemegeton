@@ -734,14 +734,51 @@ class ConnectedMedia(commands.Cog):
             await interaction.followup.send("Novel Updates could not be reached reliably. This is a provider failure, not a confirmed no-results search.", ephemeral=True)
             return
         lines = []
-        for item in results[:10]:
+        for item in results[:8]:
             name = discord.utils.escape_markdown(str(item.get("title") or "Untitled"))
             url = item.get("url")
             title_text = f"[{name}]({url})" if url else name
-            details = [str(item[key]) for key in ("author", "status", "rating") if item.get(key)]
-            lines.append(f"• **{title_text}**" + (f" · {' · '.join(details)}" if details else ""))
+            details = [str(item[key]) for key in ("author", "novel_type", "original_language", "status", "rating") if item.get(key)]
+            if item.get("rating_votes") not in (None, "") and item.get("rating"):
+                details[-1] = f"{item['rating']} ({item['rating_votes']} votes)"
+            chapters = []
+            if item.get("original_chapters") not in (None, ""):
+                chapters.append(f"original: {item['original_chapters']}")
+            if item.get("translated_chapters") not in (None, ""):
+                chapters.append(f"translated: {item['translated_chapters']}")
+            if chapters:
+                details.append("chapters " + " / ".join(chapters))
+            if item.get("release_frequency"):
+                details.append(f"release: {item['release_frequency']}")
+            if item.get("genres"):
+                details.append("genres: " + ", ".join(str(value) for value in item["genres"][:5]))
+            if item.get("tags"):
+                details.append("tags: " + ", ".join(str(value) for value in item["tags"][:5]))
+            ranks = [
+                f"{label} #{item[key]}"
+                for key, label in (
+                    ("activity_weekly_rank", "week"),
+                    ("activity_monthly_rank", "month"),
+                    ("activity_all_time_rank", "all-time"),
+                ) if item.get(key) not in (None, "")
+            ]
+            if ranks:
+                details.append("activity " + ", ".join(ranks))
+            lines.append(f"• **{title_text}**" + (f"\n{' · '.join(details)}" if details else ""))
+            for label, key in (("Related", "related_series"), ("Recommended", "recommended_series")):
+                linked = item.get(key) or []
+                linked_titles = [
+                    f"[{discord.utils.escape_markdown(str(link.get('title') or 'Untitled'))}]({link['url']})"
+                    for link in linked[:3] if link.get("url")
+                ]
+                if linked_titles:
+                    lines.append(f"  {label}: " + ", ".join(linked_titles))
         embed = discord.Embed(title=f"Novel Updates · {query}"[:256], description="\n".join(lines)[:4000] or "Novel Updates returned no matching records.", color=discord.Color.blurple())
-        embed.set_footer(text="Source: Novel Updates · Only fields supplied by the current scraper are shown")
+        dataset_results = [item for item in results if item.get("metadata_source") == "novel-dataset"]
+        if dataset_results:
+            embed.set_footer(text=f"Novel Updates dataset snapshot · Updated {dataset_results[0].get('metadata_as_of', 'date unknown')} · Details may be stale; title links may open a provider search")
+        else:
+            embed.set_footer(text="Source: Novel Updates · Only fields supplied by the current scraper are shown")
         await interaction.followup.send(embed=embed, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     @app_commands.command(name="link-suggest", description="Open a guided modal to suggest a cross-media relationship")
