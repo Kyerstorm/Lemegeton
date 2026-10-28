@@ -409,19 +409,23 @@ async def search_novelupdates(
     max_http_urls: int = 2,
     require_genres: bool = False,
 ) -> List[Dict]:
-    """Cache successful Novel Updates searches briefly; never cache provider failures."""
+    """Search public Novel Updates pages and cache successful results briefly."""
     normalized = " ".join((query or "").split())
     if not normalized:
         return []
-    key = (normalized.casefold(), bool(browser_fallback), max(1, min(int(max_http_urls), 3)), max(1, min(int(http_timeout), 10)), bool(require_genres))
+    key = (
+        normalized.casefold(),
+        bool(browser_fallback),
+        max(1, min(int(max_http_urls), 3)),
+        max(1, min(int(http_timeout), 10)),
+        bool(require_genres),
+    )
     async with _NOVELUPDATES_CACHE_LOCK:
         cached = _NOVELUPDATES_SEARCH_CACHE.get(key)
         if cached and cached[0] > time.monotonic():
             return [dict(item) for item in cached[1]]
         key_lock = _NOVELUPDATES_KEY_LOCKS.setdefault(key, asyncio.Lock())
 
-    # Coalesce concurrent searches for the same title without serializing searches
-    # for unrelated titles.
     async with key_lock:
         async with _NOVELUPDATES_CACHE_LOCK:
             cached = _NOVELUPDATES_SEARCH_CACHE.get(key)
@@ -436,18 +440,923 @@ async def search_novelupdates(
                     max_http_urls=max_http_urls,
                     require_genres=require_genres,
                 )
+            for item in results:
+                item.setdefault("source", "Novel Updates")
             if results:
                 async with _NOVELUPDATES_CACHE_LOCK:
                     now = time.monotonic()
-                    expired = [cache_key for cache_key, value in _NOVELUPDATES_SEARCH_CACHE.items() if value[0] <= now]
+                    expired = [
+                        cache_key
+                        for cache_key, value in _NOVELUPDATES_SEARCH_CACHE.items()
+                        if value[0] <= now
+                    ]
                     for cache_key in expired:
                         _NOVELUPDATES_SEARCH_CACHE.pop(cache_key, None)
-                    _NOVELUPDATES_SEARCH_CACHE[key] = (now + _NOVELUPDATES_CACHE_TTL, [dict(item) for item in results])
+                    _NOVELUPDATES_SEARCH_CACHE[key] = (
+                        now + _NOVELUPDATES_CACHE_TTL,
+                        [dict(item) for item in results],
+                    )
             return results
         finally:
             async with _NOVELUPDATES_CACHE_LOCK:
                 if _NOVELUPDATES_KEY_LOCKS.get(key) is key_lock:
                     _NOVELUPDATES_KEY_LOCKS.pop(key, None)
+
+
+_NOVELPHOENIX_BASE_URL = "https://novelphoenix.com"
+_NOVELPHOENIX_CACHE_TTL = 300
+_NOVELPHOENIX_SEARCH_CACHE: Dict[tuple, tuple[float, List[Dict]]] = {}
+_NOVELPHOENIX_CACHE_LOCK = asyncio.Lock()
+_NOVELPHOENIX_KEY_LOCKS: Dict[tuple, asyncio.Lock] = {}
+_NOVELPHOENIX_REQUEST_LIMIT = asyncio.Semaphore(1)
+_NOVELPHOENIX_EXCLUDED_CONTENT = re.compile(
+    r"\b(?:adult|mature|smut|ecchi|hentai|erotica|erotic|nsfw|pornographic)\b"
+    r"|\b18\s*\+|\bexplicit\s+content\b",
+    re.IGNORECASE,
+)
+_NOVELPHOENIX_CARD_SELECTOR = (
+    ".novel-card, .novel-item, .book-item, .novel-list-item, .book-list-item, "
+    "article, [class*='novel-card'], [class*='novel-item'], [class*='book-card']"
+)
+
+
+def _novelphoenix_search_urls(query: str) -> List[str]:
+    """Build a small set of public Novel Phoenix search routes."""
+    query = " ".join((query or "").split())
+    if not query:
+        return []
+    term = quote_plus(query)
+    return [
+        f"{_NOVELPHOENIX_BASE_URL}/search?keyword={term}",
+        f"{_NOVELPHOENIX_BASE_URL}/search-adv?keyword={term}",
+        f"{_NOVELPHOENIX_BASE_URL}/search?q={term}",
+        f"{_NOVELPHOENIX_BASE_URL}/?s={term}",
+    ]
+
+
+def _novelphoenix_is_novel_url(url: str, base_url: str) -> bool:
+    """Accept only direct HTTPS novel pages from Novel Phoenix."""
+    target = urljoin(base_url, url or "")
+    parts = urlsplit(target)
+    host = (parts.hostname or "").lower().rstrip(".")
+    return (
+        parts.scheme == "https"
+        and (host == "novelphoenix.com" or host.endswith(".novelphoenix.com"))
+        and re.fullmatch(r"/novel/[^/]+/?", parts.path, re.IGNORECASE) is not None
+    )
+
+
+def _novelphoenix_results_from_helper(payload: Dict) -> List[Dict]:
+    """Normalize search links and matching cards from a public Novel Phoenix page."""
+    fields = payload.get("fields") or {}
+    cards = fields.get("cards") or []
+    if isinstance(cards, str):
+        cards = [cards]
+    card_texts = list(dict.fromkeys(" ".join(str(card).split()) for card in cards if str(card).strip()))
+    base_url = payload.get("url") or _NOVELPHOENIX_BASE_URL
+    results: List[Dict] = []
+    seen_urls = set()
+
+    for link in payload.get("links") or []:
+        href = str(link.get("url") or "").strip()
+        if not _novelphoenix_is_novel_url(href, base_url):
+            continue
+        url = urljoin(base_url, href).split("#", 1)[0]
+        normalized_url = url.rstrip("/").casefold()
+        if normalized_url in seen_urls:
+            continue
+        title = " ".join(str(link.get("text") or "").split())
+        if not title:
+            title = urlsplit(url).path.rstrip("/").split("/")[-1].replace("-", " ").replace("_", " ")
+        if not title:
+            continue
+
+        matching_cards = [
+            card for card in card_texts if title.casefold() in card.casefold()
+        ]
+        if not matching_cards:
+            # Fail closed when the result's card cannot be checked for its content rating.
+            continue
+        card_text = min(matching_cards, key=len)
+        if _NOVELPHOENIX_EXCLUDED_CONTENT.search(card_text):
+            continue
+
+        rating_match = re.search(r"(?<![\d.])([0-5]\.\d{1,2})(?:\s*/\s*5)?(?!\d)", card_text)
+        chapters_match = re.search(r"\b([\d,]+)\s+chapters?\b", card_text, re.IGNORECASE)
+        status_match = re.search(r"\b(ongoing|completed|complete|hiatus|dropped)\b", card_text, re.IGNORECASE)
+        known_genres = (
+            "Action", "Adventure", "Comedy", "Drama", "Fantasy", "Game", "Historical",
+            "Horror", "Isekai", "Martial Arts", "Mystery", "Psychological", "Romance",
+            "School Life", "Sci-fi", "Seinen", "Shoujo", "Shounen", "Slice of Life",
+            "Supernatural", "System", "Tragedy", "Wuxia", "Xianxia", "Xuanhuan",
+        )
+        genres = [genre for genre in known_genres if re.search(
+            rf"(?<![\w]){re.escape(genre)}(?![\w])", card_text, re.IGNORECASE
+        )]
+
+        results.append({
+            "title": title[:256],
+            "url": url,
+            "description": None,
+            "image": None,
+            "rating": rating_match.group(1) if rating_match else None,
+            "author": None,
+            "status": status_match.group(1).title() if status_match else None,
+            "chapters": chapters_match.group(1) if chapters_match else None,
+            "genres": genres,
+            "source": "Novel Phoenix",
+            "provider": "novelphoenix",
+        })
+        seen_urls.add(normalized_url)
+        if len(results) >= 10:
+            break
+
+    return results
+
+
+async def _search_novelphoenix_uncached(
+    query: str, *, http_timeout: int = 7, max_urls: int = 4, browser_fallback: bool = True
+) -> List[Dict]:
+    """Scrape public Novel Phoenix search pages; stop on explicit access challenges."""
+    urls = _novelphoenix_search_urls(query)
+    selectors = {"cards": _NOVELPHOENIX_CARD_SELECTOR}
+    for url in urls[: max(1, min(int(max_urls), len(urls)))]:
+        try:
+            payload = await fetch_public_page(
+                url,
+                engine="http",
+                selectors=selectors,
+                include_text=False,
+                include_links=True,
+                link_selector="a[href*='/novel/']",
+                timeout=max(1, min(int(http_timeout), 10)),
+                retries=0,
+            )
+        except ScrapeBlockedError:
+            raise
+        except (ScrapeRequestError, ValueError) as exc:
+            logger.debug("Novel Phoenix HTTP search failed for %s: %s", url, exc)
+            continue
+        except Exception:
+            logger.exception("Unexpected Novel Phoenix scraper failure for %s", url)
+            continue
+        results = _novelphoenix_results_from_helper(payload)
+        if results:
+            results = await _enrich_aggregator_results(results, provider="novelphoenix")
+            logger.info("Novel Phoenix returned %s results for %r", len(results), query)
+            return results
+
+    if browser_fallback and urls:
+        try:
+            payload = await fetch_public_page(
+                urls[0],
+                engine="browser",
+                selectors=selectors,
+                include_text=False,
+                include_links=True,
+                link_selector="a[href*='/novel/']",
+                timeout=max(1, min(int(http_timeout), 10)),
+                retries=0,
+            )
+        except ScrapeBlockedError:
+            raise
+        except (ScrapeRequestError, ValueError) as exc:
+            logger.debug("Novel Phoenix browser fallback failed for %s: %s", urls[0], exc)
+        except Exception:
+            logger.debug("Unexpected Novel Phoenix browser fallback failure", exc_info=True)
+        else:
+            results = _novelphoenix_results_from_helper(payload)
+            if results:
+                results = await _enrich_aggregator_results(results, provider="novelphoenix")
+                return results
+    return []
+
+
+async def search_novelphoenix(
+    query: str, *, http_timeout: int = 7, max_urls: int = 4, browser_fallback: bool = True
+) -> List[Dict]:
+    """Search Novel Phoenix live, caching only successful searches."""
+    normalized = " ".join((query or "").split())
+    if not normalized:
+        return []
+    key = (normalized.casefold(), bool(browser_fallback), max(1, min(int(max_urls), 4)))
+    async with _NOVELPHOENIX_CACHE_LOCK:
+        cached = _NOVELPHOENIX_SEARCH_CACHE.get(key)
+        if cached and cached[0] > time.monotonic():
+            return [dict(item) for item in cached[1]]
+        key_lock = _NOVELPHOENIX_KEY_LOCKS.setdefault(key, asyncio.Lock())
+
+    async with key_lock:
+        async with _NOVELPHOENIX_CACHE_LOCK:
+            cached = _NOVELPHOENIX_SEARCH_CACHE.get(key)
+            if cached and cached[0] > time.monotonic():
+                return [dict(item) for item in cached[1]]
+        try:
+            async with _NOVELPHOENIX_REQUEST_LIMIT:
+                results = await _search_novelphoenix_uncached(
+                    normalized, http_timeout=http_timeout, max_urls=key[2], browser_fallback=browser_fallback
+                )
+            if results:
+                async with _NOVELPHOENIX_CACHE_LOCK:
+                    now = time.monotonic()
+                    expired = [cache_key for cache_key, value in _NOVELPHOENIX_SEARCH_CACHE.items() if value[0] <= now]
+                    for cache_key in expired:
+                        _NOVELPHOENIX_SEARCH_CACHE.pop(cache_key, None)
+                    _NOVELPHOENIX_SEARCH_CACHE[key] = (now + _NOVELPHOENIX_CACHE_TTL, [dict(item) for item in results])
+            return results
+        finally:
+            async with _NOVELPHOENIX_CACHE_LOCK:
+                if _NOVELPHOENIX_KEY_LOCKS.get(key) is key_lock:
+                    _NOVELPHOENIX_KEY_LOCKS.pop(key, None)
+
+
+
+_NOVELFIRE_BASE_URL = "https://novelfire.net"
+_NOVELFIRE_CACHE_TTL = 300
+_NOVELFIRE_SEARCH_CACHE: Dict[tuple, tuple[float, List[Dict]]] = {}
+_NOVELFIRE_CACHE_LOCK = asyncio.Lock()
+_NOVELFIRE_KEY_LOCKS: Dict[tuple, asyncio.Lock] = {}
+_NOVELFIRE_REQUEST_LIMIT = asyncio.Semaphore(1)
+_NOVELFIRE_CARD_SELECTOR = (
+    ".novel-item, .novel-card, .book-item, .book-card, .search-result, "
+    "[class*='novel-item'], [class*='book-item'], [class*='novel-card'], "
+    "[class*='book-card'], article"
+)
+
+_NOVELIST_BASE_URLS = ("https://novelist.ws", "https://novelist.info")
+_NOVELIST_CACHE_TTL = 300
+_NOVELIST_SEARCH_CACHE: Dict[tuple, tuple[float, List[Dict]]] = {}
+_NOVELIST_CACHE_LOCK = asyncio.Lock()
+_NOVELIST_KEY_LOCKS: Dict[tuple, asyncio.Lock] = {}
+_NOVELIST_REQUEST_LIMIT = asyncio.Semaphore(1)
+_NOVELIST_CARD_SELECTOR = (
+    "[data-story-id], .story-card, .series-card, .novel-card, "
+    "[class*='story-card'], [class*='series-card'], [class*='story-item'], "
+    "[class*='series-item'], article"
+)
+_NOVELIST_RESERVED_PATHS = {
+    "about", "admin", "api", "auth", "blog", "bookmarks", "collections",
+    "login", "logout", "privacy", "profile", "register", "search", "settings",
+    "stories", "terms", "user", "users",
+}
+_WEBNOVEL_GENRES = (
+    "Action", "Adventure", "Comedy", "Drama", "Fantasy", "Game", "Historical",
+    "Horror", "Isekai", "Martial Arts", "Mystery", "Psychological", "Romance",
+    "School Life", "Sci-fi", "Seinen", "Shoujo", "Shounen", "Slice of Life",
+    "Supernatural", "System", "Tragedy", "Wuxia", "Xianxia", "Xuanhuan",
+)
+
+
+def _novelfire_search_urls(query: str) -> List[str]:
+    """Build public NovelFire search routes without guessing a detail-page URL."""
+    normalized = " ".join((query or "").split())
+    if not normalized:
+        return []
+    term = quote_plus(normalized)
+    return [
+        f"{_NOVELFIRE_BASE_URL}/search?keyword={term}",
+        f"{_NOVELFIRE_BASE_URL}/search?q={term}",
+        f"{_NOVELFIRE_BASE_URL}/search?name={term}",
+    ]
+
+
+def _novelfire_is_book_url(url: str, base_url: str) -> bool:
+    """Accept only top-level NovelFire book pages, never chapter/navigation URLs."""
+    target = urljoin(base_url, url or "")
+    parts = urlsplit(target)
+    host = (parts.hostname or "").lower().rstrip(".")
+    return (
+        parts.scheme == "https"
+        and host in {"novelfire.net", "www.novelfire.net"}
+        and re.fullmatch(r"/book/[^/]+/?", parts.path, re.IGNORECASE) is not None
+    )
+
+
+def _novelfire_results_from_helper(payload: Dict) -> List[Dict]:
+    """Normalize NovelFire search cards into the common webnovel result shape."""
+    fields = payload.get("fields") or {}
+    cards = fields.get("cards") or []
+    if isinstance(cards, str):
+        cards = [cards]
+    card_texts = list(dict.fromkeys(
+        " ".join(str(card).split()) for card in cards if str(card).strip()
+    ))
+    base_url = payload.get("url") or _NOVELFIRE_BASE_URL
+    results: List[Dict] = []
+    seen_urls = set()
+
+    for link in payload.get("links") or []:
+        href = str(link.get("url") or "").strip()
+        if not _novelfire_is_book_url(href, base_url):
+            continue
+        url = urljoin(base_url, href).split("#", 1)[0].split("?", 1)[0]
+        normalized_url = url.rstrip("/").casefold()
+        if normalized_url in seen_urls:
+            continue
+        title = " ".join(str(link.get("text") or "").split())
+        if not title:
+            title = urlsplit(url).path.rstrip("/").split("/")[-1].replace("-", " ").replace("_", " ")
+        if not title:
+            continue
+
+        matching_cards = [card for card in card_texts if title.casefold() in card.casefold()]
+        if not matching_cards:
+            # If the card metadata cannot be associated with a title, fail closed.
+            continue
+        card_text = min(matching_cards, key=len)
+        if _NOVELPHOENIX_EXCLUDED_CONTENT.search(card_text):
+            continue
+
+        chapters_match = re.search(r"\b([\d,]+)\s+chapters?\b", card_text, re.IGNORECASE)
+        rating_match = re.search(r"(?<![\d.])([0-5]\.\d{1,2})(?:\s*/\s*5)?(?!\d)", card_text)
+        status_match = re.search(r"\b(ongoing|completed|complete|hiatus|dropped)\b", card_text, re.IGNORECASE)
+        genres = [
+            genre for genre in _WEBNOVEL_GENRES
+            if re.search(r"(?<![\w])" + re.escape(genre) + r"(?![\w])", card_text, re.IGNORECASE)
+        ]
+        author_match = re.search(r"\b(?:by|author\s*[:：])\s*([^|•·]{2,80}?)(?=\s{2,}|[|•·]|$)", card_text, re.IGNORECASE)
+
+        results.append({
+            "title": title[:256],
+            "url": url,
+            "description": None,
+            "image": None,
+            "rating": rating_match.group(1) if rating_match else None,
+            "author": author_match.group(1).strip() if author_match else None,
+            "status": status_match.group(1).title() if status_match else None,
+            "chapters": chapters_match.group(1).replace(",", "") if chapters_match else None,
+            "genres": genres,
+            "source": "NovelFire",
+            "provider": "novelfire",
+        })
+        seen_urls.add(normalized_url)
+        if len(results) >= 10:
+            break
+    return results
+
+
+_WEBNOVEL_DETAIL_REQUEST_LIMIT = asyncio.Semaphore(2)
+
+
+def _first_scraper_text(value) -> str:
+    """Return the first non-empty text value from a scraper-helper field."""
+    if isinstance(value, (tuple, list)):
+        return next((" ".join(str(item).split()) for item in value if str(item).strip()), "")
+    return " ".join(str(value or "").split())
+
+
+async def _enrich_aggregator_detail(
+    item: Dict, *, provider: str, http_timeout: int = 5
+) -> Optional[Dict]:
+    """Enrich an aggregator search card from its linked public novel page.
+
+    Detail-page failures leave the search-card result intact. Access challenges
+    are respected and never retried through a different engine.
+    """
+    url = str(item.get("url") or "")
+    if provider == "novelfire":
+        if not _novelfire_is_book_url(url, url):
+            return item
+        selectors = {
+            "detail_title": "h1.novel-title, .novel-title, h1",
+            "authors": ".author .property-item > span, .author a, [itemprop='author'], .novel-author",
+            "synopsis": ".summary .content, .summary, .description, .novel-description",
+            "stats": ".header-stats span",
+            "rating": ".nub, .rating, [itemprop='ratingValue']",
+            "genres": ".categories a, .genre a, .tags a",
+        }
+    elif provider == "novelphoenix":
+        if not _novelphoenix_is_novel_url(url, url):
+            return item
+        selectors = {
+            "detail_title": "h1.novel-title, .novel-title, h1",
+            "authors": ".author .property-item > span, .author a, [itemprop='author'], .novel-author",
+            "synopsis": ".summary .content, .summary, .description, .novel-description",
+            "stats": ".header-stats span",
+            "rating": ".nub, .rating, [itemprop='ratingValue']",
+            "genres": ".categories a, .genre a, .tags a",
+        }
+    else:
+        return item
+
+    try:
+        async with _WEBNOVEL_DETAIL_REQUEST_LIMIT:
+            payload = await fetch_public_page(
+                url,
+                engine="http",
+                selectors=selectors,
+                include_text=False,
+                include_links=False,
+                timeout=max(1, min(int(http_timeout), 8)),
+                retries=0,
+            )
+    except (ScrapeBlockedError, ScrapeRequestError, ValueError):
+        return item
+    except Exception:
+        logger.debug("Could not enrich %s detail page %s", provider, url, exc_info=True)
+        return item
+
+    fields = payload.get("fields") or {}
+    enriched = dict(item)
+    title = _first_scraper_text(fields.get("detail_title"))
+    authors = _first_scraper_text(fields.get("authors"))
+    synopsis = _first_scraper_text(fields.get("synopsis")) or str(payload.get("description") or "").strip()
+    stats = fields.get("stats") or []
+    if isinstance(stats, str):
+        stats = [stats]
+    stats_text = " ".join(str(value) for value in stats if value)
+    genres_raw = fields.get("genres") or []
+    if isinstance(genres_raw, str):
+        genres_raw = [genres_raw]
+    genres = []
+    for genre in genres_raw:
+        value = " ".join(str(genre).split())
+        if value and value.casefold() not in {existing.casefold() for existing in genres}:
+            genres.append(value)
+
+    if title and len(title) < 256:
+        enriched["title"] = title
+    if authors:
+        enriched["author"] = authors[:160]
+    if synopsis:
+        synopsis = re.sub(
+            r"^(?:summary|description|synopsis)\s*[:\-]?\s*", "", synopsis, flags=re.IGNORECASE
+        ).strip()
+        synopsis = re.sub(
+            r"\s*(?:show more|show less|read more|\.{3}more)\s*$", "", synopsis, flags=re.IGNORECASE
+        ).strip()
+        if synopsis:
+            enriched["description"] = synopsis[:3000]
+    if genres:
+        enriched["genres"] = genres[:20]
+
+    rating_text = _first_scraper_text(fields.get("rating"))
+    rating_match = re.search(r"(?<![\d.])([0-5](?:\.\d{1,2})?)(?!\d)", rating_text)
+    if rating_match:
+        try:
+            if 0 <= float(rating_match.group(1)) <= 5:
+                enriched["rating"] = rating_match.group(1)
+        except ValueError:
+            pass
+
+    chapters_match = re.search(r"\b([\d,]+)\s+chapters?\b", stats_text, re.IGNORECASE)
+    if chapters_match:
+        enriched["chapters"] = chapters_match.group(1).replace(",", "")
+    status_match = re.search(
+        r"\b(ongoing|completed|complete|hiatus|on hold|dropped|cancelled|canceled)\b",
+        stats_text, re.IGNORECASE,
+    )
+    if status_match:
+        raw_status = status_match.group(1).casefold()
+        enriched["status"] = (
+            "Completed" if raw_status in {"complete", "completed"}
+            else "Hiatus" if raw_status in {"hiatus", "on hold"}
+            else "Dropped" if raw_status in {"dropped", "cancelled", "canceled"}
+            else "Ongoing"
+        )
+
+    if not _is_safe_webnovel_result(enriched):
+        return None
+    return enriched
+
+
+async def _enrich_aggregator_results(results: List[Dict], *, provider: str) -> List[Dict]:
+    """Fetch a bounded number of detail pages without discarding search-only matches."""
+    if not results:
+        return []
+    tasks = [
+        _enrich_aggregator_detail(item, provider=provider)
+        for item in results[:3]
+    ]
+    details = await asyncio.gather(*tasks, return_exceptions=True)
+    normalized = []
+    for index, item in enumerate(results):
+        if index < len(details):
+            detail = details[index]
+            if isinstance(detail, Exception):
+                normalized.append(item)
+            elif detail is not None:
+                normalized.append(detail)
+        else:
+            normalized.append(item)
+    return normalized
+
+
+async def _search_novelfire_uncached(
+    query: str, *, http_timeout: int = 7, max_urls: int = 3, browser_fallback: bool = True
+) -> List[Dict]:
+    """Fetch public NovelFire search pages; stop immediately on an access challenge."""
+    urls = _novelfire_search_urls(query)
+    selectors = {"cards": _NOVELFIRE_CARD_SELECTOR}
+    for url in urls[:max(1, min(int(max_urls), len(urls)))]:
+        try:
+            payload = await fetch_public_page(
+                url,
+                engine="http",
+                selectors=selectors,
+                include_text=False,
+                include_links=True,
+                link_selector="a[href*='/book/']",
+                timeout=max(1, min(int(http_timeout), 10)),
+                retries=0,
+            )
+        except ScrapeBlockedError:
+            raise
+        except (ScrapeRequestError, ValueError) as exc:
+            logger.debug("NovelFire HTTP search failed for %s: %s", url, exc)
+            continue
+        except Exception:
+            logger.exception("Unexpected NovelFire scraper failure for %s", url)
+            continue
+        results = _novelfire_results_from_helper(payload)
+        if results:
+            results = await _enrich_aggregator_results(results, provider="novelfire")
+            logger.info("NovelFire returned %s results for %r", len(results), query)
+            return results
+
+    if browser_fallback and urls:
+        try:
+            payload = await fetch_public_page(
+                urls[0],
+                engine="browser",
+                selectors=selectors,
+                include_text=False,
+                include_links=True,
+                link_selector="a[href*='/book/']",
+                timeout=max(1, min(int(http_timeout), 10)),
+                retries=0,
+            )
+        except ScrapeBlockedError:
+            raise
+        except (ScrapeRequestError, ValueError) as exc:
+            logger.debug("NovelFire browser fallback failed for %s: %s", urls[0], exc)
+        except Exception:
+            logger.debug("Unexpected NovelFire browser fallback failure", exc_info=True)
+        else:
+            results = _novelfire_results_from_helper(payload)
+            if results:
+                results = await _enrich_aggregator_results(results, provider="novelfire")
+                return results
+    return []
+
+
+async def search_novelfire(
+    query: str, *, http_timeout: int = 7, max_urls: int = 3, browser_fallback: bool = True
+) -> List[Dict]:
+    """Search NovelFire live and cache successful results briefly."""
+    normalized = " ".join((query or "").split())
+    if not normalized:
+        return []
+    key = (normalized.casefold(), bool(browser_fallback), max(1, min(int(max_urls), 3)))
+    async with _NOVELFIRE_CACHE_LOCK:
+        cached = _NOVELFIRE_SEARCH_CACHE.get(key)
+        if cached and cached[0] > time.monotonic():
+            return [dict(item) for item in cached[1]]
+        key_lock = _NOVELFIRE_KEY_LOCKS.setdefault(key, asyncio.Lock())
+
+    async with key_lock:
+        async with _NOVELFIRE_CACHE_LOCK:
+            cached = _NOVELFIRE_SEARCH_CACHE.get(key)
+            if cached and cached[0] > time.monotonic():
+                return [dict(item) for item in cached[1]]
+        try:
+            async with _NOVELFIRE_REQUEST_LIMIT:
+                results = await _search_novelfire_uncached(
+                    normalized, http_timeout=http_timeout, max_urls=key[2], browser_fallback=browser_fallback
+                )
+            for item in results:
+                item.setdefault("source", "NovelFire")
+                item.setdefault("provider", "novelfire")
+            if results:
+                async with _NOVELFIRE_CACHE_LOCK:
+                    now = time.monotonic()
+                    expired = [cache_key for cache_key, value in _NOVELFIRE_SEARCH_CACHE.items() if value[0] <= now]
+                    for cache_key in expired:
+                        _NOVELFIRE_SEARCH_CACHE.pop(cache_key, None)
+                    _NOVELFIRE_SEARCH_CACHE[key] = (
+                        now + _NOVELFIRE_CACHE_TTL, [dict(item) for item in results]
+                    )
+            return results
+        finally:
+            async with _NOVELFIRE_CACHE_LOCK:
+                if _NOVELFIRE_KEY_LOCKS.get(key) is key_lock:
+                    _NOVELFIRE_KEY_LOCKS.pop(key, None)
+
+
+def _novelist_search_urls(query: str, *, max_urls: int = 6) -> List[str]:
+    """Try public Novelist discovery first, then its documented search-like routes."""
+    normalized = " ".join((query or "").split())
+    if not normalized:
+        return []
+    term = quote_plus(normalized)
+    urls = [f"{base_url}/stories" for base_url in _NOVELIST_BASE_URLS]
+    for parameter in ("search", "q"):
+        urls.extend(
+            f"{base_url}/stories?{parameter}={term}"
+            for base_url in _NOVELIST_BASE_URLS
+        )
+    return urls[:max(1, min(int(max_urls), len(urls)))]
+
+
+def _novelist_is_story_url(url: str, base_url: str) -> bool:
+    """Accept story detail routes, not Novelist homepage, login, or navigation URLs."""
+    target = urljoin(base_url, url or "")
+    parts = urlsplit(target)
+    host = (parts.hostname or "").lower().rstrip(".")
+    if parts.scheme != "https":
+        return False
+
+    root_hosts = {"novelist.info", "www.novelist.info", "novelist.ws", "www.novelist.ws"}
+    tenant_host = host.endswith(".novelist.app") and host != "novelist.app"
+    if host not in root_hosts and not tenant_host:
+        return False
+
+    path_parts = [part for part in parts.path.split("/") if part]
+    if not path_parts:
+        return False
+    first = path_parts[0].casefold()
+    detail_routes = {"story", "stories", "series", "read"}
+    if first in _NOVELIST_RESERVED_PATHS:
+        return first in detail_routes and len(path_parts) >= 2
+    if host in root_hosts:
+        # The central domains must use a recognizable story-detail route.
+        return first in detail_routes and len(path_parts) >= 2
+    # Branded author subdomains may use either /story/<slug> or /<story-slug>.
+    return len(path_parts) == 1 or (first in detail_routes and len(path_parts) >= 2)
+
+
+def _novelist_results_from_helper(payload: Dict) -> List[Dict]:
+    """Normalize indexed story cards; skip unassociated cards and explicitly mature results."""
+    fields = payload.get("fields") or {}
+    cards = fields.get("cards") or []
+    if isinstance(cards, str):
+        cards = [cards]
+    card_texts = list(dict.fromkeys(
+        " ".join(str(card).split()) for card in cards if str(card).strip()
+    ))
+    base_url = payload.get("url") or "https://novelist.info"
+    results: List[Dict] = []
+    seen_urls = set()
+    links = payload.get("links") or []
+
+    for link in links:
+        href = str(link.get("url") or "").strip()
+        if not _novelist_is_story_url(href, base_url):
+            continue
+        url = urljoin(base_url, href).split("#", 1)[0].split("?", 1)[0]
+        normalized_url = url.rstrip("/").casefold()
+        if normalized_url in seen_urls:
+            continue
+        title = " ".join(str(link.get("text") or "").split())
+        if not title:
+            title = urlsplit(url).path.rstrip("/").split("/")[-1].replace("-", " ").replace("_", " ")
+        if not title or title.casefold() in _NOVELIST_RESERVED_PATHS:
+            continue
+
+        matching_cards = [card for card in card_texts if title.casefold() in card.casefold()]
+        if not matching_cards:
+            continue
+        card_text = min(matching_cards, key=len)
+        if _NOVELPHOENIX_EXCLUDED_CONTENT.search(card_text):
+            continue
+
+        chapters_match = re.search(r"\b([\d,]+)\s+chapters?\b", card_text, re.IGNORECASE)
+        rating_match = re.search(r"(?<![\d.])([0-5]\.\d{1,2})(?:\s*/\s*5)?(?!\d)", card_text)
+        status_match = re.search(r"\b(ongoing|completed|complete|hiatus|dropped)\b", card_text, re.IGNORECASE)
+        genres = [
+            genre for genre in _WEBNOVEL_GENRES
+            if re.search(r"(?<![\w])" + re.escape(genre) + r"(?![\w])", card_text, re.IGNORECASE)
+        ]
+        author_match = re.search(r"\b(?:by|author\s*[:：])\s*([^|•·]{2,80}?)(?=\s{2,}|[|•·]|$)", card_text, re.IGNORECASE)
+        content_rating_match = re.search(
+            r"\b(?:content\s+rating|rating)\s*[:：]\s*(all ages|general|teen|mature|adult|explicit)\b",
+            card_text, re.IGNORECASE,
+        )
+
+        result = {
+            "title": title[:256],
+            "url": url,
+            "description": None,
+            "image": None,
+            "rating": rating_match.group(1) if rating_match else None,
+            "author": author_match.group(1).strip() if author_match else None,
+            "status": status_match.group(1).title() if status_match else None,
+            "chapters": chapters_match.group(1).replace(",", "") if chapters_match else None,
+            "genres": genres,
+            "source": "Novelist",
+            "provider": "novelist",
+        }
+        if content_rating_match:
+            result["content_rating"] = content_rating_match.group(1).title()
+        if not _is_safe_webnovel_result(result):
+            continue
+        results.append(result)
+        seen_urls.add(normalized_url)
+        if len(results) >= 10:
+            break
+    return results
+
+
+async def _search_novelist_uncached(
+    query: str, *, http_timeout: int = 7, max_urls: int = 6, browser_fallback: bool = True
+) -> List[Dict]:
+    """Fetch public Novelist search/listing pages without attempting to bypass access controls."""
+    urls = _novelist_search_urls(query, max_urls=max_urls)
+    selectors = {"cards": _NOVELIST_CARD_SELECTOR}
+    closed_catalog_hosts = set()
+    for url in urls:
+        host = (urlsplit(url).hostname or "").lower()
+        if host in closed_catalog_hosts:
+            continue
+        try:
+            payload = await fetch_public_page(
+                url,
+                engine="http",
+                selectors=selectors,
+                include_text=True,
+                include_links=True,
+                link_selector="a[href]",
+                timeout=max(1, min(int(http_timeout), 10)),
+                retries=0,
+            )
+        except ScrapeBlockedError:
+            raise
+        except (ScrapeRequestError, ValueError) as exc:
+            logger.debug("Novelist HTTP search failed for %s: %s", url, exc)
+            continue
+        except Exception:
+            logger.exception("Unexpected Novelist scraper failure for %s", url)
+            continue
+
+        page_text = str(payload.get("text") or "").casefold()
+        if (
+            "stories are coming soon" in page_text
+            or "public catalog will open once" in page_text
+        ):
+            closed_catalog_hosts.add(host)
+            logger.info("Novelist public story catalogue is not open at %s", host)
+            if len(closed_catalog_hosts) >= len(_NOVELIST_BASE_URLS):
+                return []
+            continue
+
+        results = _novelist_results_from_helper(payload)
+        if results:
+            logger.info("Novelist returned %s results for %r", len(results), query)
+            return results
+
+    if browser_fallback:
+        fallback_url = next(
+            (candidate for candidate in urls if (urlsplit(candidate).hostname or "").lower() not in closed_catalog_hosts),
+            None,
+        )
+        if fallback_url:
+            try:
+                payload = await fetch_public_page(
+                    fallback_url,
+                    engine="browser",
+                    selectors=selectors,
+                    include_text=True,
+                    include_links=True,
+                    link_selector="a[href]",
+                    timeout=max(1, min(int(http_timeout), 10)),
+                    retries=0,
+                )
+            except ScrapeBlockedError:
+                raise
+            except (ScrapeRequestError, ValueError) as exc:
+                logger.debug("Novelist browser fallback failed for %s: %s", fallback_url, exc)
+            except Exception:
+                logger.debug("Unexpected Novelist browser fallback failure", exc_info=True)
+            else:
+                page_text = str(payload.get("text") or "").casefold()
+                if "stories are coming soon" in page_text or "public catalog will open once" in page_text:
+                    return []
+                results = _novelist_results_from_helper(payload)
+                if results:
+                    logger.info("Novelist browser search returned %s results for %r", len(results), query)
+                    return results
+    return []
+
+
+async def search_novelist(
+    query: str, *, http_timeout: int = 7, max_urls: int = 6, browser_fallback: bool = True
+) -> List[Dict]:
+    """Search Novelist's public story discovery routes, caching successful results briefly."""
+    normalized = " ".join((query or "").split())
+    if not normalized:
+        return []
+    key = (normalized.casefold(), bool(browser_fallback), max(1, min(int(max_urls), 6)))
+    async with _NOVELIST_CACHE_LOCK:
+        cached = _NOVELIST_SEARCH_CACHE.get(key)
+        if cached and cached[0] > time.monotonic():
+            return [dict(item) for item in cached[1]]
+        key_lock = _NOVELIST_KEY_LOCKS.setdefault(key, asyncio.Lock())
+
+    async with key_lock:
+        async with _NOVELIST_CACHE_LOCK:
+            cached = _NOVELIST_SEARCH_CACHE.get(key)
+            if cached and cached[0] > time.monotonic():
+                return [dict(item) for item in cached[1]]
+        try:
+            async with _NOVELIST_REQUEST_LIMIT:
+                results = await _search_novelist_uncached(
+                    normalized, http_timeout=http_timeout, max_urls=key[2], browser_fallback=browser_fallback
+                )
+            for item in results:
+                item.setdefault("source", "Novelist")
+                item.setdefault("provider", "novelist")
+            if results:
+                async with _NOVELIST_CACHE_LOCK:
+                    now = time.monotonic()
+                    expired = [cache_key for cache_key, value in _NOVELIST_SEARCH_CACHE.items() if value[0] <= now]
+                    for cache_key in expired:
+                        _NOVELIST_SEARCH_CACHE.pop(cache_key, None)
+                    _NOVELIST_SEARCH_CACHE[key] = (
+                        now + _NOVELIST_CACHE_TTL, [dict(item) for item in results]
+                    )
+            return results
+        finally:
+            async with _NOVELIST_CACHE_LOCK:
+                if _NOVELIST_KEY_LOCKS.get(key) is key_lock:
+                    _NOVELIST_KEY_LOCKS.pop(key, None)
+
+
+def _is_safe_webnovel_result(item: Dict) -> bool:
+    """Hide results explicitly tagged as adult or sexually explicit by a provider."""
+    content = " ".join(
+        str(item.get(key) or "")
+        for key in ("title", "description", "content_rating", "rating_label", "genres", "tags")
+    )
+    return _NOVELPHOENIX_EXCLUDED_CONTENT.search(content) is None
+
+
+async def search_webnovels(
+    query: str,
+    *,
+    browser_fallback: bool = True,
+    http_timeout: int = 7,
+    max_http_urls: int = 2,
+    require_genres: bool = False,
+) -> List[Dict]:
+    """Combine independent live results from all supported public webnovel providers."""
+    normalized = " ".join((query or "").split())
+    if not normalized:
+        return []
+
+    provider_calls = [
+        search_novelupdates(
+            normalized,
+            browser_fallback=browser_fallback,
+            http_timeout=http_timeout,
+            max_http_urls=max_http_urls,
+            require_genres=require_genres,
+        ),
+        search_novelphoenix(
+            normalized, http_timeout=http_timeout,
+            max_urls=4 if browser_fallback else max(1, min(int(max_http_urls), 4)),
+            browser_fallback=browser_fallback,
+        ),
+        search_novelfire(
+            normalized, http_timeout=http_timeout,
+            max_urls=3 if browser_fallback else max(1, min(int(max_http_urls), 3)),
+            browser_fallback=browser_fallback,
+        ),
+        search_novelist(
+            normalized, http_timeout=http_timeout,
+            max_urls=6 if browser_fallback else max(1, min(int(max_http_urls), 6)),
+            browser_fallback=browser_fallback,
+        ),
+    ]
+    responses = await asyncio.gather(*provider_calls, return_exceptions=True)
+    failures = [result for result in responses if isinstance(result, Exception)]
+    provider_results = [result if not isinstance(result, Exception) else [] for result in responses]
+
+    # Round-robin results across providers so the first provider cannot crowd out the others.
+    combined: List[Dict] = []
+    seen_titles = set()
+    max_results = 10
+    for index in range(max((len(items) for items in provider_results), default=0)):
+        for items in provider_results:
+            if index >= len(items):
+                continue
+            item = items[index]
+            if not _is_safe_webnovel_result(item):
+                continue
+            if require_genres and not item.get("genres"):
+                continue
+            title_key = re.sub(r"[^a-z0-9]+", "", str(item.get("title") or "").casefold())
+            if not title_key or title_key in seen_titles:
+                continue
+            normalized_item = dict(item)
+            normalized_item.setdefault("source", "Novel Updates")
+            combined.append(normalized_item)
+            seen_titles.add(title_key)
+            if len(combined) >= max_results:
+                return combined
+
+    if not combined and failures:
+        raise failures[0]
+    return combined
 
 
 # Status order priority
@@ -1649,19 +2558,19 @@ class BrowseCog(commands.Cog):
                 # Browser automation can hang on provider challenges; bound the wait so
                 # the deferred Discord interaction always receives a response.
                 results = await asyncio.wait_for(
-                    search_novelupdates(title),
+                    search_webnovels(title),
                     timeout=45,
                 )
             except ScrapeBlockedError as exc:
-                logger.warning("Novel Updates blocked the search for %r: %s", title, exc)
+                logger.warning("Webnovel providers blocked the search for %r: %s", title, exc)
                 embed = build_error_embed(
-                    "Novel Updates Temporarily Unavailable",
-                    "Novel Updates blocked or rate-limited automated access. Please try again later.",
+                    "Webnovel Search Temporarily Unavailable",
+                    "One or more webnovel providers blocked or rate-limited automated access. Please try again later.",
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
             except asyncio.TimeoutError:
-                logger.warning("Novel Updates search timed out for %r", title)
+                logger.warning("Webnovel search timed out for %r", title)
                 embed = build_error_embed(
                     "Novel Updates Search Timed Out",
                     "Novel Updates took too long to respond. Please try again in a moment.",
@@ -1669,7 +2578,7 @@ class BrowseCog(commands.Cog):
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
             except Exception as e:
-                logger.warning("Novel Updates search failed for %r: %s", title, e, exc_info=True)
+                logger.warning("Webnovel search failed for %r: %s", title, e, exc_info=True)
                 embed = build_error_embed(
                     "Novel Updates Search Failed",
                     "The search service failed while reading Novel Updates. Please try again later.",
@@ -1688,7 +2597,7 @@ class BrowseCog(commands.Cog):
             if not results:
                 embed = build_error_embed(
                     "No Results Found",
-                    f"No webnovel results found on Novel Updates for {title!r} matching available metadata filters.",
+                    f"No webnovel results found across the live providers for {title!r} matching available metadata filters.",
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
@@ -1711,9 +2620,14 @@ class BrowseCog(commands.Cog):
             if novel.get("rating"):
                 embed.add_field(name="⭐ Rating", value=str(novel["rating"])[:1024], inline=True)
             if novel.get("genres"):
-                genres = ", ".join(str(value) for value in novel["genres"])
-                embed.add_field(name="🎭 Genres", value=genres[:1024], inline=False)
-            embed.set_footer(text="Fetched from Novel Updates · Source metadata may be incomplete when the provider changes its page layout")
+                embed.add_field(name="🎭 Genres", value=", ".join(str(value) for value in novel["genres"])[:1024], inline=False)
+            if novel.get("chapters") not in (None, ""):
+                embed.add_field(name="📖 Chapters", value=str(novel["chapters"])[:1024], inline=True)
+            if novel.get("platform"):
+                embed.add_field(name="📍 Platform", value=str(novel["platform"])[:1024], inline=True)
+            embed.set_footer(
+                text=f"{novel.get('source') or 'Live webnovel metadata'} · Public metadata may be incomplete or change over time"
+            )
             await interaction.followup.send(embed=embed)
             return
 
@@ -2247,13 +3161,13 @@ class BrowseCog(commands.Cog):
                 # Autocomplete gets a short HTTP-only probe; full searches can use
                 # the slower Botasaurus fallback after Discord's response is deferred.
                 results = await asyncio.wait_for(
-                    search_novelupdates(
+                    search_webnovels(
                         current, browser_fallback=False, http_timeout=2, max_http_urls=1
                     ),
                     timeout=2.25,
                 )
             except Exception as e:
-                logger.debug("Novel Updates autocomplete failed: %s", e)
+                logger.debug("Webnovel autocomplete failed: %s", e)
                 return []
             for novel in results[:10]:
                 title = (novel.get("title") or "").strip()

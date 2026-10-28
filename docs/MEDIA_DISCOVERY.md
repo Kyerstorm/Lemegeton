@@ -10,7 +10,7 @@ Use **/browse** with a media category and a title for a detailed record. For TMD
 | --- | --- |
 | Anime and manga | Genre, AniList theme/tag, provider status, year range. Manga supports manga (Japan), manhwa (Korea), manhua (China), and provider-tagged webtoon subtypes using AniList origin/format metadata. Author and artist filters are available for manga/light-novel records when AniList staff roles expose the credit. Adult-flagged titles are excluded unless the user explicitly opts in from a Discord channel marked NSFW. |
 | General novels and books | Genre/subject, author, publisher, language code, publication year range through Google Books query parameters. |
-| Webnovels | Genre, author and status when those values can be parsed from Novel Updates results. |
+| Webnovels | Genre, author and status when available from Novel Updates, Novel Phoenix, NovelFire, or Novelist. |
 | Movies and TV | TMDB genre, keyword/theme, original language code, status, release year range, runtime, director and cast filters. |
 
 A filter that the selected metadata provider cannot support is rejected instead of silently returning unfiltered results. Browse applies filters to the provider's best matching title; when the title fails one of the filters, try a broader title or fewer filters.
@@ -101,7 +101,7 @@ Lemegeton uses a shared PostgreSQL relationship graph to connect the systems it 
 - Missing optional archive tables do not take down the discovery command. Existing provider metadata remains the source of truth, and exact-title matches or recommendations are never promoted to confirmed adaptations.
 - The graph schema is created idempotently through the existing PostgreSQL access layer. It uses indexes and a uniqueness constraint to avoid repeatedly adding the same relationship.
 
-The graph is intentionally an integration layer, not a promise that every provider exposes every category or relation. AniList, TMDB, Google Books, Novel Updates, Steam/IGDB, and community archives keep their own authoritative metadata and limitations.
+The graph is intentionally an integration layer, not a promise that every provider exposes every category or relation. AniList, TMDB, Google Books, Novel Updates, Novel Phoenix, Steam/IGDB, and community archives keep their own authoritative metadata and limitations.
 
 ## Connected media commands and community archives
 
@@ -115,7 +115,10 @@ The interactive /discovery-hub command is the entry point for media navigation a
 - /trailers uses the documented movie/TV videos endpoints and constructs links only for returned YouTube or Vimeo keys. Provider-returned video types and official flags are retained.
 - /collection-guide resolves a movie, loads its belongs_to_collection reference, then displays TMDB collection parts by release date. This is not an assertion of in-universe chronology.
 - /author-works queries Google Books by author. Results may include co-authored works and editions; this is not presented as a universal cross-provider bibliography.
-- /webnovel-updates reuses the existing Novel Updates scraper with a bounded command timeout. A scraper timeout/failure is shown as a provider failure rather than a confirmed empty search.
+- `/webnovel-updates` and `/browse` query live public search pages from Novel Updates and Novel Phoenix. Each provider is isolated so one provider failure does not discard results returned by the other.
+- The scraper returns title links and available public metadata only; it does not fetch chapter text. Results explicitly marked as adult-rated or sexually explicit are filtered out.
+- Provider markup and availability can change. A scraper timeout, access challenge, or unsupported layout is treated as a provider failure rather than proof that a title does not exist.
+
 
 TMDB watch-provider data is powered by JustWatch. /where-to-watch labels the queried region and links to the provider-details URL when supplied; it does not manufacture direct streaming links. TMDB requests require TMDB_BEARER_TOKEN. Availability changes and should be verified with the provider.
 

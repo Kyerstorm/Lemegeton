@@ -69,7 +69,7 @@ Lemegeton brings media search and community interaction into the same Discord ex
 |---|---|---|
 | Anime and manga | Search, browse filters, airing/publication metadata, tags, themes, and supported relationships | AniList |
 | Light novels, books, and general novels | Title and author search, available edition information, and supported metadata links | AniList where applicable; Google Books |
-| Webnovels | Search and metadata fields available through the existing Novel Updates scraper | Novel Updates |
+| Webnovels | Live public metadata from four independent webnovel providers | Novel Updates, Novel Phoenix, NovelFire, and Novelist |
 | Movies and television | Search, genre filters, series/season/episode data, credits, videos, collections, and listed watch providers | TMDB |
 | Video games | Game metadata with optional store enrichment | IGDB; Steam |
 | Community-created resources | Attributed quotes, fanworks, moodboards, soundtrack links, scenes, theories, and member-written recommendations | Lemegeton's database-backed archive |
@@ -148,7 +148,7 @@ flowchart LR
     Search["Category-aware /browse"] --> Router["Provider selection"]
     Franchise["/franchise and /connections"] --> Relations["Resolve known relationships"]
     Similar["/similar and /compare"] --> Signals["Recommendations or genre overlap"]
-    Router --> Providers["AniList / TMDB / Google Books / Novel Updates / IGDB / Steam"]
+    Router --> Providers["AniList / TMDB / Google Books / Novel Updates / Novel Phoenix / NovelFire / Novelist / IGDB / Steam"]
     Relations --> Evidence["Preserve relationship provenance"]
     Signals --> Evidence
     Providers --> Results["Results with source labels"]
@@ -190,7 +190,7 @@ flowchart LR
 ### 🧠 Read the architecture from the outside in
 
 1. **Discord is the entry point.** The Python process owns the live gateway, slash-command tree, cog loading, interactions, and command errors.
-2. **Commands reuse providers.** Search and selection code call the existing AniList, TMDB, Google Books, Novel Updates, IGDB, and Steam integrations instead of inventing a universal metadata source.
+2. **Commands reuse providers.** Search and selection code reuse the AniList, TMDB, Google Books, Novel Updates, Novel Phoenix, NovelFire, Novelist, IGDB, and Steam integrations instead of inventing a universal metadata source.
 3. **The graph records evidence, not certainty.** Relationship edges, provider recommendations, local genre overlap, and reviewed community submissions keep separate provenance.
 4. **PostgreSQL stores structured data; S3 stores selected image files.** The media-assets registry connects records to object keys and privacy mode, while private and public objects follow separate access rules.
 5. **The web dashboard is a control plane, not a second bot.** Rust handles the public browser-facing service and authorization; private loopback services connect authenticated operations to the existing Python bot.
@@ -284,10 +284,12 @@ TMDB-powered features require TMDB_BEARER_TOKEN. Availability data changes, and 
 | Command | Purpose |
 |---|---|
 | **/author-works** | Search Google Books for titles attributed to an author. |
-| **/webnovel-updates** | Search metadata available through the existing Novel Updates scraper helper. |
+| **/webnovel-updates** | Search live Novel Updates, Novel Phoenix, NovelFire, and Novelist pages for current public webnovel metadata. |
 | **/reading** | Open the unified Reading Hub for nominations, votes, selection, scheduled discussions, and reading order. |
 
-Novel Updates results depend on the scraper and the source page's current structure. An empty response may reflect a source failure or unsupported markup; it is not necessarily proof that a title does not exist.
+Live webnovel search combines public metadata from Novel Updates, Novel Phoenix, NovelFire, and Novelist. Each provider is parsed independently, so a failure at one source does not discard the others. Results depend on the sites’ current page structures and availability; an empty response is not necessarily proof that a title does not exist. Novelist’s central public catalogue currently says stories are coming soon; its adapter checks public discovery routes and uses a normal browser-rendered fallback when available, but it cannot return catalog results until Novelist opens public discovery.
+
+Results explicitly marked adult-rated or sexually explicit are excluded.
 
 ### 🎮 Games and generated images
 
@@ -718,7 +720,7 @@ flowchart LR
         ANI["AniList"]
         TMDB["TMDB"]
         GOOGLE["Google Books"]
-        NOVEL["Novel Updates helper"]
+        NOVEL["Live webnovel provider scrapers"]
         IGDB["IGDB"]
         STEAM["Steam"]
     end

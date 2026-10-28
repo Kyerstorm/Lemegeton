@@ -12,7 +12,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from helpers.command_error_handler import handle_application_command_error
-from cogs.media.browse import BrowseCog, search_novelupdates
+from cogs.media.browse import BrowseCog, search_webnovels
 from helpers.anilist_helper import fetch_media_by_id
 from cogs_test.general_commands.dashboard import command_meta
 from helpers.media_graph import (
@@ -92,7 +92,7 @@ class CrossMediaRecommendations(commands.Cog):
             details = await fetch_media_by_id(int(seed["id"]), ani_type)
             return details or seed
         if category == "WEBNOVEL":
-            results = await asyncio.wait_for(search_novelupdates(query), timeout=45)
+            results = await asyncio.wait_for(search_webnovels(query), timeout=45)
             return self.browse.choose_best_title_match(results, query, lambda item: item.get("title"))
         if category == "BOOK":
             fiction, nonfiction = await asyncio.gather(

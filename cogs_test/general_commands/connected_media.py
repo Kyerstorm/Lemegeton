@@ -14,7 +14,7 @@ from discord.ext import commands
 
 from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView, handle_application_command_error
 import database
-from cogs.media.browse import TMDB_API_BASE_URL, TMDB_IMAGE_BASE_URL, search_novelupdates
+from cogs.media.browse import TMDB_API_BASE_URL, TMDB_IMAGE_BASE_URL, search_webnovels
 from helpers.media_graph import record_media_relationship
 from cogs_test.general_commands.dashboard import command_meta
 
@@ -713,7 +713,7 @@ class ConnectedMedia(commands.Cog):
         embed.set_footer(text="Google Books metadata · This may include editions and co-authored works")
         await interaction.followup.send(embed=embed, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
-    @app_commands.command(name="webnovel-updates", description="Search Novel Updates for available webnovel metadata")
+    @app_commands.command(name="webnovel-updates", description="Search live webnovel metadata across supported providers")
     @app_commands.guild_only()
     @app_commands.describe(title="Webnovel title or alternative title")
     @command_meta(section="Media Discovery", name="Webnovel Updates")
@@ -724,24 +724,42 @@ class ConnectedMedia(commands.Cog):
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            results = await asyncio.wait_for(search_novelupdates(query), timeout=30)
+            results = await asyncio.wait_for(search_webnovels(query), timeout=30)
         except asyncio.TimeoutError:
             results = None
         except Exception:
-            log.warning("Novel Updates lookup failed", exc_info=True)
+            log.warning("Live webnovel lookup failed", exc_info=True)
             results = None
         if results is None:
-            await interaction.followup.send("Novel Updates could not be reached reliably. This is a provider failure, not a confirmed no-results search.", ephemeral=True)
+            await interaction.followup.send("The live webnovel providers could not be reached reliably. This is a provider failure, not a confirmed no-results search.", ephemeral=True)
             return
         lines = []
-        for item in results[:10]:
+        for item in results[:8]:
             name = discord.utils.escape_markdown(str(item.get("title") or "Untitled"))
             url = item.get("url")
             title_text = f"[{name}]({url})" if url else name
-            details = [str(item[key]) for key in ("author", "status", "rating") if item.get(key)]
-            lines.append(f"• **{title_text}**" + (f" · {' · '.join(details)}" if details else ""))
-        embed = discord.Embed(title=f"Novel Updates · {query}"[:256], description="\n".join(lines)[:4000] or "Novel Updates returned no matching records.", color=discord.Color.blurple())
-        embed.set_footer(text="Source: Novel Updates · Only fields supplied by the current scraper are shown")
+            details = [
+                f"{label}: {item[key]}"
+                for key, label in (
+                    ("author", "author"),
+                    ("status", "status"),
+                    ("rating", "rating"),
+                    ("chapters", "chapters"),
+                )
+                if item.get(key) not in (None, "")
+            ]
+            if item.get("genres"):
+                details.append("genres: " + ", ".join(str(value) for value in item["genres"][:5]))
+            if item.get("source"):
+                details.append(f"source: {item['source']}")
+            lines.append(f"• **{title_text}**" + (f"\n{' · '.join(details)}" if details else ""))
+
+        embed = discord.Embed(
+            title=f"Webnovel Search · {query}"[:256],
+            description="\n".join(lines)[:4000] or "No matching webnovels were found in the live search results.",
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text="Live metadata from connected providers · Adult-rated results are excluded")
         await interaction.followup.send(embed=embed, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     @app_commands.command(name="link-suggest", description="Open a guided modal to suggest a cross-media relationship")

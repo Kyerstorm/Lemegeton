@@ -247,11 +247,12 @@ class HelpCog(commands.Cog):
                     "examples": ["/author-works Ursula K. Le Guin"]
                 },
                 "webnovel-updates": {
-                    "desc": "Look up webnovel metadata through the existing Novel Updates search helper",
+                    "desc": "Search public webnovel metadata across Novel Updates, Novel Phoenix, NovelFire, and Novelist",
                     "usage": "/webnovel-updates <title>",
-                    "note": "Results depend on the source scraper and page structure; no result does not prove a title is nonexistent.",
+                    "note": "Search Novel Updates, Novel Phoenix, NovelFire, and Novelist for public metadata. Adult-rated results are filtered; one unavailable provider does not discard the others.",
                     "examples": ["/webnovel-updates Lord of the Mysteries"]
                 },
+            },
             "🎬 Movies & TV": {
                 "tv-guide": {
                     "desc": "Browse supported TV seasons, episodes, and air-date information",
@@ -883,7 +884,7 @@ class HelpCog(commands.Cog):
                 ),
                 (
                     "◇ Metadata providers",
-                    "AniList supplies supported anime/manga metadata and relationships; TMDB supplies movie/TV information, credits, videos, collections, and region availability; Google Books supplies book/author records; Novel Updates uses the existing scraper helper; IGDB supplies game metadata, with Steam used for optional store enrichment.",
+                    "AniList supplies supported anime/manga metadata and relationships; TMDB supplies movie/TV information, credits, videos, collections, and region availability; Google Books supplies book/author records; live Novel Updates and Novel Phoenix search provide webnovel metadata; IGDB supplies game metadata, with Steam used for optional store enrichment.",
                 ),
                 (
                     "◇ Relationship graph",
@@ -1014,7 +1015,7 @@ class HelpCog(commands.Cog):
             ),
             "books": (
                 "• /author-works searches Google Books by author\n"
-                "• /webnovel-updates depends on source-page structure and may return no result temporarily\n"
+                "• /webnovel-updates searches live Novel Updates and Novel Phoenix metadata; adult-rated entries are filtered\n"
                 "• The /reading menu shows available release relationships, not assumed story chronology\n"
                 "• Use /discussion and add a clear chapter/volume or episode cutoff"
             ),
