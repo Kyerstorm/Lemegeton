@@ -22,6 +22,7 @@ from helpers.embed_helper import build_error_embed, build_info_embed
 from helpers.anilist_helper import post_graphql
 from cogs_test.general_commands.dashboard import command_meta
 from helpers.tmdb_discovery import build_tmdb_discover_params
+from helpers.novelupdates_dataset import get_novelupdates_dataset_path, search_novelupdates_dataset
 
 logger = logging.getLogger("BrowseCog")
 GOOGLE_BOOKS_URL = "https://www.googleapis.com/books/v1/volumes"
@@ -409,11 +410,19 @@ async def search_novelupdates(
     max_http_urls: int = 2,
     require_genres: bool = False,
 ) -> List[Dict]:
-    """Search current Novel Updates pages and cache successful results briefly."""
+    """Search a configured local catalog first, then the live provider pages."""
     normalized = " ".join((query or "").split())
     if not normalized:
         return []
-    key = (normalized.casefold(), bool(browser_fallback), max(1, min(int(max_http_urls), 3)), max(1, min(int(http_timeout), 10)), bool(require_genres))
+    catalog_path = get_novelupdates_dataset_path()
+    key = (
+        normalized.casefold(),
+        bool(browser_fallback),
+        max(1, min(int(max_http_urls), 3)),
+        max(1, min(int(http_timeout), 10)),
+        bool(require_genres),
+        catalog_path or "",
+    )
     async with _NOVELUPDATES_CACHE_LOCK:
         cached = _NOVELUPDATES_SEARCH_CACHE.get(key)
         if cached and cached[0] > time.monotonic():
@@ -426,21 +435,46 @@ async def search_novelupdates(
             if cached and cached[0] > time.monotonic():
                 return [dict(item) for item in cached[1]]
         try:
-            async with _NOVELUPDATES_REQUEST_LIMIT:
-                results = await _search_novelupdates_uncached(
-                    normalized,
-                    browser_fallback=browser_fallback,
-                    http_timeout=http_timeout,
-                    max_http_urls=max_http_urls,
-                    require_genres=require_genres,
-                )
+            results: List[Dict] = []
+            if catalog_path:
+                try:
+                    results = await asyncio.to_thread(
+                        search_novelupdates_dataset,
+                        normalized,
+                        path=catalog_path,
+                        limit=10,
+                        require_genres=require_genres,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Local Novel Updates catalog search failed; falling back to live pages",
+                        exc_info=True,
+                    )
+            if not results:
+                async with _NOVELUPDATES_REQUEST_LIMIT:
+                    results = await _search_novelupdates_uncached(
+                        normalized,
+                        browser_fallback=browser_fallback,
+                        http_timeout=http_timeout,
+                        max_http_urls=max_http_urls,
+                        require_genres=require_genres,
+                    )
+            for item in results:
+                item.setdefault("source", "Novel Updates")
             if results:
                 async with _NOVELUPDATES_CACHE_LOCK:
                     now = time.monotonic()
-                    expired = [cache_key for cache_key, value in _NOVELUPDATES_SEARCH_CACHE.items() if value[0] <= now]
+                    expired = [
+                        cache_key
+                        for cache_key, value in _NOVELUPDATES_SEARCH_CACHE.items()
+                        if value[0] <= now
+                    ]
                     for cache_key in expired:
                         _NOVELUPDATES_SEARCH_CACHE.pop(cache_key, None)
-                    _NOVELUPDATES_SEARCH_CACHE[key] = (now + _NOVELUPDATES_CACHE_TTL, [dict(item) for item in results])
+                    _NOVELUPDATES_SEARCH_CACHE[key] = (
+                        now + _NOVELUPDATES_CACHE_TTL,
+                        [dict(item) for item in results],
+                    )
             return results
         finally:
             async with _NOVELUPDATES_CACHE_LOCK:
@@ -1949,9 +1983,12 @@ class BrowseCog(commands.Cog):
                 embed.add_field(name="📖 Chapters", value=str(novel["chapters"])[:1024], inline=True)
             if novel.get("platform"):
                 embed.add_field(name="📍 Platform", value=str(novel["platform"])[:1024], inline=True)
-            embed.set_footer(
-                text=f"Source: {novel.get('source') or 'Live webnovel metadata'} · Only publicly available metadata is shown"
-            )
+            if novel.get("metadata_source") == "novelupdates-catalog":
+                embed.set_footer(text="Novel Updates catalog metadata · Counts and rankings may be older than current listings")
+            else:
+                embed.set_footer(
+                    text=f"{novel.get('source') or 'Live webnovel metadata'} · Public metadata may be incomplete or change over time"
+                )
             await interaction.followup.send(embed=embed)
             return
 
