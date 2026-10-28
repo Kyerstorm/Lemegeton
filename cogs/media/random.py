@@ -16,7 +16,7 @@ from helpers.embed_helper import build_error_embed
 from helpers.anilist_helper import post_graphql
 from database import get_all_users_guild_aware
 from cogs_test.general_commands.dashboard import command_meta
-from cogs.media.browse import search_novelupdates
+from cogs.media.browse import search_webnovels
 from helpers.web_scraper import ScrapeBlockedError
 from helpers.crypto_random import secure_choice, secure_randbelow
 
@@ -543,7 +543,7 @@ class Random(commands.Cog):
             if media_type == "WEBNOVEL":
                 if year_from is not None or year_to is not None:
                     raise LookupError("Novel Updates results do not expose consistent publication-year data for filtering.")
-                results = await search_novelupdates(query, require_genres=bool(genre))
+                results = await search_webnovels(query, require_genres=bool(genre))
                 if genre:
                     results = [
                         item for item in results
