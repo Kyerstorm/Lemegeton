@@ -465,9 +465,9 @@ async def search_novelupdates(
 
 _NOVELPHOENIX_BASE_URL = "https://novelphoenix.com"
 _NOVELPHOENIX_CACHE_TTL = 300
-_NOVELPHOENIX_SEARCH_CACHE: Dict[str, tuple[float, List[Dict]]] = {}
+_NOVELPHOENIX_SEARCH_CACHE: Dict[tuple, tuple[float, List[Dict]]] = {}
 _NOVELPHOENIX_CACHE_LOCK = asyncio.Lock()
-_NOVELPHOENIX_KEY_LOCKS: Dict[str, asyncio.Lock] = {}
+_NOVELPHOENIX_KEY_LOCKS: Dict[tuple, asyncio.Lock] = {}
 _NOVELPHOENIX_REQUEST_LIMIT = asyncio.Semaphore(1)
 _NOVELPHOENIX_EXCLUDED_CONTENT = re.compile(
     r"\b(?:adult|mature|smut|ecchi|hentai|erotica|erotic|nsfw|pornographic)\b"
@@ -574,11 +574,13 @@ def _novelphoenix_results_from_helper(payload: Dict) -> List[Dict]:
     return results
 
 
-async def _search_novelphoenix_uncached(query: str, *, http_timeout: int = 7) -> List[Dict]:
+async def _search_novelphoenix_uncached(
+    query: str, *, http_timeout: int = 7, max_urls: int = 4
+) -> List[Dict]:
     """Scrape public Novel Phoenix search pages; stop on explicit access challenges."""
     urls = _novelphoenix_search_urls(query)
     selectors = {"cards": _NOVELPHOENIX_CARD_SELECTOR}
-    for url in urls:
+    for url in urls[: max(1, min(int(max_urls), len(urls)))]:
         try:
             payload = await fetch_public_page(
                 url,
@@ -605,12 +607,14 @@ async def _search_novelphoenix_uncached(query: str, *, http_timeout: int = 7) ->
     return []
 
 
-async def search_novelphoenix(query: str, *, http_timeout: int = 7) -> List[Dict]:
+async def search_novelphoenix(
+    query: str, *, http_timeout: int = 7, max_urls: int = 4
+) -> List[Dict]:
     """Search Novel Phoenix live, caching only successful searches."""
     normalized = " ".join((query or "").split())
     if not normalized:
         return []
-    key = normalized.casefold()
+    key = (normalized.casefold(), max(1, min(int(max_urls), 4)))
     async with _NOVELPHOENIX_CACHE_LOCK:
         cached = _NOVELPHOENIX_SEARCH_CACHE.get(key)
         if cached and cached[0] > time.monotonic():
@@ -624,7 +628,7 @@ async def search_novelphoenix(query: str, *, http_timeout: int = 7) -> List[Dict
                 return [dict(item) for item in cached[1]]
         try:
             async with _NOVELPHOENIX_REQUEST_LIMIT:
-                results = await _search_novelphoenix_uncached(normalized, http_timeout=http_timeout)
+                results = await _search_novelphoenix_uncached(normalized, http_timeout=http_timeout, max_urls=key[1])
             if results:
                 async with _NOVELPHOENIX_CACHE_LOCK:
                     now = time.monotonic()
@@ -669,7 +673,10 @@ async def search_webnovels(
             max_http_urls=max_http_urls,
             require_genres=require_genres,
         ),
-        search_novelphoenix(normalized, http_timeout=http_timeout),
+        search_novelphoenix(
+            normalized, http_timeout=http_timeout,
+            max_urls=4 if browser_fallback else max(1, min(int(max_http_urls), 4)),
+        ),
         return_exceptions=True,
     )
     failures = [result for result in responses if isinstance(result, Exception)]
@@ -2500,13 +2507,13 @@ class BrowseCog(commands.Cog):
                 # Autocomplete gets a short HTTP-only probe; full searches can use
                 # the slower Botasaurus fallback after Discord's response is deferred.
                 results = await asyncio.wait_for(
-                    search_novelupdates(
+                    search_webnovels(
                         current, browser_fallback=False, http_timeout=2, max_http_urls=1
                     ),
                     timeout=2.25,
                 )
             except Exception as e:
-                logger.debug("Novel Updates autocomplete failed: %s", e)
+                logger.debug("Webnovel autocomplete failed: %s", e)
                 return []
             for novel in results[:10]:
                 title = (novel.get("title") or "").strip()
