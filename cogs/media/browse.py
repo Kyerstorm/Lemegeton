@@ -2310,8 +2310,8 @@ class BrowseCog(commands.Cog):
             except ScrapeBlockedError as exc:
                 logger.warning("Webnovel providers blocked the search for %r: %s", title, exc)
                 embed = build_error_embed(
-                    "Novel Updates Temporarily Unavailable",
-                    "Novel Updates blocked or rate-limited automated access. Please try again later.",
+                    "Webnovel Search Temporarily Unavailable",
+                    "One or more webnovel providers blocked or rate-limited automated access. Please try again later.",
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
