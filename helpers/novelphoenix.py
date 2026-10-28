@@ -85,9 +85,11 @@ def _has_blocked_genre(genres: list[str]) -> bool:
 
 def is_safe_novel_record(record: dict[str, Any], *, require_genres: bool = False) -> bool:
     """Exclude results visibly labelled for adult content; optionally require genre evidence."""
-    labels = record.get("genres") or []
-    labels += record.get("tags") or []
-    labels += record.get("categories") or []
+    labels = (
+        list(record.get("genres") or [])
+        + list(record.get("tags") or [])
+        + list(record.get("categories") or [])
+    )
     clean_labels = [str(value) for value in labels if value]
     if require_genres and not clean_labels:
         return False
