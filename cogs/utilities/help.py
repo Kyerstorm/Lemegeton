@@ -252,6 +252,7 @@ class HelpCog(commands.Cog):
                     "note": "Search live Novel Updates and Novel Phoenix pages for public metadata. Adult-rated results are filtered; if a provider is unavailable, try again later.",
                     "examples": ["/webnovel-updates Lord of the Mysteries"]
                 },
+            },
             "🎬 Movies & TV": {
                 "tv-guide": {
                     "desc": "Browse supported TV seasons, episodes, and air-date information",
