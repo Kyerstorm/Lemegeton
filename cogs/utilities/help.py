@@ -247,9 +247,9 @@ class HelpCog(commands.Cog):
                     "examples": ["/author-works Ursula K. Le Guin"]
                 },
                 "webnovel-updates": {
-                    "desc": "Look up webnovel metadata through the existing Novel Updates search helper",
+                    "desc": "Search the optional Novel Updates dataset for chapter/release statistics and relationships, then fall back to live scraping",
                     "usage": "/webnovel-updates <title>",
-                    "note": "Results depend on the source scraper and page structure; no result does not prove a title is nonexistent.",
+                    "note": "Set NOVELUPDATES_DATASET_PATH to a local upstream CSV/JSON file for fast indexed lookup. The v0.1.5 snapshot is dated 2025-08-21; misses fall back to live scraping, and snapshot metadata can be stale.",
                     "examples": ["/webnovel-updates Lord of the Mysteries"]
                 },
             "🎬 Movies & TV": {
@@ -1014,7 +1014,7 @@ class HelpCog(commands.Cog):
             ),
             "books": (
                 "• /author-works searches Google Books by author\n"
-                "• /webnovel-updates depends on source-page structure and may return no result temporarily\n"
+                "• /webnovel-updates uses the optional local catalog first and falls back to live Novel Updates search\n"
                 "• The /reading menu shows available release relationships, not assumed story chronology\n"
                 "• Use /discussion and add a clear chapter/volume or episode cutoff"
             ),
