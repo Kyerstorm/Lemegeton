@@ -1,7 +1,6 @@
-"""Optional local search index for shaido987/novel-dataset.
+"""Optional local search index for Novel Updates catalog metadata.
 
-The upstream data is intentionally not vendored. Set NOVELUPDATES_DATASET_PATH or
-place the upstream CSV/JSON in data/novelupdates/ after reviewing its usage terms.
+Catalog files are operator-provided, are not bundled, and are not downloaded automatically.
 """
 from __future__ import annotations
 
@@ -17,9 +16,6 @@ from urllib.parse import quote_plus, urlsplit
 
 log = logging.getLogger("Lemegeton.NovelUpdatesDataset")
 
-UPSTREAM_REPOSITORY = "https://github.com/shaido987/novel-dataset"
-DATASET_VERSION = "0.1.5"
-DATASET_UPDATED_AT = "2025-08-21"
 DATASET_MAX_BYTES = 128 * 1024 * 1024
 DEFAULT_DATASET_FILES = (
     Path(__file__).resolve().parents[1] / "data" / "novelupdates" / "novels_0.1.5.json",
@@ -123,8 +119,8 @@ def _series_url(row: dict[str, Any], title: str) -> str:
             and parsed.path.startswith("/series/")
         ):
             return str(supplied).strip()
-    # The public dataset schema does not promise a per-series permalink.
-    # Link to a Novel Updates search instead of guessing a record URL from an ID.
+    # A catalog entry may not include a verified permalink.
+    # Link to a Novel Updates search rather than guessing a series URL from an ID.
     return f"https://www.novelupdates.com/series-finder/?sf=1&sh={quote_plus(title)}"
 
 
@@ -205,9 +201,7 @@ def _normalize_record(source: dict[str, Any]) -> dict[str, Any] | None:
         "related_series_ids": related_ids,
         "recommended_series_ids": recommended_ids,
         "recommendation_list_ids": _values(_first(row, "recommendation list ids", "recommendation_list_ids")),
-        "metadata_source": "novel-dataset",
-        "dataset_version": DATASET_VERSION,
-        "metadata_as_of": DATASET_UPDATED_AT,
+        "metadata_source": "novelupdates-catalog",
         "_title_norm": _key(title),
         "_search_names": [_key(title), *[_key(name) for name in associated_names if _key(name)]],
         "_search_authors": _key(" ".join(authors)),
@@ -306,7 +300,7 @@ def _load_index(path_text: str) -> tuple[list[dict[str, Any]], dict[str, dict[st
     by_id = {record["dataset_id"]: record for record in records if record.get("dataset_id")}
     with _CACHE_LOCK:
         _CACHE[str(path.resolve())] = (stat.st_mtime_ns, stat.st_size, records, by_id)
-    log.info("Loaded %s Novel Updates dataset records from %s", len(records), path)
+    log.info("Loaded %s Novel Updates catalog records from %s", len(records), path)
     return records, by_id
 
 
@@ -317,7 +311,7 @@ def search_novelupdates_dataset(
     limit: int = 10,
     require_genres: bool = False,
 ) -> list[dict[str, Any]]:
-    """Search a locally stored upstream dataset and return provider-shaped records."""
+    """Search the locally configured Novel Updates catalog and return normalized records."""
     normalized = _key(query)
     if not normalized:
         return []
@@ -372,15 +366,10 @@ def search_novelupdates_dataset(
 
 
 def novelupdates_dataset_status() -> dict[str, Any]:
-    """Return a small status record suitable for diagnostics and help output."""
+    """Return the configured local catalog status for diagnostics."""
     path = get_novelupdates_dataset_path()
     if not path:
-        return {
-            "enabled": False,
-            "path": None,
-            "version": DATASET_VERSION,
-            "upstream": UPSTREAM_REPOSITORY,
-        }
+        return {"enabled": False, "path": None}
     try:
         stat = Path(path).expanduser().stat()
         records, _ = _load_index(path)
@@ -389,14 +378,6 @@ def novelupdates_dataset_status() -> dict[str, Any]:
             "path": path,
             "records": len(records),
             "size_bytes": stat.st_size,
-            "version": DATASET_VERSION,
-            "updated_at": DATASET_UPDATED_AT,
-            "upstream": UPSTREAM_REPOSITORY,
         }
     except OSError:
-        return {
-            "enabled": False,
-            "path": path,
-            "version": DATASET_VERSION,
-            "upstream": UPSTREAM_REPOSITORY,
-        }
+        return {"enabled": False, "path": path}
