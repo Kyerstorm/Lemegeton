@@ -1009,23 +1009,30 @@ def _novelist_search_urls(query: str, *, max_urls: int = 6) -> List[str]:
 
 
 def _novelist_is_story_url(url: str, base_url: str) -> bool:
-    """Accept public story routes on Novelist or its branded novelist.app subdomains."""
+    """Accept story detail routes, not Novelist homepage, login, or navigation URLs."""
     target = urljoin(base_url, url or "")
     parts = urlsplit(target)
     host = (parts.hostname or "").lower().rstrip(".")
     if parts.scheme != "https":
         return False
-    if host not in {"novelist.info", "www.novelist.info", "novelist.ws", "www.novelist.ws"}:
-        if host != "novelist.app" and not host.endswith(".novelist.app"):
-            return False
+
+    root_hosts = {"novelist.info", "www.novelist.info", "novelist.ws", "www.novelist.ws"}
+    tenant_host = host.endswith(".novelist.app") and host != "novelist.app"
+    if host not in root_hosts and not tenant_host:
+        return False
 
     path_parts = [part for part in parts.path.split("/") if part]
     if not path_parts:
         return False
     first = path_parts[0].casefold()
+    detail_routes = {"story", "stories", "series", "read"}
     if first in _NOVELIST_RESERVED_PATHS:
-        return first in {"stories"} and len(path_parts) > 1
-    return True
+        return first in detail_routes and len(path_parts) >= 2
+    if host in root_hosts:
+        # The central domains must use a recognizable story-detail route.
+        return first in detail_routes and len(path_parts) >= 2
+    # Branded author subdomains may use either /story/<slug> or /<story-slug>.
+    return len(path_parts) == 1 or (first in detail_routes and len(path_parts) >= 2)
 
 
 def _novelist_results_from_helper(payload: Dict) -> List[Dict]:
@@ -1232,7 +1239,7 @@ async def search_webnovels(
         ),
         search_novelist(
             normalized, http_timeout=http_timeout,
-            max_urls=4 if browser_fallback else max(1, min(int(max_http_urls), 4)),
+            max_urls=6 if browser_fallback else max(1, min(int(max_http_urls), 6)),
         ),
     ]
     responses = await asyncio.gather(*provider_calls, return_exceptions=True)
