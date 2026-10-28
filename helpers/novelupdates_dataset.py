@@ -183,7 +183,7 @@ def _normalize_record(source: dict[str, Any]) -> dict[str, Any] | None:
         "tags": tags,
         "novel_type": str(_first(row, "novel type", "novel_type", "type") or "").strip() or None,
         "associated_names": associated_names,
-        "original_language": str(_first(row, "original language", "original_language", "language") or "").strip() or None,
+        "original_language": str(_first(row, "original language", "original langauge", "original_language", "language") or "").strip() or None,
         "start_year": _first(row, "start year", "start_year", "year"),
         "licensed": licensed,
         "original_publisher": str(_first(row, "original publisher", "original_publisher") or "").strip() or None,
