@@ -204,6 +204,7 @@ def _normalize_record(source: dict[str, Any]) -> dict[str, Any] | None:
         "recommended_series_ids": recommended_ids,
         "recommendation_list_ids": _values(_first(row, "recommendation list ids", "recommendation_list_ids")),
         "metadata_source": "novel-dataset",
+        "dataset_version": DATASET_VERSION,
         "metadata_as_of": DATASET_UPDATED_AT,
         "_title_norm": _key(title),
         "_search_names": [_key(title), *[_key(name) for name in associated_names if _key(name)]],
@@ -239,7 +240,7 @@ def _read_dataset(path: Path) -> list[dict[str, Any]]:
         if path.suffix.casefold() == ".csv":
             with path.open("r", encoding="utf-8-sig", newline="") as handle:
                 source_rows = list(csv.DictReader(handle))
-        elif path.suffix.casefold() in {".json", ".jsonl"}:
+        elif path.suffix.casefold() == ".json":
             with path.open("r", encoding="utf-8-sig") as handle:
                 payload = json.load(handle)
             source_rows = _extract_rows(payload)
