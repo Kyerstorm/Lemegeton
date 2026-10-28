@@ -541,7 +541,7 @@ def _novelphoenix_results_from_helper(payload: Dict) -> List[Dict]:
         if _NOVELPHOENIX_EXCLUDED_CONTENT.search(card_text):
             continue
 
-        rating_match = re.search(r"(?<![\d.])([0-5]\\.\d{1,2})(?:\s*/\s*5)?(?!\d)", card_text)
+        rating_match = re.search(r"(?<![\d.])([0-5]\.\d{1,2})(?:\s*/\s*5)?(?!\d)", card_text)
         chapters_match = re.search(r"\b([\d,]+)\s+chapters?\b", card_text, re.IGNORECASE)
         status_match = re.search(r"\b(ongoing|completed|complete|hiatus|dropped)\b", card_text, re.IGNORECASE)
         known_genres = (
