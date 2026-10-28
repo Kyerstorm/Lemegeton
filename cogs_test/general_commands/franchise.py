@@ -14,7 +14,7 @@ from discord.ext import commands
 
 from helpers.command_error_handler import FeedbackAwareView, handle_application_command_error
 from helpers.anilist_helper import fetch_media_by_id, fetch_media_by_search
-from cogs.media.browse import BrowseCog, search_novelupdates
+from cogs.media.browse import BrowseCog, search_webnovels
 from cogs_test.general_commands.dashboard import command_meta
 from helpers.media_graph import find_linked_resources, find_media_relationships, normalize_media_title, record_media_relationship
 
@@ -486,8 +486,8 @@ class Franchise(commands.Cog):
             jobs.append(self.browse.fetch_book_results(source_title, "nonfiction"))
             job_descriptors.append(("books-nonfiction", "BOOK"))
         if category != "WEBNOVEL":
-            jobs.append(asyncio.wait_for(search_novelupdates(source_title), timeout=45))
-            job_descriptors.append(("novelupdates", "WEBNOVEL"))
+            jobs.append(asyncio.wait_for(search_webnovels(source_title), timeout=45))
+            job_descriptors.append(("webnovel", "WEBNOVEL"))
 
         results = await asyncio.gather(*jobs, return_exceptions=True)
         existing = list(media.get("_provider_related") or [])
@@ -522,7 +522,7 @@ class Franchise(commands.Cog):
                     candidate_type = "Book / novel"
                     cover = (info.get("imageLinks") or {}).get("thumbnail")
                     source_name = "Google Books"
-                elif provider_key == "novelupdates":
+                elif provider_key == "webnovel":
                     candidate_title = candidate.get("title")
                     url = candidate.get("url")
                     status = candidate.get("status") or candidate.get("author")
@@ -559,7 +559,7 @@ class Franchise(commands.Cog):
                     "date": None,
                     "source": f"{source_name} title match only",
                     "creators": ", ".join(authors[:4]) if provider_key.startswith("books-") and authors else (
-                        str(candidate.get("author")) if provider_key == "novelupdates" and candidate.get("author") else None
+                        str(candidate.get("author")) if provider_key == "webnovel" and candidate.get("author") else None
                     ),
                 }
                 if cover:
@@ -629,7 +629,7 @@ class Franchise(commands.Cog):
                 return [item for item in results if str(item.get("format") or "").upper() != "NOVEL"]
             return results
         if category == "WEBNOVEL":
-            return await asyncio.wait_for(search_novelupdates(title), timeout=45)
+            return await asyncio.wait_for(search_webnovels(title), timeout=45)
         if category in ("MOVIE", "TV"):
             return await self.browse.search_tmdb_titles(title, category)
         fiction, nonfiction = await asyncio.gather(
