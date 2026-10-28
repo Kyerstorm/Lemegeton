@@ -643,6 +643,393 @@ async def search_novelphoenix(
                     _NOVELPHOENIX_KEY_LOCKS.pop(key, None)
 
 
+
+_NOVELFIRE_BASE_URL = "https://novelfire.net"
+_NOVELFIRE_CACHE_TTL = 300
+_NOVELFIRE_SEARCH_CACHE: Dict[tuple, tuple[float, List[Dict]]] = {}
+_NOVELFIRE_CACHE_LOCK = asyncio.Lock()
+_NOVELFIRE_KEY_LOCKS: Dict[tuple, asyncio.Lock] = {}
+_NOVELFIRE_REQUEST_LIMIT = asyncio.Semaphore(1)
+_NOVELFIRE_CARD_SELECTOR = (
+    ".novel-item, .novel-card, .book-item, .book-card, .search-result, "
+    "[class*='novel-item'], [class*='book-item'], [class*='novel-card'], "
+    "[class*='book-card'], article"
+)
+
+_NOVELIST_BASE_URLS = ("https://novelist.info", "https://novelist.ws")
+_NOVELIST_CACHE_TTL = 300
+_NOVELIST_SEARCH_CACHE: Dict[tuple, tuple[float, List[Dict]]] = {}
+_NOVELIST_CACHE_LOCK = asyncio.Lock()
+_NOVELIST_KEY_LOCKS: Dict[tuple, asyncio.Lock] = {}
+_NOVELIST_REQUEST_LIMIT = asyncio.Semaphore(1)
+_NOVELIST_CARD_SELECTOR = (
+    "[data-story-id], .story-card, .series-card, .novel-card, "
+    "[class*='story-card'], [class*='series-card'], [class*='story-item'], "
+    "[class*='series-item'], article"
+)
+_NOVELIST_RESERVED_PATHS = {
+    "about", "admin", "api", "auth", "blog", "bookmarks", "collections",
+    "login", "logout", "privacy", "profile", "register", "search", "settings",
+    "stories", "terms", "user", "users",
+}
+_WEBNOVEL_GENRES = (
+    "Action", "Adventure", "Comedy", "Drama", "Fantasy", "Game", "Historical",
+    "Horror", "Isekai", "Martial Arts", "Mystery", "Psychological", "Romance",
+    "School Life", "Sci-fi", "Seinen", "Shoujo", "Shounen", "Slice of Life",
+    "Supernatural", "System", "Tragedy", "Wuxia", "Xianxia", "Xuanhuan",
+)
+
+
+def _novelfire_search_urls(query: str) -> List[str]:
+    """Build public NovelFire search routes without guessing a detail-page URL."""
+    normalized = " ".join((query or "").split())
+    if not normalized:
+        return []
+    term = quote_plus(normalized)
+    return [
+        f"{_NOVELFIRE_BASE_URL}/search?keyword={term}",
+        f"{_NOVELFIRE_BASE_URL}/search?q={term}",
+        f"{_NOVELFIRE_BASE_URL}/search?name={term}",
+    ]
+
+
+def _novelfire_is_book_url(url: str, base_url: str) -> bool:
+    """Accept only top-level NovelFire book pages, never chapter/navigation URLs."""
+    target = urljoin(base_url, url or "")
+    parts = urlsplit(target)
+    host = (parts.hostname or "").lower().rstrip(".")
+    return (
+        parts.scheme == "https"
+        and host in {"novelfire.net", "www.novelfire.net"}
+        and re.fullmatch(r"/book/[^/]+/?", parts.path, re.IGNORECASE) is not None
+    )
+
+
+def _novelfire_results_from_helper(payload: Dict) -> List[Dict]:
+    """Normalize NovelFire search cards into the common webnovel result shape."""
+    fields = payload.get("fields") or {}
+    cards = fields.get("cards") or []
+    if isinstance(cards, str):
+        cards = [cards]
+    card_texts = list(dict.fromkeys(
+        " ".join(str(card).split()) for card in cards if str(card).strip()
+    ))
+    base_url = payload.get("url") or _NOVELFIRE_BASE_URL
+    results: List[Dict] = []
+    seen_urls = set()
+
+    for link in payload.get("links") or []:
+        href = str(link.get("url") or "").strip()
+        if not _novelfire_is_book_url(href, base_url):
+            continue
+        url = urljoin(base_url, href).split("#", 1)[0].split("?", 1)[0]
+        normalized_url = url.rstrip("/").casefold()
+        if normalized_url in seen_urls:
+            continue
+        title = " ".join(str(link.get("text") or "").split())
+        if not title:
+            title = urlsplit(url).path.rstrip("/").split("/")[-1].replace("-", " ").replace("_", " ")
+        if not title:
+            continue
+
+        matching_cards = [card for card in card_texts if title.casefold() in card.casefold()]
+        if not matching_cards:
+            # If the card metadata cannot be associated with a title, fail closed.
+            continue
+        card_text = min(matching_cards, key=len)
+        if _NOVELPHOENIX_EXCLUDED_CONTENT.search(card_text):
+            continue
+
+        chapters_match = re.search(r"\b([\d,]+)\s+chapters?\b", card_text, re.IGNORECASE)
+        rating_match = re.search(r"(?<![\d.])([0-5]\.\d{1,2})(?:\s*/\s*5)?(?!\d)", card_text)
+        status_match = re.search(r"\b(ongoing|completed|complete|hiatus|dropped)\b", card_text, re.IGNORECASE)
+        genres = [
+            genre for genre in _WEBNOVEL_GENRES
+            if re.search(r"(?<![\w])" + re.escape(genre) + r"(?![\w])", card_text, re.IGNORECASE)
+        ]
+        author_match = re.search(r"\b(?:by|author\s*[:：])\s*([^|•·]{2,80}?)(?=\s{2,}|[|•·]|$)", card_text, re.IGNORECASE)
+
+        results.append({
+            "title": title[:256],
+            "url": url,
+            "description": None,
+            "image": None,
+            "rating": rating_match.group(1) if rating_match else None,
+            "author": author_match.group(1).strip() if author_match else None,
+            "status": status_match.group(1).title() if status_match else None,
+            "chapters": chapters_match.group(1).replace(",", "") if chapters_match else None,
+            "genres": genres,
+            "source": "NovelFire",
+            "provider": "novelfire",
+        })
+        seen_urls.add(normalized_url)
+        if len(results) >= 10:
+            break
+    return results
+
+
+async def _search_novelfire_uncached(
+    query: str, *, http_timeout: int = 7, max_urls: int = 3
+) -> List[Dict]:
+    """Fetch public NovelFire search pages; stop immediately on an access challenge."""
+    urls = _novelfire_search_urls(query)
+    selectors = {"cards": _NOVELFIRE_CARD_SELECTOR}
+    for url in urls[:max(1, min(int(max_urls), len(urls)))]:
+        try:
+            payload = await fetch_public_page(
+                url,
+                engine="http",
+                selectors=selectors,
+                include_text=False,
+                include_links=True,
+                link_selector="a[href*='/book/']",
+                timeout=max(1, min(int(http_timeout), 10)),
+                retries=0,
+            )
+        except ScrapeBlockedError:
+            raise
+        except (ScrapeRequestError, ValueError) as exc:
+            logger.debug("NovelFire HTTP search failed for %s: %s", url, exc)
+            continue
+        except Exception:
+            logger.exception("Unexpected NovelFire scraper failure for %s", url)
+            continue
+        results = _novelfire_results_from_helper(payload)
+        if results:
+            logger.info("NovelFire returned %s results for %r", len(results), query)
+            return results
+    return []
+
+
+async def search_novelfire(
+    query: str, *, http_timeout: int = 7, max_urls: int = 3
+) -> List[Dict]:
+    """Search NovelFire live and cache successful results briefly."""
+    normalized = " ".join((query or "").split())
+    if not normalized:
+        return []
+    key = (normalized.casefold(), max(1, min(int(max_urls), 3)))
+    async with _NOVELFIRE_CACHE_LOCK:
+        cached = _NOVELFIRE_SEARCH_CACHE.get(key)
+        if cached and cached[0] > time.monotonic():
+            return [dict(item) for item in cached[1]]
+        key_lock = _NOVELFIRE_KEY_LOCKS.setdefault(key, asyncio.Lock())
+
+    async with key_lock:
+        async with _NOVELFIRE_CACHE_LOCK:
+            cached = _NOVELFIRE_SEARCH_CACHE.get(key)
+            if cached and cached[0] > time.monotonic():
+                return [dict(item) for item in cached[1]]
+        try:
+            async with _NOVELFIRE_REQUEST_LIMIT:
+                results = await _search_novelfire_uncached(
+                    normalized, http_timeout=http_timeout, max_urls=key[1]
+                )
+            for item in results:
+                item.setdefault("source", "NovelFire")
+                item.setdefault("provider", "novelfire")
+            if results:
+                async with _NOVELFIRE_CACHE_LOCK:
+                    now = time.monotonic()
+                    expired = [cache_key for cache_key, value in _NOVELFIRE_SEARCH_CACHE.items() if value[0] <= now]
+                    for cache_key in expired:
+                        _NOVELFIRE_SEARCH_CACHE.pop(cache_key, None)
+                    _NOVELFIRE_SEARCH_CACHE[key] = (
+                        now + _NOVELFIRE_CACHE_TTL, [dict(item) for item in results]
+                    )
+            return results
+        finally:
+            async with _NOVELFIRE_CACHE_LOCK:
+                if _NOVELFIRE_KEY_LOCKS.get(key) is key_lock:
+                    _NOVELFIRE_KEY_LOCKS.pop(key, None)
+
+
+def _novelist_search_urls(query: str, *, max_urls: int = 4) -> List[str]:
+    """Build public Novelist story-search routes using the platform's visible hosts."""
+    normalized = " ".join((query or "").split())
+    if not normalized:
+        return []
+    term = quote_plus(normalized)
+    urls = []
+    for base_url in _NOVELIST_BASE_URLS:
+        urls.extend([
+            f"{base_url}/stories?search={term}",
+            f"{base_url}/stories?q={term}",
+        ])
+    return urls[:max(1, min(int(max_urls), len(urls))]
+
+
+def _novelist_is_story_url(url: str, base_url: str) -> bool:
+    """Accept public story routes on Novelist or its branded novelist.app subdomains."""
+    target = urljoin(base_url, url or "")
+    parts = urlsplit(target)
+    host = (parts.hostname or "").lower().rstrip(".")
+    if parts.scheme != "https":
+        return False
+    if host not in {"novelist.info", "www.novelist.info", "novelist.ws", "www.novelist.ws"}:
+        if host != "novelist.app" and not host.endswith(".novelist.app"):
+            return False
+
+    path_parts = [part for part in parts.path.split("/") if part]
+    if not path_parts:
+        return False
+    first = path_parts[0].casefold()
+    if first in _NOVELIST_RESERVED_PATHS:
+        return first in {"stories"} and len(path_parts) > 1
+    return True
+
+
+def _novelist_results_from_helper(payload: Dict) -> List[Dict]:
+    """Normalize indexed story cards; skip unassociated cards and explicitly mature results."""
+    fields = payload.get("fields") or {}
+    cards = fields.get("cards") or []
+    if isinstance(cards, str):
+        cards = [cards]
+    card_texts = list(dict.fromkeys(
+        " ".join(str(card).split()) for card in cards if str(card).strip()
+    ))
+    base_url = payload.get("url") or "https://novelist.info"
+    results: List[Dict] = []
+    seen_urls = set()
+    links = payload.get("links") or []
+
+    for link in links:
+        href = str(link.get("url") or "").strip()
+        if not _novelist_is_story_url(href, base_url):
+            continue
+        url = urljoin(base_url, href).split("#", 1)[0].split("?", 1)[0]
+        normalized_url = url.rstrip("/").casefold()
+        if normalized_url in seen_urls:
+            continue
+        title = " ".join(str(link.get("text") or "").split())
+        if not title:
+            title = urlsplit(url).path.rstrip("/").split("/")[-1].replace("-", " ").replace("_", " ")
+        if not title or title.casefold() in _NOVELIST_RESERVED_PATHS:
+            continue
+
+        matching_cards = [card for card in card_texts if title.casefold() in card.casefold()]
+        if not matching_cards:
+            continue
+        card_text = min(matching_cards, key=len)
+        if _NOVELPHOENIX_EXCLUDED_CONTENT.search(card_text):
+            continue
+
+        chapters_match = re.search(r"\b([\d,]+)\s+chapters?\b", card_text, re.IGNORECASE)
+        rating_match = re.search(r"(?<![\d.])([0-5]\.\d{1,2})(?:\s*/\s*5)?(?!\d)", card_text)
+        status_match = re.search(r"\b(ongoing|completed|complete|hiatus|dropped)\b", card_text, re.IGNORECASE)
+        genres = [
+            genre for genre in _WEBNOVEL_GENRES
+            if re.search(r"(?<![\w])" + re.escape(genre) + r"(?![\w])", card_text, re.IGNORECASE)
+        ]
+        author_match = re.search(r"\b(?:by|author\s*[:：])\s*([^|•·]{2,80}?)(?=\s{2,}|[|•·]|$)", card_text, re.IGNORECASE)
+        content_rating_match = re.search(
+            r"\b(?:content\s+rating|rating)\s*[:：]\s*(all ages|general|teen|mature|adult|explicit)\b",
+            card_text, re.IGNORECASE,
+        )
+
+        result = {
+            "title": title[:256],
+            "url": url,
+            "description": None,
+            "image": None,
+            "rating": rating_match.group(1) if rating_match else None,
+            "author": author_match.group(1).strip() if author_match else None,
+            "status": status_match.group(1).title() if status_match else None,
+            "chapters": chapters_match.group(1).replace(",", "") if chapters_match else None,
+            "genres": genres,
+            "source": "Novelist",
+            "provider": "novelist",
+        }
+        if content_rating_match:
+            result["content_rating"] = content_rating_match.group(1).title()
+        if not _is_safe_webnovel_result(result):
+            continue
+        results.append(result)
+        seen_urls.add(normalized_url)
+        if len(results) >= 10:
+            break
+    return results
+
+
+async def _search_novelist_uncached(
+    query: str, *, http_timeout: int = 7, max_urls: int = 4
+) -> List[Dict]:
+    """Fetch public Novelist search/listing pages without attempting to bypass access controls."""
+    urls = _novelist_search_urls(query, max_urls=max_urls)
+    selectors = {"cards": _NOVELIST_CARD_SELECTOR}
+    for url in urls:
+        try:
+            payload = await fetch_public_page(
+                url,
+                engine="http",
+                selectors=selectors,
+                include_text=False,
+                include_links=True,
+                link_selector=(
+                    "a[href*='/stories/'], a[href*='/story/'], "
+                    "a[href*='/series/'], article a[href]"
+                ),
+                timeout=max(1, min(int(http_timeout), 10)),
+                retries=0,
+            )
+        except ScrapeBlockedError:
+            raise
+        except (ScrapeRequestError, ValueError) as exc:
+            logger.debug("Novelist HTTP search failed for %s: %s", url, exc)
+            continue
+        except Exception:
+            logger.exception("Unexpected Novelist scraper failure for %s", url)
+            continue
+        results = _novelist_results_from_helper(payload)
+        if results:
+            logger.info("Novelist returned %s results for %r", len(results), query)
+            return results
+    return []
+
+
+async def search_novelist(
+    query: str, *, http_timeout: int = 7, max_urls: int = 4
+) -> List[Dict]:
+    """Search Novelist's public story discovery routes, caching successful results briefly."""
+    normalized = " ".join((query or "").split())
+    if not normalized:
+        return []
+    key = (normalized.casefold(), max(1, min(int(max_urls), 4)))
+    async with _NOVELIST_CACHE_LOCK:
+        cached = _NOVELIST_SEARCH_CACHE.get(key)
+        if cached and cached[0] > time.monotonic():
+            return [dict(item) for item in cached[1]]
+        key_lock = _NOVELIST_KEY_LOCKS.setdefault(key, asyncio.Lock())
+
+    async with key_lock:
+        async with _NOVELIST_CACHE_LOCK:
+            cached = _NOVELIST_SEARCH_CACHE.get(key)
+            if cached and cached[0] > time.monotonic():
+                return [dict(item) for item in cached[1]]
+        try:
+            async with _NOVELIST_REQUEST_LIMIT:
+                results = await _search_novelist_uncached(
+                    normalized, http_timeout=http_timeout, max_urls=key[1]
+                )
+            for item in results:
+                item.setdefault("source", "Novelist")
+                item.setdefault("provider", "novelist")
+            if results:
+                async with _NOVELIST_CACHE_LOCK:
+                    now = time.monotonic()
+                    expired = [cache_key for cache_key, value in _NOVELIST_SEARCH_CACHE.items() if value[0] <= now]
+                    for cache_key in expired:
+                        _NOVELIST_SEARCH_CACHE.pop(cache_key, None)
+                    _NOVELIST_SEARCH_CACHE[key] = (
+                        now + _NOVELIST_CACHE_TTL, [dict(item) for item in results]
+                    )
+            return results
+        finally:
+            async with _NOVELIST_CACHE_LOCK:
+                if _NOVELIST_KEY_LOCKS.get(key) is key_lock:
+                    _NOVELIST_KEY_LOCKS.pop(key, None)
+
+
 def _is_safe_webnovel_result(item: Dict) -> bool:
     """Hide results explicitly tagged as adult or sexually explicit by a provider."""
     content = " ".join(
@@ -660,12 +1047,12 @@ async def search_webnovels(
     max_http_urls: int = 2,
     require_genres: bool = False,
 ) -> List[Dict]:
-    """Combine live results from Novel Updates and Novel Phoenix, preserving provider labels."""
+    """Combine independent live results from all supported public webnovel providers."""
     normalized = " ".join((query or "").split())
     if not normalized:
         return []
 
-    responses = await asyncio.gather(
+    provider_calls = [
         search_novelupdates(
             normalized,
             browser_fallback=browser_fallback,
@@ -677,15 +1064,28 @@ async def search_webnovels(
             normalized, http_timeout=http_timeout,
             max_urls=4 if browser_fallback else max(1, min(int(max_http_urls), 4)),
         ),
-        return_exceptions=True,
-    )
+        search_novelfire(
+            normalized, http_timeout=http_timeout,
+            max_urls=3 if browser_fallback else max(1, min(int(max_http_urls), 3)),
+        ),
+        search_novelist(
+            normalized, http_timeout=http_timeout,
+            max_urls=4 if browser_fallback else max(1, min(int(max_http_urls), 4)),
+        ),
+    ]
+    responses = await asyncio.gather(*provider_calls, return_exceptions=True)
     failures = [result for result in responses if isinstance(result, Exception)]
-    successful_responses = [result for result in responses if not isinstance(result, Exception)]
+    provider_results = [result if not isinstance(result, Exception) else [] for result in responses]
+
+    # Round-robin results across providers so the first provider cannot crowd out the others.
     combined: List[Dict] = []
     seen_titles = set()
-
-    for response in successful_responses:
-        for item in response:
+    max_results = 10
+    for index in range(max((len(items) for items in provider_results), default=0)):
+        for items in provider_results:
+            if index >= len(items):
+                continue
+            item = items[index]
             if not _is_safe_webnovel_result(item):
                 continue
             if require_genres and not item.get("genres"):
@@ -697,7 +1097,7 @@ async def search_webnovels(
             normalized_item.setdefault("source", "Novel Updates")
             combined.append(normalized_item)
             seen_titles.add(title_key)
-            if len(combined) >= 10:
+            if len(combined) >= max_results:
                 return combined
 
     if not combined and failures:
