@@ -434,8 +434,6 @@ async def search_novelupdates(
                     max_http_urls=max_http_urls,
                     require_genres=require_genres,
                 )
-            for item in results:
-                item.setdefault("source", "Novel Updates")
             if results:
                 async with _NOVELUPDATES_CACHE_LOCK:
                     now = time.monotonic()
