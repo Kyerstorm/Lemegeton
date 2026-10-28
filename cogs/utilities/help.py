@@ -249,7 +249,7 @@ class HelpCog(commands.Cog):
                 "webnovel-updates": {
                     "desc": "Search live Novel Updates and Novel Phoenix pages for webnovel metadata",
                     "usage": "/webnovel-updates <title>",
-                    "note": "Set NOVELUPDATES_DATASET_PATH to a local upstream CSV/JSON file for fast indexed lookup. The v0.1.5 snapshot is dated 2025-08-21; misses fall back to live scraping, and snapshot metadata can be stale.",
+                    "note": "Search live Novel Updates and Novel Phoenix pages for public metadata. Adult-rated results are filtered; if a provider is unavailable, try again later.",
                     "examples": ["/webnovel-updates Lord of the Mysteries"]
                 },
             "🎬 Movies & TV": {
