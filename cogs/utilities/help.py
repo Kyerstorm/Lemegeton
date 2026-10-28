@@ -247,9 +247,9 @@ class HelpCog(commands.Cog):
                     "examples": ["/author-works Ursula K. Le Guin"]
                 },
                 "webnovel-updates": {
-                    "desc": "Search live Novel Updates and Novel Phoenix pages for webnovel metadata",
+                    "desc": "Search public webnovel metadata across Novel Updates, Novel Phoenix, NovelFire, and Novelist",
                     "usage": "/webnovel-updates <title>",
-                    "note": "Search live Novel Updates and Novel Phoenix pages for public metadata. Adult-rated results are filtered; if a provider is unavailable, try again later.",
+                    "note": "Search Novel Updates, Novel Phoenix, NovelFire, and Novelist for public metadata. Adult-rated results are filtered; one unavailable provider does not discard the others.",
                     "examples": ["/webnovel-updates Lord of the Mysteries"]
                 },
             },
