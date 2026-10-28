@@ -115,7 +115,11 @@ The interactive /discovery-hub command is the entry point for media navigation a
 - /trailers uses the documented movie/TV videos endpoints and constructs links only for returned YouTube or Vimeo keys. Provider-returned video types and official flags are retained.
 - /collection-guide resolves a movie, loads its belongs_to_collection reference, then displays TMDB collection parts by release date. This is not an assertion of in-universe chronology.
 - /author-works queries Google Books by author. Results may include co-authored works and editions; this is not presented as a universal cross-provider bibliography.
-- /webnovel-updates reuses the existing Novel Updates scraper with a bounded command timeout. A scraper timeout/failure is shown as a provider failure rather than a confirmed empty search.
+- /webnovel-updates searches the optional local dataset first, then falls back to the existing live Novel Updates scraper when the dataset is missing or has no match. A scraper timeout/failure is shown as a provider failure rather than a confirmed empty search.
+- Configure `NOVELUPDATES_DATASET_PATH` with a local upstream CSV/JSON file, or place `novels_0.1.5.csv` / `novels_0.1.5.json` in `data/novelupdates/`. The data is not vendored or automatically downloaded by Lemegeton.
+- The upstream `novel-dataset` 0.1.5 snapshot is dated **2025-08-21** and includes translated/original chapter counts, completion flags, release frequency, activity ranks, ratings, reading-list counts, and related/recommended series IDs. Its statistics can be stale; the command labels dataset results accordingly.
+- I could not find an explicit `LICENSE` file in the upstream repository during implementation. Review the upstream project's data usage terms before downloading or redistributing it; Lemegeton does not copy the dataset into this repository.
+
 
 TMDB watch-provider data is powered by JustWatch. /where-to-watch labels the queried region and links to the provider-details URL when supplied; it does not manufacture direct streaming links. TMDB requests require TMDB_BEARER_TOKEN. Availability changes and should be verified with the provider.
 
