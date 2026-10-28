@@ -272,7 +272,14 @@ def _extract_page_data(
                 _validate_public_http_url(target)
             except ValueError:
                 continue
-            links.append({"text": node.get_text(" ", strip=True)[:200], "url": target})
+            link_text = (
+                node.get_text(" ", strip=True)
+                or node.get("title")
+                or node.get("aria-label")
+                or node.get("data-title")
+                or ""
+            )
+            links.append({"text": str(link_text).strip()[:200], "url": target})
         result["links"] = links
 
     return result
