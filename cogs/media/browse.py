@@ -1725,6 +1725,8 @@ class BrowseCog(commands.Cog):
                 embed.add_field(name="📌 Status", value=str(novel["status"])[:1024], inline=True)
             if novel.get("rating"):
                 embed.add_field(name="⭐ Rating", value=str(novel["rating"])[:1024], inline=True)
+            if novel.get("associated_names"):
+                embed.add_field(name="Alternative Titles", value=", ".join(str(value) for value in novel["associated_names"][:8])[:1024], inline=False)
             if novel.get("genres"):
                 genres = ", ".join(str(value) for value in novel["genres"])
                 embed.add_field(name="🎭 Genres", value=genres[:1024], inline=False)
@@ -1771,7 +1773,7 @@ class BrowseCog(commands.Cog):
                 if links:
                     embed.add_field(name=label, value=" · ".join(links)[:1024], inline=False)
             if novel.get("metadata_source") == "novel-dataset":
-                embed.set_footer(text=f"Source: shaido987/novel-dataset · Snapshot date {novel.get('metadata_as_of', 'unknown')} · A title link may open a Novel Updates search rather than an exact series page")
+                embed.set_footer(text=f"Source: shaido987/novel-dataset v{novel.get('dataset_version', 'unknown')} · Snapshot date {novel.get('metadata_as_of', 'unknown')} · A title link may open a Novel Updates search rather than an exact series page")
             else:
                 embed.set_footer(text="Fetched from Novel Updates · Source metadata may be incomplete when the provider changes its page layout")
             await interaction.followup.send(embed=embed)
