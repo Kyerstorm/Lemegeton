@@ -490,7 +490,7 @@ _NOVELPHOENIX_KEY_LOCKS: Dict[str, asyncio.Lock] = {}
 _NOVELPHOENIX_REQUEST_LIMIT = asyncio.Semaphore(1)
 _NOVELPHOENIX_EXCLUDED_CONTENT = re.compile(
     r"\b(?:adult|mature|smut|ecchi|hentai|erotica|erotic|nsfw|pornographic)\b"
-    r"|\b18\s*\+\b|\bexplicit\s+content\b",
+    r"|\b18\s*\+|\bexplicit\s+content\b",
     re.IGNORECASE,
 )
 _NOVELPHOENIX_CARD_SELECTOR = (
