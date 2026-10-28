@@ -39,7 +39,7 @@ class NovelUpdatesDatasetSearchIntegrationTests(unittest.IsolatedAsyncioTestCase
                 results = await browse.search_novelupdates("Chronicle Without Internet")
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["title"], "The Offline Chronicle")
-        self.assertEqual(results[0]["metadata_source"], "novel-dataset")
+        self.assertEqual(results[0]["metadata_source"], "novelupdates-catalog")
         live_search.assert_not_awaited()
 
     async def test_catalog_miss_falls_back_to_existing_live_scraper(self):
