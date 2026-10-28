@@ -10,7 +10,7 @@ Use **/browse** with a media category and a title for a detailed record. For TMD
 | --- | --- |
 | Anime and manga | Genre, AniList theme/tag, provider status, year range. Manga supports manga (Japan), manhwa (Korea), manhua (China), and provider-tagged webtoon subtypes using AniList origin/format metadata. Author and artist filters are available for manga/light-novel records when AniList staff roles expose the credit. Adult-flagged titles are excluded unless the user explicitly opts in from a Discord channel marked NSFW. |
 | General novels and books | Genre/subject, author, publisher, language code, publication year range through Google Books query parameters. |
-| Webnovels | Genre, author and status when supplied by live Novel Updates or Novel Phoenix results. |
+| Webnovels | Genre, author and status when available from Novel Updates, Novel Phoenix, NovelFire, or Novelist. |
 | Movies and TV | TMDB genre, keyword/theme, original language code, status, release year range, runtime, director and cast filters. |
 
 A filter that the selected metadata provider cannot support is rejected instead of silently returning unfiltered results. Browse applies filters to the provider's best matching title; when the title fails one of the filters, try a broader title or fewer filters.
