@@ -457,8 +457,8 @@ _NOVELPHOENIX_CACHE_LOCK = asyncio.Lock()
 _NOVELPHOENIX_KEY_LOCKS: Dict[str, asyncio.Lock] = {}
 _NOVELPHOENIX_REQUEST_LIMIT = asyncio.Semaphore(1)
 _NOVELPHOENIX_EXCLUDED_CONTENT = re.compile(
-    r"\\b(?:adult|mature|smut|ecchi|hentai|erotica|erotic|nsfw|pornographic)\\b"
-    r"|\\b18\\s*\\+\\b|\\bexplicit\\s+content\\b",
+    r"\b(?:adult|mature|smut|ecchi|hentai|erotica|erotic|nsfw|pornographic)\b"
+    r"|\b18\s*\+\b|\bexplicit\s+content\b",
     re.IGNORECASE,
 )
 _NOVELPHOENIX_CARD_SELECTOR = (
@@ -528,9 +528,9 @@ def _novelphoenix_results_from_helper(payload: Dict) -> List[Dict]:
         if _NOVELPHOENIX_EXCLUDED_CONTENT.search(card_text):
             continue
 
-        rating_match = re.search(r"(?<![\\d.])([0-5]\\.\\d{1,2})(?:\\s*/\\s*5)?(?!\\d)", card_text)
-        chapters_match = re.search(r"\\b([\\d,]+)\\s+chapters?\\b", card_text, re.IGNORECASE)
-        status_match = re.search(r"\\b(ongoing|completed|complete|hiatus|dropped)\\b", card_text, re.IGNORECASE)
+        rating_match = re.search(r"(?<![\d.])([0-5]\\.\d{1,2})(?:\s*/\s*5)?(?!\d)", card_text)
+        chapters_match = re.search(r"\b([\d,]+)\s+chapters?\b", card_text, re.IGNORECASE)
+        status_match = re.search(r"\b(ongoing|completed|complete|hiatus|dropped)\b", card_text, re.IGNORECASE)
         known_genres = (
             "Action", "Adventure", "Comedy", "Drama", "Fantasy", "Game", "Historical",
             "Horror", "Isekai", "Martial Arts", "Mystery", "Psychological", "Romance",
@@ -538,7 +538,7 @@ def _novelphoenix_results_from_helper(payload: Dict) -> List[Dict]:
             "Supernatural", "System", "Tragedy", "Wuxia", "Xianxia", "Xuanhuan",
         )
         genres = [genre for genre in known_genres if re.search(
-            rf"(?<![\\w]){re.escape(genre)}(?![\\w])", card_text, re.IGNORECASE
+            rf"(?<![\w]){re.escape(genre)}(?![\w])", card_text, re.IGNORECASE
         )]
 
         results.append({
