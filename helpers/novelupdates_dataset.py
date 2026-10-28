@@ -105,7 +105,7 @@ def _safe_cover(value: Any) -> str | None:
     if not url:
         return None
     parsed = urlsplit(url)
-    if parsed.scheme != "https" or not parsed.hostname:
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username is not None or parsed.password is not None:
         return None
     return url
 
@@ -118,6 +118,8 @@ def _series_url(row: dict[str, Any], title: str) -> str:
         if (
             parsed.scheme == "https"
             and (host == "novelupdates.com" or host.endswith(".novelupdates.com"))
+            and parsed.username is None
+            and parsed.password is None
             and parsed.path.startswith("/series/")
         ):
             return str(supplied).strip()
