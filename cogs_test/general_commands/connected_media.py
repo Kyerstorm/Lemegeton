@@ -14,7 +14,7 @@ from discord.ext import commands
 
 from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView, handle_application_command_error
 import database
-from cogs.media.browse import TMDB_API_BASE_URL, TMDB_IMAGE_BASE_URL, search_novelupdates
+from cogs.media.browse import TMDB_API_BASE_URL, TMDB_IMAGE_BASE_URL, search_webnovels
 from helpers.media_graph import record_media_relationship
 from cogs_test.general_commands.dashboard import command_meta
 
@@ -713,7 +713,7 @@ class ConnectedMedia(commands.Cog):
         embed.set_footer(text="Google Books metadata · This may include editions and co-authored works")
         await interaction.followup.send(embed=embed, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
-    @app_commands.command(name="webnovel-updates", description="Search Novel Updates for available webnovel metadata")
+    @app_commands.command(name="webnovel-updates", description="Search live webnovel metadata across supported providers")
     @app_commands.guild_only()
     @app_commands.describe(title="Webnovel title or alternative title")
     @command_meta(section="Media Discovery", name="Webnovel Updates")
@@ -724,68 +724,42 @@ class ConnectedMedia(commands.Cog):
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            results = await asyncio.wait_for(search_novelupdates(query), timeout=30)
+            results = await asyncio.wait_for(search_webnovels(query), timeout=30)
         except asyncio.TimeoutError:
             results = None
         except Exception:
-            log.warning("Novel Updates lookup failed", exc_info=True)
+            log.warning("Live webnovel lookup failed", exc_info=True)
             results = None
         if results is None:
-            await interaction.followup.send("Novel Updates could not be reached reliably. This is a provider failure, not a confirmed no-results search.", ephemeral=True)
+            await interaction.followup.send("The live webnovel providers could not be reached reliably. This is a provider failure, not a confirmed no-results search.", ephemeral=True)
             return
         lines = []
         for item in results[:8]:
             name = discord.utils.escape_markdown(str(item.get("title") or "Untitled"))
             url = item.get("url")
             title_text = f"[{name}]({url})" if url else name
-            details = [str(item[key]) for key in ("author", "novel_type", "original_language", "status", "rating") if item.get(key)]
-            if item.get("rating_votes") not in (None, "") and item.get("rating"):
-                details[-1] = f"{item['rating']} ({item['rating_votes']} votes)"
-            chapters = []
-            if item.get("original_chapters") not in (None, ""):
-                chapters.append(f"original: {item['original_chapters']}")
-            if item.get("translated_chapters") not in (None, ""):
-                chapters.append(f"translated: {item['translated_chapters']}")
-            if chapters:
-                details.append("chapters " + " / ".join(chapters))
-            if item.get("release_frequency"):
-                details.append(f"release: {item['release_frequency']}")
-            if item.get("reading_lists") not in (None, ""):
-                details.append(f"reading lists: {item['reading_lists']}")
-            if item.get("licensed") is not None:
-                details.append("licensed" if item["licensed"] else "not marked licensed")
-            for field, label in (("original_publisher", "original publisher"), ("english_publisher", "English publisher")):
-                if item.get(field):
-                    details.append(f"{label}: {item[field]}")
+            details = [
+                f"{label}: {item[key]}"
+                for key, label in (
+                    ("author", "author"),
+                    ("status", "status"),
+                    ("rating", "rating"),
+                    ("chapters", "chapters"),
+                )
+                if item.get(key) not in (None, "")
+            ]
             if item.get("genres"):
                 details.append("genres: " + ", ".join(str(value) for value in item["genres"][:5]))
-            if item.get("tags"):
-                details.append("tags: " + ", ".join(str(value) for value in item["tags"][:5]))
-            ranks = [
-                f"{label} #{item[key]}"
-                for key, label in (
-                    ("activity_weekly_rank", "week"),
-                    ("activity_monthly_rank", "month"),
-                    ("activity_all_time_rank", "all-time"),
-                ) if item.get(key) not in (None, "")
-            ]
-            if ranks:
-                details.append("activity " + ", ".join(ranks))
+            if item.get("source"):
+                details.append(f"source: {item['source']}")
             lines.append(f"• **{title_text}**" + (f"\n{' · '.join(details)}" if details else ""))
-            for label, key in (("Related", "related_series"), ("Recommended", "recommended_series")):
-                linked = item.get(key) or []
-                linked_titles = [
-                    f"[{discord.utils.escape_markdown(str(link.get('title') or 'Untitled'))}]({link['url']})"
-                    for link in linked[:3] if link.get("url")
-                ]
-                if linked_titles:
-                    lines.append(f"  {label}: " + ", ".join(linked_titles))
-        embed = discord.Embed(title=f"Novel Updates · {query}"[:256], description="\n".join(lines)[:4000] or "Novel Updates returned no matching records.", color=discord.Color.blurple())
-        dataset_results = [item for item in results if item.get("metadata_source") == "novel-dataset"]
-        if dataset_results:
-            embed.set_footer(text=f"Novel Updates dataset v{dataset_results[0].get('dataset_version', 'unknown')} · Updated {dataset_results[0].get('metadata_as_of', 'date unknown')} · Details may be stale; links may open a provider search")
-        else:
-            embed.set_footer(text="Source: Novel Updates · Only fields supplied by the current scraper are shown")
+
+        embed = discord.Embed(
+            title=f"Webnovel Search · {query}"[:256],
+            description="\n".join(lines)[:4000] or "No matching webnovels were found in the live search results.",
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text="Live metadata from connected providers · Adult-rated results are excluded")
         await interaction.followup.send(embed=embed, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     @app_commands.command(name="link-suggest", description="Open a guided modal to suggest a cross-media relationship")
