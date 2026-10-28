@@ -284,10 +284,12 @@ TMDB-powered features require TMDB_BEARER_TOKEN. Availability data changes, and 
 | Command | Purpose |
 |---|---|
 | **/author-works** | Search Google Books for titles attributed to an author. |
-| **/webnovel-updates** | Search metadata available through the existing Novel Updates scraper helper. |
+| **/webnovel-updates** | Search the optional Novel Updates dataset first, with live-scraper fallback and chapter, rating, release, rank, and relationship metadata. |
 | **/reading** | Open the unified Reading Hub for nominations, votes, selection, scheduled discussions, and reading order. |
 
 Novel Updates results depend on the scraper and the source page's current structure. An empty response may reflect a source failure or unsupported markup; it is not necessarily proof that a title does not exist.
+
+For a faster local catalog, set `NOVELUPDATES_DATASET_PATH` to the upstream CSV/JSON file or place it at `data/novelupdates/novels_0.1.5.csv` / `.json`. Lemegeton does not bundle the data. Dataset version 0.1.5 is dated 2025-08-21, so its chapter counts and rankings may be stale; live scraping remains the fallback for misses. Review the [upstream repository](https://github.com/shaido987/novel-dataset) usage terms before downloading or redistributing it.
 
 ### 🎮 Games and generated images
 
