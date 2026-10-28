@@ -61,7 +61,7 @@ class NovelUpdatesDatasetTests(unittest.TestCase):
         self.assertEqual(novel["translation_completed"], False)
         self.assertEqual(novel["original_completed"], True)
         self.assertEqual(novel["reading_lists"], "2200")
-        self.assertEqual(novel["metadata_source"], "novel-dataset")
+        self.assertEqual(novel["metadata_source"], "novelupdates-catalog")
 
     def test_json_relations_resolve_ids_without_guessing_series_urls(self):
         path = self.root / "novels.json"
