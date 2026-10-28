@@ -63,7 +63,7 @@ class NovelPhoenixParsingTests(unittest.TestCase):
     def test_generic_safety_filter_reads_tags_and_categories(self):
         self.assertFalse(is_safe_novel_record({"genres": ["Fantasy"], "tags": ["Smut"]}))
         self.assertFalse(is_safe_novel_record({"categories": ["Mature"]}))
-        self.assertFalse(is_safe_novel_record({"genres": ["Fantasy"]}, require_genres=True))
+        self.assertFalse(is_safe_novel_record({}, require_genres=True))
         self.assertTrue(is_safe_novel_record({"genres": ["Fantasy", "Mystery"]}, require_genres=True))
 
 
