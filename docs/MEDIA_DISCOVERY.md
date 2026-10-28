@@ -116,7 +116,7 @@ The interactive /discovery-hub command is the entry point for media navigation a
 - /collection-guide resolves a movie, loads its belongs_to_collection reference, then displays TMDB collection parts by release date. This is not an assertion of in-universe chronology.
 - /author-works queries Google Books by author. Results may include co-authored works and editions; this is not presented as a universal cross-provider bibliography.
 - `/webnovel-updates` and `/browse` query live public search pages from Novel Updates and Novel Phoenix. Each provider is isolated so one provider failure does not discard results returned by the other.
-- The scraper returns title links and available public metadata only; it does not fetch chapter text. Results explicitly marked Adult, Mature, Smut, Ecchi, Hentai, Erotica, NSFW, 18+, or explicit are filtered out.
+- The scraper returns title links and available public metadata only; it does not fetch chapter text. Results explicitly marked as adult-rated or sexually explicit are filtered out.
 - Provider markup and availability can change. A scraper timeout, access challenge, or unsupported layout is treated as a provider failure rather than proof that a title does not exist.
 
 
