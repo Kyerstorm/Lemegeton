@@ -22,7 +22,6 @@ from helpers.embed_helper import build_error_embed, build_info_embed
 from helpers.anilist_helper import post_graphql
 from cogs_test.general_commands.dashboard import command_meta
 from helpers.tmdb_discovery import build_tmdb_discover_params
-from helpers.novelupdates_dataset import get_novelupdates_dataset_path, search_novelupdates_dataset
 
 logger = logging.getLogger("BrowseCog")
 GOOGLE_BOOKS_URL = "https://www.googleapis.com/books/v1/volumes"
@@ -410,47 +409,33 @@ async def search_novelupdates(
     max_http_urls: int = 2,
     require_genres: bool = False,
 ) -> List[Dict]:
-    """Cache successful Novel Updates searches briefly; never cache provider failures."""
+    """Search current Novel Updates pages and cache successful results briefly."""
     normalized = " ".join((query or "").split())
     if not normalized:
         return []
-    dataset_path = get_novelupdates_dataset_path()
-    key = (normalized.casefold(), bool(browser_fallback), max(1, min(int(max_http_urls), 3)), max(1, min(int(http_timeout), 10)), bool(require_genres), dataset_path or "")
+    key = (normalized.casefold(), bool(browser_fallback), max(1, min(int(max_http_urls), 3)), max(1, min(int(http_timeout), 10)), bool(require_genres))
     async with _NOVELUPDATES_CACHE_LOCK:
         cached = _NOVELUPDATES_SEARCH_CACHE.get(key)
         if cached and cached[0] > time.monotonic():
             return [dict(item) for item in cached[1]]
         key_lock = _NOVELUPDATES_KEY_LOCKS.setdefault(key, asyncio.Lock())
 
-    # Coalesce concurrent searches for the same title without serializing searches
-    # for unrelated titles.
     async with key_lock:
         async with _NOVELUPDATES_CACHE_LOCK:
             cached = _NOVELUPDATES_SEARCH_CACHE.get(key)
             if cached and cached[0] > time.monotonic():
                 return [dict(item) for item in cached[1]]
         try:
-            results: List[Dict] = []
-            if dataset_path:
-                try:
-                    results = await asyncio.to_thread(
-                        search_novelupdates_dataset, normalized, path=dataset_path,
-                        limit=10, require_genres=require_genres,
-                    )
-                except Exception:
-                    logger.warning("Local Novel Updates dataset search failed; trying the live provider", exc_info=True)
-            # The local catalog is fast and still searchable when Novel Updates blocks
-            # automation. Use the existing live scraper whenever the dataset is absent
-            # or does not match the query.
-            if not results:
-                async with _NOVELUPDATES_REQUEST_LIMIT:
-                    results = await _search_novelupdates_uncached(
-                        normalized,
-                        browser_fallback=browser_fallback,
-                        http_timeout=http_timeout,
-                        max_http_urls=max_http_urls,
-                        require_genres=require_genres,
-                    )
+            async with _NOVELUPDATES_REQUEST_LIMIT:
+                results = await _search_novelupdates_uncached(
+                    normalized,
+                    browser_fallback=browser_fallback,
+                    http_timeout=http_timeout,
+                    max_http_urls=max_http_urls,
+                    require_genres=require_genres,
+                )
+            for item in results:
+                item.setdefault("source", "Novel Updates")
             if results:
                 async with _NOVELUPDATES_CACHE_LOCK:
                     now = time.monotonic()
@@ -463,6 +448,241 @@ async def search_novelupdates(
             async with _NOVELUPDATES_CACHE_LOCK:
                 if _NOVELUPDATES_KEY_LOCKS.get(key) is key_lock:
                     _NOVELUPDATES_KEY_LOCKS.pop(key, None)
+
+
+_NOVELPHOENIX_BASE_URL = "https://novelphoenix.com"
+_NOVELPHOENIX_CACHE_TTL = 300
+_NOVELPHOENIX_SEARCH_CACHE: Dict[str, tuple[float, List[Dict]]] = {}
+_NOVELPHOENIX_CACHE_LOCK = asyncio.Lock()
+_NOVELPHOENIX_KEY_LOCKS: Dict[str, asyncio.Lock] = {}
+_NOVELPHOENIX_REQUEST_LIMIT = asyncio.Semaphore(1)
+_NOVELPHOENIX_EXCLUDED_CONTENT = re.compile(
+    r"\\b(?:adult|mature|smut|ecchi|hentai|erotica|erotic|nsfw|pornographic)\\b"
+    r"|\\b18\\s*\\+\\b|\\bexplicit\\s+content\\b",
+    re.IGNORECASE,
+)
+_NOVELPHOENIX_CARD_SELECTOR = (
+    ".novel-card, .novel-item, .book-item, .novel-list-item, .book-list-item, "
+    "article, [class*='novel-card'], [class*='novel-item'], [class*='book-card']"
+)
+
+
+def _novelphoenix_search_urls(query: str) -> List[str]:
+    """Build a small set of public Novel Phoenix search routes."""
+    query = " ".join((query or "").split())
+    if not query:
+        return []
+    term = quote_plus(query)
+    return [
+        f"{_NOVELPHOENIX_BASE_URL}/search?keyword={term}",
+        f"{_NOVELPHOENIX_BASE_URL}/search?q={term}",
+        f"{_NOVELPHOENIX_BASE_URL}/search-adv?keyword={term}",
+        f"{_NOVELPHOENIX_BASE_URL}/?s={term}",
+    ]
+
+
+def _novelphoenix_is_novel_url(url: str, base_url: str) -> bool:
+    """Accept only direct HTTPS novel pages from Novel Phoenix."""
+    target = urljoin(base_url, url or "")
+    parts = urlsplit(target)
+    host = (parts.hostname or "").lower().rstrip(".")
+    return (
+        parts.scheme == "https"
+        and (host == "novelphoenix.com" or host.endswith(".novelphoenix.com"))
+        and re.fullmatch(r"/novel/[^/]+/?", parts.path, re.IGNORECASE) is not None
+    )
+
+
+def _novelphoenix_results_from_helper(payload: Dict) -> List[Dict]:
+    """Normalize search links and matching cards from a public Novel Phoenix page."""
+    fields = payload.get("fields") or {}
+    cards = fields.get("cards") or []
+    if isinstance(cards, str):
+        cards = [cards]
+    card_texts = list(dict.fromkeys(" ".join(str(card).split()) for card in cards if str(card).strip()))
+    base_url = payload.get("url") or _NOVELPHOENIX_BASE_URL
+    results: List[Dict] = []
+    seen_urls = set()
+
+    for link in payload.get("links") or []:
+        href = str(link.get("url") or "").strip()
+        if not _novelphoenix_is_novel_url(href, base_url):
+            continue
+        url = urljoin(base_url, href).split("#", 1)[0]
+        normalized_url = url.rstrip("/").casefold()
+        if normalized_url in seen_urls:
+            continue
+        title = " ".join(str(link.get("text") or "").split())
+        if not title:
+            title = urlsplit(url).path.rstrip("/").split("/")[-1].replace("-", " ").replace("_", " ")
+        if not title:
+            continue
+
+        matching_cards = [
+            card for card in card_texts if title.casefold() in card.casefold()
+        ]
+        if not matching_cards:
+            # Fail closed when the result's card cannot be checked for its content rating.
+            continue
+        card_text = min(matching_cards, key=len)
+        if _NOVELPHOENIX_EXCLUDED_CONTENT.search(card_text):
+            continue
+
+        rating_match = re.search(r"(?<![\\d.])([0-5]\\.\\d{1,2})(?:\\s*/\\s*5)?(?!\\d)", card_text)
+        chapters_match = re.search(r"\\b([\\d,]+)\\s+chapters?\\b", card_text, re.IGNORECASE)
+        status_match = re.search(r"\\b(ongoing|completed|complete|hiatus|dropped)\\b", card_text, re.IGNORECASE)
+        known_genres = (
+            "Action", "Adventure", "Comedy", "Drama", "Fantasy", "Game", "Historical",
+            "Horror", "Isekai", "Martial Arts", "Mystery", "Psychological", "Romance",
+            "School Life", "Sci-fi", "Seinen", "Shoujo", "Shounen", "Slice of Life",
+            "Supernatural", "System", "Tragedy", "Wuxia", "Xianxia", "Xuanhuan",
+        )
+        genres = [genre for genre in known_genres if re.search(
+            rf"(?<![\\w]){re.escape(genre)}(?![\\w])", card_text, re.IGNORECASE
+        )]
+
+        results.append({
+            "title": title[:256],
+            "url": url,
+            "description": None,
+            "image": None,
+            "rating": rating_match.group(1) if rating_match else None,
+            "author": None,
+            "status": status_match.group(1).title() if status_match else None,
+            "chapters": chapters_match.group(1) if chapters_match else None,
+            "genres": genres,
+            "source": "Novel Phoenix",
+            "provider": "novelphoenix",
+        })
+        seen_urls.add(normalized_url)
+        if len(results) >= 10:
+            break
+
+    return results
+
+
+async def _search_novelphoenix_uncached(query: str, *, http_timeout: int = 7) -> List[Dict]:
+    """Scrape public Novel Phoenix search pages; stop on explicit access challenges."""
+    urls = _novelphoenix_search_urls(query)
+    selectors = {"cards": _NOVELPHOENIX_CARD_SELECTOR}
+    for url in urls:
+        try:
+            payload = await fetch_public_page(
+                url,
+                engine="http",
+                selectors=selectors,
+                include_text=False,
+                include_links=True,
+                link_selector="a[href*='/novel/']",
+                timeout=max(1, min(int(http_timeout), 10)),
+                retries=0,
+            )
+        except ScrapeBlockedError:
+            raise
+        except (ScrapeRequestError, ValueError) as exc:
+            logger.debug("Novel Phoenix HTTP search failed for %s: %s", url, exc)
+            continue
+        except Exception:
+            logger.exception("Unexpected Novel Phoenix scraper failure for %s", url)
+            continue
+        results = _novelphoenix_results_from_helper(payload)
+        if results:
+            logger.info("Novel Phoenix returned %s results for %r", len(results), query)
+            return results
+    return []
+
+
+async def search_novelphoenix(query: str, *, http_timeout: int = 7) -> List[Dict]:
+    """Search Novel Phoenix live, caching only successful searches."""
+    normalized = " ".join((query or "").split())
+    if not normalized:
+        return []
+    key = normalized.casefold()
+    async with _NOVELPHOENIX_CACHE_LOCK:
+        cached = _NOVELPHOENIX_SEARCH_CACHE.get(key)
+        if cached and cached[0] > time.monotonic():
+            return [dict(item) for item in cached[1]]
+        key_lock = _NOVELPHOENIX_KEY_LOCKS.setdefault(key, asyncio.Lock())
+
+    async with key_lock:
+        async with _NOVELPHOENIX_CACHE_LOCK:
+            cached = _NOVELPHOENIX_SEARCH_CACHE.get(key)
+            if cached and cached[0] > time.monotonic():
+                return [dict(item) for item in cached[1]]
+        try:
+            async with _NOVELPHOENIX_REQUEST_LIMIT:
+                results = await _search_novelphoenix_uncached(normalized, http_timeout=http_timeout)
+            if results:
+                async with _NOVELPHOENIX_CACHE_LOCK:
+                    now = time.monotonic()
+                    expired = [cache_key for cache_key, value in _NOVELPHOENIX_SEARCH_CACHE.items() if value[0] <= now]
+                    for cache_key in expired:
+                        _NOVELPHOENIX_SEARCH_CACHE.pop(cache_key, None)
+                    _NOVELPHOENIX_SEARCH_CACHE[key] = (now + _NOVELPHOENIX_CACHE_TTL, [dict(item) for item in results])
+            return results
+        finally:
+            async with _NOVELPHOENIX_CACHE_LOCK:
+                if _NOVELPHOENIX_KEY_LOCKS.get(key) is key_lock:
+                    _NOVELPHOENIX_KEY_LOCKS.pop(key, None)
+
+
+def _is_safe_webnovel_result(item: Dict) -> bool:
+    """Hide results explicitly tagged as adult or sexually explicit by a provider."""
+    content = " ".join(
+        str(item.get(key) or "")
+        for key in ("title", "description", "content_rating", "rating_label", "genres", "tags")
+    )
+    return _NOVELPHOENIX_EXCLUDED_CONTENT.search(content) is None
+
+
+async def search_webnovels(
+    query: str,
+    *,
+    browser_fallback: bool = True,
+    http_timeout: int = 7,
+    max_http_urls: int = 2,
+    require_genres: bool = False,
+) -> List[Dict]:
+    """Combine live results from Novel Updates and Novel Phoenix, preserving provider labels."""
+    normalized = " ".join((query or "").split())
+    if not normalized:
+        return []
+
+    responses = await asyncio.gather(
+        search_novelupdates(
+            normalized,
+            browser_fallback=browser_fallback,
+            http_timeout=http_timeout,
+            max_http_urls=max_http_urls,
+            require_genres=require_genres,
+        ),
+        search_novelphoenix(normalized, http_timeout=http_timeout),
+        return_exceptions=True,
+    )
+    failures = [result for result in responses if isinstance(result, Exception)]
+    successful_responses = [result for result in responses if not isinstance(result, Exception)]
+    combined: List[Dict] = []
+    seen_titles = set()
+
+    for response in successful_responses:
+        for item in response:
+            if not _is_safe_webnovel_result(item):
+                continue
+            if require_genres and not item.get("genres"):
+                continue
+            title_key = re.sub(r"[^a-z0-9]+", "", str(item.get("title") or "").casefold())
+            if not title_key or title_key in seen_titles:
+                continue
+            normalized_item = dict(item)
+            normalized_item.setdefault("source", "Novel Updates")
+            combined.append(normalized_item)
+            seen_titles.add(title_key)
+            if len(combined) >= 10:
+                return combined
+
+    if not combined and failures:
+        raise failures[0]
+    return combined
 
 
 # Status order priority
@@ -1664,11 +1884,11 @@ class BrowseCog(commands.Cog):
                 # Browser automation can hang on provider challenges; bound the wait so
                 # the deferred Discord interaction always receives a response.
                 results = await asyncio.wait_for(
-                    search_novelupdates(title),
+                    search_webnovels(title),
                     timeout=45,
                 )
             except ScrapeBlockedError as exc:
-                logger.warning("Novel Updates blocked the search for %r: %s", title, exc)
+                logger.warning("Webnovel providers blocked the search for %r: %s", title, exc)
                 embed = build_error_embed(
                     "Novel Updates Temporarily Unavailable",
                     "Novel Updates blocked or rate-limited automated access. Please try again later.",
@@ -1676,7 +1896,7 @@ class BrowseCog(commands.Cog):
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
             except asyncio.TimeoutError:
-                logger.warning("Novel Updates search timed out for %r", title)
+                logger.warning("Webnovel search timed out for %r", title)
                 embed = build_error_embed(
                     "Novel Updates Search Timed Out",
                     "Novel Updates took too long to respond. Please try again in a moment.",
@@ -1684,7 +1904,7 @@ class BrowseCog(commands.Cog):
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
             except Exception as e:
-                logger.warning("Novel Updates search failed for %r: %s", title, e, exc_info=True)
+                logger.warning("Webnovel search failed for %r: %s", title, e, exc_info=True)
                 embed = build_error_embed(
                     "Novel Updates Search Failed",
                     "The search service failed while reading Novel Updates. Please try again later.",
@@ -1703,7 +1923,7 @@ class BrowseCog(commands.Cog):
             if not results:
                 embed = build_error_embed(
                     "No Results Found",
-                    f"No webnovel results found on Novel Updates for {title!r} matching available metadata filters.",
+                    f"No webnovel results found across the live providers for {title!r} matching available metadata filters.",
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
@@ -1725,57 +1945,15 @@ class BrowseCog(commands.Cog):
                 embed.add_field(name="📌 Status", value=str(novel["status"])[:1024], inline=True)
             if novel.get("rating"):
                 embed.add_field(name="⭐ Rating", value=str(novel["rating"])[:1024], inline=True)
-            if novel.get("associated_names"):
-                embed.add_field(name="Alternative Titles", value=", ".join(str(value) for value in novel["associated_names"][:8])[:1024], inline=False)
             if novel.get("genres"):
-                genres = ", ".join(str(value) for value in novel["genres"])
-                embed.add_field(name="🎭 Genres", value=genres[:1024], inline=False)
-            if novel.get("tags"):
-                embed.add_field(name="🏷️ Tags", value=", ".join(str(value) for value in novel["tags"])[:1024], inline=False)
-            for key, label in (
-                ("novel_type", "📚 Novel Type"), ("original_language", "🌏 Original Language"),
-                ("start_year", "📅 Start Year"), ("release_frequency", "🔄 Translation Release Frequency"),
-            ):
-                if novel.get(key) not in (None, ""):
-                    embed.add_field(name=label, value=str(novel[key])[:1024], inline=True)
-            chapter_details = []
-            if novel.get("original_chapters") not in (None, ""):
-                chapter_details.append(f"Original: {novel['original_chapters']}")
-            if novel.get("translated_chapters") not in (None, ""):
-                chapter_details.append(f"Translated: {novel['translated_chapters']}")
-            if chapter_details:
-                embed.add_field(name="📖 Chapter Counts", value=" · ".join(chapter_details)[:1024], inline=True)
-            if novel.get("translation_completed") is not None:
-                completion = "Completed" if novel["translation_completed"] else "Ongoing / not marked complete"
-                embed.add_field(name="✅ Translation Status", value=completion, inline=True)
-            if novel.get("licensed") is not None:
-                embed.add_field(name="📜 English Licensing", value="Licensed" if novel["licensed"] else "Not marked licensed", inline=True)
-            for key, label in (
-                ("original_publisher", "Original Publisher"), ("english_publisher", "English Publisher"),
-            ):
-                if novel.get(key):
-                    embed.add_field(name=f"🏢 {label}", value=str(novel[key])[:1024], inline=True)
-            if novel.get("reading_lists") not in (None, ""):
-                embed.add_field(name="👥 Reading Lists", value=str(novel["reading_lists"])[:1024], inline=True)
-            ranks = [
-                f"{label}: {novel[key]}"
-                for key, label in (
-                    ("activity_weekly_rank", "Weekly activity"),
-                    ("activity_monthly_rank", "Monthly activity"),
-                    ("activity_all_time_rank", "All-time activity"),
-                ) if novel.get(key) not in (None, "")
-            ]
-            if ranks:
-                embed.add_field(name="📊 Activity Ranks", value=" · ".join(ranks)[:1024], inline=False)
-            for key, label in (("related_series", "🔗 Related Series"), ("recommended_series", "✨ Recommended Series")):
-                linked = novel.get(key) or []
-                links = [f"[{discord.utils.escape_markdown(str(item.get('title') or 'Untitled'))}]({item['url']})" for item in linked[:5] if item.get("url")]
-                if links:
-                    embed.add_field(name=label, value=" · ".join(links)[:1024], inline=False)
-            if novel.get("metadata_source") == "novel-dataset":
-                embed.set_footer(text=f"Source: shaido987/novel-dataset v{novel.get('dataset_version', 'unknown')} · Snapshot date {novel.get('metadata_as_of', 'unknown')} · A title link may open a Novel Updates search rather than an exact series page")
-            else:
-                embed.set_footer(text="Fetched from Novel Updates · Source metadata may be incomplete when the provider changes its page layout")
+                embed.add_field(name="🎭 Genres", value=", ".join(str(value) for value in novel["genres"])[:1024], inline=False)
+            if novel.get("chapters") not in (None, ""):
+                embed.add_field(name="📖 Chapters", value=str(novel["chapters"])[:1024], inline=True)
+            if novel.get("platform"):
+                embed.add_field(name="📍 Platform", value=str(novel["platform"])[:1024], inline=True)
+            embed.set_footer(
+                text=f"Source: {novel.get('source') or 'Live webnovel metadata'} · Only publicly available metadata is shown"
+            )
             await interaction.followup.send(embed=embed)
             return
 
