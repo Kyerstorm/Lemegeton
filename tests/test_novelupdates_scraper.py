@@ -8,7 +8,12 @@ from cogs.media.browse import (
     _novelupdates_parse_html,
     _novelupdates_results_from_helper,
     _novelupdates_search_urls,
+    _novelphoenix_results_from_helper,
+    _novelphoenix_search_urls,
+    _is_safe_webnovel_result,
     search_novelupdates,
+    search_webnovels,
+    _NOVELPHOENIX_SEARCH_CACHE,
 )
 
 
@@ -147,6 +152,66 @@ class NovelUpdatesSearchCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first, result)
         self.assertEqual(second, result)
         search.assert_awaited_once()
+
+
+class NovelPhoenixParserTests(unittest.TestCase):
+    def test_parses_safe_cards_and_excludes_adult_rated_cards(self):
+        payload = {
+            "url": "https://novelphoenix.com/search?keyword=chronicle",
+            "links": [
+                {"text": "The Safe Chronicle", "url": "https://novelphoenix.com/novel/the-safe-chronicle/"},
+                {"text": "Hidden Garden", "url": "https://novelphoenix.com/novel/hidden-garden/"},
+                {"text": "Unclassified Result", "url": "https://novelphoenix.com/novel/unclassified/"},
+                {"text": "Review Page", "url": "https://novelphoenix.com/novel/the-safe-chronicle/reviews"},
+                {"text": "Off-site", "url": "https://example.com/novel/off-site/"},
+            ],
+            "fields": {
+                "cards": [
+                    "The Safe Chronicle Fantasy Adventure 120 Chapters 4.7 Ongoing",
+                    "Hidden Garden Adult Romance 200 Chapters 4.5",
+                ]
+            },
+        }
+        results = _novelphoenix_results_from_helper(payload)
+        self.assertEqual([item["title"] for item in results], ["The Safe Chronicle"])
+        self.assertEqual(results[0]["source"], "Novel Phoenix")
+        self.assertEqual(results[0]["chapters"], "120")
+        self.assertEqual(results[0]["rating"], "4.7")
+        self.assertIn("Fantasy", results[0]["genres"])
+
+    def test_search_urls_encode_query_and_empty_queries_short_circuit(self):
+        urls = _novelphoenix_search_urls("A Novel & More")
+        self.assertTrue(urls)
+        self.assertIn("A+Novel+%26+More", urls[0])
+        self.assertEqual(_novelphoenix_search_urls("   "), [])
+
+    def test_safe_webnovel_filter_rejects_explicitly_flagged_content(self):
+        self.assertTrue(_is_safe_webnovel_result({"title": "Safe Chronicle", "genres": ["Fantasy"]}))
+        self.assertFalse(_is_safe_webnovel_result({"title": "Hidden Garden", "genres": ["Adult", "Romance"]}))
+        self.assertFalse(_is_safe_webnovel_result({"title": "Another Story", "tags": ["Smut"]}))
+
+
+class CombinedWebnovelSearchTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        _NOVELUPDATES_SEARCH_CACHE.clear()
+        _NOVELPHOENIX_SEARCH_CACHE.clear()
+
+    async def test_merges_live_providers_deduplicates_titles_and_filters_flagged_results(self):
+        updates_results = [
+            {"title": "Shared Chronicle", "url": "https://www.novelupdates.com/series/shared/", "genres": ["Fantasy"]},
+            {"title": "Hidden Garden", "url": "https://www.novelupdates.com/series/hidden/", "genres": ["Smut"]},
+        ]
+        phoenix_results = [
+            {"title": "shared chronicle", "url": "https://novelphoenix.com/novel/shared-chronicle/", "source": "Novel Phoenix"},
+            {"title": "Phoenix Chronicle", "url": "https://novelphoenix.com/novel/phoenix-chronicle/", "source": "Novel Phoenix"},
+        ]
+        with patch("cogs.media.browse.search_novelupdates", new=AsyncMock(return_value=updates_results)), patch(
+            "cogs.media.browse.search_novelphoenix", new=AsyncMock(return_value=phoenix_results)
+        ):
+            results = await search_webnovels("Chronicle")
+        self.assertEqual([item["title"] for item in results], ["Shared Chronicle", "Phoenix Chronicle"])
+        self.assertEqual(results[0]["source"], "Novel Updates")
+        self.assertEqual(results[1]["source"], "Novel Phoenix")
 
 
 if __name__ == "__main__":
