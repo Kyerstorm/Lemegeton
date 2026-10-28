@@ -247,7 +247,7 @@ class HelpCog(commands.Cog):
                     "examples": ["/author-works Ursula K. Le Guin"]
                 },
                 "webnovel-updates": {
-                    "desc": "Search the optional Novel Updates dataset for chapter/release statistics and relationships, then fall back to live scraping",
+                    "desc": "Search live Novel Updates and Novel Phoenix pages for webnovel metadata",
                     "usage": "/webnovel-updates <title>",
                     "note": "Set NOVELUPDATES_DATASET_PATH to a local upstream CSV/JSON file for fast indexed lookup. The v0.1.5 snapshot is dated 2025-08-21; misses fall back to live scraping, and snapshot metadata can be stale.",
                     "examples": ["/webnovel-updates Lord of the Mysteries"]
@@ -883,7 +883,7 @@ class HelpCog(commands.Cog):
                 ),
                 (
                     "◇ Metadata providers",
-                    "AniList supplies supported anime/manga metadata and relationships; TMDB supplies movie/TV information, credits, videos, collections, and region availability; Google Books supplies book/author records; Novel Updates uses the existing scraper helper; IGDB supplies game metadata, with Steam used for optional store enrichment.",
+                    "AniList supplies supported anime/manga metadata and relationships; TMDB supplies movie/TV information, credits, videos, collections, and region availability; Google Books supplies book/author records; live Novel Updates and Novel Phoenix search provide webnovel metadata; IGDB supplies game metadata, with Steam used for optional store enrichment.",
                 ),
                 (
                     "◇ Relationship graph",
@@ -1014,7 +1014,7 @@ class HelpCog(commands.Cog):
             ),
             "books": (
                 "• /author-works searches Google Books by author\n"
-                "• /webnovel-updates uses the optional local catalog first and falls back to live Novel Updates search\n"
+                "• /webnovel-updates searches live Novel Updates and Novel Phoenix metadata; adult-rated entries are filtered\n"
                 "• The /reading menu shows available release relationships, not assumed story chronology\n"
                 "• Use /discussion and add a clear chapter/volume or episode cutoff"
             ),
