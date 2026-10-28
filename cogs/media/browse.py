@@ -487,8 +487,8 @@ def _novelphoenix_search_urls(query: str) -> List[str]:
         return []
     term = quote_plus(query)
     return [
-        f"{_NOVELPHOENIX_BASE_URL}/search-adv?keyword={term}",
         f"{_NOVELPHOENIX_BASE_URL}/search?keyword={term}",
+        f"{_NOVELPHOENIX_BASE_URL}/search-adv?keyword={term}",
         f"{_NOVELPHOENIX_BASE_URL}/search?q={term}",
         f"{_NOVELPHOENIX_BASE_URL}/?s={term}",
     ]
@@ -575,7 +575,7 @@ def _novelphoenix_results_from_helper(payload: Dict) -> List[Dict]:
 
 
 async def _search_novelphoenix_uncached(
-    query: str, *, http_timeout: int = 7, max_urls: int = 4
+    query: str, *, http_timeout: int = 7, max_urls: int = 4, browser_fallback: bool = True
 ) -> List[Dict]:
     """Scrape public Novel Phoenix search pages; stop on explicit access challenges."""
     urls = _novelphoenix_search_urls(query)
@@ -605,17 +605,41 @@ async def _search_novelphoenix_uncached(
             results = await _enrich_aggregator_results(results, provider="novelphoenix")
             logger.info("Novel Phoenix returned %s results for %r", len(results), query)
             return results
+
+    if browser_fallback and urls:
+        try:
+            payload = await fetch_public_page(
+                urls[0],
+                engine="browser",
+                selectors=selectors,
+                include_text=False,
+                include_links=True,
+                link_selector="a[href*='/novel/']",
+                timeout=max(1, min(int(http_timeout), 10)),
+                retries=0,
+            )
+        except ScrapeBlockedError:
+            raise
+        except (ScrapeRequestError, ValueError) as exc:
+            logger.debug("Novel Phoenix browser fallback failed for %s: %s", urls[0], exc)
+        except Exception:
+            logger.debug("Unexpected Novel Phoenix browser fallback failure", exc_info=True)
+        else:
+            results = _novelphoenix_results_from_helper(payload)
+            if results:
+                results = await _enrich_aggregator_results(results, provider="novelphoenix")
+                return results
     return []
 
 
 async def search_novelphoenix(
-    query: str, *, http_timeout: int = 7, max_urls: int = 4
+    query: str, *, http_timeout: int = 7, max_urls: int = 4, browser_fallback: bool = True
 ) -> List[Dict]:
     """Search Novel Phoenix live, caching only successful searches."""
     normalized = " ".join((query or "").split())
     if not normalized:
         return []
-    key = (normalized.casefold(), max(1, min(int(max_urls), 4)))
+    key = (normalized.casefold(), bool(browser_fallback), max(1, min(int(max_urls), 4)))
     async with _NOVELPHOENIX_CACHE_LOCK:
         cached = _NOVELPHOENIX_SEARCH_CACHE.get(key)
         if cached and cached[0] > time.monotonic():
@@ -629,7 +653,9 @@ async def search_novelphoenix(
                 return [dict(item) for item in cached[1]]
         try:
             async with _NOVELPHOENIX_REQUEST_LIMIT:
-                results = await _search_novelphoenix_uncached(normalized, http_timeout=http_timeout, max_urls=key[1])
+                results = await _search_novelphoenix_uncached(
+                    normalized, http_timeout=http_timeout, max_urls=key[2], browser_fallback=browser_fallback
+                )
             if results:
                 async with _NOVELPHOENIX_CACHE_LOCK:
                     now = time.monotonic()
@@ -917,7 +943,7 @@ async def _enrich_aggregator_results(results: List[Dict], *, provider: str) -> L
 
 
 async def _search_novelfire_uncached(
-    query: str, *, http_timeout: int = 7, max_urls: int = 3
+    query: str, *, http_timeout: int = 7, max_urls: int = 3, browser_fallback: bool = True
 ) -> List[Dict]:
     """Fetch public NovelFire search pages; stop immediately on an access challenge."""
     urls = _novelfire_search_urls(query)
@@ -947,17 +973,41 @@ async def _search_novelfire_uncached(
             results = await _enrich_aggregator_results(results, provider="novelfire")
             logger.info("NovelFire returned %s results for %r", len(results), query)
             return results
+
+    if browser_fallback and urls:
+        try:
+            payload = await fetch_public_page(
+                urls[0],
+                engine="browser",
+                selectors=selectors,
+                include_text=False,
+                include_links=True,
+                link_selector="a[href*='/book/']",
+                timeout=max(1, min(int(http_timeout), 10)),
+                retries=0,
+            )
+        except ScrapeBlockedError:
+            raise
+        except (ScrapeRequestError, ValueError) as exc:
+            logger.debug("NovelFire browser fallback failed for %s: %s", urls[0], exc)
+        except Exception:
+            logger.debug("Unexpected NovelFire browser fallback failure", exc_info=True)
+        else:
+            results = _novelfire_results_from_helper(payload)
+            if results:
+                results = await _enrich_aggregator_results(results, provider="novelfire")
+                return results
     return []
 
 
 async def search_novelfire(
-    query: str, *, http_timeout: int = 7, max_urls: int = 3
+    query: str, *, http_timeout: int = 7, max_urls: int = 3, browser_fallback: bool = True
 ) -> List[Dict]:
     """Search NovelFire live and cache successful results briefly."""
     normalized = " ".join((query or "").split())
     if not normalized:
         return []
-    key = (normalized.casefold(), max(1, min(int(max_urls), 3)))
+    key = (normalized.casefold(), bool(browser_fallback), max(1, min(int(max_urls), 3)))
     async with _NOVELFIRE_CACHE_LOCK:
         cached = _NOVELFIRE_SEARCH_CACHE.get(key)
         if cached and cached[0] > time.monotonic():
@@ -972,7 +1022,7 @@ async def search_novelfire(
         try:
             async with _NOVELFIRE_REQUEST_LIMIT:
                 results = await _search_novelfire_uncached(
-                    normalized, http_timeout=http_timeout, max_urls=key[1]
+                    normalized, http_timeout=http_timeout, max_urls=key[2], browser_fallback=browser_fallback
                 )
             for item in results:
                 item.setdefault("source", "NovelFire")
@@ -1108,7 +1158,7 @@ def _novelist_results_from_helper(payload: Dict) -> List[Dict]:
 
 
 async def _search_novelist_uncached(
-    query: str, *, http_timeout: int = 7, max_urls: int = 6
+    query: str, *, http_timeout: int = 7, max_urls: int = 6, browser_fallback: bool = True
 ) -> List[Dict]:
     """Fetch public Novelist search/listing pages without attempting to bypass access controls."""
     urls = _novelist_search_urls(query, max_urls=max_urls)
@@ -1153,17 +1203,49 @@ async def _search_novelist_uncached(
         if results:
             logger.info("Novelist returned %s results for %r", len(results), query)
             return results
+
+    if browser_fallback:
+        fallback_url = next(
+            (candidate for candidate in urls if (urlsplit(candidate).hostname or "").lower() not in closed_catalog_hosts),
+            None,
+        )
+        if fallback_url:
+            try:
+                payload = await fetch_public_page(
+                    fallback_url,
+                    engine="browser",
+                    selectors=selectors,
+                    include_text=True,
+                    include_links=True,
+                    link_selector="a[href]",
+                    timeout=max(1, min(int(http_timeout), 10)),
+                    retries=0,
+                )
+            except ScrapeBlockedError:
+                raise
+            except (ScrapeRequestError, ValueError) as exc:
+                logger.debug("Novelist browser fallback failed for %s: %s", fallback_url, exc)
+            except Exception:
+                logger.debug("Unexpected Novelist browser fallback failure", exc_info=True)
+            else:
+                page_text = str(payload.get("text") or "").casefold()
+                if "stories are coming soon" in page_text or "public catalog will open once" in page_text:
+                    return []
+                results = _novelist_results_from_helper(payload)
+                if results:
+                    logger.info("Novelist browser search returned %s results for %r", len(results), query)
+                    return results
     return []
 
 
 async def search_novelist(
-    query: str, *, http_timeout: int = 7, max_urls: int = 6
+    query: str, *, http_timeout: int = 7, max_urls: int = 6, browser_fallback: bool = True
 ) -> List[Dict]:
     """Search Novelist's public story discovery routes, caching successful results briefly."""
     normalized = " ".join((query or "").split())
     if not normalized:
         return []
-    key = (normalized.casefold(), max(1, min(int(max_urls), 6)))
+    key = (normalized.casefold(), bool(browser_fallback), max(1, min(int(max_urls), 6)))
     async with _NOVELIST_CACHE_LOCK:
         cached = _NOVELIST_SEARCH_CACHE.get(key)
         if cached and cached[0] > time.monotonic():
@@ -1178,7 +1260,7 @@ async def search_novelist(
         try:
             async with _NOVELIST_REQUEST_LIMIT:
                 results = await _search_novelist_uncached(
-                    normalized, http_timeout=http_timeout, max_urls=key[1]
+                    normalized, http_timeout=http_timeout, max_urls=key[2], browser_fallback=browser_fallback
                 )
             for item in results:
                 item.setdefault("source", "Novelist")
@@ -1232,14 +1314,17 @@ async def search_webnovels(
         search_novelphoenix(
             normalized, http_timeout=http_timeout,
             max_urls=4 if browser_fallback else max(1, min(int(max_http_urls), 4)),
+            browser_fallback=browser_fallback,
         ),
         search_novelfire(
             normalized, http_timeout=http_timeout,
             max_urls=3 if browser_fallback else max(1, min(int(max_http_urls), 3)),
+            browser_fallback=browser_fallback,
         ),
         search_novelist(
             normalized, http_timeout=http_timeout,
             max_urls=6 if browser_fallback else max(1, min(int(max_http_urls), 6)),
+            browser_fallback=browser_fallback,
         ),
     ]
     responses = await asyncio.gather(*provider_calls, return_exceptions=True)
