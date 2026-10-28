@@ -602,6 +602,7 @@ async def _search_novelphoenix_uncached(
             continue
         results = _novelphoenix_results_from_helper(payload)
         if results:
+            results = await _enrich_aggregator_results(results, provider="novelphoenix")
             logger.info("Novel Phoenix returned %s results for %r", len(results), query)
             return results
     return []
@@ -656,7 +657,7 @@ _NOVELFIRE_CARD_SELECTOR = (
     "[class*='book-card'], article"
 )
 
-_NOVELIST_BASE_URLS = ("https://novelist.info", "https://novelist.ws")
+_NOVELIST_BASE_URLS = ("https://novelist.ws", "https://novelist.info")
 _NOVELIST_CACHE_TTL = 300
 _NOVELIST_SEARCH_CACHE: Dict[tuple, tuple[float, List[Dict]]] = {}
 _NOVELIST_CACHE_LOCK = asyncio.Lock()
@@ -768,6 +769,153 @@ def _novelfire_results_from_helper(payload: Dict) -> List[Dict]:
     return results
 
 
+_WEBNOVEL_DETAIL_REQUEST_LIMIT = asyncio.Semaphore(2)
+
+
+def _first_scraper_text(value) -> str:
+    """Return the first non-empty text value from a scraper-helper field."""
+    if isinstance(value, (tuple, list)):
+        return next((" ".join(str(item).split()) for item in value if str(item).strip()), "")
+    return " ".join(str(value or "").split())
+
+
+async def _enrich_aggregator_detail(
+    item: Dict, *, provider: str, http_timeout: int = 5
+) -> Optional[Dict]:
+    """Enrich an aggregator search card from its linked public novel page.
+
+    Detail-page failures leave the search-card result intact. Access challenges
+    are respected and never retried through a different engine.
+    """
+    url = str(item.get("url") or "")
+    if provider == "novelfire":
+        if not _novelfire_is_book_url(url, url):
+            return item
+        selectors = {
+            "detail_title": "h1.novel-title, .novel-title, h1",
+            "authors": ".author .property-item > span, .author a, [itemprop='author'], .novel-author",
+            "synopsis": ".summary .content, .summary, .description, .novel-description",
+            "stats": ".header-stats span",
+            "rating": ".nub, .rating, [itemprop='ratingValue']",
+            "genres": ".categories a, .genre a, .tags a",
+        }
+    elif provider == "novelphoenix":
+        if not _novelphoenix_is_novel_url(url, url):
+            return item
+        selectors = {
+            "detail_title": "h1.novel-title, .novel-title, h1",
+            "authors": ".author .property-item > span, .author a, [itemprop='author'], .novel-author",
+            "synopsis": ".summary .content, .summary, .description, .novel-description",
+            "stats": ".header-stats span",
+            "rating": ".nub, .rating, [itemprop='ratingValue']",
+            "genres": ".categories a, .genre a, .tags a",
+        }
+    else:
+        return item
+
+    try:
+        async with _WEBNOVEL_DETAIL_REQUEST_LIMIT:
+            payload = await fetch_public_page(
+                url,
+                engine="http",
+                selectors=selectors,
+                include_text=False,
+                include_links=False,
+                timeout=max(1, min(int(http_timeout), 8)),
+                retries=0,
+            )
+    except (ScrapeBlockedError, ScrapeRequestError, ValueError):
+        return item
+    except Exception:
+        logger.debug("Could not enrich %s detail page %s", provider, url, exc_info=True)
+        return item
+
+    fields = payload.get("fields") or {}
+    enriched = dict(item)
+    title = _first_scraper_text(fields.get("detail_title"))
+    authors = _first_scraper_text(fields.get("authors"))
+    synopsis = _first_scraper_text(fields.get("synopsis")) or str(payload.get("description") or "").strip()
+    stats = fields.get("stats") or []
+    if isinstance(stats, str):
+        stats = [stats]
+    stats_text = " ".join(str(value) for value in stats if value)
+    genres_raw = fields.get("genres") or []
+    if isinstance(genres_raw, str):
+        genres_raw = [genres_raw]
+    genres = []
+    for genre in genres_raw:
+        value = " ".join(str(genre).split())
+        if value and value.casefold() not in {existing.casefold() for existing in genres}:
+            genres.append(value)
+
+    if title and len(title) < 256:
+        enriched["title"] = title
+    if authors:
+        enriched["author"] = authors[:160]
+    if synopsis:
+        synopsis = re.sub(
+            r"^(?:summary|description|synopsis)\s*[:\-]?\s*", "", synopsis, flags=re.IGNORECASE
+        ).strip()
+        synopsis = re.sub(
+            r"\s*(?:show more|show less|read more|\.{3}more)\s*$", "", synopsis, flags=re.IGNORECASE
+        ).strip()
+        if synopsis:
+            enriched["description"] = synopsis[:3000]
+    if genres:
+        enriched["genres"] = genres[:20]
+
+    rating_text = _first_scraper_text(fields.get("rating"))
+    rating_match = re.search(r"(?<![\d.])([0-5](?:\.\d{1,2})?)(?!\d)", rating_text)
+    if rating_match:
+        try:
+            if 0 <= float(rating_match.group(1)) <= 5:
+                enriched["rating"] = rating_match.group(1)
+        except ValueError:
+            pass
+
+    chapters_match = re.search(r"\b([\d,]+)\s+chapters?\b", stats_text, re.IGNORECASE)
+    if chapters_match:
+        enriched["chapters"] = chapters_match.group(1).replace(",", "")
+    status_match = re.search(
+        r"\b(ongoing|completed|complete|hiatus|on hold|dropped|cancelled|canceled)\b",
+        stats_text, re.IGNORECASE,
+    )
+    if status_match:
+        raw_status = status_match.group(1).casefold()
+        enriched["status"] = (
+            "Completed" if raw_status in {"complete", "completed"}
+            else "Hiatus" if raw_status in {"hiatus", "on hold"}
+            else "Dropped" if raw_status in {"dropped", "cancelled", "canceled"}
+            else "Ongoing"
+        )
+
+    if not _is_safe_webnovel_result(enriched):
+        return None
+    return enriched
+
+
+async def _enrich_aggregator_results(results: List[Dict], *, provider: str) -> List[Dict]:
+    """Fetch a bounded number of detail pages without discarding search-only matches."""
+    if not results:
+        return []
+    tasks = [
+        _enrich_aggregator_detail(item, provider=provider)
+        for item in results[:3]
+    ]
+    details = await asyncio.gather(*tasks, return_exceptions=True)
+    normalized = []
+    for index, item in enumerate(results):
+        if index < len(details):
+            detail = details[index]
+            if isinstance(detail, Exception):
+                normalized.append(item)
+            elif detail is not None:
+                normalized.append(detail)
+        else:
+            normalized.append(item)
+    return normalized
+
+
 async def _search_novelfire_uncached(
     query: str, *, http_timeout: int = 7, max_urls: int = 3
 ) -> List[Dict]:
@@ -796,6 +944,7 @@ async def _search_novelfire_uncached(
             continue
         results = _novelfire_results_from_helper(payload)
         if results:
+            results = await _enrich_aggregator_results(results, provider="novelfire")
             logger.info("NovelFire returned %s results for %r", len(results), query)
             return results
     return []
@@ -844,18 +993,18 @@ async def search_novelfire(
                     _NOVELFIRE_KEY_LOCKS.pop(key, None)
 
 
-def _novelist_search_urls(query: str, *, max_urls: int = 4) -> List[str]:
-    """Build public Novelist story-search routes using the platform's visible hosts."""
+def _novelist_search_urls(query: str, *, max_urls: int = 6) -> List[str]:
+    """Try public Novelist discovery first, then its documented search-like routes."""
     normalized = " ".join((query or "").split())
     if not normalized:
         return []
     term = quote_plus(normalized)
-    urls = []
-    for base_url in _NOVELIST_BASE_URLS:
-        urls.extend([
-            f"{base_url}/stories?search={term}",
-            f"{base_url}/stories?q={term}",
-        ])
+    urls = [f"{base_url}/stories" for base_url in _NOVELIST_BASE_URLS]
+    for parameter in ("search", "q"):
+        urls.extend(
+            f"{base_url}/stories?{parameter}={term}"
+            for base_url in _NOVELIST_BASE_URLS
+        )
     return urls[:max(1, min(int(max_urls), len(urls)))]
 
 
@@ -952,23 +1101,24 @@ def _novelist_results_from_helper(payload: Dict) -> List[Dict]:
 
 
 async def _search_novelist_uncached(
-    query: str, *, http_timeout: int = 7, max_urls: int = 4
+    query: str, *, http_timeout: int = 7, max_urls: int = 6
 ) -> List[Dict]:
     """Fetch public Novelist search/listing pages without attempting to bypass access controls."""
     urls = _novelist_search_urls(query, max_urls=max_urls)
     selectors = {"cards": _NOVELIST_CARD_SELECTOR}
+    closed_catalog_hosts = set()
     for url in urls:
+        host = (urlsplit(url).hostname or "").lower()
+        if host in closed_catalog_hosts:
+            continue
         try:
             payload = await fetch_public_page(
                 url,
                 engine="http",
                 selectors=selectors,
-                include_text=False,
+                include_text=True,
                 include_links=True,
-                link_selector=(
-                    "a[href*='/stories/'], a[href*='/story/'], "
-                    "a[href*='/series/'], article a[href]"
-                ),
+                link_selector="a[href]",
                 timeout=max(1, min(int(http_timeout), 10)),
                 retries=0,
             )
@@ -980,6 +1130,18 @@ async def _search_novelist_uncached(
         except Exception:
             logger.exception("Unexpected Novelist scraper failure for %s", url)
             continue
+
+        page_text = str(payload.get("text") or "").casefold()
+        if (
+            "stories are coming soon" in page_text
+            or "public catalog will open once" in page_text
+        ):
+            closed_catalog_hosts.add(host)
+            logger.info("Novelist public story catalogue is not open at %s", host)
+            if len(closed_catalog_hosts) >= len(_NOVELIST_BASE_URLS):
+                return []
+            continue
+
         results = _novelist_results_from_helper(payload)
         if results:
             logger.info("Novelist returned %s results for %r", len(results), query)
@@ -988,13 +1150,13 @@ async def _search_novelist_uncached(
 
 
 async def search_novelist(
-    query: str, *, http_timeout: int = 7, max_urls: int = 4
+    query: str, *, http_timeout: int = 7, max_urls: int = 6
 ) -> List[Dict]:
     """Search Novelist's public story discovery routes, caching successful results briefly."""
     normalized = " ".join((query or "").split())
     if not normalized:
         return []
-    key = (normalized.casefold(), max(1, min(int(max_urls), 4)))
+    key = (normalized.casefold(), max(1, min(int(max_urls), 6)))
     async with _NOVELIST_CACHE_LOCK:
         cached = _NOVELIST_SEARCH_CACHE.get(key)
         if cached and cached[0] > time.monotonic():
