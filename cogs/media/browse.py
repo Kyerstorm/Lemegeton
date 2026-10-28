@@ -487,9 +487,9 @@ def _novelphoenix_search_urls(query: str) -> List[str]:
         return []
     term = quote_plus(query)
     return [
+        f"{_NOVELPHOENIX_BASE_URL}/search-adv?keyword={term}",
         f"{_NOVELPHOENIX_BASE_URL}/search?keyword={term}",
         f"{_NOVELPHOENIX_BASE_URL}/search?q={term}",
-        f"{_NOVELPHOENIX_BASE_URL}/search-adv?keyword={term}",
         f"{_NOVELPHOENIX_BASE_URL}/?s={term}",
     ]
 
