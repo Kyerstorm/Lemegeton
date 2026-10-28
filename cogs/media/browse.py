@@ -22,6 +22,7 @@ from helpers.embed_helper import build_error_embed, build_info_embed
 from helpers.anilist_helper import post_graphql
 from cogs_test.general_commands.dashboard import command_meta
 from helpers.tmdb_discovery import build_tmdb_discover_params
+from helpers.novelupdates_dataset import get_novelupdates_dataset_path, search_novelupdates_dataset
 
 logger = logging.getLogger("BrowseCog")
 GOOGLE_BOOKS_URL = "https://www.googleapis.com/books/v1/volumes"
@@ -413,7 +414,8 @@ async def search_novelupdates(
     normalized = " ".join((query or "").split())
     if not normalized:
         return []
-    key = (normalized.casefold(), bool(browser_fallback), max(1, min(int(max_http_urls), 3)), max(1, min(int(http_timeout), 10)), bool(require_genres))
+    dataset_path = get_novelupdates_dataset_path()
+    key = (normalized.casefold(), bool(browser_fallback), max(1, min(int(max_http_urls), 3)), max(1, min(int(http_timeout), 10)), bool(require_genres), dataset_path or "")
     async with _NOVELUPDATES_CACHE_LOCK:
         cached = _NOVELUPDATES_SEARCH_CACHE.get(key)
         if cached and cached[0] > time.monotonic():
@@ -428,14 +430,27 @@ async def search_novelupdates(
             if cached and cached[0] > time.monotonic():
                 return [dict(item) for item in cached[1]]
         try:
-            async with _NOVELUPDATES_REQUEST_LIMIT:
-                results = await _search_novelupdates_uncached(
-                    normalized,
-                    browser_fallback=browser_fallback,
-                    http_timeout=http_timeout,
-                    max_http_urls=max_http_urls,
-                    require_genres=require_genres,
-                )
+            results: List[Dict] = []
+            if dataset_path:
+                try:
+                    results = await asyncio.to_thread(
+                        search_novelupdates_dataset, normalized, path=dataset_path,
+                        limit=10, require_genres=require_genres,
+                    )
+                except Exception:
+                    logger.warning("Local Novel Updates dataset search failed; trying the live provider", exc_info=True)
+            # The local catalog is fast and still searchable when Novel Updates blocks
+            # automation. Use the existing live scraper whenever the dataset is absent
+            # or does not match the query.
+            if not results:
+                async with _NOVELUPDATES_REQUEST_LIMIT:
+                    results = await _search_novelupdates_uncached(
+                        normalized,
+                        browser_fallback=browser_fallback,
+                        http_timeout=http_timeout,
+                        max_http_urls=max_http_urls,
+                        require_genres=require_genres,
+                    )
             if results:
                 async with _NOVELUPDATES_CACHE_LOCK:
                     now = time.monotonic()
@@ -1713,7 +1728,52 @@ class BrowseCog(commands.Cog):
             if novel.get("genres"):
                 genres = ", ".join(str(value) for value in novel["genres"])
                 embed.add_field(name="🎭 Genres", value=genres[:1024], inline=False)
-            embed.set_footer(text="Fetched from Novel Updates · Source metadata may be incomplete when the provider changes its page layout")
+            if novel.get("tags"):
+                embed.add_field(name="🏷️ Tags", value=", ".join(str(value) for value in novel["tags"])[:1024], inline=False)
+            for key, label in (
+                ("novel_type", "📚 Novel Type"), ("original_language", "🌏 Original Language"),
+                ("start_year", "📅 Start Year"), ("release_frequency", "🔄 Translation Release Frequency"),
+            ):
+                if novel.get(key) not in (None, ""):
+                    embed.add_field(name=label, value=str(novel[key])[:1024], inline=True)
+            chapter_details = []
+            if novel.get("original_chapters") not in (None, ""):
+                chapter_details.append(f"Original: {novel['original_chapters']}")
+            if novel.get("translated_chapters") not in (None, ""):
+                chapter_details.append(f"Translated: {novel['translated_chapters']}")
+            if chapter_details:
+                embed.add_field(name="📖 Chapter Counts", value=" · ".join(chapter_details)[:1024], inline=True)
+            if novel.get("translation_completed") is not None:
+                completion = "Completed" if novel["translation_completed"] else "Ongoing / not marked complete"
+                embed.add_field(name="✅ Translation Status", value=completion, inline=True)
+            if novel.get("licensed") is not None:
+                embed.add_field(name="📜 English Licensing", value="Licensed" if novel["licensed"] else "Not marked licensed", inline=True)
+            for key, label in (
+                ("original_publisher", "Original Publisher"), ("english_publisher", "English Publisher"),
+            ):
+                if novel.get(key):
+                    embed.add_field(name=f"🏢 {label}", value=str(novel[key])[:1024], inline=True)
+            if novel.get("reading_lists") not in (None, ""):
+                embed.add_field(name="👥 Reading Lists", value=str(novel["reading_lists"])[:1024], inline=True)
+            ranks = [
+                f"{label}: {novel[key]}"
+                for key, label in (
+                    ("activity_weekly_rank", "Weekly activity"),
+                    ("activity_monthly_rank", "Monthly activity"),
+                    ("activity_all_time_rank", "All-time activity"),
+                ) if novel.get(key) not in (None, "")
+            ]
+            if ranks:
+                embed.add_field(name="📊 Activity Ranks", value=" · ".join(ranks)[:1024], inline=False)
+            for key, label in (("related_series", "🔗 Related Series"), ("recommended_series", "✨ Recommended Series")):
+                linked = novel.get(key) or []
+                links = [f"[{discord.utils.escape_markdown(str(item.get('title') or 'Untitled'))}]({item['url']})" for item in linked[:5] if item.get("url")]
+                if links:
+                    embed.add_field(name=label, value=" · ".join(links)[:1024], inline=False)
+            if novel.get("metadata_source") == "novel-dataset":
+                embed.set_footer(text=f"Source: shaido987/novel-dataset · Snapshot date {novel.get('metadata_as_of', 'unknown')} · A title link may open a Novel Updates search rather than an exact series page")
+            else:
+                embed.set_footer(text="Fetched from Novel Updates · Source metadata may be incomplete when the provider changes its page layout")
             await interaction.followup.send(embed=embed)
             return
 
