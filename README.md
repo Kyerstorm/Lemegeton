@@ -287,7 +287,7 @@ TMDB-powered features require TMDB_BEARER_TOKEN. Availability data changes, and 
 | **/webnovel-updates** | Search live Novel Updates, Novel Phoenix, NovelFire, and Novelist pages for current public webnovel metadata. |
 | **/reading** | Open the unified Reading Hub for nominations, votes, selection, scheduled discussions, and reading order. |
 
-Live webnovel search combines public metadata from Novel Updates, Novel Phoenix, NovelFire, and Novelist. Each provider is parsed independently, so a failure at one source does not discard the others. Results depend on the sites’ current page structures and availability; an empty response is not necessarily proof that a title does not exist.
+Live webnovel search combines public metadata from Novel Updates, Novel Phoenix, NovelFire, and Novelist. Each provider is parsed independently, so a failure at one source does not discard the others. Results depend on the sites’ current page structures and availability; an empty response is not necessarily proof that a title does not exist. Novelist’s central public catalogue currently says stories are coming soon; its adapter checks public discovery routes and uses a normal browser-rendered fallback when available, but it cannot return catalog results until Novelist opens public discovery.
 
 Results explicitly marked adult-rated or sexually explicit are excluded.
 
