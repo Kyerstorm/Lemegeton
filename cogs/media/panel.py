@@ -854,15 +854,24 @@ class PanelTagSearchModal(FeedbackAwareModal):
         self.picker.page = 0
         self.picker._build()
 
-        await interaction.response.defer(ephemeral=True)
-        if self.picker.message is not None:
-            await self.picker.message.edit(content=self.picker._content(), view=self.picker)
-        else:
-            await interaction.followup.send(
-                "Search results were found, but the picker message could not be updated. "
-                "Reopen the tag picker and try again.",
-                ephemeral=True,
-            )
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            if self.picker.message is not None:
+                await self.picker.message.edit(content=self.picker._content(), view=self.picker)
+                await interaction.delete_original_response()
+            else:
+                await interaction.edit_original_response(
+                    content="Search results were found, but the picker message could not be updated. "
+                    "Reopen the tag picker and try again."
+                )
+        except Exception:
+            log.exception("Could not apply panel tag search results")
+            try:
+                await interaction.edit_original_response(
+                    content="Search results could not be applied. Reopen the tag picker and try again."
+                )
+            except discord.HTTPException:
+                pass
 
 
 class PanelForm(FeedbackAwareModal):
