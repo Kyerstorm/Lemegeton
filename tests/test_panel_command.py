@@ -4,6 +4,16 @@ import unittest
 from cogs.media import panel
 
 
+class PanelModalComponentTests(unittest.TestCase):
+    def test_modal_labels_and_descriptions_fit_discord_limits(self):
+        modal = panel.PanelForm(None, mode="add", user_id=1, guild_id=1)
+        for item in modal.children:
+            with self.subTest(label=item.text):
+                self.assertLessEqual(len(item.text), 45)
+                if item.description:
+                    self.assertLessEqual(len(item.description), 100)
+
+
 class PanelChapterCaptionTests(unittest.TestCase):
     def test_numbered_chapter_with_caption(self):
         self.assertEqual(panel._parse_chapter_caption("Chapter 12 — The final battle"), ("12", "The final battle"))
