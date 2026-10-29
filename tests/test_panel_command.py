@@ -67,14 +67,14 @@ class PanelTagCatalogueTests(unittest.TestCase):
         self.assertTrue(panel._tags_require_nsfw(["NSFW"]))
         self.assertFalse(panel._tags_require_nsfw(["action", "romance"]))
 
-    def test_tag_parser_accepts_twenty_distinct_tags_across_both_selects(self):
-        selected = ",".join((*panel.PANEL_TAGS[:10], *panel.PANEL_VISUAL_TAGS[:10]))
-        self.assertEqual(len(panel._tags(selected)), 20)
+    def test_tag_parser_accepts_twenty_five_distinct_tags_across_pages(self):
+        selected = ",".join((*panel.PANEL_TAGS[:15], *panel.PANEL_VISUAL_TAGS[:10]))
+        self.assertEqual(len(panel._tags(selected)), 25)
 
-    def test_tag_parser_deduplicates_and_rejects_more_than_twenty(self):
+    def test_tag_parser_deduplicates_and_rejects_more_than_twenty_five(self):
         self.assertEqual(panel._tags("action, action, romance"), ["action", "romance"])
-        selected = ",".join((*panel.PANEL_TAGS[:10], *panel.PANEL_VISUAL_TAGS[:11]))
-        with self.assertRaisesRegex(ValueError, "20 unique tags"):
+        selected = ",".join((*panel.PANEL_TAGS[:16], *panel.PANEL_VISUAL_TAGS[:10]))
+        with self.assertRaisesRegex(ValueError, "25 unique tags"):
             panel._tags(selected)
 
 
