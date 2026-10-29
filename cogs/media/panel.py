@@ -299,6 +299,20 @@ def _tags(raw: str | None) -> list[str]:
     return _normalise_tag_values((raw or "").split(","))
 
 
+def _search_panel_tag_catalogue(
+    catalogue: tuple[tuple[str, str], ...], query: str
+) -> tuple[tuple[str, str], ...]:
+    """Search tag names and descriptions without changing the source catalogue."""
+    term = query.strip().casefold()
+    if not term:
+        return catalogue
+    return tuple(
+        (tag, description)
+        for tag, description in catalogue
+        if term in tag.casefold() or term in description.casefold()
+    )
+
+
 def _build_panel_tag_catalogue() -> tuple[tuple[str, str], ...]:
     """Return the hand-maintained AniList-inspired and MangaUpdates tag catalogue."""
     catalogue: dict[str, str] = {}
@@ -641,9 +655,11 @@ class PanelTagPickerView(FeedbackAwareView):
         for tag in selected:
             by_name.setdefault(tag, "Previously saved tag retained for this panel.")
         self.catalogue = tuple(sorted(by_name.items()))
+        self.all_catalogue = self.catalogue
         self.selected_tags = selected[:MAX_PANEL_TAGS]
+        self.search_query: str | None = None
+        self.message: discord.WebhookMessage | None = None
         self.page = 0
-        self._tag_select: discord.ui.Select | None = None
         self._build()
 
     @property
@@ -655,12 +671,17 @@ class PanelTagPickerView(FeedbackAwareView):
         return self.catalogue[start:start + 25]
 
     def _content(self) -> str:
+        search_status = (
+            f"Search: **{discord.utils.escape_markdown(self.search_query)}** · "
+            if self.search_query else ""
+        )
         return (
             "🏷️ **Choose panel tags**\n"
-            f"Page **{self.page + 1}/{self.page_count}** · "
-            f"**{len(self.catalogue):,}** available tags · "
+            + search_status
+            + f"Page **{self.page + 1}/{self.page_count}** · "
+            f"**{len(self.catalogue):,}** matching tags · "
             f"**{len(self.selected_tags)}/{MAX_PANEL_TAGS}** selected.\n"
-            "Selections on other pages are retained. Choose tags, browse with Previous/Next, "
+            "Selections on other pages are retained. Use **Search** to find tags, "
             "then press **Continue**."
         )
 
@@ -686,8 +707,10 @@ class PanelTagPickerView(FeedbackAwareView):
             disabled=capacity == 0,
             row=0,
         )
-        select.callback = self._select_tags
-        self._tag_select = select
+        async def select_callback(interaction: discord.Interaction) -> None:
+            await self._select_tags(interaction, select)
+
+        select.callback = select_callback
         self.add_item(select)
 
         previous = discord.ui.Button(
@@ -710,6 +733,17 @@ class PanelTagPickerView(FeedbackAwareView):
         next_page.callback = self._next_page
         self.add_item(next_page)
 
+        search_button = discord.ui.Button(label="Search", emoji="🔎", style=discord.ButtonStyle.primary, row=1)
+        search_button.callback = self._search
+        self.add_item(search_button)
+
+        all_tags_button = discord.ui.Button(
+            label="All Tags", style=discord.ButtonStyle.secondary, row=1,
+            disabled=self.search_query is None,
+        )
+        all_tags_button.callback = self._clear_search
+        self.add_item(all_tags_button)
+
         continue_button = discord.ui.Button(label="Continue", style=discord.ButtonStyle.success, row=2)
         continue_button.callback = self._continue
         self.add_item(continue_button)
@@ -718,9 +752,11 @@ class PanelTagPickerView(FeedbackAwareView):
         cancel_button.callback = self._cancel
         self.add_item(cancel_button)
 
-    async def _select_tags(self, interaction: discord.Interaction) -> None:
+    async def _select_tags(
+        self, interaction: discord.Interaction, select: discord.ui.Select
+    ) -> None:
         visible_tags = {tag for tag, _ in self._page_entries()}
-        selected_here = list(self._tag_select.values if self._tag_select else [])
+        selected_here = list(select.values)
         updated = [tag for tag in self.selected_tags if tag not in visible_tags]
         updated.extend(selected_here)
         updated = list(dict.fromkeys(updated))
@@ -744,24 +780,89 @@ class PanelTagPickerView(FeedbackAwareView):
         self._build()
         await interaction.response.edit_message(content=self._content(), view=self)
 
+    async def _search(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(PanelTagSearchModal(self))
+
+    async def _clear_search(self, interaction: discord.Interaction) -> None:
+        self.catalogue = self.all_catalogue
+        self.search_query = None
+        self.page = 0
+        self._build()
+        await interaction.response.edit_message(content=self._content(), view=self)
+
     async def _continue(self, interaction: discord.Interaction) -> None:
         if not self.selected_tags:
             await interaction.response.send_message("Select at least one tag before continuing.", ephemeral=True)
             return
-        await interaction.response.send_modal(
-            PanelForm(
-                self.cog,
-                mode=self.mode,
-                user_id=self.user_id,
-                guild_id=self.guild_id,
-                panel=self.panel,
-                source_url=self.source_url,
-                selected_tags=list(self.selected_tags),
+        try:
+            await interaction.response.send_modal(
+                PanelForm(
+                    self.cog,
+                    mode=self.mode,
+                    user_id=self.user_id,
+                    guild_id=self.guild_id,
+                    panel=self.panel,
+                    source_url=self.source_url,
+                    selected_tags=list(self.selected_tags),
+                )
             )
-        )
+        except Exception:
+            log.exception("Could not open the panel submission form from the tag picker")
+            message = (
+                "Discord couldn't open the panel form. Your tag selections are still here; "
+                "please press Continue again. If it keeps happening, report it with the slash command /feedback."
+            )
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
 
     async def _cancel(self, interaction: discord.Interaction) -> None:
         await interaction.response.edit_message(content="Panel submission cancelled.", view=None)
+
+
+class PanelTagSearchModal(FeedbackAwareModal):
+    """Search the hand-curated tag list and update the existing picker message."""
+
+    def __init__(self, picker: PanelTagPickerView):
+        super().__init__(title="Search Panel Tags", timeout=120)
+        self.picker = picker
+        self.query = discord.ui.TextInput(
+            label="Tag name or description",
+            placeholder="e.g. fantasy, kingdom building, time travel",
+            max_length=100,
+            required=True,
+        )
+        self.add_item(self.query)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if interaction.user.id != self.picker.user_id:
+            await interaction.response.send_message("This tag picker belongs to another user.", ephemeral=True)
+            return
+
+        query = str(self.query.value or "").strip()
+        matches = _search_panel_tag_catalogue(self.picker.all_catalogue, query)
+        if not matches:
+            await interaction.response.send_message(
+                f"No tags matched **{discord.utils.escape_markdown(query)}**. Try another search.",
+                ephemeral=True,
+            )
+            return
+
+        self.picker.catalogue = matches
+        self.picker.search_query = query
+        self.picker.page = 0
+        self.picker._build()
+
+        await interaction.response.defer(ephemeral=True)
+        if self.picker.message is not None:
+            await self.picker.message.edit(content=self.picker._content(), view=self.picker)
+        else:
+            await interaction.followup.send(
+                "Search results were found, but the picker message could not be updated. "
+                "Reopen the tag picker and try again.",
+                ephemeral=True,
+            )
 
 
 class PanelForm(FeedbackAwareModal):
@@ -1491,7 +1592,9 @@ class PanelCog(commands.Cog):
             panel=panel,
             source_url=source_url,
         )
-        await interaction.followup.send(content=view._content(), view=view, ephemeral=True)
+        view.message = await interaction.followup.send(
+            content=view._content(), view=view, ephemeral=True, wait=True
+        )
 
     async def _post_browser(self, interaction: discord.Interaction, ids: list[int], tags: list[str] | None = None,
                             keyword: str | None = None, user_id: int | None = None, fixed_ids: bool = False):
