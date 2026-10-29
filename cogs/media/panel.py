@@ -115,7 +115,7 @@ PANEL_ANILIST_TAGS = (
     "writing club", "zoology"
 )
 PANEL_NSFW_TAGS = ("nsfw",)
-MAX_PANEL_TAGS = 20
+MAX_PANEL_TAGS = 25
 MAX_TAG_LENGTH = 100
 
 NSFW_TAGS = frozenset({"nsfw", "mature"})
@@ -669,7 +669,7 @@ class PanelTagPickerView(FeedbackAwareView):
         entries = self._page_entries()
         visible_tags = {tag for tag, _ in entries}
         other_selected = sum(tag not in visible_tags for tag in self.selected_tags)
-        capacity = max(1, min(MAX_PANEL_TAGS - other_selected, len(entries)))
+        capacity = min(MAX_PANEL_TAGS - other_selected, len(entries))
         select = discord.ui.Select(
             placeholder=f"Select tags · page {self.page + 1}/{self.page_count}",
             options=[
@@ -682,7 +682,8 @@ class PanelTagPickerView(FeedbackAwareView):
                 for tag, description in entries
             ],
             min_values=0,
-            max_values=capacity,
+            max_values=max(1, capacity),
+            disabled=capacity == 0,
             row=0,
         )
         select.callback = self._select_tags
