@@ -802,8 +802,8 @@ class PanelForm(FeedbackAwareModal):
             chapter_label = f"Chapter {old_chapter}" if str(old_chapter).upper() != "N/A" else "N/A"
             caption_default = f"{chapter_label} — {old_caption}" if old_caption else chapter_label
         self.caption_field = discord.ui.Label(
-            text="📖 Chapter number (required) • caption (optional)",
-            description="Enter a chapter number; if unknown, enter N/A. Caption is optional. Examples: Chapter 12 — Final battle; Chapter 12; N/A.",
+            text="📖 Chapter (required) • caption optional",
+            description="Enter a chapter number, or N/A if unknown. Caption is optional. Example: Chapter 12 — Final battle.",
             component=discord.ui.TextInput(
                 default=caption_default if panel else None,
                 placeholder="Chapter 12 — final battle, or N/A",
