@@ -77,6 +77,29 @@ class PanelTagCatalogueTests(unittest.TestCase):
         self.assertTrue(panel._tags_require_nsfw(["NSFW"]))
         self.assertFalse(panel._tags_require_nsfw(["action", "romance"]))
 
+    def test_tag_search_matches_names_case_insensitively(self):
+        catalogue = (
+            ("fantasy", "Magic or mythical worlds."),
+            ("kingdom building", "A story about establishing a realm."),
+            ("time travel", "Temporal travel and changing timelines."),
+        )
+        self.assertEqual(
+            panel._search_panel_tag_catalogue(catalogue, " KINGDOM "),
+            (("kingdom building", "A story about establishing a realm."),),
+        )
+
+    def test_tag_search_matches_descriptions_and_empty_query(self):
+        catalogue = (
+            ("fantasy", "Magic or mythical worlds."),
+            ("kingdom building", "A story about establishing a realm."),
+        )
+        self.assertEqual(
+            panel._search_panel_tag_catalogue(catalogue, "MYTHICAL"),
+            (("fantasy", "Magic or mythical worlds."),),
+        )
+        self.assertEqual(panel._search_panel_tag_catalogue(catalogue, "  "), catalogue)
+        self.assertEqual(panel._search_panel_tag_catalogue(catalogue, "not-a-tag"), ())
+
     def test_tag_parser_accepts_twenty_five_distinct_tags_across_pages(self):
         selected = ",".join((*panel.PANEL_TAGS[:15], *panel.PANEL_VISUAL_TAGS[:10]))
         self.assertEqual(len(panel._tags(selected)), 25)
