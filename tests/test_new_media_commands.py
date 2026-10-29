@@ -75,7 +75,7 @@ class ServerCheckTests(unittest.TestCase):
         by_name = {name: status for status, name, _ in checks}
         self.assertEqual(by_name["Send messages"], "Needs attention")
         self.assertEqual(by_name["View this channel"], "Healthy")
-        self.assertEqual(by_name["Audit-log access"], "Unable to verify")
+        self.assertEqual(set(by_name), {"View this channel", "Send messages", "Embed links"})
 
 
 if __name__ == "__main__":

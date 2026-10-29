@@ -12,6 +12,7 @@ from discord.ext import commands, tasks
 
 from database import execute_db_operation
 from cogs_test.general_commands.dashboard import command_meta
+from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView
 
 log = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ READING_ORDER_CATEGORIES = {
 }
 
 
-class ReadingActionModal(discord.ui.Modal):
+class ReadingActionModal(FeedbackAwareModal):
     def __init__(self, cog: "ReadingClub", action: str, category: str):
         labels = {
             "nominate": "Nominate a Read", "vote": "Vote for a Read", "select": "Select Next Read",

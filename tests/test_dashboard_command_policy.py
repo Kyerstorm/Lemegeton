@@ -17,6 +17,7 @@ from cogs_test.general_commands.dashboard import (
     _filter_group_for_guild,
     _is_enabled,
     _restore_dashboard_config,
+    _sync_guild_commands,
 )
 
 
@@ -104,6 +105,65 @@ class DashboardGroupFilteringTests(unittest.TestCase):
         self.assertIs(cloned.callback, menu.callback)
         self.assertFalse(hasattr(cloned, "parent"))
 
+
+class FakeCommandTree:
+    """Records guild-tree publications; global commands are fixed at construction."""
+
+    def __init__(self, global_commands, guild_commands=()):
+        self.global_commands = list(global_commands)
+        self.guild_commands = list(guild_commands)
+        self.sync = AsyncMock()
+
+    def get_commands(self, guild=None):
+        return list(self.guild_commands if guild is not None else self.global_commands)
+
+    def clear_commands(self, guild=None):
+        self.guild_commands = []
+
+    def add_command(self, command, guild=None):
+        self.guild_commands.append(command)
+
+
+class DashboardGuildSyncTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.original = COMMAND_REGISTRY._commands.copy()
+        COMMAND_REGISTRY._commands.clear()
+
+    def tearDown(self):
+        COMMAND_REGISTRY._commands.clear()
+        COMMAND_REGISTRY._commands.update(self.original)
+
+    @staticmethod
+    def _command(name):
+        async def callback(interaction: discord.Interaction):
+            return None
+
+        return app_commands.Command(name=name, description=name, callback=callback)
+
+    async def test_global_managed_commands_are_not_duplicated_into_guilds(self):
+        browse = self._command("browse")
+        guild_only = self._command("guild-tool")
+        COMMAND_REGISTRY.register("browse", browse, "Media")
+        COMMAND_REGISTRY.register("guild-tool", guild_only, "Server")
+        tree = FakeCommandTree(global_commands=[browse])
+        bot = SimpleNamespace(_dashboard_db=FakeConfigDB(), tree=tree)
+
+        self.assertTrue(await _sync_guild_commands(bot, SimpleNamespace(id=1)))
+
+        # The global /browse stays the only copy; a guild-only command is still published.
+        self.assertEqual([command.name for command in tree.guild_commands], ["guild-tool"])
+        tree.sync.assert_awaited_once()
+
+    async def test_disabled_guild_only_command_is_still_withheld(self):
+        guild_only = self._command("guild-tool")
+        COMMAND_REGISTRY.register("guild-tool", guild_only, "Server")
+        tree = FakeCommandTree(global_commands=[])
+        db = FakeConfigDB({"sections": {}, "commands": {"guild-tool": False}})
+        bot = SimpleNamespace(_dashboard_db=db, tree=tree)
+
+        self.assertTrue(await _sync_guild_commands(bot, SimpleNamespace(id=1)))
+        self.assertEqual(tree.guild_commands, [])
+
 class DashboardCommandExecutionGuardTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.original = COMMAND_REGISTRY._commands.copy()
@@ -124,6 +184,14 @@ class DashboardCommandExecutionGuardTests(unittest.IsolatedAsyncioTestCase):
     async def test_enabled_command_passes_execution_check(self):
         self.cog.db.config["commands"]["browse"] = True
         self.assertTrue(await self.cog._dashboard_execution_guard(self.interaction))
+
+    async def test_server_without_saved_settings_keeps_command_enabled(self):
+        self.cog.db.config = {"sections": {}, "commands": {}}
+        self.assertTrue(await self.cog._dashboard_execution_guard(self.interaction))
+
+    async def test_saved_section_disablement_is_enforced(self):
+        self.cog.db.config = {"sections": {"Media": False}, "commands": {}}
+        self.assertFalse(await self.cog._dashboard_execution_guard(self.interaction))
 
     async def test_database_failure_fails_closed(self):
         self.cog.db.error = RuntimeError("database unavailable")

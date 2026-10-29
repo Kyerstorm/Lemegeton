@@ -1347,7 +1347,7 @@ async function handleInteraction(interaction, client) {
           // send DM and add infraction
           try {
             const g = await client.guilds.fetch(guildId);
-            await g.members.fetch(targetUserId).then(m => m.send({ embeds: [buildEmbed({ title: 'Moderation: Warning', description: `You were warned by a moderator in ${g.name}.` })]) }).catch(()=>{});
+            await g.members.fetch(targetUserId).then(m => m.send({ embeds: [buildEmbed({ title: 'Moderation: Warning', description: `You were warned by a moderator in ${g.name}.` })] })).catch(()=>{});
             addInfraction(guildId, targetUserId, interaction.user.id, 'warn', 'Moderator manual warn');
             await interaction.reply({ content: `Warned <@${targetUserId}>.`, ephemeral: true });
           } catch (e) { await interaction.reply({ content: 'Failed to warn: ' + e.message, ephemeral: true }); }
