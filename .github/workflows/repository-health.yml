@@ -47,7 +47,7 @@ jobs:
           python-version: "3.12"
       - name: Generate TECH_STACK.md
         env:
-          GITHUB_TOKEN: ${{ github.token }}}
+          GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: Kyerstorm/Lemegeton
         run: python .github/scripts/repository_health.py --stack
       - name: Commit report when the detected stack changes
