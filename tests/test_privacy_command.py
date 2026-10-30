@@ -31,6 +31,8 @@ class PrivacyNoticeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("does not make a hosted database public", self.notice)
         self.assertIn("valid, binding legal request", self.notice)
         self.assertIn("automatic access", self.notice)
+        self.assertIn("open-source project", self.notice)
+        self.assertIn("https://github.com/Kyerstorm/Lemegeton", self.notice)
 
     def test_notice_names_current_intents_and_message_processing(self):
         self.assertIn("message content", self.notice)
@@ -75,6 +77,8 @@ class PrivacyNoticeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("🔒 Privacy at a glance", fields)
         self.assertIn("/privacy", fields["🔒 Privacy at a glance"])
         self.assertIn("not end-to-end encrypted", fields["🔒 Privacy at a glance"].casefold())
+        self.assertIn("GitHub Repository", next(field.value for field in embed.fields if field.name == "🔗 Useful Links"))
+        self.assertIn("open source", next(field.value for field in embed.fields if field.name == "🔗 Useful Links").casefold())
 
 
 if __name__ == "__main__":
