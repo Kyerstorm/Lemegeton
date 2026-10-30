@@ -104,6 +104,15 @@ def build_privacy_embeds() -> list[discord.Embed]:
         inline=False,
     )
     disclosures.add_field(
+        name="◇ Open-source project",
+        value=(
+            "Lemegeton is an open-source project. You can inspect the source code, review how the bot works, "
+            "and contribute through the public GitHub repository: "
+            "[Kyerstorm/Lemegeton](https://github.com/Kyerstorm/Lemegeton)."
+        ),
+        inline=False,
+    )
+    disclosures.add_field(
         name="◇ MIT licence and legal requests",
         value=(
             "The MIT licence governs how people may use, copy and distribute the software code. It does not make "
