@@ -132,8 +132,10 @@ def _should_use_postgres_ssl(
         else:
             raise ValueError("POSTGRES_SSL must be a boolean value.")
 
-    if environment == "production" and not enabled:
+    if not enabled and environment == "production":
         raise RuntimeError("PostgreSQL TLS cannot be disabled in production.")
+    if not enabled and not _is_loopback_database_host(host):
+        raise RuntimeError("PostgreSQL TLS can only be disabled for loopback development databases.")
     return enabled
 
 
