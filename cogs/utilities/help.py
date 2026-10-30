@@ -836,6 +836,7 @@ class HelpCog(commands.Cog):
             value=(
                 "• [AniList Website](https://anilist.co) - Create your account\n"
                 "• [Bot Invite Link](https://discord.com/api/oauth2/authorize?client_id={}&permissions=0&scope=bot%20applications.commands) - Share with friends\n"
+                "• [GitHub Repository](https://github.com/Kyerstorm/Lemegeton) - Lemegeton is open source; inspect the code and contribute\n"
                 "• [Support Server](https://discord.gg/xUGD7krzws) - Get help and report issues\n"
                 "• Use `/feedback` to report issues or suggest features"
             ).format(BOT_ID),
