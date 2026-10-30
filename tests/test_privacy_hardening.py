@@ -29,6 +29,12 @@ class PostgreSQLTransportSecurityTests(unittest.TestCase):
                 "postgres.example.test", "false", "production"
             )
 
+    def test_remote_database_cannot_disable_tls_outside_production(self):
+        with self.assertRaisesRegex(RuntimeError, "only be disabled for loopback"):
+            database._should_use_postgres_ssl(
+                "postgres.example.test", "false", "development"
+            )
+
     def test_invalid_tls_setting_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "POSTGRES_SSL"):
             database._should_use_postgres_ssl(
