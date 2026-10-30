@@ -446,6 +446,12 @@ class HelpCog(commands.Cog):
                     "note": "Display this help information. Use the dropdown to explore categories.",
                     "examples": ["/help", "/help anime", "/help gaming"]
                 },
+                "privacy": {
+                    "desc": "Read Lemegeton's detailed privacy, data-use, logging, and encryption notice",
+                    "usage": "/privacy",
+                    "note": "Explains what the bot can process, what may be logged or stored, third-party providers, retention, legal requests, and the limits of encryption.",
+                    "examples": ["/privacy"]
+                },
                 "notifications": {
                     "desc": "Manage your bot update notification preferences",
                     "usage": "/notifications",
@@ -455,7 +461,7 @@ class HelpCog(commands.Cog):
                 "say": {
                     "desc": "Make the bot say something (Moderators only). Supports markdown, embeds, and channel targeting.",
                     "usage": "/say <message> [options]",
-                    "note": "Send messages as the bot. Supports embeds, markdown, and replying to messages. All usage is logged for moderation accountability.",
+                    "note": "Send messages as the bot. The audit record stores usage metadata (user, guild, channel, embed state, reply ID, and time), not the submitted message text.",
                     "examples": ["/say Hello world!", "/say message:Test embed:true"]
                 },
                 "userinfo": {
@@ -773,6 +779,18 @@ class HelpCog(commands.Cog):
             name="Available Categories",
             value="\n".join(category_overview),
             inline=False
+        )
+
+        embed.add_field(
+            name="🔒 Privacy at a glance",
+            value=(
+                "The bot processes Discord identifiers, server context, command inputs, linked-account identifiers, "
+                "and content submitted to features that need it. Message Content and Members privileged intents are "
+                "currently enabled for supported message and member features. Command and diagnostic logs can include "
+                "user, guild, channel, command, and selected lookup details. Lemegeton is not end-to-end encrypted. "
+                "Use /privacy for the detailed data, logging, storage, third-party, retention, and legal-request notice."
+            ),
+            inline=False,
         )
         
         if self.repository_stats:
