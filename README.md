@@ -2,6 +2,14 @@
 
 # L E M E G E T O N
 
+<!-- REPOSITORY-HEALTH:START -->
+[![Code quality](https://github.com/Kyerstorm/Lemegeton/actions/workflows/repository-health.yml/badge.svg?branch=multi_guild)](https://github.com/Kyerstorm/Lemegeton/actions/workflows/repository-health.yml)
+[![Top language](https://img.shields.io/github/languages/top/Kyerstorm/Lemegeton?style=flat-square)](https://github.com/Kyerstorm/Lemegeton)
+[![Languages](https://img.shields.io/github/languages/count/Kyerstorm/Lemegeton?style=flat-square)](https://github.com/Kyerstorm/Lemegeton)
+[![Automated tech stack](https://img.shields.io/badge/tech_stack-auto--detected-64748b?style=flat-square)](TECH_STACK.md)
+<!-- REPOSITORY-HEALTH:END -->
+
+
 ### One Discord bot. Many media worlds. One connected community layer.
 
 Discover anime, manga, novels, webnovels, films, television, and video games — then connect what belongs together without mistaking a recommendation for a confirmed adaptation.
