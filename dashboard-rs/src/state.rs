@@ -130,7 +130,7 @@ pub fn now_secs() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_o
 pub fn new_token() -> String { format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()) }
 pub fn is_owner(state: &AppState, user_id: &str) -> bool { state.config.owner_ids.contains(user_id) }
 pub fn can_manage_guild(permissions: u64) -> bool { permissions & (MANAGE_GUILD | ADMINISTRATOR) != 0 }
-pub fn protected_command(name: &str) -> bool { matches!(name, "help" | "feedback" | "dashboard") }
+pub fn protected_command(name: &str) -> bool { matches!(name, "help" | "feedback" | "dashboard" | "privacy") }
 
 pub fn cookie_value(headers: &HeaderMap, key: &str) -> Option<String> {
     headers.get(header::COOKIE)?.to_str().ok()?.split(';').find_map(|pair| {
@@ -335,6 +335,7 @@ mod tests {
         assert!(protected_command("help"));
         assert!(protected_command("feedback"));
         assert!(protected_command("dashboard"));
+        assert!(protected_command("privacy"));
         assert!(!protected_command("browse"));
     }
     #[test]
