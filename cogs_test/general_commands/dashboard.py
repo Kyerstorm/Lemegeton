@@ -36,7 +36,7 @@ ENABLED_EMOJI = "🟢"
 DISABLED_EMOJI = "⚪"
 LOCK_EMOJI = "🔒"
 GEAR = "⚙️"
-PROTECTED_CMD_NAMES = {"help", "feedback", "dashboard"}
+PROTECTED_CMD_NAMES = {"help", "feedback", "dashboard", "privacy"}
 COMMANDS_PER_PAGE = 8
 MAX_AUDIT_ENTRIES = 8
 
