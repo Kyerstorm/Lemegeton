@@ -27,18 +27,17 @@ class Say(commands.Cog):
         user_id: int,
         guild_id: int,
         channel_id: int,
-        message_content: str,
         is_embed: bool = False,
         reply_to_message_id: Optional[int] = None
     ):
-        """Log /say command usage to database for moderation accountability"""
+        """Log /say usage metadata without retaining the submitted message."""
         try:
             await execute_db_operation(
                 "log say command",
                 """INSERT INTO say_command_logs
-                   (user_id, guild_id, channel_id, message_content, is_embed, reply_to_message_id, sent_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (user_id, guild_id, channel_id, message_content, 1 if is_embed else 0, reply_to_message_id, datetime.utcnow().isoformat())
+                   (user_id, guild_id, channel_id, is_embed, reply_to_message_id, sent_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (user_id, guild_id, channel_id, 1 if is_embed else 0, reply_to_message_id, datetime.utcnow().isoformat())
             )
             logger.info(f"Logged /say command from user {user_id} in guild {guild_id}")
         except Exception as e:
@@ -168,7 +167,6 @@ class Say(commands.Cog):
                 user_id=interaction.user.id,
                 guild_id=interaction.guild_id,
                 channel_id=target_channel.id,
-                message_content=message,
                 is_embed=embed,
                 reply_to_message_id=reply_to_message_id
             )
