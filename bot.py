@@ -1556,7 +1556,7 @@ import asyncio
 
 dashboard_bridge_logger = logging.getLogger("web.dashboard_bridge")
 ROOT = Path(__file__).resolve().parent
-PROTECTED_NAMES = {"help", "feedback", "dashboard"}
+PROTECTED_NAMES = {"help", "feedback", "dashboard", "privacy"}
 LOG_FILES = {"bot.log", "dashboard.log"}
 
 
