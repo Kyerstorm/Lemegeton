@@ -39,6 +39,12 @@ class DashboardCommandPolicyTests(unittest.TestCase):
         config = {"sections": {"General": False}, "commands": {"help": False}}
         self.assertTrue(_is_enabled("help", meta, config))
 
+    def test_privacy_command_stays_enabled_even_with_false_overrides(self):
+        command = SimpleNamespace(name="privacy")
+        meta = {"command": command, "section": "Utilities"}
+        config = {"sections": {"Utilities": False}, "commands": {"privacy": False}}
+        self.assertTrue(_is_enabled("privacy", meta, config))
+
     def test_explicit_command_override_wins_over_section_state(self):
         command = SimpleNamespace(name="browse")
         meta = {"command": command, "section": "Media"}
