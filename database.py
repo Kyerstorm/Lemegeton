@@ -19,10 +19,13 @@ Requirements:
 """
 
 import asyncio
+import ipaddress
 import logging
 import os
 import re
+import ssl
 import time
+from urllib.parse import urlsplit
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 import asyncpg
@@ -88,9 +91,57 @@ POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
 POSTGRES_DATABASE = os.getenv("POSTGRES_DB", os.getenv("POSTGRES_DATABASE", "postgres"))
 POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "")
-POSTGRES_SSL = os.getenv("POSTGRES_SSL", "").strip().lower() in {
-    "1", "true", "yes", "require", "required"
-}
+POSTGRES_SSL_CA_FILE = os.getenv("POSTGRES_SSL_CA_FILE", "").strip() or None
+
+
+def _is_loopback_database_host(host: Optional[str]) -> bool:
+    if not host:
+        return False
+    normalized = host.strip().lower().strip("[]")
+    if normalized == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def _postgres_database_host() -> Optional[str]:
+    if not POSTGRES_DSN:
+        return POSTGRES_HOST
+    try:
+        return urlsplit(POSTGRES_DSN).hostname
+    except ValueError:
+        return None
+
+
+def _should_use_postgres_ssl(
+    host: Optional[str],
+    setting: Optional[str],
+    environment: str,
+) -> bool:
+    environment = environment.strip().lower()
+    if setting is None or not setting.strip():
+        enabled = environment == "production" or not _is_loopback_database_host(host)
+    else:
+        value = setting.strip().lower()
+        if value in {"1", "true", "yes", "on", "require", "required", "verify-ca", "verify-full"}:
+            enabled = True
+        elif value in {"0", "false", "no", "off", "disable", "disabled"}:
+            enabled = False
+        else:
+            raise ValueError("POSTGRES_SSL must be a boolean value.")
+
+    if environment == "production" and not enabled:
+        raise RuntimeError("PostgreSQL TLS cannot be disabled in production.")
+    return enabled
+
+
+POSTGRES_SSL = _should_use_postgres_ssl(
+    _postgres_database_host(),
+    os.getenv("POSTGRES_SSL"),
+    os.getenv("ENVIRONMENT", ""),
+)
 DB_POOL_SIZE = int(
     os.getenv(
         "POSTGRES_POOL_SIZE",
@@ -107,7 +158,10 @@ def _postgres_connect_kwargs() -> dict:
         "command_timeout": DB_TIMEOUT,
     }
     if POSTGRES_SSL:
-        kwargs["ssl"] = "require"
+        ssl_context = ssl.create_default_context(cafile=POSTGRES_SSL_CA_FILE)
+        ssl_context.check_hostname = True
+        ssl_context.verify_mode = ssl.CERT_REQUIRED
+        kwargs["ssl"] = ssl_context
 
     if POSTGRES_DSN:
         return {"dsn": POSTGRES_DSN, **kwargs}
@@ -2202,12 +2256,20 @@ async def init_say_command_logs_table():
             user_id INTEGER NOT NULL,
             guild_id INTEGER NOT NULL,
             channel_id INTEGER NOT NULL,
-            message_content TEXT NOT NULL,
+            message_content TEXT,
             is_embed INTEGER DEFAULT 0,
             reply_to_message_id INTEGER,
             sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """,
+    )
+    await execute_db_operation(
+        "allow content-free say audit records",
+        "ALTER TABLE say_command_logs ALTER COLUMN message_content DROP NOT NULL",
+    )
+    await execute_db_operation(
+        "purge previously retained say message content",
+        "UPDATE say_command_logs SET message_content = NULL WHERE message_content IS NOT NULL",
     )
     await execute_db_operation(
         "index say logs by guild",
