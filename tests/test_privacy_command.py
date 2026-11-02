@@ -32,7 +32,7 @@ class PrivacyNoticeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("valid, binding legal request", self.notice)
         self.assertIn("automatic access", self.notice)
         self.assertIn("open-source project", self.notice)
-        self.assertIn("https://github.com/Kyerstorm/Lemegeton", self.notice)
+        self.assertIn("https://github.com/Kyerstorm/Lemegeton".casefold(), self.notice)
 
     def test_notice_names_current_intents_and_message_processing(self):
         self.assertIn("message content", self.notice)
