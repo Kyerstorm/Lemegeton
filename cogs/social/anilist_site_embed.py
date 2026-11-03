@@ -59,6 +59,22 @@ STAFF_URL_RE = re.compile(r"https?://(?:www\.)?anilist\.co/staff/(\d+)(?:/[^\s/?
 STUDIO_URL_RE = re.compile(r"https?://(?:www\.)?anilist\.co/studio/(\d+)(?:/[^\s/?#]+)?/?", re.IGNORECASE)
 USER_URL_RE = re.compile(r"https?://(?:www\.)?anilist\.co/user/([A-Za-z0-9_-]+)(?:/([^?#]*))?(?:[?#]\S*)?", re.IGNORECASE)
 
+
+def _user_profile_embed_section(route_path: Optional[str]) -> Optional[str]:
+    """Return a supported user-profile section; reading-list URLs are not auto-embedded."""
+    route = (route_path or "").strip("/").split("/", 1)[0].casefold().replace("-", "").replace("_", "")
+    if route in {"animelist", "anime", "mangalist", "manga"}:
+        return None
+    return {
+        "stats": "statistics",
+        "statistics": "statistics",
+        "favorites": "favorites",
+        "favourites": "favorites",
+        "activity": "activity",
+        "social": "activity",
+    }.get(route, "overview")
+
+
 REPLIES_PER_PAGE = 5
 HTML_TIMEOUT = 15  # seconds for parsing fallback HTTP requests
 
@@ -1919,20 +1935,9 @@ class AniListCog(commands.Cog):
         m = USER_URL_RE.search(message.content)
         if m:
             identifier = m.group(1)
-            route = (m.group(2) or "").strip("/").split("/", 1)[0].casefold().replace("-", "")
-            route_aliases = {
-                "animelist": "anime_list",
-                "anime": "anime_list",
-                "mangalist": "manga_list",
-                "manga": "manga_list",
-                "stats": "statistics",
-                "statistics": "statistics",
-                "favorites": "favorites",
-                "favourites": "favorites",
-                "activity": "activity",
-                "social": "activity",
-            }
-            initial_section = route_aliases.get(route, "overview")
+            initial_section = _user_profile_embed_section(m.group(2))
+            if initial_section is None:
+                return
             user_data = await self.fetch_user_profile(identifier)
             if not user_data:
                 await message.channel.send(embed=_anilist_error("Failed to fetch AniList user profile."))
