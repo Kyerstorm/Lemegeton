@@ -3,6 +3,7 @@ import unittest
 from cogs.media.community_archives import (
     MAX_QUOTE_LENGTH,
     ArchiveHomeView,
+    CommunityArchives,
     archive_scope_filter,
     normalize_tags,
     split_candidates,
@@ -47,6 +48,9 @@ class CommunityArchiveHelperTests(unittest.TestCase):
         self.assertIs(view.media_select, view.children[1])
         self.assertIs(view.action_select, view.children[2])
         self.assertIn("Manga Panels", {item.label for item in view.children})
+
+    def test_archive_is_the_registered_slash_command(self):
+        self.assertEqual(CommunityArchives.archive.name, "archive")
 
 
 if __name__ == "__main__":
