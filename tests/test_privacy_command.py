@@ -2,9 +2,17 @@
 
 import unittest
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import discord
 
 from cogs.utilities.help import HelpCog
-from cogs.utilities.privacy import build_privacy_embeds
+from cogs.utilities.privacy import (
+    PRIVACY_SECTIONS,
+    PrivacyCog,
+    PrivacyNavigationView,
+    build_privacy_embeds,
+)
 
 
 class PrivacyNoticeTests(unittest.IsolatedAsyncioTestCase):
@@ -20,6 +28,43 @@ class PrivacyNoticeTests(unittest.IsolatedAsyncioTestCase):
                 embed.footer.text or "",
             )
         ).casefold()
+
+    def test_intro_explains_the_private_dropdown_guide_and_e2ee_limit(self):
+        intro = self.embeds[0]
+        self.assertIn("one private, interactive guide", intro.description.casefold())
+        self.assertIn("choose a section from the menu below", intro.description.casefold())
+        self.assertIn("not end-to-end encrypted", intro.description.casefold())
+
+    def test_notice_sections_match_dropdown_navigation(self):
+        self.assertEqual(len(self.embeds), len(PRIVACY_SECTIONS))
+        view = PrivacyNavigationView(SimpleNamespace(id=123), self.embeds)
+        self.assertEqual(len(view.children), 1)
+
+        select = view.children[0]
+        self.assertIsInstance(select, discord.ui.Select)
+        self.assertEqual(len(select.options), len(self.embeds))
+        self.assertTrue(select.options[0].default)
+        self.assertEqual(
+            [option.label for option in select.options],
+            [section[0] for section in PRIVACY_SECTIONS],
+        )
+
+    async def test_command_sends_one_ephemeral_message_with_navigation(self):
+        send_message = AsyncMock()
+        followup_send = AsyncMock()
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=123),
+            response=SimpleNamespace(send_message=send_message),
+            original_response=AsyncMock(return_value=object()),
+            followup=SimpleNamespace(send=followup_send),
+        )
+
+        await PrivacyCog.privacy.callback(PrivacyCog(None), interaction)
+
+        send_message.assert_awaited_once()
+        self.assertTrue(send_message.await_args.kwargs["ephemeral"])
+        self.assertIsInstance(send_message.await_args.kwargs["view"], PrivacyNavigationView)
+        followup_send.assert_not_awaited()
 
     def test_notice_explicitly_rejects_an_end_to_end_encryption_claim(self):
         self.assertIn("not end-to-end encrypted", self.notice)
