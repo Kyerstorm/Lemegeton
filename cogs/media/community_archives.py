@@ -330,6 +330,9 @@ class ArchiveHomeView(FeedbackAwareView):
         close_button.callback = self._close
         self.add_item(open_button)
         self.add_item(close_button)
+        panels_button = discord.ui.Button(label="Manga Panels", style=discord.ButtonStyle.success, emoji="📚", row=3)
+        panels_button.callback = self._open_panels
+        self.add_item(panels_button)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.owner_id:
@@ -374,8 +377,15 @@ class ArchiveHomeView(FeedbackAwareView):
         else:
             await interaction.response.send_message("That archive action is not available.", ephemeral=True)
 
+    async def _open_panels(self, interaction: discord.Interaction) -> None:
+        panel_cog = self.cog.bot.get_cog("PanelCog")
+        if panel_cog is None:
+            await interaction.response.send_message("Manga Panels are temporarily unavailable.", ephemeral=True)
+            return
+        await panel_cog.send_home(interaction)
+
     async def _close(self, interaction: discord.Interaction) -> None:
-        await interaction.response.edit_message(content="Community archive closed.", embed=None, view=None)
+        await interaction.response.edit_message(content="Archive closed.", embed=None, view=None)
 
 
 class CommunityArchives(commands.Cog):
@@ -620,24 +630,34 @@ class CommunityArchives(commands.Cog):
         await interaction.response.send_message(f"Archive entry **#{entry_id}** is now **{new_status}**.", ephemeral=True)
 
 
-    async def send_home(self, interaction: discord.Interaction) -> None:
+    async def send_home(self, interaction: discord.Interaction, *, edit: bool = False) -> None:
         if interaction.guild_id is None:
-            await interaction.response.send_message("Community Archives are available inside a server only.", ephemeral=True)
+            await interaction.response.send_message("The Archive is available inside a server only.", ephemeral=True)
             return
         embed = discord.Embed(
-            title="Community Archive",
+            title="🗃️ Lemegeton Archive",
             description=(
-                "Browse fanworks, moodboards, scenes, soundtracks, quotes, recommendations, and theories. "
-                "Contributions enter moderator review in this server; approved entries are shown according to "
-                "the archive visibility setting configured in /panels.\n\n"
-                "Choose an archive and action below. Search, submission, and moderation forms open in modals."
+                "One place for manga panels, quotes, fanworks, moodboards, scenes, soundtracks, recommendations, and theories. "
+                "Community contributions enter moderator review in the server where they were submitted; approved entries follow "
+                "that server's visibility setting.\n\n"
+                "Choose an archive and action below, or open Manga Panels."
             ),
             color=discord.Color(0x62676D),
         )
-        embed.add_field(name="Browse", value="Explore approved entries one card at a time, with source attribution and spoiler marking.", inline=False)
-        embed.add_field(name="Contribute", value="Submit credited work and source links. Archive content is metadata and links; Lemegeton does not host fan media or music.", inline=False)
-        embed.set_footer(text="Moderation remains server-scoped · Public entries retain creator attribution")
-        await interaction.response.send_message(embed=embed, view=ArchiveHomeView(self, interaction.user.id), ephemeral=True)
+        embed.add_field(name="Browse", value="Explore approved community entries with source attribution and spoiler marking.", inline=False)
+        embed.add_field(name="Contribute", value="Submit credited work and source links. Lemegeton stores archive metadata and links, not fan media or music.", inline=False)
+        embed.set_footer(text="Community moderation remains server-scoped · Creator attribution is retained")
+        view = ArchiveHomeView(self, interaction.user.id)
+        if edit:
+            await interaction.response.edit_message(content=None, embed=embed, view=view)
+        else:
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    @app_commands.command(name="archive", description="Open the unified media and community archive")
+    @app_commands.guild_only()
+    @command_meta(section="Community Archives & Events", name="Archive")
+    async def archive(self, interaction: discord.Interaction) -> None:
+        await self.send_home(interaction)
 
     async def quotes(self, interaction: discord.Interaction, action: str, title: str | None = None, content: str | None = None, source_title: str | None = None, creator: str | None = None, url: str | None = None, media_type: str = "Other", tags: str | None = None, spoiler: bool = False, keyword: str | None = None) -> None:
         await self._archive_action(interaction, "quotes", action, title, content, source_title, creator, url, media_type, tags, spoiler, keyword)
