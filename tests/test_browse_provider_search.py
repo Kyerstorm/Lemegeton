@@ -15,9 +15,10 @@ from cogs.media.browse import (
 
 
 class _FakeResponse:
-    def __init__(self, status=200, payload=None):
+    def __init__(self, status=200, payload=None, headers=None):
         self.status = status
         self.payload = payload or {}
+        self.headers = headers or {}
 
     async def __aenter__(self):
         return self
@@ -34,6 +35,7 @@ class _FakeSession:
         self.response = response
         self.url = None
         self.params = None
+        self.get_calls = 0
 
     async def __aenter__(self):
         return self
@@ -42,6 +44,7 @@ class _FakeSession:
         return None
 
     def get(self, url, *, params=None):
+        self.get_calls += 1
         self.url = url
         self.params = dict(params or {})
         return self.response
@@ -89,6 +92,42 @@ class BookProviderTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("after:", session.params["q"].casefold())
         self.assertNotIn("before:", session.params["q"].casefold())
+
+    async def test_google_books_429_sets_a_shared_cooldown(self):
+        from cogs.media import browse
+
+        browse._GOOGLE_BOOKS_CACHE.clear()
+        browse._GOOGLE_BOOKS_RATE_LIMITED_UNTIL = 0
+        session = _FakeSession(_FakeResponse(status=429, headers={"Retry-After": "30"}))
+        try:
+            with patch("cogs.media.browse.aiohttp.ClientSession", return_value=session):
+                result = await browse.fetch_google_books_payload({"q": "rate limit regression"})
+                self.assertIsNone(result)
+                self.assertGreater(browse._GOOGLE_BOOKS_RATE_LIMITED_UNTIL, 0)
+                second = await browse.fetch_google_books_payload({"q": "different query during cooldown"})
+            self.assertIsNone(second)
+            self.assertEqual(session.get_calls, 1)
+        finally:
+            browse._GOOGLE_BOOKS_RATE_LIMITED_UNTIL = 0
+            browse._GOOGLE_BOOKS_CACHE.clear()
+
+    async def test_google_books_success_is_cached(self):
+        from cogs.media import browse
+
+        browse._GOOGLE_BOOKS_CACHE.clear()
+        browse._GOOGLE_BOOKS_RATE_LIMITED_UNTIL = 0
+        payload = {"items": [{"volumeInfo": {"title": "Cached result"}}]}
+        session = _FakeSession(_FakeResponse(payload=payload))
+        try:
+            with patch("cogs.media.browse.aiohttp.ClientSession", return_value=session):
+                first = await browse.fetch_google_books_payload({"q": "cache regression"})
+                second = await browse.fetch_google_books_payload({"q": "cache regression"})
+            self.assertEqual(first, payload)
+            self.assertEqual(second, payload)
+            self.assertEqual(session.get_calls, 1)
+        finally:
+            browse._GOOGLE_BOOKS_CACHE.clear()
+            browse._GOOGLE_BOOKS_RATE_LIMITED_UNTIL = 0
 
     async def test_nonfiction_results_are_not_classified_as_fiction(self):
         non_fiction = {"categories": ["Non-fiction"]}

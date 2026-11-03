@@ -14,7 +14,6 @@ from discord.ext import commands
 from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView, handle_application_command_error
 import database
 from helpers import media_storage
-from cogs_test.general_commands.dashboard import command_meta
 
 log = logging.getLogger("Lemegeton.CommunityArchives")
 ACTIONS = [
@@ -80,6 +79,13 @@ def split_candidates(value: str | None) -> list[str]:
 
 def spoiler_wrap(text: str, spoiler: bool) -> str:
     return f"||{text}||" if spoiler else text
+
+
+def archive_scope_filter(scope: str, guild_id: int | None) -> tuple[str, tuple[Any, ...]]:
+    """Return the SQL predicate for the configured archive visibility."""
+    if scope == "server" and guild_id is not None:
+        return " AND created_guild_id = ?", (guild_id,)
+    return "", ()
 
 
 def _safe(value: Any, limit: int = 500) -> str:
@@ -299,24 +305,24 @@ class ArchiveHomeView(FeedbackAwareView):
         self.media_type = "Other"
         self.action = "browse"
 
-        archive_select = discord.ui.Select(
+        self.archive_select = discord.ui.Select(
             placeholder="Choose an archive", min_values=1, max_values=1, row=0,
             options=[discord.SelectOption(label=label, value=value, default=value == self.archive_type) for label, value in ARCHIVE_UI_TYPES],
         )
-        media_select = discord.ui.Select(
+        self.media_select = discord.ui.Select(
             placeholder="Related media type", min_values=1, max_values=1, row=1,
             options=[discord.SelectOption(label=choice.name, value=choice.value, default=choice.value == self.media_type) for choice in MEDIA_TYPES],
         )
-        action_select = discord.ui.Select(
+        self.action_select = discord.ui.Select(
             placeholder="Choose an action", min_values=1, max_values=1, row=2,
             options=[discord.SelectOption(label=label, value=value, default=value == self.action) for label, value in ARCHIVE_UI_ACTIONS],
         )
-        archive_select.callback = self._set_archive
-        media_select.callback = self._set_media
-        action_select.callback = self._set_action
-        self.add_item(archive_select)
-        self.add_item(media_select)
-        self.add_item(action_select)
+        self.archive_select.callback = self._set_archive
+        self.media_select.callback = self._set_media
+        self.action_select.callback = self._set_action
+        self.add_item(self.archive_select)
+        self.add_item(self.media_select)
+        self.add_item(self.action_select)
         open_button = discord.ui.Button(label="Continue", style=discord.ButtonStyle.primary, emoji="↗️", row=3)
         close_button = discord.ui.Button(label="Close", style=discord.ButtonStyle.secondary, row=3)
         open_button.callback = self._open
@@ -331,15 +337,15 @@ class ArchiveHomeView(FeedbackAwareView):
         return True
 
     async def _set_archive(self, interaction: discord.Interaction) -> None:
-        self.archive_type = self.children[0].values[0]
+        self.archive_type = self.archive_select.values[0]
         await interaction.response.edit_message(view=self)
 
     async def _set_media(self, interaction: discord.Interaction) -> None:
-        self.media_type = self.children[1].values[0]
+        self.media_type = self.media_select.values[0]
         await interaction.response.edit_message(view=self)
 
     async def _set_action(self, interaction: discord.Interaction) -> None:
-        self.action = self.children[2].values[0]
+        self.action = self.action_select.values[0]
         await interaction.response.edit_message(view=self)
 
     async def _open(self, interaction: discord.Interaction) -> None:
@@ -504,7 +510,7 @@ class CommunityArchives(commands.Cog):
             )
             entry_id = row[0] if row else "unknown"
             await interaction.response.send_message(
-                f"Submission **#{entry_id}** is saved and awaits moderator review in this server. Approved entries enter the shared archive.",
+                f"Submission **#{entry_id}** is saved and awaits moderator review in this server. Approved entries appear according to this server's archive visibility setting.",
                 ephemeral=True,
             )
             return
@@ -513,6 +519,21 @@ class CommunityArchives(commands.Cog):
         query = """SELECT id, title, content, source_title, creator, media_type, source_url, tags, spoiler, created_at
                    FROM community_archive_entries WHERE archive_type = ? AND status = 'approved'"""
         params: list[Any] = [archive_type]
+        if interaction.guild_id is not None:
+            try:
+                scope_row = await database.execute_db_operation(
+                    "load community archive visibility",
+                    "SELECT archive_scope FROM guild_settings WHERE guild_id = ?",
+                    (interaction.guild_id,),
+                    fetch_type="one",
+                )
+                archive_scope = str(scope_row[0] or "global").casefold() if scope_row else "global"
+            except Exception:
+                log.warning("Could not load archive visibility for guild %s; using global visibility", interaction.guild_id, exc_info=True)
+                archive_scope = "global"
+            scope_sql, scope_params = archive_scope_filter(archive_scope, interaction.guild_id)
+            query += scope_sql
+            params.extend(scope_params)
         if action == "search":
             if not clean_keyword:
                 await interaction.response.send_message("Provide a search keyword.", ephemeral=True)
@@ -598,23 +619,23 @@ class CommunityArchives(commands.Cog):
         await interaction.response.send_message(f"Archive entry **#{entry_id}** is now **{new_status}**.", ephemeral=True)
 
 
-    @app_commands.command(name="archive", description="Open the unified community media archive")
-    @app_commands.guild_only()
-    @command_meta(section="Community Archives", name="Community Archive")
-    async def archive(self, interaction: discord.Interaction) -> None:
+    async def send_home(self, interaction: discord.Interaction) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message("Community Archives are available inside a server only.", ephemeral=True)
+            return
         embed = discord.Embed(
             title="Community Archive",
             description=(
-                "Browse a shared collection of fanworks, moodboards, scenes, soundtracks, quotes, "
-                "recommendations, and theories. Contributions enter moderator review in this server; "
-                "approved entries become discoverable across the community.\n\n"
+                "Browse fanworks, moodboards, scenes, soundtracks, quotes, recommendations, and theories. "
+                "Contributions enter moderator review in this server; approved entries are shown according to "
+                "the archive visibility setting configured in /panels.\n\n"
                 "Choose an archive and action below. Search, submission, and moderation forms open in modals."
             ),
-            color=discord.Color.blurple(),
+            color=discord.Color(0x62676D),
         )
         embed.add_field(name="Browse", value="Explore approved entries one card at a time, with source attribution and spoiler marking.", inline=False)
         embed.add_field(name="Contribute", value="Submit credited work and source links. Archive content is metadata and links; Lemegeton does not host fan media or music.", inline=False)
-        embed.set_footer(text="Review queues are server-scoped · Public entries retain their creator attribution")
+        embed.set_footer(text="Moderation remains server-scoped · Public entries retain creator attribution")
         await interaction.response.send_message(embed=embed, view=ArchiveHomeView(self, interaction.user.id), ephemeral=True)
 
     async def quotes(self, interaction: discord.Interaction, action: str, title: str | None = None, content: str | None = None, source_title: str | None = None, creator: str | None = None, url: str | None = None, media_type: str = "Other", tags: str | None = None, spoiler: bool = False, keyword: str | None = None) -> None:

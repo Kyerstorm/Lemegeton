@@ -143,7 +143,7 @@ class HelpCog(commands.Cog):
                 "panels": {
                     "desc": "Open the shared manga panel archive to browse, search, contribute, or manage your submissions",
                     "usage": "/panels",
-                    "note": "Panel records are shared across servers, but archive settings and moderation are server-specific. Mature panels are hidden outside age-restricted channels. Private S3 originals are used when configured; the existing Discord-backed path remains supported.",
+                    "note": "Browse, search, add panels, view your uploads, open the moderation log, and enter Community Archives from the same menu. Configure storage, moderation, and whether approved Community Archive entries are visible globally or only in this server. Mature panels are hidden outside age-restricted channels.",
                     "examples": ["/panels"]
                 },
                 "panel-of-the-day": {
@@ -151,12 +151,6 @@ class HelpCog(commands.Cog):
                     "usage": "/panel-of-the-day",
                     "note": "Uses the server's configured daily selection and existing panel archive; it does not create a new submission.",
                     "examples": ["/panel-of-the-day"]
-                },
-                "archive": {
-                    "desc": "Open the unified panel-style community archive for quotes, fanworks, moodboards, soundtracks, scenes, recommendations, and theories",
-                    "usage": "/archive",
-                    "note": "Choose an archive and action in the interactive menu. Browse uses card-style entries; Submit, Search, Report, and moderation actions open focused modals. Review permissions and originating-server restrictions are preserved.",
-                    "examples": ["/archive"]
                 },
                 "media-bracket": {
                     "desc": "Create a server-specific elimination poll for media titles",
@@ -1022,7 +1016,7 @@ class HelpCog(commands.Cog):
             ),
             "community": (
                 "• Archive submissions may wait for local moderator approval\n"
-                "• Use /archive to check your submissions, report approved content, or review server-local queues\n"
+                "• Open /panels → Community Archives to check your submissions, report approved content, or review server-local queues\n"
                 "• Archive reports and review actions are scoped to their originating server\n"
                 "• Brackets, adaptation polls, and quiz sessions are server-specific"
             ),

@@ -90,7 +90,7 @@ function commandGuideUrl(command: Command): string {
     "media-night": "#media-night",
     compare: "#comparison",
   };
-  if (name === "dashboard" || name === "dashboard-section-toggle") {
+  if (name === "dashboard") {
     return "https://github.com/Kyerstorm/Lemegeton/blob/multi_guild/docs/DASHBOARD.md#capabilities-and-boundaries";
   }
   if (name === "custom-role" || name === "custom-role-admin") {

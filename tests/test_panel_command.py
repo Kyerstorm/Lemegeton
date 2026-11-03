@@ -14,6 +14,25 @@ class PanelModalComponentTests(unittest.TestCase):
                     self.assertLessEqual(len(item.description), 100)
 
 
+class PanelArchiveMenuTests(unittest.TestCase):
+    def test_combined_panels_menu_preserves_existing_actions_and_adds_archives(self):
+        view = panel.PanelHomeView(None)
+        labels = {item.label for item in view.children}
+        self.assertTrue({
+            "Browse All", "My Panels", "Random", "Search", "Add Panel",
+            "Configure", "Community Archives", "Moderation Log",
+        }.issubset(labels))
+
+
+class PanelArchiveConfigurationTests(unittest.TestCase):
+    def test_configure_modal_exposes_the_global_or_server_archive_select(self):
+        modal = panel.PanelConfigureModal(None, owner_id=10, guild_id=20, archive_scope="server")
+        visibility = next(item for item in modal.children if item.text == "Community archive visibility")
+        self.assertEqual([option.value for option in visibility.component.options], ["global", "server"])
+        self.assertFalse(visibility.component.options[0].default)
+        self.assertTrue(visibility.component.options[1].default)
+
+
 class PanelChapterCaptionTests(unittest.TestCase):
     def test_numbered_chapter_with_caption(self):
         self.assertEqual(panel._parse_chapter_caption("Chapter 12 — The final battle"), ("12", "The final battle"))

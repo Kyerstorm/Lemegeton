@@ -64,6 +64,15 @@ query($search: String) {
   }
 }
 """
+TITLE_AUTOCOMPLETE_QUERY = """
+query($search: String) {
+  Page(page: 1, perPage: 10) {
+    media(search: $search, type: ANIME, sort: POPULARITY_DESC, isAdult: false) {
+      title { romaji english }
+    }
+  }
+}
+"""
 
 def filter_schedule(
     entries: list[dict], day: str | None = None, season: str | None = None,
@@ -261,6 +270,37 @@ class Airing(commands.Cog):
             view=AiringView(self, entries, filters, interaction.user.id),
             ephemeral=True,
         )
+
+    @airing.autocomplete("title")
+    async def autocomplete_title(self, interaction: discord.Interaction, current: str):
+        query = " ".join((current or "").split())
+        if len(query) < 2:
+            return []
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2.25)) as session:
+                payload = await post_graphql(
+                    session,
+                    TITLE_AUTOCOMPLETE_QUERY,
+                    {"search": query},
+                    timeout=2,
+                )
+        except Exception:
+            log.debug("AniList airing title autocomplete failed", exc_info=True)
+            return []
+        media = ((payload or {}).get("Page") or {}).get("media") or []
+        choices = []
+        seen = set()
+        for item in media:
+            titles = item.get("title") or {}
+            title = str(titles.get("english") or titles.get("romaji") or "").strip()
+            if not title or title.casefold() in seen:
+                continue
+            seen.add(title.casefold())
+            choices.append(app_commands.Choice(name=title[:100], value=title[:100]))
+            if len(choices) >= 25:
+                break
+        return choices
+
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Airing(bot))

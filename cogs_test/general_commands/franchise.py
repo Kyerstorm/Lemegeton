@@ -770,6 +770,36 @@ class Franchise(commands.Cog):
         )
 
 
+    @franchise.autocomplete("title")
+    async def autocomplete_franchise_title(self, interaction: discord.Interaction, current: str):
+        query = " ".join((current or "").split())
+        category = str(getattr(interaction.namespace, "category", "ANIME") or "ANIME")
+        if len(query) < 2:
+            return []
+        try:
+            if category == "WEBNOVEL":
+                results = await asyncio.wait_for(
+                    search_webnovels(query, browser_fallback=False, http_timeout=2, max_http_urls=1),
+                    timeout=2.25,
+                )
+            else:
+                results = await asyncio.wait_for(self.search_options(query, category), timeout=2.25)
+        except Exception:
+            log.debug("Franchise autocomplete failed for %s", category, exc_info=True)
+            return []
+        choices = []
+        seen = set()
+        for item in results or []:
+            title = str((item.get("volumeInfo") or {}).get("title") or "") if category == "BOOK" else str(media_title(item))
+            title = " ".join(title.split())
+            if not title or title.casefold() in seen:
+                continue
+            seen.add(title.casefold())
+            choices.append(app_commands.Choice(name=title[:100], value=title[:100]))
+            if len(choices) >= 25:
+                break
+        return choices
+
     async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
         """Report unexpected provider and graph failures without exposing internals."""
         await handle_application_command_error(interaction, error)

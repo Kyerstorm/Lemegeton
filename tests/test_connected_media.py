@@ -1,6 +1,8 @@
 import unittest
 
 from cogs_test.general_commands.connected_media import (
+    ConnectedMedia,
+    DiscussionHomeView,
     _display_year,
     _tmdb_title,
     normalize_title,
@@ -35,6 +37,10 @@ class ConnectedMediaHelperTests(unittest.TestCase):
         self.assertEqual(_tmdb_title(item, "COLLECTION"), "Example Film")
         self.assertEqual(_tmdb_title(item, "VIDEOS_MOVIE"), "Example Film")
         self.assertEqual(_display_year(item, "COLLECTION"), "2024")
+
+    def test_discussion_view_uses_a_named_select_reference(self):
+        view = DiscussionHomeView(ConnectedMedia(None), owner_id=123)
+        self.assertIs(view.type_select, view.children[0])
 
 
 if __name__ == "__main__":

@@ -468,6 +468,45 @@ class CrossMediaRecommendations(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
+    @similar.autocomplete("title")
+    async def autocomplete_similar_title(self, interaction: discord.Interaction, current: str):
+        query = " ".join((current or "").split())
+        category = str(getattr(interaction.namespace, "category", "") or "")
+        if len(query) < 2:
+            return []
+        franchise = self.bot.get_cog("Franchise")
+        if franchise is None or not hasattr(franchise, "search_options"):
+            return []
+        try:
+            if category == "WEBNOVEL":
+                results = await asyncio.wait_for(
+                    search_webnovels(query, browser_fallback=False, http_timeout=2, max_http_urls=1),
+                    timeout=2.25,
+                )
+            else:
+                results = await asyncio.wait_for(franchise.search_options(query, category), timeout=2.25)
+        except Exception:
+            log.debug("Cross-media title autocomplete failed for %s", category, exc_info=True)
+            return []
+        choices = []
+        seen = set()
+        for item in results or []:
+            if category == "BOOK":
+                title = str((item.get("volumeInfo") or {}).get("title") or "")
+            elif category in ("ANIME", "MANGA", "LIGHT_NOVEL"):
+                title_data = item.get("title") or {}
+                title = str(title_data.get("english") or title_data.get("romaji") or title_data.get("native") or "")
+            else:
+                title = str(item.get("title") or item.get("name") or "")
+            title = " ".join(title.split())
+            if not title or title.casefold() in seen:
+                continue
+            seen.add(title.casefold())
+            choices.append(app_commands.Choice(name=title[:100], value=title[:100]))
+            if len(choices) >= 25:
+                break
+        return choices
+
     async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
         """Route unexpected provider/database failures through the shared private reporter."""
         await handle_application_command_error(interaction, error)

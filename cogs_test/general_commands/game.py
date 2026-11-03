@@ -209,6 +209,31 @@ class Game(commands.Cog):
             log.warning("Game search failed: %s", exc)
             await interaction.followup.send("Game search is temporarily unavailable. Please try again later.", ephemeral=True)
 
+    @game.autocomplete("title")
+    async def autocomplete_game_title(self, interaction: discord.Interaction, current: str):
+        query = " ".join((current or "").split())
+        if len(query) < 2 or not igdb.IGDB_CLIENT_ID or not igdb.IGDB_CLIENT_SECRET:
+            return []
+
+        async def lookup():
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2.5)) as session:
+                token = await igdb.get_access_token(session)
+                return await igdb.search_games(session, token, query, limit=10) if token else []
+
+        try:
+            results = await asyncio.wait_for(lookup(), timeout=2.5)
+        except Exception:
+            log.debug("IGDB title autocomplete failed", exc_info=True)
+            return []
+        choices = []
+        for item in results or []:
+            title = " ".join(str(item.get("name") or "").split())
+            if title:
+                choices.append(app_commands.Choice(name=title[:100], value=title[:100]))
+            if len(choices) >= 25:
+                break
+        return choices
+
     async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
         """Handle unexpected IGDB/Steam/graph failures through the common reporter."""
         await handle_application_command_error(interaction, error)

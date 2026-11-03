@@ -973,68 +973,14 @@ class DashboardCog(commands.Cog):
             self._refresh_command_registry()
             view = DashboardView(self.bot, interaction.guild, self.db)
             embed = await view.render(interaction.user)
-            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+            await interaction.edit_original_response(embed=embed, view=view)
         except Exception:
             logger.exception("Failed to open dashboard for guild %s", interaction.guild.id)
+            message = "The dashboard couldn't load. Please retry shortly; the failure was logged."
             if interaction.response.is_done():
-                await interaction.followup.send(
-                    "The dashboard couldn't load. Please retry shortly; the failure was logged.",
-                    ephemeral=True,
-                )
+                await interaction.edit_original_response(content=message, embed=None, view=None)
             else:
-                await interaction.response.send_message(
-                    "The dashboard couldn't load. Please retry shortly; the failure was logged.",
-                    ephemeral=True,
-                )
-
-    @app_commands.command(name="dashboard-section-toggle", description="Admin: enable or disable a dashboard category")
-    @app_commands.describe(section="Exact dashboard category name", enabled="Whether this category should be enabled")
-    async def section_toggle(self, interaction: discord.Interaction, section: str, enabled: bool):
-        if interaction.guild is None:
-            await interaction.response.send_message("This command is only available in a server.", ephemeral=True)
-            return
-        if not _has_dashboard_access(interaction, self.bot):
-            await interaction.response.send_message("You don't have permission to change dashboard settings.", ephemeral=True)
-            return
-        before: dict[str, Any] | None = None
-        try:
-            await interaction.response.defer(ephemeral=True, thinking=True)
-            await self.db.open()
-            self._refresh_command_registry()
-            sections = COMMAND_REGISTRY.get_sections()
-            if section not in sections:
-                await interaction.followup.send(
-                    f"Unknown category. Available categories: {', '.join(sections) or 'none'}",
-                    ephemeral=True,
-                )
-                return
-            before = await self.db.get_guild_config(interaction.guild.id)
-            await self.db.set_section(interaction.guild.id, section, enabled)
-            if not await attempt_sync_for_guild(self.bot, interaction.guild):
-                await _restore_dashboard_config(self.db, self.bot, interaction.guild, before, f"section command {section}")
-                await interaction.followup.send(
-                    "Discord did not confirm that category change. Previous settings were restored where possible.",
-                    ephemeral=True,
-                )
-                return
-            await self.db.log_action(
-                interaction.guild.id,
-                interaction.user.id,
-                "section_toggle",
-                format_commit_message(interaction.user, f"{section} → {'enabled' if enabled else 'disabled'}"),
-            )
-            await interaction.followup.send(
-                f"{'🟢' if enabled else '⚪'} **{section}** is now {'enabled' if enabled else 'disabled'}.",
-                ephemeral=True,
-            )
-        except Exception:
-            logger.exception("Failed setting dashboard section for guild %s", interaction.guild.id)
-            if before is not None:
-                await _restore_dashboard_config(self.db, self.bot, interaction.guild, before, f"failed section command {section}")
-            if interaction.response.is_done():
-                await interaction.followup.send("Couldn't update that category. Previous settings were restored where possible; check the bot logs.", ephemeral=True)
-            else:
-                await interaction.response.send_message("Couldn't update that category. Check the bot logs.", ephemeral=True)
+                await interaction.response.send_message(message, ephemeral=True)
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild):

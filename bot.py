@@ -13,6 +13,13 @@ import discord
 from discord.ext import commands
 import config
 from helpers.command_error_handler import handle_application_command_error, handle_prefix_command_error
+from helpers.terms_consent import (
+    TermsCommandTree,
+    TermsConsentView,
+    build_consent_embed,
+    init_user_consent_schema,
+    user_has_current_consent,
+)
 from web.custom_role_picker_server import CustomRolePickerServer, loopback_bind_host as _loopback_bind_host
 
 # Suppress deprecation warning from discord.py's internal WebSocket connection code
@@ -499,7 +506,35 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
-bot = commands.Bot(command_prefix="!", intents=intents, application_id=config.BOT_ID)
+bot = commands.Bot(
+    command_prefix="!",
+    intents=intents,
+    application_id=config.BOT_ID,
+    tree_cls=TermsCommandTree,
+)
+
+
+@bot.check
+async def require_prefix_consent(ctx: commands.Context) -> bool:
+    if ctx.author.bot:
+        return True
+    try:
+        if await user_has_current_consent(ctx.author.id):
+            return True
+        await ctx.author.send(
+            embed=build_consent_embed(),
+            view=TermsConsentView(ctx.author.id),
+        )
+        await ctx.reply("I've sent the policy agreement to your DMs. Accept it there, then retry your command.", mention_author=False)
+    except discord.Forbidden:
+        await ctx.reply(
+            "I couldn't DM the policy agreement. Enable server DMs or use a slash command to open the private agreement prompt.",
+            mention_author=False,
+        )
+    except Exception:
+        logger.exception("Could not verify first-use policy agreement for user %s", ctx.author.id)
+        await ctx.reply("Lemegeton cannot verify your policy agreement right now. Please try again shortly.", mention_author=False)
+    return False
 
 
 @bot.tree.error
@@ -1963,7 +1998,8 @@ async def main():
         logger.info("Initializing database...")
         try:
             await init_db()
-            logger.info("✅ Database initialization completed")
+            await init_user_consent_schema()
+            logger.info("✅ Database and first-use consent storage initialized")
         except Exception as db_error:
             logger.error(f"❌ Database initialization failed: {db_error}", exc_info=True)
             raise

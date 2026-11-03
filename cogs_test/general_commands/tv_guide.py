@@ -222,5 +222,28 @@ class TVGuide(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
+    @tv_guide.autocomplete("title")
+    async def autocomplete_tv_title(self, interaction: discord.Interaction, current: str):
+        query = " ".join((current or "").split())
+        if len(query) < 2:
+            return []
+        try:
+            results = await asyncio.wait_for(self.browse.search_tmdb_titles(query, "TV"), timeout=2.25)
+        except Exception:
+            log.debug("TV guide title autocomplete failed", exc_info=True)
+            return []
+        choices = []
+        seen = set()
+        for item in results or []:
+            title = " ".join(str(item.get("name") or item.get("original_name") or "").split())
+            if not title or title.casefold() in seen:
+                continue
+            seen.add(title.casefold())
+            choices.append(app_commands.Choice(name=title[:100], value=title[:100]))
+            if len(choices) >= 25:
+                break
+        return choices
+
+
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(TVGuide(bot))

@@ -132,10 +132,11 @@ TMDB watch-provider data is powered by JustWatch. /where-to-watch labels the que
 
 ### Community archives and events
 
-The interactive **/archive** command unifies the community contribution archives in a Panels-inspired, card-based browser. Select an archive type and action, then use its buttons or modal form.
+The interactive **/panels** command is the single entry point for the manga-panel archive and community contribution archives. Its menu retains every panel action (browse, personal panels, random, search, upload, configure, and moderation log) and adds a Community Archives entry that opens the archive browser.
 
-- **/archive** — browse, search, contribute, or randomly discover quotes, credited fanworks, moodboards, soundtracks, scenes, human-written recommendations, and spoiler-marked theories. The same menu provides personal submission history, entry reporting, submission review, and report moderation.
-- **/panels** — the dedicated manga-panel archive with its existing image, search, filtering, and moderation interface.
+- **/panels → Community Archives** — browse, search, contribute, or randomly discover quotes, credited fanworks, moodboards, soundtracks, scenes, human-written recommendations, and spoiler-marked theories. The archive menu also provides personal submission history, entry reporting, submission review, and report moderation.
+- **/panels → Configure** — choose whether approved community archive entries are visible globally or only to the current server. Existing servers retain global visibility unless changed. Submission queues, approval, and moderation remain server-scoped.
+- **/panels** — browse and search manga panels, view personal uploads, choose a random panel, add panels, configure storage/moderation, and open the moderation log.
 - **/panel-of-the-day** — selects a non-NSFW record from the existing Panels table and persists one selection per server per date instead of maintaining a second panel database.
 - **/media-bracket**, **/adaptation-vote**, and **/media-quiz** — persist server-scoped votes, polls, trivia questions, and user quiz sessions.
 

@@ -33,7 +33,7 @@ HUB_SECTIONS = {
             "**Books, light novels and webnovels**\n"
             "• /reading — nominations, votes, selection, scheduling and reading order\n"
             "• /discussion — spoiler-aware chapter, volume, episode, season and general threads\n"
-            "• /archive — discover quotes, fanworks, moodboards, scenes, soundtracks, recommendations and theories\n"
+            "• /panels → Community Archives — discover quotes, fanworks, moodboards, scenes, soundtracks, recommendations and theories\n"
             "• /webnovel-updates — query Novel Updates metadata\n"
             "• /author-works — search Google Books by author"
         ),
@@ -58,7 +58,7 @@ HUB_SECTIONS = {
         "description": (
             "**Browse and contribute**\n"
             "• /panels — manga panel archive\n"
-            "• /archive — quotes, fanworks, moodboards, soundtracks, scenes, recommendations and theories\n"
+            "• /panels → Community Archives — quotes, fanworks, moodboards, soundtracks, scenes, recommendations and theories\n"
             "• /panel-of-the-day — feature a safe archived panel"
         ),
     },

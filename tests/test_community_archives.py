@@ -1,6 +1,13 @@
 import unittest
 
-from cogs.media.community_archives import MAX_QUOTE_LENGTH, normalize_tags, split_candidates, spoiler_wrap
+from cogs.media.community_archives import (
+    MAX_QUOTE_LENGTH,
+    ArchiveHomeView,
+    archive_scope_filter,
+    normalize_tags,
+    split_candidates,
+    spoiler_wrap,
+)
 
 
 class CommunityArchiveHelperTests(unittest.TestCase):
@@ -25,6 +32,20 @@ class CommunityArchiveHelperTests(unittest.TestCase):
         self.assertEqual(MAX_QUOTE_LENGTH, 280)
         self.assertEqual(spoiler_wrap("ending revealed", True), "||ending revealed||")
         self.assertEqual(spoiler_wrap("safe caption", False), "safe caption")
+
+    def test_archive_scope_filter_is_server_local_only_when_selected(self):
+        self.assertEqual(
+            archive_scope_filter("server", 123),
+            (" AND created_guild_id = ?", (123,)),
+        )
+        self.assertEqual(archive_scope_filter("global", 123), ("", ()))
+        self.assertEqual(archive_scope_filter("server", None), ("", ()))
+
+    def test_archive_launcher_keeps_three_named_dropdown_controls(self):
+        view = ArchiveHomeView(None, owner_id=123)
+        self.assertIs(view.archive_select, view.children[0])
+        self.assertIs(view.media_select, view.children[1])
+        self.assertIs(view.action_select, view.children[2])
 
 
 if __name__ == "__main__":

@@ -316,9 +316,8 @@ Results explicitly marked adult-rated or sexually explicit are excluded.
 
 | Command | Purpose |
 |---|---|
-| **/panels** | Open the shared manga panel archive. |
+| **/panels** | Open the shared manga panel archive, including the Community Archives browser, server/global archive visibility settings, upload, search, and moderation tools. |
 | **/panel-of-the-day** | Display the selected safe panel for the current server. |
-| **/archive** | Open the panel-style community archive for quotes, fanworks, moodboards, soundtracks, scenes, recommendations, and theories; search, submit, report, or moderate through its interactive modal flow. |
 | **/media-bracket** | Run a guild-local elimination poll for media candidates. |
 | **/adaptation-vote** | Compare community preferences between two versions or adaptations. |
 | **/media-quiz** | Add source-linked trivia, play a question, and submit an answer privately. |

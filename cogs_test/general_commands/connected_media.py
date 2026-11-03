@@ -14,7 +14,9 @@ from discord.ext import commands
 
 from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView, handle_application_command_error
 import database
-from cogs.media.browse import TMDB_API_BASE_URL, TMDB_IMAGE_BASE_URL, search_webnovels
+from cogs.media.browse import (
+    TMDB_API_BASE_URL, TMDB_IMAGE_BASE_URL, fetch_google_books_payload, search_webnovels,
+)
 from helpers.media_graph import record_media_relationship
 from cogs_test.general_commands.dashboard import command_meta
 
@@ -205,12 +207,12 @@ class DiscussionHomeView(FeedbackAwareView):
         self.cog = cog
         self.owner_id = owner_id
         self.discussion_type = "chapter"
-        select = discord.ui.Select(
+        self.type_select = discord.ui.Select(
             placeholder="Choose a discussion type", min_values=1, max_values=1, row=0,
             options=[discord.SelectOption(label=label, value=value, default=value == self.discussion_type) for label, value in DISCUSSION_TYPES],
         )
-        select.callback = self._select_type
-        self.add_item(select)
+        self.type_select.callback = self._select_type
+        self.add_item(self.type_select)
         create = discord.ui.Button(label="Open discussion form", style=discord.ButtonStyle.primary, emoji="📝", row=1)
         close = discord.ui.Button(label="Close", style=discord.ButtonStyle.secondary, row=1)
         create.callback = self._create
@@ -225,7 +227,7 @@ class DiscussionHomeView(FeedbackAwareView):
         return True
 
     async def _select_type(self, interaction: discord.Interaction) -> None:
-        self.discussion_type = self.children[0].values[0]
+        self.discussion_type = self.type_select.values[0]
         await interaction.response.edit_message(view=self)
 
     async def _create(self, interaction: discord.Interaction) -> None:
@@ -272,24 +274,24 @@ class LinkSuggestionView(FeedbackAwareView):
         self.source_category = "ANIME"
         self.target_category = "MANGA"
         self.relationship = "adaptation"
-        source_select = discord.ui.Select(
+        self.source_select = discord.ui.Select(
             placeholder="Source category", min_values=1, max_values=1, row=0,
             options=[discord.SelectOption(label=choice.name, value=choice.value, default=choice.value == self.source_category) for choice in MEDIA_CATEGORIES],
         )
-        target_select = discord.ui.Select(
+        self.target_select = discord.ui.Select(
             placeholder="Related category", min_values=1, max_values=1, row=1,
             options=[discord.SelectOption(label=choice.name, value=choice.value, default=choice.value == self.target_category) for choice in MEDIA_CATEGORIES],
         )
-        relationship_select = discord.ui.Select(
+        self.relationship_select = discord.ui.Select(
             placeholder="Relationship type", min_values=1, max_values=1, row=2,
             options=[discord.SelectOption(label=choice.name, value=choice.value, default=choice.value == self.relationship) for choice in RELATION_TYPES],
         )
-        source_select.callback = self._set_source
-        target_select.callback = self._set_target
-        relationship_select.callback = self._set_relationship
-        self.add_item(source_select)
-        self.add_item(target_select)
-        self.add_item(relationship_select)
+        self.source_select.callback = self._set_source
+        self.target_select.callback = self._set_target
+        self.relationship_select.callback = self._set_relationship
+        self.add_item(self.source_select)
+        self.add_item(self.target_select)
+        self.add_item(self.relationship_select)
         open_button = discord.ui.Button(label="Open suggestion form", style=discord.ButtonStyle.primary, emoji="🔗", row=3)
         close_button = discord.ui.Button(label="Close", style=discord.ButtonStyle.secondary, row=3)
         open_button.callback = self._open_form
@@ -304,15 +306,15 @@ class LinkSuggestionView(FeedbackAwareView):
         return True
 
     async def _set_source(self, interaction: discord.Interaction) -> None:
-        self.source_category = self.children[0].values[0]
+        self.source_category = self.source_select.values[0]
         await interaction.response.edit_message(view=self)
 
     async def _set_target(self, interaction: discord.Interaction) -> None:
-        self.target_category = self.children[1].values[0]
+        self.target_category = self.target_select.values[0]
         await interaction.response.edit_message(view=self)
 
     async def _set_relationship(self, interaction: discord.Interaction) -> None:
-        self.relationship = self.children[2].values[0]
+        self.relationship = self.relationship_select.values[0]
         await interaction.response.edit_message(view=self)
 
     async def _open_form(self, interaction: discord.Interaction) -> None:
@@ -330,6 +332,69 @@ class ConnectedMedia(commands.Cog):
         self.bot = bot
         self._schema_ready = False
         self._schema_lock = asyncio.Lock()
+
+    @staticmethod
+    def _provider_title(item: dict, category: str) -> str:
+        if category == "BOOK":
+            return str((item.get("volumeInfo") or {}).get("title") or "").strip()
+        if category == "WEBNOVEL":
+            return str(item.get("title") or "").strip()
+        if category in ("ANIME", "MANGA", "LIGHT_NOVEL"):
+            titles = item.get("title") or {}
+            return str(titles.get("english") or titles.get("romaji") or titles.get("native") or "").strip()
+        return str(item.get("title") or item.get("name") or "").strip()
+
+    async def _title_autocomplete(self, current: str, category: str) -> list[app_commands.Choice[str]]:
+        query = " ".join((current or "").split())
+        if len(query) < 2 or category == "GAME":
+            return []
+        try:
+            if category == "WEBNOVEL":
+                results = await asyncio.wait_for(
+                    search_webnovels(query, browser_fallback=False, http_timeout=2, max_http_urls=1),
+                    timeout=2.25,
+                )
+            else:
+                franchise = self.bot.get_cog("Franchise")
+                if franchise is None or not hasattr(franchise, "search_options"):
+                    return []
+                results = await asyncio.wait_for(franchise.search_options(query, category), timeout=2.25)
+        except Exception:
+            log.debug("Title autocomplete failed for %s", category, exc_info=True)
+            return []
+
+        choices = []
+        seen = set()
+        for item in results or []:
+            title = self._provider_title(item, category)
+            if not title or title.casefold() in seen:
+                continue
+            seen.add(title.casefold())
+            choices.append(app_commands.Choice(name=title[:100], value=title[:100]))
+            if len(choices) >= 25:
+                break
+        return choices
+
+    async def _tmdb_title_autocomplete(self, current: str, media_type: str) -> list[app_commands.Choice[str]]:
+        query = " ".join((current or "").split())
+        if len(query) < 2:
+            return []
+        try:
+            results = await asyncio.wait_for(_tmdb_search(query, media_type), timeout=2.25)
+        except Exception:
+            log.debug("TMDB title autocomplete failed for %s", media_type, exc_info=True)
+            return []
+        choices = []
+        seen = set()
+        for item in results:
+            title = _tmdb_title(item, media_type).strip()
+            if not title or title.casefold() in seen:
+                continue
+            seen.add(title.casefold())
+            choices.append(app_commands.Choice(name=title[:100], value=title[:100]))
+            if len(choices) >= 25:
+                break
+        return choices
 
     async def cog_load(self) -> None:
         async with self._schema_lock:
@@ -682,19 +747,16 @@ class ConnectedMedia(commands.Cog):
             await interaction.response.send_message("Enter an author name.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
-        try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12)) as session:
-                async with session.get(
-                    "https://www.googleapis.com/books/v1/volumes",
-                    params={"q": f"inauthor:{query}", "maxResults": 10, "orderBy": "relevance"},
-                ) as response:
-                    if response.status != 200:
-                        await interaction.followup.send(f"Google Books returned HTTP {response.status}.", ephemeral=True)
-                        return
-                    payload = await response.json(content_type=None)
-        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
-            log.warning("Google Books author search failed", exc_info=True)
-            await interaction.followup.send("Google Books could not be reached. Please try again later.", ephemeral=True)
+        payload = await fetch_google_books_payload({
+            "q": f"inauthor:{query}",
+            "maxResults": 10,
+            "orderBy": "relevance",
+        })
+        if payload is None:
+            await interaction.followup.send(
+                "Google Books is temporarily unavailable or rate-limited. Please try again later.",
+                ephemeral=True,
+            )
             return
         items = payload.get("items") or []
         lines = []
@@ -940,8 +1002,26 @@ class ConnectedMedia(commands.Cog):
             await interaction.response.send_message("Provide a title and chapter/episode reference.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
+        starter = discord.Embed(
+            title=title[:256],
+            description=(
+                "A dedicated place to discuss this work. Keep the conversation within the spoiler cutoff "
+                "and mark any later material with Discord spoiler formatting."
+            ),
+            color=discord.Color(0x62676D),
+        )
+        starter.add_field(name="Discussion type", value=media_type.title(), inline=True)
+        starter.add_field(name="Spoiler cutoff", value=reference, inline=True)
+        starter.add_field(
+            name="Spoiler guidance",
+            value=f"Discuss only through **{discord.utils.escape_markdown(reference)}**. Mark later spoilers clearly.",
+            inline=False,
+        )
+        if source_url:
+            starter.add_field(name="Reference", value=f"[Open source]({source_url})", inline=False)
+        starter.set_footer(text=f"Started by {interaction.user.display_name} · Lemegeton")
         message = await interaction.channel.send(
-            f"## {discord.utils.escape_markdown(title)}\n**Spoiler cutoff:** {discord.utils.escape_markdown(reference)}\nDiscuss only up to this point. Mark spoilers using Discord's spoiler syntax.\n" + (f"Source: {source_url}" if source_url else ""),
+            embed=starter,
             allowed_mentions=discord.AllowedMentions.none(),
         )
         thread = await interaction.channel.create_thread(
@@ -957,7 +1037,18 @@ class ConnectedMedia(commands.Cog):
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (interaction.guild.id, interaction.channel.id, thread.id, interaction.user.id, media_type, title, reference, source_url),
         )
-        await interaction.followup.send(f"Discussion thread created: {thread.mention}", ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        confirmation = discord.Embed(
+            title="Discussion created",
+            description=f"Your thread is ready: [Open discussion]({thread.jump_url})",
+            color=discord.Color(0x62676D),
+        )
+        confirmation.add_field(name="Work", value=title[:1024], inline=False)
+        confirmation.add_field(name="Spoiler cutoff", value=reference, inline=False)
+        await interaction.followup.send(
+            embed=confirmation,
+            ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
     async def chapter_discussion(self, interaction: discord.Interaction, title: str, chapter: str, source_url: str | None = None) -> None:
         await self._create_discussion(interaction, "chapter", title, chapter, source_url)
@@ -965,6 +1056,33 @@ class ConnectedMedia(commands.Cog):
     async def episode_discussion(self, interaction: discord.Interaction, series: str, episode: str, source_url: str | None = None) -> None:
         await self._create_discussion(interaction, "episode", series, episode, source_url)
 
+
+    @connections.autocomplete("title")
+    async def autocomplete_connections(self, interaction: discord.Interaction, current: str):
+        category = str(getattr(interaction.namespace, "category", "ANIME") or "ANIME")
+        return await self._title_autocomplete(current, category)
+
+    @where_to_watch.autocomplete("title")
+    async def autocomplete_watch_title(self, interaction: discord.Interaction, current: str):
+        media_type = str(getattr(interaction.namespace, "media_type", "MOVIE") or "MOVIE")
+        return await self._tmdb_title_autocomplete(current, media_type)
+
+    @trailers.autocomplete("title")
+    async def autocomplete_trailer_title(self, interaction: discord.Interaction, current: str):
+        media_type = str(getattr(interaction.namespace, "media_type", "MOVIE") or "MOVIE")
+        return await self._tmdb_title_autocomplete(current, media_type)
+
+    @collection_guide.autocomplete("title")
+    async def autocomplete_collection_title(self, interaction: discord.Interaction, current: str):
+        return await self._tmdb_title_autocomplete(current, "MOVIE")
+
+    @webnovel_updates.autocomplete("title")
+    async def autocomplete_webnovel_title(self, interaction: discord.Interaction, current: str):
+        return await self._title_autocomplete(current, "WEBNOVEL")
+
+    @person_credits.autocomplete("name")
+    async def autocomplete_person_name(self, interaction: discord.Interaction, current: str):
+        return await self._tmdb_title_autocomplete(current, "PERSON")
 
     async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
         """Handle unexpected provider, database, and Discord interaction failures privately."""

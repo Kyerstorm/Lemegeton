@@ -59,6 +59,12 @@ class DashboardCommandPolicyTests(unittest.TestCase):
         self.assertTrue(_is_enabled("browse", meta, {"sections": {}, "commands": {}}))
 
 
+class DashboardSingleEntryTests(unittest.TestCase):
+    def test_category_toggle_is_not_a_separate_slash_command(self):
+        self.assertTrue(hasattr(DashboardCog, "dashboard"))
+        self.assertFalse(hasattr(DashboardCog, "section_toggle"))
+
+
 class DashboardGroupFilteringTests(unittest.TestCase):
     def setUp(self):
         self.original = COMMAND_REGISTRY._commands.copy()

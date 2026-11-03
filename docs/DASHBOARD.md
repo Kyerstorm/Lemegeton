@@ -38,7 +38,7 @@ Configure the following in the service environment (see `.env.example` for the f
 
 Use a random `DASHBOARD_BRIDGE_SECRET` of at least 32 UTF-8 bytes (for example, `openssl rand -hex 32`). Do not commit it. Rust refuses to call the bot bridge with a shorter value; the Python bridge and picker refuse non-loopback listeners. The Rust web service binds to `127.0.0.1` by default. On production HTTPS, set `DASHBOARD_PUBLIC_URL` and `CUSTOM_ROLES_PUBLIC_URL` to the same browser-visible origin and `DASHBOARD_COOKIE_SECURE=true`; startup fails closed if a non-local HTTP origin or mismatched OAuth callback is configured. The configured OAuth callback must exactly match the Discord Developer Portal entry.
 
-The bot still requires its existing Discord token and PostgreSQL configuration. The dashboard does not create a second Discord client or a second command registry.
+The bot still requires its existing Discord token and PostgreSQL configuration. The dashboard does not create a second Discord client or a second command registry. In Discord, **/dashboard** is the single command-control entry point; command and category toggles, synchronization, reset, and audit actions are available in its private panel. There is no separate `/dashboard-section-toggle` command.
 
 ## Local development
 

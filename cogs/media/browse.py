@@ -30,6 +30,68 @@ TMDB_API_BASE_URL = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p"
 MDBLIST_API_BASE_URL = "https://api.mdblist.com"
 
+_GOOGLE_BOOKS_CACHE_TTL = 180
+_GOOGLE_BOOKS_CACHE: Dict[tuple, tuple[float, Dict]] = {}
+_GOOGLE_BOOKS_RATE_LIMITED_UNTIL = 0.0
+_GOOGLE_BOOKS_REQUEST_LIMIT = asyncio.Semaphore(2)
+
+
+async def fetch_google_books_payload(params: dict) -> Dict | None:
+    """Fetch Google Books with shared caching and a cooldown after HTTP 429 responses."""
+    global _GOOGLE_BOOKS_RATE_LIMITED_UNTIL
+
+    request_params = dict(params)
+    api_key = os.getenv("GOOGLE_BOOKS_API_KEY", "").strip()
+    if api_key:
+        request_params.setdefault("key", api_key)
+    cache_key = tuple(sorted((str(key), str(value)) for key, value in request_params.items()))
+    now = time.monotonic()
+    cached = _GOOGLE_BOOKS_CACHE.get(cache_key)
+    if cached and cached[0] > now:
+        return cached[1]
+    if now < _GOOGLE_BOOKS_RATE_LIMITED_UNTIL:
+        return None
+
+    async with _GOOGLE_BOOKS_REQUEST_LIMIT:
+        now = time.monotonic()
+        cached = _GOOGLE_BOOKS_CACHE.get(cache_key)
+        if cached and cached[0] > now:
+            return cached[1]
+        if now < _GOOGLE_BOOKS_RATE_LIMITED_UNTIL:
+            return None
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+                async with session.get(GOOGLE_BOOKS_URL, params=request_params) as response:
+                    if response.status == 429:
+                        retry_after = getattr(response, "headers", {}).get("Retry-After")
+                        try:
+                            cooldown = max(1, min(int(retry_after), 300))
+                        except (TypeError, ValueError):
+                            cooldown = 60
+                        _GOOGLE_BOOKS_RATE_LIMITED_UNTIL = time.monotonic() + cooldown
+                        logger.warning("Google Books rate limit reached; pausing requests for %s seconds", cooldown)
+                        return None
+                    if response.status != 200:
+                        logger.warning("Google Books returned HTTP %s", response.status)
+                        return None
+                    payload = await response.json()
+                    if not isinstance(payload, dict):
+                        return None
+                    if len(_GOOGLE_BOOKS_CACHE) >= 512:
+                        for stale_key, (expires_at, _) in list(_GOOGLE_BOOKS_CACHE.items()):
+                            if expires_at <= time.monotonic():
+                                _GOOGLE_BOOKS_CACHE.pop(stale_key, None)
+                        if len(_GOOGLE_BOOKS_CACHE) >= 512:
+                            _GOOGLE_BOOKS_CACHE.pop(next(iter(_GOOGLE_BOOKS_CACHE)))
+                    _GOOGLE_BOOKS_CACHE[cache_key] = (
+                        time.monotonic() + _GOOGLE_BOOKS_CACHE_TTL,
+                        payload,
+                    )
+                    return payload
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
+            logger.warning("Google Books request failed: %s", exc)
+            return None
+
 
 _NOVELUPDATES_CACHE_TTL = 300
 _NOVELUPDATES_SEARCH_CACHE: Dict[tuple, tuple[float, List[Dict]]] = {}
@@ -1558,35 +1620,24 @@ class BrowseCog(commands.Cog):
             params["langRestrict"] = language.strip().lower()
         all_items = []
         filtered_items = []
-        try:
-            timeout = aiohttp.ClientTimeout(total=8)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(GOOGLE_BOOKS_URL, params=params) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        for item in data.get("items", []) or []:
-                            if not isinstance(item, dict):
-                                continue
-                            book = item.get("volumeInfo") or {}
-                            if not isinstance(book, dict) or not book.get("title"):
-                                continue
-                            all_items.append(item)
-                            if not self._book_matches_publication_year(book, year_from, year_to):
-                                continue
+        data = await fetch_google_books_payload(params)
+        if data:
+            for item in data.get("items", []) or []:
+                if not isinstance(item, dict):
+                    continue
+                book = item.get("volumeInfo") or {}
+                if not isinstance(book, dict) or not book.get("title"):
+                    continue
+                all_items.append(item)
+                if not self._book_matches_publication_year(book, year_from, year_to):
+                    continue
 
-                            is_fiction = self._is_fiction_book(book)
-                            is_nonfiction = self._is_nonfiction_book(book)
-                            if book_type == "fiction" and is_fiction and not is_nonfiction:
-                                filtered_items.append(item)
-                            elif book_type == "nonfiction" and is_nonfiction and not is_fiction:
-                                filtered_items.append(item)
-                    else:
-                        logger.warning(
-                            "Google Books returned HTTP %s for %s query %r",
-                            response.status, book_type, query,
-                        )
-        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
-            logger.warning("Google Books %s search failed for %r: %s", book_type, query, exc)
+                is_fiction = self._is_fiction_book(book)
+                is_nonfiction = self._is_nonfiction_book(book)
+                if book_type == "fiction" and is_fiction and not is_nonfiction:
+                    filtered_items.append(item)
+                elif book_type == "nonfiction" and is_nonfiction and not is_fiction:
+                    filtered_items.append(item)
 
         if filtered_items:
             return filtered_items[:10]
@@ -2243,7 +2294,7 @@ class BrowseCog(commands.Cog):
     @command_meta(section="Media", name="Browse")
     @app_commands.describe(
         media_type="Choose a media type",
-        title="Leave blank to discover movies or TV shows using the supplied filters.",
+        title="Required for Anime, Manga, Light Novels, General Novels, Books and Webnovels; optional for Movie/TV discovery.",
         genre="Genre filter (provider-supported categories only)",
         theme="Theme/tag/keyword filter when the provider exposes it",
         author="Author or writer filter (manga/books/webnovels where supported)",
