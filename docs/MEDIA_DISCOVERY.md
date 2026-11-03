@@ -132,11 +132,11 @@ TMDB watch-provider data is powered by JustWatch. /where-to-watch labels the que
 
 ### Community archives and events
 
-The interactive **/panels** command is the single entry point for the manga-panel archive and community contribution archives. Its menu retains every panel action (browse, personal panels, random, search, upload, configure, and moderation log) and adds a Community Archives entry that opens the archive browser.
+The interactive **/archive** command is the single entry point for manga panels and community contribution archives. Choose **Manga Panels** to open the existing panel actions (browse, personal panels, random, search, upload, configure, and moderation log), or use the community archive selectors for quotes, fanworks, moodboards, soundtracks, scenes, recommendations, and theories.
 
-- **/panels → Community Archives** — browse, search, contribute, or randomly discover quotes, credited fanworks, moodboards, soundtracks, scenes, human-written recommendations, and spoiler-marked theories. The archive menu also provides personal submission history, entry reporting, submission review, and report moderation.
-- **/panels → Configure** — choose whether approved community archive entries are visible globally or only to the current server. Existing servers retain global visibility unless changed. Submission queues, approval, and moderation remain server-scoped.
-- **/panels** — browse and search manga panels, view personal uploads, choose a random panel, add panels, configure storage/moderation, and open the moderation log.
+- **/archive → Community Archives** — browse, search, contribute, or randomly discover quotes, credited fanworks, moodboards, soundtracks, scenes, human-written recommendations, and spoiler-marked theories. The archive menu also provides personal submission history, entry reporting, submission review, and report moderation.
+- **/archive → Manga Panels → Configure** — select the storage channel, moderation log, moderator role, and whether approved community archive entries are visible globally or only to the current server. Existing servers retain global visibility unless changed. Submission queues, approval, and moderation remain server-scoped.
+- **/archive → Manga Panels** — browse and search manga panels, view personal uploads, choose a random panel, add panels, configure storage/moderation, and open the moderation log.
 - **/panel-of-the-day** — selects a non-NSFW record from the existing Panels table and persists one selection per server per date instead of maintaining a second panel database.
 - **/media-bracket**, **/adaptation-vote**, and **/media-quiz** — persist server-scoped votes, polls, trivia questions, and user quiz sessions.
 
