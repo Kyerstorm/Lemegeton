@@ -15,13 +15,15 @@ class PanelModalComponentTests(unittest.TestCase):
 
 
 class PanelArchiveMenuTests(unittest.TestCase):
-    def test_combined_panels_menu_preserves_existing_actions_and_adds_archives(self):
+    def test_panel_menu_keeps_its_actions_and_returns_to_archive(self):
         view = panel.PanelHomeView(None)
         labels = {item.label for item in view.children}
         self.assertTrue({
             "Browse All", "My Panels", "Random", "Search", "Add Panel",
-            "Configure", "Community Archives", "Moderation Log",
+            "Configure", "Back to Archive", "Moderation Log",
         }.issubset(labels))
+        self.assertNotIn("Community Archives", labels)
+        self.assertFalse(hasattr(panel.PanelCog, "panels"))
 
 
 class PanelArchiveConfigurationTests(unittest.TestCase):
