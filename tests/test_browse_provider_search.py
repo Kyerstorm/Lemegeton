@@ -9,6 +9,7 @@ from cogs.media.browse import (
     BrowseCog,
     _search_novelfire_uncached,
     _search_novelphoenix_uncached,
+    _is_safe_webnovel_result,
     search_webnovels,
 )
 
@@ -177,6 +178,20 @@ class BookProviderTests(unittest.IsolatedAsyncioTestCase):
 
 
 class WebnovelProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_mature_rating_markers_are_filtered(self):
+        for marker in ("Adult", "Mature", "R-18", "R18", "NC-17", "Explicit"):
+            with self.subTest(marker=marker):
+                self.assertFalse(_is_safe_webnovel_result({
+                    "title": "The River Chronicle",
+                    "content_rating": marker,
+                    "genres": ["Fantasy"],
+                }))
+        self.assertTrue(_is_safe_webnovel_result({
+            "title": "The River Chronicle",
+            "content_rating": "General",
+            "genres": ["Fantasy"],
+        }))
+
     async def test_one_slow_provider_does_not_discard_another_providers_results(self):
         async def slow_provider(*args, **kwargs):
             await asyncio.sleep(0.05)
