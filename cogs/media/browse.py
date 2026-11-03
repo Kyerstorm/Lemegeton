@@ -1471,8 +1471,13 @@ class BrowseCog(commands.Cog):
             "environment", "government", "statistics",
         )
         for category in book.get("categories", []) or []:
-            normalized = str(category).lower().replace("non-fiction", "nonfiction")
-            if "nonfiction" in normalized or any(marker in normalized for marker in nonfiction_markers):
+            normalized = re.sub(r"[^a-z0-9]+", " ", str(category).casefold()).strip()
+            if re.search(r"\bnon\s?fiction\b", normalized):
+                return True
+            if not re.search(r"\bfiction\b", normalized) and any(
+                re.search(rf"\b{re.escape(marker)}\b", normalized)
+                for marker in nonfiction_markers
+            ):
                 return True
         return False
 
@@ -1610,6 +1615,11 @@ class BrowseCog(commands.Cog):
                 book_type, query,
             )
             return fallback_items[:10]
+
+        if genre or year_from is not None or year_to is not None or author or language or publisher:
+            # Goodreads autocomplete does not expose the same filters; never return
+            # unfiltered fallback results for a constrained search.
+            return []
 
         logger.info("No suitable Google Books result for %r; trying Goodreads", query)
         return await self.fetch_goodreads_results(query)
