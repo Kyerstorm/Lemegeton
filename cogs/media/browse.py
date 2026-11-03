@@ -36,6 +36,7 @@ _NOVELUPDATES_SEARCH_CACHE: Dict[tuple, tuple[float, List[Dict]]] = {}
 _NOVELUPDATES_CACHE_LOCK = asyncio.Lock()
 _NOVELUPDATES_KEY_LOCKS: Dict[tuple, asyncio.Lock] = {}
 _NOVELUPDATES_REQUEST_LIMIT = asyncio.Semaphore(2)
+_WEBNOVEL_PROVIDER_TIMEOUT = 18
 
 
 def _novelupdates_search_urls(query: str) -> List[str]:
@@ -531,13 +532,10 @@ def _novelphoenix_results_from_helper(payload: Dict) -> List[Dict]:
         if not title:
             continue
 
-        matching_cards = [
-            card for card in card_texts if title.casefold() in card.casefold()
-        ]
-        if not matching_cards:
-            # Fail closed when the result's card cannot be checked for its content rating.
+        card_text = _matching_novel_card(title, card_texts)
+        if not card_text:
+            # Keep the adult-content check fail-closed when card metadata is missing.
             continue
-        card_text = min(matching_cards, key=len)
         if _NOVELPHOENIX_EXCLUDED_CONTENT.search(card_text):
             continue
 
@@ -606,25 +604,27 @@ async def _search_novelphoenix_uncached(
             logger.info("Novel Phoenix returned %s results for %r", len(results), query)
             return results
 
-    if browser_fallback and urls:
-        try:
-            payload = await fetch_public_page(
-                urls[0],
-                engine="browser",
-                selectors=selectors,
-                include_text=False,
-                include_links=True,
-                link_selector="a[href*='/novel/']",
-                timeout=max(1, min(int(http_timeout), 10)),
-                retries=0,
-            )
-        except ScrapeBlockedError:
-            raise
-        except (ScrapeRequestError, ValueError) as exc:
-            logger.debug("Novel Phoenix browser fallback failed for %s: %s", urls[0], exc)
-        except Exception:
-            logger.debug("Unexpected Novel Phoenix browser fallback failure", exc_info=True)
-        else:
+    if browser_fallback:
+        for browser_url in urls[: max(1, min(int(max_urls), len(urls)))]:
+            try:
+                payload = await fetch_public_page(
+                    browser_url,
+                    engine="browser",
+                    selectors=selectors,
+                    include_text=False,
+                    include_links=True,
+                    link_selector="a[href*='/novel/']",
+                    timeout=max(1, min(int(http_timeout), 10)),
+                    retries=0,
+                )
+            except ScrapeBlockedError:
+                raise
+            except (ScrapeRequestError, ValueError) as exc:
+                logger.debug("Novel Phoenix browser fallback failed for %s: %s", browser_url, exc)
+                continue
+            except Exception:
+                logger.debug("Unexpected Novel Phoenix browser fallback failure for %s", browser_url, exc_info=True)
+                continue
             results = _novelphoenix_results_from_helper(payload)
             if results:
                 results = await _enrich_aggregator_results(results, provider="novelphoenix")
@@ -707,6 +707,19 @@ _WEBNOVEL_GENRES = (
 )
 
 
+def _matching_novel_card(title: str, card_texts: List[str]) -> Optional[str]:
+    """Match provider link titles to their card text despite punctuation differences."""
+    normalized_title = re.sub(r"[^a-z0-9]+", " ", str(title or "").casefold()).strip()
+    if not normalized_title:
+        return None
+    matches = []
+    for card_text in card_texts:
+        normalized_card = re.sub(r"[^a-z0-9]+", " ", str(card_text).casefold()).strip()
+        if normalized_title in normalized_card:
+            matches.append(card_text)
+    return min(matches, key=len) if matches else None
+
+
 def _novelfire_search_urls(query: str) -> List[str]:
     """Build public NovelFire search routes without guessing a detail-page URL."""
     normalized = " ".join((query or "").split())
@@ -759,11 +772,10 @@ def _novelfire_results_from_helper(payload: Dict) -> List[Dict]:
         if not title:
             continue
 
-        matching_cards = [card for card in card_texts if title.casefold() in card.casefold()]
-        if not matching_cards:
-            # If the card metadata cannot be associated with a title, fail closed.
+        card_text = _matching_novel_card(title, card_texts)
+        if not card_text:
+            # Keep the adult-content check fail-closed when card metadata is missing.
             continue
-        card_text = min(matching_cards, key=len)
         if _NOVELPHOENIX_EXCLUDED_CONTENT.search(card_text):
             continue
 
@@ -974,25 +986,27 @@ async def _search_novelfire_uncached(
             logger.info("NovelFire returned %s results for %r", len(results), query)
             return results
 
-    if browser_fallback and urls:
-        try:
-            payload = await fetch_public_page(
-                urls[0],
-                engine="browser",
-                selectors=selectors,
-                include_text=False,
-                include_links=True,
-                link_selector="a[href*='/book/']",
-                timeout=max(1, min(int(http_timeout), 10)),
-                retries=0,
-            )
-        except ScrapeBlockedError:
-            raise
-        except (ScrapeRequestError, ValueError) as exc:
-            logger.debug("NovelFire browser fallback failed for %s: %s", urls[0], exc)
-        except Exception:
-            logger.debug("Unexpected NovelFire browser fallback failure", exc_info=True)
-        else:
+    if browser_fallback:
+        for browser_url in urls[: max(1, min(int(max_urls), len(urls)))]:
+            try:
+                payload = await fetch_public_page(
+                    browser_url,
+                    engine="browser",
+                    selectors=selectors,
+                    include_text=False,
+                    include_links=True,
+                    link_selector="a[href*='/book/']",
+                    timeout=max(1, min(int(http_timeout), 10)),
+                    retries=0,
+                )
+            except ScrapeBlockedError:
+                raise
+            except (ScrapeRequestError, ValueError) as exc:
+                logger.debug("NovelFire browser fallback failed for %s: %s", browser_url, exc)
+                continue
+            except Exception:
+                logger.debug("Unexpected NovelFire browser fallback failure for %s", browser_url, exc_info=True)
+                continue
             results = _novelfire_results_from_helper(payload)
             if results:
                 results = await _enrich_aggregator_results(results, provider="novelfire")
@@ -1113,10 +1127,10 @@ def _novelist_results_from_helper(payload: Dict) -> List[Dict]:
         if not title or title.casefold() in _NOVELIST_RESERVED_PATHS:
             continue
 
-        matching_cards = [card for card in card_texts if title.casefold() in card.casefold()]
-        if not matching_cards:
+        card_text = _matching_novel_card(title, card_texts)
+        if not card_text:
+            # Keep the adult-content check fail-closed when card metadata is missing.
             continue
-        card_text = min(matching_cards, key=len)
         if _NOVELPHOENIX_EXCLUDED_CONTENT.search(card_text):
             continue
 
@@ -1205,11 +1219,9 @@ async def _search_novelist_uncached(
             return results
 
     if browser_fallback:
-        fallback_url = next(
-            (candidate for candidate in urls if (urlsplit(candidate).hostname or "").lower() not in closed_catalog_hosts),
-            None,
-        )
-        if fallback_url:
+        for fallback_url in urls:
+            if (urlsplit(fallback_url).hostname or "").lower() in closed_catalog_hosts:
+                continue
             try:
                 payload = await fetch_public_page(
                     fallback_url,
@@ -1225,16 +1237,18 @@ async def _search_novelist_uncached(
                 raise
             except (ScrapeRequestError, ValueError) as exc:
                 logger.debug("Novelist browser fallback failed for %s: %s", fallback_url, exc)
+                continue
             except Exception:
-                logger.debug("Unexpected Novelist browser fallback failure", exc_info=True)
-            else:
-                page_text = str(payload.get("text") or "").casefold()
-                if "stories are coming soon" in page_text or "public catalog will open once" in page_text:
-                    return []
-                results = _novelist_results_from_helper(payload)
-                if results:
-                    logger.info("Novelist browser search returned %s results for %r", len(results), query)
-                    return results
+                logger.debug("Unexpected Novelist browser fallback failure for %s", fallback_url, exc_info=True)
+                continue
+            page_text = str(payload.get("text") or "").casefold()
+            if "stories are coming soon" in page_text or "public catalog will open once" in page_text:
+                closed_catalog_hosts.add((urlsplit(fallback_url).hostname or "").lower())
+                continue
+            results = _novelist_results_from_helper(payload)
+            if results:
+                logger.info("Novelist browser search returned %s results for %r", len(results), query)
+                return results
     return []
 
 
@@ -1303,28 +1317,38 @@ async def search_webnovels(
     if not normalized:
         return []
 
+    route_limit = max(1, min(int(max_http_urls), 4))
     provider_calls = [
-        search_novelupdates(
-            normalized,
-            browser_fallback=browser_fallback,
-            http_timeout=http_timeout,
-            max_http_urls=max_http_urls,
-            require_genres=require_genres,
+        asyncio.wait_for(
+            search_novelupdates(
+                normalized,
+                browser_fallback=browser_fallback,
+                http_timeout=http_timeout,
+                max_http_urls=route_limit,
+                require_genres=require_genres,
+            ),
+            timeout=_WEBNOVEL_PROVIDER_TIMEOUT,
         ),
-        search_novelphoenix(
-            normalized, http_timeout=http_timeout,
-            max_urls=4 if browser_fallback else max(1, min(int(max_http_urls), 4)),
-            browser_fallback=browser_fallback,
+        asyncio.wait_for(
+            search_novelphoenix(
+                normalized, http_timeout=http_timeout,
+                max_urls=route_limit, browser_fallback=browser_fallback,
+            ),
+            timeout=_WEBNOVEL_PROVIDER_TIMEOUT,
         ),
-        search_novelfire(
-            normalized, http_timeout=http_timeout,
-            max_urls=3 if browser_fallback else max(1, min(int(max_http_urls), 3)),
-            browser_fallback=browser_fallback,
+        asyncio.wait_for(
+            search_novelfire(
+                normalized, http_timeout=http_timeout,
+                max_urls=route_limit, browser_fallback=browser_fallback,
+            ),
+            timeout=_WEBNOVEL_PROVIDER_TIMEOUT,
         ),
-        search_novelist(
-            normalized, http_timeout=http_timeout,
-            max_urls=6 if browser_fallback else max(1, min(int(max_http_urls), 6)),
-            browser_fallback=browser_fallback,
+        asyncio.wait_for(
+            search_novelist(
+                normalized, http_timeout=http_timeout,
+                max_urls=route_limit, browser_fallback=browser_fallback,
+            ),
+            timeout=_WEBNOVEL_PROVIDER_TIMEOUT,
         ),
     ]
     responses = await asyncio.gather(*provider_calls, return_exceptions=True)
@@ -1413,12 +1437,25 @@ class BrowseCog(commands.Cog):
             "young adult", "graphic novels", "fairy tales",
         )
         for category in book.get("categories", []) or []:
-            normalized = str(category).lower().replace("non-fiction", "nonfiction")
-            if "nonfiction" in normalized:
+            normalized = re.sub(r"[^a-z0-9]+", " ", str(category).casefold()).strip()
+            if re.search(r"\bnon\s?fiction\b", normalized):
                 continue
-            if any(marker in normalized for marker in fiction_markers):
+            if any(re.search(rf"\b{re.escape(marker)}\b", normalized) for marker in fiction_markers):
                 return True
         return False
+
+    @staticmethod
+    def _book_matches_publication_year(
+        book: Dict, year_from: Optional[int] = None, year_to: Optional[int] = None
+    ) -> bool:
+        """Match Google Books publication dates, which may be YYYY, YYYY-MM or YYYY-MM-DD."""
+        if year_from is None and year_to is None:
+            return True
+        match = re.match(r"^\s*(\d{4})", str(book.get("publishedDate") or ""))
+        if not match:
+            return False
+        year = int(match.group(1))
+        return (year_from is None or year >= year_from) and (year_to is None or year <= year_to)
 
     @staticmethod
     def _is_nonfiction_book(book: Dict) -> bool:
@@ -1502,10 +1539,6 @@ class BrowseCog(commands.Cog):
         query_parts = [" ".join((query or "").split())]
         if genre:
             query_parts.insert(0, f"subject:{genre}")
-        if year_from is not None:
-            query_parts.append(f"after:{year_from}")
-        if year_to is not None:
-            query_parts.append(f"before:{year_to + 1}")
         if author:
             query_parts.append(f"inauthor:{author.strip()}")
         if publisher:
@@ -1533,11 +1566,14 @@ class BrowseCog(commands.Cog):
                             if not isinstance(book, dict) or not book.get("title"):
                                 continue
                             all_items.append(item)
+                            if not self._book_matches_publication_year(book, year_from, year_to):
+                                continue
+
                             is_fiction = self._is_fiction_book(book)
                             is_nonfiction = self._is_nonfiction_book(book)
-                            if book_type == "fiction" and is_fiction:
+                            if book_type == "fiction" and is_fiction and not is_nonfiction:
                                 filtered_items.append(item)
-                            elif book_type == "nonfiction" and is_nonfiction:
+                            elif book_type == "nonfiction" and is_nonfiction and not is_fiction:
                                 filtered_items.append(item)
                     else:
                         logger.warning(
@@ -1549,20 +1585,23 @@ class BrowseCog(commands.Cog):
 
         if filtered_items:
             return filtered_items[:10]
-        if genre or year_from is not None or year_to is not None or author or language or publisher:
-            # Goodreads autocomplete does not reliably expose all Google Books filters.
-            return []
-
         # Google Books often omits categories or labels them too broadly to classify
-        # a result. Keep likely matches instead of dropping every title and needlessly
-        # waiting on Goodreads. Exclude only results explicitly classified as the
-        # opposite media type.
+        # a result. Keep unclassified candidates, but never cross the fiction/nonfiction
+        # boundary. Publication-year constraints are applied before this fallback too.
         fallback_items = [
             item for item in all_items
-            if not (
-                self._is_nonfiction_book(item.get("volumeInfo") or {})
-                if book_type == "fiction"
-                else self._is_fiction_book(item.get("volumeInfo") or {})
+            if (
+                not (
+                    self._is_nonfiction_book(item.get("volumeInfo") or {})
+                    if book_type == "fiction"
+                    else self._is_fiction_book(item.get("volumeInfo") or {})
+                )
+                and (
+                    year_from is None and year_to is None
+                    or self._book_matches_publication_year(
+                        item.get("volumeInfo") or {}, year_from, year_to
+                    )
+                )
             )
         ]
         if fallback_items:
