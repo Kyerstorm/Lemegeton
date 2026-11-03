@@ -14,6 +14,7 @@ from discord.ext import commands
 from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView, handle_application_command_error
 import database
 from helpers import media_storage
+from cogs_test.general_commands.dashboard import command_meta
 
 log = logging.getLogger("Lemegeton.CommunityArchives")
 ACTIONS = [
