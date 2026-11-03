@@ -20,7 +20,6 @@ from discord.ext import commands
 
 import database
 from helpers import media_storage
-from cogs_test.general_commands.dashboard import command_meta
 from helpers.anilist_helper import fetch_media_by_id
 from helpers.color_palette import PALETTE
 from helpers.crypto_random import secure_choice
@@ -1557,13 +1556,13 @@ class PanelHomeView(FeedbackAwareView):
             log.exception("Could not open panel configuration for guild %s", interaction.guild_id)
             await interaction.response.send_message(application_error_message(exc), ephemeral=True)
 
-    @discord.ui.button(label="Community Archives", emoji="🗃️", style=discord.ButtonStyle.secondary, row=1)
-    async def community_archives(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="Back to Archive", emoji="↩️", style=discord.ButtonStyle.secondary, row=1)
+    async def back_to_archive(self, interaction: discord.Interaction, button: discord.ui.Button):
         cog = self.cog.bot.get_cog("CommunityArchives")
         if cog is None:
-            await interaction.response.send_message("Community Archives are temporarily unavailable.", ephemeral=True)
+            await interaction.response.send_message("The Archive menu is temporarily unavailable.", ephemeral=True)
             return
-        await cog.send_home(interaction)
+        await cog.send_home(interaction, edit=True)
 
     @discord.ui.button(label="Moderation Log", emoji="🛡️", style=discord.ButtonStyle.secondary, row=1)
     async def moderation_log(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1746,11 +1745,10 @@ class PanelCog(commands.Cog):
             if interaction.response.is_done(): await interaction.followup.send("Something went wrong.", ephemeral=True)
             else: await interaction.response.send_message("Something went wrong.", ephemeral=True)
 
-    @app_commands.command(name="panels", description="Open the shared Manga Panel Archive")
-    @command_meta(section="Media", name="Panel Archive")
-    async def panels(self, interaction: discord.Interaction):
+    async def send_home(self, interaction: discord.Interaction) -> None:
+        """Replace the unified archive menu with the manga-panel actions."""
         try:
-            await interaction.response.defer(ephemeral=True, thinking=True)
+            await interaction.response.defer()
             server_count = (
                 await _count_from_guild(interaction.guild_id)
                 if interaction.guild_id is not None else 0
@@ -1769,15 +1767,18 @@ class PanelCog(commands.Cog):
             )
             embed.add_field(name="🖼️ Browse", value="Explore the archive, jump between panels, or pick a random find.", inline=True)
             embed.add_field(name="➕ Contribute", value="Upload a panel, add tags, and link its AniList manga entry.", inline=True)
-            embed.add_field(name="🗃️ Community Archives", value="Open quotes, fanworks, moodboards, soundtracks, scenes, recommendations, and theories from this same menu.", inline=False)
-            embed.set_footer(text="One archive menu · Storage and community visibility are configured per server")
+            embed.set_footer(text="Manga Panels · Storage and moderation are configured per server · Return to /archive")
             if not _nsfw(interaction):
                 embed.add_field(name="🔞 Content visibility", value="Mature panels are hidden in channels that are not age-restricted.", inline=False)
-            await interaction.followup.send(embed=embed, view=PanelHomeView(self), ephemeral=True)
+            await interaction.edit_original_response(content=None, embed=embed, view=PanelHomeView(self))
         except Exception as exc:
-            log.exception("/panels failed")
-            if interaction.response.is_done(): await interaction.followup.send("Something went wrong.", ephemeral=True)
-            else: await interaction.response.send_message("Something went wrong.", ephemeral=True)
+            log.exception("Could not open Manga Panels from /archive")
+            if interaction.response.is_done():
+                await interaction.edit_original_response(
+                    content=application_error_message(exc), embed=None, view=None
+                )
+            else:
+                await interaction.response.send_message(application_error_message(exc), ephemeral=True)
 
     async def save_message(self, interaction: discord.Interaction, message: discord.Message):
         try:
