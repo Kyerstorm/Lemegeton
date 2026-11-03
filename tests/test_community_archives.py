@@ -41,11 +41,12 @@ class CommunityArchiveHelperTests(unittest.TestCase):
         self.assertEqual(archive_scope_filter("global", 123), ("", ()))
         self.assertEqual(archive_scope_filter("server", None), ("", ()))
 
-    def test_archive_launcher_keeps_three_named_dropdown_controls(self):
+    def test_archive_launcher_keeps_dropdowns_and_opens_manga_panels(self):
         view = ArchiveHomeView(None, owner_id=123)
         self.assertIs(view.archive_select, view.children[0])
         self.assertIs(view.media_select, view.children[1])
         self.assertIs(view.action_select, view.children[2])
+        self.assertIn("Manga Panels", {item.label for item in view.children})
 
 
 if __name__ == "__main__":
