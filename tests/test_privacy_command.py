@@ -99,7 +99,7 @@ class PrivacyNoticeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn(value, self.notice)
 
     def test_embed_limits_are_respected(self):
-        self.assertLessEqual(len(self.embeds), 10)
+        self.assertEqual(len(self.embeds), len(PRIVACY_SECTIONS))
         for embed in self.embeds:
             total = len(embed.title or "") + len(embed.description or "") + len(embed.footer.text or "")
             for field in embed.fields:
