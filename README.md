@@ -316,7 +316,7 @@ Results explicitly marked adult-rated or sexually explicit are excluded.
 
 | Command | Purpose |
 |---|---|
-| **/panels** | Open the shared manga panel archive, including the Community Archives browser, server/global archive visibility settings, upload, search, and moderation tools. |
+| **/archive** | Open the unified community archive, then choose Manga Panels or a community archive category. Panel uploads, search, configuration, and moderation are under Manga Panels. |
 | **/panel-of-the-day** | Display the selected safe panel for the current server. |
 | **/media-bracket** | Run a guild-local elimination poll for media candidates. |
 | **/adaptation-vote** | Compare community preferences between two versions or adaptations. |
@@ -801,7 +801,7 @@ flowchart TB
 ```mermaid
 flowchart LR
     subgraph PRIVATEFLOW["🔒 Private image flow"]
-        PANELUPLOAD["/panels upload"]
+        PANELUPLOAD["/archive → Manga Panels upload"]
         ROLEUPLOAD["Custom Role original icon"]
         OBJECTHELPER["helpers/media_storage.py"]
         PRIVOBJ[("S3_BUCKET")]
