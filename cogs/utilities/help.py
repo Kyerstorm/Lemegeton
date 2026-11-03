@@ -140,11 +140,11 @@ class HelpCog(commands.Cog):
                 }
             },
             "👥 Community Archives & Events": {
-                "panels": {
-                    "desc": "Open the shared manga panel archive to browse, search, contribute, or manage your submissions",
-                    "usage": "/panels",
-                    "note": "Browse, search, add panels, view your uploads, open the moderation log, and enter Community Archives from the same menu. Configure storage, moderation, and whether approved Community Archive entries are visible globally or only in this server. Mature panels are hidden outside age-restricted channels.",
-                    "examples": ["/panels"]
+                "archive": {
+                    "desc": "Open the unified archive for community contributions and manga panels",
+                    "usage": "/archive",
+                    "note": "Choose Community Archives or Manga Panels. The panel menu includes browsing, search, uploads, personal panels, configuration, and the moderation log. Configure where approved community entries are visible; panel images remain globally discoverable, and mature panels are hidden outside age-restricted channels.",
+                    "examples": ["/archive"]
                 },
                 "panel-of-the-day": {
                     "desc": "View this server's selected safe panel for today",
@@ -1016,7 +1016,7 @@ class HelpCog(commands.Cog):
             ),
             "community": (
                 "• Archive submissions may wait for local moderator approval\n"
-                "• Open /panels → Community Archives to check your submissions, report approved content, or review server-local queues\n"
+                "• Open /archive to check submissions, report approved content, or review server-local queues\n"
                 "• Archive reports and review actions are scoped to their originating server\n"
                 "• Brackets, adaptation polls, and quiz sessions are server-specific"
             ),
