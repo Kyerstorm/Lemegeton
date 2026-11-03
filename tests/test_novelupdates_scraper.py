@@ -216,7 +216,12 @@ class NovelPhoenixParserTests(unittest.TestCase):
         self.assertTrue(_is_safe_webnovel_result({"title": "Safe Chronicle", "genres": ["Fantasy"]}))
         self.assertFalse(_is_safe_webnovel_result({"title": "Hidden Garden", "genres": ["Adult", "Romance"]}))
         self.assertFalse(_is_safe_webnovel_result({"title": "Another Story", "tags": ["Smut"]}))
-        self.assertFalse(_is_safe_webnovel_result({"title": "Another Story 18+"}))
+        for marker in ("18+", "R-18", "R18", "NC-17", "Explicit"):
+            with self.subTest(marker=marker):
+                self.assertFalse(_is_safe_webnovel_result({
+                    "title": "Another Story",
+                    "content_rating": marker,
+                }))
 
 
 
