@@ -7,6 +7,7 @@ import discord
 from discord import app_commands
 
 import database
+from helpers.command_error_handler import FeedbackAwareView
 
 log = logging.getLogger("Lemegeton.TermsConsent")
 
@@ -70,7 +71,7 @@ async def user_has_current_consent(user_id: int) -> bool:
     return row is not None
 
 
-class TermsConsentView(discord.ui.View):
+class TermsConsentView(FeedbackAwareView):
     """User-bound agreement controls shared by slash and prefix command prompts."""
 
     def __init__(self, owner_id: int):
@@ -86,7 +87,7 @@ class TermsConsentView(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="Agree & Continue", style=discord.ButtonStyle.primary, emoji="✓")
+    @discord.ui.button(label="Agree & Continue", style=discord.ButtonStyle.primary, emoji="✅")
     async def agree(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         try:
             await database.execute_db_operation(

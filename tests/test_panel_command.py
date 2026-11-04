@@ -1,5 +1,6 @@
 """Focused regression tests for manga panel metadata and tag selection."""
 import unittest
+from unittest import mock
 
 from cogs.media import panel
 
@@ -156,4 +157,83 @@ class PanelTagCatalogueTests(unittest.TestCase):
     def test_mature_tag_is_available_for_age_restricted_panels(self):
         self.assertIn("mature", panel.PANEL_VISUAL_TAGS)
         self.assertIn("Age-restricted", panel.PANEL_TAG_DESCRIPTIONS["mature"])
+
+
+class _FakeConn:
+    def __init__(self, n: int):
+        self.n = n
+        self.calls: list[tuple] = []
+
+    async def fetchrow(self, sql, *args):
+        self.calls.append((sql, args))
+        return {"n": self.n}
+
+
+class _FakeAcquire:
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def __aenter__(self):
+        return self.conn
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _FakePool:
+    def __init__(self, conn):
+        self.conn = conn
+
+    def acquire(self):
+        return _FakeAcquire(self.conn)
+
+
+class PanelsCommandAgeGateTests(unittest.IsolatedAsyncioTestCase):
+    """/panels must not reveal age-restricted panel counts in channels that hide them."""
+
+    def _interaction(self, *, nsfw: bool):
+        interaction = mock.MagicMock()
+        interaction.guild_id = 20
+        interaction.channel.is_nsfw.return_value = nsfw
+        interaction.response.defer = mock.AsyncMock()
+        interaction.response.is_done.return_value = True
+        interaction.followup.send = mock.AsyncMock()
+        interaction.edit_original_response = mock.AsyncMock()
+        return interaction
+
+    async def _run_panels(self, *, nsfw: bool):
+        interaction = self._interaction(nsfw=nsfw)
+        cog = mock.MagicMock()
+        with mock.patch.object(panel, "_count_from_guild", mock.AsyncMock(return_value=0)) as guild_count, \
+                mock.patch.object(panel, "_count", mock.AsyncMock(return_value=0)) as global_count:
+            await panel.PanelCog.send_home(cog, interaction)
+        return guild_count, global_count
+
+    async def test_safe_channel_counts_exclude_mature_panels(self):
+        guild_count, global_count = await self._run_panels(nsfw=False)
+        guild_count.assert_awaited_once_with(20, False)
+        global_count.assert_awaited_once_with(False)
+
+    async def test_nsfw_channel_counts_include_mature_panels(self):
+        guild_count, global_count = await self._run_panels(nsfw=True)
+        guild_count.assert_awaited_once_with(20, True)
+        global_count.assert_awaited_once_with(True)
+
+    async def test_guild_count_query_applies_the_age_gate(self):
+        conn = _FakeConn(n=3)
+        with mock.patch.object(panel, "_pool", mock.AsyncMock(return_value=_FakePool(conn))):
+            total = await panel._count_from_guild(20, False)
+        self.assertEqual(total, 3)
+        sql, args = conn.calls[0]
+        self.assertIn("is_nsfw=FALSE", sql)
+        self.assertEqual(args, (20, False))
+
+
+class PanelCogLoadTests(unittest.IsolatedAsyncioTestCase):
+    async def test_schema_failure_still_registers_the_command_and_context_menu(self):
+        bot = mock.MagicMock()
+        cog = panel.PanelCog(bot)
+        with mock.patch.object(panel, "_schema", mock.AsyncMock(side_effect=RuntimeError("db down"))):
+            await cog.cog_load()
+        bot.tree.add_command.assert_called_once_with(cog.save_menu, override=True)
 
