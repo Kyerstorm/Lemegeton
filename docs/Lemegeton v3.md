@@ -1558,3 +1558,145 @@ The v3 migration audit should use the actual repository source as its authority.
 - [Existing dashboard implementation](https://github.com/Kyerstorm/Lemegeton/blob/multi_guild/cogs_test/general_commands/dashboard.py)
 
 These links are historical audit starting points, not implementation guarantees. Verify the current branch, actual callers, and behavior before porting anything.
+
+---
+
+## 22. Fifty candidate feature environments and command ideas
+
+This catalogue records fifty substantial feature concepts raised during v3 planning. It is deliberately a catalogue of **feature environments, workflows, and specialist views**, not a plan to register fifty top-level Discord slash commands.
+
+The approved public command surface remains the seven feature entry points in Section 3:
+
+- `/discover`
+- `/archive`
+- `/community`
+- `/play`
+- `/profile`
+- `/custom-role`
+- `/settings`
+
+Every idea below must be implemented inside the most suitable existing feature environment unless a later, explicit product decision justifies a new public command. Names such as `/atlas`, `/creators`, `/trails`, or `/trivia` are **planning labels and navigation concepts only**; they are not permission to create separate slash commands. Use contextual buttons, select menus, tabs, modals, autocomplete, message context actions, and dashboard views to expose the relevant workflows.
+
+The list is a product backlog for evaluation and sequencing. Listing an idea does not by itself approve implementation, promise provider support, or override the scope exclusions and privacy rules elsewhere in this specification.
+
+### 22.1 Media Intelligence — inside `/discover`
+
+| No. | Candidate environment | Intended capability |
+|---:|---|---|
+| 1 | **Discovery Metropolis** | The main media discovery environment: multi-provider search, browse, filters, recommendations, random discovery, trending views, detailed title cards, comparisons, and cross-media exploration. It absorbs existing discovery commands rather than duplicating them. |
+| 2 | **Community Knowledge Atlas** | An Obsidian-inspired visual graph of media, creators, franchises, adaptations, archive records, collections, discussions, and community activity. It provides image-backed nodes, typed relationships, zoom, pan, filters, search, path exploration, node details, and permission-aware navigation. The Atlas is a major view within `/discover`, with contextual entry points from related records and the dashboard. |
+| 3 | **Creator Explorer** | Explore authors, artists, illustrators, editors, translators, studios, directors, developers, publishers, and their supported workographies. Show credits and collaborations only when supported by reliable provider data. |
+| 4 | **Franchise Explorer** | Explore works belonging to a franchise, including sequels, prequels, spin-offs, side stories, alternate versions, and related entries. Label relationship provenance and avoid assuming that similarly named works belong to one franchise. |
+| 5 | **Adaptation Explorer** | Explore source-to-adaptation relationships across manga, anime, novels, games, films, and television. Distinguish provider-confirmed links from community proposals and local matching. |
+| 6 | **Comparison Studio** | Compare multiple works using category-aware fields such as format, creators, release data, genres, platforms, editions, and provider ratings. Explain which sources supplied each comparison field. |
+| 7 | **Books & Editions** | Provide category-aware discovery for books, general novels, light novels, and translations, including ISBNs, publishers, editions, languages, illustrators, volume information, and publication histories where available. |
+| 8 | **Availability Explorer** | Show supported streaming, regional catalogue, game storefront, and publisher availability. Require a reliable provider, identify the region and source, and distinguish unavailable information from confirmed absence. |
+| 9 | **Media Release Explorer** | Explore upcoming and recent episodes, chapters, volumes, webnovel updates, publications, films, television releases, and games. Detailed title discovery lives in `/discover`; community scheduling and release views connect to `/community`. |
+| 10 | **Metadata Source Explorer** | Inspect provider provenance, identifiers, field-level sources, freshness where available, missing metadata, and the distinction between provider facts, local matching, recommendations, and community-suggested relationships. |
+
+### 22.2 Community Archive — inside `/archive`
+
+| No. | Candidate environment | Intended capability |
+|---:|---|---|
+| 11 | **Archive Metropolis** | The complete existing Archive environment: browse, submit, search, filter, review, edit, remove, configure, and moderate permitted contributions across all supported archive categories. Preserve the unified Archive direction; Panels remains an archive category/workflow, not a competing command. |
+| 12 | **Collection Studio** | Create and maintain mixed-media collections, reorder entries, add descriptions and source credits, invite collaborators, manage contribution permissions, and publish or unpublish collections. |
+| 13 | **Archive Trails** | Build guided paths through archive entries. A trail can connect panels, quotes, scenes, soundtracks, fanworks, theories, and other permitted records with curator-authored transitions and explanations. |
+| 14 | **Visual Archive Gallery** | Explore image-based archive material through galleries, visual category filters, collection previews, and media-linked displays. Gallery views must preserve the permissions and visibility of the underlying records. |
+| 15 | **Soundtrack Discovery** | Explore soundtrack records and supported music metadata, connect soundtracks to media, browse by work or creator, and curate soundtrack collections. This is a media archive capability, not a general-purpose music player or unrelated music service. |
+| 16 | **Curation Studio** | Maintain featured collections, curated indexes, category spotlights, Archive Trails, themed showcases, and community-selected highlights with clear curator attribution. |
+| 17 | **Community Spotlights** | Surface approved contributions, older archive entries, notable collections, creator features, and media-linked highlights. Scheduling and publication are coordinated through `/community`; the source records remain in `/archive`. |
+
+### 22.3 Community Activities — inside `/community`
+
+| No. | Candidate environment | Intended capability |
+|---:|---|---|
+| 18 | **Community Metropolis** | The central environment for Daily Drop, rankings, sessions, discussions, tournaments, community seasons, calendar views, and selected community showcases. It consolidates existing activity commands and workflows rather than creating a command for each activity. |
+| 19 | **Daily Media Centre** | Configure and participate in daily media prompts, mystery titles, trivia, quotes, media polls, recommendations, creator features, comparisons, and archive spotlights. Guild schedule, timezone, destination, and moderation settings remain explicit. |
+| 20 | **Ranking Studio** | Create and manage community rankings, accept candidates, define voting rules, allow permitted vote changes, close voting, publish results, and explore historical rankings. |
+| 21 | **Tournament Centre** | Run media brackets and structured competitions, including elimination rounds, multi-stage voting, character or creator competitions, and adaptation matchups. Rules, ties, eligibility, and voting windows must be defined for each tournament. |
+| 22 | **Session Centre** | Coordinate Watch, Read, Play, and Discuss sessions with nominations, voting, hosts, co-hosts, RSVP, waitlists, event links, reminders associated with the event itself, and session history. Session participation must not become personal media-progress tracking. |
+| 23 | **Discussion Centre** | Create and browse media-linked discussions with spoiler boundaries for episodes, chapters, volumes, seasons, and other supported units. Connect discussions to titles, archive entries, collections, and sessions. |
+| 24 | **Media & Community Calendar** | Present supported media releases, community sessions, rankings, tournaments, discussions, and selected events in one filterable calendar. Preserve source dates, timezone, and event state. |
+| 25 | **Community Seasons** | Run themed community periods containing scheduled Daily Drops, rankings, sessions, challenges, archive spotlights, and a final showcase. Season configuration must reuse existing activity records rather than duplicate them. |
+| 26 | **Community Showcase** | Curate completed collections, Archive Trails, creative contributions, ranking outcomes, and event highlights. Public presentation must respect the sharing scope and review state of every included record. |
+
+### 22.4 Interactive Media Games — inside `/play`
+
+| No. | Candidate environment | Intended capability |
+|---:|---|---|
+| 27 | **Interactive Game Metropolis** | The main media-game environment: discover available game modes, start or join a game, select solo/team formats, manage supported game sessions, and present results. |
+| 28 | **Trivia Arena** | Source-aware trivia across supported media categories, with solo, team, hosted, and multi-round formats. Questions need answer validation, difficulty, provenance, and review before community publication. |
+| 29 | **Mystery Media** | Layered clues to identify a hidden work, franchise, creator, adaptation, or game. Support daily and hosted formats without exposing the answer through metadata or interaction payloads. |
+| 30 | **Guessing Arena** | Title, creator, release-period, franchise, synopsis, and other media-identification rounds. Make accepted answers and normalization rules explicit. |
+| 31 | **Team Games** | Create teams and run cooperative or competitive media challenges. Team membership, scoring, eligibility, and round state must persist reliably. |
+| 32 | **Challenge Centre** | Timed or multi-stage media challenges, themed discovery tasks, seasonal challenges, and community puzzles with transparent rules and accessible time limits. |
+| 33 | **Quiz Pack Studio** | Create, review, revise, curate, and share community quiz packs with answer keys, accepted alternatives, source references, difficulty, and revision history. |
+| 34 | **Media Puzzle Room** | Media-themed word puzzles, relationship puzzles, franchise connection puzzles, clue chains, and cooperative problem-solving activities. Avoid adding generic non-media games to this product pillar without a separate decision. |
+
+### 22.5 Social & Profiles — inside `/profile`
+
+| No. | Candidate environment | Intended capability |
+|---:|---|---|
+| 35 | **Profile Metropolis** | Present supported Discord and provider profile information, connected accounts, opt-in media affinity, contribution attribution, visibility settings, and public profile presentation. |
+| 36 | **Account Connection Centre** | Link, unlink, inspect, and manage supported AniList, Steam, and other verified provider connections. Show connection status and consent scope; protect tokens and credentials. |
+| 37 | **Media Affinity** | Compare opt-in provider-supported interests between members, explain the comparison signals, and avoid treating an affinity score as a judgment about people. |
+| 38 | **Community Taste Explorer** | Show opt-in aggregate media interests within a guild, including commonly shared interests and category-level trends, without exposing individual private records or introducing activity tracking. |
+| 39 | **Contributor Centre** | Present a member's permitted public archive contributions, collections, trails, and other approved creative work with accurate attribution. |
+| 40 | **Community Creations** | Provide a unified way to browse supported member-created archive content, fanworks, curated lists, and other approved contributions. Canonical content remains stored and moderated by the Archive. |
+| 41 | **Profile Showcase** | Build a curated, opt-in public presentation of supported profile data and community contributions. It must not become a personal watch/read/play library or progress tracker. |
+
+### 22.6 Custom Roles — inside `/custom-role`
+
+| No. | Candidate environment | Intended capability |
+|---:|---|---|
+| 42 | **Custom Role Metropolis** | Retain the existing member and administrator custom-role experience behind one `/custom-role` entry point. Provide permission-aware creation, selection, assignment, styling, preview, and administration using the existing system's verified capabilities. |
+| 43 | **Role Design Studio** | A deeper design workflow within Custom Roles for supported palettes, gradients, icons, previews, and role styling. This is a panel or sub-environment inside `/custom-role`, not another public slash command or a general server-theme system. |
+
+### 22.7 Media Notifications & Automation — configuration through `/settings`, discovery through `/discover`, activity through `/community`
+
+| No. | Candidate environment | Intended capability |
+|---:|---|---|
+| 44 | **Media Follow Centre** | Subscribe to supported titles, creators, franchises, and media categories for relevant release or metadata updates. This is a notification subscription, not a personal library or progress tracker. |
+| 45 | **Media Alert Centre** | Configure alerts for supported episodes, chapters, publications, films, television releases, game releases, provider updates, and streaming-availability changes. Allow user preferences and guild channel delivery rules where appropriate. |
+| 46 | **Media Digest Studio** | Configure media-only digests, such as daily or weekly release summaries. Select supported categories, followed entities, region, timezone, destination, and presentation format. Do not add general reminders or unrelated digest content. |
+| 47 | **Media Automation Studio** | Configure explicit media-linked workflows, such as a verified release updating the calendar, proposing a relevant session, opening a discussion proposal, or refreshing a Knowledge Atlas projection. Workflows must be bounded, auditable, idempotent, and limited to approved media/community triggers. |
+
+### 22.8 Knowledge Atlas and Operations — integrated views, not extra public commands
+
+| No. | Candidate environment | Intended capability |
+|---:|---|---|
+| 48 | **Graph Export Studio** | Export permission-filtered Knowledge Atlas views, focused franchise or creator maps, collection graphs, and relationship paths as supported image formats. Provide readable labels, useful sizing, and source/visibility safeguards. Export is a graph action inside the Atlas, not a separate slash command. |
+| 49 | **Feature Diagnostics** | Provide authorized diagnostics for selected v3 features: missing Discord permissions, inaccessible channels, provider health, asset failures, job status, and relevant database/service health. Surface it through `/settings` and the authenticated dashboard, with sensitive operator details restricted. |
+| 50 | **Data & Backup Centre** | Provide restricted operational visibility into migration status, backup verification, asset recovery, and selected data-safety reports. This is an operator/infrastructure capability, not a public member command or a replacement for deployment and backup tooling. |
+
+### 22.9 Consolidation map
+
+The fifty concepts route into the existing seven commands as follows:
+
+| Public command | Environments owned |
+|---|---|
+| **/discover** | 1–10, plus Knowledge Atlas graph exploration and Graph Export Studio (2 and 48) |
+| **/archive** | 11–16 and 40, with archive-backed parts of 17, 26, and 39 |
+| **/community** | 17–26, including spotlights, daily activities, rankings, tournaments, sessions, discussions, calendar, seasons, and showcases |
+| **/play** | 27–34 |
+| **/profile** | 35–41 |
+| **/custom-role** | 42–43 |
+| **/settings** | Configuration for 44–47, plus authorized diagnostics (49) and restricted operational views (50) |
+
+Some environments intentionally connect to more than one command. For example, a release can be discovered in `/discover`, followed for notifications through the media subscription system, and displayed in `/community`'s calendar. This is a shared domain workflow, not a reason to duplicate the underlying record or register more commands.
+
+### 22.10 Rules for turning catalogue ideas into implementation
+
+1. Keep the seven-command public surface as the default. A new top-level command requires a documented usability reason and explicit approval.
+2. A candidate name with a slash prefix is a planning label unless it appears in the approved public command table in Section 3.
+3. Prefer adding a focused view or action to an existing metropolis over creating a separate command.
+4. Do not implement all fifty concepts at once. Sequence them by user value, data dependencies, provider support, security, and migration readiness.
+5. Reuse canonical media, archive, community, profile, and graph records. Do not create duplicate data models for the same entity merely because it appears in multiple environments.
+6. Keep media notifications and automation media-based only. Do not add birthdays, generic reminders, general-purpose task scheduling, or unrelated automation.
+7. Keep Custom Roles as the only selected item from the broader server-customization category. Do not use this catalogue to introduce a theme marketplace or broad server administration suite.
+8. The Knowledge Atlas must support image-backed nodes and readable graph views, but images are visual representations of permission-checked graph data, not an alternate source of truth.
+9. Graph exports, spotlights, collections, community showcases, and global archive views must re-check source visibility at the point of display and export.
+10. A candidate enters implementation only after its behavior, source of truth, permissions, failure cases, storage needs, and focused acceptance tests have been defined.
+11. Preserve the distinction between a provider-confirmed fact, a provider-generated recommendation, a local similarity result, and a community-submitted suggestion.
+12. The catalogue does not change the 200,000-line aspiration into a target to manufacture. Codebase size must arise from real implemented behavior, integrations, tests, and operational needs.
+
