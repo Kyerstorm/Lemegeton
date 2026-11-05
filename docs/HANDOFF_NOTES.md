@@ -393,7 +393,7 @@ First, `/custom-role-admin` → **Server features** should show ✅ for **Role i
 - The picker on phones wasn't tested live.
 
 **Issues outside Custom Roles (not fixed)**
-- `cogs_test.panel` fails to load ("context menus cannot be defined inside a class").
+- The retired `cogs_test.panel` prototype was removed during command-cog consolidation; the active archive implementation is `cogs/media/community_archives.py`.
 - The news and free-games tasks fail at startup with "Client has not been properly initialised"
   (they wait for "ready" before the bot has logged in).
 - Some other cogs query tables or columns that don't exist in PostgreSQL (`paginator_state`,
