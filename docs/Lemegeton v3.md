@@ -1,9 +1,9 @@
 # Lemegeton v3 — Product & Engineering Specification
 
-**Status:** Approved product direction; specification only  
+**Status:** Approved product direction; implementation in progress  
 **Target branch:** lemegeton-v3  
 **Pull request:** #17 — keep Draft  
-**Implementation status:** Not started  
+**Implementation status:** TypeScript runtime foundation and the first AniList-backed `/discover` vertical slice are implemented; remaining feature migrations and production cutover are not complete.  
 **Product scope:** Media Intelligence, Community Archive, Community Activities, Interactive Media Games, Social & Profiles, Custom Roles, Media Notifications & Automation, Community Knowledge Atlas, and Operations & Infrastructure.
 
 ---
@@ -1428,6 +1428,10 @@ Provider information may be displayed when the member explicitly links and autho
 ## 17. Migration plan
 
 The redevelopment is staged so the new bot does not lose existing behavior during the rewrite.
+
+### Current implementation checkpoint — 6 November 2026
+
+The new TypeScript/Node.js/Discord.js runtime is established under `bot/`. It includes validated startup configuration, structured logging, slash-command registration and interaction routing, an AniList provider adapter, and the first functional `/discover` environment for anime and manga search and trending results. Focused provider/configuration tests and a dedicated CI workflow are included. This is the first migration slice, not feature parity: the existing Python bot, PostgreSQL layer, Rust/Axum dashboard API, and S3 storage remain in place until each replacement workflow has been migrated and verified. The remaining feature environments and production cutover are still outstanding.
 
 1. **Repository and behavior audit** — inventory all loaded cogs, commands, interactions, jobs, helpers, providers, schemas, dashboard endpoints, deployment scripts, permissions, and tests. Include both normal cogs and dynamically loaded test-cog paths. Identify which documented features are actually implemented.
 2. **Command consolidation map** — produce the final mapping from existing commands to /discover, /archive, /community, /play, /profile, /custom-role, and /settings. Identify historical, test-only, backup, and out-of-scope commands. Do not implement additional command entry points merely to preserve old CRUD commands.

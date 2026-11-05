@@ -86,3 +86,7 @@ dashboard-frontend/dist/
 # Local dashboard / VPS runtime
 .venv/
 runtime-home/
+
+# TypeScript Discord bot
+bot/node_modules/
+bot/dist/

@@ -1,0 +1,37 @@
+name: TypeScript bot
+
+on:
+  pull_request:
+    branches: [multi_guild]
+    paths:
+      - "bot/**"
+      - ".github/workflows/typescript-bot.yml"
+  push:
+    branches: [multi_guild]
+    paths:
+      - "bot/**"
+      - ".github/workflows/typescript-bot.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Type-check and test Discord bot
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bot
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Type-check
+        run: npm run typecheck
+      - name: Build and run tests
+        run: npm test
