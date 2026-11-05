@@ -460,17 +460,31 @@ async def _shared_panel_archive_availability(guild_id: int) -> tuple[bool, bool]
         return False, False
 
 
+def _is_private_storage_channel(channel: discord.TextChannel) -> bool:
+    channel_guild = channel.guild
+    bot_member = channel_guild.me
+    bot_permissions = channel.permissions_for(bot_member) if bot_member else None
+    public_permissions = channel.permissions_for(channel_guild.default_role)
+    return bool(
+        bot_permissions
+        and bot_permissions.view_channel
+        and bot_permissions.send_messages
+        and bot_permissions.attach_files
+        and not public_permissions.view_channel
+    )
+
+
 async def _storage_channel(bot: commands.Bot, guild: discord.Guild | None):
     if guild:
         settings = await _settings(guild.id)
         channel_id = settings.get("panel_storage_channel_id")
         if channel_id:
             channel = guild.get_channel(int(channel_id))
-            if isinstance(channel, discord.TextChannel):
+            if isinstance(channel, discord.TextChannel) and _is_private_storage_channel(channel):
                 return channel
     if DEFAULT_STORAGE_CHANNEL_ID:
         channel = bot.get_channel(int(DEFAULT_STORAGE_CHANNEL_ID))
-        if isinstance(channel, discord.TextChannel):
+        if isinstance(channel, discord.TextChannel) and _is_private_storage_channel(channel):
             return channel
     return None
 

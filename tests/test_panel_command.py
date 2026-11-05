@@ -72,6 +72,25 @@ class SharedPanelArchiveSettingsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await panel._shared_panel_archive_availability(10), (True, True))
 
 
+class PrivatePanelStorageChannelTests(unittest.TestCase):
+    def test_rejects_storage_channels_visible_to_everyone(self):
+        class FakeChannel:
+            def __init__(self, public_access):
+                self.guild = mock.MagicMock()
+                self.guild.me = object()
+                self.guild.default_role = object()
+                self.public_role = self.guild.default_role
+                self.public_access = public_access
+
+            def permissions_for(self, role):
+                if role is self.public_role:
+                    return mock.Mock(view_channel=self.public_access)
+                return mock.Mock(view_channel=True, send_messages=True, attach_files=True)
+
+        self.assertTrue(panel._is_private_storage_channel(FakeChannel(False)))
+        self.assertFalse(panel._is_private_storage_channel(FakeChannel(True)))
+
+
 class PanelChapterCaptionTests(unittest.TestCase):
     def test_numbered_chapter_with_caption(self):
         self.assertEqual(panel._parse_chapter_caption("Chapter 12 — The final battle"), ("12", "The final battle"))
