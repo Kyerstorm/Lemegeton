@@ -6,15 +6,15 @@
 
 | Language | Bytes | Share |
 | --- | ---: | ---: |
-| Python | 3,757,935 | 94.0% |
-| TypeScript | 78,058 | 2.0% |
-| Rust | 56,370 | 1.4% |
+| Python | 3,800,018 | 94.0% |
+| TypeScript | 78,058 | 1.9% |
+| Rust | 56,346 | 1.4% |
 | JavaScript | 48,182 | 1.2% |
 | CSS | 24,920 | 0.6% |
 | Batchfile | 17,137 | 0.4% |
 | HTML | 13,244 | 0.3% |
-| Dockerfile | 2,314 | 0.1% |
-| Shell | 937 | 0.0% |
+| Dockerfile | 2,243 | 0.1% |
+| Shell | 899 | 0.0% |
 | Procfile | 24 | 0.0% |
 
 _Language source: GitHub Linguist. Percentages describe repository composition, not individual authorship._
