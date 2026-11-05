@@ -132,10 +132,9 @@ TMDB watch-provider data is powered by JustWatch. /where-to-watch labels the que
 
 ### Community archives and events
 
-The interactive **/archive** command is the single entry point for manga panels and community contribution archives. Choose **Manga Panels** to open the existing panel actions (browse, personal panels, random, search, upload, configure, and moderation log), or use the community archive selectors for quotes, fanworks, moodboards, soundtracks, scenes, recommendations, and theories.
+**/archive** is the single entry point for Manga Panels and community collections. Its modal keeps archive, related media, and action choices together. Manga Panels includes browsing, personal panels, random discovery, search, upload, configuration, and its moderation log. Community collections cover quotes, credited fanworks, moodboards, soundtracks, scenes, recommendations, and theories, with submission history, reports, and guild-scoped review.
 
-- **/archive → Community Archives** — browse, search, contribute, or randomly discover quotes, credited fanworks, moodboards, soundtracks, scenes, human-written recommendations, and spoiler-marked theories. The archive menu also provides personal submission history, entry reporting, submission review, and report moderation.
-- **/archive → Manga Panels → Configure** — select the storage channel, moderation log, moderator role, and whether approved community archive entries are visible globally or only to the current server. Existing servers retain global visibility unless changed. Submission queues, approval, and moderation remain server-scoped.
+Panel configuration still selects the storage channel, moderation log, moderator role, and whether approved community entries are visible globally or only in the current server. Submission queues and moderation remain server-scoped.
 - **/archive → Manga Panels** — browse and search manga panels, view personal uploads, choose a random panel, add panels, configure storage/moderation, and open the moderation log.
 - **/panel-of-the-day** — selects a non-NSFW record from the existing Panels table and persists one selection per server per date instead of maintaining a second panel database.
 - **/media-bracket**, **/adaptation-vote**, and **/media-quiz** — persist server-scoped votes, polls, trivia questions, and user quiz sessions.

@@ -316,7 +316,7 @@ Results explicitly marked adult-rated or sexually explicit are excluded.
 
 | Command | Purpose |
 |---|---|
-| **/archive** | Open the unified community archive, then choose Manga Panels or a community archive category. Panel uploads, search, configuration, and moderation are under Manga Panels. |
+| **/archive** | Open the unified archive modal for Manga Panels or a community collection, then choose the action. |
 | **/panel-of-the-day** | Display the selected safe panel for the current server. |
 | **/media-bracket** | Run a guild-local elimination poll for media candidates. |
 | **/adaptation-vote** | Compare community preferences between two versions or adaptations. |

@@ -1516,77 +1516,6 @@ class PanelResultView(FeedbackAwareView):
         await interaction.response.edit_message(content="Done.", embed=None, view=None)
 
 
-class PanelHomeView(FeedbackAwareView):
-    def __init__(self, cog: "PanelCog"):
-        super().__init__(timeout=300)
-        self.cog = cog
-
-    @discord.ui.button(label="Browse All", emoji="📚", style=discord.ButtonStyle.primary, row=0)
-    async def browse(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog._safe_home_action(interaction, "browse")
-
-    @discord.ui.button(label="My Panels", emoji="🗂️", style=discord.ButtonStyle.secondary, row=0)
-    async def mine(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog._safe_home_action(interaction, "mine")
-
-    @discord.ui.button(label="Random", emoji="🎲", style=discord.ButtonStyle.secondary, row=0)
-    async def random_panel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog._safe_home_action(interaction, "random")
-
-    @discord.ui.button(label="Search", emoji="🔎", style=discord.ButtonStyle.secondary, row=0)
-    async def search(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(PanelSearchModal(self.cog))
-
-    @discord.ui.button(label="Add Panel", emoji="➕", style=discord.ButtonStyle.success, row=0)
-    async def add(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.guild_id is None:
-            await interaction.response.send_message("Adding panels is only available in a server.", ephemeral=True); return
-        await self.cog._open_tag_picker(
-            interaction, mode="add", user_id=interaction.user.id, guild_id=interaction.guild_id,
-        )
-
-    @discord.ui.button(label="Configure", emoji="⚙️", style=discord.ButtonStyle.secondary, row=1)
-    async def configure(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.guild_id is None or not interaction.permissions.manage_guild:
-            await interaction.response.send_message("Manage Server permission is required in a server.", ephemeral=True); return
-        try:
-            settings = await _settings(interaction.guild_id)
-            archive_scope = str(settings.get("archive_scope") or "global")
-            await interaction.response.send_modal(
-                PanelConfigureModal(self.cog, interaction.user.id, interaction.guild_id, archive_scope)
-            )
-        except Exception as exc:
-            log.exception("Could not open panel configuration for guild %s", interaction.guild_id)
-            await interaction.response.send_message(application_error_message(exc), ephemeral=True)
-
-    @discord.ui.button(label="Back to Archive", emoji="↩️", style=discord.ButtonStyle.secondary, row=1)
-    async def back_to_archive(self, interaction: discord.Interaction, button: discord.ui.Button):
-        cog = self.cog.bot.get_cog("CommunityArchives")
-        if cog is None:
-            await interaction.response.send_message("The Archive menu is temporarily unavailable.", ephemeral=True)
-            return
-        await cog.send_home(interaction, edit=True)
-
-    @discord.ui.button(label="Moderation Log", emoji="🛡️", style=discord.ButtonStyle.secondary, row=1)
-    async def moderation_log(self, interaction: discord.Interaction, button: discord.ui.Button):
-        try:
-            if not await _is_mod(interaction):
-                await interaction.response.send_message("Moderator permissions are required.", ephemeral=True); return
-            pool = await _pool()
-            async with pool.acquire() as conn:
-                rows = await conn.fetch("SELECT * FROM mod_log WHERE guild_id=$1 ORDER BY created_at DESC LIMIT 15", interaction.guild_id)
-            embed = discord.Embed(title="🛡️ Panel Moderation Log", colour=PALETTE.WARNING)
-            embed.description = "\n".join(
-                f"• <t:{int(r['created_at'].timestamp())}:R> — <@{r['moderator_id']}> deleted **{discord.utils.escape_markdown(r['panel_title'] or 'Untitled')}** (#{r['panel_id']})"
-                for r in rows
-            ) or "No moderation actions have been logged for this server."
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-        except Exception as exc:
-            log.exception("Moderation log view failed")
-            if interaction.response.is_done(): await interaction.followup.send(application_error_message(exc), ephemeral=True)
-            else: await interaction.response.send_message(application_error_message(exc), ephemeral=True)
-
-
 class PanelAttachmentPicker(FeedbackAwareView):
     def __init__(self, cog: "PanelCog", message: discord.Message, attachments: list[discord.Attachment]):
         super().__init__(timeout=120)
@@ -1617,8 +1546,7 @@ class PanelCog(commands.Cog):
         self.save_menu = app_commands.ContextMenu(name="Save to Panels", callback=self.save_message)
 
     async def cog_load(self):
-        # A schema hiccup must not stop /panels and the context menu from registering; each
-        # action reports its own error, so the command answers instead of disappearing.
+        # Keep panel actions available from /archive even if schema setup needs retrying.
         try:
             await _schema()
         except Exception:
@@ -1735,6 +1663,70 @@ class PanelCog(commands.Cog):
             if interaction.response.is_done(): await interaction.followup.send("Something went wrong.", ephemeral=True)
             else: await interaction.response.send_message("Something went wrong.", ephemeral=True)
 
+    async def handle_archive_action(self, interaction: discord.Interaction, action: str) -> None:
+        if action in {"browse", "mine", "random"}:
+            await self._safe_home_action(interaction, action)
+            return
+        if action == "search":
+            await interaction.response.send_modal(PanelSearchModal(self))
+            return
+        if action == "add":
+            if interaction.guild_id is None:
+                await interaction.response.send_message(
+                    "Adding panels is only available in a server.", ephemeral=True,
+                )
+                return
+            await self._open_tag_picker(
+                interaction, mode="add", user_id=interaction.user.id, guild_id=interaction.guild_id,
+            )
+            return
+        if action == "configure":
+            if interaction.guild_id is None or not interaction.permissions.manage_guild:
+                await interaction.response.send_message(
+                    "Manage Server permission is required in a server.", ephemeral=True,
+                )
+                return
+            try:
+                settings = await _settings(interaction.guild_id)
+                archive_scope = str(settings.get("archive_scope") or "global")
+                await interaction.response.send_modal(
+                    PanelConfigureModal(self, interaction.user.id, interaction.guild_id, archive_scope)
+                )
+            except Exception as exc:
+                log.exception("Could not open panel configuration for guild %s", interaction.guild_id)
+                await interaction.response.send_message(application_error_message(exc), ephemeral=True)
+            return
+        if action == "modlog":
+            try:
+                if not await _is_mod(interaction):
+                    await interaction.response.send_message(
+                        "Moderator permissions are required.", ephemeral=True,
+                    )
+                    return
+                pool = await _pool()
+                async with pool.acquire() as conn:
+                    rows = await conn.fetch(
+                        "SELECT * FROM mod_log WHERE guild_id=$1 ORDER BY created_at DESC LIMIT 15",
+                        interaction.guild_id,
+                    )
+                embed = discord.Embed(title="🛡️ Panel Moderation Log", colour=PALETTE.WARNING)
+                embed.description = "\n".join(
+                    f"• <t:{int(row['created_at'].timestamp())}:R> — <@{row['moderator_id']}> deleted "
+                    f"**{discord.utils.escape_markdown(row['panel_title'] or 'Untitled')}** (#{row['panel_id']})"
+                    for row in rows
+                ) or "No moderation actions have been logged for this server."
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+            except Exception as exc:
+                log.exception("Moderation log view failed")
+                if interaction.response.is_done():
+                    await interaction.followup.send(application_error_message(exc), ephemeral=True)
+                else:
+                    await interaction.response.send_message(application_error_message(exc), ephemeral=True)
+            return
+        await interaction.response.send_message(
+            "That Manga Panels action is not available.", ephemeral=True,
+        )
+
     async def _safe_home_action(self, interaction: discord.Interaction, action: str):
         try:
             await interaction.response.defer(ephemeral=True, thinking=True)
@@ -1752,43 +1744,6 @@ class PanelCog(commands.Cog):
             log.exception("Panel home action failed")
             if interaction.response.is_done(): await interaction.followup.send("Something went wrong.", ephemeral=True)
             else: await interaction.response.send_message("Something went wrong.", ephemeral=True)
-
-    async def send_home(self, interaction: discord.Interaction) -> None:
-        """Replace the unified archive menu with the manga-panel actions."""
-        try:
-            await interaction.response.defer()
-            # Counts must follow the same age gate as the browser, or a safe channel learns that hidden panels exist.
-            allow_mature = _nsfw(interaction)
-            server_count = (
-                await _count_from_guild(interaction.guild_id, allow_mature)
-                if interaction.guild_id is not None else 0
-            )
-            global_count = await _count(allow_mature)
-            embed = discord.Embed(
-                title="📚 Manga Panel Archive",
-                description=(
-                    "A shared gallery of manga moments, double spreads, and standout artwork.\n"
-                    + "```ansi\n"
-                    + f"\u001b[1;32m{server_count:,}\u001b[0m Panels are From This Server\n"
-                    + f"Total amount of Panels Globally \u001b[1;36m{global_count:,}\u001b[0m\n"
-                    + "```"
-                ),
-                colour=PALETTE.PRIMARY,
-            )
-            embed.add_field(name="🖼️ Browse", value="Explore the archive, jump between panels, or pick a random find.", inline=True)
-            embed.add_field(name="➕ Contribute", value="Upload a panel, add tags, and link its AniList manga entry.", inline=True)
-            embed.set_footer(text="Manga Panels · Storage and moderation are configured per server · Return to /archive")
-            if not _nsfw(interaction):
-                embed.add_field(name="🔞 Content visibility", value="Mature panels are hidden in channels that are not age-restricted.", inline=False)
-            await interaction.edit_original_response(content=None, embed=embed, view=PanelHomeView(self))
-        except Exception as exc:
-            log.exception("Could not open Manga Panels from /archive")
-            if interaction.response.is_done():
-                await interaction.edit_original_response(
-                    content=application_error_message(exc), embed=None, view=None
-                )
-            else:
-                await interaction.response.send_message(application_error_message(exc), ephemeral=True)
 
     async def save_message(self, interaction: discord.Interaction, message: discord.Message):
         try:

@@ -107,16 +107,38 @@ def _https_url(value: str | None, required: bool = False) -> str | None:
 
 
 ARCHIVE_UI_TYPES = [
-    ("Quotes", "quotes"), ("Fanworks", "fanworks"), ("Moodboards", "moodboards"),
-    ("Soundtracks", "soundtracks"), ("Scenes", "scenes"),
-    ("Recommendations", "recommendation-board"), ("Theories", "theories"),
+    ("Manga Panels", "panels", "📚"),
+    ("Quotes", "quotes", "💬"),
+    ("Fanworks", "fanworks", "🎨"),
+    ("Moodboards", "moodboards", "🖼️"),
+    ("Soundtracks", "soundtracks", "🎵"),
+    ("Scenes", "scenes", "🎬"),
+    ("Recommendations", "recommendation-board", "⭐"),
+    ("Theories", "theories", "💡"),
 ]
 ARCHIVE_UI_ACTIONS = [
-    ("Browse", "browse"), ("Search", "search"), ("Submit", "add"), ("Random entry", "random"),
-    ("My submissions", "mine"), ("Report an entry", "report"),
-    ("Review submissions", "review"), ("Review a submission", "review-entry"),
-    ("View reports", "reports"), ("Review a report", "report-review"),
+    ("Browse", "browse", "📖", "Open approved entries or panels."),
+    ("Search", "search", "🔎", "Find a specific entry or panel."),
+    ("Submit / Upload", "add", "➕", "Add a community entry or panel."),
+    ("Random", "random", "🎲", "Open a random entry or panel."),
+    ("My submissions / panels", "mine", "🗂️", "View your own entries."),
+    ("Report entry", "report", "🚩", "Community archives only."),
+    ("Review submissions", "review", "🛡️", "Community moderators only."),
+    ("Review submission", "review-entry", "📝", "Community moderators only."),
+    ("View reports", "reports", "📬", "Community moderators only."),
+    ("Review report", "report-review", "🔍", "Community moderators only."),
+    ("Configure Panels", "configure", "⚙️", "Manga Panels only."),
+    ("Panel moderation log", "modlog", "📋", "Manga Panels only."),
 ]
+MEDIA_TYPE_EMOJIS = {
+    "Anime": "📺", "Manga": "📚", "Light novel": "📖", "Webnovel": "🌐",
+    "Book": "📕", "Movie": "🎬", "TV": "📺", "Other": "✨",
+}
+PANEL_ARCHIVE_ACTIONS = {"browse", "search", "add", "random", "mine", "configure", "modlog"}
+COMMUNITY_ARCHIVE_ACTIONS = {
+    "browse", "search", "add", "random", "mine", "report", "review",
+    "review-entry", "reports", "report-review",
+}
 
 
 class ArchiveSubmissionModal(FeedbackAwareModal):
@@ -296,96 +318,120 @@ class ArchiveResultsView(FeedbackAwareView):
         await interaction.response.edit_message(content="Archive view closed.", embed=None, view=None)
 
 
-class ArchiveHomeView(FeedbackAwareView):
-    """Unified archive launcher for browse, submissions, and guild-local moderation."""
-    def __init__(self, cog: "CommunityArchives", owner_id: int):
-        super().__init__(timeout=240)
+class ArchiveActionLauncherView(FeedbackAwareView):
+    """One-click handoff for actions that need a second form."""
+    def __init__(
+        self, cog: "CommunityArchives", owner_id: int, archive_type: str,
+        media_type: str, action: str,
+    ):
+        super().__init__(timeout=180)
         self.cog = cog
         self.owner_id = owner_id
-        self.archive_type = "quotes"
-        self.media_type = "Other"
-        self.action = "browse"
-
-        self.archive_select = discord.ui.Select(
-            placeholder="Choose an archive", min_values=1, max_values=1, row=0,
-            options=[discord.SelectOption(label=label, value=value, default=value == self.archive_type) for label, value in ARCHIVE_UI_TYPES],
+        self.archive_type = archive_type
+        self.media_type = media_type
+        self.action = action
+        button = discord.ui.Button(
+            label="Continue", emoji="➡️", style=discord.ButtonStyle.primary,
         )
-        self.media_select = discord.ui.Select(
-            placeholder="Related media type", min_values=1, max_values=1, row=1,
-            options=[discord.SelectOption(label=choice.name, value=choice.value, default=choice.value == self.media_type) for choice in MEDIA_TYPES],
-        )
-        self.action_select = discord.ui.Select(
-            placeholder="Choose an action", min_values=1, max_values=1, row=2,
-            options=[discord.SelectOption(label=label, value=value, default=value == self.action) for label, value in ARCHIVE_UI_ACTIONS],
-        )
-        self.archive_select.callback = self._set_archive
-        self.media_select.callback = self._set_media
-        self.action_select.callback = self._set_action
-        self.add_item(self.archive_select)
-        self.add_item(self.media_select)
-        self.add_item(self.action_select)
-        open_button = discord.ui.Button(label="Continue", style=discord.ButtonStyle.primary, emoji="↗️", row=3)
-        close_button = discord.ui.Button(label="Close", style=discord.ButtonStyle.secondary, row=3)
-        open_button.callback = self._open
-        close_button.callback = self._close
-        self.add_item(open_button)
-        self.add_item(close_button)
-        panels_button = discord.ui.Button(label="Manga Panels", style=discord.ButtonStyle.success, emoji="📚", row=3)
-        panels_button.callback = self._open_panels
-        self.add_item(panels_button)
+        button.callback = self._continue
+        self.add_item(button)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.owner_id:
-            await interaction.response.send_message("Only the person who opened this archive menu can control it.", ephemeral=True)
+            await interaction.response.send_message(
+                "Only the person who opened this archive can continue.", ephemeral=True,
+            )
             return False
         return True
 
-    async def _set_archive(self, interaction: discord.Interaction) -> None:
-        self.archive_type = self.archive_select.values[0]
-        await interaction.response.edit_message(view=self)
+    async def _continue(self, interaction: discord.Interaction) -> None:
+        if self.archive_type == "panels":
+            panel_cog = self.cog.bot.get_cog("PanelCog")
+            if panel_cog is None:
+                await interaction.response.send_message(
+                    "Manga Panels are temporarily unavailable.", ephemeral=True,
+                )
+                return
+            await panel_cog.handle_archive_action(interaction, self.action)
+            return
 
-    async def _set_media(self, interaction: discord.Interaction) -> None:
-        self.media_type = self.media_select.values[0]
-        await interaction.response.edit_message(view=self)
-
-    async def _set_action(self, interaction: discord.Interaction) -> None:
-        self.action = self.action_select.values[0]
-        await interaction.response.edit_message(view=self)
-
-    async def _open(self, interaction: discord.Interaction) -> None:
-        if self.action in {"browse", "random"}:
-            await self.cog._archive_action(
-                interaction, self.archive_type, self.action, None, None, None, None, None,
-                self.media_type, None, self.archive_type == "theories", None,
-            )
-        elif self.action == "search":
+        if self.action == "search":
             await interaction.response.send_modal(ArchiveSearchModal(self.cog, self.archive_type))
         elif self.action == "add":
-            await interaction.response.send_modal(ArchiveSubmissionModal(self.cog, self.archive_type, self.media_type))
-        elif self.action == "mine":
-            await self.cog.archive_mine(interaction, self.archive_type)
+            await interaction.response.send_modal(
+                ArchiveSubmissionModal(self.cog, self.archive_type, self.media_type),
+            )
         elif self.action == "report":
             await interaction.response.send_modal(ArchiveReportModal(self.cog, self.archive_type))
-        elif self.action == "review":
-            await self.cog._review_archive(interaction, "list", None)
         elif self.action == "review-entry":
             await interaction.response.send_modal(ArchiveReviewModal(self.cog, self.archive_type))
-        elif self.action == "reports":
-            await self.cog.archive_report_review(interaction, "list", None, "")
         elif self.action == "report-review":
             await interaction.response.send_modal(ArchiveReportReviewModal(self.cog))
         else:
-            await interaction.response.send_message("That archive action is not available.", ephemeral=True)
+            await interaction.response.send_message(
+                "That archive action is no longer available.", ephemeral=True,
+            )
 
-    async def _open_panels(self, interaction: discord.Interaction) -> None:
-        panel_cog = self.cog.bot.get_cog("PanelCog")
-        if panel_cog is None:
-            await interaction.response.send_message("Manga Panels are temporarily unavailable.", ephemeral=True)
-            return
-        await panel_cog.send_home(interaction)
 
-    async def _close(self, interaction: discord.Interaction) -> None:
-        await interaction.response.edit_message(content="Archive closed.", embed=None, view=None)
+class ArchiveSelectionModal(FeedbackAwareModal):
+    """Compact three-select entry point for every archive action."""
+    def __init__(self, cog: "CommunityArchives"):
+        super().__init__(title="🗃️ Archive", timeout=180)
+        self.cog = cog
+        self.archive = discord.ui.Label(
+            text="🗂️ Archive",
+            component=discord.ui.Select(
+                placeholder="Choose an archive",
+                min_values=1,
+                max_values=1,
+                options=[
+                    discord.SelectOption(label=label, value=value, emoji=emoji)
+                    for label, value, emoji in ARCHIVE_UI_TYPES
+                ],
+            ),
+        )
+        self.media = discord.ui.Label(
+            text="🎞️ Related media",
+            component=discord.ui.Select(
+                placeholder="Choose a media type",
+                min_values=1,
+                max_values=1,
+                options=[
+                    discord.SelectOption(
+                        label=choice.name,
+                        value=choice.value,
+                        emoji=MEDIA_TYPE_EMOJIS.get(choice.value),
+                        default=choice.value == "Other",
+                    )
+                    for choice in MEDIA_TYPES
+                ],
+            ),
+        )
+        self.action = discord.ui.Label(
+            text="⚡ Action",
+            component=discord.ui.Select(
+                placeholder="Choose an action",
+                min_values=1,
+                max_values=1,
+                options=[
+                    discord.SelectOption(
+                        label=label, value=value, emoji=emoji, description=description,
+                        default=value == "browse",
+                    )
+                    for label, value, emoji, description in ARCHIVE_UI_ACTIONS
+                ],
+            ),
+        )
+        for item in (self.archive, self.media, self.action):
+            self.add_item(item)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.cog.dispatch_archive_action(
+            interaction,
+            self.archive.component.values[0],
+            self.media.component.values[0],
+            self.action.component.values[0],
+        )
 
 
 class CommunityArchives(commands.Cog):
@@ -630,34 +676,63 @@ class CommunityArchives(commands.Cog):
         await interaction.response.send_message(f"Archive entry **#{entry_id}** is now **{new_status}**.", ephemeral=True)
 
 
-    async def send_home(self, interaction: discord.Interaction, *, edit: bool = False) -> None:
-        if interaction.guild_id is None:
-            await interaction.response.send_message("The Archive is available inside a server only.", ephemeral=True)
+    async def dispatch_archive_action(
+        self, interaction: discord.Interaction, archive_type: str, media_type: str, action: str,
+    ) -> None:
+        if archive_type == "panels":
+            panel_cog = self.bot.get_cog("PanelCog")
+            if panel_cog is None:
+                await interaction.response.send_message(
+                    "Manga Panels are temporarily unavailable.", ephemeral=True,
+                )
+                return
+            if action not in PANEL_ARCHIVE_ACTIONS:
+                await interaction.response.send_message(
+                    "Choose an action available for Manga Panels.", ephemeral=True,
+                )
+                return
+            if action in {"search", "configure"}:
+                await interaction.response.send_message(
+                    "Continue to open the selected form.",
+                    view=ArchiveActionLauncherView(
+                        self, interaction.user.id, archive_type, media_type, action,
+                    ),
+                    ephemeral=True,
+                )
+                return
+            await panel_cog.handle_archive_action(interaction, action)
             return
-        embed = discord.Embed(
-            title="🗃️ Lemegeton Archive",
-            description=(
-                "One place for manga panels, quotes, fanworks, moodboards, scenes, soundtracks, recommendations, and theories. "
-                "Community contributions enter moderator review in the server where they were submitted; approved entries follow "
-                "that server's visibility setting.\n\n"
-                "Choose an archive and action below, or open Manga Panels."
-            ),
-            color=discord.Color(0x62676D),
-        )
-        embed.add_field(name="Browse", value="Explore approved community entries with source attribution and spoiler marking.", inline=False)
-        embed.add_field(name="Contribute", value="Submit credited work and source links. Lemegeton stores archive metadata and links, not fan media or music.", inline=False)
-        embed.set_footer(text="Community moderation remains server-scoped · Creator attribution is retained")
-        view = ArchiveHomeView(self, interaction.user.id)
-        if edit:
-            await interaction.response.edit_message(content=None, embed=embed, view=view)
-        else:
-            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-    @app_commands.command(name="archive", description="Open the unified media and community archive")
+        if action not in COMMUNITY_ARCHIVE_ACTIONS:
+            await interaction.response.send_message(
+                "That action is only available for Manga Panels.", ephemeral=True,
+            )
+            return
+        if action in {"search", "add", "report", "review-entry", "report-review"}:
+            await interaction.response.send_message(
+                "Continue to enter the details.",
+                view=ArchiveActionLauncherView(
+                    self, interaction.user.id, archive_type, media_type, action,
+                ),
+                ephemeral=True,
+            )
+        elif action in {"browse", "random"}:
+            await self._archive_action(
+                interaction, archive_type, action, None, None, None, None, None,
+                media_type, None, archive_type == "theories", None,
+            )
+        elif action == "mine":
+            await self.archive_mine(interaction, archive_type)
+        elif action == "review":
+            await self._review_archive(interaction, "list", None)
+        elif action == "reports":
+            await self.archive_report_review(interaction, "list", None, "")
+
+    @app_commands.command(name="archive", description="Open the unified Manga Panels and community archive")
     @app_commands.guild_only()
     @command_meta(section="Community Archives & Events", name="Archive")
     async def archive(self, interaction: discord.Interaction) -> None:
-        await self.send_home(interaction)
+        await interaction.response.send_modal(ArchiveSelectionModal(self))
 
     async def quotes(self, interaction: discord.Interaction, action: str, title: str | None = None, content: str | None = None, source_title: str | None = None, creator: str | None = None, url: str | None = None, media_type: str = "Other", tags: str | None = None, spoiler: bool = False, keyword: str | None = None) -> None:
         await self._archive_action(interaction, "quotes", action, title, content, source_title, creator, url, media_type, tags, spoiler, keyword)

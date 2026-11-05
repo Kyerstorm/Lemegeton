@@ -15,16 +15,24 @@ class PanelModalComponentTests(unittest.TestCase):
                     self.assertLessEqual(len(item.description), 100)
 
 
-class PanelArchiveMenuTests(unittest.TestCase):
-    def test_panel_menu_keeps_its_actions_and_returns_to_archive(self):
-        view = panel.PanelHomeView(None)
-        labels = {item.label for item in view.children}
-        self.assertTrue({
-            "Browse All", "My Panels", "Random", "Search", "Add Panel",
-            "Configure", "Back to Archive", "Moderation Log",
-        }.issubset(labels))
-        self.assertNotIn("Community Archives", labels)
-        self.assertFalse(hasattr(panel.PanelCog, "panels"))
+class PanelArchiveActionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_browse_routes_through_the_existing_panel_browser(self):
+        cog = panel.PanelCog(mock.MagicMock())
+        interaction = mock.MagicMock()
+        with mock.patch.object(cog, "_safe_home_action", new_callable=mock.AsyncMock) as action:
+            await cog.handle_archive_action(interaction, "browse")
+        action.assert_awaited_once_with(interaction, "browse")
+
+    async def test_search_opens_the_existing_panel_search_modal(self):
+        cog = panel.PanelCog(mock.MagicMock())
+        interaction = mock.MagicMock()
+        interaction.response.send_modal = mock.AsyncMock()
+        await cog.handle_archive_action(interaction, "search")
+        interaction.response.send_modal.assert_awaited_once()
+        self.assertIsInstance(
+            interaction.response.send_modal.await_args.args[0],
+            panel.PanelSearchModal,
+        )
 
 
 class PanelArchiveConfigurationTests(unittest.TestCase):
@@ -188,36 +196,8 @@ class _FakePool:
         return _FakeAcquire(self.conn)
 
 
-class PanelsCommandAgeGateTests(unittest.IsolatedAsyncioTestCase):
-    """/panels must not reveal age-restricted panel counts in channels that hide them."""
-
-    def _interaction(self, *, nsfw: bool):
-        interaction = mock.MagicMock()
-        interaction.guild_id = 20
-        interaction.channel.is_nsfw.return_value = nsfw
-        interaction.response.defer = mock.AsyncMock()
-        interaction.response.is_done.return_value = True
-        interaction.followup.send = mock.AsyncMock()
-        interaction.edit_original_response = mock.AsyncMock()
-        return interaction
-
-    async def _run_panels(self, *, nsfw: bool):
-        interaction = self._interaction(nsfw=nsfw)
-        cog = mock.MagicMock()
-        with mock.patch.object(panel, "_count_from_guild", mock.AsyncMock(return_value=0)) as guild_count, \
-                mock.patch.object(panel, "_count", mock.AsyncMock(return_value=0)) as global_count:
-            await panel.PanelCog.send_home(cog, interaction)
-        return guild_count, global_count
-
-    async def test_safe_channel_counts_exclude_mature_panels(self):
-        guild_count, global_count = await self._run_panels(nsfw=False)
-        guild_count.assert_awaited_once_with(20, False)
-        global_count.assert_awaited_once_with(False)
-
-    async def test_nsfw_channel_counts_include_mature_panels(self):
-        guild_count, global_count = await self._run_panels(nsfw=True)
-        guild_count.assert_awaited_once_with(20, True)
-        global_count.assert_awaited_once_with(True)
+class PanelArchiveAgeGateTests(unittest.IsolatedAsyncioTestCase):
+    """Panel queries continue to apply the channel age gate."""
 
     async def test_guild_count_query_applies_the_age_gate(self):
         conn = _FakeConn(n=3)
@@ -230,7 +210,7 @@ class PanelsCommandAgeGateTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PanelCogLoadTests(unittest.IsolatedAsyncioTestCase):
-    async def test_schema_failure_still_registers_the_command_and_context_menu(self):
+    async def test_schema_failure_still_registers_the_context_menu(self):
         bot = mock.MagicMock()
         cog = panel.PanelCog(bot)
         with mock.patch.object(panel, "_schema", mock.AsyncMock(side_effect=RuntimeError("db down"))):

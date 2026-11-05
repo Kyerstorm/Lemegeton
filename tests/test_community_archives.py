@@ -2,7 +2,7 @@ import unittest
 
 from cogs.media.community_archives import (
     MAX_QUOTE_LENGTH,
-    ArchiveHomeView,
+    ArchiveSelectionModal,
     CommunityArchives,
     archive_scope_filter,
     normalize_tags,
@@ -42,12 +42,15 @@ class CommunityArchiveHelperTests(unittest.TestCase):
         self.assertEqual(archive_scope_filter("global", 123), ("", ()))
         self.assertEqual(archive_scope_filter("server", None), ("", ()))
 
-    def test_archive_launcher_keeps_dropdowns_and_opens_manga_panels(self):
-        view = ArchiveHomeView(None, owner_id=123)
-        self.assertIs(view.archive_select, view.children[0])
-        self.assertIs(view.media_select, view.children[1])
-        self.assertIs(view.action_select, view.children[2])
-        self.assertIn("Manga Panels", {item.label for item in view.children})
+    def test_archive_modal_keeps_all_choices_in_one_string_select_modal(self):
+        modal = ArchiveSelectionModal(None)
+        self.assertEqual(len(modal.children), 3)
+        fields = {item.text: item.component for item in modal.children}
+        self.assertEqual(set(fields), {"🗂️ Archive", "🎞️ Related media", "⚡ Action"})
+        self.assertIn("panels", {option.value for option in fields["🗂️ Archive"].options})
+        self.assertIn("Anime", {option.value for option in fields["🎞️ Related media"].options})
+        actions = {option.value for option in fields["⚡ Action"].options}
+        self.assertTrue({"browse", "add", "search", "configure", "modlog", "review"}.issubset(actions))
 
     def test_archive_is_the_registered_slash_command(self):
         self.assertEqual(CommunityArchives.archive.name, "archive")
