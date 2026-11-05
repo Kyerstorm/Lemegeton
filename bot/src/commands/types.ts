@@ -6,7 +6,7 @@ import type {
 } from "discord.js";
 
 export interface BotCommand {
-  data: SlashCommandBuilder;
+  data: Pick<SlashCommandBuilder, "name" | "toJSON">;
   execute(interaction: ChatInputCommandInteraction): Promise<void>;
   handleButton?(interaction: ButtonInteraction): Promise<boolean>;
   handleModal?(interaction: ModalSubmitInteraction): Promise<boolean>;
