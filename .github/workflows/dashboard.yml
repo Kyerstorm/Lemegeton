@@ -37,6 +37,8 @@ on:
       - "cogs_test/general_commands/franchise.py"
       - "cogs_test/general_commands/game.py"
       - "tests/test_media_storage.py"
+      - "tests/test_community_archives.py"
+      - "tests/test_panel_command.py"
       - "tests/test_media_graph.py"
       - "requirements.txt"
       - "tests/custom_roles/test_picker_web.py"
@@ -69,6 +71,7 @@ on:
   push:
     branches: [multi_guild]
     paths:
+      - ".github/workflows/dashboard.yml"
       - "Cargo.toml"
       - "dashboard-rs/**"
       - "dashboard-frontend/**"
@@ -96,6 +99,8 @@ on:
       - "cogs_test/general_commands/franchise.py"
       - "cogs_test/general_commands/game.py"
       - "tests/test_media_storage.py"
+      - "tests/test_community_archives.py"
+      - "tests/test_panel_command.py"
       - "tests/test_media_graph.py"
       - "requirements.txt"
       - "bot.py"
