@@ -6,7 +6,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 BOT_SOURCE = (ROOT / "bot.py").read_text(encoding="utf-8")
 BOT_TREE = ast.parse(BOT_SOURCE)
-PICKER_SERVER_SOURCE = (ROOT / "web" / "custom_role_picker_server.py").read_text(encoding="utf-8")
+PICKER_SERVER_SOURCE = (ROOT / "Web" / "bot" / "custom_role_picker_server.py").read_text(encoding="utf-8")
 
 
 class DashboardRuntimeSourceTests(unittest.TestCase):
