@@ -9,10 +9,13 @@ on:
     - cron: "23 5 * * 1"
   pull_request:
     paths:
+      - "cogs/**"
+      - "tests/**"
+      - "Web/**"
       - "Cargo.toml"
-      - "dashboard-rs/**"
-      - "dashboard-frontend/**"
-      - "dashboard-rs/src/ui.rs"
+      - "Web/backend/**"
+      - "Web/frontend/**"
+      - "Web/backend/src/ui.rs"
       - "tests/test_dashboard_bridge.py"
       - "tests/test_dashboard_assets.py"
       - "tests/test_dashboard_command_policy.py"
@@ -31,11 +34,11 @@ on:
       - "helpers/tmdb_discovery.py"
       - "tests/test_novelupdates_scraper.py"
       - "tests/test_screen_discovery.py"
-      - "cogs_test/general_commands/connected_media.py"
-      - "cogs_test/general_commands/cross_media_recommendations.py"
-      - "cogs_test/general_commands/discovery_hub.py"
-      - "cogs_test/general_commands/franchise.py"
-      - "cogs_test/general_commands/game.py"
+      - "cogs/media/connected_media.py"
+      - "cogs/media/cross_media_recommendations.py"
+      - "cogs/media/discovery_hub.py"
+      - "cogs/media/franchise.py"
+      - "cogs/gaming/game.py"
       - "tests/test_media_storage.py"
       - "tests/test_community_archives.py"
       - "tests/test_panel_command.py"
@@ -47,12 +50,12 @@ on:
       - "tests/custom_roles/test_picker_icon.py"
       - "bot.py"
       - "config.py"
-      - "cogs_test/general_commands/dashboard.py"
+      - "cogs/admin/dashboard.py"
       - "tests/test_custom_role_picker_server.py"
       - "README.md"
       - "docs/DASHBOARD.md"
       - "docs/SECURITY_AUDIT.md"
-      - "web/**"
+      - "Web/bot/**"
       - "deploy/vps/**"
       - "Dockerfile"
       - ".dockerignore"
@@ -71,10 +74,13 @@ on:
   push:
     branches: [multi_guild]
     paths:
+      - "cogs/**"
+      - "tests/**"
+      - "Web/**"
       - ".github/workflows/dashboard.yml"
       - "Cargo.toml"
-      - "dashboard-rs/**"
-      - "dashboard-frontend/**"
+      - "Web/backend/**"
+      - "Web/frontend/**"
       - "tests/test_dashboard_bridge.py"
       - "tests/test_dashboard_assets.py"
       - "tests/test_dashboard_command_policy.py"
@@ -93,11 +99,11 @@ on:
       - "helpers/tmdb_discovery.py"
       - "tests/test_novelupdates_scraper.py"
       - "tests/test_screen_discovery.py"
-      - "cogs_test/general_commands/connected_media.py"
-      - "cogs_test/general_commands/cross_media_recommendations.py"
-      - "cogs_test/general_commands/discovery_hub.py"
-      - "cogs_test/general_commands/franchise.py"
-      - "cogs_test/general_commands/game.py"
+      - "cogs/media/connected_media.py"
+      - "cogs/media/cross_media_recommendations.py"
+      - "cogs/media/discovery_hub.py"
+      - "cogs/media/franchise.py"
+      - "cogs/gaming/game.py"
       - "tests/test_media_storage.py"
       - "tests/test_community_archives.py"
       - "tests/test_panel_command.py"
@@ -105,13 +111,13 @@ on:
       - "requirements.txt"
       - "bot.py"
       - "config.py"
-      - "cogs_test/general_commands/dashboard.py"
+      - "cogs/admin/dashboard.py"
       - "tests/test_custom_role_picker_server.py"
       - "docker-compose.yml"
       - ".dockerignore"
       - "Dockerfile"
       - "deploy/vps/**"
-      - "web/**"
+      - "Web/bot/**"
       - "docs/SECURITY_AUDIT.md"
       - "docs/DASHBOARD.md"
       - "railpack.json"
@@ -132,11 +138,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: npm install --prefix dashboard-frontend --no-audit --no-fund
-      - run: npm run typecheck --prefix dashboard-frontend
-      - run: npm audit --prefix dashboard-frontend --audit-level=high
-      - run: npm run build --prefix dashboard-frontend
-      - run: test -s dashboard-frontend/dist/app.js && test -s dashboard-frontend/dist/app.css
+      - run: npm install --prefix Web/frontend --no-audit --no-fund
+      - run: npm run typecheck --prefix Web/frontend
+      - run: npm audit --prefix Web/frontend --audit-level=high
+      - run: npm run build --prefix Web/frontend
+      - run: test -s Web/frontend/dist/app.js && test -s Web/frontend/dist/app.css
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --workspace
       - run: cargo install cargo-audit --locked
@@ -150,7 +156,7 @@ jobs:
         with:
           python-version: "3.13"
       - run: python -m pip install aiohttp python-dotenv discord.py==2.7.1 asyncpg==0.32.0 Pillow==11.1.0 "boto3>=1.35,<2" beautifulsoup4 botasaurus "scrapling[fetchers]>=0.4.15,<1.0" "Scrapy>=2.13,<3.0"
-      - run: python -m compileall -q cogs/utilities/privacy.py tests/test_privacy_command.py cogs/utilities/help.py database.py cogs/utilities/say.py tests/test_privacy_hardening.py bot.py web config.py cogs/media/browse.py tests/test_novelupdates_scraper.py helpers/web_scraper.py helpers/tmdb_discovery.py tests/test_screen_discovery.py cogs/utilities/help.py cogs_test/general_commands/dashboard.py cogs_test/general_commands/connected_media.py cogs_test/general_commands/cross_media_recommendations.py cogs_test/general_commands/discovery_hub.py cogs_test/general_commands/franchise.py cogs_test/general_commands/game.py cogs/media/panel.py cogs/media/community_archives.py cogs/media/three_by_three.py cogs/social/anilist_site_embed.py helpers/media_storage.py helpers/media_graph.py helpers/custom_roles/service.py helpers/custom_roles/storage.py tests/test_media_storage.py tests/test_media_graph.py tests/test_browse_provider_search.py tests/test_anilist_site_embed.py
+      - run: python -m compileall -q bot.py Web/bot config.py cogs helpers tests
       - run: python -m unittest discover -s tests -p "test_media_storage.py"
       - run: python -m unittest discover -s tests -p "test_community_archives.py"
       - run: python -m unittest discover -s tests -p "test_panel_command.py"

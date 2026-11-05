@@ -26,12 +26,12 @@ cd /opt/lemegeton
 python3.13 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/pip install -r requirements.txt
-npm install --prefix dashboard-frontend --no-audit --no-fund
-npm run typecheck --prefix dashboard-frontend
-npm audit --prefix dashboard-frontend --audit-level=moderate
-npm run build --prefix dashboard-frontend
+npm install --prefix Web/frontend --no-audit --no-fund
+npm run typecheck --prefix Web/frontend
+npm audit --prefix Web/frontend --audit-level=moderate
+npm run build --prefix Web/frontend
 cargo test --workspace
-cargo build --manifest-path dashboard-rs/Cargo.toml --release
+cargo build --manifest-path Web/backend/Cargo.toml --release
 ```
 
 Make source/build outputs root-owned and read-only to runtime users; only the bot's runtime directories should be writable:

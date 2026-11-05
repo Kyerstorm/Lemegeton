@@ -33,8 +33,8 @@ pub fn login_html() -> Html<&'static str> {
 
 pub async fn static_asset(Path(filename): Path<String>) -> Response {
     let (content_type, disk_path) = match filename.as_str() {
-        "app.js" => ("application/javascript; charset=utf-8", "dashboard-frontend/dist/app.js"),
-        "app.css" => ("text/css; charset=utf-8", "dashboard-frontend/dist/app.css"),
+        "app.js" => ("application/javascript; charset=utf-8", "Web/frontend/dist/app.js"),
+        "app.css" => ("text/css; charset=utf-8", "Web/frontend/dist/app.css"),
         _ => return (StatusCode::NOT_FOUND, "Asset not found").into_response(),
     };
     let contents = match tokio::fs::read(disk_path).await {
@@ -42,7 +42,7 @@ pub async fn static_asset(Path(filename): Path<String>) -> Response {
         Err(_) => {
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
-                "Frontend assets are not built. Run npm install --prefix dashboard-frontend && npm run build --prefix dashboard-frontend.",
+                "Frontend assets are not built. Run npm install --prefix Web/frontend && npm run build --prefix Web/frontend.",
             ).into_response();
         }
     };

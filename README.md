@@ -411,10 +411,10 @@ The optional web control plane is separate from Discord's native command interfa
 
 ### 🧱 Components
 
-- **dashboard-frontend/** — React 19 + TypeScript UI built with Vite.
-- **dashboard-rs/** — Rust/Axum browser-facing service for Discord OAuth2, server-side sessions, authorization checks, command management, status, and audit views.
+- **Web/frontend/** — React 19 + TypeScript UI built with Vite.
+- **Web/backend/** — Rust/Axum browser-facing service for Discord OAuth2, server-side sessions, authorization checks, command management, status, and audit views.
 - **bot.py** — the existing Discord gateway and command registry, plus the private runtime adapter used by the dashboard.
-- **web/custom_role_picker_server.py** — private Custom Role picker service; the Rust service reverse-proxies the browser-facing route.
+- **Web/bot/custom_role_picker_server.py** — private Custom Role picker service; the Rust service reverse-proxies the browser-facing route.
 - **PostgreSQL** — existing guild command configuration and audit persistence.
 
 ### 🎛️ Main controls
@@ -498,16 +498,16 @@ The bot validates its required configuration, initializes the PostgreSQL layer, 
 Build the frontend:
 
 ~~~bash
-npm install --prefix dashboard-frontend
-npm run typecheck --prefix dashboard-frontend
-npm run build --prefix dashboard-frontend
+npm install --prefix Web/frontend
+npm run typecheck --prefix Web/frontend
+npm run build --prefix Web/frontend
 ~~~
 
 Build and test the Rust service:
 
 ~~~bash
-cargo test --manifest-path dashboard-rs/Cargo.toml
-cargo fmt --manifest-path dashboard-rs/Cargo.toml -- --check
+cargo test --manifest-path Web/backend/Cargo.toml
+cargo fmt --manifest-path Web/backend/Cargo.toml -- --check
 ~~~
 
 Configure dashboard OAuth, public-origin, cookie, and private-bridge values described in [docs/DASHBOARD.md](docs/DASHBOARD.md) before running the dashboard. Production deployments should use HTTPS and the recommended reverse-proxy setup.
@@ -554,12 +554,12 @@ Run commands from the repository root unless a command explicitly changes direct
 
 ~~~bash
 python -m compileall -q bot.py web config.py cogs/utilities/help.py \
-  cogs_test/general_commands/dashboard.py \
-  cogs_test/general_commands/connected_media.py \
-  cogs_test/general_commands/cross_media_recommendations.py \
-  cogs_test/general_commands/discovery_hub.py \
-  cogs_test/general_commands/franchise.py \
-  cogs_test/general_commands/game.py \
+  cogs/admin/dashboard.py \
+  cogs/media/connected_media.py \
+  cogs/media/cross_media_recommendations.py \
+  cogs/media/discovery_hub.py \
+  cogs/media/franchise.py \
+  cogs/gaming/game.py \
   cogs/media/panel.py cogs/media/community_archives.py \
   cogs/media/three_by_three.py cogs/social/anilist_site_embed.py \
   helpers/media_storage.py helpers/media_graph.py \
@@ -584,11 +584,11 @@ The repository's GitHub Actions workflow also checks the dashboard frontend, per
 - Shared relationship graph and source/provenance handling: **helpers/media_graph.py**.
 - S3-compatible upload, URL generation, and privacy selection: **helpers/media_storage.py**.
 - Provider-backed media browsing: **cogs/media/browse.py**.
-- Cross-media relationships and selection flows: **cogs_test/general_commands/franchise.py** and **connected_media.py**.
-- Cross-provider recommendations and genre overlap: **cogs_test/general_commands/cross_media_recommendations.py**.
-- Interactive Discovery Hub: **cogs_test/general_commands/discovery_hub.py**.
-- Discord command dashboard: **cogs_test/general_commands/dashboard.py**.
-- Public web dashboard: **dashboard-rs/** and **dashboard-frontend/**.
+- Cross-media relationships and selection flows: **cogs/media/franchise.py** and **connected_media.py**.
+- Cross-provider recommendations and genre overlap: **cogs/media/cross_media_recommendations.py**.
+- Interactive Discovery Hub: **cogs/media/discovery_hub.py**.
+- Discord command dashboard: **cogs/admin/dashboard.py**.
+- Public web dashboard: **Web/backend/** and **Web/frontend/**.
 
 ---
 
@@ -627,7 +627,7 @@ Lemegeton/                                                                 🏰 
 │   └── 🧰 utilities/
 │       └── 📖 help.py                                                    # Category dropdown, command references, Code guide
 │
-├── 🧪 cogs_test/general_commands/                                        # Cross-media and dashboard command extensions
+├── 🧩 cogs/                                                                  # Production command cogs, organized by domain
 │   ├── 🎛️ dashboard.py                                                  # CommandRegistry, ConfigDB, /dashboard and sync/guard
 │   ├── 🔗 connected_media.py                                             # Cross-media links, TMDB tools, discussions and regions
 │   ├── ✨ cross_media_recommendations.py                                 # Provider recommendations + local genre overlap
@@ -650,12 +650,12 @@ Lemegeton/                                                                 🏰 
 │   │   └── 🗄️ storage.py                                                 # Original icon image storage and fallbacks
 │   └── 🧩 Other domain helpers                                           # Reuse provider-specific helpers before adding new layers
 │
-├── 🌐 web/                                                               # Python-side web adapters; not a second bot
+├── 🌐 Web/bot/                                                               # Python-side web adapters; not a second bot
 │   ├── 🔌 dashboard.py                                                  # Runtime adapter/helper functions
 │   ├── 🎭 custom_role_picker_server.py                                   # Private picker listener behind the Rust proxy
 │   └── 🎨 static/custom_roles/                                           # Existing picker static assets
 │
-├── 🦀 dashboard-rs/                                                      # Optional browser-facing dashboard control plane
+├── 🦀 Web/backend/                                                      # Optional browser-facing dashboard control plane
 │   ├── 📦 Cargo.toml                                                     # Rust dependency manifest
 │   └── src/
 │       ├── 🚦 main.rs                                                    # Router, bind policy, security headers and startup
@@ -664,7 +664,7 @@ Lemegeton/                                                                 🏰 
 │       ├── 🧠 state.rs                                                   # Sessions, OAuth state, guild auth, bot bridge
 │       └── 🖥️ ui.rs                                                      # HTML shell and allow-listed static assets
 │
-├── ⚛️ dashboard-frontend/                                                # React/TypeScript UI for the same running bot
+├── ⚛️ Web/frontend/                                                # React/TypeScript UI for the same running bot
 │   ├── 📦 package.json                                                   # Build and typecheck scripts
 │   └── src/
 │       ├── 🪟 App.tsx                                                    # Dashboard pages, data loading and command controls

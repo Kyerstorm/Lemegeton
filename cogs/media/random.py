@@ -15,7 +15,7 @@ from helpers.media_helper import fetch_random_media
 from helpers.embed_helper import build_error_embed
 from helpers.anilist_helper import post_graphql
 from database import get_all_users_guild_aware
-from cogs_test.general_commands.dashboard import command_meta
+from cogs.admin.dashboard import command_meta
 from cogs.media.browse import search_webnovels
 from helpers.web_scraper import ScrapeBlockedError
 from helpers.crypto_random import secure_choice, secure_randbelow

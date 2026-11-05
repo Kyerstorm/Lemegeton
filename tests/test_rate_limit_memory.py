@@ -2,7 +2,7 @@
 import unittest
 from collections import deque
 
-from web.rate_limit_memory import record_event
+from Web.bot.rate_limit_memory import record_event
 
 
 class RateLimitMemoryTests(unittest.TestCase):

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional
 import json
 from datetime import datetime, timedelta
-from cogs_test.general_commands.dashboard import command_meta
+from cogs.admin.dashboard import command_meta
 
 # ------------------------------------------------------
 # Logging Setup - Auto-clearing

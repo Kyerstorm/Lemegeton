@@ -16,7 +16,7 @@ from database import (
     is_user_registered_in_guild, update_username, remove_user
 )
 from config import STEAM_API_KEY
-from cogs_test.general_commands.dashboard import command_meta
+from cogs.admin.dashboard import command_meta
 from helpers.anilist_helper import fetch_anilist_user_basic
 from helpers.text_helper import validate_anilist_username
 from helpers.embed_helper import build_error_embed, build_success_embed

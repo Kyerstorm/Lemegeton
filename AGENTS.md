@@ -16,9 +16,9 @@ Confirm these paths and their contents before relying on them; the code may evol
 - `config.py` and `.env.example`: configuration defaults and documented environment variables.
 - `database.py`: shared PostgreSQL persistence layer using `asyncpg`; its module documentation identifies it as PostgreSQL-only.
 - `cogs/`: primary command cogs organized into areas such as account, admin, customization, gaming, media, server management, social, and utilities.
-- `cogs_test/`: additional or experimental cog code. Check how and whether a module is loaded before treating it as a production feature.
+- `Web/`: dashboard frontend, Rust service, and the private Python custom-role picker.
 - `helpers/`: shared integrations and utilities, including media/AniList helpers, caching, command logging, embed helpers, color palette, and gaming/IGDB helpers.
-- `web/`: optional web dashboard and related web UI code.
+- `Web/bot/`: optional web dashboard and related web UI code.
 - `requirements.txt`: Python dependencies and version constraints.
 - `docs/`: project documentation and maintenance material.
 - `.apm/guides/`: existing project workflow guidance. Read a relevant guide when the task explicitly uses that workflow.
@@ -152,7 +152,7 @@ Some scraping-related dependencies are present, but their presence is not permis
 
 ## 11. Optional Web Dashboard
 
-The web dashboard under `web/` is an optional interface associated with the bot. Keep it optional unless the task explicitly changes that requirement.
+The web dashboard under `Web/bot/` is an optional interface associated with the bot. Keep it optional unless the task explicitly changes that requirement.
 
 - Read the existing routes, session/OAuth flow, static assets, and dashboard-to-cog/database integration before editing.
 - Enforce Discord authentication and server authorization on the server side for every protected route and mutation. Do not trust client-submitted guild IDs, role lists, user IDs, or permission flags.

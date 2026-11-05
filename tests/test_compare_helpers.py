@@ -1,7 +1,7 @@
 """Tests for multi-title comparison formatting."""
 import unittest
 
-from cogs_test.general_commands.compare import comparison_embed
+from cogs.media.compare import comparison_embed
 
 
 class ComparisonEmbedTests(unittest.TestCase):

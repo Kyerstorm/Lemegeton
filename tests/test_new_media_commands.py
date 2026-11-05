@@ -3,10 +3,10 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
-from cogs_test.general_commands.airing import filter_schedule
-from cogs_test.general_commands.media_night import tally_votes
-from cogs_test.general_commands.server_check import collect_checks
-from cogs_test.general_commands.server_taste import aggregate_member_interests
+from cogs.media.airing import filter_schedule
+from cogs.media.media_night import tally_votes
+from cogs.server_management.server_check import collect_checks
+from cogs.social.server_taste import aggregate_member_interests
 
 
 class ServerTasteAggregationTests(unittest.TestCase):

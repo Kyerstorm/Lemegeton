@@ -18,7 +18,7 @@ from database import (
     get_user_guild_aware, get_user_any_guild, get_user_achievements_guild_aware,
     save_user_guild_aware, upsert_user_stats_guild_aware
 )
-from cogs_test.general_commands.dashboard import command_meta
+from cogs.admin.dashboard import command_meta
 from helpers.anilist_helper import post_graphql
 from helpers.text_helper import sanitize_url
 from helpers.profile_helper import (

@@ -6,7 +6,7 @@ from discord.ext import commands
 import logging
 from pathlib import Path
 from config import BOT_ID
-from cogs_test.general_commands.dashboard import command_meta
+from cogs.admin.dashboard import command_meta
 
 # ------------------------------------------------------
 # Logging Setup - Safe handling

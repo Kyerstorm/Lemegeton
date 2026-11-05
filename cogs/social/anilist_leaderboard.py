@@ -27,7 +27,7 @@ from database import (
     upsert_user_stats_guild_aware
 )
 from helpers.media_helper import fetch_user_stats
-from cogs_test.general_commands.dashboard import command_meta
+from cogs.admin.dashboard import command_meta
 
 # ------------------------------------------------------
 # Logging Setup - Clears on each bot run

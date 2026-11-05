@@ -18,7 +18,7 @@ try:
             RecommendationView, create_recommendation_embed
         )
         from helpers.embed_helper import build_error_embed, build_info_embed
-        from cogs_test.general_commands.dashboard import command_meta
+        from cogs.admin.dashboard import command_meta
     except Exception:
         import sys
         repo_root = Path(__file__).resolve().parents[2]
@@ -31,7 +31,7 @@ try:
             RecommendationView, create_recommendation_embed
         )
         from helpers.embed_helper import build_error_embed, build_info_embed
-        from cogs_test.general_commands.dashboard import command_meta
+        from cogs.admin.dashboard import command_meta
 except ModuleNotFoundError:
     # Some deployment environments don't put the project root on sys.path.
     # Try to add the repo root (two levels up from this file: ../..) to sys.path
@@ -48,7 +48,7 @@ except ModuleNotFoundError:
         RecommendationView, create_recommendation_embed
     )
     from helpers.embed_helper import build_error_embed, build_info_embed
-    from cogs_test.general_commands.dashboard import command_meta
+    from cogs.admin.dashboard import command_meta
 
 
 class SteamRecommendation(commands.Cog):

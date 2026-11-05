@@ -1,7 +1,7 @@
 """Tests for transparent cross-media recommendation ranking."""
 import unittest
 
-from cogs_test.general_commands.cross_media_recommendations import CrossMediaRecommendations, genre_tokens, local_match_reason
+from cogs.media.cross_media_recommendations import CrossMediaRecommendations, genre_tokens, local_match_reason
 
 
 class CrossMediaRecommendationTests(unittest.TestCase):

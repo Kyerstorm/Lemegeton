@@ -20,7 +20,7 @@ from helpers.terms_consent import (
     init_user_consent_schema,
     user_has_current_consent,
 )
-from web.custom_role_picker_server import CustomRolePickerServer, loopback_bind_host as _loopback_bind_host
+from Web.bot.custom_role_picker_server import CustomRolePickerServer, loopback_bind_host as _loopback_bind_host
 
 # Suppress deprecation warning from discord.py's internal WebSocket connection code
 # This is a known issue in discord.py 2.6.0 that will be fixed in future versions
@@ -1074,6 +1074,15 @@ async def _load_cogs_impl():
         # Clean up any stuck extensions first (from previous crashes/forced shutdowns)
         loaded_extensions = list(bot.extensions.keys())
         for ext_name in loaded_extensions:
+            if ext_name.startswith('cogs_test.'):
+                try:
+                    await bot.unload_extension(ext_name)
+                    cog_timestamps.pop(ext_name, None)
+                    failed_cog_timestamps.pop(ext_name, None)
+                    logger.info("Unloaded retired experimental extension: %s", ext_name)
+                except Exception as cleanup_error:
+                    logger.error("Failed to unload retired extension %s: %s", ext_name, cleanup_error)
+                continue
             if ext_name.startswith('cogs.'):
                 try:
                     # Map dotted extension name to possible filesystem paths under ./cogs
@@ -1090,8 +1099,8 @@ async def _load_cogs_impl():
                 except Exception as cleanup_error:
                     logger.error(f"Failed to cleanup extension {ext_name}: {cleanup_error}")
         
-        # Check both cogs and cogs_test directories
-        cog_dirs = ['cogs', 'cogs_test']
+        # Discover production command extensions from the consolidated cogs tree.
+        cog_dirs = ['cogs']
         cog_files = []  # list of tuples (module_relative_path, file_path, base_dir)
         
         for base_dir in cog_dirs:
@@ -1731,7 +1740,7 @@ class DashboardBotBridge:
         return value
 
     def _command_rows(self, cfg: dict[str, Any]) -> list[dict[str, Any]]:
-        from cogs_test.general_commands.dashboard import COMMAND_REGISTRY
+        from cogs.admin.dashboard import COMMAND_REGISTRY
 
         rows = []
         for fullname, meta in COMMAND_REGISTRY.all_commands():
@@ -1838,7 +1847,7 @@ class DashboardBotBridge:
         if not fullname or len(fullname) > 100:
             return _error("Invalid command name.", 400)
 
-        from cogs_test.general_commands.dashboard import COMMAND_REGISTRY, PROTECTED_CMD_NAMES, attempt_sync_for_guild
+        from cogs.admin.dashboard import COMMAND_REGISTRY, PROTECTED_CMD_NAMES, attempt_sync_for_guild
         meta = COMMAND_REGISTRY.get_meta(fullname)
         if not meta:
             return _error("Command is not registered for dashboard management.", 404)
@@ -1878,7 +1887,7 @@ class DashboardBotBridge:
         actor_id = data.get("actor_id")
         if not _valid_identifier(actor_id):
             return _error("Invalid dashboard actor.", 400)
-        from cogs_test.general_commands.dashboard import attempt_sync_for_guild
+        from cogs.admin.dashboard import attempt_sync_for_guild
         if not await attempt_sync_for_guild(self.bot, guild):
             return _error("Discord did not confirm command synchronization.", 502)
         cog = self._cog()
@@ -1896,7 +1905,7 @@ class DashboardBotBridge:
         actor_id = data.get("actor_id")
         if not _valid_identifier(actor_id):
             return _error("Invalid dashboard actor.", 400)
-        from cogs_test.general_commands.dashboard import attempt_sync_for_guild
+        from cogs.admin.dashboard import attempt_sync_for_guild
         cog = self._cog()
         before = await cog.db.get_guild_config(guild.id)
         try:

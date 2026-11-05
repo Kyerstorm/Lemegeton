@@ -29,12 +29,12 @@ human can test it in Discord.
 | Current feature | `cogs/customization/server_boost.py` has `/nitro-role-set role_name hex_color` (solid only) and an `on_member_update` boost-welcome DM. | **Replace** this cog's command with `/custom-role`. Keep (and update) the welcome DM. |
 | Database | **PostgreSQL only** (`database.py`, asyncpg). Queries go through `execute_db_operation(name, sql, params, fetch_type=...)` using `?` placeholders; the layer converts `INTEGER` → `BIGINT` and `?` → `$n`. | Use `execute_db_operation`. Register new table init functions in `init_db()`'s `table_init_functions` list. |
 | Existing table | `booster_roles(discord_id, guild_id, role_id, created_at, updated_at)`, PK `(discord_id, guild_id)`. | Import its rows with **Import old roles** in `/custom-role-admin` (§8; originally "on first init"), then stop using the old helpers. |
-| Cog loader | `bot.py` loads **every `.py` file** under `cogs/` and `cogs_test/` as an extension. | Put non-cog code (service, image utils) in `helpers/`, **not** under `cogs/`. |
+| Cog loader | `bot.py` loads **every `.py` file** under `cogs/` as an extension. | Put non-cog code (service, image utils) in `helpers/`, **not** under `cogs/`. |
 | Intents | `members` and `message_content` intents are enabled. | Boost start/stop is detectable via `on_member_update` (`premium_since`). |
 | Command sync | Commands are synced globally (`bot.tree.sync()`). | Nothing extra needed. |
-| Web server | The public dashboard is a Rust/Axum service (`dashboard-rs/`). The existing Python custom-role picker runs on loopback through `utils/dashboard_picker_server.py`; Rust proxies `/custom-roles` to it. | Keep the picker token checks and Discord role validation in Python. The picker must remain available even when Discord OAuth is not configured; its private port must never be exposed publicly. |
+| Web server | The public dashboard is a Rust/Axum service (`Web/backend/`). The existing Python custom-role picker runs on loopback through `utils/dashboard_picker_server.py`; Rust proxies `/custom-roles` to it. | Keep the picker token checks and Discord role validation in Python. The picker must remain available even when Discord OAuth is not configured; its private port must never be exposed publicly. |
 | Security middleware | Rejects cross-origin POST/PUT/PATCH/DELETE; CSP is `script-src 'self'`, `img-src 'self' https://cdn.discordapp.com data:`, `connect-src 'self'`. | Picker JS must be **external files** (no inline `<script>`). Use **`data:` URLs** for image previews (not `blob:`), or explicitly add `blob:` to `img-src`. |
-| Theme | `web/static/custom_roles/theme.css` holds the picker-specific design tokens. The obsolete `web/static/theme.css` dashboard stylesheet has been removed. | Keep picker styling token-driven (§6.6) and independent of the Rust dashboard stylesheet. |
+| Theme | `Web/bot/static/custom_roles/theme.css` holds the picker-specific design tokens. The obsolete `Web/bot/static/theme.css` dashboard stylesheet has been removed. | Keep picker styling token-driven (§6.6) and independent of the Rust dashboard stylesheet. |
 | Utilities | `helpers/color_palette.py`, `helpers/embed_helper.py` exist; Pillow 11 is installed. | Reuse them. |
 
 ## 3. Core behaviour rules
@@ -181,7 +181,7 @@ drop near-duplicates, sort by prominence, return hex strings. Cache per avatar h
   require an image content type.
 
 ### 6.6 Theming (so the server dev can match a server's own theme easily)
-- Files: `web/static/custom_roles/picker.html`, `picker.css`, `picker.js`, `theme.css`.
+- Files: `Web/bot/static/custom_roles/picker.html`, `picker.css`, `picker.js`, `theme.css`.
 - **All** colors, radii, fonts and spacing used by the picker are CSS variables defined in **`theme.css`** only
   (e.g. `--cr-bg`, `--cr-card`, `--cr-text`, `--cr-muted`, `--cr-accent` (default Discord blurple `#5865F2`), `--cr-radius`).
   `picker.css` must not contain hard-coded colors. Changing the theme = editing that one file.

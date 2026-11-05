@@ -11,7 +11,7 @@ import logging
 import unicodedata
 import urllib.parse
 import re
-from cogs_test.general_commands.dashboard import command_meta
+from cogs.admin.dashboard import command_meta
 from helpers.embed_helper import build_error_embed, build_warning_embed, build_info_embed
 from helpers.anilist_helper import post_graphql
 

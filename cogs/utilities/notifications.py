@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional
 import config
-from cogs_test.general_commands.dashboard import command_meta
+from cogs.admin.dashboard import command_meta
 
 # ------------------------------------------------------
 # Logging Setup

@@ -36,7 +36,7 @@ from helpers.gaming_utils import (
 )
 from helpers.command_logger import log_command
 from helpers.embed_helper import build_error_embed, build_info_embed
-from cogs_test.general_commands.dashboard import command_meta
+from cogs.admin.dashboard import command_meta
 
 # Logging setup
 logger = logging.getLogger("SteamGame")

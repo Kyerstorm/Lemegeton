@@ -21,7 +21,7 @@ from aiohttp import web
 
 import config
 from helpers.custom_roles import COMMAND_GROUP, images, safe_fetch, service, tokens, validation
-from web.rate_limit_memory import record_event
+from Web.bot.rate_limit_memory import record_event
 
 logger = logging.getLogger("web.custom_role_picker")
 STATIC_DIR = Path(__file__).resolve().parent

@@ -2,7 +2,7 @@
 import unittest
 from datetime import datetime, timezone
 
-from cogs_test.general_commands.release_calendar import _title, date_is_in_window, normalize_categories
+from cogs.media.release_calendar import _title, date_is_in_window, normalize_categories
 
 
 class ReleaseCalendarTests(unittest.TestCase):

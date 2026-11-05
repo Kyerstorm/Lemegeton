@@ -8,7 +8,7 @@ import logging
 from typing import Optional
 from datetime import datetime
 from database import is_user_bot_moderator, execute_db_operation, init_say_command_logs_table
-from cogs_test.general_commands.dashboard import command_meta
+from cogs.admin.dashboard import command_meta
 
 logger = logging.getLogger("say")
 

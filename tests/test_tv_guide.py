@@ -1,7 +1,7 @@
 """Pure formatting tests for the TMDB season guide."""
 import unittest
 
-from cogs_test.general_commands.tv_guide import episode_line, season_embed
+from cogs.media.tv_guide import episode_line, season_embed
 
 
 class TVGuideTests(unittest.TestCase):

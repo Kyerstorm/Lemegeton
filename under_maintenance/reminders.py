@@ -7,7 +7,7 @@ from typing import Optional
 from datetime import datetime, timedelta
 import re
 from database import execute_db_operation, init_reminders_table
-from cogs_test.general_commands.dashboard import command_meta
+from cogs.admin.dashboard import command_meta
 
 # ------------------------------------------------------
 # Logging Setup

@@ -16,7 +16,7 @@ import asyncio
 from dataclasses import dataclass, asdict
 import random
 from pathlib import Path
-from cogs_test.general_commands.dashboard import command_meta
+from cogs.admin.dashboard import command_meta
 from helpers.embed_helper import build_error_embed, build_success_embed, build_info_embed, build_warning_embed
 
 # Set up dedicated logging for theme system

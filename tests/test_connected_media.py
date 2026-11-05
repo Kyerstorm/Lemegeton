@@ -1,6 +1,6 @@
 import unittest
 
-from cogs_test.general_commands.connected_media import (
+from cogs.media.connected_media import (
     ConnectedMedia,
     DiscussionHomeView,
     _display_year,
@@ -8,7 +8,7 @@ from cogs_test.general_commands.connected_media import (
     normalize_title,
     validate_https_url,
 )
-from cogs_test.general_commands.franchise import Franchise
+from cogs.media.franchise import Franchise
 
 
 class ConnectedMediaHelperTests(unittest.TestCase):

@@ -2,7 +2,7 @@
 import unittest
 from datetime import datetime, timezone
 
-from cogs_test.general_commands.reading_club import parse_schedule_time, validate_source_url
+from cogs.media.reading_club import parse_schedule_time, validate_source_url
 
 
 class ReadingClubValidationTests(unittest.TestCase):

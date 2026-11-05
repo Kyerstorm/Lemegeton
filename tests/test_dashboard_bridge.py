@@ -15,7 +15,7 @@ class DashboardRuntimeSourceTests(unittest.TestCase):
         functions = {node.name for node in BOT_TREE.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
         self.assertIn("DashboardBotBridge", classes)
         self.assertNotIn("CustomRolePickerServer", classes)
-        self.assertIn("from web.custom_role_picker_server import CustomRolePickerServer", BOT_SOURCE)
+        self.assertIn("from Web.bot.custom_role_picker_server import CustomRolePickerServer", BOT_SOURCE)
         self.assertIn("class CustomRolePickerServer:", PICKER_SERVER_SOURCE)
         self.assertIn("_connection_status", functions)
         self.assertIn("_valid_identifier", functions)

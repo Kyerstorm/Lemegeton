@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 import time
 from helpers.embed_helper import build_error_embed, build_warning_embed, build_info_embed, build_success_embed
 from helpers.anilist_helper import post_graphql
-from cogs_test.general_commands.dashboard import command_meta
+from cogs.admin.dashboard import command_meta
 
 # ------------------------------------------------------
 # RECOMMENDATIONS COG LOGGING SETUP

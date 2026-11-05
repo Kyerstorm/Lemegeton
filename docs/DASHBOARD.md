@@ -1,6 +1,6 @@
 # Lemegeton web dashboard
 
-The public control plane is a Rust/Axum service with a React + TypeScript frontend in `dashboard-frontend/src/`. Screen components live in `.tsx` and styling is authored in `styles.ts`; Vite builds those sources into `dashboard-frontend/dist/app.js` and `app.css`, which Rust serves from the same origin. The root `railpack.json` explicitly supplies Node 22 for this nested package, so a Python/Rust deployment does not rely on language auto-detection to provide Node. The Rust service binds to loopback by default and refuses non-loopback binding unless `DASHBOARD_ALLOW_PUBLIC_BIND=true`; Railway/container configuration explicitly opts into the platform ingress interface. No handwritten dashboard HTML or standalone CSS/JavaScript source files are used. The Discord bot remains the existing Python/discord.py application. A narrow runtime adapter stays consolidated in `bot.py` because only the live bot process owns its command tree and gateway connection.
+The public control plane is a Rust/Axum service with a React + TypeScript frontend in `Web/frontend/src/`. Screen components live in `.tsx` and styling is authored in `styles.ts`; Vite builds those sources into `Web/frontend/dist/app.js` and `app.css`, which Rust serves from the same origin. The root `railpack.json` explicitly supplies Node 22 for this nested package, so a Python/Rust deployment does not rely on language auto-detection to provide Node. The Rust service binds to loopback by default and refuses non-loopback binding unless `DASHBOARD_ALLOW_PUBLIC_BIND=true`; Railway/container configuration explicitly opts into the platform ingress interface. No handwritten dashboard HTML or standalone CSS/JavaScript source files are used. The Discord bot remains the existing Python/discord.py application. A narrow runtime adapter stays consolidated in `bot.py` because only the live bot process owns its command tree and gateway connection.
 
 ## Capabilities and boundaries
 
@@ -45,19 +45,19 @@ The bot still requires its existing Discord token and PostgreSQL configuration. 
 1. Install Python dependencies with `python -m pip install -r requirements.txt`.
 2. Install Node.js 22 or newer and a current stable Rust toolchain.
 3. Configure the environment values above and the existing bot/database values.
-4. Build the frontend: `npm install --prefix dashboard-frontend && npm run build --prefix dashboard-frontend`.
-5. Build the public service: `cargo build --manifest-path dashboard-rs/Cargo.toml`.
-6. Start the dashboard backend with `cargo run --manifest-path dashboard-rs/Cargo.toml` from the repository root in one terminal.
+4. Build the frontend: `npm install --prefix Web/frontend && npm run build --prefix Web/frontend`.
+5. Build the public service: `cargo build --manifest-path Web/backend/Cargo.toml`.
+6. Start the dashboard backend with `cargo run --manifest-path Web/backend/Cargo.toml` from the repository root in one terminal.
 7. Start the existing bot with `python bot.py` in another terminal. The bot starts its private runtime adapter and custom-role picker automatically.
 8. Open the public dashboard address. For local development, register `http://localhost:8080/oauth/callback` and use `DASHBOARD_PUBLIC_URL=http://localhost:8080`.
 
-For the combined deployment entry point, build the frontend assets and release binary first, then use `./scripts/start.sh`. The Railway build command installs Node dependencies, generates the frontend assets, compiles the Rust service, and starts both services through this script. `dashboard-frontend/dist/` is generated output and is not a frontend source directory.
+For the combined deployment entry point, build the frontend assets and release binary first, then use `./scripts/start.sh`. The Railway build command installs Node dependencies, generates the frontend assets, compiles the Rust service, and starts both services through this script. `Web/frontend/dist/` is generated output and is not a frontend source directory.
 
 ## Testing and checks
 
-- Rust unit tests: `cargo test --manifest-path dashboard-rs/Cargo.toml`
-- Rust formatting: `cargo fmt --manifest-path dashboard-rs/Cargo.toml -- --check`
-- Python syntax: `python -m compileall -q bot.py web/custom_role_picker.py`
+- Rust unit tests: `cargo test --manifest-path Web/backend/Cargo.toml`
+- Rust formatting: `cargo fmt --manifest-path Web/backend/Cargo.toml -- --check`
+- Python syntax: `python -m compileall -q bot.py Web/bot/custom_role_picker.py`
 - Bridge unit tests: `python -m unittest discover -s tests -p "test_dashboard_bridge.py"`
 - Existing custom-role web regression suite: run the project's documented `tests/custom_roles/run_all.py` entry point in a configured test environment.
 

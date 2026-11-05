@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 import discord
 from discord import app_commands
 
-from cogs_test.general_commands.dashboard import (
+from cogs.admin.dashboard import (
     COMMAND_REGISTRY,
     ConfigDB,
     DashboardCog,
@@ -78,7 +78,7 @@ class DashboardGroupFilteringTests(unittest.TestCase):
         async def callback(interaction: discord.Interaction):
             return None
 
-        callback.__module__ = "cogs_test.general_commands.screen_discovery"
+        callback.__module__ = "cogs.media.screen_discovery"
         command = app_commands.Command(name="screen-discover", description="Discover", callback=callback)
         DashboardCog._register_if_annotated(command)
         meta = COMMAND_REGISTRY.get_meta("screen-discover")
@@ -221,7 +221,7 @@ class DashboardRollbackTests(unittest.IsolatedAsyncioTestCase):
                 return ('{"sections":{},"commands":{}}',)
             return None
 
-        with patch("cogs_test.general_commands.dashboard.database.execute_db_operation", new_callable=AsyncMock) as execute:
+        with patch("cogs.admin.dashboard.database.execute_db_operation", new_callable=AsyncMock) as execute:
             execute.side_effect = fake_execute
             for method in ("set_command", "set_section", "reset_guild"):
                 db = ConfigDB()
@@ -248,7 +248,7 @@ class DashboardRollbackTests(unittest.IsolatedAsyncioTestCase):
         snapshot = {"sections": {"Media": False}, "commands": {"browse": True}}
 
         with patch(
-            "cogs_test.general_commands.dashboard.attempt_sync_for_guild",
+            "cogs.admin.dashboard.attempt_sync_for_guild",
             new_callable=AsyncMock,
             return_value=True,
         ) as sync:
@@ -271,7 +271,7 @@ class DashboardRollbackTests(unittest.IsolatedAsyncioTestCase):
         snapshot = {"sections": {}, "commands": {"example": False}}
 
         with patch(
-            "cogs_test.general_commands.dashboard.attempt_sync_for_guild",
+            "cogs.admin.dashboard.attempt_sync_for_guild",
             new_callable=AsyncMock,
             return_value=False,
         ):

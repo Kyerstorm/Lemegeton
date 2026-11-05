@@ -3,24 +3,24 @@ from pathlib import Path
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-UI_SOURCE = (ROOT / "dashboard-rs" / "src" / "ui.rs").read_text(encoding="utf-8")
-MAIN_SOURCE = (ROOT / "dashboard-rs" / "src" / "main.rs").read_text(encoding="utf-8")
-AUTH_SOURCE = (ROOT / "dashboard-rs" / "src" / "auth.rs").read_text(encoding="utf-8")
-FRONTEND_APP = (ROOT / "dashboard-frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
-FRONTEND_STYLES = (ROOT / "dashboard-frontend" / "src" / "styles.ts").read_text(encoding="utf-8")
-FRONTEND_ENTRY = (ROOT / "dashboard-frontend" / "src" / "main.tsx").read_text(encoding="utf-8")
-FRONTEND_CONFIG = (ROOT / "dashboard-frontend" / "vite.config.ts").read_text(encoding="utf-8")
-RUST_STATE = (ROOT / "dashboard-rs" / "src" / "state.rs").read_text(encoding="utf-8")
-RUST_AUTH = (ROOT / "dashboard-rs" / "src" / "auth.rs").read_text(encoding="utf-8")
-RUST_CARGO = (ROOT / "dashboard-rs" / "Cargo.toml").read_text(encoding="utf-8")
-FRONTEND_PACKAGE = (ROOT / "dashboard-frontend" / "package.json").read_text(encoding="utf-8")
+UI_SOURCE = (ROOT / "Web/backend" / "src" / "ui.rs").read_text(encoding="utf-8")
+MAIN_SOURCE = (ROOT / "Web/backend" / "src" / "main.rs").read_text(encoding="utf-8")
+AUTH_SOURCE = (ROOT / "Web/backend" / "src" / "auth.rs").read_text(encoding="utf-8")
+FRONTEND_APP = (ROOT / "Web/frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
+FRONTEND_STYLES = (ROOT / "Web/frontend" / "src" / "styles.ts").read_text(encoding="utf-8")
+FRONTEND_ENTRY = (ROOT / "Web/frontend" / "src" / "main.tsx").read_text(encoding="utf-8")
+FRONTEND_CONFIG = (ROOT / "Web/frontend" / "vite.config.ts").read_text(encoding="utf-8")
+RUST_STATE = (ROOT / "Web/backend" / "src" / "state.rs").read_text(encoding="utf-8")
+RUST_AUTH = (ROOT / "Web/backend" / "src" / "auth.rs").read_text(encoding="utf-8")
+RUST_CARGO = (ROOT / "Web/backend" / "Cargo.toml").read_text(encoding="utf-8")
+FRONTEND_PACKAGE = (ROOT / "Web/frontend" / "package.json").read_text(encoding="utf-8")
 WORKFLOW = (ROOT / ".github" / "workflows" / "dashboard.yml").read_text(encoding="utf-8")
 START_SCRIPT = (ROOT / "scripts" / "start.sh").read_text(encoding="utf-8")
-PICKER_SOURCE = (ROOT / "web" / "custom_role_picker.py").read_text(encoding="utf-8")
-PICKER_SERVER = (ROOT / "web" / "custom_role_picker_server.py").read_text(encoding="utf-8")
-PICKER_PAGE = (ROOT / "web" / "picker.html").read_text(encoding="utf-8")
-PICKER_THEME = (ROOT / "web" / "theme.css").read_text(encoding="utf-8")
-PICKER_SCRIPT = (ROOT / "web" / "picker.js").read_text(encoding="utf-8")
+PICKER_SOURCE = (ROOT / "Web" / "bot" / "custom_role_picker.py").read_text(encoding="utf-8")
+PICKER_SERVER = (ROOT / "Web" / "bot" / "custom_role_picker_server.py").read_text(encoding="utf-8")
+PICKER_PAGE = (ROOT / "Web" / "bot" / "picker.html").read_text(encoding="utf-8")
+PICKER_THEME = (ROOT / "Web" / "bot" / "theme.css").read_text(encoding="utf-8")
+PICKER_SCRIPT = (ROOT / "Web" / "bot" / "picker.js").read_text(encoding="utf-8")
 
 
 class DashboardAssetTests(unittest.TestCase):
@@ -49,10 +49,10 @@ class DashboardAssetTests(unittest.TestCase):
         self.assertIn('"app.js"', UI_SOURCE)
         self.assertIn('"app.css"', UI_SOURCE)
         for path in (
-            "dashboard-frontend/index.html",
-            "dashboard-frontend/src/index.html",
-            "dashboard-frontend/src/styles.css",
-            "dashboard-frontend/src/app.css",
+            "Web/frontend/index.html",
+            "Web/frontend/src/index.html",
+            "Web/frontend/src/styles.css",
+            "Web/frontend/src/app.css",
             "web/static/dashboard.html",
             "web/static/login.html",
             "web/static/dashboard.css",
@@ -83,13 +83,13 @@ class DashboardAssetTests(unittest.TestCase):
         )
         for command in commands:
             with self.subTest(command=command):
-                self.assertIn("npm run typecheck --prefix dashboard-frontend", command)
-                self.assertIn("npm run build --prefix dashboard-frontend", command)
-                self.assertIn("cargo build --manifest-path dashboard-rs/Cargo.toml --release", command)
-        self.assertIn("dashboard-frontend/dist/app.js", START_SCRIPT)
-        self.assertIn("dashboard-frontend/dist/app.css", START_SCRIPT)
-        self.assertIn("test -s dashboard-frontend/dist/app.js", WORKFLOW)
-        self.assertIn("test -s dashboard-frontend/dist/app.css", WORKFLOW)
+                self.assertIn("npm run typecheck --prefix Web/frontend", command)
+                self.assertIn("npm run build --prefix Web/frontend", command)
+                self.assertIn("cargo build --manifest-path Web/backend/Cargo.toml --release", command)
+        self.assertIn("Web/frontend/dist/app.js", START_SCRIPT)
+        self.assertIn("Web/frontend/dist/app.css", START_SCRIPT)
+        self.assertIn("test -s Web/frontend/dist/app.js", WORKFLOW)
+        self.assertIn("test -s Web/frontend/dist/app.css", WORKFLOW)
         self.assertIn('      - "railpack.json"', WORKFLOW)
         self.assertIn('      - "config/railway.json"', WORKFLOW)
         self.assertIn('      - "scripts/start.sh"', WORKFLOW)
@@ -111,10 +111,10 @@ class DashboardAssetTests(unittest.TestCase):
     def test_custom_role_picker_is_consolidated_under_web(self):
         for filename in ("custom_role_picker.py", "custom_role_picker_server.py", "picker.html", "picker.css", "theme.css", "picker.js", "favicon.svg"):
             with self.subTest(filename=filename):
-                self.assertTrue((ROOT / "web" / filename).is_file())
+                self.assertTrue((ROOT / "Web" / "bot" / filename).is_file())
         self.assertEqual(PICKER_SOURCE.split("STATIC_DIR = ", 1)[1].splitlines()[0], "Path(__file__).resolve().parent")
         self.assertNotIn("web.static/custom_roles", PICKER_SOURCE)
-        self.assertFalse((ROOT / "web" / "static" / "custom_roles" / "picker.html").exists())
+        self.assertFalse((ROOT / "Web" / "bot" / "static" / "custom_roles" / "picker.html").exists())
         self.assertIn("COMMUNITY CONTROL", PICKER_PAGE)
         self.assertIn("ROLE STUDIO", PICKER_PAGE)
         self.assertIn("#090a09", PICKER_THEME)

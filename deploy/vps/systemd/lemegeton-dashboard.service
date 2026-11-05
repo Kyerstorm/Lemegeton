@@ -12,7 +12,7 @@ WorkingDirectory=/opt/lemegeton
 EnvironmentFile=/etc/lemegeton/dashboard.env
 Environment=HOME=/nonexistent
 Environment=PYTHONDONTWRITEBYTECODE=1
-ExecStart=/opt/lemegeton/dashboard-rs/target/release/lemegeton-dashboard
+ExecStart=/opt/lemegeton/target/release/lemegeton-dashboard
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=20s

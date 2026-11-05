@@ -1,7 +1,7 @@
 """Tests for media-night mood, title normalization, and suitability filters."""
 import unittest
 
-from cogs_test.general_commands.media_night import _family_friendly, _matches_mood, title_of
+from cogs.media.media_night import _family_friendly, _matches_mood, title_of
 
 
 class MediaNightFilterTests(unittest.TestCase):

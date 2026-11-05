@@ -18,7 +18,7 @@ from database import (
     get_bot_config,
     set_bot_config,
 )
-from cogs_test.general_commands.dashboard import command_meta
+from cogs.admin.dashboard import command_meta
 from helpers.embed_helper import build_error_embed, build_success_embed, build_info_embed, build_warning_embed
 
 # Setup logger

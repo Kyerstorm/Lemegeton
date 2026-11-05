@@ -6,7 +6,7 @@ from discord.ext import commands
 import logging
 from pathlib import Path
 from config import ADMIN_DISCORD_ID, BOT_ID
-from cogs_test.general_commands.dashboard import command_meta
+from cogs.admin.dashboard import command_meta
 from helpers.embed_helper import build_error_embed, build_warning_embed
 from helpers.repo_stats import collect_repository_stats, format_bytes
 

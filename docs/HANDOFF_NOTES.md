@@ -182,7 +182,7 @@ The old `booster_roles` table is left in place and never changed.
 
 ## 4. Theming the color picker
 
-To restyle the page, edit **only** `web/static/custom_roles/theme.css`.
+To restyle the page, edit **only** `Web/bot/static/custom_roles/theme.css`.
 
 - Every color, radius, font, spacing and size the page uses is a `--cr-*` variable in that file,
   grouped by area (page, controls, messages, preview cards, icon crop, shape, type, spacing,

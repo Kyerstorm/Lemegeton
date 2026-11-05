@@ -31,7 +31,7 @@ class CustomRolePickerServer:
 
     def build_app(self) -> web.Application:
         from helpers.custom_roles import images
-        from web.custom_role_picker import CustomRolePicker, MULTIPART_OVERHEAD
+        from Web.bot.custom_role_picker import CustomRolePicker, MULTIPART_OVERHEAD
         app = web.Application(client_max_size=images.source_max_bytes() + MULTIPART_OVERHEAD)
         CustomRolePicker(self.bot).register(app)
         return app

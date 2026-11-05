@@ -21,7 +21,7 @@ if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
 from helpers.command_logger import log_command
-from cogs_test.general_commands.dashboard import command_meta
+from cogs.admin.dashboard import command_meta
 
 # Logging setup
 logger = logging.getLogger("Timestamp")

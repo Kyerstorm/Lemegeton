@@ -11,7 +11,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 import config
-from cogs_test.general_commands.dashboard import command_meta
+from cogs.admin.dashboard import command_meta
 from helpers.color_palette import PALETTE
 from helpers.embed_helper import build_error_embed, build_info_embed, build_success_embed, build_warning_embed
 from helpers.command_error_handler import FeedbackAwareModal, FeedbackAwareView, FEEDBACK_ERROR_GUIDANCE, application_error_message

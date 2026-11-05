@@ -9,7 +9,7 @@ from config import BOT_FEEDBACK_CHANNEL_ID
 import database
 import config
 import io
-from cogs_test.general_commands.dashboard import command_meta
+from cogs.admin.dashboard import command_meta
 
 # ------------------------------------------------------
 # Logging Setup - Safe handling

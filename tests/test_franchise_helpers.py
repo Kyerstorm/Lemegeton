@@ -1,7 +1,7 @@
 """Tests for robust title handling across franchise providers."""
 import unittest
 
-from cogs_test.general_commands.franchise import _ani_release_date, _has_full_release_date, _ani_release_sort, media_title
+from cogs.media.franchise import _ani_release_date, _has_full_release_date, _ani_release_sort, media_title
 
 
 class FranchiseTitleTests(unittest.TestCase):

@@ -20,7 +20,7 @@ from database import (
 )
 from helpers.challenge_helper import assign_challenge_role, get_manga_difficulty, get_challenge_difficulty, calculate_manga_points, calculate_challenge_completion_bonus
 from helpers.command_logger import log_command
-from cogs_test.general_commands.dashboard import command_meta
+from cogs.admin.dashboard import command_meta
 
 
 # Logging Setup

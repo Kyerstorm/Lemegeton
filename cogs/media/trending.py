@@ -9,7 +9,7 @@ import re
 import logging
 import os
 from pathlib import Path
-from cogs_test.general_commands.dashboard import command_meta
+from cogs.admin.dashboard import command_meta
 from helpers.embed_helper import build_error_embed, build_warning_embed
 from helpers.anilist_helper import post_graphql
 

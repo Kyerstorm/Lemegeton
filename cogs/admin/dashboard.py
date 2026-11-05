@@ -280,21 +280,23 @@ def _infer_command_section(command: app_commands.Command) -> str:
         return "Customization"
     if module.startswith("cogs.gaming.") or leaf == "game":
         return "Gaming"
-    if module.startswith("cogs.media."):
-        return "Media"
+    if module.startswith("cogs.media.") and leaf in {"media_night", "reading_club", "release_calendar"}:
+        return "Community"
+    if module.startswith("cogs.media.") and leaf in {
+        "airing", "compare", "connected_media", "cross_media_recommendations",
+        "discovery_hub", "franchise", "screen_discovery", "tv_guide",
+    }:
+        return "Media Discovery"
     if module.startswith("cogs.server_management.") or leaf in {"server_check", "server_taste"}:
         return "Server Management"
+    if module.startswith("cogs.media."):
+        return "Media"
     if module.startswith("cogs.social."):
         return "Social"
-    if module.startswith("cogs.utilities.") or leaf in {"dashboard", "gpt"}:
+    if module.startswith("cogs.utilities."):
         return "Utilities"
-    if module.startswith("cogs_test.general_commands."):
-        if leaf in {"community_archives", "media_night", "reading_club", "release_calendar"}:
-            return "Community"
-        if leaf in {"server_check", "server_taste"}:
-            return "Server Management"
-        return "Media Discovery"
     return "Other"
+
 
 
 def _root_app_command(command: app_commands.Command | app_commands.Group):

@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 
 import config
-from web.custom_role_picker_server import CustomRolePickerServer, loopback_bind_host
+from Web.bot.custom_role_picker_server import CustomRolePickerServer, loopback_bind_host
 
 
 class LoopbackBindHostTests(unittest.TestCase):

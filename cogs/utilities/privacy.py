@@ -4,7 +4,7 @@ from discord import app_commands
 import discord
 from discord.ext import commands
 
-from cogs_test.general_commands.dashboard import command_meta
+from cogs.admin.dashboard import command_meta
 from helpers.color_palette import PALETTE
 from helpers.command_error_handler import FeedbackAwareView
 

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from helpers.crypto_random import secure_choice, secure_randbelow
-from cogs_test.general_commands.airing import filter_schedule, format_utc_airing_time
+from cogs.media.airing import filter_schedule, format_utc_airing_time
 from cogs.media.browse import BrowseCog
 from cogs.media.recommendations import RecommendationsCog, get_format_category
 from cogs.server_management.server_config import validate_config_channel
