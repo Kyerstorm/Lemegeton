@@ -83,9 +83,9 @@ The family-friendly option is a best-effort metadata filter, not a parental-rati
 
 ## Image asset storage
 
-The bot uses a shared S3-compatible asset store and PostgreSQL `media_assets` registry. Configure `S3_BUCKET`, `S3_REGION`, and credentials; `S3_ENDPOINT_URL` is optional for AWS S3 and can point to R2, MinIO, or another S3-compatible endpoint. Keep this primary bucket private. Private images use short-lived signed URLs.
+The bot uses a shared S3-compatible asset store and PostgreSQL `media_assets` registry. Configure `S3_BUCKET`, `S3_REGION`, and credentials; `S3_ENDPOINT_URL` is optional for AWS S3 and can point to R2, MinIO, or another S3-compatible endpoint. Keep this primary bucket private. Private media uses short-lived signed URLs.
 
-New Panels uploads use this store when configured, and `panels.media_asset_id` references their registry entries. Existing Discord-hosted panels continue to work without a bulk migration; when object storage is not configured, Panels retains its existing Discord-channel fallback. Newly uploaded Custom Role original images also use private object storage when configured and fall back to PostgreSQL otherwise. Existing records are retained; historical images are not automatically re-uploaded.
+New Panels images and configured community archive image/audio/video attachments use this store when configured. `panels.media_asset_id` and `community_archive_entries.media_asset_id` reference their registry entries. Existing Discord-hosted Panels continue to work without a bulk migration; when object storage is not configured, Panels and community archive attachments use their configured private Discord storage channel fallback. Newly uploaded Custom Role original images also use private object storage when configured and fall back to PostgreSQL otherwise. Existing records are retained; historical images are not automatically re-uploaded.
 
 The `/3x3` generator and AniList staff-character collage can optionally publish their generated, non-sensitive composite images to a **separate** public bucket. Enable this only by setting both `S3_PUBLIC_BUCKET` and an HTTPS `S3_PUBLIC_BASE_URL` (usually a CDN URL). Never use that public bucket for custom-role source images, private uploads, or feedback attachments. Apply a lifecycle policy to generated-image prefixes to control retention. If public output storage is not configured, these commands continue sending Discord attachments.
 
@@ -132,17 +132,23 @@ TMDB watch-provider data is powered by JustWatch. /where-to-watch labels the que
 
 ### Community archives and events
 
-**/archive** is the single entry point for Manga Panels and community collections. Its modal keeps archive, related media, and action choices together. Manga Panels includes browsing, personal panels, random discovery, search, upload, configuration, and its moderation log. Community collections cover quotes, credited fanworks, moodboards, soundtracks, scenes, recommendations, and theories, with submission history, reports, and guild-scoped review.
+**/archive** is the single entry point for Manga Panels and community collections. Its modal keeps archive, related media, and action choices together. Each server can enable or hide Manga Panels, Quotes, Fanworks, Moodboards, Soundtracks, Scenes, Recommendations, and Theories from the selector.
 
-Panel configuration still selects the storage channel, moderation log, moderator role, and whether approved community entries are visible globally or only in the current server. Submission queues and moderation remain server-scoped.
-- **/archive → Manga Panels** — browse and search manga panels, view personal uploads, choose a random panel, add panels, configure storage/moderation, and open the moderation log.
+Server admins choose **Configure archive** for two focused settings groups:
+- **Categories & uploads** — choose visible archive categories and accepted image, audio, and video uploads. Images remain enabled by default for the existing Panels workflow; audio and video are opt-in. Supported files are limited to 20 MiB each.
+- **Storage & moderation** — configure a private media-storage channel fallback, moderation log, moderator role, and whether approved community entries are visible globally or only in the current server. Private S3-compatible storage can be used without a Discord storage channel.
+
+Community attachments are optional, stored privately, and remain pending until moderator approval. Soundtrack entries require either an HTTPS platform link or an enabled audio/video attachment; an upload-only soundtrack does not enter the moderation queue until the attachment is saved. Approved images appear in the archive entry; audio and video are linked from it. Rejected or removed entries have their stored attachments deleted.
+
+Manga Panels retain their specialised AniList, chapter, tag, and age-gating fields, while their category visibility and image-upload permission follow the shared archive settings. This keeps the data models specialised without splitting the server configuration.
+- **/archive → Manga Panels** — browse and search manga panels, view personal uploads, choose a random panel, add panels, configure shared storage/moderation, and open the panel moderation log.
 - **/panel-of-the-day** — selects a non-NSFW record from the existing Panels table and persists one selection per server per date instead of maintaining a second panel database.
 - **/media-bracket**, **/adaptation-vote**, and **/media-quiz** — persist server-scoped votes, polls, trivia questions, and user quiz sessions.
 
-New community archive submissions start pending. Approval takes place in the originating guild; approved entries are shared across servers. Moderation and votes remain guild-scoped. Fanworks and soundtrack submissions require HTTPS links, and user-supplied links are not treated as proof of a media relationship. Quotes are limited to 280 characters; do not submit lyrics or long copyrighted passages. Archive entries link to external work and metadata rather than rehosting fan media or music.
+New community archive submissions start pending. Approval takes place in the originating guild; approved entries are shared across servers. Moderation and votes remain guild-scoped. Fanworks submissions require HTTPS source links. Soundtrack submissions can use an HTTPS platform link or an admin-enabled audio/video attachment. Uploaders must confirm they own the media or have permission to share it. Quotes are limited to 280 characters; do not submit lyrics or long copyrighted passages. User-supplied links are not treated as proof of a media relationship.
 
 ### Database changes
 
-New tables are initialized by their cogs and use the existing PostgreSQL access layer. They include connected_media_guild_settings, media_link_suggestions, connected_media_discussions, community_archive_entries, community_archive_reports, community_panel_daily_log, community_media_brackets, community_media_bracket_votes, community_adaptation_polls, community_adaptation_votes, community_media_quiz_questions and community_media_quiz_sessions. Existing archive tables and records are not copied or replaced.
+New tables are initialized by their cogs and use the existing PostgreSQL access layer. They include connected_media_guild_settings, media_link_suggestions, connected_media_discussions, community_archive_entries (including media attachment metadata), guild_archive_settings, community_archive_reports, community_panel_daily_log, community_media_brackets, community_media_bracket_votes, community_adaptation_polls, community_adaptation_votes, community_media_quiz_questions and community_media_quiz_sessions. Existing archive tables and records are not copied or replaced.
 
 These community features do not store personal reading or watching progress. Provider fields that are unavailable remain unavailable instead of being guessed.

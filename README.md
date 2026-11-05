@@ -323,7 +323,7 @@ Results explicitly marked adult-rated or sexually explicit are excluded.
 | **/media-quiz** | Add source-linked trivia, play a question, and submit an answer privately. |
 | **/media-night** | Run server-specific media-night voting when configured. |
 
-Community-submitted resources retain attribution and review status. Some commands require moderator permission, and discussions or voting sessions are stored in the relevant guild context.
+Community-submitted resources retain attribution and review status. Server admins can configure which archive categories are visible and enable image, audio, or video uploads. Images remain enabled by default; audio and video are opt-in. Uploads are privately stored, limited to 20 MiB per file, and held for moderator review. Uploaders must confirm they own media or have permission to share it. Storage, moderator role, and global-versus-server community archive visibility are configured from **/archive → Configure archive**.
 
 ### 👥 Account, customization, and server tools
 

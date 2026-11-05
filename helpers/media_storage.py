@@ -24,13 +24,17 @@ import database
 log = logging.getLogger("Lemegeton.MediaStorage")
 
 @dataclass(frozen=True)
-class StoredImage:
+class StoredMedia:
     bucket: str
     key: str
     content_type: str
     size_bytes: int
     sha256: str
     is_private: bool = True
+
+
+# Backwards-compatible name for existing image consumers.
+StoredImage = StoredMedia
 
 
 def _setting(name: str, default: str = "") -> str:
@@ -119,6 +123,46 @@ def _extension(filename: str) -> str:
     return f".{match.group(1).lower()}" if match else ".img"
 
 
+async def store_media(
+    data: bytes,
+    *,
+    namespace: str,
+    filename: str,
+    content_type: str,
+    private: bool = True,
+) -> StoredMedia | None:
+    """Store a non-empty media object and return registry-ready metadata."""
+    if not is_configured(private=private):
+        return None
+    payload = bytes(data)
+    mime = str(content_type or "").split(";", 1)[0].strip().lower()
+    if not payload:
+        raise ValueError("Only non-empty media files can be stored.")
+    if not re.fullmatch(r"[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+", mime):
+        raise ValueError("A valid media content type is required.")
+    bucket = _bucket(private=private)
+    key = f"{_namespace(namespace)}/{uuid.uuid4().hex}{_extension(filename)}"
+
+    def put() -> None:
+        _client().put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=payload,
+            ContentType=mime,
+            CacheControl="private, no-store",
+        )
+
+    await asyncio.to_thread(put)
+    return StoredMedia(
+        bucket=bucket,
+        key=key,
+        content_type=mime[:128],
+        size_bytes=len(payload),
+        sha256=hashlib.sha256(payload).hexdigest(),
+        is_private=private,
+    )
+
+
 async def store_image(
     data: bytes,
     *,
@@ -127,34 +171,16 @@ async def store_image(
     content_type: str,
     private: bool = True,
 ) -> StoredImage | None:
-    """Upload image bytes and return database-ready metadata, or None if disabled."""
-    if not is_configured(private=private):
-        return None
-    if not data or not str(content_type or "").lower().startswith("image/"):
-        raise ValueError("Only non-empty image files can be stored.")
-    bucket = _bucket(private=private)
-    key = f"{_namespace(namespace)}/{uuid.uuid4().hex}{_extension(filename)}"
-    payload = bytes(data)
-
-    def put() -> None:
-        _client().put_object(
-            Bucket=bucket,
-            Key=key,
-            Body=payload,
-            ContentType=content_type,
-            CacheControl="private, no-store",
-        )
-
-    await asyncio.to_thread(put)
-    return StoredImage(
-        bucket=bucket,
-        key=key,
-        content_type=str(content_type)[:128],
-        size_bytes=len(payload),
-        sha256=hashlib.sha256(payload).hexdigest(),
-        is_private=private,
+    """Image-only compatibility wrapper around the shared media store."""
+    if not str(content_type or "").lower().startswith("image/"):
+        raise ValueError("Only image files can be stored with store_image().")
+    return await store_media(
+        data,
+        namespace=namespace,
+        filename=filename,
+        content_type=content_type,
+        private=private,
     )
-
 
 async def ensure_schema() -> None:
     """Create the shared asset registry idempotently using the existing DB pool."""
@@ -189,7 +215,7 @@ async def ensure_schema() -> None:
 
 async def register_asset(
     conn,
-    stored: StoredImage,
+    stored: StoredMedia,
     *,
     namespace: str,
     uploaded_by: int | None = None,
@@ -208,7 +234,7 @@ async def register_asset(
 
 
 async def create_asset(
-    stored: StoredImage,
+    stored: StoredMedia,
     *,
     namespace: str,
     uploaded_by: int | None = None,
@@ -331,7 +357,7 @@ async def store_public_image(
         return None
 
 
-async def delete_uploaded_object(stored: StoredImage) -> None:
+async def delete_uploaded_object(stored: StoredMedia) -> None:
     """Compensate for an upload when its database transaction did not commit."""
     await asyncio.to_thread(
         _client().delete_object, Bucket=stored.bucket, Key=stored.key

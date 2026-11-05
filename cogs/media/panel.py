@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import logging
 import re
 import secrets
@@ -439,6 +440,24 @@ async def _settings(guild_id: int) -> dict[str, Any]:
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM guild_settings WHERE guild_id=$1", guild_id)
     return dict(row) if row else {}
+
+
+async def _shared_panel_archive_availability(guild_id: int) -> tuple[bool, bool]:
+    """Return whether Panels and their image uploads are enabled for this server."""
+    try:
+        row = await database.execute_db_operation(
+            "load shared archive panel settings",
+            "SELECT enabled_categories, upload_types FROM guild_archive_settings WHERE guild_id = ?",
+            (guild_id,), fetch_type="one",
+        )
+        if not row:
+            return True, True
+        categories = json.loads(row[0] or "[]")
+        uploads = json.loads(row[1] or '["image"]')
+        return "panels" in categories, "image" in uploads
+    except Exception:
+        log.exception("Could not load shared archive settings for guild %s", guild_id)
+        return False, False
 
 
 async def _storage_channel(bot: commands.Bot, guild: discord.Guild | None):
@@ -1149,14 +1168,18 @@ class PanelSearchModal(FeedbackAwareModal, title="Search Manga Panels"):
             await interaction.followup.send(application_error_message(exc), ephemeral=True)
 
 
-class PanelConfigureModal(FeedbackAwareModal, title="Configure Panel Archive"):
+class PanelConfigureModal(FeedbackAwareModal, title="Archive Storage & Moderation"):
     def __init__(self, cog: "PanelCog", owner_id: int, guild_id: int, archive_scope: str = "global"):
         super().__init__(timeout=180)
         self.cog = cog
         self.owner_id = owner_id
         self.guild_id = guild_id
-        self.storage = discord.ui.Label(text="Storage channel (required)", component=discord.ui.ChannelSelect(
-            channel_types=[discord.ChannelType.text], min_values=1, max_values=1))
+        self.storage = discord.ui.Label(
+            text="Media storage channel (optional with S3)",
+            component=discord.ui.ChannelSelect(
+                channel_types=[discord.ChannelType.text], min_values=0, max_values=1, required=False,
+            ),
+        )
         self.log_channel = discord.ui.Label(text="Moderation log channel (optional)", component=discord.ui.ChannelSelect(
             channel_types=[discord.ChannelType.text], min_values=0, max_values=1, required=False))
         self.mod_role = discord.ui.Label(text="Moderator role (optional)", component=discord.ui.RoleSelect(
@@ -1199,17 +1222,32 @@ class PanelConfigureModal(FeedbackAwareModal, title="Configure Panel Archive"):
             ):
                 await interaction.followup.send("Manage Server permission is required.", ephemeral=True)
                 return
-            # ChannelSelect yields AppCommandChannel stubs; resolve the real channel for permission checks.
+            # Preserve the current fallback unless a replacement is selected.
             picked = self.storage.component.values
-            storage = guild.get_channel(picked[0].id) if picked else None
-            if not isinstance(storage, discord.TextChannel):
-                await interaction.followup.send("Choose a text storage channel.", ephemeral=True)
+            storage = guild.get_channel(picked[0].id) if picked else await _storage_channel(self.cog.bot, guild)
+            if picked and not isinstance(storage, discord.TextChannel):
+                await interaction.followup.send("Choose a valid text storage channel.", ephemeral=True)
                 return
-            me = guild.me
-            perms = storage.permissions_for(me) if me else None
-            if not perms or not (perms.view_channel and perms.send_messages and perms.attach_files):
-                await interaction.followup.send("The bot needs View Channel, Send Messages, and Attach Files in the storage channel.", ephemeral=True)
+            if storage is None and not media_storage.is_configured(private=True):
+                await interaction.followup.send(
+                    "Select a private storage channel or configure private S3 storage first.",
+                    ephemeral=True,
+                )
                 return
+            if storage is not None:
+                me = guild.me
+                perms = storage.permissions_for(me) if me else None
+                public_perms = storage.permissions_for(guild.default_role)
+                if (
+                    not perms
+                    or not (perms.view_channel and perms.send_messages and perms.attach_files)
+                    or public_perms.view_channel
+                ):
+                    await interaction.followup.send(
+                        "The storage channel must be private to members and allow the bot to view, send, and attach files.",
+                        ephemeral=True,
+                    )
+                    return
             logs = self.log_channel.component.values or []
             roles = self.mod_role.component.values or []
             archive_scope = self.archive_scope.component.values[0]
@@ -1225,10 +1263,10 @@ class PanelConfigureModal(FeedbackAwareModal, title="Configure Panel Archive"):
                     panel_log_channel_id=EXCLUDED.panel_log_channel_id,
                     panel_mod_role_id=EXCLUDED.panel_mod_role_id,
                     archive_scope=EXCLUDED.archive_scope
-                """, guild.id, storage.id, logs[0].id if logs else None, roles[0].id if roles else None, archive_scope)
+                """, guild.id, storage.id if storage else None, logs[0].id if logs else None, roles[0].id if roles else None, archive_scope)
             visibility = "Global Archives" if archive_scope == "global" else "Only This Server"
             await interaction.followup.send(
-                f"Panel settings saved for this server. Community archive visibility: **{visibility}**.",
+                f"Archive storage and moderation settings saved. Community archive visibility: **{visibility}**.",
                 ephemeral=True,
             )
         except Exception as exc:
@@ -1676,6 +1714,13 @@ class PanelCog(commands.Cog):
                     "Adding panels is only available in a server.", ephemeral=True,
                 )
                 return
+            panels_enabled, images_enabled = await _shared_panel_archive_availability(interaction.guild_id)
+            if not panels_enabled:
+                await interaction.response.send_message("Manga Panels are disabled in this server.", ephemeral=True)
+                return
+            if not images_enabled:
+                await interaction.response.send_message("Image uploads are disabled in this server's archive settings.", ephemeral=True)
+                return
             await self._open_tag_picker(
                 interaction, mode="add", user_id=interaction.user.id, guild_id=interaction.guild_id,
             )
@@ -1749,6 +1794,12 @@ class PanelCog(commands.Cog):
         try:
             if interaction.guild_id is None:
                 await interaction.response.send_message("This action is only available in a server.", ephemeral=True); return
+            panels_enabled, images_enabled = await _shared_panel_archive_availability(interaction.guild_id)
+            if not panels_enabled or not images_enabled:
+                await interaction.response.send_message(
+                    "Manga Panel image uploads are disabled in this server's archive settings.", ephemeral=True,
+                )
+                return
             images = [a for a in message.attachments if (a.content_type or "").lower() in IMAGE_TYPES]
             if not images:
                 await interaction.response.send_message("That message has no supported image attachments.", ephemeral=True); return

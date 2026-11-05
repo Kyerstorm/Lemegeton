@@ -44,6 +44,34 @@ class PanelArchiveConfigurationTests(unittest.TestCase):
         self.assertTrue(visibility.component.options[1].default)
 
 
+    def test_archive_storage_channel_is_optional_when_s3_is_configured(self):
+        modal = panel.PanelConfigureModal(None, owner_id=1, guild_id=2)
+        storage = next(item for item in modal.children if item.text.startswith("Media storage channel"))
+        self.assertFalse(storage.component.required)
+
+
+class SharedPanelArchiveSettingsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_missing_archive_settings_keep_legacy_panel_uploads_enabled(self):
+        with mock.patch.object(
+            panel.database, "execute_db_operation", new_callable=mock.AsyncMock, return_value=None,
+        ):
+            self.assertEqual(await panel._shared_panel_archive_availability(10), (True, True))
+
+    async def test_server_can_disable_panels_or_panel_image_uploads(self):
+        with mock.patch.object(
+            panel.database, "execute_db_operation", new_callable=mock.AsyncMock,
+            return_value=('["quotes"]', '["audio"]'),
+        ):
+            self.assertEqual(await panel._shared_panel_archive_availability(10), (False, False))
+
+    async def test_enabled_panels_can_keep_image_uploads_without_audio(self):
+        with mock.patch.object(
+            panel.database, "execute_db_operation", new_callable=mock.AsyncMock,
+            return_value=('["panels", "quotes"]', '["image"]'),
+        ):
+            self.assertEqual(await panel._shared_panel_archive_availability(10), (True, True))
+
+
 class PanelChapterCaptionTests(unittest.TestCase):
     def test_numbered_chapter_with_caption(self):
         self.assertEqual(panel._parse_chapter_caption("Chapter 12 — The final battle"), ("12", "The final battle"))

@@ -150,6 +150,35 @@ class MediaStorageUploadTests(unittest.IsolatedAsyncioTestCase):
         client.put_object.assert_called_once()
         self.assertEqual(client.put_object.call_args.kwargs["Bucket"], "generated-public")
 
+    async def test_generic_media_upload_accepts_audio(self):
+        client = Mock()
+        payload = b"audio-payload"
+        with (
+            patch.dict(os.environ, {"S3_BUCKET": "private-assets"}, clear=True),
+            patch("helpers.media_storage._client", return_value=client),
+        ):
+            stored = await media_storage.store_media(
+                payload,
+                namespace="community-archives/soundtracks",
+                filename="theme.mp3",
+                content_type="audio/mpeg",
+            )
+        self.assertIsNotNone(stored)
+        self.assertEqual(stored.content_type, "audio/mpeg")
+        self.assertEqual(stored.sha256, hashlib.sha256(payload).hexdigest())
+        self.assertTrue(stored.is_private)
+        client.put_object.assert_called_once()
+
+    async def test_generic_media_upload_rejects_invalid_mime(self):
+        with patch.dict(os.environ, {"S3_BUCKET": "private-assets"}, clear=True):
+            with self.assertRaises(ValueError):
+                await media_storage.store_media(
+                    b"payload",
+                    namespace="community-archives",
+                    filename="asset.bin",
+                    content_type="not-a-mime-type",
+                )
+
     async def test_non_image_payload_is_rejected(self):
         with patch.dict(os.environ, {"S3_BUCKET": "private-assets"}, clear=True):
             with self.assertRaises(ValueError):
