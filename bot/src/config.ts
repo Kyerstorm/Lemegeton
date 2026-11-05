@@ -41,8 +41,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BotConfig {
 
   const anilistApiUrl = env.ANILIST_API_URL?.trim() || "https://graphql.anilist.co";
   const parsedApiUrl = new URL(anilistApiUrl);
-  if (parsedApiUrl.protocol !== "https:" && parsedApiUrl.hostname !== "localhost" && parsedApiUrl.hostname !== "127.0.0.1") {
-    throw new Error("ANILIST_API_URL must use HTTPS (HTTP is allowed only for localhost development).");
+  const isLoopback = ["localhost", "127.0.0.1", "[::1]"].includes(parsedApiUrl.hostname);
+  const isSecure = parsedApiUrl.protocol === "https:";
+  const isLocalDevelopment = parsedApiUrl.protocol === "http:" && isLoopback;
+  if (!isSecure && !isLocalDevelopment) {
+    throw new Error("ANILIST_API_URL must use HTTPS (HTTP is allowed only for loopback development).");
   }
 
   const normalizedApplicationId = optionalSnowflake(applicationId, "BOT_ID / DISCORD_CLIENT_ID");

@@ -38,6 +38,19 @@ test("loadConfig rejects insecure external AniList endpoints", () => {
   );
 });
 
+test("loadConfig allows HTTP only for loopback development endpoints", () => {
+  const config = loadConfig({
+    ...baseEnvironment,
+    ANILIST_API_URL: "http://127.0.0.1:8080/graphql",
+  });
+
+  assert.equal(config.anilistApiUrl, "http://127.0.0.1:8080/graphql");
+  assert.throws(
+    () => loadConfig({ ...baseEnvironment, ANILIST_API_URL: "ftp://localhost/graphql" }),
+    /must use HTTPS/,
+  );
+});
+
 test("loadConfig rejects invalid AniList timeout values", () => {
   assert.throws(
     () => loadConfig({ ...baseEnvironment, ANILIST_API_TIMEOUT: "0" }),

@@ -150,7 +150,7 @@ export class AniListClient {
           "Content-Type": "application/json",
           Accept: "application/json",
         },
-        body: JSON.strinfify({ query: MEDIA_SEARCH_QUERY, variables }),
+        body: JSON.stringify({ query: MEDIA_SEARCH_QUERY, variables }),
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch (error) {
