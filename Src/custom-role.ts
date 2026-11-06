@@ -32,6 +32,9 @@ import {
   customRoleCooldownMessage,
   customRoleEligibility,
   addCustomRoleBlockedWord,
+  clearCustomRoleSnoozes,
+  deleteCustomRoleRecord,
+  removeCustomRolePendingUser,
   parseCustomRoleWordList,
   removeCustomRoleBlockedWord,
   getCustomRoleIconData,
@@ -54,6 +57,8 @@ type SelectInteraction = RoleSelectMenuInteraction | ChannelSelectMenuInteractio
 type GuildInteraction = ChatInputCommandInteraction | ButtonInteraction | ModalSubmitInteraction | SelectInteraction;
 
 const MAX_ROLE_COOLDOWN = 86_400;
+const memberRemovalRequests = new Map<string, { targetUserId: string; reason: string; expiresAt: number }>();
+function removalRequestKey(guildId: string, actorId: string, targetId: string): string { return guildId + ":" + actorId + ":" + targetId; }
 const MEMBER_ACTIONS = [
   { id: "create", label: "Create role", style: ButtonStyle.Success },
   { id: "rename", label: "Rename", style: ButtonStyle.Secondary },
@@ -245,6 +250,8 @@ export class CustomRoleCommand implements FeatureCommand {
       { name: "Take role off", value: "unwear" },
       { name: "Move role", value: "move" },
       { name: "Admin settings", value: "admin" },
+      { name: "View member custom role", value: "member" },
+      { name: "Remove member custom role", value: "remove-member" },
       { name: "Enable feature", value: "enable" },
       { name: "Disable feature", value: "disable" },
       { name: "Set anchor role", value: "anchor" },
@@ -266,6 +273,8 @@ export class CustomRoleCommand implements FeatureCommand {
     .addChannelOption(option => option.setName("channel").setDescription("Channel where members can use the command"))
     .addIntegerOption(option => option.setName("seconds").setDescription("Cooldown in seconds (0 to 86400)").setMinValue(0).setMaxValue(MAX_ROLE_COOLDOWN))
     .addChannelOption(option => option.setName("log_channel").setDescription("Channel for custom role audit messages"))
+    .addUserOption(option => option.setName("member").setDescription("Member whose custom role is being managed"))
+    .addStringOption(option => option.setName("reason").setDescription("Optional reason sent to a removed member").setMaxLength(500))
     .addStringOption(option => option.setName("placement").setDescription("Where custom roles sit relative to the anchor")
       .addChoices({ name: "Below anchor", value: "below" }, { name: "Above anchor", value: "above" }));
 
@@ -279,6 +288,21 @@ export class CustomRoleCommand implements FeatureCommand {
       switch (action) {
         case "home": await this.showMemberPanel(interaction, await interaction.guild.members.fetch(interaction.user.id)); return;
         case "admin": await this.showAdminPanel(interaction); return;
+        case "member":
+        case "remove-member": {
+          if (!this.requireManager(interaction)) return;
+          const target = interaction.options.getUser("member");
+          if (!target) {
+            await interaction.reply({ content: "Choose a server member with the **member** option.", flags: MessageFlags.Ephemeral });
+            return;
+          }
+          if (action === "member") {
+            await this.showManagedMemberRole(interaction, target.id);
+          } else {
+            await this.promptRemoveMemberRole(interaction, target.id, interaction.options.getString("reason") ?? "");
+          }
+          return;
+        }
         case "create": {
           const name = interaction.options.getString("name");
           if (!name) { await interaction.showModal(nameModal(interaction.user.id, "create")); return; }
@@ -391,6 +415,26 @@ export class CustomRoleCommand implements FeatureCommand {
     if (action === "palette") { await this.showAvatarPalette(interaction); return true; }
     if (action === "palette-color" && resourceId && /^[0-9a-f]{6}$/i.test(resourceId)) {
       await this.reportResult(interaction, await this.setRoleColor(interaction, "#" + resourceId));
+      return true;
+    }
+    if (action === "member-remove-confirm" && resourceId && interaction.guildId) {
+      if (!this.requireManager(interaction) || !interaction.guild) return true;
+      const key = removalRequestKey(interaction.guildId, interaction.user.id, resourceId);
+      const request = memberRemovalRequests.get(key);
+      if (!request || request.expiresAt < Date.now()) {
+        memberRemovalRequests.delete(key);
+        await interaction.reply({ content: "That removal confirmation expired. Run /custom-role again to review the member's role.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      memberRemovalRequests.delete(key);
+      const result = await this.removeManagedMemberRole(interaction, request.targetUserId, request.reason);
+      await interaction.reply({ content: result.message, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (action === "member-remove-cancel" && resourceId && interaction.guildId) {
+      if (!this.requireManager(interaction)) return true;
+      memberRemovalRequests.delete(removalRequestKey(interaction.guildId, interaction.user.id, resourceId));
+      await interaction.reply({ content: "Nothing was removed.", flags: MessageFlags.Ephemeral });
       return true;
     }
     if (action === "admin") { await this.showAdminPanel(interaction); return true; }
@@ -568,6 +612,103 @@ export class CustomRoleCommand implements FeatureCommand {
     await interaction.reply({ content: result.message, flags: MessageFlags.Ephemeral }).catch(async () => {
       if (interaction.isRepliable() && interaction.deferred) await interaction.editReply({ content: result.message });
     });
+  }
+
+  private async showManagedMemberRole(
+    interaction: ChatInputCommandInteraction,
+    targetId: string,
+  ): Promise<void> {
+    const record = await getCustomRoleRecord(interaction.guildId!, targetId);
+    if (!record) {
+      await interaction.reply({ content: "That member has no saved Custom Role record in this server.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const member = await interaction.guild!.members.fetch(targetId).catch(() => null);
+    const role = record.role_id ? await interaction.guild!.roles.fetch(record.role_id).catch(() => null) : null;
+    const iconData = await getCustomRoleIconData(interaction.guildId!, targetId);
+    const icon = record.icon_emoji ?? (iconData?.icon_png ? "Image icon" : "None");
+    const embed = homeEmbed(
+      "Custom Role · Member details",
+      "Guild-local role record for " + (member ? member.user.tag : targetId) + ".",
+      [
+        { name: "Member", value: "<@" + targetId + ">", inline: true },
+        { name: "Status", value: record.status, inline: true },
+        { name: "Role", value: role ? role.name + " · <@&" + role.id + ">" : record.name ?? "No live role", inline: false },
+        { name: "Color style", value: record.color_mode + " · " + colorLabel(record.primary_color), inline: true },
+        { name: "Secondary color", value: colorLabel(record.secondary_color), inline: true },
+        { name: "Icon", value: icon, inline: true },
+        { name: "Position", value: record.position_hint === null ? "Not saved" : String(record.position_hint), inline: true },
+        { name: "Last changed", value: record.last_changed_at ?? "Not recorded", inline: true },
+      ],
+    );
+    await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+  }
+
+  private async promptRemoveMemberRole(
+    interaction: ChatInputCommandInteraction,
+    targetUserId: string,
+    reason: string,
+  ): Promise<void> {
+    const record = await getCustomRoleRecord(interaction.guildId!, targetUserId);
+    if (!record) {
+      await interaction.reply({ content: "That member has no saved Custom Role record in this server.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const role = record.role_id ? await interaction.guild!.roles.fetch(record.role_id).catch(() => null) : null;
+    const key = removalRequestKey(interaction.guildId!, interaction.user.id, targetUserId);
+    memberRemovalRequests.set(key, { targetUserId, reason: reason.trim().slice(0, 500), expiresAt: Date.now() + 5 * 60_000 });
+    await interaction.reply({
+      content: "Remove " + (role ? "**" + role.name + "**" : "the saved Custom Role") + " for <@" + targetUserId + "> and delete its saved settings? This cannot be undone. " +
+        (reason.trim() ? "The member will be sent the reason by DM if their DMs are open." : "No DM will be sent."),
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(userCustomId(interaction.user.id, "member-remove-confirm") + ":" + targetUserId)
+          .setLabel("Remove role and settings").setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId(userCustomId(interaction.user.id, "member-remove-cancel") + ":" + targetUserId)
+          .setLabel("Cancel").setStyle(ButtonStyle.Secondary),
+      )],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  private async removeManagedMemberRole(
+    interaction: ButtonInteraction,
+    targetUserId: string,
+    reason: string,
+  ): Promise<{ ok: boolean; message: string }> {
+    const guild = interaction.guild!;
+    const record = await getCustomRoleRecord(guild.id, targetUserId);
+    if (!record) return { ok: false, message: "That member's Custom Role record was already removed." };
+    const role = record.role_id ? await guild.roles.fetch(record.role_id).catch(() => null) : null;
+    if (role) {
+      const botMember = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
+      if (!botMember?.permissions.has(PermissionFlagsBits.ManageRoles)) {
+        return { ok: false, message: "I need Manage Roles to remove that role. No record was changed." };
+      }
+      if (role.position >= botMember.roles.highest.position || role.managed || role.id === guild.id) {
+        return { ok: false, message: "That role is managed or at/above my highest role. Nothing was changed." };
+      }
+      try {
+        await role.delete("Custom Roles: removed by " + interaction.user.id + (reason ? " · " + reason : ""));
+      } catch (error) {
+        return { ok: false, message: error instanceof Error ? "Discord refused to delete the role: " + error.message : "Discord refused to delete that role. Nothing was changed." };
+      }
+    }
+    const deleted = await deleteCustomRoleRecord(guild.id, targetUserId);
+    if (!deleted) return { ok: false, message: "The Discord role was removed, but the database record could not be deleted. Check the role record before retrying." };
+    if (deleted.icon_source_asset_id) {
+      await deleteCustomRoleIconSource(deleted.icon_source_asset_id, guild.id).catch(() => undefined);
+    }
+    await clearCustomRoleSnoozes(guild.id, [targetUserId]);
+    await removeCustomRolePendingUser(guild.id, targetUserId, interaction.user.id);
+    const settings = await getCustomRoleSettings(guild.id);
+    await this.logEvent(guild, settings, "<@" + interaction.user.id + "> removed <@" + targetUserId + ">'s Custom Role and saved settings.");
+    if (reason) {
+      const member = await guild.members.fetch(targetUserId).catch(() => null);
+      if (member) {
+        await member.send({ content: "Your Custom Role in **" + guild.name + "** was removed by a server administrator.\nReason: " + reason }).catch(() => undefined);
+      }
+    }
+    return { ok: true, message: "Removed <@" + targetUserId + ">'s role and saved settings." };
   }
 
   private async showMemberPanel(interaction: GuildInteraction, member: GuildMember): Promise<void> {
