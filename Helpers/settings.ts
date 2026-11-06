@@ -9,7 +9,7 @@ export function isFeatureName(value: string): value is FeatureName {
 }
 
 export async function getFeatureSettings(guildId: string): Promise<FeatureSettings> {
-  const states: FeatureSettings = {discover:true,archive:true,community:true,play:true,profile:true};
+  const states: FeatureSettings = {discover:true,archive:true,community:true,play:true,profile:true,"custom-role":true};
   const rows = await query<{feature_name:string;enabled:boolean}>(
     "SELECT feature_name,enabled FROM guild_feature_settings WHERE guild_id = $1", [guildId],
   );
