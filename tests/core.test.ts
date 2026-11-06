@@ -7,6 +7,7 @@ import {nextLocalOccurrence} from "../Helpers/community.js";
 import {classifyArchiveUpload} from "../Helpers/media-storage.js";
 import {ARCHIVE_TAG_CATALOG,searchArchiveTags} from "../Helpers/archive.js";
 import {AniListClient} from "../Helpers/anilist.js";
+import {getAniListProfileAchievements} from "../Helpers/profile.js";
 import sharp from "sharp";
 import {processCustomRoleIconImage,extractCustomRoleAvatarPalette} from "../Helpers/custom-role-images.js";
 import {normalizeAtlasTitle,normalizeAtlasCategory,safeAtlasUrl} from "../Helpers/atlas.js";
@@ -107,6 +108,50 @@ test("Custom role avatar palette ignores transparent pixels and returns distinct
  const palette=await extractCustomRoleAvatarPalette(image,5);
  assert.ok(palette.length>0 && palette.length<=5);
  assert.ok(palette.every(color=>Number.isInteger(color)&&color>=0&&color<=0xffffff));
+});
+
+
+test("AniList linked profiles preserve provider-reported statistics and supported milestones",async()=>{
+ const client=new AniListClient(undefined,1000,async(_input,init)=>{
+  const request=JSON.parse(String(init?.body)) as {query:string;variables:Record<string,unknown>};
+  assert.match(request.query,/episodesWatched/);
+  assert.match(request.query,/chaptersRead/);
+  return new Response(JSON.stringify({data:{User:{
+   id:42,name:"VirExample",siteUrl:"https://anilist.co/user/VirExample",
+   avatar:{large:"https://anilist.co/avatar.png"},bannerImage:null,about:"A media profile",
+   statistics:{
+    anime:{count:520,meanScore:84,episodesWatched:6400,minutesWatched:92000,
+     statuses:[{status:"COMPLETED",count:400}],formats:[{format:"TV",count:300}],
+     genres:[{genre:"Fantasy",count:80}]},
+    manga:{count:210,meanScore:78,chaptersRead:9000,volumesRead:360,
+     statuses:[{status:"COMPLETED",count:150}],formats:[{format:"MANGA",count:180}],
+     genres:[{genre:"Drama",count:70}]}
+   },
+   favourites:{
+    anime:{nodes:[]},manga:{nodes:[]},characters:{nodes:[]}
+   }
+  }}}),{status:200,headers:{"content-type":"application/json"}});
+ });
+ const profile=await client.getUser("VirExample");
+ assert.ok(profile);
+ assert.equal(profile.anime.episodesWatched,6400);
+ assert.equal(profile.anime.minutesWatched,92000);
+ assert.equal(profile.manga.chaptersRead,9000);
+ assert.equal(profile.manga.volumesRead,360);
+ assert.deepEqual(profile.anime.statuses,[{status:"COMPLETED",count:400}]);
+ assert.deepEqual(profile.manga.formats,[{format:"MANGA",count:180}]);
+ assert.deepEqual(
+  getAniListProfileAchievements(profile).map(item=>item.title),
+  ["Anime shelf","Anime archive","Manga shelf","Manga archive","High anime average"],
+ );
+});
+
+test("AniList profile milestones do not award thresholds before the provider data reaches them",()=>{
+ const profile={
+  anime:{count:99,meanScore:90,episodesWatched:null,minutesWatched:null,chaptersRead:null,volumesRead:null,genres:[],statuses:[],formats:[]},
+  manga:{count:49,meanScore:0,episodesWatched:null,minutesWatched:null,chaptersRead:null,volumesRead:null,genres:[],statuses:[],formats:[]},
+ } as Parameters<typeof getAniListProfileAchievements>[0];
+ assert.deepEqual(getAniListProfileAchievements(profile),[]);
 });
 
 test("AniList random discovery samples a catalogue page rather than the trending feed", async () => {
