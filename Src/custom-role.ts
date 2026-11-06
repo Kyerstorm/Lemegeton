@@ -523,9 +523,7 @@ export class CustomRoleCommand implements FeatureCommand {
       const additions = parseCustomRoleWordList(interaction.fields.getTextInputValue("block"));
       const removals = parseCustomRoleWordList(interaction.fields.getTextInputValue("unblock"));
       if (!additions.length && !removals.length) {
-        const renamed = await this.sweepBlockedRoleNames(interaction.guild!);
-      if (renamed) outcomes.push("Renamed " + renamed + " existing custom role(s) that no longer met the name rules.");
-      await interaction.reply({ content: "Enter at least one word to block or unblock.", flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: "Enter at least one word to block or unblock.", flags: MessageFlags.Ephemeral });
         return true;
       }
       const outcomes: string[] = [];
@@ -537,8 +535,10 @@ export class CustomRoleCommand implements FeatureCommand {
         const result = await removeCustomRoleBlockedWord(interaction.guildId!, word);
         outcomes.push(`${result.ok ? "✓" : "·"} ${result.message}`);
       }
+      const renamed = await this.sweepBlockedRoleNames(interaction.guild!);
+      if (renamed) outcomes.push("Renamed " + renamed + " existing custom role(s) that no longer met the name rules.");
       await interaction.reply({
-        content: "**Custom role name restrictions**\n" + outcomes.join("\n").slice(0, 1800) + "\n\nThese rules are applied to new names and edits.",
+        content: "**Custom role name restrictions**\\n" + outcomes.join("\\n").slice(0, 1800) + "\\n\\nThese rules are applied to new names and edits.",
         flags: MessageFlags.Ephemeral,
       });
       return true;
