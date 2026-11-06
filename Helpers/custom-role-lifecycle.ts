@@ -290,9 +290,24 @@ async function restoreSavedRole(member: GuildMember): Promise<boolean> {
       reason: "Custom Roles: restored role for " + member.id,
     });
     try {
-      const target = settings.anchor_place === "above" ? anchor.position + 1 : Math.max(1, anchor.position - 1);
+      let target = settings.anchor_place === "above" ? anchor.position + 1 : Math.max(1, anchor.position - 1);
+      if (record.position_hint !== null) {
+        const peers: Array<{ position: number; id: string }> = [];
+        for (const candidate of await listCustomRoleRecords(guild.id)) {
+          if (candidate.user_id === member.id || candidate.status !== "active" || !candidate.role_id) continue;
+          const peer = await guild.roles.fetch(candidate.role_id).catch(error => {
+            if (isMissing(error)) return null;
+            throw error;
+          });
+          if (peer && peer.position < botMember.roles.highest.position) peers.push({ id: peer.id, position: peer.position });
+        }
+        peers.sort((left, right) => left.position - right.position);
+        const above = peers.find(peer => peer.position >= record.position_hint!);
+        if (above) target = Math.max(1, above.position - 1);
+        else if (peers.length) target = peers[peers.length - 1]!.position + 1;
+      }
       if (target >= botMember.roles.highest.position) throw new Error("Role hierarchy prevents placement.");
-      await role.setPosition(target, { reason: "Custom Roles: restore role position" });
+      await role.setPosition(target, { reason: "Custom Roles: restore saved role position" });
       await member.roles.add(role, "Custom Roles: restore saved role");
       await saveCustomRole({
         guild_id: guild.id,
