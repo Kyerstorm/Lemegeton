@@ -5,6 +5,10 @@ import {isValidHttpsUrl,normalizeTags} from "../Helpers/security.js";
 import {validateSteamId} from "../Helpers/steam.js";
 import {nextLocalOccurrence} from "../Helpers/community.js";
 import {classifyArchiveUpload} from "../Helpers/media-storage.js";
+import {ARCHIVE_TAG_CATALOG,searchArchiveTags} from "../Helpers/archive.js";
+import {AniListClient} from "../Helpers/anilist.js";
+import {normalizeAtlasTitle,normalizeAtlasCategory,safeAtlasUrl} from "../Helpers/atlas.js";
+import {FEATURE_NAMES,isFeatureName} from "../Helpers/settings.js";
 
 test("bot configuration requires valid Discord credentials and validates the AniList endpoint",()=>{
  assert.throws(()=>loadConfig({}),/DISCORD_TOKEN/);
@@ -33,4 +37,42 @@ test("Archive media types are checked against category policy and MIME",()=>{
  assert.equal(classifyArchiveUpload("panels",image).kind,"image");
  assert.throws(()=>classifyArchiveUpload("panels",{...image,name:"panel.mp4",contentType:"video/mp4"}),/not supported/);
  assert.throws(()=>classifyArchiveUpload("panels",{...image,contentType:"image/jpeg"}),/does not match/);
+});
+
+test("Knowledge Atlas normalizes media identities and rejects unsafe URLs",()=>{
+ assert.equal(normalizeAtlasTitle("  Frieren: Beyond Journey’s End  "),"frieren beyond journey s end");
+ assert.equal(normalizeAtlasCategory("light novel"),"LIGHT_NOVEL");
+ assert.equal(normalizeAtlasCategory("tv-series"),"TV");
+ assert.equal(normalizeAtlasCategory("unsupported"),null);
+ assert.equal(safeAtlasUrl("https://anilist.co/anime/1"),"https://anilist.co/anime/1");
+ assert.equal(safeAtlasUrl("http://example.com"),null);
+ assert.equal(safeAtlasUrl("https://user:pass@example.com"),null);
+});
+test("Server settings expose only the five registered feature environments",()=>{
+ assert.deepEqual(FEATURE_NAMES,["discover","archive","community","play","profile"]);
+ assert.equal(isFeatureName("archive"),true);
+ assert.equal(isFeatureName("custom-role"),false);
+});
+
+test("AniList random discovery samples a catalogue page rather than the trending feed", async () => {
+ const captured: {body?:{query:string;variables:Record<string,unknown>}} = {};
+ const client = new AniListClient(undefined, 1000, async (_input, init) => {
+  captured.body = JSON.parse(String(init?.body)) as {query:string;variables:Record<string,unknown>};
+  return new Response(JSON.stringify({data:{Page:{media:[]}}}), {status:200,headers:{"content-type":"application/json"}});
+ });
+ await client.random("ANIME");
+ assert.ok(captured.body);
+ assert.equal(captured.body.variables.type,"ANIME");
+ assert.equal(captured.body.variables.sort,"POPULARITY_DESC");
+ assert.equal(captured.body.variables.perPage,10);
+ assert.ok(Number(captured.body.variables.page)>=1 && Number(captured.body.variables.page)<=200);
+ assert.match(captured.body.query,/Page\(page:\$page,perPage:\$perPage\)/);
+});
+
+test("Archive tag search supports incremental multi-tag selection",()=>{
+ assert.ok(searchArchiveTags("rom").includes("romance"));
+ assert.ok(!searchArchiveTags("rom",["Romance"]).includes("romance"));
+ assert.ok(searchArchiveTags("sci").includes("sci-fi"));
+ assert.equal((ARCHIVE_TAG_CATALOG as readonly string[]).some(tag=>tag==="nsfw"||tag==="mature"),false);
+ assert.ok(searchArchiveTags("").length<=25);
 });
