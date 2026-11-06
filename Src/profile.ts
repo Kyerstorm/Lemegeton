@@ -362,11 +362,11 @@ export class ProfileCommand implements FeatureCommand {
         { name: "Anime genres", value: profile.anilist.anime.genres.slice(0, 5).map((item) => item.genre).join(", ") || "Unavailable", inline: false },
         { name: "Manga genres", value: profile.anilist.manga.genres.slice(0, 5).map((item) => item.genre).join(", ") || "Unavailable", inline: false },
       );
-      const favouriteLines = (items:Array<{title:string;url:string}>) => items.map((item)=>[${item.title}](${item.url})).join("\\n").slice(0,1000) || "No public favourites";
+      const favouriteLines = (items: Array<{ title: string; url: string }>) => items.map((item) => `[${item.title}](${item.url})`).join("\n").slice(0, 1000) || "No public favourites";
       embed.addFields(
         { name: "Favourite anime", value: favouriteLines(profile.anilist.favorites.anime), inline: true },
         { name: "Favourite manga", value: favouriteLines(profile.anilist.favorites.manga), inline: true },
-        { name: "Favourite characters", value: profile.anilist.favorites.characters.map((item)=>[${item.name}](${item.url})).join("\\n").slice(0,1000) || "No public favourites", inline: false },
+        { name: "Favourite characters", value: profile.anilist.favorites.characters.map((item) => `[${item.name}](${item.url})`).join("\n").slice(0, 1000) || "No public favourites", inline: false },
       );
       if (profile.anilist.banner) embed.setImage(profile.anilist.banner);
       if (profile.anilist.avatar) embed.setThumbnail(profile.anilist.avatar);

@@ -1,5 +1,6 @@
 import {Client,Events,GatewayIntentBits,MessageFlags,type Interaction,type TextChannel} from "discord.js";
-import {createServer,timingSafeEqual,type Server} from "node:http";
+import {createServer, type Server} from "node:http";
+import {timingSafeEqual} from "node:crypto";
 import {findAtlasRelationships,normalizeAtlasCategory,safeAtlasUrl} from "./Helpers/atlas.js";
 import {loadConfig} from "./Helpers/config.js";
 import {configureLogger,logger} from "./Helpers/logger.js";
