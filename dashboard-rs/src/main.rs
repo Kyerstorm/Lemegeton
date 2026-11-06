@@ -27,7 +27,7 @@ async fn security_headers(State(state): State<AppState>, request: Request<Body>,
     }
     if !headers.contains_key("content-security-policy") {
         let policy = if is_picker {
-            "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+            "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
         } else {
             "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://cdn.discordapp.com; font-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
         };
@@ -80,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/guilds/{guild_id}/commands/{*fullname}", put(api::set_command))
         .route("/api/guilds/{guild_id}/sync", post(api::sync_guild)).route("/api/guilds/{guild_id}/reset", post(api::reset_guild))
         .route("/api/guilds/{guild_id}/audit", get(api::audit)).route("/api/guilds/{guild_id}/database", get(api::database))
-        .route("/static/{filename}", get(ui::static_asset))
+        .route("/_next/{*path}", get(ui::next_asset))
         .route("/custom-roles", any(api::custom_roles_proxy)).route("/custom-roles/{*path}", any(api::custom_roles_proxy))
         .fallback(not_found).route_layer(axum::middleware::from_fn_with_state(state.clone(), security_headers)).with_state(state);
     let listener = tokio::net::TcpListener::bind(&bind).await?;
