@@ -461,6 +461,51 @@ const schemaStatements = [
       source_title_key,source_category,COALESCE(source_url,''),target_title_key,target_category,
       COALESCE(target_url,''),relationship_type,source_kind,COALESCE(guild_id,0)
     )`,
+
+  `CREATE TABLE IF NOT EXISTS custom_role_records (
+    guild_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    role_id BIGINT,
+    status TEXT NOT NULL DEFAULT 'active',
+    name VARCHAR(100),
+    color_mode TEXT NOT NULL DEFAULT 'solid',
+    primary_color INTEGER,
+    secondary_color INTEGER,
+    icon_png BYTEA,
+    position_hint INTEGER,
+    last_changed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    icon_emoji TEXT,
+    icon_source BYTEA,
+    icon_crop TEXT,
+    icon_source_asset_id BIGINT,
+    PRIMARY KEY (guild_id, user_id)
+  )`,
+  "ALTER TABLE custom_role_records ADD COLUMN IF NOT EXISTS secondary_color INTEGER",
+  "ALTER TABLE custom_role_records ADD COLUMN IF NOT EXISTS icon_png BYTEA",
+  "ALTER TABLE custom_role_records ADD COLUMN IF NOT EXISTS position_hint INTEGER",
+  "ALTER TABLE custom_role_records ADD COLUMN IF NOT EXISTS last_changed_at TIMESTAMPTZ",
+  "ALTER TABLE custom_role_records ADD COLUMN IF NOT EXISTS icon_emoji TEXT",
+  "ALTER TABLE custom_role_records ADD COLUMN IF NOT EXISTS icon_source BYTEA",
+  "ALTER TABLE custom_role_records ADD COLUMN IF NOT EXISTS icon_crop TEXT",
+  "ALTER TABLE custom_role_records ADD COLUMN IF NOT EXISTS icon_source_asset_id BIGINT",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_custom_role_records_role_id ON custom_role_records (role_id) WHERE role_id IS NOT NULL",
+  `CREATE TABLE IF NOT EXISTS custom_role_guild_settings (
+    guild_id BIGINT PRIMARY KEY,
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    anchor_role_id BIGINT,
+    command_channel_id BIGINT,
+    log_channel_id BIGINT,
+    cooldown_seconds INTEGER NOT NULL DEFAULT 0,
+    allowed_role_ids TEXT NOT NULL DEFAULT '[]',
+    blocked_words TEXT NOT NULL DEFAULT '[]',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    anchor_place TEXT NOT NULL DEFAULT 'below',
+    removed_default_words TEXT NOT NULL DEFAULT '[]'
+  )`,
+  "ALTER TABLE custom_role_guild_settings ADD COLUMN IF NOT EXISTS anchor_place TEXT NOT NULL DEFAULT 'below'",
+  "ALTER TABLE custom_role_guild_settings ADD COLUMN IF NOT EXISTS removed_default_words TEXT NOT NULL DEFAULT '[]'",
 ];
 
 export async function initDatabase(): Promise<void> {
