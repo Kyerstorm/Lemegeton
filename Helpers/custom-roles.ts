@@ -257,9 +257,9 @@ export async function updateCustomRole(
 export function parseCustomRoleWordList(raw: string): string[] {
   const seen = new Set<string>();
   const words: string[] = [];
-  for (const part of raw.replace(/,/g, "\\n").split(/\\r?\\n/)) {
-    const word = part.normalize("NFKC").replace(/\\s+/g, " ").trim().toLocaleLowerCase();
-    if (!word || word.length > 40 || !/[\\p{L}\\p{N}]/u.test(word) || seen.has(word)) continue;
+  for (const part of raw.replace(/,/g, "\n").split(/\r?\n/)) {
+    const word = part.normalize("NFKC").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+    if (!word || word.length > 40 || !/[\p{L}\p{N}]/u.test(word) || seen.has(word)) continue;
     seen.add(word);
     words.push(word);
   }
