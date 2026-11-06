@@ -23,6 +23,7 @@ export interface CustomRoleRecord {
   color_mode: string;
   primary_color: number | null;
   secondary_color: number | null;
+  icon_emoji: string | null;
   last_changed_at: string | null;
 }
 
@@ -32,6 +33,8 @@ const DEFAULT_PROTECTED_WORDS = [
   "official", "bot", "verified", "partner", "team",
 ] as const;
 const HEX_COLOR = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i;
+export const HOLOGRAPHIC_COLORS = [11127295, 16759788, 16761760] as const;
+const STANDARD_EMOJI = /^(?:\\p{Extended_Pictographic}(?:\\uFE0F|\\uFE0E)?\\p{Emoji_Modifier}?(?:\\u200D\\p{Extended_Pictographic}(?:\\uFE0F|\\uFE0E)?\\p{Emoji_Modifier}?)*|\\p{Regional_Indicator}{2}|[0-9#*]\\uFE0F?\\u20E3)$/u;
 const LEET: Record<string, string> = { "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b", "@": "a", "$": "s", "!": "i", "|": "l" };
 
 function stringList(value: unknown): string[] {
@@ -93,7 +96,7 @@ function containsProtectedWord(name: string, word: string): boolean {
   return false;
 }
 
-export function parseCustomRoleColor(input: string): number | null {
+export function validateCustomRoleEmoji(input: string): string | null {\n  const emoji = input.trim();\n  return emoji && emoji.length <= 32 && !emoji.startsWith("<") && STANDARD_EMOJI.test(emoji) ? emoji : null;\n}\n\nexport function parseCustomRoleColor(input: string): number | null {
   const match = HEX_COLOR.exec(input.trim());
   if (!match) return null;
   const digits = match[1] ?? "";
@@ -219,7 +222,7 @@ export async function saveCustomRole(record: Omit<CustomRoleRecord, "last_change
 export async function updateCustomRole(
   guildId: string,
   userId: string,
-  fields: { name?: string; primary_color?: number | null; status?: CustomRoleRecord["status"]; role_id?: string | null },
+  fields: { name?: string; color_mode?: string; primary_color?: number | null; secondary_color?: number | null; icon_emoji?: string | null; status?: CustomRoleRecord["status"]; role_id?: string | null },
   changed = false,
 ): Promise<void> {
   const assignments: string[] = [];
