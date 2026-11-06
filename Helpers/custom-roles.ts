@@ -203,7 +203,7 @@ export async function updateCustomRoleSettings(
 export async function getCustomRoleRecord(guildId: string, userId: string): Promise<CustomRoleRecord | null> {
   return queryOne<CustomRoleRecord>(
     `SELECT guild_id, user_id, role_id, status, name, color_mode, primary_color,
-            secondary_color, last_changed_at
+            secondary_color, icon_emoji, last_changed_at
        FROM custom_role_records WHERE guild_id = $1 AND user_id = $2`,
     [guildId, userId],
   );
@@ -213,14 +213,14 @@ export async function saveCustomRole(record: Omit<CustomRoleRecord, "last_change
   await queryOne(
     `INSERT INTO custom_role_records (
        guild_id, user_id, role_id, status, name, color_mode, primary_color, secondary_color,
-       created_at, updated_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW(),NOW())
+       icon_emoji, created_at, updated_at
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW(),NOW())
      ON CONFLICT (guild_id,user_id) DO UPDATE SET
        role_id=EXCLUDED.role_id, status=EXCLUDED.status, name=EXCLUDED.name,
        color_mode=EXCLUDED.color_mode, primary_color=EXCLUDED.primary_color,
-       secondary_color=EXCLUDED.secondary_color, updated_at=NOW()`,
+       secondary_color=EXCLUDED.secondary_color, icon_emoji=EXCLUDED.icon_emoji, updated_at=NOW()`,
     [record.guild_id, record.user_id, record.role_id, record.status, record.name,
-      record.color_mode, record.primary_color, record.secondary_color],
+      record.color_mode, record.primary_color, record.secondary_color, record.icon_emoji],
   );
 }
 
