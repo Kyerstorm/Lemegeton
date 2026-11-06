@@ -25,7 +25,7 @@ import {
 import type { FeatureCommand } from "../Helpers/command.js";
 import {cancelCustomRolePending,confirmCustomRolePending,getPendingCustomRoleRemoval} from "../Helpers/custom-role-lifecycle.js";
 import { homeEmbed } from "../Helpers/discord.js";
-import { processCustomRoleIconImage, type CustomRoleIconCrop } from "../Helpers/custom-role-images.js";
+import { extractCustomRoleAvatarPalette, processCustomRoleIconImage, type CustomRoleIconCrop } from "../Helpers/custom-role-images.js";
 import { deleteCustomRoleIconSource, readCustomRoleIconSource, storeCustomRoleIconSource } from "../Helpers/media-storage.js";
 import {
   customRoleChannelAllowed,
@@ -101,6 +101,9 @@ function memberRows(userId: string, manager: boolean): ActionRowBuilder<ButtonBu
     new ButtonBuilder().setCustomId(userCustomId(userId, "icon")).setLabel("Emoji icon").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(userCustomId(userId, "image")).setLabel("Image icon").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(userCustomId(userId, "recrop")).setLabel("Recrop image").setStyle(ButtonStyle.Secondary),
+  ));
+  rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(userCustomId(userId, "palette")).setLabel("Avatar colour palette").setStyle(ButtonStyle.Secondary),
   ));
   return rows;
 }
@@ -383,6 +386,11 @@ export class CustomRoleCommand implements FeatureCommand {
         ? await confirmCustomRolePending(interaction.guild, resourceId, interaction.user.id)
         : await cancelCustomRolePending(interaction.guild, resourceId, interaction.user.id);
       await interaction.reply({ content: result, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (action === "palette") { await this.showAvatarPalette(interaction); return true; }
+    if (action === "palette-color" && resourceId && /^[0-9a-f]{6}$/i.test(resourceId)) {
+      await this.reportResult(interaction, await this.setRoleColor(interaction, "#" + resourceId));
       return true;
     }
     if (action === "admin") { await this.showAdminPanel(interaction); return true; }
@@ -723,6 +731,56 @@ export class CustomRoleCommand implements FeatureCommand {
       return { ok: true, message: `Your role is now called **${checked.name}**.` };
     } catch (error) {
       return { ok: false, message: error instanceof Error ? `I couldn't rename your role: ${error.message}` : "I couldn't rename your role." };
+    }
+  }
+
+  private async showAvatarPalette(interaction: ButtonInteraction): Promise<void> {
+    const context = await this.memberContext(interaction);
+    if ("error" in context) {
+      await interaction.reply({ content: context.error, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const { member } = context;
+    const record = await getCustomRoleRecord(member.guild.id, member.id);
+    if (!record?.role_id || !member.guild.roles.cache.has(record.role_id)) {
+      await interaction.reply({ content: "Create a custom role before choosing a palette color.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    try {
+      const avatarUrl = member.displayAvatarURL({ extension: "png", size: 128 });
+      const response = await fetch(avatarUrl, { signal: AbortSignal.timeout(10_000) });
+      if (!response.ok) throw new Error("Discord could not provide your avatar.");
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (bytes.byteLength > 2 * 1024 * 1024) throw new Error("That avatar is too large to analyze safely.");
+      const colors = await extractCustomRoleAvatarPalette(bytes, 10);
+      if (!colors.length) throw new Error("I couldn't find enough visible colors in that avatar.");
+      const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+      for (let index = 0; index < colors.length; index += 5) {
+        const row = new ActionRowBuilder<ButtonBuilder>();
+        for (const color of colors.slice(index, index + 5)) {
+          const hex = color.toString(16).padStart(6, "0").toUpperCase();
+          row.addComponents(new ButtonBuilder()
+            .setCustomId(userCustomId(interaction.user.id, "palette-color") + ":" + hex.toLowerCase())
+            .setLabel("#" + hex)
+            .setStyle(ButtonStyle.Secondary));
+        }
+        rows.push(row);
+      }
+      const embed = homeEmbed(
+        "Custom role · Avatar palette",
+        "Choose one color sampled from your current server avatar. Applying it uses the same role-change cooldown as a manual color.",
+        colors.slice(0, 10).map(color => ({
+          name: "#" + color.toString(16).padStart(6, "0").toUpperCase(),
+          value: "Extracted from your avatar",
+          inline: true,
+        })),
+      );
+      await interaction.reply({ embeds: [embed], components: rows, flags: MessageFlags.Ephemeral });
+    } catch (error) {
+      await interaction.reply({
+        content: error instanceof Error ? error.message : "I couldn't extract a palette from your avatar.",
+        flags: MessageFlags.Ephemeral,
+      });
     }
   }
 
