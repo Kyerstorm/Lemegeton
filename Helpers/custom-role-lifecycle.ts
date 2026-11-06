@@ -342,6 +342,10 @@ async function restoreSavedRole(member: GuildMember): Promise<boolean> {
   });
 }
 
+export async function restoreCustomRoleForMember(member: GuildMember): Promise<boolean> {
+  return restoreSavedRole(member);
+}
+
 async function queueArchive(guild: Guild, userId: string, reason: string): Promise<void> {
   const queue = queues.get(guild.id) ?? new Map<string, string>();
   queue.set(userId, reason);
