@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import KnowledgeAtlas from "./KnowledgeAtlas";
 
-type Page = "overview" | "commands" | "extensions" | "audit" | "diagnostics" | "logs" | "integrations" | "database";
+type Page = "overview" | "commands" | "extensions" | "audit" | "diagnostics" | "logs" | "integrations" | "database" | "atlas";
 type User = { id: string; username: string; global_name?: string | null; avatar?: string | null };
 type Guild = { id: string; name: string; icon?: string | null; administrator?: boolean; member_count?: number | null };
 type Command = { fullname: string; name?: string; description?: string; section?: string; type?: string; scope?: string; enabled: boolean; protected?: boolean; required_permissions?: string | boolean | null };
@@ -23,7 +24,8 @@ const PAGES: { id: Page; label: string; glyph: string; eyebrow: string; subtitle
   { id: "diagnostics", label: "Diagnostics", glyph: "⌁", eyebrow: "HEALTH & TELEMETRY / 05", subtitle: "Inspect the bot gateway, runtime version, uptime, and last-known status." },
   { id: "logs", label: "Runtime logs", glyph: "≡", eyebrow: "RUNTIME OUTPUT / 06", subtitle: "Read recent operational logs. This view is restricted to dashboard owners." },
   { id: "integrations", label: "Integrations", glyph: "⟷", eyebrow: "CONNECTED SERVICES / 07", subtitle: "Check configuration presence without exposing credential values." },
-  { id: "database", label: "Persistence", glyph: "▤", eyebrow: "PERSISTENCE / 08", subtitle: "Inspect the saved resources supporting per-guild command settings." }
+  { id: "database", label: "Persistence", glyph: "▤", eyebrow: "PERSISTENCE / 08", subtitle: "Inspect the saved resources supporting per-guild command settings." },
+  { id: "atlas", label: "Knowledge Atlas", glyph: "◎", eyebrow: "MEDIA RELATIONSHIP GRAPH / 09", subtitle: "Explore source-attributed connections across media categories and this server’s approved community links." }
 ];
 
 async function api<T>(path: string, csrf = "", init: RequestInit = {}): Promise<T> {
@@ -535,6 +537,8 @@ export default function App() {
         <SectionHeading eyebrow={selectedPage.eyebrow} title={<>State that <span>survives.</span></>} subtitle={selectedPage.subtitle} actions={<Button onClick={() => void loadDatabase()} disabled={refreshing}>Refresh ↻</Button>} />
         <Panel eyebrow="PERSISTED RESOURCES" title="Storage overview"><div className="table-scroll"><table><thead><tr><th>RESOURCE</th><th>PURPOSE / DETAILS</th><th>STATE</th></tr></thead><tbody>{resources.length ? resources.map((row, index) => <tr key={(row.name || "resource") + index}><td>{row.name || "—"}</td><td>{row.purpose || "—"}<small>{row.detail || ""}</small></td><td><StatusPill ok={String(row.state || "").toLowerCase() === "available"}>{row.state || "Unknown"}</StatusPill></td></tr>) : <tr><td colSpan={3}><Empty>Persistence resources are unavailable or none were reported.</Empty></td></tr>}</tbody></table></div></Panel>
       </section> : null}
+
+      {page === "atlas" ? <section className="page"><SectionHeading eyebrow={selectedPage.eyebrow} title={<>Knowledge <span>Atlas.</span></>} subtitle={selectedPage.subtitle} /><KnowledgeAtlas guildId={guildId} /></section> : null}
 
       <footer className="page-footer"><span>LEMEGETON / CONTROL PLANE</span><span>{system.status === "unknown" ? "LIVE BOT DATA UNAVAILABLE" : "PRIVATE SESSION · DATA REFRESHED"}</span></footer>
     </main>

@@ -1,4 +1,6 @@
 import {Client,Events,GatewayIntentBits,MessageFlags,type Interaction,type TextChannel} from "discord.js";
+import {createServer,timingSafeEqual,type Server} from "node:http";
+import {findAtlasRelationships,normalizeAtlasCategory,safeAtlasUrl} from "./Helpers/atlas.js";
 import {loadConfig} from "./Helpers/config.js";
 import {configureLogger,logger} from "./Helpers/logger.js";
 import type {FeatureCommand} from "./Helpers/command.js";
@@ -13,6 +15,49 @@ const config=loadConfig();configureLogger(config.logLevel);
 const client=new Client({intents:[GatewayIntentBits.Guilds,GatewayIntentBits.GuildMessages,GatewayIntentBits.MessageContent]});
 const commands=createCommandRegistry(config);
 const commandByName=new Map<string,FeatureCommand>(commands.map(command=>[command.data.name,command]));
+let atlasBridge: Server | undefined;
+async function startAtlasBridge(): Promise<void> {
+ const secret=process.env.DASHBOARD_BRIDGE_SECRET?.trim()??"";
+ if(Buffer.byteLength(secret)<32){logger.warn("Knowledge Atlas dashboard bridge disabled; DASHBOARD_BRIDGE_SECRET must contain at least 32 bytes.");return;}
+ const port=Number(process.env.DASHBOARD_ATLAS_BRIDGE_PORT??"8093");
+ if(!Number.isInteger(port)||port<1||port>65535)throw new Error("DASHBOARD_ATLAS_BRIDGE_PORT must be a valid TCP port.");
+ const expected=Buffer.from(secret);
+ const server=createServer((request,response)=>{
+  const send=(status:number,payload:unknown)=>{if(response.headersSent)return;response.writeHead(status,{"content-type":"application/json; charset=utf-8","cache-control":"no-store"});response.end(JSON.stringify(payload));};
+  if(request.method!=="GET"){send(405,{error:"Method not allowed."});return;}
+  let parsed:URL;
+  try{parsed=new URL(request.url??"/","http://127.0.0.1");}catch{send(400,{error:"Invalid request."});return;}
+  if(parsed.pathname!=="/atlas"){send(404,{error:"Route not found."});return;}
+  const authorization=request.headers.authorization??"";
+  const supplied=Buffer.from(authorization.startsWith("Bearer ")?authorization.slice(7):"");
+  if(supplied.length!==expected.length||!timingSafeEqual(supplied,expected)){send(401,{error:"Unauthorized."});return;}
+  const guildId=parsed.searchParams.get("guild_id")??"";
+  const title=(parsed.searchParams.get("title")??"").trim();
+  const category=normalizeAtlasCategory(parsed.searchParams.get("category")??"");
+  const rawUrl=parsed.searchParams.get("url");
+  const safeUrl=rawUrl?safeAtlasUrl(rawUrl):null;
+  if(!/^\d{17,20}$/.test(guildId)||!title||title.length>256||!category||(rawUrl&&!safeUrl)){send(400,{error:"A valid guild, title and media category are required."});return;}
+  void findAtlasRelationships(guildId,title,category,safeUrl,30).then((relationships)=>{
+   send(200,{root:{title,category,url:safeUrl},relationships});
+  }).catch((error)=>{
+   logger.error("Knowledge Atlas lookup failed",{guildId,reason:error instanceof Error?error.message:"Unknown error"});
+   send(503,{error:"The Knowledge Atlas is temporarily unavailable."});
+  });
+ });
+ await new Promise<void>((resolve,reject)=>{
+  const failed=(error:Error)=>reject(error);
+  server.once("error",failed);
+  server.listen(port,"127.0.0.1",()=>{server.off("error",failed);resolve();});
+ });
+ atlasBridge=server;
+ logger.info("Knowledge Atlas dashboard bridge ready",{host:"127.0.0.1",port});
+}
+async function closeAtlasBridge(): Promise<void> {
+ const server=atlasBridge;atlasBridge=undefined;
+ if(!server)return;
+ await new Promise<void>((resolve)=>server.close(()=>resolve()));
+}
+
 
 async function respondWithError(interaction:Interaction,message:string):Promise<void>{
  if(!interaction.isRepliable())return;
@@ -63,10 +108,11 @@ async function processDailyDrops():Promise<void>{
 let shuttingDown=false;
 async function shutdown(signal:NodeJS.Signals):Promise<void>{
  if(shuttingDown)return;shuttingDown=true;logger.info("Shutting down Lemegeton",{signal});client.destroy();
+ await closeAtlasBridge().catch(error=>logger.error("Atlas bridge shutdown failed",{reason:error instanceof Error?error.message:"Unknown error"}));
  await closeDatabase().catch(error=>logger.error("Database shutdown failed",{reason:error instanceof Error?error.message:"Unknown error"}));
 }
 async function start():Promise<void>{
- await initDatabase();await client.login(config.discordToken);
+ await initDatabase();await startAtlasBridge();await client.login(config.discordToken);
  const timer=setInterval(()=>void processDailyDrops(),30_000);timer.unref();
  void processDailyDrops();
 }

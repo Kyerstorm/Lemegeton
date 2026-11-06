@@ -80,6 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/guilds/{guild_id}/commands/{*fullname}", put(api::set_command))
         .route("/api/guilds/{guild_id}/sync", post(api::sync_guild)).route("/api/guilds/{guild_id}/reset", post(api::reset_guild))
         .route("/api/guilds/{guild_id}/audit", get(api::audit)).route("/api/guilds/{guild_id}/database", get(api::database))
+        .route("/api/guilds/{guild_id}/atlas", get(api::atlas))
         .route("/static/{filename}", get(ui::static_asset))
         .route("/custom-roles", any(api::custom_roles_proxy)).route("/custom-roles/{*path}", any(api::custom_roles_proxy))
         .fallback(not_found).route_layer(axum::middleware::from_fn_with_state(state.clone(), security_headers)).with_state(state);

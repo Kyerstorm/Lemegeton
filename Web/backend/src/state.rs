@@ -13,7 +13,7 @@ pub const ADMINISTRATOR: u64 = 1 << 3;
 #[derive(Clone)]
 pub struct AppConfig {
     pub client_id: String, pub client_secret: String, pub redirect_uri: String, pub public_origin: String,
-    pub bridge_url: String, pub bridge_secret: String, pub picker_url: String, pub bind_host: String,
+    pub bridge_url: String, pub bridge_secret: String, pub atlas_bridge_url: String, pub picker_url: String, pub bind_host: String,
     pub port: u16, pub secure_cookie: bool, pub session_ttl: u64, pub owner_ids: HashSet<String>,
 }
 impl AppConfig {
@@ -35,6 +35,7 @@ impl AppConfig {
             client_id, client_secret: env::var("DASHBOARD_CLIENT_SECRET").unwrap_or_default(), redirect_uri, public_origin,
             bridge_url: loopback_url(env::var("DASHBOARD_BRIDGE_URL").unwrap_or_else(|_| "http://127.0.0.1:8091".to_string()), "http://127.0.0.1:8091"),
             bridge_secret: env::var("DASHBOARD_BRIDGE_SECRET").unwrap_or_default(),
+            atlas_bridge_url: loopback_url(env::var("DASHBOARD_ATLAS_BRIDGE_URL").unwrap_or_else(|_| "http://127.0.0.1:8093".to_string()), "http://127.0.0.1:8093"),
             picker_url: loopback_url(env::var("DASHBOARD_PICKER_URL").unwrap_or_else(|_| "http://127.0.0.1:8092".to_string()), "http://127.0.0.1:8092"),
             bind_host: env::var("DASHBOARD_HOST").unwrap_or_else(|_| "127.0.0.1".to_string()), port,
             secure_cookie,

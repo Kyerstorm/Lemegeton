@@ -64,6 +64,42 @@ pub async fn database(State(state): State<AppState>, headers: HeaderMap, Path(gu
     let _ = authorized_guild(&state, &headers, &guild_id).await?;
     Ok(Json(bridge_json(&state, Method::GET, &format!("/guilds/{guild_id}/database"), None).await?))
 }
+
+#[derive(Deserialize)]
+pub struct AtlasQuery { title: String, category: String, url: Option<String> }
+pub async fn atlas(State(state): State<AppState>, headers: HeaderMap, Path(guild_id): Path<String>, Query(query): Query<AtlasQuery>) -> ApiResult<Json<Value>> {
+    let _ = authorized_guild(&state, &headers, &guild_id).await?;
+    if query.title.trim().is_empty() || query.title.len() > 256 {
+        return Err(ApiError::bad_request("A media title between 1 and 256 characters is required."));
+    }
+    let category = query.category.trim().to_ascii_uppercase().replace('-', "_");
+    if !matches!(category.as_str(), "ANIME" | "MANGA" | "LIGHT_NOVEL" | "WEBNOVEL" | "BOOK" | "MOVIE" | "TV" | "GAME") {
+        return Err(ApiError::bad_request("Unsupported media category."));
+    }
+    if query.url.as_deref().is_some_and(|url| url.len() > 2_048) {
+        return Err(ApiError::bad_request("The media URL is too long."));
+    }
+    if state.config.bridge_secret.as_bytes().len() < 32 { return Err(ApiError::unavailable()); }
+    let mut request = state.client.get(format!("{}/atlas", state.config.atlas_bridge_url))
+        .header(header::AUTHORIZATION, format!("Bearer {}", state.config.bridge_secret))
+        .query(&[("guild_id", guild_id.as_str()), ("title", query.title.trim()), ("category", category.as_str())]);
+    if let Some(url) = query.url.as_deref().filter(|value| !value.trim().is_empty()) {
+        request = request.query(&[("url", url)]);
+    }
+    let response = request.send().await.map_err(|_| ApiError::unavailable())?;
+    let status = response.status();
+    let payload = response.json::<Value>().await
+        .map_err(|_| ApiError::new(StatusCode::BAD_GATEWAY, "The Knowledge Atlas returned an invalid response."))?;
+    if !status.is_success() {
+        let message = payload.get("error").and_then(Value::as_str).unwrap_or("The Knowledge Atlas could not complete this request.").to_string();
+        let mapped = match status.as_u16() {
+            400 => StatusCode::BAD_REQUEST, 401 => StatusCode::SERVICE_UNAVAILABLE,
+            404 => StatusCode::NOT_FOUND, _ => StatusCode::SERVICE_UNAVAILABLE,
+        };
+        return Err(ApiError::new(mapped, message));
+    }
+    Ok(Json(payload))
+}
 pub async fn logs(State(state): State<AppState>, headers: HeaderMap, Query(query): Query<HashMap<String, String>>) -> ApiResult<Json<Value>> {
     let (_, session) = session_from_headers(&state, &headers).await?;
     if !is_owner(&state, &session.user.id) { return Err(ApiError::forbidden("Runtime logs are restricted to configured dashboard owners.")); }
