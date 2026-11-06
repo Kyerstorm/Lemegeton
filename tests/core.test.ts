@@ -9,7 +9,7 @@ import {ARCHIVE_TAG_CATALOG,searchArchiveTags} from "../Helpers/archive.js";
 import {AniListClient} from "../Helpers/anilist.js";
 import {normalizeAtlasTitle,normalizeAtlasCategory,safeAtlasUrl} from "../Helpers/atlas.js";
 import {FEATURE_NAMES,isFeatureName} from "../Helpers/settings.js";
-import {customRoleChannelAllowed,customRoleCooldownMessage,parseCustomRoleColor,validateCustomRoleEmoji,validateCustomRoleName} from "../Helpers/custom-roles.js";
+import {customRoleChannelAllowed,customRoleCooldownMessage,parseCustomRoleColor,parseCustomRoleWordList,validateCustomRoleEmoji,validateCustomRoleName} from "../Helpers/custom-roles.js";
 
 test("bot configuration requires valid Discord credentials and validates the AniList endpoint",()=>{
  assert.throws(()=>loadConfig({}),/DISCORD_TOKEN/);
@@ -62,6 +62,8 @@ test("Custom role colors and names follow the existing safety rules",()=>{
  assert.equal(validateCustomRoleEmoji("🌙"),"🌙");
  assert.equal(validateCustomRoleEmoji("🌙🌙"),null);
  assert.equal(validateCustomRoleEmoji("<:moon:123456789012345678>"),null);
+ assert.deepEqual(parseCustomRoleWordList("Spoiler, lore\\n Romance\\nspoiler"),["spoiler","lore","romance"]);
+ assert.deepEqual(parseCustomRoleWordList(" , , "),[]);
  const settings={blocked_words:["spoiler"],removed_default_words:[]};
  assert.equal(validateCustomRoleName("Moonlit Circle",settings).name,"Moonlit Circle");
  assert.match(validateCustomRoleName("a.d.m.i.n",settings).error??"",/admin/i);
