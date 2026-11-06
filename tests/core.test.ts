@@ -5,6 +5,7 @@ import {isValidHttpsUrl,normalizeTags} from "../Helpers/security.js";
 import {validateSteamId} from "../Helpers/steam.js";
 import {nextLocalOccurrence} from "../Helpers/community.js";
 import {classifyArchiveUpload} from "../Helpers/media-storage.js";
+import {ARCHIVE_TAG_CATALOG,searchArchiveTags} from "../Helpers/archive.js";
 import {AniListClient} from "../Helpers/anilist.js";
 import {normalizeAtlasTitle,normalizeAtlasCategory,safeAtlasUrl} from "../Helpers/atlas.js";
 import {FEATURE_NAMES,isFeatureName} from "../Helpers/settings.js";
@@ -66,4 +67,12 @@ test("AniList random discovery samples a catalogue page rather than the trending
  assert.equal(captured.body.variables.perPage,10);
  assert.ok(Number(captured.body.variables.page)>=1 && Number(captured.body.variables.page)<=200);
  assert.match(captured.body.query,/Page\(page:\$page,perPage:\$perPage\)/);
+});
+
+test("Archive tag search supports incremental multi-tag selection",()=>{
+ assert.ok(searchArchiveTags("rom").includes("romance"));
+ assert.ok(!searchArchiveTags("rom",["Romance"]).includes("romance"));
+ assert.ok(searchArchiveTags("sci").includes("sci-fi"));
+ assert.equal(ARCHIVE_TAG_CATALOG.some(tag=>tag==="nsfw"||tag==="mature"),false);
+ assert.ok(searchArchiveTags("").length<=25);
 });

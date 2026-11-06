@@ -69,6 +69,7 @@ async function respondWithError(interaction:Interaction,message:string):Promise<
 }
 async function routeInteraction(interaction:Interaction):Promise<void>{
  try{
+  if(interaction.isAutocomplete()){const command=commandByName.get(interaction.commandName);if(command?.handleAutocomplete){await command.handleAutocomplete(interaction);}else{await interaction.respond([]);}return;}
   if(interaction.isChatInputCommand()){const command=commandByName.get(interaction.commandName);if(!command){await interaction.reply({content:"That feature command is not available.",flags:MessageFlags.Ephemeral});return;}if(interaction.guildId&&interaction.commandName!=="settings"&&!await isFeatureEnabled(interaction.guildId,interaction.commandName)){await interaction.reply({content:"This feature is currently disabled by this server’s settings.",flags:MessageFlags.Ephemeral});return;}await command.execute(interaction);return;}
   if(!interaction.isButton()&&!interaction.isStringSelectMenu()&&!interaction.isModalSubmit())return;
   const prefix=interaction.customId.split(":",1)[0]??"";const command=commandByName.get(prefix);if(!command)return;
