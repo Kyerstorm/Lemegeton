@@ -1704,3 +1704,14 @@ Some environments intentionally connect to more than one command. For example, a
 11. Preserve the distinction between a provider-confirmed fact, a provider-generated recommendation, a local similarity result, and a community-submitted suggestion.
 12. The catalogue does not change the 200,000-line aspiration into a target to manufacture. Codebase size must arise from real implemented behavior, integrations, tests, and operational needs.
 
+
+
+## Retired Python command modules
+
+The TypeScript `/profile` environment replaces the old account/profile and server-taste commands. The following Python Cogs have therefore been removed from `multi_guild`:
+
+- `cogs/account/login.py` — AniList and Steam linking/unlinking.
+- `cogs/account/profile.py` — profile presentation and privacy controls.
+- `cogs/social/server_taste.py` — opted-in server taste aggregation.
+
+Their reusable Python helpers remain until all dependants are migrated. Custom-role files and mixed-purpose media/community Cogs remain active in the legacy runtime until their complete workflows are migrated.
