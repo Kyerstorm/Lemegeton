@@ -1,21 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {loadConfig} from "../Helpers/config.js";
-import {isValidHttpsUrl,normalizeTags} from "../Helpers/security.js";
-import {validateSteamId} from "../Helpers/steam.js";
-import {nextLocalOccurrence} from "../Helpers/community.js";
-import {classifyArchiveUpload} from "../Helpers/media-storage.js";
-import {ARCHIVE_TAG_CATALOG,searchArchiveTags} from "../Helpers/archive.js";
-import {AniListClient} from "../Helpers/anilist.js";
-import {getAniListProfileAchievements} from "../Helpers/profile.js";
-import {allowPickerCall,clearPickerLinks,createPickerLink,lookupPickerLink} from "../Helpers/custom-role-picker-tokens.js";
-import {isPublicImageAddress} from "../Helpers/custom-role-picker-server.js";
+import {loadConfig} from "../helpers/config.js";
+import {isValidHttpsUrl,normalizeTags} from "../helpers/security.js";
+import {validateSteamId} from "../helpers/steam.js";
+import {nextLocalOccurrence} from "../helpers/community.js";
+import {classifyArchiveUpload} from "../helpers/media-storage.js";
+import {ARCHIVE_TAG_CATALOG,searchArchiveTags} from "../helpers/archive.js";
+import {AniListClient} from "../helpers/anilist.js";
+import {getAniListProfileAchievements} from "../helpers/profile.js";
+import {allowPickerCall,clearPickerLinks,createPickerLink,lookupPickerLink} from "../helpers/custom-role-picker-tokens.js";
+import {isPublicImageAddress} from "../helpers/custom-role-picker-server.js";
 import sharp from "sharp";
-import {processCustomRoleIconImage,extractCustomRoleAvatarPalette} from "../Helpers/custom-role-images.js";
-import {normalizeAtlasTitle,normalizeAtlasCategory,safeAtlasUrl} from "../Helpers/atlas.js";
-import {FEATURE_NAMES,isFeatureName} from "../Helpers/settings.js";
-import {dashboardCommandRows,dashboardSecretMatches,isDashboardGuildId} from "../Helpers/dashboard-bridge.js";
-import {customRoleChannelAllowed,customRoleCooldownMessage,parseCustomRoleColor,parseCustomRoleWordList,validateCustomRoleEmoji,validateCustomRoleName} from "../Helpers/custom-roles.js";
+import {processCustomRoleIconImage,extractCustomRoleAvatarPalette} from "../helpers/custom-role-images.js";
+import {normalizeAtlasTitle,normalizeAtlasCategory,safeAtlasUrl} from "../helpers/atlas.js";
+import {FEATURE_NAMES,isFeatureName} from "../helpers/settings.js";
+import {dashboardCommandRows,dashboardSecretMatches,isDashboardGuildId} from "../helpers/dashboard-bridge.js";
+import {customRoleChannelAllowed,customRoleCooldownMessage,parseCustomRoleColor,parseCustomRoleWordList,validateCustomRoleEmoji,validateCustomRoleName} from "../helpers/custom-roles.js";
 
 test("bot configuration requires valid Discord credentials and validates the AniList endpoint",()=>{
  assert.throws(()=>loadConfig({}),/DISCORD_TOKEN/);

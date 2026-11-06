@@ -4,8 +4,8 @@ on:
   pull_request:
     branches: [multi_guild]
     paths:
-      - "Src/**"
-      - "Helpers/**"
+      - "src/**"
+      - "helpers/**"
       - "tests/**"
       - "bot.ts"
       - "database.ts"
@@ -15,8 +15,8 @@ on:
   push:
     branches: [multi_guild]
     paths:
-      - "Src/**"
-      - "Helpers/**"
+      - "src/**"
+      - "helpers/**"
       - "tests/**"
       - "bot.ts"
       - "database.ts"

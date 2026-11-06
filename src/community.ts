@@ -17,11 +17,11 @@ import {
   type StringSelectMenuInteraction,
   type TextChannel,
 } from "discord.js";
-import type { FeatureCommand } from "../Helpers/command.js";
-import type { BotConfig } from "../Helpers/config.js";
-import { homeEmbed } from "../Helpers/discord.js";
-import { AniListClient } from "../Helpers/anilist.js";
-import { TmdbClient } from "../Helpers/tmdb.js";
+import type { FeatureCommand } from "../helpers/command.js";
+import type { BotConfig } from "../helpers/config.js";
+import { homeEmbed } from "../helpers/discord.js";
+import { AniListClient } from "../helpers/anilist.js";
+import { TmdbClient } from "../helpers/tmdb.js";
 import {
   addRankingCandidate,
   closeDiscussion,
@@ -47,9 +47,9 @@ import {
   setSessionRsvp,
   submitDailyItem,
   voteForRanking,
-} from "../Helpers/community.js";
+} from "../helpers/community.js";
 import { query, queryOne } from "../database.js";
-import { cleanText, isGuildManager, isValidHttpsUrl, safeDisplay } from "../Helpers/security.js";
+import { cleanText, isGuildManager, isValidHttpsUrl, safeDisplay } from "../helpers/security.js";
 
 const DAILY_FORMATS = [
   { name: "Question", value: "question" },

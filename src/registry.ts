@@ -1,5 +1,5 @@
-import type {BotConfig} from "../Helpers/config.js";
-import type {FeatureCommand} from "../Helpers/command.js";
+import type {BotConfig} from "../helpers/config.js";
+import type {FeatureCommand} from "../helpers/command.js";
 import {DiscoverCommand} from "./discover.js";
 import {ArchiveCommand} from "./archive.js";
 import {CommunityCommand} from "./community.js";

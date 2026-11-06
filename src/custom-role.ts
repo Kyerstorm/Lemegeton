@@ -23,13 +23,13 @@ import {
   type Role,
   type RoleSelectMenuInteraction,
 } from "discord.js";
-import type { FeatureCommand } from "../Helpers/command.js";
-import { loadConfig } from "../Helpers/config.js";
-import { createCustomRolePickerLink } from "../Helpers/custom-role-picker-server.js";
-import {archiveLegacyCustomRole,cancelCustomRolePending,confirmCustomRolePending,getPendingCustomRoleRemoval} from "../Helpers/custom-role-lifecycle.js";
-import { homeEmbed } from "../Helpers/discord.js";
-import { extractCustomRoleAvatarPalette, processCustomRoleIconImage, type CustomRoleIconCrop } from "../Helpers/custom-role-images.js";
-import { deleteCustomRoleIconSource, readCustomRoleIconSource, storeCustomRoleIconSource } from "../Helpers/media-storage.js";
+import type { FeatureCommand } from "../helpers/command.js";
+import { loadConfig } from "../helpers/config.js";
+import { createCustomRolePickerLink } from "../helpers/custom-role-picker-server.js";
+import {archiveLegacyCustomRole,cancelCustomRolePending,confirmCustomRolePending,getPendingCustomRoleRemoval} from "../helpers/custom-role-lifecycle.js";
+import { homeEmbed } from "../helpers/discord.js";
+import { extractCustomRoleAvatarPalette, processCustomRoleIconImage, type CustomRoleIconCrop } from "../helpers/custom-role-images.js";
+import { deleteCustomRoleIconSource, readCustomRoleIconSource, storeCustomRoleIconSource } from "../helpers/media-storage.js";
 import {
   customRoleChannelAllowed,
   customRoleCooldownMessage,
@@ -55,7 +55,7 @@ import {
   validateCustomRoleName,
   type CustomRoleRecord,
   type CustomRoleSettings,
-} from "../Helpers/custom-roles.js";
+} from "../helpers/custom-roles.js";
 
 type SelectInteraction = RoleSelectMenuInteraction | ChannelSelectMenuInteraction;
 type GuildInteraction = ChatInputCommandInteraction | ButtonInteraction | ModalSubmitInteraction | SelectInteraction;

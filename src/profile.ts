@@ -14,10 +14,10 @@ import {
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction,
 } from "discord.js";
-import type { FeatureCommand } from "../Helpers/command.js";
-import type { BotConfig } from "../Helpers/config.js";
-import { AniListClient } from "../Helpers/anilist.js";
-import { SteamClient } from "../Helpers/steam.js";
+import type { FeatureCommand } from "../helpers/command.js";
+import type { BotConfig } from "../helpers/config.js";
+import { AniListClient } from "../helpers/anilist.js";
+import { SteamClient } from "../helpers/steam.js";
 import {
   getAniListAffinity,
   getAniListLeaderboard,
@@ -30,10 +30,10 @@ import {
   unlinkAniListAccount,
   unlinkSteamAccount,
   updateProfilePreferences,
-} from "../Helpers/profile.js";
-import { homeEmbed } from "../Helpers/discord.js";
+} from "../helpers/profile.js";
+import { homeEmbed } from "../helpers/discord.js";
 import { queryOne } from "../database.js";
-import { isDiscordSnowflake, safeDisplay } from "../Helpers/security.js";
+import { isDiscordSnowflake, safeDisplay } from "../helpers/security.js";
 
 function profileHome(): { embeds: EmbedBuilder[]; components: ActionRowBuilder<ButtonBuilder>[] } {
   const embed = homeEmbed(

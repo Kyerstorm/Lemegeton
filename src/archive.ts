@@ -16,47 +16,51 @@ import {
   type GuildMember,
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction,
-} from "discord.js";
-import type { FeatureCommand } from "../Helpers/command.js";
-import { homeEmbed } from "../Helpers/discord.js";
-import {
+  } from "discord.js";,
+  import type { FeatureCommand } from "../helpers/command.js";,
+  import { homeEmbed } from "../helpers/discord.js";,
+  import {,
   ARCHIVE_CATEGORIES,
   searchArchiveTags,
-  canModerateArchive,
   finishArchiveUpload,
   getArchiveEntry,
   getArchiveSettings,
-  getCollectionItems,
   getOwnSubmissions,
   isArchiveCategory,
-  isGlobalArchiveModerator,
-  listArchiveCollections,
   listArchiveEntries,
-  listArchiveTrails,
+  deleteArchiveEntry,
+  updateArchiveEntry,
+  saveArchiveSettings,
+  submitArchiveEntry,
+  type ArchiveCategory,
+  type ArchiveEntry,
+  type ArchiveVisibility
+} from "../helpers/archive.js";
+import {
+  canModerateArchive,
+  isGlobalArchiveModerator,
   listPendingEntries,
   moderateArchiveEntry,
   addArchiveReport,
+  listArchiveReports,
+  reviewArchiveReport
+} from "../helpers/archive-moderation.js";
+import {
   addEntryToCollection,
   addEntryToTrail,
   addCollectionCollaborator,
   removeCollectionCollaborator,
   removeEntryFromCollection,
   getArchiveTrailSteps,
-  deleteArchiveEntry,
-  updateArchiveEntry,
-  listArchiveReports,
-  reviewArchiveReport,
+  listArchiveCollections,
+  listArchiveTrails,
+  getCollectionItems,
   saveArchiveCollection,
-  saveArchiveSettings,
-  saveArchiveTrail,
-  submitArchiveEntry,
-  type ArchiveCategory,
-  type ArchiveEntry,
-  type ArchiveVisibility,
-} from "../Helpers/archive.js";
+  saveArchiveTrail
+} from "../helpers/archive-collections.js";
 import { query, queryOne } from "../database.js";
-import { deleteArchiveAsset, signedArchiveAssetUrl, storeArchiveUpload, classifyArchiveUpload } from "../Helpers/media-storage.js";
-import { cleanText, isGuildManager, isValidHttpsUrl, safeDisplay } from "../Helpers/security.js";
+import { deleteArchiveAsset, signedArchiveAssetUrl, storeArchiveUpload, classifyArchiveUpload } from "../helpers/media-storage.js";
+import { cleanText, isGuildManager, isValidHttpsUrl, safeDisplay } from "../helpers/security.js";
 
 const ACTIONS = [
   { name: "Browse approved entries", value: "browse" },

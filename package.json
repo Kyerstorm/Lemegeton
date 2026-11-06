@@ -12,7 +12,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test dist/tests/*.test.js",
     "start": "node --env-file-if-exists=.env dist/bot.js",
-    "deploy:commands": "node --env-file-if-exists=.env dist/Src/deploy-commands.js"
+    "deploy:commands": "node --env-file-if-exists=.env dist/src/deploy-commands.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.900.0",

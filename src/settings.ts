@@ -2,8 +2,8 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags,
   PermissionFlagsBits, SlashCommandBuilder, type ButtonInteraction, type ChatInputCommandInteraction,
 } from "discord.js";
-import type { FeatureCommand } from "../Helpers/command.js";
-import { FEATURE_NAMES, getFeatureSettings, isFeatureName, setFeatureEnabled, type FeatureName } from "../Helpers/settings.js";
+import type { FeatureCommand } from "../helpers/command.js";
+import { FEATURE_NAMES, getFeatureSettings, isFeatureName, setFeatureEnabled, type FeatureName } from "../helpers/settings.js";
 
 async function panel(guildId: string): Promise<{embeds:EmbedBuilder[];components:ActionRowBuilder<ButtonBuilder>[]}> {
   const states = await getFeatureSettings(guildId);

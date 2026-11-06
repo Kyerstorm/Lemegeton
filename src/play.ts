@@ -15,8 +15,8 @@ import {
   type StringSelectMenuInteraction,
   type TextChannel,
 } from "discord.js";
-import type { FeatureCommand } from "../Helpers/command.js";
-import { homeEmbed } from "../Helpers/discord.js";
+import type { FeatureCommand } from "../helpers/command.js";
+import { homeEmbed } from "../helpers/discord.js";
 import {
   addQuizQuestion,
   advanceGame,
@@ -31,9 +31,9 @@ import {
   reviewQuizPack,
   reviewQuizQuestion,
   startGame,
-} from "../Helpers/games.js";
+} from "../helpers/games.js";
 import { query } from "../database.js";
-import { isGuildManager, isValidHttpsUrl, safeDisplay } from "../Helpers/security.js";
+import { isGuildManager, isValidHttpsUrl, safeDisplay } from "../helpers/security.js";
 
 function playHome(): { embeds: EmbedBuilder[]; components: ActionRowBuilder<ButtonBuilder>[] } {
   return {

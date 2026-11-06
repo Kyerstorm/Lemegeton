@@ -13,15 +13,15 @@ import {
   type ChatInputCommandInteraction,
   type ModalSubmitInteraction,
 } from "discord.js";
-import type { FeatureCommand } from "../Helpers/command.js";
-import type { BotConfig } from "../Helpers/config.js";
-import { AniListClient, type AniListMedia, type AniListMediaType, type AniListSearchFilters } from "../Helpers/anilist.js";
-import { GoogleBooksClient, type GoogleBook } from "../Helpers/google-books.js";
-import { IgdbClient, type IgdbGame } from "../Helpers/igdb.js";
-import { homeEmbed, navigationButtons } from "../Helpers/discord.js";
-import { TmdbClient, type TmdbMedia } from "../Helpers/tmdb.js";
-import { cleanText } from "../Helpers/security.js";
-import { findAtlasRelationships, recordProviderRelationships } from "../Helpers/atlas.js";
+import type { FeatureCommand } from "../helpers/command.js";
+import type { BotConfig } from "../helpers/config.js";
+import { AniListClient, type AniListMedia, type AniListMediaType, type AniListSearchFilters } from "../helpers/anilist.js";
+import { GoogleBooksClient, type GoogleBook } from "../helpers/google-books.js";
+import { IgdbClient, type IgdbGame } from "../helpers/igdb.js";
+import { homeEmbed, navigationButtons } from "../helpers/discord.js";
+import { TmdbClient, type TmdbMedia } from "../helpers/tmdb.js";
+import { cleanText } from "../helpers/security.js";
+import { findAtlasRelationships, recordProviderRelationships } from "../helpers/atlas.js";
 
 
 type Category = "all" | "anime" | "manga" | "light_novel" | "book" | "movie" | "tv" | "game";
