@@ -27,6 +27,9 @@ import {
   customRoleChannelAllowed,
   customRoleCooldownMessage,
   customRoleEligibility,
+  addCustomRoleBlockedWord,
+  parseCustomRoleWordList,
+  removeCustomRoleBlockedWord,
   getCustomRoleRecord,
   getCustomRoleSettings,
   HOLOGRAPHIC_COLORS,
@@ -107,6 +110,7 @@ function adminRows(userId: string, settings: CustomRoleSettings): ActionRowBuild
   const second = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(userCustomId(userId, "allow-role")).setLabel("Allow a role").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(userCustomId(userId, "remove-allowed")).setLabel("Remove allowed role").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(userCustomId(userId, "words")).setLabel("Blocked words").setStyle(ButtonStyle.Secondary),
   );
   const third = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(userCustomId(userId, "log-channel")).setLabel("Set log channel").setStyle(ButtonStyle.Secondary),
@@ -170,6 +174,24 @@ function moveModal(userId: string, placement: "above" | "below"): ModalBuilder {
       new TextInputBuilder().setCustomId("placement").setLabel("Type above or below the anchor role")
         .setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(5).setValue(placement),
     ));
+}
+
+function wordsModal(userId: string, blockedWords: string[], removedDefaults: string[]): ModalBuilder {
+  return new ModalBuilder()
+    .setCustomId(userCustomId(userId, "words"))
+    .setTitle("Custom role name restrictions")
+    .addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("block").setLabel("Block words / re-enable built-ins")
+          .setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500)
+          .setValue(blockedWords.join(", ").slice(0, 500)),
+      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("unblock").setLabel("Unblock words / disable built-ins")
+          .setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500)
+          .setValue(removedDefaults.join(", ").slice(0, 500)),
+      ),
+    );
 }
 
 function cooldownModal(userId: string, seconds: number): ModalBuilder {
@@ -317,6 +339,12 @@ export class CustomRoleCommand implements FeatureCommand {
       return true;
     }
     if (action === "admin") { await this.showAdminPanel(interaction); return true; }
+    if (action === "words") {
+      if (!this.requireManager(interaction)) return true;
+      const settings = await getCustomRoleSettings(interaction.guildId!);
+      await interaction.showModal(wordsModal(interaction.user.id, settings.blocked_words, settings.removed_default_words));
+      return true;
+    }
     if (action === "create" || action === "rename") { await interaction.showModal(nameModal(interaction.user.id, action)); return true; }
     if (action === "color") { await interaction.showModal(colorModal(interaction.user.id)); return true; }
     if (action === "gradient") { await interaction.showModal(gradientModal(interaction.user.id)); return true; }
@@ -433,6 +461,29 @@ export class CustomRoleCommand implements FeatureCommand {
       await this.reportResult(interaction, await this.moveRole(interaction, placement));
       return true;
     }
+    if (action === "words") {
+      if (!this.requireManager(interaction)) return true;
+      const additions = parseCustomRoleWordList(interaction.fields.getTextInputValue("block"));
+      const removals = parseCustomRoleWordList(interaction.fields.getTextInputValue("unblock"));
+      if (!additions.length && !removals.length) {
+        await interaction.reply({ content: "Enter at least one word to block or unblock.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      const outcomes: string[] = [];
+      for (const word of additions) {
+        const result = await addCustomRoleBlockedWord(interaction.guildId!, word);
+        outcomes.push(`${result.ok ? "✓" : "·"} ${result.message}`);
+      }
+      for (const word of removals) {
+        const result = await removeCustomRoleBlockedWord(interaction.guildId!, word);
+        outcomes.push(`${result.ok ? "✓" : "·"} ${result.message}`);
+      }
+      await interaction.reply({
+        content: `**Custom role name restrictions**\\n${outcomes.join("\\n").slice(0, 1800)}\\n\\nThese rules are applied to new names and edits. Existing roles are not renamed automatically yet.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
     if (action === "cooldown") {
       if (!this.requireManager(interaction)) return true;
       const raw = interaction.fields.getTextInputValue("seconds").trim();
@@ -497,6 +548,8 @@ export class CustomRoleCommand implements FeatureCommand {
         { name: "Log channel", value: settings.log_channel_id ? `<#${settings.log_channel_id}>` : "Off", inline: true },
         { name: "Cooldown", value: settings.cooldown_seconds ? `${settings.cooldown_seconds}s` : "Off", inline: true },
         { name: "Allowed roles", value: settings.allowed_role_ids.length ? settings.allowed_role_ids.map(id => `<@&${id}>`).join(", ").slice(0, 900) : "Boosters only", inline: false },
+        { name: "Additional blocked words", value: settings.blocked_words.join(", ").slice(0, 900) || "None", inline: false },
+        { name: "Disabled built-in protections", value: settings.removed_default_words.join(", ").slice(0, 900) || "None", inline: false },
       ],
     );
     await interaction.reply({ embeds: [embed], components: adminRows(interaction.user.id, settings), flags: MessageFlags.Ephemeral });
