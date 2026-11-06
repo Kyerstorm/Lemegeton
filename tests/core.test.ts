@@ -10,7 +10,7 @@ test("bot configuration requires valid Discord credentials and validates the Ani
  assert.throws(()=>loadConfig({}),/DISCORD_TOKEN/);
  const config=loadConfig({DISCORD_TOKEN:"token",BOT_ID:"123456789012345678"});
  assert.equal(config.applicationId,"123456789012345678");
- assert.equal(config.anilistApiUrl,"https://graphql.anilist.co");
+ assert.equal(config.anilistApiUrl,"https://graphql.anilist.co/");
  assert.throws(()=>loadConfig({DISCORD_TOKEN:"token",BOT_ID:"123456789012345678",ANILIST_API_URL:"http://example.com"}),/HTTPS/);
 });
 test("source URLs and Archive tags are normalized and validated",()=>{
