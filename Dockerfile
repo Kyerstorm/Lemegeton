@@ -1,8 +1,8 @@
 FROM node:22-bookworm-slim AS frontend
-WORKDIR /src/dashboard-frontend
-COPY dashboard-frontend/package.json dashboard-frontend/tsconfig.json dashboard-frontend/next.config.ts dashboard-frontend/next-env.d.ts ./
-COPY dashboard-frontend/app ./app
-COPY dashboard-frontend/src ./src
+WORKDIR /src/web/frontend
+COPY web/frontend/package.json web/frontend/tsconfig.json web/frontend/next.config.ts web/frontend/next-env.d.ts ./
+COPY web/frontend/app ./app
+COPY web/frontend/src ./src
 RUN npm install --no-audit --no-fund \
     && npm run typecheck \
     && npm audit --audit-level=moderate \
@@ -11,8 +11,8 @@ RUN npm install --no-audit --no-fund \
 FROM rust:bookworm AS rust-builder
 WORKDIR /src
 COPY Cargo.toml ./Cargo.toml
-COPY dashboard-rs ./dashboard-rs
-RUN cargo build --manifest-path dashboard-rs/Cargo.toml --release
+COPY web/backend ./web/backend
+RUN cargo build --manifest-path web/backend/Cargo.toml --release
 
 FROM python:3.13-slim-bookworm AS python-dependencies
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
@@ -42,8 +42,8 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=python-dependencies /install /usr/local
 COPY . /app
-COPY --from=rust-builder /src/dashboard-rs/target/release/lemegeton-dashboard /app/dashboard-rs/target/release/lemegeton-dashboard
-COPY --from=frontend /src/dashboard-frontend/out /app/dashboard-frontend/out
+COPY --from=rust-builder /src/target/release/lemegeton-dashboard /app/target/release/lemegeton-dashboard
+COPY --from=frontend /src/web/frontend/out /app/web/frontend/out
 RUN chown -R 10001:10001 /app/data /app/logs /app/runtime-home \
     && chmod 0750 /app/data /app/logs /app/runtime-home
 USER 10001:10001

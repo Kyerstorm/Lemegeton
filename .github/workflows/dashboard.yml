@@ -10,7 +10,7 @@ on:
   pull_request:
     paths:
       - "Cargo.toml"
-      - "dashboard-rs/**"
+      - "web/backend/**"
       - "helpers/dashboard-bridge.ts"
       - "helpers/logger.ts"
       - "helpers/settings.ts"
@@ -19,8 +19,8 @@ on:
       - "database.ts"
       - "package.json"
       - "tests/core.test.ts"
-      - "dashboard-frontend/**"
-      - "dashboard-rs/src/ui.rs"
+      - "web/frontend/**"
+      - "web/backend/src/ui.rs"
       - "tests/test_dashboard_bridge.py"
       - "tests/test_dashboard_assets.py"
       - "tests/test_dashboard_command_policy.py"
@@ -81,7 +81,7 @@ on:
     paths:
       - ".github/workflows/dashboard.yml"
       - "Cargo.toml"
-      - "dashboard-rs/**"
+      - "web/backend/**"
       - "helpers/dashboard-bridge.ts"
       - "helpers/logger.ts"
       - "helpers/settings.ts"
@@ -90,7 +90,7 @@ on:
       - "database.ts"
       - "package.json"
       - "tests/core.test.ts"
-      - "dashboard-frontend/**"
+      - "web/frontend/**"
       - "tests/test_dashboard_bridge.py"
       - "tests/test_dashboard_assets.py"
       - "tests/test_dashboard_command_policy.py"
@@ -148,13 +148,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: npm install --prefix dashboard-frontend --no-audit --no-fund
-      - run: npm run typecheck --prefix dashboard-frontend
-      - run: npm audit --prefix dashboard-frontend --audit-level=high
-      - run: npm run build --prefix dashboard-frontend
-      - run: test -s dashboard-frontend/out/index.html && test -s dashboard-frontend/out/login/index.html
-      - run: find dashboard-frontend/out/_next/static -type f -name '*.js' -print -quit | grep -q .
-      - run: find dashboard-frontend/out/_next/static -type f -name '*.css' -print -quit | grep -q .
+      - run: npm install --prefix web/frontend --no-audit --no-fund
+      - run: npm run typecheck --prefix web/frontend
+      - run: npm audit --prefix web/frontend --audit-level=high
+      - run: npm run build --prefix web/frontend
+      - run: test -s web/frontend/out/index.html && test -s web/frontend/out/login/index.html
+      - run: find web/frontend/out/_next/static -type f -name '*.js' -print -quit | grep -q .
+      - run: find web/frontend/out/_next/static -type f -name '*.css' -print -quit | grep -q .
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --workspace
       - run: cargo install cargo-audit --locked

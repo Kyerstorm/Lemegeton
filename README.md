@@ -411,8 +411,8 @@ The optional web control plane is separate from Discord's native command interfa
 
 ### 🧱 Components
 
-- **dashboard-frontend/** — React 19 + TypeScript UI built with Vite.
-- **dashboard-rs/** — Rust/Axum browser-facing service for Discord OAuth2, server-side sessions, authorization checks, command management, status, and audit views.
+- **web/frontend/** — Next.js App Router frontend built with React and TypeScript.
+- **web/backend/** — Rust/Axum browser-facing service for Discord OAuth2, server-side sessions, authorization checks, command management, status, and audit views.
 - **bot.py** — the existing Discord gateway and command registry, plus the private runtime adapter used by the dashboard.
 - **web/custom_role_picker_server.py** — private Custom Role picker service; the Rust service reverse-proxies the browser-facing route.
 - **PostgreSQL** — existing guild command configuration and audit persistence.
@@ -498,16 +498,16 @@ The bot validates its required configuration, initializes the PostgreSQL layer, 
 Build the frontend:
 
 ~~~bash
-npm install --prefix dashboard-frontend
-npm run typecheck --prefix dashboard-frontend
-npm run build --prefix dashboard-frontend
+npm install --prefix web/frontend
+npm run typecheck --prefix web/frontend
+npm run build --prefix web/frontend
 ~~~
 
 Build and test the Rust service:
 
 ~~~bash
-cargo test --manifest-path dashboard-rs/Cargo.toml
-cargo fmt --manifest-path dashboard-rs/Cargo.toml -- --check
+cargo test --manifest-path web/backend/Cargo.toml
+cargo fmt --manifest-path web/backend/Cargo.toml -- --check
 ~~~
 
 Configure dashboard OAuth, public-origin, cookie, and private-bridge values described in [docs/DASHBOARD.md](docs/DASHBOARD.md) before running the dashboard. Production deployments should use HTTPS and the recommended reverse-proxy setup.
@@ -588,7 +588,7 @@ The repository's GitHub Actions workflow also checks the dashboard frontend, per
 - Cross-provider recommendations and genre overlap: **cogs_test/general_commands/cross_media_recommendations.py**.
 - Interactive Discovery Hub: **cogs_test/general_commands/discovery_hub.py**.
 - Discord command dashboard: **cogs_test/general_commands/dashboard.py**.
-- Public web dashboard: **dashboard-rs/** and **dashboard-frontend/**.
+- Public web dashboard: **web/backend/** and **web/frontend/**.
 
 ---
 
@@ -655,7 +655,7 @@ Lemegeton/                                                                 🏰 
 │   ├── 🎭 custom_role_picker_server.py                                   # Private picker listener behind the Rust proxy
 │   └── 🎨 static/custom_roles/                                           # Existing picker static assets
 │
-├── 🦀 dashboard-rs/                                                      # Optional browser-facing dashboard control plane
+├── 🦀 web/backend/                                                      # Optional browser-facing dashboard control plane
 │   ├── 📦 Cargo.toml                                                     # Rust dependency manifest
 │   └── src/
 │       ├── 🚦 main.rs                                                    # Router, bind policy, security headers and startup
@@ -664,7 +664,7 @@ Lemegeton/                                                                 🏰 
 │       ├── 🧠 state.rs                                                   # Sessions, OAuth state, guild auth, bot bridge
 │       └── 🖥️ ui.rs                                                      # HTML shell and allow-listed static assets
 │
-├── ⚛️ dashboard-frontend/                                                # React/TypeScript UI for the same running bot
+├── ⚛️ web/frontend/                                                # React/TypeScript UI for the same running bot
 │   ├── 📦 package.json                                                   # Build and typecheck scripts
 │   └── src/
 │       ├── 🪟 App.tsx                                                    # Dashboard pages, data loading and command controls

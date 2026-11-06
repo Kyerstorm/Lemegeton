@@ -3,14 +3,14 @@ set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-if [[ ! -s "$ROOT/dashboard-frontend/out/index.html" || ! -s "$ROOT/dashboard-frontend/out/login/index.html" ]]; then
-  echo "Next.js dashboard export is missing. Build it with: npm install --prefix dashboard-frontend && npm run typecheck --prefix dashboard-frontend && npm run build --prefix dashboard-frontend" >&2
+if [[ ! -s "$ROOT/web/frontend/out/index.html" || ! -s "$ROOT/web/frontend/out/login/index.html" ]]; then
+  echo "Next.js dashboard export is missing. Build it with: npm install --prefix web/frontend && npm run typecheck --prefix web/frontend && npm run build --prefix web/frontend" >&2
   exit 1
 fi
 
-DASHBOARD_BIN="$ROOT/dashboard-rs/target/release/lemegeton-dashboard"
+DASHBOARD_BIN="$ROOT/target/release/lemegeton-dashboard"
 if [[ ! -x "$DASHBOARD_BIN" ]]; then
-  echo "Rust dashboard binary is missing. Build it with: cargo build --manifest-path dashboard-rs/Cargo.toml --release" >&2
+  echo "Rust dashboard binary is missing. Build it with: cargo build --manifest-path web/backend/Cargo.toml --release" >&2
   exit 1
 fi
 

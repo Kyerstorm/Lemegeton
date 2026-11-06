@@ -14,7 +14,9 @@ runtime-home/
 tools/
 target/
 **/target/
-dashboard-frontend/node_modules/
-dashboard-frontend/dist/
+web/frontend/node_modules/
+web/frontend/dist/
 node_modules/
 test_images/
+
+web/backend/target/

@@ -1,6 +1,6 @@
 # Lemegeton web dashboard
 
-The public control plane is a Rust/Axum service with a Next.js App Router frontend in `dashboard-frontend/app/`. Interactive screens remain React + TypeScript components in `dashboard-frontend/src/`; the stylesheet is authored as CSS in `dashboard-frontend/app/globals.css`. Next.js builds a static export in `dashboard-frontend/out/`; Rust serves the exported `index.html`, `login/index.html`, and hashed `_next/static` assets from the same origin. The root `railpack.json` supplies Node 22 for this nested package. The Rust service binds to loopback by default and refuses non-loopback binding unless `DASHBOARD_ALLOW_PUBLIC_BIND=true`; Railway/container configuration explicitly opts into the platform ingress interface. The v3 branch contains a TypeScript bot bridge and custom-role picker, but the combined Docker/Railway entry point still launches the legacy Python bot until feature parity and production cutover are complete.
+The public control plane is a Rust/Axum service with a Next.js App Router frontend in `web/frontend/app/`. Interactive screens remain React + TypeScript components in `web/frontend/src/`; the stylesheet is authored as CSS in `web/frontend/app/globals.css`. Next.js builds a static export in `web/frontend/out/`; Rust serves the exported `index.html`, `login/index.html`, and hashed `_next/static` assets from the same origin. The root `railpack.json` supplies Node 22 for this nested package. The Rust service binds to loopback by default and refuses non-loopback binding unless `DASHBOARD_ALLOW_PUBLIC_BIND=true`; Railway/container configuration explicitly opts into the platform ingress interface. The v3 branch contains a TypeScript bot bridge and custom-role picker, but the combined Docker/Railway entry point still launches the legacy Python bot until feature parity and production cutover are complete.
 
 ## Capabilities and boundaries
 
@@ -44,21 +44,21 @@ The bot still requires its existing Discord token and PostgreSQL configuration. 
 
 ## Local development
 
-1. Install dependencies with `npm install` and `npm install --prefix dashboard-frontend`.
+1. Install dependencies with `npm install` and `npm install --prefix web/frontend`.
 2. Install Node.js 22 or newer and a current stable Rust toolchain.
 3. Configure the environment values above and the existing bot/database values.
-4. Build the frontend: `npm install --prefix dashboard-frontend && npm run typecheck --prefix dashboard-frontend && npm run build --prefix dashboard-frontend`.
-5. Build the public service: `cargo build --manifest-path dashboard-rs/Cargo.toml`.
-6. Start the dashboard backend with `cargo run --manifest-path dashboard-rs/Cargo.toml` from the repository root in one terminal.
+4. Build the frontend: `npm install --prefix web/frontend && npm run typecheck --prefix web/frontend && npm run build --prefix web/frontend`.
+5. Build the public service: `cargo build --manifest-path web/backend/Cargo.toml`.
+6. Start the dashboard backend with `cargo run --manifest-path web/backend/Cargo.toml` from the repository root in one terminal.
 7. Build the bot with `npm run build` and start it with `npm start`. It starts the private Custom Roles picker listener automatically when enabled.
 8. Open the public dashboard address. For local development, register `http://localhost:8080/oauth/callback` and use `DASHBOARD_PUBLIC_URL=http://localhost:8080`.
 
-For the combined deployment entry point, build the frontend assets and release binary first, then use `./scripts/start.sh`. The Railway build command installs Node dependencies, generates the frontend assets, compiles the Rust service, and starts both services through this script. `dashboard-frontend/out/` is generated static-export output and is not a frontend source directory.
+For the combined deployment entry point, build the frontend assets and release binary first, then use `./scripts/start.sh`. The Railway build command installs Node dependencies, generates the frontend assets, compiles the Rust service, and starts both services through this script. `web/frontend/out/` is generated static-export output and is not a frontend source directory.
 
 ## Testing and checks
 
-- Rust unit tests: `cargo test --manifest-path dashboard-rs/Cargo.toml`
-- Rust formatting: `cargo fmt --manifest-path dashboard-rs/Cargo.toml -- --check`
+- Rust unit tests: `cargo test --manifest-path web/backend/Cargo.toml`
+- Rust formatting: `cargo fmt --manifest-path web/backend/Cargo.toml -- --check`
 - TypeScript bot: `npm run typecheck && npm test`
 - Legacy Python runtime (until cutover): `python -m compileall -q bot.py cogs helpers web`
 - Bridge unit tests: `python -m unittest discover -s tests -p "test_dashboard_bridge.py"`
