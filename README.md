@@ -55,16 +55,16 @@ The figures below are generated from repository files and are refreshed automati
 <!-- REPO-STATS:START -->
 | Metric | Current total |
 |:--|--:|
-| Tracked files | 268 |
-| Text files scanned | 265 |
-| Source code files | 221 |
-| Source lines (including blank lines) | 96,978 |
-| Non-blank source lines | 84,794 |
-| Text lines (code, docs, and configuration) | 103,306 |
-| Characters (excluding line breaks) | 4,665,585 |
-| Text file size | 4.6 MB |
-| Source line breakdown | Python: 86,078 lines; JavaScript / TypeScript: 8,396 lines; Rust: 939 lines; Shell: 749 lines; CSS / Sass: 564 lines; HTML / SVG: 252 lines |
-| Last refreshed (UTC) | 2026-11-06 08:41 UTC |
+| Tracked files | 266 |
+| Text files scanned | 263 |
+| Source code files | 219 |
+| Source lines (including blank lines) | 94,674 |
+| Non-blank source lines | 82,854 |
+| Text lines (code, docs, and configuration) | 101,015 |
+| Characters (excluding line breaks) | 4,579,110 |
+| Text file size | 4.5 MB |
+| Source line breakdown | Python: 83,434 lines; JavaScript / TypeScript: 8,698 lines; Rust: 977 lines; Shell: 749 lines; CSS / Sass: 564 lines; HTML / SVG: 252 lines |
+| Last refreshed (UTC) | 2026-11-06 08:53 UTC |
 <!-- REPO-STATS:END -->
 
 ## ✦ What Lemegeton does
