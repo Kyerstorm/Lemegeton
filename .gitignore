@@ -82,6 +82,8 @@ test_images/
 # Generated dashboard frontend dependencies and bundles
 dashboard-frontend/node_modules/
 dashboard-frontend/dist/
+dashboard-frontend/out/
+dashboard-frontend/.next/
 
 # Local dashboard / VPS runtime
 .venv/
