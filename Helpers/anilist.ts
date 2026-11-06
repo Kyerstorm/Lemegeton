@@ -35,6 +35,22 @@ export interface AniListUserProfile {
   manga:AniListUserStatistics;
   favorites:{anime:AniListFavoriteMedia[];manga:AniListFavoriteMedia[];characters:AniListFavoriteCharacter[]};
 }
+export interface AniListRecentlyFinishedMedia {
+  id: number;
+  type: AniListMediaType;
+  title: string;
+  description: string | null;
+  url: string;
+  cover: string | null;
+  status: "FINISHED" | "CANCELLED";
+  format: string | null;
+  episodes: number | null;
+  chapters: number | null;
+  averageScore: number | null;
+  genres: string[];
+  endDate: { year: number; month: number; day: number } | null;
+}
+
 export interface AniListAiring {mediaId:number;title:string;episode:number;airingAt:number;url:string;image:string|null}
 type Obj=Record<string,unknown>;
 const isObj=(v:unknown):v is Obj=>typeof v==="object"&&v!==null&&!Array.isArray(v);
@@ -121,6 +137,35 @@ export class AniListClient {
   const data=await this.graphql(`query Recs($id:Int,$type:MediaType!){Media(id:$id,type:$type){recommendations(sort:RATING,perPage:10){nodes{mediaRecommendation{id type title{romaji english native} description(asHtml:false) siteUrl coverImage{large} bannerImage averageScore status format startDate{year month day} episodes chapters volumes genres}}}}}}`,{id,type});
   const m=isObj(data.Media)?data.Media:{};const rec=isObj(m.recommendations)&&Array.isArray(m.recommendations.nodes)?m.recommendations.nodes:[];
   return rec.flatMap(x=>isObj(x)&&parseMedia(x.mediaRecommendation)?[parseMedia(x.mediaRecommendation)!]:[]);
+ }
+ async recentlyFinished(type:AniListMediaType, after:Date, before:Date):Promise<AniListRecentlyFinishedMedia[]>{
+  const dateKey=(value:Date)=>value.getUTCFullYear()*10000+(value.getUTCMonth()+1)*100+value.getUTCDate();
+  const query=`query RecentlyFinished($type:MediaType!,$after:Int!,$before:Int!){
+   Page(page:1,perPage:25){
+    media(type:$type,status_in:[FINISHED,CANCELLED],sort:END_DATE_DESC,endDate_greater:$after,endDate_lesser:$before){
+     id type title{romaji english native} description(asHtml:false) siteUrl coverImage{large}
+     status format episodes chapters averageScore genres endDate{year month day}
+    }
+   }
+  }`;
+  const data=await this.graphql(query,{type,after:dateKey(after),before:dateKey(before)});
+  const page=isObj(data.Page)?data.Page:{};
+  const rows=Array.isArray(page.media)?page.media:[];
+  return rows.flatMap((value)=>{
+   if(!isObj(value))return[];
+   const id=num(value.id),url=str(value.siteUrl),status=str(value.status),title=titleOf(value.title);
+   const date=isObj(value.endDate)?value.endDate:{};
+   const year=num(date.year),month=num(date.month),day=num(date.day);
+   if(!id||!url?.startsWith("https://anilist.co/")||!title
+     ||(status!=="FINISHED"&&status!=="CANCELLED")||year===null||month===null||day===null
+     ||month<1||month>12||day<1||day>31)return[];
+   const genres=Array.isArray(value.genres)?value.genres.filter((item):item is string=>typeof item==="string").slice(0,12):[];
+   return[{
+    id,type,title,description:str(value.description),url,cover:imageOf(value.coverImage),
+    status,format:str(value.format),episodes:num(value.episodes),chapters:num(value.chapters),
+    averageScore:num(value.averageScore),genres,endDate:{year,month,day},
+   } satisfies AniListRecentlyFinishedMedia];
+  });
  }
  async getUser(username:string):Promise<AniListUserProfile|null>{
   const data=await this.graphql(USER,{name:username.trim()});if(!isObj(data.User))return null;const u=data.User;
