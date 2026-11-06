@@ -12,6 +12,7 @@ import {createCommandRegistry} from "./Src/registry.js";
 import {isFeatureEnabled} from "./Helpers/settings.js";
 import {homeEmbed} from "./Helpers/discord.js";
 import {onCustomRoleMemberAdd,onCustomRoleMemberRemove,onCustomRoleMemberUpdate,onCustomRoleRoleDelete,reconcileCustomRoleGuild} from "./Helpers/custom-role-lifecycle.js";
+import {startCustomRolePicker,stopCustomRolePicker} from "./Helpers/custom-role-picker-server.js";
 
 const config=loadConfig();configureLogger(config.logLevel);
 const client=new Client({intents:[GatewayIntentBits.Guilds,GatewayIntentBits.GuildMembers,GatewayIntentBits.GuildMessages,GatewayIntentBits.MessageContent]});
@@ -82,6 +83,7 @@ async function routeInteraction(interaction:Interaction):Promise<void>{
 }
 client.once(Events.ClientReady,ready=>{
  logger.info("Lemegeton TypeScript bot connected",{user:ready.user.tag,commands:commands.map(command=>command.data.name)});
+ void startCustomRolePicker(client,config).catch(error=>logger.error("Custom Roles picker startup failed",{reason:error instanceof Error?error.message:"Unknown error"}));
  for(const guild of ready.guilds.cache.values()){
   void reconcileCustomRoleGuild(guild).catch(error=>logger.error("Initial Custom Roles reconciliation failed",{guildId:guild.id,reason:error instanceof Error?error.message:"Unknown error"}));
  }
