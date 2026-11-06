@@ -10,23 +10,23 @@ async fn export_page(path: &str) -> Response {
             .body(Body::from(contents))
             .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Could not serve the dashboard page").into_response()),
         Err(_) => (StatusCode::SERVICE_UNAVAILABLE,
-            "The Next.js dashboard has not been exported. Run npm install --prefix dashboard-frontend && npm run build --prefix dashboard-frontend.").into_response(),
+            "The Next.js dashboard has not been exported. Run npm install --prefix web/frontend && npm run build --prefix web/frontend.").into_response(),
     }
 }
 
 pub async fn dashboard_html() -> Response {
-    export_page("dashboard-frontend/out/index.html").await
+    export_page("web/frontend/out/index.html").await
 }
 
 pub async fn login_html() -> Response {
-    export_page("dashboard-frontend/out/login/index.html").await
+    export_page("web/frontend/out/login/index.html").await
 }
 
 pub async fn next_asset(Path(path): Path<String>) -> Response {
     if path.is_empty() || path.split('/').any(|part| part.is_empty() || part == "." || part == "..") {
         return (StatusCode::NOT_FOUND, "Asset not found").into_response();
     }
-    let root = FsPath::new("dashboard-frontend/out/_next");
+    let root = FsPath::new("web/frontend/out/_next");
     let disk_path = root.join(&path);
     if !disk_path.starts_with(root) {
         return (StatusCode::NOT_FOUND, "Asset not found").into_response();
