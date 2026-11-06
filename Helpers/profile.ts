@@ -1,5 +1,5 @@
 import { query, queryOne } from "../database.js";
-import type { AniListUserProfile } from "./anilist.js";
+import type { AniListUserInterests, AniListUserProfile } from "./anilist.js";
 import { AniListClient } from "./anilist.js";
 import type { SteamProfile } from "./steam.js";
 import { SteamClient } from "./steam.js";
@@ -238,7 +238,13 @@ export async function getAniListAffinity(
 export async function getServerTaste(
   guildId: string,
   aniList: AniListClient,
-): Promise<{ participants: number; anime: Array<{ genre: string; count: number }>; manga: Array<{ genre: string; count: number }> }> {
+): Promise<{
+  participants: number;
+  anime: Array<{genre:string;count:number}>;
+  manga: Array<{genre:string;count:number}>;
+  animeTags: Array<{tag:string;count:number}>;
+  mangaTags: Array<{tag:string;count:number}>;
+}> {
   const participants = await query<{ anilist_username: string }>(
     `SELECT u.anilist_username
      FROM users u
@@ -247,28 +253,31 @@ export async function getServerTaste(
        AND p.show_anilist = TRUE AND u.anilist_username IS NOT NULL`,
     [guildId],
   );
-  if (participants.length < 3) {
-    throw new Error("Server Taste is hidden until at least three members opt in.");
+  if (participants.length < 3) throw new Error("Server Taste is hidden until at least three members opt in.");
+
+  const profiles: AniListUserInterests[] = [];
+  for (let index = 0; index < participants.length; index += 4) {
+    const batch = await Promise.all(participants.slice(index,index+4).map((row) =>
+      aniList.getUserInterests(row.anilist_username).catch(() => null),
+    ));
+    profiles.push(...batch.filter((item): item is AniListUserInterests => item !== null));
   }
-  const profiles = (await Promise.all(
-    participants.map((row) => aniList.getUser(row.anilist_username).catch(() => null)),
-  )).filter((profile): profile is NonNullable<typeof profile> => profile !== null);
   if (profiles.length < 3) {
-    throw new Error("Server Taste is hidden until at least three opted-in AniList profiles can be retrieved.");
+    throw new Error("Server Taste is hidden until at least three opted-in AniList lists are publicly accessible.");
   }
-  const animeCounts = new Map<string, number>();
-  const mangaCounts = new Map<string, number>();
-  for (const profile of profiles) {
-    for (const item of profile.anime.genres) animeCounts.set(item.genre, (animeCounts.get(item.genre) ?? 0) + item.count);
-    for (const item of profile.manga.genres) mangaCounts.set(item.genre, (mangaCounts.get(item.genre) ?? 0) + item.count);
-  }
-  const top = (counts: Map<string, number>) => [...counts]
-    .map(([genre, count]) => ({ genre, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 8);
+
+  const countUnique = (select: (profile:AniListUserInterests)=>string[]) => {
+    const counts = new Map<string,number>();
+    for (const profile of profiles) for (const item of new Set(select(profile))) {
+      counts.set(item,(counts.get(item)??0)+1);
+    }
+    return [...counts].map(([name,count])=>({name,count})).sort((a,b)=>b.count-a.count).slice(0,8);
+  };
   return {
     participants: profiles.length,
-    anime: top(animeCounts),
-    manga: top(mangaCounts),
+    anime: countUnique((profile)=>profile.anime.genres).map(({name, count})=>({genre:name,count})),
+    manga: countUnique((profile)=>profile.manga.genres).map(({name, count})=>({genre:name,count})),
+    animeTags: countUnique((profile)=>profile.anime.tags).map(({name, count})=>({tag:name,count})),
+    mangaTags: countUnique((profile)=>profile.manga.tags).map(({name, count})=>({tag:name,count})),
   };
 }

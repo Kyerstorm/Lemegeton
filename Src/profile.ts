@@ -346,8 +346,13 @@ export class ProfileCommand implements FeatureCommand {
       .setDescription(ownProfile
         ? "Your private profile preview. Other members can see it only after you enable Public profile."
         : "Provider data shown here is controlled by this member's profile and provider visibility settings.")
-      .addFields({ name: "Approved Archive contributions", value: String(profile.contributions), inline: true });
+      .addFields(
+        { name: "Approved Archive contributions", value: String(profile.contributions), inline: true },
+        { name: "AniList connection", value: profile.anilistUsername ? (profile.preferences.show_anilist ? (profile.anilist ? "Linked · verified" : "Linked · provider unavailable") : "Hidden by member") : "Not connected", inline: true },
+        { name: "Steam connection", value: profile.steamId ? (profile.preferences.show_steam ? (profile.steam ? "Linked · verified" : "Linked · provider unavailable") : "Hidden by member") : "Not connected", inline: true },
+      );
     if (profile.anilist) {
+      if (profile.anilist.about) embed.addFields({ name: "About", value: profile.anilist.about.slice(0,1024), inline: false });
       embed.addFields(
         { name: "AniList", value: `[${profile.anilist.name}](${profile.anilist.url})`, inline: true },
         { name: "Anime list entries", value: String(profile.anilist.anime.count), inline: true },
@@ -357,6 +362,13 @@ export class ProfileCommand implements FeatureCommand {
         { name: "Anime genres", value: profile.anilist.anime.genres.slice(0, 5).map((item) => item.genre).join(", ") || "Unavailable", inline: false },
         { name: "Manga genres", value: profile.anilist.manga.genres.slice(0, 5).map((item) => item.genre).join(", ") || "Unavailable", inline: false },
       );
+      const favouriteLines = (items:Array<{title:string;url:string}>) => items.map((item)=>[${item.title}](${item.url})).join("\\n").slice(0,1000) || "No public favourites";
+      embed.addFields(
+        { name: "Favourite anime", value: favouriteLines(profile.anilist.favorites.anime), inline: true },
+        { name: "Favourite manga", value: favouriteLines(profile.anilist.favorites.manga), inline: true },
+        { name: "Favourite characters", value: profile.anilist.favorites.characters.map((item)=>[${item.name}](${item.url})).join("\\n").slice(0,1000) || "No public favourites", inline: false },
+      );
+      if (profile.anilist.banner) embed.setImage(profile.anilist.banner);
       if (profile.anilist.avatar) embed.setThumbnail(profile.anilist.avatar);
     }
     if (profile.steam) {
@@ -400,8 +412,10 @@ export class ProfileCommand implements FeatureCommand {
         "Server Taste",
         `Anonymous provider-genre aggregate from ${taste.participants} members who opted in. No profile names, account identifiers or individual list records are shown.`,
         [
-          { name: "Popular anime genres", value: taste.anime.map((item) => `${item.genre} · ${item.count}`).join("\n") || "Unavailable", inline: true },
-          { name: "Popular manga genres", value: taste.manga.map((item) => `${item.genre} · ${item.count}`).join("\n") || "Unavailable", inline: true },
+          { name: "Popular anime genres", value: taste.anime.map((item) => `${item.genre} · ${item.count} members`).join("\n") || "Unavailable", inline: true },
+          { name: "Popular manga genres", value: taste.manga.map((item) => `${item.genre} · ${item.count} members`).join("\n") || "Unavailable", inline: true },
+          { name: "Common anime themes", value: taste.animeTags.map((item) => `${item.tag} · ${item.count} members`).join("\n") || "Unavailable", inline: true },
+          { name: "Common manga themes", value: taste.mangaTags.map((item) => `${item.tag} · ${item.count} members`).join("\n") || "Unavailable", inline: true },
         ],
       );
       await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
