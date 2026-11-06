@@ -73,6 +73,6 @@ test("Archive tag search supports incremental multi-tag selection",()=>{
  assert.ok(searchArchiveTags("rom").includes("romance"));
  assert.ok(!searchArchiveTags("rom",["Romance"]).includes("romance"));
  assert.ok(searchArchiveTags("sci").includes("sci-fi"));
- assert.equal(ARCHIVE_TAG_CATALOG.some(tag=>tag==="nsfw"||tag==="mature"),false);
+ assert.equal((ARCHIVE_TAG_CATALOG as readonly string[]).some(tag=>tag==="nsfw"||tag==="mature"),false);
  assert.ok(searchArchiveTags("").length<=25);
 });
