@@ -477,7 +477,7 @@ export class CustomRoleCommand implements FeatureCommand {
         outcomes.push(`${result.ok ? "✓" : "·"} ${result.message}`);
       }
       await interaction.reply({
-        content: "**Custom role name restrictions**\\n" + outcomes.join("\\n").slice(0, 1800) + "\\n\\nThese rules are applied to new names and edits. Existing roles are not renamed automatically yet.",
+        content: "**Custom role name restrictions**\n" + outcomes.join("\n").slice(0, 1800) + "\n\nThese rules are applied to new names and edits. Existing roles are not renamed automatically yet.",
         flags: MessageFlags.Ephemeral,
       });
       return true;
