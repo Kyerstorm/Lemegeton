@@ -4,12 +4,24 @@ on:
   pull_request:
     branches: [multi_guild]
     paths:
-      - "bot/**"
+      - "Src/**"
+      - "Helpers/**"
+      - "tests/**"
+      - "bot.ts"
+      - "database.ts"
+      - "package.json"
+      - "tsconfig.json"
       - ".github/workflows/typescript-bot.yml"
   push:
     branches: [multi_guild]
     paths:
-      - "bot/**"
+      - "Src/**"
+      - "Helpers/**"
+      - "tests/**"
+      - "bot.ts"
+      - "database.ts"
+      - "package.json"
+      - "tsconfig.json"
       - ".github/workflows/typescript-bot.yml"
 
 permissions:
@@ -17,11 +29,8 @@ permissions:
 
 jobs:
   quality:
-    name: Type-check and test Discord bot
+    name: Type-check and test TypeScript bot
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: bot
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
