@@ -437,7 +437,9 @@ async function updateResponse(
   touchPickerLink(link);
   let state: Record<string, unknown> | null = null;
   if (result.ok) {
-    const guild = client.guilds.cache.get(guildId);
+    if (!config.customRolePickerEnabled) throw new Error("The web Color picker is disabled in this deployment.");
+  if (!server?.listening) throw new Error("The web Color picker is still starting. Try again in a moment.");
+  const guild = client.guilds.cache.get(guildId);
     if (guild) {
       try {
         const fresh = await resolvePickerContext(guild, userId);
