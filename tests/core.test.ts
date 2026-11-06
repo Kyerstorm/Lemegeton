@@ -14,6 +14,7 @@ import sharp from "sharp";
 import {processCustomRoleIconImage,extractCustomRoleAvatarPalette} from "../Helpers/custom-role-images.js";
 import {normalizeAtlasTitle,normalizeAtlasCategory,safeAtlasUrl} from "../Helpers/atlas.js";
 import {FEATURE_NAMES,isFeatureName} from "../Helpers/settings.js";
+import {dashboardCommandRows,dashboardSecretMatches,isDashboardGuildId} from "../Helpers/dashboard-bridge.js";
 import {customRoleChannelAllowed,customRoleCooldownMessage,parseCustomRoleColor,parseCustomRoleWordList,validateCustomRoleEmoji,validateCustomRoleName} from "../Helpers/custom-roles.js";
 
 test("bot configuration requires valid Discord credentials and validates the AniList endpoint",()=>{
@@ -54,6 +55,31 @@ test("Knowledge Atlas normalizes media identities and rejects unsafe URLs",()=>{
  assert.equal(safeAtlasUrl("http://example.com"),null);
  assert.equal(safeAtlasUrl("https://user:pass@example.com"),null);
 });
+test("Dashboard bridge exposes only the guild's six feature flags and protects settings",()=>{
+ const commands=[
+  {data:{name:"discover",toJSON:()=>({description:"Find media"})}},
+  {data:{name:"custom-role",toJSON:()=>({description:"Manage a personal role"})}},
+  {data:{name:"settings",toJSON:()=>({description:"Server settings"})}},
+ ] as unknown as Parameters<typeof dashboardCommandRows>[0];
+ const settings={discover:false,archive:true,community:true,play:true,profile:true,"custom-role":false};
+ const rows=dashboardCommandRows(commands,settings);
+ assert.equal(rows[0]?.enabled,false);
+ assert.equal(rows[1]?.enabled,false);
+ assert.equal(rows[2]?.enabled,true);
+ assert.equal(rows[2]?.protected,true);
+ assert.equal(rows[2]?.scope,"global");
+ assert.equal(rows.length,3);
+});
+
+test("Dashboard bridge uses exact shared-secret matching and Discord ID validation",()=>{
+ assert.equal(dashboardSecretMatches("same-secret-value","same-secret-value"),true);
+ assert.equal(dashboardSecretMatches("same-secret-value","same-secret-value-extra"),false);
+ assert.equal(dashboardSecretMatches("short","longer"),false);
+ assert.equal(isDashboardGuildId("123456789012345678"),true);
+ assert.equal(isDashboardGuildId("123"),false);
+ assert.equal(isDashboardGuildId("abc123456789012345"),false);
+});
+
 test("Server settings expose all six configurable feature environments",()=>{
  assert.deepEqual(FEATURE_NAMES,["discover","archive","community","play","profile","custom-role"]);
  assert.equal(isFeatureName("archive"),true);
