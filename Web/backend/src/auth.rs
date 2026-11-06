@@ -161,7 +161,7 @@ mod tests {
             redirect_uri: "http://localhost:8080/oauth/callback".to_string(),
             public_origin: "http://localhost:8080".to_string(),
             bridge_url: "http://127.0.0.1:8091".to_string(), bridge_secret: String::new(),
-            picker_url: "http://127.0.0.1:8092".to_string(), bind_host: "127.0.0.1".to_string(),
+            atlas_bridge_url: "http://127.0.0.1:8093".to_string(), picker_url: "http://127.0.0.1:8092".to_string(), bind_host: "127.0.0.1".to_string(),
             port: 8080, secure_cookie: false, session_ttl: 3600,
             owner_ids: HashSet::new(),
         })
