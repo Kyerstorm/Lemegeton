@@ -49,7 +49,7 @@ test("Knowledge Atlas normalizes media identities and rejects unsafe URLs",()=>{
  assert.equal(safeAtlasUrl("http://example.com"),null);
  assert.equal(safeAtlasUrl("https://user:pass@example.com"),null);
 });
-test("Server settings expose the seven registered feature environments",()=>{
+test("Server settings expose all six configurable feature environments",()=>{
  assert.deepEqual(FEATURE_NAMES,["discover","archive","community","play","profile","custom-role"]);
  assert.equal(isFeatureName("archive"),true);
  assert.equal(isFeatureName("custom-role"),true);
@@ -73,9 +73,10 @@ test("Custom role command scope and cooldown are guild-local and deterministic",
  assert.equal(customRoleChannelAllowed("200",null,settings),true);
  assert.equal(customRoleChannelAllowed("201","200",settings),true);
  assert.equal(customRoleChannelAllowed("201",null,settings),false);
- const record={last_changed_at:"2026-01-01T00:00:00.000Z"} as Parameters<typeof customRoleCooldownMessage>[0];
- assert.match(customRoleCooldownMessage(record,120,Date.parse(record.last_changed_at)+30_000)??"",/2 minutes/);
- assert.equal(customRoleCooldownMessage(record,120,Date.parse(record.last_changed_at)+130_000),null);
+ const changedAt="2026-01-01T00:00:00.000Z";
+ const record={last_changed_at:changedAt} as Parameters<typeof customRoleCooldownMessage>[0];
+ assert.match(customRoleCooldownMessage(record,120,Date.parse(changedAt)+30_000)??"",/2 minutes/);
+ assert.equal(customRoleCooldownMessage(record,120,Date.parse(changedAt)+130_000),null);
 });
 
 test("AniList random discovery samples a catalogue page rather than the trending feed", async () => {
