@@ -1,4 +1,4 @@
-import { type Guild, type GuildMember, type Role } from "discord.js";
+import { PermissionFlagsBits, type Guild, type GuildMember, type Role } from "discord.js";
 import { query, queryOne } from "../database.js";
 
 export interface CustomRoleSettings {
@@ -473,6 +473,120 @@ export async function removeCustomRolePendingUser(
   } else {
     await resolveCustomRolePending(pending.id, guildId, "withdrawn", actorId);
   }
+}
+
+export interface LegacyCustomRoleImportEntry {
+  user_id: string;
+  role_id: string;
+  role_name: string | null;
+  reason: string | null;
+}
+
+export interface LegacyCustomRoleImportPlan {
+  total: number;
+  take_over: LegacyCustomRoleImportEntry[];
+  not_qualifying: LegacyCustomRoleImportEntry[];
+  skipped: LegacyCustomRoleImportEntry[];
+}
+
+const LEGACY_MODERATION_PERMISSIONS = [
+  PermissionFlagsBits.Administrator,
+  PermissionFlagsBits.ManageGuild,
+  PermissionFlagsBits.ManageRoles,
+  PermissionFlagsBits.ManageMessages,
+  PermissionFlagsBits.KickMembers,
+  PermissionFlagsBits.BanMembers,
+  PermissionFlagsBits.ModerateMembers,
+] as const;
+
+export async function planLegacyCustomRoleImport(guild: Guild): Promise<LegacyCustomRoleImportPlan> {
+  let legacyRows: Array<{ user_id: string; role_id: string }>;
+  try {
+    legacyRows = await query<{ user_id: string; role_id: string }>(
+      \`SELECT discord_id::text AS user_id, role_id::text AS role_id
+         FROM booster_roles WHERE guild_id = $1
+         ORDER BY created_at ASC, discord_id ASC\`,
+      [guild.id],
+    );
+  } catch (error) {
+    if ((error as { code?: string } | null)?.code === "42P01") {
+      throw new Error("The legacy booster_roles table is not present in this PostgreSQL database. No import was attempted.");
+    }
+    throw error;
+  }
+
+  let members;
+  try {
+    members = await guild.members.fetch({ force: true });
+    await guild.roles.fetch();
+  } catch (error) {
+    throw new Error("I couldn't verify the full member and role lists, so I won't import old booster roles. " +
+      (error instanceof Error ? error.message : "Try again once Server Members Intent and role access are available."));
+  }
+  const settings = await getCustomRoleSettings(guild.id);
+  const records = await listCustomRoleRecords(guild.id);
+  const recordsByUser = new Map(records.map(record => [record.user_id, record]));
+  const recordedRoleIds = new Set(records.flatMap(record => record.role_id ? [record.role_id] : []));
+  const botMember = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
+  const result: LegacyCustomRoleImportPlan = { total: legacyRows.length, take_over: [], not_qualifying: [], skipped: [] };
+  const seenRoleIds = new Set<string>();
+
+  for (const row of legacyRows) {
+    const userId = String(row.user_id);
+    const roleId = String(row.role_id);
+    const role = guild.roles.cache.get(roleId) ?? null;
+    const entry: LegacyCustomRoleImportEntry = {
+      user_id: userId,
+      role_id: roleId,
+      role_name: role?.name ?? null,
+      reason: null,
+    };
+    const current = recordsByUser.get(userId);
+    if (!/^\d{17,20}$/.test(userId) || !/^\d{17,20}$/.test(roleId)) {
+      entry.reason = "Legacy record has an invalid Discord ID.";
+      result.skipped.push(entry);
+    } else if (current?.role_id === roleId && current.status === "active") {
+      entry.reason = "Already imported.";
+      result.skipped.push(entry);
+    } else if (current?.role_id && guild.roles.cache.has(current.role_id)) {
+      entry.reason = "Member already has another active Custom Role.";
+      result.skipped.push(entry);
+    } else if (!role) {
+      entry.reason = "The old Discord role no longer exists.";
+      result.skipped.push(entry);
+    } else if (role.id === guild.id) {
+      entry.reason = "The old role is @everyone.";
+      result.skipped.push(entry);
+    } else if (role.managed) {
+      entry.reason = "The old role is managed by Discord or an integration.";
+      result.skipped.push(entry);
+    } else if (!botMember || role.position >= botMember.roles.highest.position) {
+      entry.reason = "The old role is at or above the bot's highest role.";
+      result.skipped.push(entry);
+    } else if (LEGACY_MODERATION_PERMISSIONS.some(permission => role.permissions.has(permission))) {
+      entry.reason = "The old role has moderation or administration permissions.";
+      result.skipped.push(entry);
+    } else if (role.id === settings.anchor_role_id) {
+      entry.reason = "The old role is the configured Custom Roles anchor.";
+      result.skipped.push(entry);
+    } else if (settings.allowed_role_ids.includes(role.id)) {
+      entry.reason = "The old role is configured as an eligibility role.";
+      result.skipped.push(entry);
+    } else if (recordedRoleIds.has(roleId) || seenRoleIds.has(roleId)) {
+      entry.reason = "That Discord role is already linked to another Custom Role record.";
+      result.skipped.push(entry);
+    } else {
+      seenRoleIds.add(roleId);
+      const member = members.get(userId) ?? null;
+      if (!member || !customRoleEligibility(member, settings)) {
+        entry.reason = member ? "Member no longer qualifies for Custom Roles." : "Member is no longer in this server.";
+        result.not_qualifying.push(entry);
+      } else {
+        result.take_over.push(entry);
+      }
+    }
+  }
+  return result;
 }
 
 export function customRoleEligibility(member: GuildMember, settings: CustomRoleSettings): boolean {
