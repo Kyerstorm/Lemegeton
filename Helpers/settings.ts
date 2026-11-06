@@ -1,6 +1,6 @@
 import { query, queryOne } from "../database.js";
 
-export const FEATURE_NAMES = ["discover","archive","community","play","profile"] as const;
+export const FEATURE_NAMES = ["discover","archive","community","play","profile","custom-role"] as const;
 export type FeatureName = typeof FEATURE_NAMES[number];
 export type FeatureSettings = Record<FeatureName, boolean>;
 
