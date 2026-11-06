@@ -17,9 +17,12 @@ export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
  const pickerEnabled=(env.CUSTOM_ROLES_PICKER_ENABLED?.trim().toLowerCase()??"true");
  if(!["1","true","yes","on","0","false","no","off"].includes(pickerEnabled))throw new Error("CUSTOM_ROLES_PICKER_ENABLED must be a boolean.");
  const pickerHost=env.DASHBOARD_PICKER_HOST?.trim()||"127.0.0.1";
- const pickerHostAllowed=pickerHost==="localhost"||pickerHost==="::1"||/^127(?:\\.\\d{1,3}){3}$/.test(pickerHost);
+ const hostParts=pickerHost.split(".");
+ const loopbackV4=hostParts.length===4&&Number(hostParts[0])===127&&hostParts.every(part=>/^\\d{1,3}$/.test(part)&&Number(part)>=0&&Number(part)<=255);
+ const pickerHostAllowed=pickerHost==="localhost"||pickerHost==="::1"||loopbackV4;
  if(!pickerHostAllowed)throw new Error("DASHBOARD_PICKER_HOST must be localhost or a loopback IPv4/IPv6 address.");
- const customRolesPublicUrl=(env.CUSTOM_ROLES_PUBLIC_URL?.trim()||env.DASHBOARD_PUBLIC_URL?.trim()||"http://localhost:8080").replace(/\\/$/,"");
+ let customRolesPublicUrl=env.CUSTOM_ROLES_PUBLIC_URL?.trim()||env.DASHBOARD_PUBLIC_URL?.trim()||"http://localhost:8080";
+ if(customRolesPublicUrl.endsWith("/"))customRolesPublicUrl=customRolesPublicUrl.slice(0,-1);
  const pickerOrigin=new URL(customRolesPublicUrl);
  const localPickerOrigin=["localhost","127.0.0.1","[::1]"].includes(pickerOrigin.hostname);
  if(pickerOrigin.protocol!=="https:"&&!(pickerOrigin.protocol==="http:"&&localPickerOrigin))throw new Error("CUSTOM_ROLES_PUBLIC_URL must use HTTPS (HTTP only for loopback development).");
