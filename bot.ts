@@ -11,7 +11,7 @@ import {dueDailyDeliveries,dueDailySchedules,markDailyDelivery,prepareDailyDeliv
 import {createCommandRegistry} from "./Src/registry.js";
 import {isFeatureEnabled} from "./Helpers/settings.js";
 import {homeEmbed} from "./Helpers/discord.js";
-import {onCustomRoleMemberAdd,onCustomRoleMemberRemove,onCustomRoleMemberUpdate,reconcileCustomRoleGuild} from "./Helpers/custom-role-lifecycle.js";
+import {onCustomRoleMemberAdd,onCustomRoleMemberRemove,onCustomRoleMemberUpdate,onCustomRoleRoleDelete,reconcileCustomRoleGuild} from "./Helpers/custom-role-lifecycle.js";
 
 const config=loadConfig();configureLogger(config.logLevel);
 const client=new Client({intents:[GatewayIntentBits.Guilds,GatewayIntentBits.GuildMembers,GatewayIntentBits.GuildMessages,GatewayIntentBits.MessageContent]});
@@ -97,6 +97,9 @@ client.on(Events.GuildMemberUpdate,(oldMember,newMember)=>{
 });
 client.on(Events.GuildMemberRemove,member=>{
  void onCustomRoleMemberRemove(member).catch(error=>logger.error("Custom Roles member removal failed",{guildId:member.guild.id,userId:member.id,reason:error instanceof Error?error.message:"Unknown error"}));
+});
+client.on(Events.GuildRoleDelete,role=>{
+ void onCustomRoleRoleDelete(role).catch(error=>logger.error("Custom Roles role deletion handling failed",{guildId:role.guild.id,roleId:role.id,reason:error instanceof Error?error.message:"Unknown error"}));
 });
 client.on(Events.GuildMemberAdd,member=>{
  void onCustomRoleMemberAdd(member).catch(error=>logger.error("Custom Roles member restoration failed",{guildId:member.guild.id,userId:member.id,reason:error instanceof Error?error.message:"Unknown error"}));
