@@ -15,7 +15,7 @@ import {
 } from "discord.js";
 import type { FeatureCommand } from "../Helpers/command.js";
 import type { BotConfig } from "../Helpers/config.js";
-import { AniListClient, type AniListMedia, type AniListMediaType } from "../Helpers/anilist.js";
+import { AniListClient, type AniListMedia, type AniListMediaType, type AniListSearchFilters } from "../Helpers/anilist.js";
 import { GoogleBooksClient, type GoogleBook } from "../Helpers/google-books.js";
 import { IgdbClient, type IgdbGame } from "../Helpers/igdb.js";
 import { homeEmbed, navigationButtons } from "../Helpers/discord.js";
@@ -25,6 +25,7 @@ import { findAtlasRelationships, recordProviderRelationships } from "../Helpers/
 
 
 type Category = "all" | "anime" | "manga" | "light_novel" | "book" | "movie" | "tv" | "game";
+type DiscoverFilters = AniListSearchFilters;
 type SearchRecord =
   | { provider: "AniList"; category: "anime" | "manga" | "light_novel"; item: AniListMedia }
   | { provider: "Google Books"; category: "book"; item: GoogleBook }
@@ -226,6 +227,21 @@ export class DiscoverCommand implements FeatureCommand {
       ...CATEGORIES.map((category) => ({ name: category.label, value: category.value })),
     ))
     .addStringOption((option) => option.setName("compare_to").setDescription("Second title to compare against").setMinLength(2).setMaxLength(100))
+    .addStringOption((option) => option.setName("genre").setDescription("AniList genre filter").addChoices(
+      ...["Action","Adventure","Comedy","Drama","Fantasy","Horror","Mystery","Psychological","Romance","Sci-Fi","Thriller"].map(value=>({name:value,value})),
+    ))
+    .addIntegerOption((option) => option.setName("year_from").setDescription("Earliest release year").setMinValue(1970).setMaxValue(2100))
+    .addIntegerOption((option) => option.setName("year_to").setDescription("Latest release year").setMinValue(1970).setMaxValue(2100))
+    .addStringOption((option) => option.setName("status").setDescription("AniList status").addChoices(
+      ...["FINISHED","RELEASING","NOT_YET_RELEASED","CANCELLED","HIATUS"].map(value=>({name:value.replaceAll("_"," "),value})),
+    ))
+    .addStringOption((option) => option.setName("media_format").setDescription("AniList format").addChoices(
+      ...["TV","TV_SHORT","MOVIE","SPECIAL","OVA","ONA","MANGA","NOVEL","ONE_SHOT"].map(value=>({name:value.replaceAll("_"," "),value})),
+    ))
+    .addStringOption((option) => option.setName("season").setDescription("Anime season").addChoices(
+      {name:"Winter",value:"WINTER"},{name:"Spring",value:"SPRING"},{name:"Summer",value:"SUMMER"},{name:"Fall",value:"FALL"},
+    ))
+    .addIntegerOption((option) => option.setName("season_year").setDescription("Anime season year").setMinValue(1970).setMaxValue(2100))
     .addStringOption((option) => option.setName("view").setDescription("Open search results or the Knowledge Atlas").addChoices(
       { name: "Search results", value: "search" }, { name: "Knowledge Atlas", value: "atlas" },
     ));
@@ -247,20 +263,45 @@ export class DiscoverCommand implements FeatureCommand {
     const compareTo = interaction.options.getString("compare_to")?.trim();
     const category = (interaction.options.getString("category") ?? "anime") as Category;
     const view = interaction.options.getString("view") ?? "search";
+    const filters: DiscoverFilters = {
+      genre:interaction.options.getString("genre")??undefined,
+      yearFrom:interaction.options.getInteger("year_from")??undefined,
+      yearTo:interaction.options.getInteger("year_to")??undefined,
+      status:interaction.options.getString("status")??undefined,
+      format:interaction.options.getString("media_format")??undefined,
+      season:interaction.options.getString("season")??undefined,
+      seasonYear:interaction.options.getInteger("season_year")??undefined,
+    };
+    const hasFilters=Object.values(filters).some(value=>value!==undefined);
+    if(filters.yearFrom&&filters.yearTo&&filters.yearFrom>filters.yearTo){
+      await interaction.reply({content:"The earliest release year cannot be later than the latest release year.",flags:MessageFlags.Ephemeral});return;
+    }
+    if(hasFilters&&!["anime","manga","light_novel"].includes(category)){
+      await interaction.reply({content:"These filters are provided by AniList and apply to anime, manga and light novels. Choose one of those categories.",flags:MessageFlags.Ephemeral});return;
+    }
+    if((filters.season||filters.seasonYear)&&category!=="anime"){
+      await interaction.reply({content:"Season and season year filters apply to anime only.",flags:MessageFlags.Ephemeral});return;
+    }
+    if(filters.format){
+      const allowed=category==="anime"?["TV","TV_SHORT","MOVIE","SPECIAL","OVA","ONA"]:category==="manga"?["MANGA","ONE_SHOT","NOVEL"]:["NOVEL"];
+      if(!allowed.includes(filters.format)){
+        await interaction.reply({content:"That format is not supported by the selected media category.",flags:MessageFlags.Ephemeral});return;
+      }
+    }
     if (!query) {
       const home = homePanel();
       await interaction.reply({ ...home, flags: MessageFlags.Ephemeral });
       return;
     }
     if (view === "atlas") {
-      await this.atlasAndRespond(interaction, query, category);
+      await this.atlasAndRespond(interaction, query, category, filters);
       return;
     }
     if (compareTo) {
-      await this.compareAndRespond(interaction, query, compareTo, category);
+      await this.compareAndRespond(interaction, query, compareTo, category, filters);
       return;
     }
-    await this.searchAndRespond(interaction, query, category);
+    await this.searchAndRespond(interaction, query, category, filters);
   }
 
   async handleButton(interaction: ButtonInteraction): Promise<boolean> {
@@ -311,11 +352,12 @@ export class DiscoverCommand implements FeatureCommand {
     firstTitle: string,
     secondTitle: string,
     category: Category,
+    filters: DiscoverFilters = {},
   ): Promise<void> {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const [first, second] = await Promise.all([
-      this.fetchSearch(firstTitle, category),
-      this.fetchSearch(secondTitle, category),
+      this.fetchSearch(firstTitle, category, filters),
+      this.fetchSearch(secondTitle, category, filters),
     ]);
     const left = first[0];
     const right = second[0];
@@ -338,15 +380,16 @@ export class DiscoverCommand implements FeatureCommand {
     interaction: ChatInputCommandInteraction | ModalSubmitInteraction,
     query: string,
     category: Category,
+    filters: DiscoverFilters = {},
   ): Promise<void> {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const results = await this.fetchSearch(query, category);
+    const results = await this.fetchSearch(query, category, filters);
     await this.presentResults(interaction, results, `Search results · ${categoryLabel(category)}`);
   }
 
-  private async atlasAndRespond(interaction: ChatInputCommandInteraction, query: string, category: Category): Promise<void> {
+  private async atlasAndRespond(interaction: ChatInputCommandInteraction, query: string, category: Category, filters: DiscoverFilters = {}): Promise<void> {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const results = await this.fetchSearch(query, category);
+    const results = await this.fetchSearch(query, category, filters);
     await this.saveProviderEdges(results);
     const first = results[0];
     if (!first) {
@@ -397,7 +440,7 @@ export class DiscoverCommand implements FeatureCommand {
     await Promise.allSettled(writes);
   }
 
-  private async fetchSearch(query: string, category: Category): Promise<SearchRecord[]> {
+  private async fetchSearch(query: string, category: Category, filters: DiscoverFilters = {}): Promise<SearchRecord[]> {
     if (category === "all") {
       const providers = await Promise.allSettled([
         this.anilist.search(query, "ANIME").then((items) => items.map((item) => anilistRecord(item, "anime"))),
@@ -411,9 +454,9 @@ export class DiscoverCommand implements FeatureCommand {
       return providers.flatMap((provider) => provider.status === "fulfilled" ? provider.value : []);
     }
     switch (category) {
-      case "anime": return (await this.anilist.search(query, "ANIME")).map((item) => anilistRecord(item, "anime"));
-      case "manga": return (await this.anilist.search(query, "MANGA")).map((item) => anilistRecord(item, "manga"));
-      case "light_novel": return (await this.anilist.search(query, "MANGA", true)).map((item) => anilistRecord(item, "light_novel"));
+      case "anime": return (await this.anilist.search(query, "ANIME", false, filters)).map((item) => anilistRecord(item, "anime"));
+      case "manga": return (await this.anilist.search(query, "MANGA", false, filters)).map((item) => anilistRecord(item, "manga"));
+      case "light_novel": return (await this.anilist.search(query, "MANGA", true, filters)).map((item) => anilistRecord(item, "light_novel"));
       case "book": return (await this.books.search(query)).map((item) => ({ provider: "Google Books", category: "book", item }));
       case "movie": return (await this.tmdb.search(query, "movie")).map((item) => ({ provider: "TMDB", category: "movie", item }));
       case "tv": return (await this.tmdb.search(query, "tv")).map((item) => ({ provider: "TMDB", category: "tv", item }));
