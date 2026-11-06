@@ -348,7 +348,7 @@ export class ArchiveCommand implements FeatureCommand {
             throw new Error("Global collections can only be published by configured global Archive moderators. You can create a server-only collection.");
           }
           const collectionId = await saveArchiveCollection(guildId, userId, title, interaction.options.getString("content") ?? "", visibility);
-          await interaction.reply({ content: `Created collection **${safeDisplay(title)}** (#${collectionId}). Add approved entries with `/archive action:add-to-collection collection_id:${collectionId} entry_id:...`.`, flags: MessageFlags.Ephemeral });
+          await interaction.reply({ content: `Created collection **${safeDisplay(title)}** (#${collectionId}). Add approved entries with /archive action:collection-add collection_id:${collectionId} entry_id:...`, flags: MessageFlags.Ephemeral });
           return;
         }
         case "collection-add": {
@@ -395,7 +395,7 @@ export class ArchiveCommand implements FeatureCommand {
             throw new Error("Global Trails can only be created by configured global Archive moderators.");
           }
           const id = await saveArchiveTrail(guildId, userId, title, interaction.options.getString("content") ?? "", visibility);
-          await interaction.reply({ content: `Created Archive Trail #${id}. Add approved entries with `/archive action:add-to-trail trail_id:${id} entry_id:...`.`, flags: MessageFlags.Ephemeral });
+          await interaction.reply({ content: `Created Archive Trail #${id}. Add approved entries with /archive action:trail-add trail_id:${id} entry_id:...`, flags: MessageFlags.Ephemeral });
           return;
         }
         case "trail-add": {
