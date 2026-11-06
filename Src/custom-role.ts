@@ -654,6 +654,7 @@ export class CustomRoleCommand implements FeatureCommand {
       let primaryColor = existing?.primary_color ?? null;
       let secondaryColor = existing?.secondary_color ?? null;
       let colors: { primaryColor: number; secondaryColor?: number | null; tertiaryColor?: number | null };
+      const savedIcon = roleIcons ? await getCustomRoleIconData(member.guild.id, member.id) : null;
       if (colorMode === "holographic" && enhancedStyles) {
         [primaryColor, secondaryColor] = HOLOGRAPHIC_COLORS;
         colors = { primaryColor: HOLOGRAPHIC_COLORS[0], secondaryColor: HOLOGRAPHIC_COLORS[1], tertiaryColor: HOLOGRAPHIC_COLORS[2] };
@@ -667,7 +668,7 @@ export class CustomRoleCommand implements FeatureCommand {
       role = await member.guild.roles.create({
         name: checked.name,
         colors,
-        ...(roleIcons && existing?.icon_emoji ? { unicodeEmoji: existing.icon_emoji } : {}),
+        ...(savedIcon?.icon_png ? { icon: savedIcon.icon_png } : roleIcons && existing?.icon_emoji ? { unicodeEmoji: existing.icon_emoji } : {}),
         permissions: [],
         reason: `Custom Roles: custom role for ${member.user.tag} (${member.id})`,
       });
@@ -842,10 +843,11 @@ export class CustomRoleCommand implements FeatureCommand {
         icon_source_asset_id: assetId,
       }, true);
       if (oldIcon?.icon_source_asset_id && oldIcon.icon_source_asset_id !== assetId) {
-        await deleteCustomRoleIconSource(oldIcon.icon_source_asset_id, member.guild.id).catch(error => {
+        try {
+          await deleteCustomRoleIconSource(oldIcon.icon_source_asset_id, member.guild.id);
+        } catch {
           await this.logEvent(member.guild, settings, "A replaced custom role source image could not be deleted from private storage.");
-          void error;
-        });
+        }
       }
       await this.logEvent(member.guild, settings, "<@!" + member.id + "> changed their custom role image icon.");
       return { ok: true, message: "Your image icon has been applied. The original stays in private storage so you can crop it again later." };
@@ -855,6 +857,8 @@ export class CustomRoleCommand implements FeatureCommand {
         await role.edit({ icon: oldIcon.icon_png, unicodeEmoji: null, reason: "Custom Roles: roll back failed icon save" }).catch(() => undefined);
       } else if (record.icon_emoji) {
         await role.edit({ icon: null, unicodeEmoji: record.icon_emoji, reason: "Custom Roles: roll back failed icon save" }).catch(() => undefined);
+      } else {
+        await role.edit({ icon: null, unicodeEmoji: null, reason: "Custom Roles: roll back failed icon save" }).catch(() => undefined);
       }
       return { ok: false, message: error instanceof Error ? "I couldn't apply that image icon: " + error.message : "I couldn't apply that image icon." };
     }
