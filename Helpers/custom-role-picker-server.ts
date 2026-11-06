@@ -32,7 +32,7 @@ import {
 import { processCustomRoleIconImage } from "./custom-role-images.js";
 
 const BASE = "/custom-roles";
-const MAX_JSON_BODY = 2048;
+const MAX_JSON_BODY = 16 * 1024;
 const MULTIPART_OVERHEAD = 64 * 1024;
 const FETCH_LIMIT = 6;
 const FETCH_WINDOW_MS = 60_000;
