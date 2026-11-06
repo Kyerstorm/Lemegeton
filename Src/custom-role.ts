@@ -108,7 +108,12 @@ function adminRows(userId: string, settings: CustomRoleSettings): ActionRowBuild
     new ButtonBuilder().setCustomId(userCustomId(userId, "allow-role")).setLabel("Allow a role").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(userCustomId(userId, "remove-allowed")).setLabel("Remove allowed role").setStyle(ButtonStyle.Secondary),
   );
-  return [first, second];
+  const third = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(userCustomId(userId, "log-channel")).setLabel("Set log channel").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(userCustomId(userId, "clear-channel")).setLabel("Clear command channel").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(userCustomId(userId, "clear-log-channel")).setLabel("Clear log channel").setStyle(ButtonStyle.Secondary),
+  );
+  return [first, second, third];
 }
 
 function nameModal(userId: string, action: "create" | "rename"): ModalBuilder {
@@ -222,6 +227,7 @@ export class CustomRoleCommand implements FeatureCommand {
     .addRoleOption(option => option.setName("role").setDescription("Anchor or eligibility role"))
     .addChannelOption(option => option.setName("channel").setDescription("Channel where members can use the command"))
     .addIntegerOption(option => option.setName("seconds").setDescription("Cooldown in seconds (0 to 86400)").setMinValue(0).setMaxValue(MAX_ROLE_COOLDOWN))
+    .addChannelOption(option => option.setName("log_channel").setDescription("Channel for custom role audit messages"))
     .addStringOption(option => option.setName("placement").setDescription("Where custom roles sit relative to the anchor")
       .addChoices({ name: "Below anchor", value: "below" }, { name: "Above anchor", value: "above" }));
 
@@ -284,6 +290,8 @@ export class CustomRoleCommand implements FeatureCommand {
         case "anchor": await this.configureAnchor(interaction, interaction.options.getRole("role"), interaction.options.getString("placement")); return;
         case "channel": await this.configureChannel(interaction, interaction.options.getChannel("channel")); return;
         case "clear-channel": await this.configureChannel(interaction, null); return;
+        case "log-channel": await this.configureLogChannel(interaction, interaction.options.getChannel("log_channel")); return;
+        case "clear-log-channel": await this.configureLogChannel(interaction, null); return;
         case "cooldown": {
           const seconds = interaction.options.getInteger("seconds");
           if (seconds === null) { await interaction.showModal(cooldownModal(interaction.user.id, 0)); return; }
@@ -332,10 +340,11 @@ export class CustomRoleCommand implements FeatureCommand {
       await interaction.reply({ content: "Choose a role.", components: [new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(menu)], flags: MessageFlags.Ephemeral });
       return true;
     }
-    if (action === "channel") {
+    if (action === "channel" || action === "log-channel") {
       if (!this.requireManager(interaction)) return true;
-      const menu = new ChannelSelectMenuBuilder().setCustomId(userCustomId(interaction.user.id, "channel"))
-        .setPlaceholder("Choose the Custom Roles command channel").setMinValues(1).setMaxValues(1);
+      const menu = new ChannelSelectMenuBuilder().setCustomId(userCustomId(interaction.user.id, action))
+        .setPlaceholder(action === "log-channel" ? "Choose the Custom Roles log channel" : "Choose the Custom Roles command channel")
+        .setMinValues(1).setMaxValues(1);
       await interaction.reply({ content: "Choose a text or announcement channel.", components: [new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(menu)], flags: MessageFlags.Ephemeral });
       return true;
     }
@@ -365,13 +374,14 @@ export class CustomRoleCommand implements FeatureCommand {
       if (action === "allow-role") { await this.configureAllowedRole(interaction, role, true); return true; }
       if (action === "remove-allowed") { await this.configureAllowedRole(interaction, role, false); return true; }
     }
-    if (interaction.isChannelSelectMenu() && action === "channel") {
+    if (interaction.isChannelSelectMenu() && (action === "channel" || action === "log-channel")) {
       const channel = await interaction.guild!.channels.fetch(interaction.values[0] ?? "");
       if (!channel || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)) {
         await interaction.reply({ content: "Choose a text or announcement channel.", flags: MessageFlags.Ephemeral });
         return true;
       }
-      await this.configureChannel(interaction, channel);
+      if (action === "log-channel") await this.configureLogChannel(interaction, channel);
+      else await this.configureChannel(interaction, channel);
       return true;
     }
     return false;
@@ -474,6 +484,7 @@ export class CustomRoleCommand implements FeatureCommand {
         { name: "Anchor", value: anchor?.name ?? "Not set", inline: true },
         { name: "Placement", value: settings.anchor_place, inline: true },
         { name: "Command channel", value: channel ? `<#${channel.id}>` : "Any channel", inline: true },
+        { name: "Log channel", value: settings.log_channel_id ? `<#${settings.log_channel_id}>` : "Off", inline: true },
         { name: "Cooldown", value: settings.cooldown_seconds ? `${settings.cooldown_seconds}s` : "Off", inline: true },
         { name: "Allowed roles", value: settings.allowed_role_ids.length ? settings.allowed_role_ids.map(id => `<@&${id}>`).join(", ").slice(0, 900) : "Boosters only", inline: false },
       ],
@@ -803,6 +814,36 @@ export class CustomRoleCommand implements FeatureCommand {
     }
     await updateCustomRoleSettings(interaction.guild.id, { command_channel_id: selected?.id ?? null });
     await interaction.reply({ content: selected ? `Custom role commands are now limited to <#${selected.id}> and its threads.` : "Custom role commands can now be used in any channel.", flags: MessageFlags.Ephemeral });
+  }
+
+  private async configureLogChannel(interaction: GuildInteraction, channel: unknown): Promise<void> {
+    if (!this.requireManager(interaction) || !interaction.guild) return;
+    const selected = channel && typeof channel === "object" && "id" in channel
+      ? channel as { id: string; type?: number; permissionsFor?: (member: GuildMember) => { has: (permission: bigint) => boolean } }
+      : null;
+    if (selected && selected.type !== ChannelType.GuildText && selected.type !== ChannelType.GuildAnnouncement) {
+      await interaction.reply({ content: "Choose a text or announcement channel.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (selected) {
+      const botMember = interaction.guild.members.me;
+      const permissions = botMember && "permissionsFor" in selected
+        ? selected.permissionsFor?.(botMember)
+        : null;
+      const canSend = Boolean(permissions
+        && permissions.has(PermissionFlagsBits.ViewChannel)
+        && permissions.has(PermissionFlagsBits.SendMessages)
+        && permissions.has(PermissionFlagsBits.EmbedLinks));
+      if (!canSend) {
+        await interaction.reply({ content: `I need View Channel, Send Messages and Embed Links in <#${selected.id}>.`, flags: MessageFlags.Ephemeral });
+        return;
+      }
+    }
+    await updateCustomRoleSettings(interaction.guild.id, { log_channel_id: selected?.id ?? null });
+    await interaction.reply({
+      content: selected ? `Custom Roles audit messages will be posted in <#${selected.id}>.` : "Custom Roles audit logging is now off.",
+      flags: MessageFlags.Ephemeral,
+    });
   }
 
   private async configureCooldown(interaction: GuildInteraction, seconds: number): Promise<void> {
