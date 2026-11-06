@@ -7,12 +7,12 @@ use subtle::ConstantTimeEq;
 
 pub async fn home(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if session_from_headers(&state, &headers).await.is_ok() {
-        return ui::dashboard_html().into_response();
+        return ui::dashboard_html().await;
     }
     Redirect::to("/login").into_response()
 }
 pub async fn login_page() -> Response {
-    ui::login_html().into_response()
+    ui::login_html().await
 }
 pub async fn oauth_start(State(state): State<AppState>) -> Response {
     if !state.config.oauth_ready() {
