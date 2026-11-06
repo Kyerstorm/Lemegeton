@@ -109,9 +109,13 @@ export function revokePickerLink(guildId: string, userId: string): boolean {
   return true;
 }
 
-export function clearPickerLinksForTests(): void {
+export function clearPickerLinks(): void {
   links.clear();
   byMember.clear();
+}
+
+export function clearPickerLinksForTests(): void {
+  clearPickerLinks();
 }
 
 export function pickerTokenCountForTests(): number {
