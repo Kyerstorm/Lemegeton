@@ -97,6 +97,16 @@ The TypeScript bot owns:
 
 Discord handlers should validate the interaction, resolve the actor and guild context, authorize the operation, call a domain operation, and present its result. Provider-specific logic must not be embedded in button callbacks or command presentation code.
 
+### 2.1.1 Gateway intents and guild membership
+
+The TypeScript runtime currently requests the `Guilds`, `GuildMembers`, `GuildMessages`, and `MessageContent` gateway intents. Enable the privileged **Server Members Intent** and **Message Content Intent** for the application in the Discord Developer Portal before deploying this runtime.
+
+- `GuildMembers` is required for booster/allowed-role eligibility changes, member join/leave handling, and full-guild Custom Role reconciliation.
+- `MessageContent` is used by the configured Community Archive upload-channel workflow.
+- When the bot cannot fetch a complete member list, Custom Role reconciliation must fail closed: skip the automatic archive pass, log the reason, and leave saved roles untouched. Do not infer ineligibility from a partial cache.
+
+The PostgreSQL startup migration widens the existing `booster_roles.discord_id`, `guild_id`, and `role_id` columns to `BIGINT` when that legacy table exists. This is a widening conversion that preserves existing rows and its primary key; the legacy table remains read-only during the one-time import.
+
 ### 2.2 Dashboard responsibilities
 
 The dashboard remains the control plane for the running bot, not a second Discord client or an alternate command registry.
