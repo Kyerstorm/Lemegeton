@@ -23,8 +23,9 @@ const SECTIONS: Record<string, string> = {
 let server: Server | null = null;
 let startedAt = Date.now();
 const guildLocks = new Map<string, Promise<void>>();
+let hasBeenReady = false;
 
-function validSnowflake(value: unknown): value is string {
+export function isDashboardGuildId(value: unknown): value is string {
   return typeof value === "string" && /^\d{17,20}$/.test(value);
 }
 
@@ -49,7 +50,7 @@ function jsonResponse(response: ServerResponse, status: number, value: unknown):
   response.end(body);
 }
 
-function equalSecret(supplied: string, expected: string): boolean {
+export function dashboardSecretMatches(supplied: string, expected: string): boolean {
   const left = Buffer.from(supplied, "utf8");
   const right = Buffer.from(expected, "utf8");
   return left.length === right.length && timingSafeEqual(left, right);
@@ -76,7 +77,7 @@ async function readJson(request: IncomingMessage): Promise<Record<string, unknow
   return value as Record<string, unknown>;
 }
 
-function commandRows(commands: FeatureCommand[], settings: Awaited<ReturnType<typeof getFeatureSettings>>) {
+export function dashboardCommandRows(commands: FeatureCommand[], settings: Awaited<ReturnType<typeof getFeatureSettings>>) {
   return commands.map(command => {
     const definition = command.data.toJSON();
     const name = command.data.name;
@@ -97,7 +98,7 @@ function commandRows(commands: FeatureCommand[], settings: Awaited<ReturnType<ty
 }
 
 function guildFor(client: Client, guildId: string): Guild | null {
-  if (!validSnowflake(guildId)) return null;
+  if (!isDashboardGuildId(guildId)) return null;
   return client.guilds.cache.get(guildId) ?? null;
 }
 
@@ -131,13 +132,15 @@ async function withGuildLock<T>(guildId: string, operation: () => Promise<T>): P
 
 async function health(client: Client, commands: FeatureCommand[]): Promise<Record<string, unknown>> {
   const ready = client.isReady();
+  if (ready) hasBeenReady = true;
   const latency = ready && client.ws.ping >= 0 ? client.ws.ping : null;
+  const status = ready ? latency !== null && latency >= 500 ? "degraded" : "online" : hasBeenReady ? "offline" : "connecting";
   return {
-    status: ready ? "online" : "connecting",
+    status,
     ready,
     latency_ms: latency,
     guild_count: client.guilds.cache.size,
-    extension_count: 0,
+    extension_count: commands.length,
     extensions: commands.map(command => command.data.name),
     uptime_seconds: Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
     node_version: process.versions.node,
@@ -162,7 +165,7 @@ async function overview(
   guild: Guild,
 ): Promise<Record<string, unknown>> {
   const settings = await getFeatureSettings(guild.id);
-  const rows = commandRows(commands, settings);
+  const rows = dashboardCommandRows(commands, settings);
   const state = await health(client, commands);
   return {
     guild: { id: guild.id, name: guild.name },
@@ -172,7 +175,7 @@ async function overview(
       latency_ms: state.latency_ms,
       guild_count: state.guild_count,
       member_count: guild.memberCount ?? null,
-      extension_count: 0,
+      extension_count: commands.length,
       extensions: commands.map(command => command.data.name),
     },
     commands: {
@@ -184,7 +187,7 @@ async function overview(
 }
 
 async function commandList(commands: FeatureCommand[], guildId: string): Promise<Record<string, unknown>> {
-  return { commands: commandRows(commands, await getFeatureSettings(guildId)) };
+  return { commands: dashboardCommandRows(commands, await getFeatureSettings(guildId)) };
 }
 
 async function setCommand(
@@ -260,7 +263,7 @@ async function syncGuild(
       errorResponse(response, 400, error instanceof Error ? error.message : "Invalid request body.");
       return;
     }
-    if (!validSnowflake(String(body.actor_id ?? ""))) {
+    if (!isDashboardGuildId(String(body.actor_id ?? ""))) {
       errorResponse(response, 400, "Invalid dashboard actor.");
       return;
     }
@@ -293,7 +296,7 @@ async function resetGuild(
       errorResponse(response, 400, error instanceof Error ? error.message : "Invalid request body.");
       return;
     }
-    if (!validSnowflake(String(body.actor_id ?? ""))) {
+    if (!isDashboardGuildId(String(body.actor_id ?? ""))) {
       errorResponse(response, 400, "Invalid dashboard actor.");
       return;
     }
@@ -376,7 +379,7 @@ async function handleRequest(
 ): Promise<void> {
   const authorization = String(request.headers.authorization ?? "");
   const supplied = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
-  if (!equalSecret(supplied, secret)) {
+  if (!dashboardSecretMatches(supplied, secret)) {
     errorResponse(response, 401, "Unauthorized internal dashboard request.");
     return;
   }
@@ -483,6 +486,7 @@ export async function startDashboardBridge(
   const port = Number(process.env.DASHBOARD_BRIDGE_PORT ?? "8091");
   if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("DASHBOARD_BRIDGE_PORT must be a valid TCP port.");
   startedAt = Date.now();
+  hasBeenReady = client.isReady();
   const next = createServer((request, response) => {
     void handleRequest(request, response, client, commands, config, secret).catch(error => {
       logger.error("Dashboard bridge request failed", {
