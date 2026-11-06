@@ -1,4 +1,4 @@
-import { PermissionFlagsBits, type Guild, type GuildMember } from "discord.js";
+import { PermissionFlagsBits, type Guild, type GuildMember, type Role } from "discord.js";
 import { logger } from "./logger.js";
 import {
   HOLOGRAPHIC_COLORS,
@@ -349,6 +349,29 @@ async function queueArchive(guild: Guild, userId: string, reason: string): Promi
   }, EVENT_BATCH_MS);
   timer.unref();
   timers.set(guild.id, timer);
+}
+
+export async function onCustomRoleRoleDelete(role: Role): Promise<void> {
+  const guild = role.guild;
+  const records = await listCustomRoleRecords(guild.id);
+  const tracked = records.find(record => record.role_id === role.id && record.status === "active");
+  if (tracked) {
+    await markCustomRoleMissing(guild.id, tracked.user_id, role.id);
+    await audit(guild, "A member's custom role was deleted outside Lemegeton. Its settings were kept for restoration.");
+    return;
+  }
+
+  let settings = await getCustomRoleSettings(guild.id);
+  if (settings.anchor_role_id === role.id) {
+    await audit(guild, "The Custom Roles anchor **" + role.name + "** was deleted. Member role actions are paused until an administrator selects a new anchor.");
+  }
+  if (settings.allowed_role_ids.includes(role.id)) {
+    settings = await updateCustomRoleSettings(guild.id, {
+      allowed_role_ids: settings.allowed_role_ids.filter(id => id !== role.id),
+    });
+    await audit(guild, "Allowed role **" + role.name + "** was deleted. Rechecking members who depended on it.");
+    await reconcileCustomRoleGuild(guild);
+  }
 }
 
 export async function onCustomRoleMemberUpdate(oldMember: GuildMember, newMember: GuildMember): Promise<void> {
