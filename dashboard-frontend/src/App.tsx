@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 
 type Page = "overview" | "commands" | "extensions" | "audit" | "diagnostics" | "logs" | "integrations" | "database";
 type User = { id: string; username: string; global_name?: string | null; avatar?: string | null };
@@ -132,7 +133,8 @@ function Button({ tone = "secondary", className, children, ...props }: React.But
   return <button {...props} className={"button " + tone + (className ? " " + className : "")}>{children}</button>;
 }
 function LoginPage() {
-  const cancelled = new URLSearchParams(window.location.search).get("error") === "cancelled";
+  const [cancelled, setCancelled] = useState(false);
+  useEffect(() => setCancelled(new URLSearchParams(window.location.search).get("error") === "cancelled"), []);
   return <main className="login-wrap">
     <div className="login-orbit orbit-one" aria-hidden="true" /><div className="login-orbit orbit-two" aria-hidden="true" />
     <section className="login-card">
@@ -150,7 +152,8 @@ function LoginPage() {
 }
 
 export default function App() {
-  const isLogin = window.location.pathname === "/login";
+  const pathname = usePathname();
+  const isLogin = pathname === "/login";
   const [user, setUser] = useState<User | null>(null);
   const [guilds, setGuilds] = useState<Guild[]>([]);
   const [guildId, setGuildId] = useState("");
