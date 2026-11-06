@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -23,7 +24,7 @@ import {
   type RoleSelectMenuInteraction,
 } from "discord.js";
 import type { FeatureCommand } from "../Helpers/command.js";
-import {cancelCustomRolePending,confirmCustomRolePending,getPendingCustomRoleRemoval} from "../Helpers/custom-role-lifecycle.js";
+import {archiveLegacyCustomRole,cancelCustomRolePending,confirmCustomRolePending,getPendingCustomRoleRemoval} from "../Helpers/custom-role-lifecycle.js";
 import { homeEmbed } from "../Helpers/discord.js";
 import { extractCustomRoleAvatarPalette, processCustomRoleIconImage, type CustomRoleIconCrop } from "../Helpers/custom-role-images.js";
 import { deleteCustomRoleIconSource, readCustomRoleIconSource, storeCustomRoleIconSource } from "../Helpers/media-storage.js";
@@ -36,6 +37,7 @@ import {
   deleteCustomRoleRecord,
   removeCustomRolePendingUser,
   parseCustomRoleWordList,
+  planLegacyCustomRoleImport,
   removeCustomRoleBlockedWord,
   getCustomRoleIconData,
   getCustomRoleRecord,
@@ -58,6 +60,9 @@ type GuildInteraction = ChatInputCommandInteraction | ButtonInteraction | ModalS
 
 const MAX_ROLE_COOLDOWN = 86_400;
 const memberRemovalRequests = new Map<string, { targetUserId: string; reason: string; expiresAt: number }>();
+type LegacyImportPreview = { guildId: string; actorId: string; takeOverIds: string[]; notQualifyingIds: string[]; expiresAt: number };
+const legacyImportPreviews = new Map<string, LegacyImportPreview>();
+function legacyImportKey(guildId: string, actorId: string, planId: string): string { return guildId + ":" + actorId + ":" + planId; }
 function removalRequestKey(guildId: string, actorId: string, targetId: string): string { return guildId + ":" + actorId + ":" + targetId; }
 const MEMBER_ACTIONS = [
   { id: "create", label: "Create role", style: ButtonStyle.Success },
@@ -133,6 +138,7 @@ function adminRows(userId: string, settings: CustomRoleSettings): ActionRowBuild
     new ButtonBuilder().setCustomId(userCustomId(userId, "clear-channel")).setLabel("Clear command channel").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(userCustomId(userId, "clear-log-channel")).setLabel("Clear log channel").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(userCustomId(userId, "pending")).setLabel("Pending removal").setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(userCustomId(userId, "import")).setLabel("Import old roles").setStyle(ButtonStyle.Primary),
   );
   return [first, second, third];
 }
@@ -385,6 +391,24 @@ export class CustomRoleCommand implements FeatureCommand {
       await interaction.reply({ content: "This Custom Roles panel belongs to another member. Run /custom-role to open your own.", flags: MessageFlags.Ephemeral });
       return true;
     }
+    if (action === "import") {
+      if (!this.requireManager(interaction) || !interaction.guild) return true;
+      await this.showLegacyImportPlan(interaction);
+      return true;
+    }
+    if (action === "legacy-takeover" || action === "legacy-archive") {
+      if (!this.requireManager(interaction) || !interaction.guild || !resourceId) return true;
+      const key = legacyImportKey(interaction.guild.id, interaction.user.id, resourceId);
+      const preview = legacyImportPreviews.get(key);
+      if (!preview || preview.expiresAt < Date.now()) {
+        legacyImportPreviews.delete(key);
+        await interaction.reply({ content: "That legacy import preview expired. Open Import old roles again to recheck the data.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      legacyImportPreviews.delete(key);
+      await this.executeLegacyImport(interaction, preview, action === "legacy-archive");
+      return true;
+    }
     if (action === "pending") {
       if (!this.requireManager(interaction)) return true;
       const pending = interaction.guildId ? await getPendingCustomRoleRemoval(interaction.guildId) : null;
@@ -612,6 +636,191 @@ export class CustomRoleCommand implements FeatureCommand {
     await interaction.reply({ content: result.message, flags: MessageFlags.Ephemeral }).catch(async () => {
       if (interaction.isRepliable() && interaction.deferred) await interaction.editReply({ content: result.message });
     });
+  }
+
+  private async showLegacyImportPlan(interaction: ButtonInteraction): Promise<void> {
+    const guild = interaction.guild!;
+    const settings = await getCustomRoleSettings(guild.id);
+    if (!settings.enabled || !settings.anchor_role_id || !guild.roles.cache.has(settings.anchor_role_id)) {
+      await interaction.reply({
+        content: "Configure an anchor role and enable Custom Roles before importing legacy booster roles.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const plan = await planLegacyCustomRoleImport(guild);
+    const planId = randomUUID();
+    const preview: LegacyImportPreview = {
+      guildId: guild.id,
+      actorId: interaction.user.id,
+      takeOverIds: plan.take_over.map(entry => entry.user_id),
+      notQualifyingIds: plan.not_qualifying.map(entry => entry.user_id),
+      expiresAt: Date.now() + 10 * 60_000,
+    };
+    legacyImportPreviews.set(legacyImportKey(guild.id, interaction.user.id, planId), preview);
+
+    const takeOverLines = plan.take_over.slice(0, 12).map(entry =>
+      "<@" + entry.user_id + "> → " + (entry.role_name ?? entry.role_id),
+    );
+    const notQualifyingLines = plan.not_qualifying.slice(0, 12).map(entry =>
+      "<@" + entry.user_id + "> → " + (entry.role_name ?? entry.role_id) + " (" + (entry.reason ?? "not eligible") + ")",
+    );
+    const skippedLines = plan.skipped.slice(0, 12).map(entry =>
+      (entry.role_name ?? entry.role_id) + ": " + (entry.reason ?? "skipped"),
+    );
+    const embed = homeEmbed(
+      "Custom Roles · Legacy import preview",
+      "Read-only preview of the old booster_roles table for this server. Nothing has been changed yet. The import will recheck all selected records before acting.",
+      [
+        { name: "Take over existing roles", value: String(plan.take_over.length), inline: true },
+        { name: "No longer eligible", value: String(plan.not_qualifying.length), inline: true },
+        { name: "Skipped", value: String(plan.skipped.length), inline: true },
+        { name: "Will be taken over", value: takeOverLines.join("\n").slice(0, 900) || "None", inline: false },
+        { name: "No longer eligible", value: notQualifyingLines.join("\n").slice(0, 900) || "None", inline: false },
+        { name: "Skipped reasons", value: skippedLines.join("\n").slice(0, 900) || "None", inline: false },
+      ],
+    );
+    const row = new ActionRowBuilder<ButtonBuilder>();
+    if (plan.take_over.length) {
+      row.addComponents(new ButtonBuilder()
+        .setCustomId(userCustomId(interaction.user.id, "legacy-takeover") + ":" + planId)
+        .setLabel("Take over eligible roles").setStyle(ButtonStyle.Success));
+    }
+    if (plan.not_qualifying.length) {
+      row.addComponents(new ButtonBuilder()
+        .setCustomId(userCustomId(interaction.user.id, "legacy-archive") + ":" + planId)
+        .setLabel("Take over + archive ineligible").setStyle(ButtonStyle.Danger));
+    }
+    row.addComponents(new ButtonBuilder()
+      .setCustomId(userCustomId(interaction.user.id, "legacy-cancel") + ":" + planId)
+      .setLabel("Cancel").setStyle(ButtonStyle.Secondary));
+    await interaction.reply({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
+  }
+
+  private async executeLegacyImport(
+    interaction: ButtonInteraction,
+    preview: LegacyImportPreview,
+    archiveIneligible: boolean,
+  ): Promise<void> {
+    const guild = interaction.guild!;
+    if (preview.guildId !== guild.id || preview.actorId !== interaction.user.id) {
+      await interaction.reply({ content: "That import preview belongs to another administrator or server.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const settings = await getCustomRoleSettings(guild.id);
+    if (!settings.enabled || !settings.anchor_role_id || !guild.roles.cache.has(settings.anchor_role_id)) {
+      await interaction.reply({ content: "Custom Roles is no longer configured. Nothing was imported.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    let latest;
+    try {
+      latest = await planLegacyCustomRoleImport(guild);
+    } catch (error) {
+      await interaction.editReply(error instanceof Error ? error.message : "I couldn't revalidate the legacy role data.");
+      return;
+    }
+
+    const selectedTakeOvers = latest.take_over.filter(entry => preview.takeOverIds.includes(entry.user_id));
+    const selectedArchives = archiveIneligible
+      ? latest.not_qualifying.filter(entry => preview.notQualifyingIds.includes(entry.user_id))
+      : [];
+    let takenOver = 0;
+    let archived = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+
+    const takeOver = async (entry: { user_id: string; role_id: string; role_name: string | null }) => {
+      const member = await guild.members.fetch(entry.user_id).catch(() => null);
+      const role = await guild.roles.fetch(entry.role_id).catch(() => null);
+      if (!member || !role || !member.roles.cache.has(role.id)) {
+        skipped += 1;
+        return;
+      }
+
+      const primary = role.color || 0x010101;
+      const roleColors = role.colors as { primaryColor?: number; secondaryColor?: number | null; tertiaryColor?: number | null } | undefined;
+      const hasSecondary = typeof roleColors?.secondaryColor === "number";
+      const hasTertiary = typeof roleColors?.tertiaryColor === "number";
+      const mode = hasTertiary ? "holographic" : hasSecondary ? "gradient" : "solid";
+      const primaryColor = roleColors?.primaryColor ?? primary;
+      const secondaryColor = hasSecondary ? roleColors?.secondaryColor ?? null : null;
+      const emoji = role.unicodeEmoji ?? null;
+
+      await saveCustomRole({
+        guild_id: guild.id,
+        user_id: member.id,
+        role_id: role.id,
+        position_hint: role.position,
+        status: "active",
+        name: role.name,
+        color_mode: mode,
+        primary_color: primaryColor,
+        secondary_color: secondaryColor,
+        icon_emoji: emoji,
+      });
+
+      const iconUrl = role.iconURL({ extension: "png", size: 128 });
+      if (iconUrl && (guild.features as readonly string[]).includes("ROLE_ICONS")) {
+        try {
+          const response = await fetch(iconUrl, { signal: AbortSignal.timeout(10_000) });
+          if (response.ok) {
+            const original = Buffer.from(await response.arrayBuffer());
+            const processed = await processCustomRoleIconImage(original);
+            const assetId = await storeCustomRoleIconSource(
+              guild.id,
+              member.id,
+              original,
+              processed.sourceType === "png" ? "image/png" : "image/jpeg",
+            );
+            await updateCustomRole(guild.id, member.id, {
+              icon_png: processed.png,
+              icon_emoji: null,
+              icon_crop: JSON.stringify(processed.crop),
+              icon_source_asset_id: assetId,
+            });
+          } else {
+            errors.push("Could not preserve the image icon for " + role.name + ".");
+          }
+        } catch {
+          errors.push("Could not preserve the image icon for " + role.name + "; the Discord role itself was left unchanged.");
+        }
+      }
+      takenOver += 1;
+    };
+
+    for (let index = 0; index < selectedTakeOvers.length; index += 1) {
+      const entry = selectedTakeOvers[index]!;
+      try {
+        await takeOver(entry);
+      } catch (error) {
+        skipped += 1;
+        errors.push("Skipped " + (entry.role_name ?? entry.role_id) + ": " + (error instanceof Error ? error.message : "unknown error"));
+      }
+      if ((index + 1) % 5 === 0 && index + 1 < selectedTakeOvers.length) await new Promise(resolve => setTimeout(resolve, 2_000));
+    }
+
+    for (let index = 0; index < selectedArchives.length; index += 1) {
+      const entry = selectedArchives[index]!;
+      try {
+        await takeOver(entry);
+        const result = await archiveLegacyCustomRole(guild, entry.user_id, interaction.user.id);
+        if (result) archived += 1;
+        else skipped += 1;
+      } catch (error) {
+        skipped += 1;
+        errors.push("Could not archive " + (entry.role_name ?? entry.role_id) + ": " + (error instanceof Error ? error.message : "unknown error"));
+      }
+      if ((index + 1) % 5 === 0 && index + 1 < selectedArchives.length) await new Promise(resolve => setTimeout(resolve, 2_000));
+    }
+
+    await interaction.editReply(
+      "Legacy import complete. Took over " + takenOver + ", archived " + archived + ", skipped " + skipped + "." +
+      (errors.length ? "\n" + errors.slice(0, 8).join("\n").slice(0, 1200) : ""),
+    );
+    await this.logEvent(guild, settings, "Imported legacy booster roles: took over " + takenOver + ", archived " + archived + ", skipped " + skipped + ".");
   }
 
   private async showManagedMemberRole(
