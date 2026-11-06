@@ -12,6 +12,7 @@ import {
   SlashCommandBuilder,
   TextInputBuilder,
   TextInputStyle,
+  type Attachment,
   type ButtonInteraction,
   type ChannelSelectMenuInteraction,
   type ChatInputCommandInteraction,
@@ -24,6 +25,8 @@ import {
 import type { FeatureCommand } from "../Helpers/command.js";
 import {cancelCustomRolePending,confirmCustomRolePending,getPendingCustomRoleRemoval} from "../Helpers/custom-role-lifecycle.js";
 import { homeEmbed } from "../Helpers/discord.js";
+import { processCustomRoleIconImage, type CustomRoleIconCrop } from "../Helpers/custom-role-images.js";
+import { deleteCustomRoleIconSource, readCustomRoleIconSource, storeCustomRoleIconSource } from "../Helpers/media-storage.js";
 import {
   customRoleChannelAllowed,
   customRoleCooldownMessage,
@@ -31,6 +34,7 @@ import {
   addCustomRoleBlockedWord,
   parseCustomRoleWordList,
   removeCustomRoleBlockedWord,
+  getCustomRoleIconData,
   getCustomRoleRecord,
   getCustomRoleSettings,
   listCustomRoleRecords,
@@ -94,7 +98,9 @@ function memberRows(userId: string, manager: boolean): ActionRowBuilder<ButtonBu
   rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(userCustomId(userId, "gradient")).setLabel("Gradient").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(userCustomId(userId, "holographic")).setLabel("Holographic").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(userCustomId(userId, "icon")).setLabel("Role icon").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(userCustomId(userId, "icon")).setLabel("Emoji icon").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(userCustomId(userId, "image")).setLabel("Image icon").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(userCustomId(userId, "recrop")).setLabel("Recrop image").setStyle(ButtonStyle.Secondary),
   ));
   return rows;
 }
@@ -230,6 +236,8 @@ export class CustomRoleCommand implements FeatureCommand {
       { name: "Set gradient", value: "gradient" },
       { name: "Set holographic style", value: "holographic" },
       { name: "Set role emoji", value: "icon" },
+      { name: "Set image icon", value: "image" },
+      { name: "Recrop image icon", value: "recrop" },
       { name: "Put role on", value: "wear" },
       { name: "Take role off", value: "unwear" },
       { name: "Move role", value: "move" },
@@ -247,6 +255,10 @@ export class CustomRoleCommand implements FeatureCommand {
     .addStringOption(option => option.setName("color").setDescription("Hex role color, such as #8B5CF6").setMaxLength(7))
     .addStringOption(option => option.setName("secondary_color").setDescription("Second hex color for a gradient").setMaxLength(7))
     .addStringOption(option => option.setName("emoji").setDescription("One standard Unicode role emoji").setMaxLength(32))
+    .addAttachmentOption(option => option.setName("image").setDescription("PNG or JPEG image for your role icon"))
+    .addIntegerOption(option => option.setName("crop_x").setDescription("Crop left edge in pixels").setMinValue(0))
+    .addIntegerOption(option => option.setName("crop_y").setDescription("Crop top edge in pixels").setMinValue(0))
+    .addIntegerOption(option => option.setName("crop_size").setDescription("Square crop size in pixels").setMinValue(16))
     .addRoleOption(option => option.setName("role").setDescription("Anchor or eligibility role"))
     .addChannelOption(option => option.setName("channel").setDescription("Channel where members can use the command"))
     .addIntegerOption(option => option.setName("seconds").setDescription("Cooldown in seconds (0 to 86400)").setMinValue(0).setMaxValue(MAX_ROLE_COOLDOWN))
@@ -296,6 +308,13 @@ export class CustomRoleCommand implements FeatureCommand {
           await this.reportResult(interaction, await this.setRoleIconEmoji(interaction, emoji));
           return;
         }
+        case "image": {
+          const image = interaction.options.getAttachment("image");
+          if (!image) { await interaction.reply({ content: "Attach a still PNG or JPEG with the **image** option.", flags: MessageFlags.Ephemeral }); return; }
+          await this.reportResult(interaction, await this.setRoleImageIcon(interaction, image, this.cropOptions(interaction)));
+          return;
+        }
+        case "recrop": await this.reportResult(interaction, await this.recropRoleImageIcon(interaction, this.cropOptions(interaction))); return;
         case "wear": await this.reportResult(interaction, await this.wearRole(interaction)); return;
         case "unwear": await this.reportResult(interaction, await this.unwearRole(interaction)); return;
         case "move": {
@@ -378,6 +397,8 @@ export class CustomRoleCommand implements FeatureCommand {
     if (action === "gradient") { await interaction.showModal(gradientModal(interaction.user.id)); return true; }
     if (action === "holographic") { await this.reportResult(interaction, await this.setRoleStyle(interaction, "holographic")); return true; }
     if (action === "icon") { await interaction.showModal(iconModal(interaction.user.id)); return true; }
+    if (action === "image") { await interaction.reply({ content: "Use `/custom-role` → **Set image icon** and attach your PNG or JPEG in the **image** option.", flags: MessageFlags.Ephemeral }); return true; }
+    if (action === "recrop") { await this.reportResult(interaction, await this.recropRoleImageIcon(interaction)); return true; }
     if (action === "move") {
       const settings = await getCustomRoleSettings(interaction.guildId!);
       await interaction.showModal(moveModal(interaction.user.id, settings.anchor_place === "above" ? "below" : "above"));
@@ -768,6 +789,118 @@ export class CustomRoleCommand implements FeatureCommand {
     }
   }
 
+  private cropOptions(interaction: ChatInputCommandInteraction): CustomRoleIconCrop | undefined {
+    const x = interaction.options.getInteger("crop_x");
+    const y = interaction.options.getInteger("crop_y");
+    const size = interaction.options.getInteger("crop_size");
+    if (x === null && y === null && size === null) return undefined;
+    if (x === null || y === null || size === null) {
+      throw new Error("Supply crop_x, crop_y and crop_size together, or leave all three blank for a centre crop.");
+    }
+    return { x, y, size };
+  }
+
+  private async setRoleImageIcon(
+    interaction: GuildInteraction,
+    attachment: Attachment,
+    crop?: CustomRoleIconCrop,
+  ): Promise<{ ok: boolean; message: string }> {
+    const context = await this.memberContext(interaction);
+    if ("error" in context) return { ok: false, message: context.error };
+    const { member, settings } = context;
+    if (!(member.guild.features as readonly string[]).includes("ROLE_ICONS")) {
+      return { ok: false, message: "Image role icons need Discord's Role Icons server feature (Boost Level 2). You can still use a Unicode emoji icon." };
+    }
+    const record = await getCustomRoleRecord(member.guild.id, member.id);
+    if (!record?.role_id) return { ok: false, message: "Create a custom role before setting its image icon." };
+    const role = member.guild.roles.cache.get(record.role_id);
+    if (!role) return { ok: false, message: "Your saved role no longer exists. Use Create role to restore it." };
+    const cooldown = customRoleCooldownMessage(record, settings.cooldown_seconds);
+    if (cooldown) return { ok: false, message: cooldown };
+    const maxBytes = Math.max(256 * 1024, Number(process.env.CUSTOM_ROLES_ICON_SOURCE_MAX_BYTES || 8 * 1024 * 1024));
+    if (attachment.size > maxBytes) return { ok: false, message: "That image is too large. The original upload limit is " + Math.ceil(maxBytes / (1024 * 1024)) + " MB." };
+
+    let original: Buffer;
+    try {
+      const response = await fetch(attachment.url, { signal: AbortSignal.timeout(15_000) });
+      if (!response.ok) return { ok: false, message: "Discord could not provide that attachment. Please upload it again." };
+      original = Buffer.from(await response.arrayBuffer());
+    } catch {
+      return { ok: false, message: "I couldn't download that image from Discord. Please upload it again." };
+    }
+    const processed = await processCustomRoleIconImage(original, crop);
+    const contentType = processed.sourceType === "png" ? "image/png" : "image/jpeg";
+    const oldIcon = await getCustomRoleIconData(member.guild.id, member.id);
+    let assetId: number | null = null;
+    try {
+      assetId = await storeCustomRoleIconSource(member.guild.id, member.id, original, contentType);
+      await role.edit({ icon: processed.png, unicodeEmoji: null, reason: "Custom Roles: member uploaded an image icon" });
+      await updateCustomRole(member.guild.id, member.id, {
+        icon_png: processed.png,
+        icon_emoji: null,
+        icon_crop: JSON.stringify(processed.crop),
+        icon_source_asset_id: assetId,
+      }, true);
+      if (oldIcon?.icon_source_asset_id && oldIcon.icon_source_asset_id !== assetId) {
+        await deleteCustomRoleIconSource(oldIcon.icon_source_asset_id, member.guild.id).catch(error => {
+          await this.logEvent(member.guild, settings, "A replaced custom role source image could not be deleted from private storage.");
+          void error;
+        });
+      }
+      await this.logEvent(member.guild, settings, "<@!" + member.id + "> changed their custom role image icon.");
+      return { ok: true, message: "Your image icon has been applied. The original stays in private storage so you can crop it again later." };
+    } catch (error) {
+      if (assetId) await deleteCustomRoleIconSource(assetId, member.guild.id).catch(() => undefined);
+      if (oldIcon?.icon_png) {
+        await role.edit({ icon: oldIcon.icon_png, unicodeEmoji: null, reason: "Custom Roles: roll back failed icon save" }).catch(() => undefined);
+      } else if (record.icon_emoji) {
+        await role.edit({ icon: null, unicodeEmoji: record.icon_emoji, reason: "Custom Roles: roll back failed icon save" }).catch(() => undefined);
+      }
+      return { ok: false, message: error instanceof Error ? "I couldn't apply that image icon: " + error.message : "I couldn't apply that image icon." };
+    }
+  }
+
+  private async recropRoleImageIcon(
+    interaction: GuildInteraction,
+    crop?: CustomRoleIconCrop,
+  ): Promise<{ ok: boolean; message: string }> {
+    const context = await this.memberContext(interaction);
+    if ("error" in context) return { ok: false, message: context.error };
+    const { member, settings } = context;
+    if (!(member.guild.features as readonly string[]).includes("ROLE_ICONS")) {
+      return { ok: false, message: "Image role icons need Discord's Role Icons server feature (Boost Level 2)." };
+    }
+    const record = await getCustomRoleRecord(member.guild.id, member.id);
+    if (!record?.role_id) return { ok: false, message: "Create a custom role before recropping its icon." };
+    const role = member.guild.roles.cache.get(record.role_id);
+    if (!role) return { ok: false, message: "Your saved role no longer exists. Use Create role to restore it." };
+    const cooldown = customRoleCooldownMessage(record, settings.cooldown_seconds);
+    if (cooldown) return { ok: false, message: cooldown };
+    const current = await getCustomRoleIconData(member.guild.id, member.id);
+    if (!current?.icon_source_asset_id) return { ok: false, message: "There is no saved original image to crop. Upload a new image icon first." };
+    const original = await readCustomRoleIconSource(current.icon_source_asset_id, member.guild.id);
+    if (!original) return { ok: false, message: "The private original image is missing. Upload a new image icon to replace it." };
+    let savedCrop: CustomRoleIconCrop | undefined;
+    try {
+      if (current.icon_crop) savedCrop = JSON.parse(current.icon_crop) as CustomRoleIconCrop;
+    } catch {
+      savedCrop = undefined;
+    }
+    const processed = await processCustomRoleIconImage(original, crop ?? savedCrop);
+    try {
+      await role.edit({ icon: processed.png, unicodeEmoji: null, reason: "Custom Roles: member recropped their image icon" });
+      await updateCustomRole(member.guild.id, member.id, {
+        icon_png: processed.png,
+        icon_emoji: null,
+        icon_crop: JSON.stringify(processed.crop),
+      }, true);
+      await this.logEvent(member.guild, settings, "<@!" + member.id + "> recropped their custom role image icon.");
+      return { ok: true, message: "Your custom role image icon has been recropped." };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? "I couldn't recrop that image: " + error.message : "I couldn't recrop that image." };
+    }
+  }
+
   private async setRoleIconEmoji(interaction: GuildInteraction, rawEmoji: string): Promise<{ ok: boolean; message: string }> {
     const context = await this.memberContext(interaction);
     if ("error" in context) return { ok: false, message: context.error };
@@ -784,8 +917,10 @@ export class CustomRoleCommand implements FeatureCommand {
     const cooldown = customRoleCooldownMessage(record, settings.cooldown_seconds);
     if (cooldown) return { ok: false, message: cooldown };
     try {
-      await role.edit({ unicodeEmoji: emoji, reason: "Custom Roles: member changed role icon" });
-      await updateCustomRole(member.guild.id, member.id, { icon_emoji: emoji }, true);
+      const oldIcon = await getCustomRoleIconData(member.guild.id, member.id);
+      await role.edit({ icon: null, unicodeEmoji: emoji, reason: "Custom Roles: member changed role icon" });
+      await updateCustomRole(member.guild.id, member.id, { icon_emoji: emoji, icon_png: null, icon_crop: null, icon_source_asset_id: null }, true);
+      if (oldIcon?.icon_source_asset_id) await deleteCustomRoleIconSource(oldIcon.icon_source_asset_id, member.guild.id).catch(() => undefined);
       await this.logEvent(member.guild, settings, `<@!${member.id}> changed their custom role icon.`);
       return { ok: true, message: `Your role icon is now ${emoji}.` };
     } catch (error) {
