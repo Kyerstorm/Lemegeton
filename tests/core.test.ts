@@ -7,6 +7,8 @@ import {nextLocalOccurrence} from "../Helpers/community.js";
 import {classifyArchiveUpload} from "../Helpers/media-storage.js";
 import {ARCHIVE_TAG_CATALOG,searchArchiveTags} from "../Helpers/archive.js";
 import {AniListClient} from "../Helpers/anilist.js";
+import sharp from "sharp";
+import {processCustomRoleIconImage,extractCustomRoleAvatarPalette} from "../Helpers/custom-role-images.js";
 import {normalizeAtlasTitle,normalizeAtlasCategory,safeAtlasUrl} from "../Helpers/atlas.js";
 import {FEATURE_NAMES,isFeatureName} from "../Helpers/settings.js";
 import {customRoleChannelAllowed,customRoleCooldownMessage,parseCustomRoleColor,parseCustomRoleWordList,validateCustomRoleEmoji,validateCustomRoleName} from "../Helpers/custom-roles.js";
@@ -82,6 +84,29 @@ test("Custom role command scope and cooldown are guild-local and deterministic",
  const record={last_changed_at:changedAt} as Parameters<typeof customRoleCooldownMessage>[0];
  assert.match(customRoleCooldownMessage(record,120,Date.parse(changedAt)+30_000)??"",/2 minutes/);
  assert.equal(customRoleCooldownMessage(record,120,Date.parse(changedAt)+130_000),null);
+});
+
+
+test("Custom role image icons validate PNG/JPEG data and crop to bounded square PNGs",async()=>{
+ const png=await sharp({create:{width:180,height:120,channels:4,background:{r:120,g:80,b:200,alpha:1}}}).png().toBuffer();
+ const cropped=await processCustomRoleIconImage(png,{x:20,y:10,size:80});
+ assert.equal(cropped.side,64);
+ assert.deepEqual(cropped.crop,{x:20,y:10,size:80});
+ assert.ok(cropped.png.byteLength<=256*1024);
+ assert.deepEqual([...cropped.png.subarray(0,8)],[137,80,78,71,13,10,26,10]);
+ const jpeg=await sharp(png).jpeg().toBuffer();
+ assert.equal((await processCustomRoleIconImage(jpeg)).sourceType,"jpeg");
+ assert.rejects(()=>processCustomRoleIconImage(Buffer.from("not an image")));
+ assert.rejects(()=>processCustomRoleIconImage(png,{x:100,y:90,size:80}),/doesn't fit/);
+});
+
+test("Custom role avatar palette ignores transparent pixels and returns distinct RGB colors",async()=>{
+ const image=await sharp({create:{width:8,height:8,channels:4,background:{r:255,g:0,b:0,alpha:1}}})
+  .composite([{input:await sharp({create:{width:4,height:4,channels:4,background:{r:0,g:0,b:255,alpha:1}}}).png().toBuffer(),left:0,top:0}])
+  .png().toBuffer();
+ const palette=await extractCustomRoleAvatarPalette(image,5);
+ assert.ok(palette.length>0 && palette.length<=5);
+ assert.ok(palette.every(color=>Number.isInteger(color)&&color>=0&&color<=0xffffff));
 });
 
 test("AniList random discovery samples a catalogue page rather than the trending feed", async () => {
