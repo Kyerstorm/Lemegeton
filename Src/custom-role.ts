@@ -733,6 +733,7 @@ export class CustomRoleCommand implements FeatureCommand {
     const selectedArchives = archiveIneligible
       ? latest.not_qualifying.filter(entry => preview.notQualifyingIds.includes(entry.user_id))
       : [];
+    let takenOver = 0;
     let archived = 0;
     let skipped = 0;
     const errors: string[] = [];
@@ -743,7 +744,21 @@ export class CustomRoleCommand implements FeatureCommand {
     ): Promise<boolean> => {
       const member = await guild.members.fetch(entry.user_id).catch(() => null);
       const role = await guild.roles.fetch(entry.role_id).catch(() => null);
-      if (!role || (!member && !allowMissingMember)) {
+      const botMember = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
+      const hasProtectedPermissions = [
+        PermissionFlagsBits.Administrator,
+        PermissionFlagsBits.ManageGuild,
+        PermissionFlagsBits.ManageRoles,
+        PermissionFlagsBits.ManageMessages,
+        PermissionFlagsBits.KickMembers,
+        PermissionFlagsBits.BanMembers,
+        PermissionFlagsBits.ModerateMembers,
+      ].some(permission => role?.permissions.has(permission));
+      if (!role || role.id === guild.id || role.managed || hasProtectedPermissions
+        || !botMember || role.position >= botMember.roles.highest.position
+        || (!member && !allowMissingMember)
+        || (member && !customRoleEligibility(member, settings) && !allowMissingMember)
+        || (member && customRoleEligibility(member, settings) && allowMissingMember)) {
         skipped += 1;
         return false;
       }
@@ -782,27 +797,26 @@ export class CustomRoleCommand implements FeatureCommand {
 
       const iconUrl = role.iconURL({ extension: "png", size: 128 });
       if (iconUrl && (guild.features as readonly string[]).includes("ROLE_ICONS")) {
+        let assetId: number | null = null;
         try {
           const response = await fetch(iconUrl, { signal: AbortSignal.timeout(10_000) });
-          if (response.ok) {
-            const original = Buffer.from(await response.arrayBuffer());
-            const processed = await processCustomRoleIconImage(original);
-            const assetId = await storeCustomRoleIconSource(
-              guild.id,
-              entry.user_id,
-              original,
-              processed.sourceType === "png" ? "image/png" : "image/jpeg",
-            );
-            await updateCustomRole(guild.id, entry.user_id, {
-              icon_png: processed.png,
-              icon_emoji: null,
-              icon_crop: JSON.stringify(processed.crop),
-              icon_source_asset_id: assetId,
-            });
-          } else {
-            errors.push("Could not preserve the image icon for " + role.name + ".");
-          }
+          if (!response.ok) throw new Error("Could not download the old role icon.");
+          const original = Buffer.from(await response.arrayBuffer());
+          const processed = await processCustomRoleIconImage(original);
+          assetId = await storeCustomRoleIconSource(
+            guild.id,
+            entry.user_id,
+            original,
+            processed.sourceType === "png" ? "image/png" : "image/jpeg",
+          );
+          await updateCustomRole(guild.id, entry.user_id, {
+            icon_png: processed.png,
+            icon_emoji: null,
+            icon_crop: JSON.stringify(processed.crop),
+            icon_source_asset_id: assetId,
+          });
         } catch {
+          if (assetId) await deleteCustomRoleIconSource(assetId, guild.id).catch(() => undefined);
           errors.push("Could not preserve the image icon for " + role.name + ".");
         }
       }
