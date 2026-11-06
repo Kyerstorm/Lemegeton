@@ -22,6 +22,7 @@ import {
   type RoleSelectMenuInteraction,
 } from "discord.js";
 import type { FeatureCommand } from "../Helpers/command.js";
+import {cancelCustomRolePending,confirmCustomRolePending,getPendingCustomRoleRemoval} from "../Helpers/custom-role-lifecycle.js";
 import { homeEmbed } from "../Helpers/discord.js";
 import {
   customRoleChannelAllowed,
@@ -116,6 +117,7 @@ function adminRows(userId: string, settings: CustomRoleSettings): ActionRowBuild
     new ButtonBuilder().setCustomId(userCustomId(userId, "log-channel")).setLabel("Set log channel").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(userCustomId(userId, "clear-channel")).setLabel("Clear command channel").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(userCustomId(userId, "clear-log-channel")).setLabel("Clear log channel").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(userCustomId(userId, "pending")).setLabel("Pending removal").setStyle(ButtonStyle.Danger),
   );
   return [first, second, third];
 }
@@ -330,10 +332,37 @@ export class CustomRoleCommand implements FeatureCommand {
   }
 
   async handleButton(interaction: ButtonInteraction): Promise<boolean> {
-    const [prefix, ownerId, action] = interaction.customId.split(":");
+    const [prefix, ownerId, action, resourceId] = interaction.customId.split(":");
     if (prefix !== "custom-role" || !action) return false;
     if (ownerId !== interaction.user.id) {
       await interaction.reply({ content: "This Custom Roles panel belongs to another member. Run /custom-role to open your own.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (action === "pending") {
+      if (!this.requireManager(interaction)) return true;
+      const pending = interaction.guildId ? await getPendingCustomRoleRemoval(interaction.guildId) : null;
+      if (!pending) {
+        await interaction.reply({ content: "There are no automatic role removals waiting for approval.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      await interaction.reply({
+        content: "This batch contains " + pending.user_ids.length + " member(s). Confirming archives their custom roles while preserving saved settings. Cancelling keeps them and asks again in 24 hours if they remain ineligible.",
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId(userCustomId(interaction.user.id, "pending-confirm") + ":" + pending.id)
+            .setLabel("Confirm archive").setStyle(ButtonStyle.Danger),
+          new ButtonBuilder().setCustomId(userCustomId(interaction.user.id, "pending-cancel") + ":" + pending.id)
+            .setLabel("Cancel and snooze").setStyle(ButtonStyle.Secondary),
+        )],
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+    if (action === "pending-confirm" || action === "pending-cancel") {
+      if (!this.requireManager(interaction) || !interaction.guild || !resourceId) return true;
+      const result = action === "pending-confirm"
+        ? await confirmCustomRolePending(interaction.guild, resourceId, interaction.user.id)
+        : await cancelCustomRolePending(interaction.guild, resourceId, interaction.user.id);
+      await interaction.reply({ content: result, flags: MessageFlags.Ephemeral });
       return true;
     }
     if (action === "admin") { await this.showAdminPanel(interaction); return true; }
@@ -548,6 +577,7 @@ export class CustomRoleCommand implements FeatureCommand {
         { name: "Allowed roles", value: settings.allowed_role_ids.length ? settings.allowed_role_ids.map(id => `<@&${id}>`).join(", ").slice(0, 900) : "Boosters only", inline: false },
         { name: "Additional blocked words", value: settings.blocked_words.join(", ").slice(0, 900) || "None", inline: false },
         { name: "Disabled built-in protections", value: settings.removed_default_words.join(", ").slice(0, 900) || "None", inline: false },
+        { name: "Removal approval", value: (await getPendingCustomRoleRemoval(interaction.guildId!))?.user_ids.length.toString() ?? "None pending", inline: true },
       ],
     );
     await interaction.reply({ embeds: [embed], components: adminRows(interaction.user.id, settings), flags: MessageFlags.Ephemeral });
