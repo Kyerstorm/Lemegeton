@@ -1,4 +1,4 @@
-import { PermissionsBitField, type Guild, type GuildMember, type Role } from "discord.js";
+import { type Guild, type GuildMember, type Role } from "discord.js";
 import { queryOne } from "../database.js";
 
 export interface CustomRoleSettings {
