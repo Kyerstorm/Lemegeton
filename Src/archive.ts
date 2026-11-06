@@ -10,6 +10,7 @@ import {
   StringSelectMenuBuilder,
   TextInputBuilder,
   TextInputStyle,
+  type AutocompleteInteraction,
   type ButtonInteraction,
   type ChatInputCommandInteraction,
   type GuildMember,
@@ -20,6 +21,7 @@ import type { FeatureCommand } from "../Helpers/command.js";
 import { homeEmbed } from "../Helpers/discord.js";
 import {
   ARCHIVE_CATEGORIES,
+  searchArchiveTags,
   canModerateArchive,
   finishArchiveUpload,
   getArchiveEntry,
@@ -226,7 +228,7 @@ export class ArchiveCommand implements FeatureCommand {
     .addStringOption((option) => option.setName("creator").setDescription("Original creator / contributor").setMaxLength(200))
     .addStringOption((option) => option.setName("source_url").setDescription("HTTPS source URL").setMaxLength(1_000))
     .addStringOption((option) => option.setName("media_type").setDescription("Linked media category").addChoices(...MEDIA_TYPES))
-    .addStringOption((option) => option.setName("tags").setDescription("Comma-separated tags").setMaxLength(400))
+    .addStringOption((option) => option.setName("tags").setDescription("Search and select one or more tags").setMaxLength(400).setAutocomplete(true))
     .addStringOption((option) => option.setName("visibility").setDescription("Publication scope").addChoices(
       { name: "This server", value: "server" },
       { name: "Global (explicit sharing)", value: "global" },
@@ -251,6 +253,22 @@ export class ArchiveCommand implements FeatureCommand {
       { name: "Editor", value: "editor" },
       { name: "Contributor", value: "contributor" },
     ));
+
+  async handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
+    const focused = interaction.options.getFocused(true);
+    if (focused.name !== "tags") {
+      await interaction.respond([]);
+      return;
+    }
+    const parts = String(focused.value).split(",");
+    const query = parts.pop()?.trim() ?? "";
+    const selected = parts.map((tag) => tag.trim()).filter(Boolean);
+    const prefix = selected.length ? `${selected.join(", ")}, ` : "";
+    const choices = searchArchiveTags(query, selected)
+      .filter((tag) => prefix.length + tag.length <= 100)
+      .map((tag) => ({ name: tag, value: `${prefix}${tag}` }));
+    await interaction.respond(choices);
+  }
 
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
     if (!interaction.guildId) {
