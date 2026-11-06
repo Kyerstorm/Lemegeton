@@ -16,10 +16,10 @@ import {
   type GuildMember,
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction,
-  } from "discord.js";,
-  import type { FeatureCommand } from "../helpers/command.js";,
-  import { homeEmbed } from "../helpers/discord.js";,
-  import {,
+} from "discord.js";
+import type { FeatureCommand } from "../Helpers/command.js";
+import { homeEmbed } from "../Helpers/discord.js";
+import {
   ARCHIVE_CATEGORIES,
   searchArchiveTags,
   finishArchiveUpload,
