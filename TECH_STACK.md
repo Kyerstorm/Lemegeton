@@ -6,8 +6,8 @@
 
 | Language | Bytes | Share |
 | --- | ---: | ---: |
-| Python | 3,800,026 | 87.1% |
-| TypeScript | 400,036 | 9.2% |
+| Python | 3,800,026 | 86.6% |
+| TypeScript | 425,491 | 9.7% |
 | Rust | 56,346 | 1.3% |
 | JavaScript | 48,182 | 1.1% |
 | CSS | 24,920 | 0.6% |
