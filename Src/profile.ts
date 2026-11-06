@@ -20,6 +20,8 @@ import { AniListClient } from "../Helpers/anilist.js";
 import { SteamClient } from "../Helpers/steam.js";
 import {
   getAniListAffinity,
+  getAniListLeaderboard,
+  getAniListProfileAchievements,
   getLinkedProfile,
   getProfilePreferences,
   getServerTaste,
@@ -56,6 +58,10 @@ function profileHome(): { embeds: EmbedBuilder[]; components: ActionRowBuilder<B
         new ButtonBuilder().setCustomId("profile:affinity").setLabel("Compare interests").setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId("profile:taste").setLabel("Server Taste").setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId("profile:unlink").setLabel("Manage connections").setStyle(ButtonStyle.Danger),
+      ),
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId("profile:leaderboard:anime").setLabel("Anime leaderboard").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId("profile:leaderboard:manga").setLabel("Manga leaderboard").setStyle(ButtonStyle.Secondary),
       ),
     ],
   };
@@ -101,6 +107,7 @@ function privacyEmbed(
     { name: "Show Steam", value: state(prefs.show_steam), inline: true },
     { name: "Share for affinity", value: state(prefs.allow_affinity), inline: true },
     { name: "Server Taste opt-in", value: state(prefs.server_taste_opt_in), inline: true },
+    { name: "AniList leaderboard", value: state(prefs.share_leaderboard), inline: true },
   ]);
 }
 
@@ -114,6 +121,7 @@ function privacyButtons(prefs: Awaited<ReturnType<typeof getProfilePreferences>>
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId("profile:toggle:allow_affinity").setLabel(`Affinity sharing: ${prefs.allow_affinity ? "On" : "Off"}`).setStyle(prefs.allow_affinity ? ButtonStyle.Success : ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("profile:toggle:server_taste_opt_in").setLabel(`Server Taste: ${prefs.server_taste_opt_in ? "On" : "Off"}`).setStyle(prefs.server_taste_opt_in ? ButtonStyle.Success : ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("profile:toggle:share_leaderboard").setLabel(`Leaderboard: ${prefs.share_leaderboard ? "On" : "Off"}`).setStyle(prefs.share_leaderboard ? ButtonStyle.Success : ButtonStyle.Secondary),
     ),
   ];
 }
@@ -131,6 +139,8 @@ export class ProfileCommand implements FeatureCommand {
       { name: "Privacy settings", value: "privacy" },
       { name: "Compare interests", value: "affinity" },
       { name: "Server Taste", value: "taste" },
+      { name: "Anime leaderboard", value: "leaderboard-anime" },
+      { name: "Manga leaderboard", value: "leaderboard-manga" },
     ))
     .addUserOption((option) => option.setName("member").setDescription("Member whose public profile or shared interests to view"))
     .addStringOption((option) => option.setName("account").setDescription("AniList username or Steam vanity / SteamID64").setMaxLength(100));
@@ -198,6 +208,8 @@ export class ProfileCommand implements FeatureCommand {
           return;
         }
         case "taste": await this.showTaste(interaction); return;
+        case "leaderboard-anime": await this.showLeaderboard(interaction, "anime"); return;
+        case "leaderboard-manga": await this.showLeaderboard(interaction, "manga"); return;
         default:
           await interaction.reply({ ...profileHome(), flags: MessageFlags.Ephemeral });
           return;
@@ -236,6 +248,10 @@ export class ProfileCommand implements FeatureCommand {
       await this.showTaste(interaction);
       return true;
     }
+    if (action === "leaderboard" && (setting === "anime" || setting === "manga")) {
+      await this.showLeaderboard(interaction, setting);
+      return true;
+    }
     if (action === "unlink") {
       const [ani, steam] = await Promise.all([
         queryOne<{ anilist_username: string | null }>("SELECT anilist_username FROM users WHERE discord_id = $1 AND guild_id = $2", [interaction.user.id, interaction.guildId]),
@@ -262,14 +278,20 @@ export class ProfileCommand implements FeatureCommand {
       return true;
     }
     if (action === "toggle" && setting) {
-      const key = setting as "public_profile" | "show_anilist" | "show_steam" | "allow_affinity" | "server_taste_opt_in";
-      const allowed = ["public_profile", "show_anilist", "show_steam", "allow_affinity", "server_taste_opt_in"].includes(key);
+      const key = setting as "public_profile" | "show_anilist" | "show_steam" | "allow_affinity" | "server_taste_opt_in" | "share_leaderboard";
+      const allowed = ["public_profile", "show_anilist", "show_steam", "allow_affinity", "server_taste_opt_in", "share_leaderboard"].includes(key);
       if (!allowed) return false;
       const current = await getProfilePreferences(interaction.guildId, interaction.user.id);
       const nextValue = !current[key];
-      if (key === "allow_affinity" && nextValue && !current.show_anilist) {
-        await interaction.reply({ content: "Enable AniList display before opting into AniList interest comparisons.", flags: MessageFlags.Ephemeral });
-        return true;
+      if (key === "share_leaderboard" && nextValue) {
+        const link = await queryOne<{ anilist_username: string }>(
+          "SELECT anilist_username FROM users WHERE guild_id = $1 AND discord_id = $2 AND anilist_username IS NOT NULL",
+          [interaction.guildId, interaction.user.id],
+        );
+        if (!link) {
+          await interaction.reply({ content: "Connect an AniList account before opting into the server leaderboard.", flags: MessageFlags.Ephemeral });
+          return true;
+        }
       }
       const updated = await updateProfilePreferences(interaction.guildId, interaction.user.id, { [key]: nextValue });
       await interaction.update({ embeds: [privacyEmbed(updated)], components: privacyButtons(updated) });
@@ -355,13 +377,28 @@ export class ProfileCommand implements FeatureCommand {
       if (profile.anilist.about) embed.addFields({ name: "About", value: profile.anilist.about.slice(0,1024), inline: false });
       embed.addFields(
         { name: "AniList", value: `[${profile.anilist.name}](${profile.anilist.url})`, inline: true },
-        { name: "Anime list entries", value: String(profile.anilist.anime.count), inline: true },
-        { name: "Manga list entries", value: String(profile.anilist.manga.count), inline: true },
+        { name: "Anime entries", value: String(profile.anilist.anime.count), inline: true },
         { name: "Anime mean score", value: profile.anilist.anime.meanScore ? `${profile.anilist.anime.meanScore.toFixed(1)}/100` : "No score", inline: true },
+        { name: "Episodes watched (AniList)", value: profile.anilist.anime.episodesWatched === null ? "Unavailable" : profile.anilist.anime.episodesWatched.toLocaleString(), inline: true },
+        { name: "Manga entries", value: String(profile.anilist.manga.count), inline: true },
         { name: "Manga mean score", value: profile.anilist.manga.meanScore ? `${profile.anilist.manga.meanScore.toFixed(1)}/100` : "No score", inline: true },
+        { name: "Chapters read (AniList)", value: profile.anilist.manga.chaptersRead === null ? "Unavailable" : profile.anilist.manga.chaptersRead.toLocaleString(), inline: true },
+        { name: "Volumes read (AniList)", value: profile.anilist.manga.volumesRead === null ? "Unavailable" : profile.anilist.manga.volumesRead.toLocaleString(), inline: true },
+        { name: "Anime formats", value: profile.anilist.anime.formats.slice(0, 5).map(item => `${item.format}: ${item.count}`).join("\n") || "Unavailable", inline: true },
+        { name: "Manga formats", value: profile.anilist.manga.formats.slice(0, 5).map(item => `${item.format}: ${item.count}`).join("\n") || "Unavailable", inline: true },
         { name: "Anime genres", value: profile.anilist.anime.genres.slice(0, 5).map((item) => item.genre).join(", ") || "Unavailable", inline: false },
         { name: "Manga genres", value: profile.anilist.manga.genres.slice(0, 5).map((item) => item.genre).join(", ") || "Unavailable", inline: false },
+        { name: "Anime list status", value: profile.anilist.anime.statuses.slice(0, 5).map(item => `${item.status}: ${item.count}`).join("\n") || "Unavailable", inline: true },
+        { name: "Manga list status", value: profile.anilist.manga.statuses.slice(0, 5).map(item => `${item.status}: ${item.count}`).join("\n") || "Unavailable", inline: true },
       );
+      const achievements = getAniListProfileAchievements(profile.anilist);
+      if (achievements.length) {
+        embed.addFields({
+          name: "AniList milestones",
+          value: achievements.map(item => `**${item.title}** — ${item.detail}`).join("\n").slice(0, 1000),
+          inline: false,
+        });
+      }
       const favouriteLines = (items: Array<{ title: string; url: string }>) => items.map((item) => `[${item.title}](${item.url})`).join("\n").slice(0, 1000) || "No public favourites";
       embed.addFields(
         { name: "Favourite anime", value: favouriteLines(profile.anilist.favorites.anime), inline: true },
@@ -402,6 +439,33 @@ export class ProfileCommand implements FeatureCommand {
       await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     } catch (error) {
       await interaction.reply({ content: error instanceof Error ? error.message : "The comparison could not be calculated.", flags: MessageFlags.Ephemeral });
+    }
+  }
+
+  private async showLeaderboard(
+    interaction: ButtonInteraction | ChatInputCommandInteraction,
+    medium: "anime" | "manga",
+  ): Promise<void> {
+    try {
+      const members = await interaction.guild!.members.fetch();
+      const result = await getAniListLeaderboard(
+        interaction.guildId!,
+        new Set(members.keys()),
+        medium,
+        this.anilist,
+      );
+      const rows = result.entries.map((entry, index) => {
+        const countLabel = medium === "anime" ? "entries" : "entries";
+        return `**${index + 1}.** [${safeDisplay(entry.aniListName)}](${entry.aniListUrl}) — ${entry.entries.toLocaleString()} ${countLabel} · ${entry.meanScore ? entry.meanScore.toFixed(1) + "/100" : "No mean score"}`;
+      });
+      const embed = homeEmbed(
+        medium === "anime" ? "AniList anime leaderboard" : "AniList manga leaderboard",
+        `Guild-only summary of ${result.checked} opted-in member profiles checked. ${result.optedIn} current members have opted in. Members can withdraw at any time through /profile privacy. Rankings use only AniList-reported entry counts, with mean score as a tie-breaker.`,
+        [{ name: "Top opted-in members", value: rows.join("\n").slice(0, 3900) || "No public entries", inline: false }],
+      );
+      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+    } catch (error) {
+      await interaction.reply({ content: error instanceof Error ? error.message : "The AniList leaderboard is unavailable.", flags: MessageFlags.Ephemeral });
     }
   }
 
