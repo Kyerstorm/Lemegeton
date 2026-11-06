@@ -82,6 +82,7 @@ function memberRows(userId: string, manager: boolean): ActionRowBuilder<ButtonBu
   rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
     ...MEMBER_ACTIONS.slice(3).map(action => new ButtonBuilder()
       .setCustomId(userCustomId(userId, action.id)).setLabel(action.label).setStyle(action.style)),
+    new ButtonBuilder().setCustomId(userCustomId(userId, "move")).setLabel("Move").setStyle(ButtonStyle.Secondary),
     ...(manager ? [new ButtonBuilder().setCustomId(userCustomId(userId, "admin"))
       .setLabel("Admin settings").setStyle(ButtonStyle.Danger)] : []),
   ));
@@ -156,6 +157,16 @@ function iconModal(userId: string): ModalBuilder {
     ));
 }
 
+function moveModal(userId: string, placement: "above" | "below"): ModalBuilder {
+  return new ModalBuilder()
+    .setCustomId(userCustomId(userId, "move"))
+    .setTitle("Move your custom role")
+    .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder().setCustomId("placement").setLabel("Type above or below the anchor role")
+        .setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(5).setValue(placement),
+    ));
+}
+
 function cooldownModal(userId: string, seconds: number): ModalBuilder {
   return new ModalBuilder()
     .setCustomId(userCustomId(userId, "cooldown"))
@@ -193,6 +204,7 @@ export class CustomRoleCommand implements FeatureCommand {
       { name: "Set role emoji", value: "icon" },
       { name: "Put role on", value: "wear" },
       { name: "Take role off", value: "unwear" },
+      { name: "Move role", value: "move" },
       { name: "Admin settings", value: "admin" },
       { name: "Enable feature", value: "enable" },
       { name: "Disable feature", value: "disable" },
@@ -257,6 +269,16 @@ export class CustomRoleCommand implements FeatureCommand {
         }
         case "wear": await this.reportResult(interaction, await this.wearRole(interaction)); return;
         case "unwear": await this.reportResult(interaction, await this.unwearRole(interaction)); return;
+        case "move": {
+          const placement = interaction.options.getString("placement");
+          if (placement !== "above" && placement !== "below") {
+            const settings = await getCustomRoleSettings(interaction.guildId);
+            await interaction.showModal(moveModal(interaction.user.id, settings.anchor_place));
+            return;
+          }
+          await this.reportResult(interaction, await this.moveRole(interaction, placement));
+          return;
+        }
         case "enable": await this.configureEnabled(interaction, true); return;
         case "disable": await this.configureEnabled(interaction, false); return;
         case "anchor": await this.configureAnchor(interaction, interaction.options.getRole("role"), interaction.options.getString("placement")); return;
@@ -292,6 +314,11 @@ export class CustomRoleCommand implements FeatureCommand {
     if (action === "gradient") { await interaction.showModal(gradientModal(interaction.user.id)); return true; }
     if (action === "holographic") { await this.reportResult(interaction, await this.setRoleStyle(interaction, "holographic")); return true; }
     if (action === "icon") { await interaction.showModal(iconModal(interaction.user.id)); return true; }
+    if (action === "move") {
+      const settings = await getCustomRoleSettings(interaction.guildId!);
+      await interaction.showModal(moveModal(interaction.user.id, settings.anchor_place === "above" ? "below" : "above"));
+      return true;
+    }
     if (action === "cooldown") {
       if (!this.requireManager(interaction)) return true;
       const settings = await getCustomRoleSettings(interaction.guildId!);
@@ -375,6 +402,15 @@ export class CustomRoleCommand implements FeatureCommand {
     }
     if (action === "icon") {
       await this.reportResult(interaction, await this.setRoleIconEmoji(interaction, interaction.fields.getTextInputValue("emoji")));
+      return true;
+    }
+    if (action === "move") {
+      const placement = interaction.fields.getTextInputValue("placement").trim().toLowerCase();
+      if (placement !== "above" && placement !== "below") {
+        await interaction.reply({ content: "Type either **above** or **below**.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      await this.reportResult(interaction, await this.moveRole(interaction, placement));
       return true;
     }
     if (action === "cooldown") {
@@ -514,11 +550,12 @@ export class CustomRoleCommand implements FeatureCommand {
         await role.delete("Custom Roles: requested position is above the bot role").catch(() => undefined);
         return { ok: false, message: "The configured anchor is too high for me to place a custom role safely." };
       }
-      await role.setPosition(targetPosition, { reason: "Custom Roles: place role beside configured anchor" });
+      role = await role.setPosition(targetPosition, { reason: "Custom Roles: place role beside configured anchor" });
       await saveCustomRole({
         guild_id: member.guild.id,
         user_id: member.id,
         role_id: role.id,
+        position_hint: role.position,
         status: "active",
         name: checked.name,
         color_mode: colorMode,
@@ -648,6 +685,35 @@ export class CustomRoleCommand implements FeatureCommand {
       return { ok: true, message: `Your role icon is now ${emoji}.` };
     } catch (error) {
       return { ok: false, message: error instanceof Error ? `I couldn't set that role icon: ${error.message}` : "I couldn't set that role icon." };
+    }
+  }
+
+  private async moveRole(
+    interaction: GuildInteraction,
+    placement: "above" | "below",
+  ): Promise<{ ok: boolean; message: string }> {
+    const context = await this.memberContext(interaction);
+    if ("error" in context) return { ok: false, message: context.error };
+    const { member, settings } = context;
+    const record = await getCustomRoleRecord(member.guild.id, member.id);
+    if (!record?.role_id) return { ok: false, message: "Create a custom role before moving it." };
+    const role = member.guild.roles.cache.get(record.role_id);
+    const anchor = settings.anchor_role_id ? member.guild.roles.cache.get(settings.anchor_role_id) : null;
+    const botMember = member.guild.members.me;
+    if (!role || !anchor || !botMember) return { ok: false, message: "Your role or the configured anchor is missing. Ask an administrator to check the setup." };
+    const cooldown = customRoleCooldownMessage(record, settings.cooldown_seconds);
+    if (cooldown) return { ok: false, message: cooldown };
+    const targetPosition = placement === "above" ? anchor.position + 1 : Math.max(1, anchor.position - 1);
+    if (targetPosition >= botMember.roles.highest.position) {
+      return { ok: false, message: "I can't place your role above my highest role. Ask an administrator to move the anchor lower." };
+    }
+    try {
+      const moved = await role.setPosition(targetPosition, { reason: "Custom Roles: member moved their personal role" });
+      await updateCustomRole(member.guild.id, member.id, { position_hint: moved.position }, true);
+      await this.logEvent(member.guild, settings, `<@!${member.id}> moved their custom role ${placement} the anchor.`);
+      return { ok: true, message: `Your role is now positioned directly ${placement} the anchor role.` };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? `I couldn't move your role: ${error.message}` : "I couldn't move your role." };
     }
   }
 
