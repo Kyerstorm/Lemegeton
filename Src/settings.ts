@@ -11,11 +11,15 @@ async function panel(guildId: string): Promise<{embeds:EmbedBuilder[];components
     .setDescription("Control which Lemegeton feature environments are available in this server. Changes are guild-local and take effect immediately.")
     .addFields(FEATURE_NAMES.map(feature=>({name:`/${feature}`,value:states[feature]?"Enabled":"Disabled",inline:true})))
     .setFooter({text:"Only members with Manage Server can change these settings."});
-  const row = new ActionRowBuilder<ButtonBuilder>();
-  for (const feature of FEATURE_NAMES) row.addComponents(new ButtonBuilder()
-    .setCustomId(`settings:toggle:${feature}`).setLabel(`/${feature} · ${states[feature]?"On":"Off"}`)
-    .setStyle(states[feature]?ButtonStyle.Success:ButtonStyle.Secondary));
-  return {embeds:[embed],components:[row]};
+  const components: ActionRowBuilder<ButtonBuilder>[] = [];
+  for (let index = 0; index < FEATURE_NAMES.length; index += 5) {
+    const row = new ActionRowBuilder<ButtonBuilder>();
+    for (const feature of FEATURE_NAMES.slice(index, index + 5)) row.addComponents(new ButtonBuilder()
+      .setCustomId(`settings:toggle:${feature}`).setLabel(`/${feature} · ${states[feature]?"On":"Off"}`)
+      .setStyle(states[feature]?ButtonStyle.Success:ButtonStyle.Secondary));
+    components.push(row);
+  }
+  return {embeds:[embed],components};
 }
 
 function canManage(interaction: ButtonInteraction | ChatInputCommandInteraction): boolean {
