@@ -24,6 +24,8 @@ import {
   type RoleSelectMenuInteraction,
 } from "discord.js";
 import type { FeatureCommand } from "../Helpers/command.js";
+import { loadConfig } from "../Helpers/config.js";
+import { createCustomRolePickerLink } from "../Helpers/custom-role-picker-server.js";
 import {archiveLegacyCustomRole,cancelCustomRolePending,confirmCustomRolePending,getPendingCustomRoleRemoval} from "../Helpers/custom-role-lifecycle.js";
 import { homeEmbed } from "../Helpers/discord.js";
 import { extractCustomRoleAvatarPalette, processCustomRoleIconImage, type CustomRoleIconCrop } from "../Helpers/custom-role-images.js";
@@ -114,6 +116,7 @@ function memberRows(userId: string, manager: boolean): ActionRowBuilder<ButtonBu
   ));
   rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(userCustomId(userId, "palette")).setLabel("Avatar colour palette").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(userCustomId(userId, "picker")).setLabel("Color picker").setStyle(ButtonStyle.Primary),
   ));
   return rows;
 }
@@ -440,6 +443,27 @@ export class CustomRoleCommand implements FeatureCommand {
         ? await confirmCustomRolePending(interaction.guild, resourceId, interaction.user.id)
         : await cancelCustomRolePending(interaction.guild, resourceId, interaction.user.id);
       await interaction.reply({ content: result, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (action === "picker") {
+      if (!interaction.guildId) {
+        await interaction.reply({ content: "The Color picker is only available inside a server.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      try {
+        const picker = await createCustomRolePickerLink(interaction.guildId, interaction.user.id, interaction.client, loadConfig());
+        const expires = Math.floor(picker.expiresAt / 1000);
+        const latest = Math.floor(picker.maxExpiresAt / 1000);
+        await interaction.reply({
+          content: "[Open the Custom Role Studio](<" + picker.url + ">)\\nThis private link expires <t:" + expires + ":R> without use and <t:" + latest + ":R> at the latest. It replaces any previous picker link for you. **Do not share it**: anyone with the link can change your role.",
+          flags: MessageFlags.Ephemeral,
+        });
+      } catch (error) {
+        await interaction.reply({
+          content: error instanceof Error ? error.message : "The Custom Role Studio couldn't be opened.",
+          flags: MessageFlags.Ephemeral,
+        });
+      }
       return true;
     }
     if (action === "palette") { await this.showAvatarPalette(interaction); return true; }
