@@ -1,6 +1,7 @@
 FROM node:22-bookworm-slim AS frontend
 WORKDIR /src/dashboard-frontend
-COPY dashboard-frontend/package.json dashboard-frontend/tsconfig.json dashboard-frontend/vite.config.ts ./
+COPY dashboard-frontend/package.json dashboard-frontend/tsconfig.json dashboard-frontend/next.config.ts dashboard-frontend/next-env.d.ts ./
+COPY dashboard-frontend/app ./app
 COPY dashboard-frontend/src ./src
 RUN npm install --no-audit --no-fund \
     && npm run typecheck \
@@ -42,7 +43,7 @@ WORKDIR /app
 COPY --from=python-dependencies /install /usr/local
 COPY . /app
 COPY --from=rust-builder /src/dashboard-rs/target/release/lemegeton-dashboard /app/dashboard-rs/target/release/lemegeton-dashboard
-COPY --from=frontend /src/dashboard-frontend/dist /app/dashboard-frontend/dist
+COPY --from=frontend /src/dashboard-frontend/out /app/dashboard-frontend/out
 RUN chown -R 10001:10001 /app/data /app/logs /app/runtime-home \
     && chmod 0750 /app/data /app/logs /app/runtime-home
 USER 10001:10001
