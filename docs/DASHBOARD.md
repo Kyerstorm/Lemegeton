@@ -1,6 +1,6 @@
 # Lemegeton web dashboard
 
-The public control plane is a Rust/Axum service with a Next.js App Router frontend in `dashboard-frontend/app/`. Interactive screens remain React + TypeScript components in `dashboard-frontend/src/`; the stylesheet is authored as CSS in `dashboard-frontend/app/globals.css`. Next.js builds a static export in `dashboard-frontend/out/`; Rust serves the exported `index.html`, `login/index.html`, and hashed `_next/static` assets from the same origin. The root `railpack.json` supplies Node 22 for this nested package. The Rust service binds to loopback by default and refuses non-loopback binding unless `DASHBOARD_ALLOW_PUBLIC_BIND=true`; Railway/container configuration explicitly opts into the platform ingress interface. The Discord bot is being migrated separately to the TypeScript runtime on the v3 PR branch.
+The public control plane is a Rust/Axum service with a Next.js App Router frontend in `dashboard-frontend/app/`. Interactive screens remain React + TypeScript components in `dashboard-frontend/src/`; the stylesheet is authored as CSS in `dashboard-frontend/app/globals.css`. Next.js builds a static export in `dashboard-frontend/out/`; Rust serves the exported `index.html`, `login/index.html`, and hashed `_next/static` assets from the same origin. The root `railpack.json` supplies Node 22 for this nested package. The Rust service binds to loopback by default and refuses non-loopback binding unless `DASHBOARD_ALLOW_PUBLIC_BIND=true`; Railway/container configuration explicitly opts into the platform ingress interface. The Discord bot runtime and custom-role web picker are being migrated to TypeScript on the existing v3 PR branch.
 
 ## Capabilities and boundaries
 
@@ -11,7 +11,7 @@ The public control plane is a Rust/Axum service with a Next.js App Router fronte
 - Command changes are written through the bot's existing PostgreSQL configuration layer and are synchronized to Discord before the API confirms success. If synchronization fails, the bridge restores the previous configuration and attempts to restore the prior command set.
 - Extension inventory, runtime status, persisted configuration, audit history, and selected logs reflect the running bot. Runtime load/unload/reload controls are deliberately omitted because the current architecture does not provide a safety contract for unloading arbitrary cogs.
 - Logs and bot-wide integration configuration are owner-only. Only booleans and provider labels are returned for integrations; secrets are never sent to the browser.
-- The existing custom-role picker is still served from the legacy Python implementation on a second loopback port and is reverse-proxied through Rust. Its token, image and role-validation behavior must be ported before that Python service can be removed.
+- The custom-role browser picker is served by the TypeScript bot on a private loopback port and reverse-proxied through Rust. Its bearer token is issued in the URL fragment, stored only as a SHA-256 hash in process memory, sent only in the Authorization header, and revoked on replacement, expiry or bot restart. Writes require the configured browser Origin and every request re-checks the current guild member, eligibility, role record and role hierarchy. External icon image links are HTTPS-only, resolved to public addresses and fetched with the resolved IP pinned to the TLS request; redirects are refused.
 
 The service does not expose arbitrary code execution, shell commands, raw SQL, or unrestricted extension operations.
 
@@ -36,19 +36,19 @@ Configure the following in the service environment (see `.env.example` for the f
 | `CUSTOM_ROLES_PUBLIC_URL` | Exact browser-visible origin for picker mutation Origin checks; match `DASHBOARD_PUBLIC_URL` |
 | `CUSTOM_ROLES_TRUST_PROXY` | Enable only when the trusted ingress appends the real client IP as the rightmost `X-Forwarded-For` entry |
 
-Use a random `DASHBOARD_BRIDGE_SECRET` of at least 32 UTF-8 bytes (for example, `openssl rand -hex 32`). Do not commit it. Rust refuses to call the bot bridge with a shorter value; the Python bridge and picker refuse non-loopback listeners. The Rust web service binds to `127.0.0.1` by default. On production HTTPS, set `DASHBOARD_PUBLIC_URL` and `CUSTOM_ROLES_PUBLIC_URL` to the same browser-visible origin and `DASHBOARD_COOKIE_SECURE=true`; startup fails closed if a non-local HTTP origin or mismatched OAuth callback is configured. The configured OAuth callback must exactly match the Discord Developer Portal entry.
+Use a random `DASHBOARD_BRIDGE_SECRET` of at least 32 UTF-8 bytes (for example, `openssl rand -hex 32`). Do not commit it. Rust refuses to call the bot bridge with a shorter value; the TypeScript bridge and picker refuse non-loopback listeners. The Rust web service binds to `127.0.0.1` by default. On production HTTPS, set `DASHBOARD_PUBLIC_URL` and `CUSTOM_ROLES_PUBLIC_URL` to the same browser-visible origin and `DASHBOARD_COOKIE_SECURE=true`; startup fails closed if a non-local HTTP origin or mismatched OAuth callback is configured. The configured OAuth callback must exactly match the Discord Developer Portal entry.
 
 The bot still requires its existing Discord token and PostgreSQL configuration. The dashboard does not create a second Discord client or a second command registry. In Discord, **/dashboard** is the single command-control entry point; command and category toggles, synchronization, reset, and audit actions are available in its private panel. There is no separate `/dashboard-section-toggle` command.
 
 ## Local development
 
-1. Install Python dependencies with `python -m pip install -r requirements.txt`.
+1. Install dependencies with `npm install` and `npm install --prefix dashboard-frontend`.
 2. Install Node.js 22 or newer and a current stable Rust toolchain.
 3. Configure the environment values above and the existing bot/database values.
 4. Build the frontend: `npm install --prefix dashboard-frontend && npm run typecheck --prefix dashboard-frontend && npm run build --prefix dashboard-frontend`.
 5. Build the public service: `cargo build --manifest-path dashboard-rs/Cargo.toml`.
 6. Start the dashboard backend with `cargo run --manifest-path dashboard-rs/Cargo.toml` from the repository root in one terminal.
-7. Start the existing bot with `python bot.py` in another terminal. The bot starts its private runtime adapter and custom-role picker automatically.
+7. Build the bot with `npm run build` and start it with `npm start`. It starts the private Custom Roles picker listener automatically when enabled.
 8. Open the public dashboard address. For local development, register `http://localhost:8080/oauth/callback` and use `DASHBOARD_PUBLIC_URL=http://localhost:8080`.
 
 For the combined deployment entry point, build the frontend assets and release binary first, then use `./scripts/start.sh`. The Railway build command installs Node dependencies, generates the frontend assets, compiles the Rust service, and starts both services through this script. `dashboard-frontend/out/` is generated static-export output and is not a frontend source directory.
@@ -57,11 +57,11 @@ For the combined deployment entry point, build the frontend assets and release b
 
 - Rust unit tests: `cargo test --manifest-path dashboard-rs/Cargo.toml`
 - Rust formatting: `cargo fmt --manifest-path dashboard-rs/Cargo.toml -- --check`
-- Python syntax: `python -m compileall -q bot.py web/custom_role_picker.py`
+- Python syntax: `npm run typecheck && npm test`
 - Bridge unit tests: `python -m unittest discover -s tests -p "test_dashboard_bridge.py"`
 - Existing custom-role web regression suite: run the project's documented `tests/custom_roles/run_all.py` entry point in a configured test environment.
 
-CI runs the Rust tests, Python syntax compilation, and focused bridge tests. The complete Discord/database-backed bot test suite still needs the repository's normal test fixture and PostgreSQL setup.
+CI runs the Rust tests, Next.js type-check/build/static-export checks, TypeScript bot type-check/tests, and the remaining legacy Python checks. The complete Discord/database-backed bot test suite still needs the repository's normal test fixture and PostgreSQL setup.
 
 ## Operational notes
 
@@ -73,7 +73,7 @@ CI runs the Rust tests, Python syntax compilation, and focused bridge tests. The
 
 ## Production deployment: VPS, systemd, and Nginx
 
-For a VPS, use the separate systemd services and Nginx reverse proxy in `deploy/vps/`. The bot and public Rust service run as different unprivileged users; only the bot user can write bot data and logs. Rust binds to loopback, the bot bridge and custom-role picker stay on loopback, and Nginx terminates TLS and limits public request rates.
+For a VPS, use the separate systemd services and Nginx reverse proxy in `deploy/vps/`. The bot and public Rust service run as different unprivileged users; only the bot user can write bot data and logs. Rust binds to loopback, the bot bridge and TypeScript custom-role picker stay on loopback, and Nginx terminates TLS and limits public request rates.
 
 Read [the VPS deployment guide](../deploy/vps/README.md) before opening firewall ports. Expose only SSH and HTTPS (HTTP may be open for the redirect/ACME flow); do not expose ports 8080, 8091, or 8092 publicly. Keep OAuth client secrets and the bridge secret in root-owned service environment files, not in Git. Set the public origin and OAuth callback to the same HTTPS host, set `DASHBOARD_COOKIE_SECURE=true`, and use a unique 32-byte-or-longer bridge secret in both service environments.
 
