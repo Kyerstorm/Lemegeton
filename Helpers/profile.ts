@@ -13,6 +13,7 @@ export interface ProfilePreferences {
   show_steam: boolean;
   allow_affinity: boolean;
   server_taste_opt_in: boolean;
+  share_leaderboard: boolean;
 }
 
 export interface LinkedProfile {
@@ -35,12 +36,13 @@ function defaultPreferences(guildId: string, userId: string): ProfilePreferences
     show_steam: true,
     allow_affinity: false,
     server_taste_opt_in: false,
+    share_leaderboard: false,
   };
 }
 
 export async function getProfilePreferences(guildId: string, userId: string): Promise<ProfilePreferences> {
   const row = await queryOne<ProfilePreferences>(
-    "SELECT guild_id, user_id, public_profile, show_anilist, show_steam, allow_affinity, server_taste_opt_in FROM profile_preferences WHERE guild_id = $1 AND user_id = $2",
+    "SELECT guild_id, user_id, public_profile, show_anilist, show_steam, allow_affinity, server_taste_opt_in, share_leaderboard FROM profile_preferences WHERE guild_id = $1 AND user_id = $2",
     [guildId, userId],
   );
   return row ?? defaultPreferences(guildId, userId);
@@ -55,18 +57,19 @@ export async function updateProfilePreferences(
   const next = { ...current, ...changes };
   await query(
     `INSERT INTO profile_preferences
-     (guild_id, user_id, public_profile, show_anilist, show_steam, allow_affinity, server_taste_opt_in, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+     (guild_id, user_id, public_profile, show_anilist, show_steam, allow_affinity, server_taste_opt_in, share_leaderboard, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
      ON CONFLICT (guild_id, user_id) DO UPDATE SET
        public_profile = EXCLUDED.public_profile,
        show_anilist = EXCLUDED.show_anilist,
        show_steam = EXCLUDED.show_steam,
        allow_affinity = EXCLUDED.allow_affinity,
        server_taste_opt_in = EXCLUDED.server_taste_opt_in,
+       share_leaderboard = EXCLUDED.share_leaderboard,
        updated_at = NOW()`,
     [
       guildId, userId, next.public_profile, next.show_anilist, next.show_steam,
-      next.allow_affinity, next.server_taste_opt_in,
+      next.allow_affinity, next.server_taste_opt_in, next.share_leaderboard,
     ],
   );
   return next;
@@ -210,8 +213,8 @@ export async function getAniListAffinity(
     getProfilePreferences(guildId, firstUserId),
     getProfilePreferences(guildId, secondUserId),
   ]);
-  if (!firstPrefs.allow_affinity || !secondPrefs.allow_affinity || !firstPrefs.show_anilist || !secondPrefs.show_anilist) {
-    throw new Error("Both members must have AniList display and affinity sharing enabled.");
+  if (!firstPrefs.allow_affinity || !secondPrefs.allow_affinity) {
+    throw new Error("Both members must opt in to AniList affinity sharing.");
   }
   const [firstLink, secondLink] = await Promise.all([
     queryOne<{ anilist_username: string | null }>("SELECT anilist_username FROM users WHERE guild_id = $1 AND discord_id = $2", [guildId, firstUserId]),
@@ -233,6 +236,57 @@ export async function getAniListAffinity(
     sharedAnime: anime.shared.map((item) => item.genre),
     sharedManga: manga.shared.map((item) => item.genre),
   };
+}
+
+export type AniListLeaderboardMedium = "anime" | "manga";
+export interface AniListLeaderboardEntry {
+  userId: string;
+  aniListName: string;
+  entries: number;
+  meanScore: number;
+}
+
+export async function getAniListLeaderboard(
+  guildId: string,
+  memberIds: ReadonlySet<string>,
+  medium: AniListLeaderboardMedium,
+  aniList: AniListClient,
+): Promise<{ entries: AniListLeaderboardEntry[]; optedIn: number; checked: number }> {
+  const rows = await query<{ user_id: string; anilist_username: string }>(
+    `SELECT u.discord_id AS user_id, u.anilist_username
+       FROM users u
+       JOIN profile_preferences p ON p.guild_id = u.guild_id AND p.user_id = u.discord_id
+      WHERE u.guild_id = $1 AND p.share_leaderboard = TRUE
+        AND u.anilist_username IS NOT NULL
+      ORDER BY u.discord_id`,
+    [guildId],
+  );
+  const candidates = rows.filter(row => memberIds.has(row.user_id));
+  if (candidates.length < 3) throw new Error("The AniList leaderboard is hidden until at least three current server members opt in.");
+
+  const selected = candidates.slice(0, 100);
+  const entries: AniListLeaderboardEntry[] = [];
+  for (let index = 0; index < selected.length; index += 4) {
+    const batch = await Promise.all(selected.slice(index, index + 4).map(async row => {
+      try {
+        const profile = await aniList.getUser(row.anilist_username);
+        if (!profile) return null;
+        const stats = profile[medium];
+        return {
+          userId: row.user_id,
+          aniListName: profile.name,
+          entries: stats.count,
+          meanScore: stats.meanScore,
+        } satisfies AniListLeaderboardEntry;
+      } catch {
+        return null;
+      }
+    }));
+    entries.push(...batch.filter((entry): entry is AniListLeaderboardEntry => entry !== null));
+  }
+  if (entries.length < 3) throw new Error("The AniList leaderboard is hidden until at least three opted-in profiles can be retrieved.");
+  entries.sort((left, right) => right.entries - left.entries || right.meanScore - left.meanScore || left.aniListName.localeCompare(right.aniListName));
+  return { entries: entries.slice(0, 10), optedIn: candidates.length, checked: selected.length };
 }
 
 export async function getServerTaste(
