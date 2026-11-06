@@ -18,14 +18,16 @@ export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
  if(!["1","true","yes","on","0","false","no","off"].includes(pickerEnabled))throw new Error("CUSTOM_ROLES_PICKER_ENABLED must be a boolean.");
  const pickerHost=env.DASHBOARD_PICKER_HOST?.trim()||"127.0.0.1";
  const hostParts=pickerHost.split(".");
- const loopbackV4=hostParts.length===4&&Number(hostParts[0])===127&&hostParts.every(part=>/^\\d{1,3}$/.test(part)&&Number(part)>=0&&Number(part)<=255);
- const pickerHostAllowed=pickerHost==="localhost"||pickerHost==="::1"||loopbackV4;
+ const loopbackV4=hostParts.length===4&&Number(hostParts[0])===127&&hostParts.every(part=>part.length>0&&[...part].every(char=>char>="0"&&char<="9")&&Number(part)>=0&&Number(part)<=255);
+ const pickerHostAllowed=pickerHost==="localhost"||pickerHost==="::1"||pickerHost==="[::1]"||loopbackV4;
  if(!pickerHostAllowed)throw new Error("DASHBOARD_PICKER_HOST must be localhost or a loopback IPv4/IPv6 address.");
  let customRolesPublicUrl=env.CUSTOM_ROLES_PUBLIC_URL?.trim()||env.DASHBOARD_PUBLIC_URL?.trim()||"http://localhost:8080";
  if(customRolesPublicUrl.endsWith("/"))customRolesPublicUrl=customRolesPublicUrl.slice(0,-1);
  const pickerOrigin=new URL(customRolesPublicUrl);
  const localPickerOrigin=["localhost","127.0.0.1","[::1]"].includes(pickerOrigin.hostname);
  if(pickerOrigin.protocol!=="https:"&&!(pickerOrigin.protocol==="http:"&&localPickerOrigin))throw new Error("CUSTOM_ROLES_PUBLIC_URL must use HTTPS (HTTP only for loopback development).");
+ const pickerPort=positive(env.DASHBOARD_PICKER_PORT,8092,"DASHBOARD_PICKER_PORT");
+ if(pickerPort>65535)throw new Error("DASHBOARD_PICKER_PORT must be between 1 and 65535.");
  const pickerIdleTtl=Math.max(60,positive(env.CUSTOM_ROLES_PICKER_IDLE_TTL,3600,"CUSTOM_ROLES_PICKER_IDLE_TTL"));
  const pickerMaxTtl=Math.max(pickerIdleTtl,positive(env.CUSTOM_ROLES_PICKER_MAX_TTL,10800,"CUSTOM_ROLES_PICKER_MAX_TTL"));
  const trustProxy=(env.CUSTOM_ROLES_TRUST_PROXY?.trim().toLowerCase()??"false");
@@ -41,7 +43,7 @@ export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
  ...(env.STEAM_API_KEY?.trim()?{steamApiKey:env.STEAM_API_KEY.trim()}:{}),
  archiveUploadMaxBytes:Math.min(positive(env.ARCHIVE_UPLOAD_MAX_BYTES,20*1024*1024,"ARCHIVE_UPLOAD_MAX_BYTES"),20*1024*1024),
  customRolePickerEnabled:["1","true","yes","on"].includes(pickerEnabled),customRolePickerHost:pickerHost,
- customRolePickerPort:positive(env.DASHBOARD_PICKER_PORT,8092,"DASHBOARD_PICKER_PORT"),
+ customRolePickerPort:pickerPort,
  customRolePickerIdleTtl:pickerIdleTtl,customRolePickerMaxTtl:pickerMaxTtl,
  customRolesPublicUrl,customRolesTrustProxy:["1","true","yes","on"].includes(trustProxy),
  customRoleIconSourceMaxBytes:Math.max(256*1024,positive(env.CUSTOM_ROLES_ICON_SOURCE_MAX_BYTES,8*1024*1024,"CUSTOM_ROLES_ICON_SOURCE_MAX_BYTES")),
