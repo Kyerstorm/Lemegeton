@@ -1,0 +1,73 @@
+import {Client,Events,GatewayIntentBits,MessageFlags,type Interaction,type TextChannel} from "discord.js";
+import {loadConfig} from "./Helpers/config.js";
+import {configureLogger,logger} from "./Helpers/logger.js";
+import type {FeatureCommand} from "./Helpers/command.js";
+import {handleArchiveUploadMessage} from "./Helpers/archive.js";
+import {closeDatabase,initDatabase} from "./database.js";
+import {dueDailyDeliveries,dueDailySchedules,markDailyDelivery,prepareDailyDelivery} from "./Helpers/community.js";
+import {createCommandRegistry} from "./Src/registry.js";
+import {homeEmbed} from "./Helpers/discord.js";
+
+const config=loadConfig();configureLogger(config.logLevel);
+const client=new Client({intents:[GatewayIntentBits.Guilds,GatewayIntentBits.GuildMessages,GatewayIntentBits.MessageContent]});
+const commands=createCommandRegistry(config);
+const commandByName=new Map<string,FeatureCommand>(commands.map(command=>[command.data.name,command]));
+
+async function respondWithError(interaction:Interaction,message:string):Promise<void>{
+ if(!interaction.isRepliable())return;
+ try{if(interaction.deferred)await interaction.editReply({content:message,embeds:[],components:[]});
+ else if(interaction.replied)await interaction.followUp({content:message,flags:MessageFlags.Ephemeral});
+ else await interaction.reply({content:message,flags:MessageFlags.Ephemeral});}
+ catch(error){logger.warn("Failed to respond to interaction error",{reason:error instanceof Error?error.message:"Unknown error"});}
+}
+async function routeInteraction(interaction:Interaction):Promise<void>{
+ try{
+  if(interaction.isChatInputCommand()){const command=commandByName.get(interaction.commandName);if(!command){await interaction.reply({content:"That feature command is not available.",flags:MessageFlags.Ephemeral});return;}await command.execute(interaction);return;}
+  if(!interaction.isButton()&&!interaction.isStringSelectMenu()&&!interaction.isModalSubmit())return;
+  const prefix=interaction.customId.split(":",1)[0]??"";const command=commandByName.get(prefix);if(!command)return;
+  const handled=interaction.isButton()?await(command.handleButton?.(interaction)??false)
+   :interaction.isStringSelectMenu()?await(command.handleSelect?.(interaction)??false)
+   :await(command.handleModal?.(interaction)??false);
+  if(!handled&&!interaction.replied&&!interaction.deferred)await interaction.reply({content:"This control is no longer available. Reopen the feature command and try again.",flags:MessageFlags.Ephemeral});
+ }catch(error){const message=error instanceof Error?error.message:"Lemegeton could not complete that action.";logger.error("Discord interaction failed",{interactionId:interaction.id,reason:message});await respondWithError(interaction,message);}
+}
+client.once(Events.ClientReady,ready=>logger.info("Lemegeton TypeScript bot connected",{user:ready.user.tag,commands:commands.map(command=>command.data.name)}));
+client.on(Events.InteractionCreate,interaction=>void routeInteraction(interaction));
+client.on(Events.MessageCreate,message=>{
+ void handleArchiveUploadMessage(message,client).catch(async error=>{
+  logger.error("Archive upload processing failed",{guildId:message.guildId,channelId:message.channelId,reason:error instanceof Error?error.message:"Unknown error"});
+  if(!message.author.bot)await message.reply("The Archive could not store that upload privately. No public file link was created.").catch(()=>undefined);
+ });
+});
+
+let workerRunning=false;
+async function processDailyDrops():Promise<void>{
+ if(workerRunning||!client.isReady())return;workerRunning=true;
+ try{
+  for(const schedule of await dueDailySchedules()){
+   try{await prepareDailyDelivery(schedule);}
+   catch(error){logger.error("Could not prepare Daily Drop",{guildId:schedule.guild_id,reason:error instanceof Error?error.message:"Unknown error"});}
+  }
+  for(const delivery of await dueDailyDeliveries()){
+   try{
+    const channel=await client.channels.fetch(delivery.channel_id);
+    if(!channel||!channel.isTextBased()||!("send" in channel)){await markDailyDelivery(delivery.id,"pending",undefined,"Configured channel is unavailable.");continue;}
+    const message=await(channel as TextChannel).send({embeds:[homeEmbed(`Daily Drop · ${delivery.title}`,delivery.content,delivery.source_url?[{name:"Source",value:`[Open original source](${delivery.source_url})`}]:[])],allowedMentions:{parse:[]}});
+    await markDailyDelivery(delivery.id,"sent",message.id);
+   }catch(error){await markDailyDelivery(delivery.id,"pending",undefined,error instanceof Error?error.message:"Unknown delivery error").catch(()=>undefined);}
+  }
+ }catch(error){logger.error("Daily Drop worker failed",{reason:error instanceof Error?error.message:"Unknown error"});}
+ finally{workerRunning=false;}
+}
+let shuttingDown=false;
+async function shutdown(signal:NodeJS.Signals):Promise<void>{
+ if(shuttingDown)return;shuttingDown=true;logger.info("Shutting down Lemegeton",{signal});client.destroy();
+ await closeDatabase().catch(error=>logger.error("Database shutdown failed",{reason:error instanceof Error?error.message:"Unknown error"}));
+}
+async function start():Promise<void>{
+ await initDatabase();await client.login(config.discordToken);
+ const timer=setInterval(()=>void processDailyDrops(),30_000);timer.unref();
+ void processDailyDrops();
+}
+process.once("SIGINT",()=>void shutdown("SIGINT"));process.once("SIGTERM",()=>void shutdown("SIGTERM"));
+void start().catch(async error=>{logger.error("Lemegeton startup failed",{reason:error instanceof Error?error.message:"Unknown error"});await shutdown("SIGTERM");process.exitCode=1;});
