@@ -455,7 +455,7 @@ export class CustomRoleCommand implements FeatureCommand {
         const expires = Math.floor(picker.expiresAt / 1000);
         const latest = Math.floor(picker.maxExpiresAt / 1000);
         await interaction.reply({
-          content: "[Open the Custom Role Studio](<" + picker.url + ">)\\nThis private link expires <t:" + expires + ":R> without use and <t:" + latest + ":R> at the latest. It replaces any previous picker link for you. **Do not share it**: anyone with the link can change your role.",
+          content: "[Open the Custom Role Studio](<" + picker.url + ">)\nThis private link expires <t:" + expires + ":R> without use and <t:" + latest + ":R> at the latest. It replaces any previous picker link for you. **Do not share it**: anyone with the link can change your role.",
           flags: MessageFlags.Ephemeral,
         });
       } catch (error) {
