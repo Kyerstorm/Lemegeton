@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 export type AniListMediaType = "ANIME" | "MANGA";
 export interface AniListMedia {
   id:number; type:AniListMediaType;
@@ -81,14 +82,14 @@ function parseInterestSection(value:unknown):AniListUserInterests["anime"] {
  }
  return{genres:[...genres],tags:[...tags]};
 }
-const SEARCH=`query Search($search:String,$type:MediaType!,$format:MediaFormat,$sort:[MediaSort]){Page(page:1,perPage:10){media(search:$search,type:$type,format:$format,sort:$sort){id type title{romaji english native} description(asHtml:false) siteUrl coverImage{large} bannerImage averageScore status format startDate{year month day} episodes chapters volumes genres studios{nodes{name}} staff(page:1,perPage:8){nodes{name{full}}} relations{edges{relationType node{id type siteUrl title{romaji english}}}}}}}}`;
+const SEARCH=`query Search($search:String,$type:MediaType!,$format:MediaFormat,$sort:[MediaSort],$page:Int,$perPage:Int){Page(page:$page,perPage:$perPage){media(search:$search,type:$type,format:$format,sort:$sort){id type title{romaji english native} description(asHtml:false) siteUrl coverImage{large} bannerImage averageScore status format startDate{year month day} episodes chapters volumes genres studios{nodes{name}} staff(page:1,perPage:8){nodes{name{full}}} relations{edges{relationType node{id type siteUrl title{romaji english}}}}}}}}`;
 const USER=`query User($name:String){User(name:$name){id name siteUrl avatar{large} bannerImage about(asHtml:false) statistics{anime{count meanScore genres{genre count}} manga{count meanScore genres{genre count}}} favourites{anime(page:1,perPage:5){nodes{id siteUrl title{romaji english native} coverImage{large}}} manga(page:1,perPage:5){nodes{id siteUrl title{romaji english native} coverImage{large}}} characters(page:1,perPage:5){nodes{id siteUrl name{full} image{large}}}}}}}`;
 const TASTE=`query UserTaste($name:String){anime:MediaListCollection(userName:$name,type:ANIME){lists{entries{media{genres tags{name rank isMediaSpoiler}}}}} manga:MediaListCollection(userName:$name,type:MANGA){lists{entries{media{genres tags{name rank isMediaSpoiler}}}}}}}`;
 const AIRING=`query Airing($from:Int,$to:Int){Page(page:1,perPage:50){airingSchedules(airingAt_greater:$from,airingAt_lesser:$to,sort:TIME){airingAt episode media{id title{romaji english} siteUrl coverImage{large} isAdult}}}}`;
 export class AniListError extends Error {constructor(message:string,readonly statusCode?:number){super(message);this.name="AniListError";}}
 export class AniListClient {
  constructor(private readonly endpoint="https://graphql.anilist.co",private readonly timeoutMs=10000,private readonly fetcher:typeof fetch=globalThis.fetch){}
- async search(query:string,type:AniListMediaType,lightNovelOnly=false):Promise<AniListMedia[]>{return this.searchQuery({search:query.trim(),type,...(lightNovelOnly?{format:"LIGHT_NOVEL"}:{}),sort:"SEARCH_MATCH"});}
+ async search(query:string,type:AniListMediaType,lightNovelOnly=false):Promise<AniListMedia[]>{return this.searchQuery({search:query.trim(),type,...(lightNovelOnly?{format:"NOVEL"}:{}),sort:"SEARCH_MATCH"});} async random(type:AniListMediaType,lightNovelOnly=false):Promise<AniListMedia[]>{return this.searchQuery({type,...(lightNovelOnly?{format:"NOVEL"}:{}),sort:"POPULARITY_DESC",page:randomInt(1,201),perPage:10});}
  async trending(type:AniListMediaType):Promise<AniListMedia[]>{return this.searchQuery({type,sort:"TRENDING_DESC"});}
  async recommendations(id:number,type:AniListMediaType):Promise<AniListMedia[]>{
   const data=await this.graphql(`query Recs($id:Int,$type:MediaType!){Media(id:$id,type:$type){recommendations(sort:RATING,perPage:10){nodes{mediaRecommendation{id type title{romaji english native} description(asHtml:false) siteUrl coverImage{large} bannerImage averageScore status format startDate{year month day} episodes chapters volumes genres}}}}}}`,{id,type});
@@ -110,7 +111,7 @@ export class AniListClient {
   const p=isObj(data.Page)?data.Page:{};const rows=Array.isArray(p.airingSchedules)?p.airingSchedules:[];
   return rows.flatMap(x=>{if(!isObj(x)||!isObj(x.media)||x.media.isAdult===true)return[];const m=x.media;const id=num(m.id),at=num(x.airingAt),ep=num(x.episode),url=str(m.siteUrl);if(!id||!at||ep===null||!url?.startsWith("https://anilist.co/"))return[];return[{mediaId:id,title:titleOf(m.title),episode:ep,airingAt:at,url,image:imageOf(m.coverImage)}];});
  }
- private async searchQuery(vars:Record<string,unknown>):Promise<AniListMedia[]>{const d=await this.graphql(SEARCH,vars);const p=isObj(d.Page)?d.Page:{};return(Array.isArray(p.media)?p.media:[]).flatMap(x=>{const m=parseMedia(x);return m?[m]:[];});}
+ private async searchQuery(vars:Record<string,unknown>):Promise<AniListMedia[]>{const d=await this.graphql(SEARCH,{page:1,perPage:10,...vars});const p=isObj(d.Page)?d.Page:{};return(Array.isArray(p.media)?p.media:[]).flatMap(x=>{const m=parseMedia(x);return m?[m]:[];});}
  private async graphql(query:string,variables:Record<string,unknown>):Promise<Obj>{
   let response:Response;try{response=await this.fetcher(this.endpoint,{method:"POST",headers:{"Content-Type":"application/json",Accept:"application/json"},body:JSON.stringify({query,variables}),signal:AbortSignal.timeout(this.timeoutMs)});}catch(e){throw new AniListError(e instanceof Error&&["TimeoutError","AbortError"].includes(e.name)?"AniList request timed out.":"AniList could not be reached.");}
   if(!response.ok)throw new AniListError(`AniList returned HTTP ${response.status}.`,response.status);const payload:unknown=await response.json();if(!isObj(payload)||Array.isArray(payload.errors)||!isObj(payload.data))throw new AniListError("AniList returned no usable data.");return payload.data;

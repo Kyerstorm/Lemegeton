@@ -5,6 +5,7 @@ import {isValidHttpsUrl,normalizeTags} from "../Helpers/security.js";
 import {validateSteamId} from "../Helpers/steam.js";
 import {nextLocalOccurrence} from "../Helpers/community.js";
 import {classifyArchiveUpload} from "../Helpers/media-storage.js";
+import {AniListClient} from "../Helpers/anilist.js";
 import {normalizeAtlasTitle,normalizeAtlasCategory,safeAtlasUrl} from "../Helpers/atlas.js";
 import {FEATURE_NAMES,isFeatureName} from "../Helpers/settings.js";
 
@@ -50,4 +51,19 @@ test("Server settings expose only the five registered feature environments",()=>
  assert.deepEqual(FEATURE_NAMES,["discover","archive","community","play","profile"]);
  assert.equal(isFeatureName("archive"),true);
  assert.equal(isFeatureName("custom-role"),false);
+});
+
+test("AniList random discovery samples a catalogue page rather than the trending feed", async () => {
+ const captured: {body?:{query:string;variables:Record<string,unknown>}} = {};
+ const client = new AniListClient(undefined, 1000, async (_input, init) => {
+  captured.body = JSON.parse(String(init?.body)) as {query:string;variables:Record<string,unknown>};
+  return new Response(JSON.stringify({data:{Page:{media:[]}}}), {status:200,headers:{"content-type":"application/json"}});
+ });
+ await client.random("ANIME");
+ assert.ok(captured.body);
+ assert.equal(captured.body.variables.type,"ANIME");
+ assert.equal(captured.body.variables.sort,"POPULARITY_DESC");
+ assert.equal(captured.body.variables.perPage,10);
+ assert.ok(Number(captured.body.variables.page)>=1 && Number(captured.body.variables.page)<=200);
+ assert.match(captured.body.query,/Page\(page:\$page,perPage:\$perPage\)/);
 });

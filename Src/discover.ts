@@ -277,9 +277,8 @@ export class DiscoverCommand implements FeatureCommand {
     }
     if (action === "random" && CATEGORIES.some((item) => item.value === categoryValue)) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const results = await this.fetchTrending(categoryValue as Category);
-      const selected = results.length ? [results[randomInt(results.length)]!] : [];
-      await this.presentResults(interaction, selected, `Random discovery · ${categoryLabel(categoryValue as Category)}`);
+      const results = await this.fetchRandom(categoryValue as Category);
+      await this.presentResults(interaction, results, `Random discovery · ${categoryLabel(categoryValue as Category)}`);
       return true;
     }
     if (action === "recommend" && (categoryValue === "ANIME" || categoryValue === "MANGA") && maybeId) {
@@ -420,6 +419,28 @@ export class DiscoverCommand implements FeatureCommand {
       case "tv": return (await this.tmdb.search(query, "tv")).map((item) => ({ provider: "TMDB", category: "tv", item }));
       case "game": return (await this.igdb.search(query)).map((item) => ({ provider: "IGDB", category: "game", item }));
     }
+  }
+
+  private async fetchRandom(category: Category): Promise<SearchRecord[]> {
+    const categories: Exclude<Category, "all">[] = category === "all"
+      ? ["anime", "manga", "light_novel", "book", "movie", "tv", "game"]
+      : [category];
+    const load = async (item: Exclude<Category, "all">): Promise<SearchRecord[]> => {
+      switch (item) {
+        case "anime": return (await this.anilist.random("ANIME")).map((media) => anilistRecord(media, "anime"));
+        case "manga": return (await this.anilist.random("MANGA")).map((media) => anilistRecord(media, "manga"));
+        case "light_novel": return (await this.anilist.random("MANGA", true)).map((media) => anilistRecord(media, "light_novel"));
+        case "book": return (await this.books.random()).map((media) => ({ provider: "Google Books", category: "book", item: media }));
+        case "movie": return (await this.tmdb.random("movie")).map((media) => ({ provider: "TMDB", category: "movie", item: media }));
+        case "tv": return (await this.tmdb.random("tv")).map((media) => ({ provider: "TMDB", category: "tv", item: media }));
+        case "game": return (await this.igdb.random()).map((media) => ({ provider: "IGDB", category: "game", item: media }));
+      }
+    };
+    const batches = await Promise.allSettled(categories.map(load));
+    return batches.flatMap((batch) => {
+      if (batch.status !== "fulfilled" || !batch.value.length) return [];
+      return [batch.value[randomInt(batch.value.length)]!];
+    });
   }
 
   private async fetchTrending(category: Category): Promise<SearchRecord[]> {
