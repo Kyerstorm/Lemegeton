@@ -237,7 +237,10 @@ export async function updateCustomRole(
     assignments.push(`${column} = $${values.length}`);
   };
   if (fields.name !== undefined) add("name", fields.name);
+  if (fields.color_mode !== undefined) add("color_mode", fields.color_mode);
   if (fields.primary_color !== undefined) add("primary_color", fields.primary_color);
+  if (fields.secondary_color !== undefined) add("secondary_color", fields.secondary_color);
+  if (fields.icon_emoji !== undefined) add("icon_emoji", fields.icon_emoji);
   if (fields.status !== undefined) add("status", fields.status);
   if (fields.role_id !== undefined) add("role_id", fields.role_id);
   if (changed) assignments.push("last_changed_at = NOW()");
