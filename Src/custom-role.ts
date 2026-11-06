@@ -733,17 +733,19 @@ export class CustomRoleCommand implements FeatureCommand {
     const selectedArchives = archiveIneligible
       ? latest.not_qualifying.filter(entry => preview.notQualifyingIds.includes(entry.user_id))
       : [];
-    let takenOver = 0;
     let archived = 0;
     let skipped = 0;
     const errors: string[] = [];
 
-    const takeOver = async (entry: { user_id: string; role_id: string; role_name: string | null }) => {
+    const takeOver = async (
+      entry: { user_id: string; role_id: string; role_name: string | null },
+      allowMissingMember: boolean,
+    ): Promise<boolean> => {
       const member = await guild.members.fetch(entry.user_id).catch(() => null);
       const role = await guild.roles.fetch(entry.role_id).catch(() => null);
-      if (!member || !role) {
+      if (!role || (!member && !allowMissingMember)) {
         skipped += 1;
-        return;
+        return false;
       }
 
       const primary = role.color || 0x010101;
@@ -755,10 +757,10 @@ export class CustomRoleCommand implements FeatureCommand {
       const secondaryColor = hasSecondary ? roleColors?.secondaryColor ?? null : null;
       const emoji = role.unicodeEmoji ?? null;
 
-      const previousIcon = await getCustomRoleIconData(guild.id, member.id);
+      const previousIcon = await getCustomRoleIconData(guild.id, entry.user_id);
       await saveCustomRole({
         guild_id: guild.id,
-        user_id: member.id,
+        user_id: entry.user_id,
         role_id: role.id,
         position_hint: role.position,
         status: "active",
@@ -768,7 +770,7 @@ export class CustomRoleCommand implements FeatureCommand {
         secondary_color: secondaryColor,
         icon_emoji: emoji,
       });
-      await updateCustomRole(guild.id, member.id, {
+      await updateCustomRole(guild.id, entry.user_id, {
         icon_png: null,
         icon_crop: null,
         icon_source_asset_id: null,
@@ -787,11 +789,11 @@ export class CustomRoleCommand implements FeatureCommand {
             const processed = await processCustomRoleIconImage(original);
             const assetId = await storeCustomRoleIconSource(
               guild.id,
-              member.id,
+              entry.user_id,
               original,
               processed.sourceType === "png" ? "image/png" : "image/jpeg",
             );
-            await updateCustomRole(guild.id, member.id, {
+            await updateCustomRole(guild.id, entry.user_id, {
               icon_png: processed.png,
               icon_emoji: null,
               icon_crop: JSON.stringify(processed.crop),
@@ -801,16 +803,17 @@ export class CustomRoleCommand implements FeatureCommand {
             errors.push("Could not preserve the image icon for " + role.name + ".");
           }
         } catch {
-          errors.push("Could not preserve the image icon for " + role.name + "; the Discord role itself was left unchanged.");
+          errors.push("Could not preserve the image icon for " + role.name + ".");
         }
       }
-      takenOver += 1;
+      return true;
     };
+
 
     for (let index = 0; index < selectedTakeOvers.length; index += 1) {
       const entry = selectedTakeOvers[index]!;
       try {
-        await takeOver(entry);
+        if (!await takeOver(entry, false)) continue;
       } catch (error) {
         skipped += 1;
         errors.push("Skipped " + (entry.role_name ?? entry.role_id) + ": " + (error instanceof Error ? error.message : "unknown error"));
@@ -821,7 +824,7 @@ export class CustomRoleCommand implements FeatureCommand {
     for (let index = 0; index < selectedArchives.length; index += 1) {
       const entry = selectedArchives[index]!;
       try {
-        await takeOver(entry);
+        if (!await takeOver(entry, true)) continue;
         const result = await archiveLegacyCustomRole(guild, entry.user_id, interaction.user.id);
         if (result) archived += 1;
         else skipped += 1;
@@ -836,7 +839,7 @@ export class CustomRoleCommand implements FeatureCommand {
       "Legacy import complete. Took over " + takenOver + ", archived " + archived + ", skipped " + skipped + "." +
       (errors.length ? "\n" + errors.slice(0, 8).join("\n").slice(0, 1200) : ""),
     );
-    await this.logEvent(guild, settings, "Imported legacy booster roles: took over " + takenOver + ", archived " + archived + ", skipped " + skipped + ".");
+    await this.logEvent(guild, settings, "Imported legacy booster roles: linked eligible records, archived " + archived + ", skipped " + skipped + ".");
   }
 
   private async showManagedMemberRole(
