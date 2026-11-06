@@ -202,6 +202,18 @@ function weightedGenreOverlap(
   return { percent: maximum ? Math.round((minimum / maximum) * 100) : 0, shared };
 }
 
+export function getAniListProfileAchievements(profile: AniListUserProfile): Array<{ title: string; detail: string }> {
+  const achievements: Array<{ title: string; detail: string }> = [];
+  if (profile.anime.count >= 100) achievements.push({ title: "Anime shelf", detail: "100+ entries on the linked AniList profile" });
+  if (profile.anime.count >= 500) achievements.push({ title: "Anime archive", detail: "500+ entries on the linked AniList profile" });
+  if (profile.manga.count >= 50) achievements.push({ title: "Manga shelf", detail: "50+ entries on the linked AniList profile" });
+  if (profile.manga.count >= 200) achievements.push({ title: "Manga archive", detail: "200+ entries on the linked AniList profile" });
+  if (profile.anime.count >= 10 && profile.anime.meanScore >= 80) {
+    achievements.push({ title: "High anime average", detail: "AniList-reported mean score of 80 or higher across 10+ entries" });
+  }
+  return achievements;
+}
+
 export async function getAniListAffinity(
   guildId: string,
   firstUserId: string,
@@ -242,6 +254,7 @@ export type AniListLeaderboardMedium = "anime" | "manga";
 export interface AniListLeaderboardEntry {
   userId: string;
   aniListName: string;
+  aniListUrl: string;
   entries: number;
   meanScore: number;
 }
@@ -275,6 +288,7 @@ export async function getAniListLeaderboard(
         return {
           userId: row.user_id,
           aniListName: profile.name,
+          aniListUrl: profile.url,
           entries: stats.count,
           meanScore: stats.meanScore,
         } satisfies AniListLeaderboardEntry;
