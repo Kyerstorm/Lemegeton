@@ -1,73 +1,57 @@
-use axum::{
-    body::Body,
-    extract::Path,
-    http::{header, StatusCode},
-    response::{Html, IntoResponse, Response},
-};
+use axum::{body::Body,http::{header,StatusCode},response::{IntoResponse,Response}};
+use axum::extract::Path;
+use std::path::Path as FsPath;
 
-const APP_SHELL: &str = r####"<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#090a09">
-  <meta name="color-scheme" content="dark">
-  <title>Lemegeton / Control</title>
-  <link rel="stylesheet" href="/static/app.css">
-  <script src="/static/app.js" defer></script>
-</head>
-<body>
-  <div id="app"><main class="boot-screen"><span class="boot-mark">L.</span><p>Loading Lemegeton Control Plane…</p></main></div>
-  <noscript>This dashboard requires JavaScript. Enable JavaScript and reload to continue.</noscript>
-</body>
-</html>
-"####;
-
-pub fn dashboard_html() -> Html<&'static str> {
-    Html(APP_SHELL)
+async fn export_page(path: &str) -> Response {
+    match tokio::fs::read(path).await {
+        Ok(contents) => Response::builder()
+            .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+            .header(header::CACHE_CONTROL, "no-store")
+            .body(Body::from(contents))
+            .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Could not serve the dashboard page").into_response()),
+        Err(_) => (StatusCode::SERVICE_UNAVAILABLE,
+            "The Next.js dashboard has not been exported. Run npm install --prefix dashboard-frontend && npm run build --prefix dashboard-frontend.").into_response(),
+    }
 }
 
-pub fn login_html() -> Html<&'static str> {
-    Html(APP_SHELL)
+pub async fn dashboard_html() -> Response {
+    export_page("dashboard-frontend/out/index.html").await
 }
 
-pub async fn static_asset(Path(filename): Path<String>) -> Response {
-    let (content_type, disk_path) = match filename.as_str() {
-        "app.js" => ("application/javascript; charset=utf-8", "dashboard-frontend/dist/app.js"),
-        "app.css" => ("text/css; charset=utf-8", "dashboard-frontend/dist/app.css"),
+pub async fn login_html() -> Response {
+    export_page("dashboard-frontend/out/login/index.html").await
+}
+
+pub async fn next_asset(Path(path): Path<String>) -> Response {
+    if path.is_empty() || path.split('/').any(|part| part.is_empty() || part == "." || part == "..") {
+        return (StatusCode::NOT_FOUND, "Asset not found").into_response();
+    }
+    let root = FsPath::new("dashboard-frontend/out/_next");
+    let disk_path = root.join(&path);
+    if !disk_path.starts_with(root) {
+        return (StatusCode::NOT_FOUND, "Asset not found").into_response();
+    }
+    let content_type = match disk_path.extension().and_then(|value| value.to_str()).unwrap_or("") {
+        "js" | "mjs" => "application/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "json" => "application/json; charset=utf-8",
+        "woff" => "font/woff",
+        "woff2" => "font/woff2",
+        "ttf" => "font/ttf",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "ico" => "image/x-icon",
         _ => return (StatusCode::NOT_FOUND, "Asset not found").into_response(),
     };
-    let contents = match tokio::fs::read(disk_path).await {
+    let contents = match tokio::fs::read(&disk_path).await {
         Ok(contents) => contents,
-        Err(_) => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "Frontend assets are not built. Run npm install --prefix dashboard-frontend && npm run build --prefix dashboard-frontend.",
-            ).into_response();
-        }
+        Err(_) => return (StatusCode::NOT_FOUND, "Asset not found").into_response(),
     };
     Response::builder()
         .header(header::CONTENT_TYPE, content_type)
-        .header(header::CACHE_CONTROL, "no-store")
+        .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
         .body(Body::from(contents))
-        .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Could not serve frontend asset").into_response())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn shell_loads_the_typescript_frontend_bundle_and_external_styles() {
-        assert!(APP_SHELL.contains("<div id=\"app\">"));
-        assert!(APP_SHELL.contains("/static/app.js"));
-        assert!(APP_SHELL.contains("/static/app.css"));
-        assert!(APP_SHELL.contains("<noscript>"));
-        assert!(!APP_SHELL.contains("data-view="));
-    }
-
-    #[test]
-    fn dashboard_and_login_share_the_same_spa_shell() {
-        assert_eq!(dashboard_html().0, login_html().0);
-    }
+        .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Could not serve dashboard asset").into_response())
 }
