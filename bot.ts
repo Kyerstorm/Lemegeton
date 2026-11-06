@@ -74,7 +74,7 @@ async function routeInteraction(interaction:Interaction):Promise<void>{
   if(!interaction.isButton()&&!interaction.isStringSelectMenu()&&!interaction.isRoleSelectMenu()&&!interaction.isChannelSelectMenu()&&!interaction.isModalSubmit())return;
   const prefix=interaction.customId.split(":",1)[0]??"";const command=commandByName.get(prefix);if(!command)return;
   const handled=interaction.isButton()?await(command.handleButton?.(interaction)??false)
-   :interaction.isStringSelectMenu()?await(command.handleSelect?.(interaction)??false)
+   :(interaction.isStringSelectMenu()||interaction.isRoleSelectMenu()||interaction.isChannelSelectMenu())?await(command.handleSelect?.(interaction)??false)
    :await(command.handleModal?.(interaction)??false);
   if(!handled&&!interaction.replied&&!interaction.deferred)await interaction.reply({content:"This control is no longer available. Reopen the feature command and try again.",flags:MessageFlags.Ephemeral});
  }catch(error){const message=error instanceof Error?error.message:"Lemegeton could not complete that action.";logger.error("Discord interaction failed",{interactionId:interaction.id,reason:message});await respondWithError(interaction,message);}
