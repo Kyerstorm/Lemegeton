@@ -11,9 +11,10 @@ import {dueDailyDeliveries,dueDailySchedules,markDailyDelivery,prepareDailyDeliv
 import {createCommandRegistry} from "./Src/registry.js";
 import {isFeatureEnabled} from "./Helpers/settings.js";
 import {homeEmbed} from "./Helpers/discord.js";
+import {onCustomRoleMemberAdd,onCustomRoleMemberRemove,onCustomRoleMemberUpdate,reconcileCustomRoleGuild} from "./Helpers/custom-role-lifecycle.js";
 
 const config=loadConfig();configureLogger(config.logLevel);
-const client=new Client({intents:[GatewayIntentBits.Guilds,GatewayIntentBits.GuildMessages,GatewayIntentBits.MessageContent]});
+const client=new Client({intents:[GatewayIntentBits.Guilds,GatewayIntentBits.GuildMembers,GatewayIntentBits.GuildMessages,GatewayIntentBits.MessageContent]});
 const commands=createCommandRegistry(config);
 const commandByName=new Map<string,FeatureCommand>(commands.map(command=>[command.data.name,command]));
 let atlasBridge: Server | undefined;
@@ -79,7 +80,27 @@ async function routeInteraction(interaction:Interaction):Promise<void>{
   if(!handled&&!interaction.replied&&!interaction.deferred)await interaction.reply({content:"This control is no longer available. Reopen the feature command and try again.",flags:MessageFlags.Ephemeral});
  }catch(error){const message=error instanceof Error?error.message:"Lemegeton could not complete that action.";logger.error("Discord interaction failed",{interactionId:interaction.id,reason:message});await respondWithError(interaction,message);}
 }
-client.once(Events.ClientReady,ready=>logger.info("Lemegeton TypeScript bot connected",{user:ready.user.tag,commands:commands.map(command=>command.data.name)}));
+client.once(Events.ClientReady,ready=>{
+ logger.info("Lemegeton TypeScript bot connected",{user:ready.user.tag,commands:commands.map(command=>command.data.name)});
+ for(const guild of ready.guilds.cache.values()){
+  void reconcileCustomRoleGuild(guild).catch(error=>logger.error("Initial Custom Roles reconciliation failed",{guildId:guild.id,reason:error instanceof Error?error.message:"Unknown error"}));
+ }
+ const reconcileTimer=setInterval(()=>{
+  for(const guild of client.guilds.cache.values()){
+   void reconcileCustomRoleGuild(guild).catch(error=>logger.error("Custom Roles reconciliation failed",{guildId:guild.id,reason:error instanceof Error?error.message:"Unknown error"}));
+  }
+ },30*60_000);
+ reconcileTimer.unref();
+});
+client.on(Events.GuildMemberUpdate,(oldMember,newMember)=>{
+ void onCustomRoleMemberUpdate(oldMember,newMember).catch(error=>logger.error("Custom Roles member update failed",{guildId:newMember.guild.id,userId:newMember.id,reason:error instanceof Error?error.message:"Unknown error"}));
+});
+client.on(Events.GuildMemberRemove,member=>{
+ void onCustomRoleMemberRemove(member).catch(error=>logger.error("Custom Roles member removal failed",{guildId:member.guild.id,userId:member.id,reason:error instanceof Error?error.message:"Unknown error"}));
+});
+client.on(Events.GuildMemberAdd,member=>{
+ void onCustomRoleMemberAdd(member).catch(error=>logger.error("Custom Roles member restoration failed",{guildId:member.guild.id,userId:member.id,reason:error instanceof Error?error.message:"Unknown error"}));
+});
 client.on(Events.InteractionCreate,interaction=>void routeInteraction(interaction));
 client.on(Events.MessageCreate,message=>{
  void handleArchiveUploadMessage(message,client).catch(async error=>{
