@@ -1,4 +1,4 @@
-import { type Guild, type GuildMember } from "discord.js";
+import { PermissionFlagsBits, type Guild, type GuildMember } from "discord.js";
 import { logger } from "./logger.js";
 import {
   HOLOGRAPHIC_COLORS,
@@ -111,7 +111,7 @@ async function archiveOne(guild: Guild, userId: string, reason: string): Promise
 
     if (role) {
       const botMember = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
-      if (!botMember || !botMember.permissions.has("ManageRoles")
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageRoles)
         || role.position >= botMember.roles.highest.position) {
         logger.warn("Skipped Custom Role archive because role hierarchy or permissions are unsafe", {
           guildId: guild.id, userId, roleId: role.id,
@@ -249,7 +249,10 @@ async function restoreSavedRole(member: GuildMember): Promise<boolean> {
   return withLock(guild.id, member.id, async () => {
     const record = await getCustomRoleRecord(guild.id, member.id);
     if (!record || (record.status !== "saved" && record.status !== "missing")) return false;
-    const existing = record.role_id ? await guild.roles.fetch(record.role_id).catch(() => null) : null;
+    const existing = record.role_id ? await guild.roles.fetch(record.role_id).catch(error => {
+      if (isMissing(error)) return null;
+      throw error;
+    }) : null;
     if (existing) {
       if (!member.roles.cache.has(existing.id)) await member.roles.add(existing, "Custom Roles: restore eligibility");
       await updateCustomRole(guild.id, member.id, { status: "active", name: existing.name });
@@ -258,7 +261,7 @@ async function restoreSavedRole(member: GuildMember): Promise<boolean> {
 
     const botMember = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
     const anchor = await guild.roles.fetch(settings.anchor_role_id).catch(() => null);
-    if (!botMember || !botMember.permissions.has("ManageRoles") || !anchor
+    if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageRoles) || !anchor
       || anchor.position >= botMember.roles.highest.position || guild.roles.cache.size >= 250) return false;
 
     const enhanced = guild.features.includes("ENHANCED_ROLE_COLORS");
