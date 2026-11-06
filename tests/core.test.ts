@@ -96,8 +96,8 @@ test("Custom role image icons validate PNG/JPEG data and crop to bounded square 
  assert.deepEqual([...cropped.png.subarray(0,8)],[137,80,78,71,13,10,26,10]);
  const jpeg=await sharp(png).jpeg().toBuffer();
  assert.equal((await processCustomRoleIconImage(jpeg)).sourceType,"jpeg");
- assert.rejects(()=>processCustomRoleIconImage(Buffer.from("not an image")));
- assert.rejects(()=>processCustomRoleIconImage(png,{x:100,y:90,size:80}),/doesn't fit/);
+ await assert.rejects(()=>processCustomRoleIconImage(Buffer.from("not an image")));
+ await assert.rejects(()=>processCustomRoleIconImage(png,{x:100,y:90,size:80}),/doesn't fit/);
 });
 
 test("Custom role avatar palette ignores transparent pixels and returns distinct RGB colors",async()=>{
