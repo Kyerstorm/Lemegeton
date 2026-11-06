@@ -521,6 +521,26 @@ export async function initDatabase(): Promise<void> {
     await client.query("BEGIN");
     for (const statement of schemaStatements) await client.query(statement);
 
+    const legacyRoleColumns = await client.query<{ column_name: string; data_type: string }>(
+      `SELECT column_name, data_type FROM information_schema.columns
+       WHERE table_schema = current_schema() AND table_name = 'booster_roles'
+         AND column_name = ANY($1::text[])`,
+      [["discord_id", "guild_id", "role_id"]],
+    );
+    if (legacyRoleColumns.rows.length === 3) {
+      const types = new Map(legacyRoleColumns.rows.map(row => [row.column_name, row.data_type]));
+      for (const column of ["discord_id", "guild_id", "role_id"] as const) {
+        if (types.get(column) !== "bigint") {
+          await client.query(
+            `ALTER TABLE booster_roles ALTER COLUMN ${column} TYPE BIGINT USING ${column}::BIGINT`,
+          );
+        }
+      }
+      logger.info("Legacy booster role identifiers widened to BIGINT for Discord snowflakes");
+    } else if (legacyRoleColumns.rows.length > 0) {
+      logger.warn("Legacy booster_roles table is incomplete; its records were not changed");
+    }
+
     const defaultGuildId = process.env.GUILD_ID?.trim() || process.env.PRIMARY_GUILD_ID?.trim() || "897814031346319382";
     if (!/^\d{17,20}$/.test(defaultGuildId)) throw new Error("GUILD_ID / PRIMARY_GUILD_ID must be a valid Discord snowflake.");
     await client.query("UPDATE steam_users SET guild_id = $1 WHERE guild_id IS NULL", [defaultGuildId]);
