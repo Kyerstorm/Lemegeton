@@ -1,5 +1,5 @@
 import { type Guild, type GuildMember, type Role } from "discord.js";
-import { queryOne } from "../database.js";
+import { query, queryOne } from "../database.js";
 
 export interface CustomRoleSettings {
   guild_id: string;
@@ -252,6 +252,59 @@ export async function updateCustomRole(
     `UPDATE custom_role_records SET ${assignments.join(", ")} WHERE guild_id = $1 AND user_id = $2 RETURNING guild_id`,
     values,
   );
+}
+
+export function parseCustomRoleWordList(raw: string): string[] {
+  const seen = new Set<string>();
+  const words: string[] = [];
+  for (const part of raw.replace(/,/g, "\\n").split(/\\r?\\n/)) {
+    const word = part.normalize("NFKC").replace(/\\s+/g, " ").trim().toLocaleLowerCase();
+    if (!word || word.length > 40 || !/[\\p{L}\\p{N}]/u.test(word) || seen.has(word)) continue;
+    seen.add(word);
+    words.push(word);
+  }
+  return words;
+}
+
+export async function addCustomRoleBlockedWord(
+  guildId: string,
+  raw: string,
+): Promise<{ ok: boolean; message: string }> {
+  const word = raw.normalize("NFKC").replace(/\\s+/g, " ").trim().toLocaleLowerCase();
+  if (!word || word.length > 40 || !/[\\p{L}\\p{N}]/u.test(word)) {
+    return { ok: false, message: "Blocked words must be 1–40 characters and include a letter or number." };
+  }
+  const settings = await getCustomRoleSettings(guildId);
+  if ((DEFAULT_PROTECTED_WORDS as readonly string[]).includes(word)) {
+    if (!settings.removed_default_words.includes(word)) {
+      return { ok: false, message: `**${word}** is already a built-in protected word.` };
+    }
+    await updateCustomRoleSettings(guildId, {
+      removed_default_words: settings.removed_default_words.filter(item => item !== word),
+    });
+    return { ok: true, message: `Built-in protected word **${word}** is back on.` };
+  }
+  if (settings.blocked_words.includes(word)) return { ok: false, message: `**${word}** is already blocked.` };
+  await updateCustomRoleSettings(guildId, { blocked_words: [...settings.blocked_words, word] });
+  return { ok: true, message: `Blocked **${word}** anywhere in custom role names.` };
+}
+
+export async function removeCustomRoleBlockedWord(
+  guildId: string,
+  raw: string,
+): Promise<{ ok: boolean; message: string }> {
+  const word = raw.normalize("NFKC").replace(/\\s+/g, " ").trim().toLocaleLowerCase();
+  const settings = await getCustomRoleSettings(guildId);
+  if (settings.blocked_words.includes(word)) {
+    await updateCustomRoleSettings(guildId, { blocked_words: settings.blocked_words.filter(item => item !== word) });
+    return { ok: true, message: `Unblocked **${word}**.` };
+  }
+  if ((DEFAULT_PROTECTED_WORDS as readonly string[]).includes(word)) {
+    if (settings.removed_default_words.includes(word)) return { ok: false, message: `Built-in word **${word}** is already off.` };
+    await updateCustomRoleSettings(guildId, { removed_default_words: [...settings.removed_default_words, word] });
+    return { ok: true, message: `Built-in protected word **${word}** is now off.` };
+  }
+  return { ok: false, message: `**${word || raw}** isn't on the blocked list.` };
 }
 
 export function customRoleEligibility(member: GuildMember, settings: CustomRoleSettings): boolean {
