@@ -177,20 +177,18 @@ function moveModal(userId: string, placement: "above" | "below"): ModalBuilder {
 }
 
 function wordsModal(userId: string, blockedWords: string[], removedDefaults: string[]): ModalBuilder {
+  const block = new TextInputBuilder().setCustomId("block").setLabel("Block words / re-enable built-ins")
+    .setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500);
+  const unblock = new TextInputBuilder().setCustomId("unblock").setLabel("Unblock words / disable built-ins")
+    .setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500);
+  if (blockedWords.length) block.setValue(blockedWords.join(", ").slice(0, 500));
+  if (removedDefaults.length) unblock.setValue(removedDefaults.join(", ").slice(0, 500));
   return new ModalBuilder()
     .setCustomId(userCustomId(userId, "words"))
     .setTitle("Custom role name restrictions")
     .addComponents(
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId("block").setLabel("Block words / re-enable built-ins")
-          .setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500)
-          .setValue(blockedWords.join(", ").slice(0, 500)),
-      ),
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId("unblock").setLabel("Unblock words / disable built-ins")
-          .setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500)
-          .setValue(removedDefaults.join(", ").slice(0, 500)),
-      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(block),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(unblock),
     );
 }
 
@@ -479,7 +477,7 @@ export class CustomRoleCommand implements FeatureCommand {
         outcomes.push(`${result.ok ? "✓" : "·"} ${result.message}`);
       }
       await interaction.reply({
-        content: `**Custom role name restrictions**\\n${outcomes.join("\\n").slice(0, 1800)}\\n\\nThese rules are applied to new names and edits. Existing roles are not renamed automatically yet.`,
+        content: "**Custom role name restrictions**\\n" + outcomes.join("\\n").slice(0, 1800) + "\\n\\nThese rules are applied to new names and edits. Existing roles are not renamed automatically yet.",
         flags: MessageFlags.Ephemeral,
       });
       return true;
