@@ -15,14 +15,17 @@ import {
 } from "discord.js";
 import type { FeatureCommand } from "../Helpers/command.js";
 import type { BotConfig } from "../Helpers/config.js";
-import { AniListClient, type AniListMedia, type AniListMediaType } from "../Helpers/anilist.js";
+import { AniListClient, type AniListMedia, type AniListMediaType, type AniListSearchFilters } from "../Helpers/anilist.js";
 import { GoogleBooksClient, type GoogleBook } from "../Helpers/google-books.js";
 import { IgdbClient, type IgdbGame } from "../Helpers/igdb.js";
 import { homeEmbed, navigationButtons } from "../Helpers/discord.js";
 import { TmdbClient, type TmdbMedia } from "../Helpers/tmdb.js";
 import { cleanText } from "../Helpers/security.js";
+import { findAtlasRelationships, recordProviderRelationships } from "../Helpers/atlas.js";
+
 
 type Category = "all" | "anime" | "manga" | "light_novel" | "book" | "movie" | "tv" | "game";
+type DiscoverFilters = AniListSearchFilters;
 type SearchRecord =
   | { provider: "AniList"; category: "anime" | "manga" | "light_novel"; item: AniListMedia }
   | { provider: "Google Books"; category: "book"; item: GoogleBook }
@@ -223,7 +226,25 @@ export class DiscoverCommand implements FeatureCommand {
     .addStringOption((option) => option.setName("category").setDescription("Media category").addChoices(
       ...CATEGORIES.map((category) => ({ name: category.label, value: category.value })),
     ))
-    .addStringOption((option) => option.setName("compare_to").setDescription("Second title to compare against").setMinLength(2).setMaxLength(100));
+    .addStringOption((option) => option.setName("compare_to").setDescription("Second title to compare against").setMinLength(2).setMaxLength(100))
+    .addStringOption((option) => option.setName("genre").setDescription("AniList genre filter").addChoices(
+      ...["Action","Adventure","Comedy","Drama","Fantasy","Horror","Mystery","Psychological","Romance","Sci-Fi","Thriller"].map(value=>({name:value,value})),
+    ))
+    .addIntegerOption((option) => option.setName("year_from").setDescription("Earliest release year").setMinValue(1970).setMaxValue(2100))
+    .addIntegerOption((option) => option.setName("year_to").setDescription("Latest release year").setMinValue(1970).setMaxValue(2100))
+    .addStringOption((option) => option.setName("status").setDescription("AniList status").addChoices(
+      ...["FINISHED","RELEASING","NOT_YET_RELEASED","CANCELLED","HIATUS"].map(value=>({name:value.replaceAll("_"," "),value})),
+    ))
+    .addStringOption((option) => option.setName("media_format").setDescription("AniList format").addChoices(
+      ...["TV","TV_SHORT","MOVIE","SPECIAL","OVA","ONA","MANGA","NOVEL","ONE_SHOT"].map(value=>({name:value.replaceAll("_"," "),value})),
+    ))
+    .addStringOption((option) => option.setName("season").setDescription("Anime season").addChoices(
+      {name:"Winter",value:"WINTER"},{name:"Spring",value:"SPRING"},{name:"Summer",value:"SUMMER"},{name:"Fall",value:"FALL"},
+    ))
+    .addIntegerOption((option) => option.setName("season_year").setDescription("Anime season year").setMinValue(1970).setMaxValue(2100))
+    .addStringOption((option) => option.setName("view").setDescription("Open search results or the Knowledge Atlas").addChoices(
+      { name: "Search results", value: "search" }, { name: "Knowledge Atlas", value: "atlas" },
+    ));
 
   private readonly anilist: AniListClient;
   private readonly books: GoogleBooksClient;
@@ -241,16 +262,46 @@ export class DiscoverCommand implements FeatureCommand {
     const query = interaction.options.getString("query")?.trim();
     const compareTo = interaction.options.getString("compare_to")?.trim();
     const category = (interaction.options.getString("category") ?? "anime") as Category;
+    const view = interaction.options.getString("view") ?? "search";
+    const filters: DiscoverFilters = {
+      genre:interaction.options.getString("genre")??undefined,
+      yearFrom:interaction.options.getInteger("year_from")??undefined,
+      yearTo:interaction.options.getInteger("year_to")??undefined,
+      status:interaction.options.getString("status")??undefined,
+      format:interaction.options.getString("media_format")??undefined,
+      season:interaction.options.getString("season")??undefined,
+      seasonYear:interaction.options.getInteger("season_year")??undefined,
+    };
+    const hasFilters=Object.values(filters).some(value=>value!==undefined);
+    if(filters.yearFrom&&filters.yearTo&&filters.yearFrom>filters.yearTo){
+      await interaction.reply({content:"The earliest release year cannot be later than the latest release year.",flags:MessageFlags.Ephemeral});return;
+    }
+    if(hasFilters&&!["anime","manga","light_novel"].includes(category)){
+      await interaction.reply({content:"These filters are provided by AniList and apply to anime, manga and light novels. Choose one of those categories.",flags:MessageFlags.Ephemeral});return;
+    }
+    if((filters.season||filters.seasonYear)&&category!=="anime"){
+      await interaction.reply({content:"Season and season year filters apply to anime only.",flags:MessageFlags.Ephemeral});return;
+    }
+    if(filters.format){
+      const allowed=category==="anime"?["TV","TV_SHORT","MOVIE","SPECIAL","OVA","ONA"]:category==="manga"?["MANGA","ONE_SHOT","NOVEL"]:["NOVEL"];
+      if(!allowed.includes(filters.format)){
+        await interaction.reply({content:"That format is not supported by the selected media category.",flags:MessageFlags.Ephemeral});return;
+      }
+    }
     if (!query) {
       const home = homePanel();
       await interaction.reply({ ...home, flags: MessageFlags.Ephemeral });
       return;
     }
-    if (compareTo) {
-      await this.compareAndRespond(interaction, query, compareTo, category);
+    if (view === "atlas") {
+      await this.atlasAndRespond(interaction, query, category, filters);
       return;
     }
-    await this.searchAndRespond(interaction, query, category);
+    if (compareTo) {
+      await this.compareAndRespond(interaction, query, compareTo, category, filters);
+      return;
+    }
+    await this.searchAndRespond(interaction, query, category, filters);
   }
 
   async handleButton(interaction: ButtonInteraction): Promise<boolean> {
@@ -267,9 +318,8 @@ export class DiscoverCommand implements FeatureCommand {
     }
     if (action === "random" && CATEGORIES.some((item) => item.value === categoryValue)) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const results = await this.fetchTrending(categoryValue as Category);
-      const selected = results.length ? [results[randomInt(results.length)]!] : [];
-      await this.presentResults(interaction, selected, `Random discovery · ${categoryLabel(categoryValue as Category)}`);
+      const results = await this.fetchRandom(categoryValue as Category);
+      await this.presentResults(interaction, results, `Random discovery · ${categoryLabel(categoryValue as Category)}`);
       return true;
     }
     if (action === "recommend" && (categoryValue === "ANIME" || categoryValue === "MANGA") && maybeId) {
@@ -302,11 +352,12 @@ export class DiscoverCommand implements FeatureCommand {
     firstTitle: string,
     secondTitle: string,
     category: Category,
+    filters: DiscoverFilters = {},
   ): Promise<void> {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const [first, second] = await Promise.all([
-      this.fetchSearch(firstTitle, category),
-      this.fetchSearch(secondTitle, category),
+      this.fetchSearch(firstTitle, category, filters),
+      this.fetchSearch(secondTitle, category, filters),
     ]);
     const left = first[0];
     const right = second[0];
@@ -329,13 +380,67 @@ export class DiscoverCommand implements FeatureCommand {
     interaction: ChatInputCommandInteraction | ModalSubmitInteraction,
     query: string,
     category: Category,
+    filters: DiscoverFilters = {},
   ): Promise<void> {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const results = await this.fetchSearch(query, category);
+    const results = await this.fetchSearch(query, category, filters);
     await this.presentResults(interaction, results, `Search results · ${categoryLabel(category)}`);
   }
 
-  private async fetchSearch(query: string, category: Category): Promise<SearchRecord[]> {
+  private async atlasAndRespond(interaction: ChatInputCommandInteraction, query: string, category: Category, filters: DiscoverFilters = {}): Promise<void> {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const results = await this.fetchSearch(query, category, filters);
+    await this.saveProviderEdges(results);
+    const first = results[0];
+    if (!first) {
+      await interaction.editReply({ content: "No provider record was found, so the Atlas has no node to open.", embeds: [] });
+      return;
+    }
+    const title = this.recordTitle(first);
+    const mediaCategory = this.recordCategory(first);
+    const relationships = await findAtlasRelationships(interaction.guildId, title, mediaCategory, this.recordUrl(first), 20);
+    const embed = toEmbed(first).setTitle(`Knowledge Atlas · ${title}`.slice(0,256))
+      .setDescription("A source-attributed view of recorded relationships. Provider links are global; community links are visible only inside the server that approved them.");
+    if (relationships.length) {
+      for (const relation of relationships.slice(0,20)) {
+        const label = relation.url ? `[${relation.title.slice(0,180)}](${relation.url})` : relation.title.slice(0,180);
+        embed.addFields({name:`${relation.relationType} · ${relation.category}`.slice(0,256),
+          value:`${label}\nSource: ${relation.source}`.slice(0,1024),inline:false});
+      }
+    } else {
+      embed.addFields({name:"No recorded connections yet",value:"This provider has not supplied related-work edges for this title, and this server has not approved any community links yet.",inline:false});
+    }
+    embed.setFooter({text:"Knowledge Atlas · Provider provenance and guild-scoped community links"});
+    await interaction.editReply({embeds:[embed],components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],allowedMentions:{parse:[]}});
+  }
+
+  private recordTitle(record: SearchRecord): string {
+    if (record.provider === "AniList") return record.item.title.english ?? record.item.title.romaji ?? record.item.title.native ?? "Untitled";
+    return record.item.title;
+  }
+
+  private recordCategory(record: SearchRecord): string {
+    return record.category;
+  }
+
+  private recordUrl(record: SearchRecord): string {
+    return record.provider === "AniList" ? record.item.siteUrl : record.item.sourceUrl;
+  }
+
+  private async saveProviderEdges(results: SearchRecord[]): Promise<void> {
+    const writes = results.flatMap((record) => record.provider === "AniList" ? [
+      recordProviderRelationships({
+        sourceTitle:this.recordTitle(record),sourceCategory:record.category,sourceUrl:record.item.siteUrl,
+        sourceLabel:"AniList provider relationships",
+        relations:record.item.relations.map((relation) => ({
+          title:relation.title,category:relation.category,url:relation.url,relationshipType:relation.relation,
+        })),
+      }),
+    ] : []);
+    await Promise.allSettled(writes);
+  }
+
+  private async fetchSearch(query: string, category: Category, filters: DiscoverFilters = {}): Promise<SearchRecord[]> {
     if (category === "all") {
       const providers = await Promise.allSettled([
         this.anilist.search(query, "ANIME").then((items) => items.map((item) => anilistRecord(item, "anime"))),
@@ -349,14 +454,36 @@ export class DiscoverCommand implements FeatureCommand {
       return providers.flatMap((provider) => provider.status === "fulfilled" ? provider.value : []);
     }
     switch (category) {
-      case "anime": return (await this.anilist.search(query, "ANIME")).map((item) => anilistRecord(item, "anime"));
-      case "manga": return (await this.anilist.search(query, "MANGA")).map((item) => anilistRecord(item, "manga"));
-      case "light_novel": return (await this.anilist.search(query, "MANGA", true)).map((item) => anilistRecord(item, "light_novel"));
+      case "anime": return (await this.anilist.search(query, "ANIME", false, filters)).map((item) => anilistRecord(item, "anime"));
+      case "manga": return (await this.anilist.search(query, "MANGA", false, filters)).map((item) => anilistRecord(item, "manga"));
+      case "light_novel": return (await this.anilist.search(query, "MANGA", true, filters)).map((item) => anilistRecord(item, "light_novel"));
       case "book": return (await this.books.search(query)).map((item) => ({ provider: "Google Books", category: "book", item }));
       case "movie": return (await this.tmdb.search(query, "movie")).map((item) => ({ provider: "TMDB", category: "movie", item }));
       case "tv": return (await this.tmdb.search(query, "tv")).map((item) => ({ provider: "TMDB", category: "tv", item }));
       case "game": return (await this.igdb.search(query)).map((item) => ({ provider: "IGDB", category: "game", item }));
     }
+  }
+
+  private async fetchRandom(category: Category): Promise<SearchRecord[]> {
+    const categories: Exclude<Category, "all">[] = category === "all"
+      ? ["anime", "manga", "light_novel", "book", "movie", "tv", "game"]
+      : [category];
+    const load = async (item: Exclude<Category, "all">): Promise<SearchRecord[]> => {
+      switch (item) {
+        case "anime": return (await this.anilist.random("ANIME")).map((media) => anilistRecord(media, "anime"));
+        case "manga": return (await this.anilist.random("MANGA")).map((media) => anilistRecord(media, "manga"));
+        case "light_novel": return (await this.anilist.random("MANGA", true)).map((media) => anilistRecord(media, "light_novel"));
+        case "book": return (await this.books.random()).map((media) => ({ provider: "Google Books", category: "book", item: media }));
+        case "movie": return (await this.tmdb.random("movie")).map((media) => ({ provider: "TMDB", category: "movie", item: media }));
+        case "tv": return (await this.tmdb.random("tv")).map((media) => ({ provider: "TMDB", category: "tv", item: media }));
+        case "game": return (await this.igdb.random()).map((media) => ({ provider: "IGDB", category: "game", item: media }));
+      }
+    };
+    const batches = await Promise.allSettled(categories.map(load));
+    return batches.flatMap((batch) => {
+      if (batch.status !== "fulfilled" || !batch.value.length) return [];
+      return [batch.value[randomInt(batch.value.length)]!];
+    });
   }
 
   private async fetchTrending(category: Category): Promise<SearchRecord[]> {
@@ -387,6 +514,7 @@ export class DiscoverCommand implements FeatureCommand {
     results: SearchRecord[],
     title: string,
   ): Promise<void> {
+    await this.saveProviderEdges(results);
     if (!results.length) {
       await interaction.editReply({ embeds: [homeEmbed("No results found", "The selected provider returned no matching records. Try a more specific title or a different category.")] });
       return;
