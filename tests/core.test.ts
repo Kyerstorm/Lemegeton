@@ -5,6 +5,8 @@ import {isValidHttpsUrl,normalizeTags} from "../Helpers/security.js";
 import {validateSteamId} from "../Helpers/steam.js";
 import {nextLocalOccurrence} from "../Helpers/community.js";
 import {classifyArchiveUpload} from "../Helpers/media-storage.js";
+import {normalizeAtlasTitle,normalizeAtlasCategory,safeAtlasUrl} from "../Helpers/atlas.js";
+import {FEATURE_NAMES,isFeatureName} from "../Helpers/settings.js";
 
 test("bot configuration requires valid Discord credentials and validates the AniList endpoint",()=>{
  assert.throws(()=>loadConfig({}),/DISCORD_TOKEN/);
@@ -33,4 +35,19 @@ test("Archive media types are checked against category policy and MIME",()=>{
  assert.equal(classifyArchiveUpload("panels",image).kind,"image");
  assert.throws(()=>classifyArchiveUpload("panels",{...image,name:"panel.mp4",contentType:"video/mp4"}),/not supported/);
  assert.throws(()=>classifyArchiveUpload("panels",{...image,contentType:"image/jpeg"}),/does not match/);
+});
+
+test("Knowledge Atlas normalizes media identities and rejects unsafe URLs",()=>{
+ assert.equal(normalizeAtlasTitle("  Frieren: Beyond Journey’s End  "),"frieren beyond journey s end");
+ assert.equal(normalizeAtlasCategory("light novel"),"LIGHT_NOVEL");
+ assert.equal(normalizeAtlasCategory("tv-series"),"TV");
+ assert.equal(normalizeAtlasCategory("unsupported"),null);
+ assert.equal(safeAtlasUrl("https://anilist.co/anime/1"),"https://anilist.co/anime/1");
+ assert.equal(safeAtlasUrl("http://example.com"),null);
+ assert.equal(safeAtlasUrl("https://user:pass@example.com"),null);
+});
+test("Server settings expose only the five registered feature environments",()=>{
+ assert.deepEqual(FEATURE_NAMES,["discover","archive","community","play","profile"]);
+ assert.equal(isFeatureName("archive"),true);
+ assert.equal(isFeatureName("custom-role"),false);
 });

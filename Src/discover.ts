@@ -21,6 +21,8 @@ import { IgdbClient, type IgdbGame } from "../Helpers/igdb.js";
 import { homeEmbed, navigationButtons } from "../Helpers/discord.js";
 import { TmdbClient, type TmdbMedia } from "../Helpers/tmdb.js";
 import { cleanText } from "../Helpers/security.js";
+import { findAtlasRelationships, recordProviderRelationships } from "../Helpers/atlas.js";
+
 
 type Category = "all" | "anime" | "manga" | "light_novel" | "book" | "movie" | "tv" | "game";
 type SearchRecord =
@@ -223,7 +225,10 @@ export class DiscoverCommand implements FeatureCommand {
     .addStringOption((option) => option.setName("category").setDescription("Media category").addChoices(
       ...CATEGORIES.map((category) => ({ name: category.label, value: category.value })),
     ))
-    .addStringOption((option) => option.setName("compare_to").setDescription("Second title to compare against").setMinLength(2).setMaxLength(100));
+    .addStringOption((option) => option.setName("compare_to").setDescription("Second title to compare against").setMinLength(2).setMaxLength(100))
+    .addStringOption((option) => option.setName("view").setDescription("Open search results or the Knowledge Atlas").addChoices(
+      { name: "Search results", value: "search" }, { name: "Knowledge Atlas", value: "atlas" },
+    ));
 
   private readonly anilist: AniListClient;
   private readonly books: GoogleBooksClient;
@@ -241,9 +246,14 @@ export class DiscoverCommand implements FeatureCommand {
     const query = interaction.options.getString("query")?.trim();
     const compareTo = interaction.options.getString("compare_to")?.trim();
     const category = (interaction.options.getString("category") ?? "anime") as Category;
+    const view = interaction.options.getString("view") ?? "search";
     if (!query) {
       const home = homePanel();
       await interaction.reply({ ...home, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (view === "atlas") {
+      await this.atlasAndRespond(interaction, query, category);
       return;
     }
     if (compareTo) {
@@ -335,6 +345,59 @@ export class DiscoverCommand implements FeatureCommand {
     await this.presentResults(interaction, results, `Search results · ${categoryLabel(category)}`);
   }
 
+  private async atlasAndRespond(interaction: ChatInputCommandInteraction, query: string, category: Category): Promise<void> {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const results = await this.fetchSearch(query, category);
+    await this.saveProviderEdges(results);
+    const first = results[0];
+    if (!first) {
+      await interaction.editReply({ content: "No provider record was found, so the Atlas has no node to open.", embeds: [] });
+      return;
+    }
+    const title = this.recordTitle(first);
+    const mediaCategory = this.recordCategory(first);
+    const relationships = await findAtlasRelationships(interaction.guildId, title, mediaCategory, this.recordUrl(first), 20);
+    const embed = toEmbed(first).setTitle(`Knowledge Atlas · ${title}`.slice(0,256))
+      .setDescription("A source-attributed view of recorded relationships. Provider links are global; community links are visible only inside the server that approved them.");
+    if (relationships.length) {
+      for (const relation of relationships.slice(0,20)) {
+        const label = relation.url ? `[${relation.title.slice(0,180)}](${relation.url})` : relation.title.slice(0,180);
+        embed.addFields({name:`${relation.relationType} · ${relation.category}`.slice(0,256),
+          value:`${label}\nSource: ${relation.source}`.slice(0,1024),inline:false});
+      }
+    } else {
+      embed.addFields({name:"No recorded connections yet",value:"This provider has not supplied related-work edges for this title, and this server has not approved any community links yet.",inline:false});
+    }
+    embed.setFooter({text:"Knowledge Atlas · Provider provenance and guild-scoped community links"});
+    await interaction.editReply({embeds:[embed],components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],allowedMentions:{parse:[]}});
+  }
+
+  private recordTitle(record: SearchRecord): string {
+    if (record.provider === "AniList") return record.item.title.english ?? record.item.title.romaji ?? record.item.title.native ?? "Untitled";
+    return record.item.title;
+  }
+
+  private recordCategory(record: SearchRecord): string {
+    return record.category;
+  }
+
+  private recordUrl(record: SearchRecord): string {
+    return record.provider === "AniList" ? record.item.siteUrl : record.item.sourceUrl;
+  }
+
+  private async saveProviderEdges(results: SearchRecord[]): Promise<void> {
+    const writes = results.flatMap((record) => record.provider === "AniList" ? [
+      recordProviderRelationships({
+        sourceTitle:this.recordTitle(record),sourceCategory:record.category,sourceUrl:record.item.siteUrl,
+        sourceLabel:"AniList provider relationships",
+        relations:record.item.relations.map((relation) => ({
+          title:relation.title,category:relation.category,url:relation.url,relationshipType:relation.relation,
+        })),
+      }),
+    ] : []);
+    await Promise.allSettled(writes);
+  }
+
   private async fetchSearch(query: string, category: Category): Promise<SearchRecord[]> {
     if (category === "all") {
       const providers = await Promise.allSettled([
@@ -387,6 +450,7 @@ export class DiscoverCommand implements FeatureCommand {
     results: SearchRecord[],
     title: string,
   ): Promise<void> {
+    await this.saveProviderEdges(results);
     if (!results.length) {
       await interaction.editReply({ embeds: [homeEmbed("No results found", "The selected provider returned no matching records. Try a more specific title or a different category.")] });
       return;

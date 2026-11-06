@@ -7,7 +7,7 @@ export interface AniListMedia {
   startDate:{year:number|null;month:number|null;day:number|null}|null;
   episodes:number|null; chapters:number|null; volumes:number|null;
   genres:string[]; studios:string[]; staff:string[];
-  relations:Array<{id:number;title:string;relation:string;url:string}>;
+  relations:Array<{id:number;title:string;relation:string;url:string;category:"anime"|"manga"}>;
 }
 export interface AniListUserProfile {
   id:number; name:string; url:string; avatar:string|null; banner:string|null; about:string|null;
@@ -36,10 +36,10 @@ function parseMedia(v:unknown):AniListMedia|null {
  genres:Array.isArray(v.genres)?v.genres.filter((x):x is string=>typeof x==="string").slice(0,20):[],
  studios:studios.flatMap(x=>isObj(x)&&typeof x.name==="string"?[x.name]:[]).slice(0,8),
  staff:staff.flatMap(x=>isObj(x)&&isObj(x.name)&&typeof x.name.full==="string"?[x.name.full]:[]).slice(0,8),
- relations:edges.flatMap(x=>{if(!isObj(x)||!isObj(x.node))return[];const n=x.node;const u=str(n.siteUrl);if(!u||typeof n.id!=="number")return[];return[{id:n.id,title:titleOf(n.title),relation:str(x.relationType)??"RELATED",url:u}];}).slice(0,10)};
+ relations:edges.flatMap(x=>{if(!isObj(x)||!isObj(x.node))return[];const n=x.node;const u=str(n.siteUrl);if(!u||typeof n.id!=="number"||(n.type!=="ANIME"&&n.type!=="MANGA"))return[];return[{id:n.id,title:titleOf(n.title),relation:str(x.relationType)??"RELATED",url:u,category:n.type==="ANIME"?"anime" as const:"manga" as const}];}).slice(0,10)};
 }
 function stats(v:unknown):AniListUserProfile["anime"] {const o=isObj(v)?v:{};const genres=Array.isArray(o.genres)?o.genres.flatMap(x=>isObj(x)&&typeof x.genre==="string"&&typeof x.count==="number"?[{genre:x.genre,count:x.count}]:[]):[];return{count:num(o.count)??0,meanScore:num(o.meanScore)??0,genres:genres.sort((a,b)=>b.count-a.count).slice(0,20)};}
-const SEARCH=`query Search($search:String,$type:MediaType!,$format:MediaFormat,$sort:[MediaSort]){Page(page:1,perPage:10){media(search:$search,type:$type,format:$format,sort:$sort){id type title{romaji english native} description(asHtml:false) siteUrl coverImage{large} bannerImage averageScore status format startDate{year month day} episodes chapters volumes genres studios{nodes{name}} staff(page:1,perPage:8){nodes{name{full}}} relations{edges{relationType node{id siteUrl title{romaji english}}}}}}}}`;
+const SEARCH=`query Search($search:String,$type:MediaType!,$format:MediaFormat,$sort:[MediaSort]){Page(page:1,perPage:10){media(search:$search,type:$type,format:$format,sort:$sort){id type title{romaji english native} description(asHtml:false) siteUrl coverImage{large} bannerImage averageScore status format startDate{year month day} episodes chapters volumes genres studios{nodes{name}} staff(page:1,perPage:8){nodes{name{full}}} relations{edges{relationType node{id type siteUrl title{romaji english}}}}}}}}`;
 const USER=`query User($name:String){User(name:$name){id name siteUrl avatar{large} bannerImage about(asHtml:false) statistics{anime{count meanScore genres{genre count}} manga{count meanScore genres{genre count}}}}}`;
 const AIRING=`query Airing($from:Int,$to:Int){Page(page:1,perPage:50){airingSchedules(airingAt_greater:$from,airingAt_lesser:$to,sort:TIME){airingAt episode media{id title{romaji english} siteUrl coverImage{large} isAdult}}}}`;
 export class AniListError extends Error {constructor(message:string,readonly statusCode?:number){super(message);this.name="AniListError";}}
