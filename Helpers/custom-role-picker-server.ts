@@ -10,7 +10,7 @@ import type { BotConfig } from "./config.js";
 import { logger } from "./logger.js";
 import {
   allowPickerCall,
-  clearPickerLinksForTests,
+  clearPickerLinks,
   createPickerLink,
   lookupPickerLink,
   pickerLinkExpiry,
@@ -749,7 +749,7 @@ export async function stopCustomRolePicker(): Promise<void> {
   server = null;
   failedAttempts.clear();
   linkFetches.clear();
-  clearPickerLinksForTests();
+  clearPickerLinks();
   if (!current) return;
   await new Promise<void>(resolveClose => current.close(() => resolveClose()));
 }
