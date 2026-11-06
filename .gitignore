@@ -86,3 +86,7 @@ dashboard-frontend/dist/
 # Local dashboard / VPS runtime
 .venv/
 runtime-home/
+
+# Root TypeScript Discord runtime
+/node_modules/
+/dist/
