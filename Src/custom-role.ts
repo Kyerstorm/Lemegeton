@@ -340,6 +340,16 @@ export class CustomRoleCommand implements FeatureCommand {
       await interaction.reply({ content: "Choose a role.", components: [new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(menu)], flags: MessageFlags.Ephemeral });
       return true;
     }
+    if (action === "clear-channel") {
+      if (!this.requireManager(interaction)) return true;
+      await this.configureChannel(interaction, null);
+      return true;
+    }
+    if (action === "clear-log-channel") {
+      if (!this.requireManager(interaction)) return true;
+      await this.configureLogChannel(interaction, null);
+      return true;
+    }
     if (action === "channel" || action === "log-channel") {
       if (!this.requireManager(interaction)) return true;
       const menu = new ChannelSelectMenuBuilder().setCustomId(userCustomId(interaction.user.id, action))
