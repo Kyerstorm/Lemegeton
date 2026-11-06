@@ -503,9 +503,8 @@ export async function planLegacyCustomRoleImport(guild: Guild): Promise<LegacyCu
   let legacyRows: Array<{ user_id: string; role_id: string }>;
   try {
     legacyRows = await query<{ user_id: string; role_id: string }>(
-      \`SELECT discord_id::text AS user_id, role_id::text AS role_id
-         FROM booster_roles WHERE guild_id = $1
-         ORDER BY created_at ASC, discord_id ASC\`,
+      "SELECT discord_id::text AS user_id, role_id::text AS role_id " +
+        "FROM booster_roles WHERE guild_id = $1 ORDER BY created_at ASC, discord_id ASC",
       [guild.id],
     );
   } catch (error) {
