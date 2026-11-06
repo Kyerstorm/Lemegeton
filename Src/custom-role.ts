@@ -396,6 +396,12 @@ export class CustomRoleCommand implements FeatureCommand {
       await this.showLegacyImportPlan(interaction);
       return true;
     }
+    if (action === "legacy-cancel" && resourceId && interaction.guildId) {
+      if (!this.requireManager(interaction)) return true;
+      legacyImportPreviews.delete(legacyImportKey(interaction.guildId, interaction.user.id, resourceId));
+      await interaction.reply({ content: "Legacy import cancelled. No roles or records were changed.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
     if (action === "legacy-takeover" || action === "legacy-archive") {
       if (!this.requireManager(interaction) || !interaction.guild || !resourceId) return true;
       const key = legacyImportKey(interaction.guild.id, interaction.user.id, resourceId);
@@ -735,7 +741,7 @@ export class CustomRoleCommand implements FeatureCommand {
     const takeOver = async (entry: { user_id: string; role_id: string; role_name: string | null }) => {
       const member = await guild.members.fetch(entry.user_id).catch(() => null);
       const role = await guild.roles.fetch(entry.role_id).catch(() => null);
-      if (!member || !role || !member.roles.cache.has(role.id)) {
+      if (!member || !role) {
         skipped += 1;
         return;
       }
@@ -749,6 +755,7 @@ export class CustomRoleCommand implements FeatureCommand {
       const secondaryColor = hasSecondary ? roleColors?.secondaryColor ?? null : null;
       const emoji = role.unicodeEmoji ?? null;
 
+      const previousIcon = await getCustomRoleIconData(guild.id, member.id);
       await saveCustomRole({
         guild_id: guild.id,
         user_id: member.id,
@@ -761,6 +768,15 @@ export class CustomRoleCommand implements FeatureCommand {
         secondary_color: secondaryColor,
         icon_emoji: emoji,
       });
+      await updateCustomRole(guild.id, member.id, {
+        icon_png: null,
+        icon_crop: null,
+        icon_source_asset_id: null,
+        icon_emoji: emoji,
+      });
+      if (previousIcon?.icon_source_asset_id) {
+        await deleteCustomRoleIconSource(previousIcon.icon_source_asset_id, guild.id).catch(() => undefined);
+      }
 
       const iconUrl = role.iconURL({ extension: "png", size: 128 });
       if (iconUrl && (guild.features as readonly string[]).includes("ROLE_ICONS")) {
