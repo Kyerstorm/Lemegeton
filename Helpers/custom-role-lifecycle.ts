@@ -6,6 +6,7 @@ import {
   createCustomRolePending,
   customRoleEligibility,
   customRoleSnoozedUsers,
+  getCustomRoleIconData,
   getCustomRoleRecord,
   getCustomRoleSettings,
   getOpenCustomRolePending,
@@ -282,11 +283,12 @@ async function restoreSavedRole(member: GuildMember): Promise<boolean> {
       colors = { primaryColor: primary ?? 0, secondaryColor: null, tertiaryColor: null };
     }
 
+    const iconData = roleIcons ? await getCustomRoleIconData(guild.id, member.id) : null;
     const role = await guild.roles.create({
       name: (record.name || (member.user.username + "'s custom role")).slice(0, 100),
       permissions: [],
       colors,
-      ...(roleIcons && record.icon_emoji ? { unicodeEmoji: record.icon_emoji } : {}),
+      ...(iconData?.icon_png ? { icon: iconData.icon_png } : roleIcons && record.icon_emoji ? { unicodeEmoji: record.icon_emoji } : {}),
       reason: "Custom Roles: restored role for " + member.id,
     });
     try {
