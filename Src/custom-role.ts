@@ -582,7 +582,7 @@ export class CustomRoleCommand implements FeatureCommand {
       const renamed = await this.sweepBlockedRoleNames(interaction.guild!);
       if (renamed) outcomes.push("Renamed " + renamed + " existing custom role(s) that no longer met the name rules.");
       await interaction.reply({
-        content: "**Custom role name restrictions**\\n" + outcomes.join("\\n").slice(0, 1800) + "\\n\\nThese rules are applied to new names and edits.",
+        content: "**Custom role name restrictions**\n" + outcomes.join("\n").slice(0, 1800) + "\n\nThese rules are applied to new names and edits.",
         flags: MessageFlags.Ephemeral,
       });
       return true;
