@@ -450,6 +450,31 @@ export async function clearCustomRoleSnoozes(guildId: string, userIds: string[])
   );
 }
 
+export async function deleteCustomRoleRecord(
+  guildId: string,
+  userId: string,
+): Promise<{ icon_source_asset_id: number | null } | null> {
+  return queryOne<{ icon_source_asset_id: number | null }>(
+    "DELETE FROM custom_role_records WHERE guild_id = $1 AND user_id = $2 RETURNING icon_source_asset_id",
+    [guildId, userId],
+  );
+}
+
+export async function removeCustomRolePendingUser(
+  guildId: string,
+  userId: string,
+  actorId: string,
+): Promise<void> {
+  const pending = await getOpenCustomRolePending(guildId);
+  if (!pending || !pending.user_ids.includes(userId)) return;
+  const remaining = pending.user_ids.filter(id => id !== userId);
+  if (remaining.length) {
+    await updateCustomRolePendingUsers(pending.id, remaining);
+  } else {
+    await resolveCustomRolePending(pending.id, guildId, "withdrawn", actorId);
+  }
+}
+
 export function customRoleEligibility(member: GuildMember, settings: CustomRoleSettings): boolean {
   return Boolean(member.premiumSince) || member.roles.cache.some(role => settings.allowed_role_ids.includes(role.id));
 }
