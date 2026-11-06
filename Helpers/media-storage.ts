@@ -160,3 +160,65 @@ export async function deleteArchiveAsset(assetId: number): Promise<boolean> {
   await query("DELETE FROM media_assets WHERE id = $1", [assetId]);
   return true;
 }
+
+
+export async function storeCustomRoleIconSource(
+  guildId: string,
+  userId: string,
+  bytes: Buffer,
+  contentType: "image/png" | "image/jpeg",
+): Promise<number> {
+  if (bytes.byteLength < 1) throw new Error("The role icon image is empty.");
+  const bucket = process.env.S3_BUCKET?.trim();
+  if (!bucket) throw new Error("Private S3 storage is not configured. Image role icons cannot be saved safely.");
+  const extension = contentType === "image/png" ? ".png" : ".jpg";
+  const key = `custom-roles/${guildId}/${randomUUID()}${extension}`;
+  const digest = createHash("sha256").update(bytes).digest("hex");
+  const storage = s3Client();
+  await storage.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: bytes,
+    ContentType: contentType,
+    CacheControl: "private, no-store",
+    Metadata: { sha256: digest },
+  }));
+  try {
+    const inserted = await queryOne<{ id: string }>(
+      `INSERT INTO media_assets
+       (provider, namespace, bucket_name, object_key, content_type, size_bytes, sha256, is_private, uploaded_by, guild_id)
+       VALUES ('s3', $1, $2, $3, $4, $5, $6, TRUE, $7, $8) RETURNING id`,
+      [`custom-roles/${guildId}`, bucket, key, contentType, bytes.byteLength, digest, userId, guildId],
+    );
+    if (!inserted) throw new Error("Custom role icon asset registry insert returned no ID.");
+    return Number(inserted.id);
+  } catch (error) {
+    await storage.send(new DeleteObjectCommand({ Bucket: bucket, Key: key })).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function readCustomRoleIconSource(assetId: number, guildId: string): Promise<Buffer | null> {
+  const asset = await queryOne<{ bucket_name: string; object_key: string; is_private: boolean; namespace: string }>(
+    "SELECT bucket_name, object_key, is_private, namespace FROM media_assets WHERE id = $1 AND guild_id = $2",
+    [assetId, guildId],
+  );
+  if (!asset || !asset.is_private || asset.namespace !== `custom-roles/${guildId}`) return null;
+  const response = await s3Client().send(new GetObjectCommand({
+    Bucket: asset.bucket_name,
+    Key: asset.object_key,
+  }));
+  if (!response.Body) return null;
+  return Buffer.from(await response.Body.transformToByteArray());
+}
+
+export async function deleteCustomRoleIconSource(assetId: number, guildId: string): Promise<boolean> {
+  const asset = await queryOne<{ bucket_name: string; object_key: string }>(
+    "SELECT bucket_name, object_key FROM media_assets WHERE id = $1 AND guild_id = $2 AND namespace = $3 AND is_private = TRUE",
+    [assetId, guildId, `custom-roles/${guildId}`],
+  );
+  if (!asset) return false;
+  await s3Client().send(new DeleteObjectCommand({ Bucket: asset.bucket_name, Key: asset.object_key }));
+  await query("DELETE FROM media_assets WHERE id = $1 AND guild_id = $2", [assetId, guildId]);
+  return true;
+}
