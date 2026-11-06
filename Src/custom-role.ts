@@ -29,11 +29,13 @@ import {
   customRoleEligibility,
   getCustomRoleRecord,
   getCustomRoleSettings,
+  HOLOGRAPHIC_COLORS,
   parseCustomRoleColor,
   saveCustomRole,
   updateCustomRole,
   updateCustomRoleSettings,
   validateCustomRoleAnchor,
+  validateCustomRoleEmoji,
   validateCustomRoleName,
   type CustomRoleRecord,
   type CustomRoleSettings,
@@ -83,6 +85,11 @@ function memberRows(userId: string, manager: boolean): ActionRowBuilder<ButtonBu
     ...(manager ? [new ButtonBuilder().setCustomId(userCustomId(userId, "admin"))
       .setLabel("Admin settings").setStyle(ButtonStyle.Danger)] : []),
   ));
+  rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(userCustomId(userId, "gradient")).setLabel("Gradient").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(userCustomId(userId, "holographic")).setLabel("Holographic").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(userCustomId(userId, "icon")).setLabel("Role icon").setStyle(ButtonStyle.Secondary),
+  ));
   return rows;
 }
 
@@ -123,6 +130,32 @@ function colorModal(userId: string): ModalBuilder {
     ));
 }
 
+function gradientModal(userId: string): ModalBuilder {
+  return new ModalBuilder()
+    .setCustomId(userCustomId(userId, "gradient"))
+    .setTitle("Set role gradient")
+    .addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("primary").setLabel("First hex color")
+          .setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(7),
+      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("secondary").setLabel("Second hex color")
+          .setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(7),
+      ),
+    );
+}
+
+function iconModal(userId: string): ModalBuilder {
+  return new ModalBuilder()
+    .setCustomId(userCustomId(userId, "icon"))
+    .setTitle("Set role emoji")
+    .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder().setCustomId("emoji").setLabel("One standard Unicode emoji")
+        .setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(32),
+    ));
+}
+
 function cooldownModal(userId: string, seconds: number): ModalBuilder {
   return new ModalBuilder()
     .setCustomId(userCustomId(userId, "cooldown"))
@@ -155,6 +188,9 @@ export class CustomRoleCommand implements FeatureCommand {
       { name: "Create role", value: "create" },
       { name: "Rename role", value: "rename" },
       { name: "Change color", value: "color" },
+      { name: "Set gradient", value: "gradient" },
+      { name: "Set holographic style", value: "holographic" },
+      { name: "Set role emoji", value: "icon" },
       { name: "Put role on", value: "wear" },
       { name: "Take role off", value: "unwear" },
       { name: "Admin settings", value: "admin" },
@@ -169,6 +205,8 @@ export class CustomRoleCommand implements FeatureCommand {
     ))
     .addStringOption(option => option.setName("name").setDescription("Name for your custom role").setMaxLength(100))
     .addStringOption(option => option.setName("color").setDescription("Hex role color, such as #8B5CF6").setMaxLength(7))
+    .addStringOption(option => option.setName("secondary_color").setDescription("Second hex color for a gradient").setMaxLength(7))
+    .addStringOption(option => option.setName("emoji").setDescription("One standard Unicode role emoji").setMaxLength(32))
     .addRoleOption(option => option.setName("role").setDescription("Anchor or eligibility role"))
     .addChannelOption(option => option.setName("channel").setDescription("Channel where members can use the command"))
     .addIntegerOption(option => option.setName("seconds").setDescription("Cooldown in seconds (0 to 86400)").setMinValue(0).setMaxValue(MAX_ROLE_COOLDOWN))
@@ -201,6 +239,20 @@ export class CustomRoleCommand implements FeatureCommand {
           const color = interaction.options.getString("color");
           if (!color) { await interaction.showModal(colorModal(interaction.user.id)); return; }
           await this.reportResult(interaction, await this.setRoleColor(interaction, color));
+          return;
+        }
+        case "gradient": {
+          const primary = interaction.options.getString("color");
+          const secondary = interaction.options.getString("secondary_color");
+          if (!primary || !secondary) { await interaction.showModal(gradientModal(interaction.user.id)); return; }
+          await this.reportResult(interaction, await this.setRoleStyle(interaction, "gradient", primary, secondary));
+          return;
+        }
+        case "holographic": await this.reportResult(interaction, await this.setRoleStyle(interaction, "holographic")); return;
+        case "icon": {
+          const emoji = interaction.options.getString("emoji");
+          if (!emoji) { await interaction.showModal(iconModal(interaction.user.id)); return; }
+          await this.reportResult(interaction, await this.setRoleIconEmoji(interaction, emoji));
           return;
         }
         case "wear": await this.reportResult(interaction, await this.wearRole(interaction)); return;
@@ -237,6 +289,9 @@ export class CustomRoleCommand implements FeatureCommand {
     if (action === "admin") { await this.showAdminPanel(interaction); return true; }
     if (action === "create" || action === "rename") { await interaction.showModal(nameModal(interaction.user.id, action)); return true; }
     if (action === "color") { await interaction.showModal(colorModal(interaction.user.id)); return true; }
+    if (action === "gradient") { await interaction.showModal(gradientModal(interaction.user.id)); return true; }
+    if (action === "holographic") { await this.reportResult(interaction, await this.setRoleStyle(interaction, "holographic")); return true; }
+    if (action === "icon") { await interaction.showModal(iconModal(interaction.user.id)); return true; }
     if (action === "cooldown") {
       if (!this.requireManager(interaction)) return true;
       const settings = await getCustomRoleSettings(interaction.guildId!);
@@ -310,6 +365,16 @@ export class CustomRoleCommand implements FeatureCommand {
     }
     if (action === "color") {
       await this.reportResult(interaction, await this.setRoleColor(interaction, interaction.fields.getTextInputValue("color")));
+      return true;
+    }
+    if (action === "gradient") {
+      await this.reportResult(interaction, await this.setRoleStyle(
+        interaction, "gradient", interaction.fields.getTextInputValue("primary"), interaction.fields.getTextInputValue("secondary"),
+      ));
+      return true;
+    }
+    if (action === "icon") {
+      await this.reportResult(interaction, await this.setRoleIconEmoji(interaction, interaction.fields.getTextInputValue("emoji")));
       return true;
     }
     if (action === "cooldown") {
@@ -420,9 +485,28 @@ export class CustomRoleCommand implements FeatureCommand {
 
     let role: Role | null = null;
     try {
+      const enhancedStyles = (member.guild.features as readonly string[]).includes("ENHANCED_ROLE_COLORS");
+      const roleIcons = (member.guild.features as readonly string[]).includes("ROLE_ICONS");
+      let colorMode = existing?.color_mode ?? "solid";
+      let primaryColor = existing?.primary_color ?? null;
+      let secondaryColor = existing?.secondary_color ?? null;
+      let colors: { primaryColor: number; secondaryColor?: number | null; tertiaryColor?: number | null };
+      if (colorMode === "holographic" && enhancedStyles) {
+        [primaryColor, secondaryColor] = HOLOGRAPHIC_COLORS;
+        colors = { primaryColor: HOLOGRAPHIC_COLORS[0], secondaryColor: HOLOGRAPHIC_COLORS[1], tertiaryColor: HOLOGRAPHIC_COLORS[2] };
+      } else if (colorMode === "gradient" && enhancedStyles) {
+        colors = { primaryColor: primaryColor ?? 0, secondaryColor: secondaryColor ?? 0, tertiaryColor: null };
+      } else {
+        if (colorMode !== "solid") {
+          colorMode = "solid";
+          secondaryColor = null;
+        }
+        colors = { primaryColor: primaryColor ?? 0, secondaryColor: null, tertiaryColor: null };
+      }
       role = await member.guild.roles.create({
         name: checked.name,
-        color: existing?.primary_color ?? 0,
+        colors,
+        ...(roleIcons && existing?.icon_emoji ? { unicodeEmoji: existing.icon_emoji } : {}),
         permissions: [],
         reason: `Custom Roles: custom role for ${member.user.tag} (${member.id})`,
       });
@@ -438,13 +522,17 @@ export class CustomRoleCommand implements FeatureCommand {
         role_id: role.id,
         status: "active",
         name: checked.name,
-        color_mode: "solid",
-        primary_color: existing?.primary_color ?? null,
-        secondary_color: null,
+        color_mode: colorMode,
+        primary_color: primaryColor,
+        secondary_color: secondaryColor,
+        icon_emoji: roleIcons ? existing?.icon_emoji ?? null : null,
       });
       await member.roles.add(role, "Custom Roles: assign personal role");
       await this.logEvent(member.guild, settings, `Created a custom role for <@!${member.id}>.`);
-      return { ok: true, message: `Your custom role **${checked.name}** has been created and added to you.` };
+      const styleNotice = existing?.color_mode && existing.color_mode !== colorMode
+        ? " Your server no longer supports the saved gradient style, so I restored a solid color."
+        : "";
+      return { ok: true, message: `Your custom role **${checked.name}** has been created and added to you.${styleNotice}` };
     } catch (error) {
       if (role && !await getCustomRoleRecord(member.guild.id, member.id).catch(() => null)) {
         await role.delete("Custom Roles: roll back incomplete creation").catch(() => undefined);
@@ -494,6 +582,73 @@ export class CustomRoleCommand implements FeatureCommand {
       return { ok: true, message: `Your role color is now **${colorLabel(color)}**.` };
     } catch (error) {
       return { ok: false, message: error instanceof Error ? `I couldn't change your role color: ${error.message}` : "I couldn't change your role color." };
+    }
+  }
+
+  private async setRoleStyle(
+    interaction: GuildInteraction,
+    mode: "gradient" | "holographic",
+    rawPrimary?: string,
+    rawSecondary?: string,
+  ): Promise<{ ok: boolean; message: string }> {
+    const context = await this.memberContext(interaction);
+    if ("error" in context) return { ok: false, message: context.error };
+    const { member, settings } = context;
+    if (!(member.guild.features as readonly string[]).includes("ENHANCED_ROLE_COLORS")) {
+      return { ok: false, message: "Gradient and holographic styles need Discord's Enhanced Role Styles feature (3 server boosts). Solid colors still work." };
+    }
+    const record = await getCustomRoleRecord(member.guild.id, member.id);
+    if (!record?.role_id) return { ok: false, message: "Create a custom role before changing its style." };
+    const role = member.guild.roles.cache.get(record.role_id);
+    if (!role) return { ok: false, message: "Your saved role no longer exists. Use Create role to restore it." };
+    const cooldown = customRoleCooldownMessage(record, settings.cooldown_seconds);
+    if (cooldown) return { ok: false, message: cooldown };
+    let primaryColor: number;
+    let secondaryColor: number;
+    let colors: { primaryColor: number; secondaryColor: number; tertiaryColor: number | null };
+    if (mode === "holographic") {
+      [primaryColor, secondaryColor] = HOLOGRAPHIC_COLORS;
+      colors = { primaryColor: HOLOGRAPHIC_COLORS[0], secondaryColor: HOLOGRAPHIC_COLORS[1], tertiaryColor: HOLOGRAPHIC_COLORS[2] };
+    } else {
+      primaryColor = rawPrimary ? parseCustomRoleColor(rawPrimary) ?? -1 : -1;
+      secondaryColor = rawSecondary ? parseCustomRoleColor(rawSecondary) ?? -1 : -1;
+      if (primaryColor < 0 || secondaryColor < 0) {
+        return { ok: false, message: "Enter two valid hex colors, such as #8B5CF6 and #EC4899." };
+      }
+      colors = { primaryColor, secondaryColor, tertiaryColor: null };
+    }
+    try {
+      await role.edit({ colors, reason: `Custom Roles: member selected ${mode} colors` });
+      await updateCustomRole(member.guild.id, member.id, { color_mode: mode, primary_color: primaryColor, secondary_color: secondaryColor }, true);
+      await this.logEvent(member.guild, settings, `<@!${member.id}> changed their custom role style to ${mode}.`);
+      return { ok: true, message: mode === "holographic" ? "Your role now has the holographic style." : "Your role now has a two-color gradient." };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? `I couldn't change your role style: ${error.message}` : "I couldn't change your role style." };
+    }
+  }
+
+  private async setRoleIconEmoji(interaction: GuildInteraction, rawEmoji: string): Promise<{ ok: boolean; message: string }> {
+    const context = await this.memberContext(interaction);
+    if ("error" in context) return { ok: false, message: context.error };
+    const { member, settings } = context;
+    if (!(member.guild.features as readonly string[]).includes("ROLE_ICONS")) {
+      return { ok: false, message: "Role icons need Discord's Role Icons server feature (Boost Level 2). You can still use a custom role without an icon." };
+    }
+    const emoji = validateCustomRoleEmoji(rawEmoji);
+    if (!emoji) return { ok: false, message: "Send one standard Unicode emoji, not a custom server emoji or emoji shortcode." };
+    const record = await getCustomRoleRecord(member.guild.id, member.id);
+    if (!record?.role_id) return { ok: false, message: "Create a custom role before setting its icon." };
+    const role = member.guild.roles.cache.get(record.role_id);
+    if (!role) return { ok: false, message: "Your saved role no longer exists. Use Create role to restore it." };
+    const cooldown = customRoleCooldownMessage(record, settings.cooldown_seconds);
+    if (cooldown) return { ok: false, message: cooldown };
+    try {
+      await role.edit({ unicodeEmoji: emoji, reason: "Custom Roles: member changed role icon" });
+      await updateCustomRole(member.guild.id, member.id, { icon_emoji: emoji }, true);
+      await this.logEvent(member.guild, settings, `<@!${member.id}> changed their custom role icon.`);
+      return { ok: true, message: `Your role icon is now ${emoji}.` };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? `I couldn't set that role icon: ${error.message}` : "I couldn't set that role icon." };
     }
   }
 
