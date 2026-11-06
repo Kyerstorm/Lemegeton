@@ -21,6 +21,32 @@ export const ARCHIVE_CATEGORIES = [
   { label: "Theories", value: "theories", emoji: "💡" },
 ] as const;
 
+export const ARCHIVE_TAG_CATALOG = [
+  "action","adventure","comedy","drama","fantasy","horror","mystery","psychological",
+  "romance","sci-fi","slice of life","supernatural","thriller","tragedy","isekai",
+  "martial arts","school life","historical","shounen","shoujo","seinen","josei",
+  "manhwa","manhua","double spread","splash page","panel sequence","iconic moment",
+  "character close-up","fight scene","comedy panel","emotional scene","flashback",
+  "worldbuilding","monster / creature","weapons","magic","cyberpunk","post-apocalyptic",
+  "folklore","mythology","politics","survival","revenge","cultivation","time travel",
+  "reincarnation","sports","mecha","music","friendship","found family","coming of age",
+  "school","historical fantasy","urban fantasy","mystery investigation","time loop",
+  "reconstruction","dystopia","science fiction","travel","workplace","royalty",
+] as const;
+
+export function searchArchiveTags(query: string, selected: string[] = []): string[] {
+  const term = query.trim().toLocaleLowerCase("en-US");
+  const excluded = new Set(selected.map((tag) => tag.trim().toLocaleLowerCase("en-US")));
+  return ARCHIVE_TAG_CATALOG.filter((tag) => {
+    const normalized = tag.toLocaleLowerCase("en-US");
+    return !excluded.has(normalized) && (!term || normalized.includes(term));
+  }).sort((left, right) => {
+    const leftStarts = left.toLocaleLowerCase("en-US").startsWith(term);
+    const rightStarts = right.toLocaleLowerCase("en-US").startsWith(term);
+    return Number(rightStarts) - Number(leftStarts) || left.localeCompare(right);
+  }).slice(0, 25);
+}
+
 export type ArchiveCategory = typeof ARCHIVE_CATEGORIES[number]["value"];
 export type ArchiveVisibility = "server" | "global";
 
