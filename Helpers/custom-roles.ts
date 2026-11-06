@@ -307,6 +307,130 @@ export async function removeCustomRoleBlockedWord(
   return { ok: false, message: "**" + (word || raw) + "** isn't on the blocked list." };
 }
 
+
+export interface CustomRolePendingRemoval {
+  id: string;
+  guild_id: string;
+  user_ids: string[];
+  reason: string;
+  status: "pending" | "confirmed" | "cancelled" | "withdrawn";
+  log_channel_id: string | null;
+  log_message_id: string | null;
+}
+
+function parseSnowflakeList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String).filter(item => /^\\d{17,20}$/.test(item));
+  if (typeof value === "string") {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed.map(String).filter(item => /^\\d{17,20}$/.test(item)) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+export async function listCustomRoleRecords(guildId: string): Promise<CustomRoleRecord[]> {
+  return query<CustomRoleRecord>(
+    `SELECT guild_id, user_id, role_id, position_hint, status, name, color_mode, primary_color,
+            secondary_color, icon_emoji, last_changed_at
+       FROM custom_role_records WHERE guild_id = $1 ORDER BY user_id`,
+    [guildId],
+  );
+}
+
+export async function markCustomRoleMissing(
+  guildId: string,
+  userId: string,
+  roleId: string,
+): Promise<void> {
+  await query(
+    `UPDATE custom_role_records SET status = 'missing', role_id = NULL, updated_at = NOW()
+       WHERE guild_id = $1 AND user_id = $2 AND role_id = $3 AND status = 'active'`,
+    [guildId, userId, roleId],
+  );
+}
+
+export async function getOpenCustomRolePending(guildId: string): Promise<CustomRolePendingRemoval | null> {
+  const row = await queryOne<Omit<CustomRolePendingRemoval, "user_ids"> & { user_ids: unknown }>(
+    `SELECT id::text, guild_id::text, user_ids, reason, status, log_channel_id::text, log_message_id::text
+       FROM custom_role_pending_removals WHERE guild_id = $1 AND status = 'pending'
+       ORDER BY id DESC LIMIT 1`,
+    [guildId],
+  );
+  return row ? { ...row, user_ids: parseSnowflakeList(row.user_ids) } : null;
+}
+
+export async function createCustomRolePending(
+  guildId: string,
+  userIds: string[],
+  reason: string,
+): Promise<CustomRolePendingRemoval> {
+  const row = await queryOne<Omit<CustomRolePendingRemoval, "user_ids"> & { user_ids: unknown }>(
+    `INSERT INTO custom_role_pending_removals (guild_id, user_ids, reason)
+       VALUES ($1, $2::jsonb, $3)
+       RETURNING id::text, guild_id::text, user_ids, reason, status, log_channel_id::text, log_message_id::text`,
+    [guildId, JSON.stringify([...new Set(userIds)]), reason],
+  );
+  if (!row) throw new Error("The pending custom role removal could not be saved.");
+  return { ...row, user_ids: parseSnowflakeList(row.user_ids) };
+}
+
+export async function updateCustomRolePendingUsers(id: string, userIds: string[]): Promise<void> {
+  await query(
+    "UPDATE custom_role_pending_removals SET user_ids = $2::jsonb WHERE id = $1 AND status = 'pending'",
+    [id, JSON.stringify([...new Set(userIds)])],
+  );
+}
+
+export async function resolveCustomRolePending(
+  id: string,
+  guildId: string,
+  status: Exclude<CustomRolePendingRemoval["status"], "pending">,
+  actorId: string,
+): Promise<boolean> {
+  const row = await queryOne<{ id: string }>(
+    `UPDATE custom_role_pending_removals
+        SET status = $3, resolved_by = $4, resolved_at = NOW()
+      WHERE id = $1 AND guild_id = $2 AND status = 'pending'
+      RETURNING id::text`,
+    [id, guildId, status, actorId],
+  );
+  return Boolean(row);
+}
+
+export async function snoozeCustomRoleUsers(guildId: string, userIds: string[], hours = 24): Promise<void> {
+  for (const userId of new Set(userIds)) {
+    await query(
+      `INSERT INTO custom_role_archive_snoozes (guild_id, user_id, until)
+         VALUES ($1, $2, NOW() + ($3::text || ' hours')::interval)
+         ON CONFLICT (guild_id, user_id) DO UPDATE SET until = EXCLUDED.until`,
+      [guildId, userId, hours],
+    );
+  }
+}
+
+export async function customRoleSnoozedUsers(guildId: string): Promise<{ active: Set<string>; expired: Set<string> }> {
+  const rows = await query<{ user_id: string; is_active: boolean }>(
+    `SELECT user_id::text, (until > NOW()) AS is_active
+       FROM custom_role_archive_snoozes WHERE guild_id = $1`,
+    [guildId],
+  );
+  return {
+    active: new Set(rows.filter(row => row.is_active).map(row => row.user_id)),
+    expired: new Set(rows.filter(row => !row.is_active).map(row => row.user_id)),
+  };
+}
+
+export async function clearCustomRoleSnoozes(guildId: string, userIds: string[]): Promise<void> {
+  if (!userIds.length) return;
+  await query(
+    "DELETE FROM custom_role_archive_snoozes WHERE guild_id = $1 AND user_id = ANY($2::bigint[])",
+    [guildId, userIds],
+  );
+}
+
 export function customRoleEligibility(member: GuildMember, settings: CustomRoleSettings): boolean {
   return Boolean(member.premiumSince) || member.roles.cache.some(role => settings.allowed_role_ids.includes(role.id));
 }
