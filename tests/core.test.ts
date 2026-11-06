@@ -8,6 +8,8 @@ import {classifyArchiveUpload} from "../Helpers/media-storage.js";
 import {ARCHIVE_TAG_CATALOG,searchArchiveTags} from "../Helpers/archive.js";
 import {AniListClient} from "../Helpers/anilist.js";
 import {getAniListProfileAchievements} from "../Helpers/profile.js";
+import {allowPickerCall,clearPickerLinks,createPickerLink,lookupPickerLink} from "../Helpers/custom-role-picker-tokens.js";
+import {isPublicImageAddress} from "../Helpers/custom-role-picker-server.js";
 import sharp from "sharp";
 import {processCustomRoleIconImage,extractCustomRoleAvatarPalette} from "../Helpers/custom-role-images.js";
 import {normalizeAtlasTitle,normalizeAtlasCategory,safeAtlasUrl} from "../Helpers/atlas.js";
@@ -110,6 +112,39 @@ test("Custom role avatar palette ignores transparent pixels and returns distinct
  assert.ok(palette.every(color=>Number.isInteger(color)&&color>=0&&color<=0xffffff));
 });
 
+
+test("Custom role picker tokens replace prior links and enforce short write windows",()=>{
+ clearPickerLinks();
+ const config={customRolePickerIdleTtl:120,customRolePickerMaxTtl:600} as Parameters<typeof createPickerLink>[2];
+ const first=createPickerLink("guild-1","member-1",config);
+ assert.equal(first.token.length,43);
+ assert.ok(lookupPickerLink(first.token));
+ const now=Date.now();
+ for(let index=0;index<20;index++)assert.equal(allowPickerCall(lookupPickerLink(first.token)!,true,now+index),true);
+ assert.equal(allowPickerCall(lookupPickerLink(first.token)!,true,now+21),false);
+ const second=createPickerLink("guild-1","member-1",config);
+ assert.notEqual(second.token,first.token);
+ assert.equal(lookupPickerLink(first.token),null);
+ assert.ok(lookupPickerLink(second.token));
+ clearPickerLinks();
+ assert.equal(lookupPickerLink(second.token),null);
+});
+
+test("custom role picker external image fetch rejects private and reserved address ranges",()=>{
+ assert.equal(isPublicImageAddress("8.8.8.8"),true);
+ assert.equal(isPublicImageAddress("1.1.1.1"),true);
+ assert.equal(isPublicImageAddress("127.0.0.1"),false);
+ assert.equal(isPublicImageAddress("10.0.0.1"),false);
+ assert.equal(isPublicImageAddress("169.254.1.1"),false);
+ assert.equal(isPublicImageAddress("192.168.1.1"),false);
+ assert.equal(isPublicImageAddress("100.64.0.1"),false);
+ assert.equal(isPublicImageAddress("224.0.0.1"),false);
+ assert.equal(isPublicImageAddress("::1"),false);
+ assert.equal(isPublicImageAddress("fd00::1"),false);
+ assert.equal(isPublicImageAddress("2001:db8::1"),false);
+ assert.equal(isPublicImageAddress("2001:4860:4860::8888"),true);
+ assert.equal(isPublicImageAddress("::ffff:8.8.8.8"),false);
+});
 
 test("AniList linked profiles preserve provider-reported statistics and supported milestones",async()=>{
  const client=new AniListClient(undefined,1000,async(_input,init)=>{
