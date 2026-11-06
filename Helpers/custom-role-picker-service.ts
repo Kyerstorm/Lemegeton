@@ -17,7 +17,6 @@ import {
   updateCustomRole,
   validateCustomRoleEmoji,
   validateCustomRoleName,
-  listCustomRoleRecords,
 } from "./custom-roles.js";
 import {
   deleteCustomRoleIconSource,
@@ -94,7 +93,11 @@ export async function resolvePickerContext(guild: Guild, userId: string): Promis
   let record = await getCustomRoleRecord(guild.id, member.id);
   if (!record) throw new Error("Create a custom role before opening the Color picker.");
   let role = record.role_id ? await guild.roles.fetch(record.role_id).catch(() => null) : null;
-  if (!role && (record.status === "missing" || record.status === "saved")) {
+  if (!role && record.role_id) {
+    await markCustomRoleMissing(guild.id, member.id, record.role_id);
+    record = await getCustomRoleRecord(guild.id, member.id);
+  }
+  if (!role && record && (record.status === "missing" || record.status === "saved")) {
     await restoreCustomRoleForMember(member);
     record = await getCustomRoleRecord(guild.id, member.id);
     role = record?.role_id ? await guild.roles.fetch(record.role_id).catch(() => null) : null;
@@ -262,9 +265,8 @@ export async function pickerSetName(context: PickerContext, rawName: unknown): P
   if (!context.role) return { ok: false, message: "Your custom role is missing. Reopen /custom-role to restore it." };
   if (typeof rawName !== "string" || rawName.length > 400) return { ok: false, message: "Role names can be at most 100 characters." };
 
-  const tracked = new Set((await listCustomRoleRecords(context.guild.id)).flatMap(record => record.role_id ? [record.role_id] : []));
   const roles = await context.guild.roles.fetch();
-  const peers = [...roles.values()].filter(role => !role.managed && role.id !== context.role!.id && !tracked.has(role.id));
+  const peers = [...roles.values()].filter(role => !role.managed && role.id !== context.role!.id);
   const checked = validateCustomRoleName(rawName, context.settings, peers.map(role => role.name), protectedRoleNames(peers));
   if (checked.error || !checked.name) return { ok: false, message: checked.error ?? "Choose a valid role name." };
   const waiting = cooldownMessage(context);
