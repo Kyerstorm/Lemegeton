@@ -62,7 +62,7 @@ test("Custom role colors and names follow the existing safety rules",()=>{
  assert.equal(validateCustomRoleEmoji("🌙"),"🌙");
  assert.equal(validateCustomRoleEmoji("🌙🌙"),null);
  assert.equal(validateCustomRoleEmoji("<:moon:123456789012345678>"),null);
- assert.deepEqual(parseCustomRoleWordList("Spoiler, lore\\n Romance\\nspoiler"),["spoiler","lore","romance"]);
+ assert.deepEqual(parseCustomRoleWordList("Spoiler, lore\n Romance\nspoiler"),["spoiler","lore","romance"]);
  assert.deepEqual(parseCustomRoleWordList(" , , "),[]);
  const settings={blocked_words:["spoiler"],removed_default_words:[]};
  assert.equal(validateCustomRoleName("Moonlit Circle",settings).name,"Moonlit Circle");
