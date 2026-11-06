@@ -403,7 +403,7 @@ export class CustomRoleCommand implements FeatureCommand {
       return true;
     }
     if (action === "legacy-takeover" || action === "legacy-archive") {
-      if (!this.requireManager(interaction) || !interaction.guild || !resourceId) return true;
+      if (!this.requireManager(interaction) || (action === "legacy-archive" && !this.requireRoleManager(interaction)) || !interaction.guild || !resourceId) return true;
       const key = legacyImportKey(interaction.guild.id, interaction.user.id, resourceId);
       const preview = legacyImportPreviews.get(key);
       if (!preview || preview.expiresAt < Date.now()) {
@@ -435,7 +435,7 @@ export class CustomRoleCommand implements FeatureCommand {
       return true;
     }
     if (action === "pending-confirm" || action === "pending-cancel") {
-      if (!this.requireManager(interaction) || !interaction.guild || !resourceId) return true;
+      if (!this.requireManager(interaction) || (action === "pending-confirm" && !this.requireRoleManager(interaction)) || !interaction.guild || !resourceId) return true;
       const result = action === "pending-confirm"
         ? await confirmCustomRolePending(interaction.guild, resourceId, interaction.user.id)
         : await cancelCustomRolePending(interaction.guild, resourceId, interaction.user.id);
@@ -448,7 +448,7 @@ export class CustomRoleCommand implements FeatureCommand {
       return true;
     }
     if (action === "member-remove-confirm" && resourceId && interaction.guildId) {
-      if (!this.requireManager(interaction) || !interaction.guild) return true;
+      if (!this.requireManager(interaction) || !this.requireRoleManager(interaction) || !interaction.guild) return true;
       const key = removalRequestKey(interaction.guildId, interaction.user.id, resourceId);
       const request = memberRemovalRequests.get(key);
       if (!request || request.expiresAt < Date.now()) {
@@ -628,6 +628,14 @@ export class CustomRoleCommand implements FeatureCommand {
       return true;
     }
     return false;
+  }
+
+  private requireRoleManager(interaction: GuildInteraction): boolean {
+    if (!canManageRoles(interaction)) {
+      void interaction.reply({ content: "Manage Server and Manage Roles permissions are required for this action.", flags: MessageFlags.Ephemeral });
+      return false;
+    }
+    return true;
   }
 
   private requireManager(interaction: GuildInteraction): boolean {
