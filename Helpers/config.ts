@@ -16,7 +16,8 @@ export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
  if(parsed.protocol!=="https:"&&!(parsed.protocol==="http:"&&local))throw new Error("ANILIST_API_URL must use HTTPS (HTTP only for loopback development).");
  const pickerEnabled=(env.CUSTOM_ROLES_PICKER_ENABLED?.trim().toLowerCase()??"true");
  if(!["1","true","yes","on","0","false","no","off"].includes(pickerEnabled))throw new Error("CUSTOM_ROLES_PICKER_ENABLED must be a boolean.");
- const pickerHost=env.DASHBOARD_PICKER_HOST?.trim()||"127.0.0.1";
+ const pickerHostRaw=env.DASHBOARD_PICKER_HOST?.trim()||"127.0.0.1";
+ const pickerHost=pickerHostRaw==="[::1]"?"::1":pickerHostRaw;
  const hostParts=pickerHost.split(".");
  const loopbackV4=hostParts.length===4&&Number(hostParts[0])===127&&hostParts.every(part=>part.length>0&&[...part].every(char=>char>="0"&&char<="9")&&Number(part)>=0&&Number(part)<=255);
  const pickerHostAllowed=pickerHost==="localhost"||pickerHost==="::1"||pickerHost==="[::1]"||loopbackV4;
@@ -24,6 +25,8 @@ export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
  let customRolesPublicUrl=env.CUSTOM_ROLES_PUBLIC_URL?.trim()||env.DASHBOARD_PUBLIC_URL?.trim()||"http://localhost:8080";
  if(customRolesPublicUrl.endsWith("/"))customRolesPublicUrl=customRolesPublicUrl.slice(0,-1);
  const pickerOrigin=new URL(customRolesPublicUrl);
+ if(pickerOrigin.pathname!=="/"||pickerOrigin.search||pickerOrigin.hash||pickerOrigin.username||pickerOrigin.password)throw new Error("CUSTOM_ROLES_PUBLIC_URL must be an origin without a path, query or credentials.");
+ if(env.NODE_ENV?.trim().toLowerCase()==="production"&&["1","true","yes","on"].includes(pickerEnabled)&&!env.CUSTOM_ROLES_PUBLIC_URL?.trim()&&!env.DASHBOARD_PUBLIC_URL?.trim())throw new Error("Set CUSTOM_ROLES_PUBLIC_URL to the public HTTPS dashboard origin before enabling the production picker.");
  const localPickerOrigin=["localhost","127.0.0.1","[::1]"].includes(pickerOrigin.hostname);
  if(pickerOrigin.protocol!=="https:"&&!(pickerOrigin.protocol==="http:"&&localPickerOrigin))throw new Error("CUSTOM_ROLES_PUBLIC_URL must use HTTPS (HTTP only for loopback development).");
  const pickerPort=positive(env.DASHBOARD_PICKER_PORT,8092,"DASHBOARD_PICKER_PORT");
@@ -45,7 +48,7 @@ export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
  customRolePickerEnabled:["1","true","yes","on"].includes(pickerEnabled),customRolePickerHost:pickerHost,
  customRolePickerPort:pickerPort,
  customRolePickerIdleTtl:pickerIdleTtl,customRolePickerMaxTtl:pickerMaxTtl,
- customRolesPublicUrl,customRolesTrustProxy:["1","true","yes","on"].includes(trustProxy),
+ customRolesPublicUrl:pickerOrigin.origin,customRolesTrustProxy:["1","true","yes","on"].includes(trustProxy),
  customRoleIconSourceMaxBytes:Math.max(256*1024,positive(env.CUSTOM_ROLES_ICON_SOURCE_MAX_BYTES,8*1024*1024,"CUSTOM_ROLES_ICON_SOURCE_MAX_BYTES")),
  logLevel};
 }
