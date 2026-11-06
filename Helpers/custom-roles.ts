@@ -319,11 +319,11 @@ export interface CustomRolePendingRemoval {
 }
 
 function parseSnowflakeList(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map(String).filter(item => /^\\d{17,20}$/.test(item));
+  if (Array.isArray(value)) return value.map(String).filter(item => /^\d{17,20}$/.test(item));
   if (typeof value === "string") {
     try {
       const parsed: unknown = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed.map(String).filter(item => /^\\d{17,20}$/.test(item)) : [];
+      return Array.isArray(parsed) ? parsed.map(String).filter(item => /^\d{17,20}$/.test(item)) : [];
     } catch {
       return [];
     }
