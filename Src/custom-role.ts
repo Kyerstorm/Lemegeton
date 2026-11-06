@@ -418,7 +418,8 @@ export class CustomRoleCommand implements FeatureCommand {
         { name: "Feature", value: settings.enabled && anchor ? "Enabled" : "Not configured", inline: true },
         { name: "Eligibility", value: status, inline: true },
         { name: "Your role", value: role ? role.name : record?.name ? `${record.name} · saved` : "Not created", inline: true },
-        { name: "Color", value: colorLabel(record?.primary_color ?? null), inline: true },
+        { name: "Color", value: `${record?.color_mode ?? "solid"} · ${colorLabel(record?.primary_color ?? null)}`, inline: true },
+        { name: "Icon", value: record?.icon_emoji ?? "None", inline: true },
         { name: "Anchor", value: anchor?.name ?? "Not set", inline: true },
       ],
     );
@@ -497,10 +498,8 @@ export class CustomRoleCommand implements FeatureCommand {
       } else if (colorMode === "gradient" && enhancedStyles) {
         colors = { primaryColor: primaryColor ?? 0, secondaryColor: secondaryColor ?? 0, tertiaryColor: null };
       } else {
-        if (colorMode !== "solid") {
-          colorMode = "solid";
-          secondaryColor = null;
-        }
+        if (colorMode !== "solid") colorMode = "solid";
+        secondaryColor = null;
         colors = { primaryColor: primaryColor ?? 0, secondaryColor: null, tertiaryColor: null };
       }
       role = await member.guild.roles.create({
@@ -525,7 +524,7 @@ export class CustomRoleCommand implements FeatureCommand {
         color_mode: colorMode,
         primary_color: primaryColor,
         secondary_color: secondaryColor,
-        icon_emoji: roleIcons ? existing?.icon_emoji ?? null : null,
+        icon_emoji: existing?.icon_emoji ?? null,
       });
       await member.roles.add(role, "Custom Roles: assign personal role");
       await this.logEvent(member.guild, settings, `Created a custom role for <@!${member.id}>.`);
@@ -576,8 +575,8 @@ export class CustomRoleCommand implements FeatureCommand {
     const color = parseCustomRoleColor(rawColor);
     if (color === null) return { ok: false, message: "Enter a valid hex color, such as #8B5CF6 or #ABC." };
     try {
-      await role.edit({ color, reason: "Custom Roles: member changed role color" });
-      await updateCustomRole(member.guild.id, member.id, { primary_color: color }, true);
+      await role.edit({ colors: { primaryColor: color, secondaryColor: null, tertiaryColor: null }, reason: "Custom Roles: member changed role color" });
+      await updateCustomRole(member.guild.id, member.id, { color_mode: "solid", primary_color: color, secondary_color: null }, true);
       await this.logEvent(member.guild, settings, `<@!${member.id}> changed their custom role color.`);
       return { ok: true, message: `Your role color is now **${colorLabel(color)}**.` };
     } catch (error) {
