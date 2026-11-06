@@ -484,9 +484,9 @@ export async function getCommunityHistory(guildId: string): Promise<{
   discussions: Array<{ id: string; title: string; status: string; created_at: Date }>;
 }> {
   const [closedRankings, pastSessions, discussions] = await Promise.all([
-    query("SELECT id, title, closed_at FROM community_rankings WHERE guild_id = $1 AND status = 'closed' ORDER BY closed_at DESC LIMIT 5", [guildId]),
-    query("SELECT id, title, activity_type, scheduled_at FROM community_sessions WHERE guild_id = $1 AND scheduled_at < NOW() ORDER BY scheduled_at DESC LIMIT 5", [guildId]),
-    query("SELECT id, title, status, created_at FROM community_discussions WHERE guild_id = $1 ORDER BY created_at DESC LIMIT 5", [guildId]),
+    query<{ id: string; title: string; closed_at: Date | null }>("SELECT id, title, closed_at FROM community_rankings WHERE guild_id = $1 AND status = 'closed' ORDER BY closed_at DESC LIMIT 5", [guildId]),
+    query<{ id: string; title: string; activity_type: string; scheduled_at: Date }>("SELECT id, title, activity_type, scheduled_at FROM community_sessions WHERE guild_id = $1 AND scheduled_at < NOW() ORDER BY scheduled_at DESC LIMIT 5", [guildId]),
+    query<{ id: string; title: string; status: string; created_at: Date }>("SELECT id, title, status, created_at FROM community_discussions WHERE guild_id = $1 ORDER BY created_at DESC LIMIT 5", [guildId]),
   ]);
   return { closedRankings, pastSessions, discussions };
 }

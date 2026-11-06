@@ -405,7 +405,7 @@ export class PlayCommand implements FeatureCommand {
   }
 
   private async reviewQueue(interaction: ButtonInteraction): Promise<void> {
-    if (!isGuildManager(interaction)) {
+    if (!interaction.guildId || !isGuildManager(interaction)) {
       await interaction.reply({ content: "Manage Server permission is required to review question packs.", flags: MessageFlags.Ephemeral });
       return;
     }
