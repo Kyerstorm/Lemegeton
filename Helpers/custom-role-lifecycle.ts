@@ -195,6 +195,16 @@ async function archiveAutomatically(guild: Guild, reasons: ArchiveReason[]): Pro
   if (archived) noteArchives(guild.id, archived);
 }
 
+export async function archiveLegacyCustomRole(
+  guild: Guild,
+  userId: string,
+  actorId: string,
+): Promise<boolean> {
+  const settings = await getCustomRoleSettings(guild.id);
+  if (!settings.enabled) return false;
+  return archiveOne(guild, userId, "legacy role import archive confirmed by " + actorId);
+}
+
 export async function getPendingCustomRoleRemoval(guildId: string) {
   return getOpenCustomRolePending(guildId);
 }
