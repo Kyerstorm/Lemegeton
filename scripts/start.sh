@@ -3,8 +3,8 @@ set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-if [[ ! -s "$ROOT/dashboard-frontend/dist/app.js" || ! -s "$ROOT/dashboard-frontend/dist/app.css" ]]; then
-  echo "Dashboard frontend assets are missing. Build them with: npm install --prefix dashboard-frontend && npm run build --prefix dashboard-frontend" >&2
+if [[ ! -s "$ROOT/dashboard-frontend/out/index.html" || ! -s "$ROOT/dashboard-frontend/out/login/index.html" ]]; then
+  echo "Next.js dashboard export is missing. Build it with: npm install --prefix dashboard-frontend && npm run typecheck --prefix dashboard-frontend && npm run build --prefix dashboard-frontend" >&2
   exit 1
 fi
 
