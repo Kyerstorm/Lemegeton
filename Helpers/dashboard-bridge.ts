@@ -206,7 +206,7 @@ async function setCommand(
       errorResponse(response, 400, error instanceof Error ? error.message : "Invalid request body.");
       return;
     }
-    if (typeof body.enabled !== "boolean" || !validSnowflake(String(body.actor_id ?? ""))) {
+    if (typeof body.enabled !== "boolean" || !isDashboardGuildId(String(body.actor_id ?? ""))) {
       errorResponse(response, 400, "enabled must be a boolean and actor_id must be a valid Discord ID.");
       return;
     }
