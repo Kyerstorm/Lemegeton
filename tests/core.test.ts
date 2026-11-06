@@ -9,6 +9,7 @@ import {ARCHIVE_TAG_CATALOG,searchArchiveTags} from "../Helpers/archive.js";
 import {AniListClient} from "../Helpers/anilist.js";
 import {normalizeAtlasTitle,normalizeAtlasCategory,safeAtlasUrl} from "../Helpers/atlas.js";
 import {FEATURE_NAMES,isFeatureName} from "../Helpers/settings.js";
+import {customRoleChannelAllowed,customRoleCooldownMessage,parseCustomRoleColor,validateCustomRoleName} from "../Helpers/custom-roles.js";
 
 test("bot configuration requires valid Discord credentials and validates the AniList endpoint",()=>{
  assert.throws(()=>loadConfig({}),/DISCORD_TOKEN/);
@@ -48,10 +49,33 @@ test("Knowledge Atlas normalizes media identities and rejects unsafe URLs",()=>{
  assert.equal(safeAtlasUrl("http://example.com"),null);
  assert.equal(safeAtlasUrl("https://user:pass@example.com"),null);
 });
-test("Server settings expose only the five registered feature environments",()=>{
- assert.deepEqual(FEATURE_NAMES,["discover","archive","community","play","profile"]);
+test("Server settings expose the seven registered feature environments",()=>{
+ assert.deepEqual(FEATURE_NAMES,["discover","archive","community","play","profile","custom-role"]);
  assert.equal(isFeatureName("archive"),true);
- assert.equal(isFeatureName("custom-role"),false);
+ assert.equal(isFeatureName("custom-role"),true);
+});
+
+test("Custom role colors and names follow the existing safety rules",()=>{
+ assert.equal(parseCustomRoleColor("#abc"),0xaabbcc);
+ assert.equal(parseCustomRoleColor("#000"),0x010101);
+ assert.equal(parseCustomRoleColor("not-a-color"),null);
+ const settings={blocked_words:["spoiler"],removed_default_words:[]};
+ assert.equal(validateCustomRoleName("Moonlit Circle",settings).name,"Moonlit Circle");
+ assert.match(validateCustomRoleName("a.d.m.i.n",settings).error??"",/admin/i);
+ assert.match(validateCustomRoleName("@everyone Crew",settings).error??"",/@everyone/i);
+ assert.match(validateCustomRoleName("Spoiler Club",settings).error??"",/blocked word/i);
+ assert.match(validateCustomRoleName("Server Team",settings,["Server Team"]).error??"",/already a server role/i);
+ assert.equal(validateCustomRoleName("Mod Squad",{...settings,removed_default_words:["mod"]}).name,"Mod Squad");
+});
+
+test("Custom role command scope and cooldown are guild-local and deterministic",()=>{
+ const settings={command_channel_id:"200"} as Parameters<typeof customRoleChannelAllowed>[2];
+ assert.equal(customRoleChannelAllowed("200",null,settings),true);
+ assert.equal(customRoleChannelAllowed("201","200",settings),true);
+ assert.equal(customRoleChannelAllowed("201",null,settings),false);
+ const record={last_changed_at:"2026-01-01T00:00:00.000Z"} as Parameters<typeof customRoleCooldownMessage>[0];
+ assert.match(customRoleCooldownMessage(record,120,Date.parse(record.last_changed_at)+30_000)??"",/2 minutes/);
+ assert.equal(customRoleCooldownMessage(record,120,Date.parse(record.last_changed_at)+130_000),null);
 });
 
 test("AniList random discovery samples a catalogue page rather than the trending feed", async () => {
