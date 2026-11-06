@@ -46,7 +46,7 @@ function stringList(value: unknown): string[] {
 }
 
 function normalizeName(value: string): string {
-  return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+  return value.normalize("NFKD").replace(/[\p{Cf}\p{Cc}\p{Mn}\p{Me}]/gu, "").toLowerCase()
     .replace(/[0134578@$!|]/g, character => LEET[character] ?? character);
 }
 
@@ -54,18 +54,43 @@ function nameTokens(value: string): string[] {
   return normalizeName(value).split(/[^a-z0-9]+/).filter(Boolean);
 }
 
+function mergeSingleLetters(tokens: string[]): string[] {
+  const merged: string[] = [];
+  let run = "";
+  for (const token of tokens) {
+    if (token.length === 1) {
+      run += token;
+      continue;
+    }
+    if (run) merged.push(run);
+    run = "";
+    merged.push(token);
+  }
+  if (run) merged.push(run);
+  return merged;
+}
+
 function containsProtectedWord(name: string, word: string): boolean {
-  const nameTokensValue = nameTokens(name);
+  const split = nameTokens(name);
   const wordTokens = nameTokens(word);
   if (!wordTokens.length) return false;
-  for (let index = 0; index <= nameTokensValue.length - wordTokens.length; index += 1) {
-    const candidate = nameTokensValue.slice(index, index + wordTokens.length);
-    const last = candidate[candidate.length - 1] ?? "";
-    const expected = wordTokens[wordTokens.length - 1] ?? "";
-    if (candidate.slice(0, -1).join(" ") === wordTokens.slice(0, -1).join(" ")
-      && (last === expected || last === `${expected}s` || last === `${expected}es`)) return true;
+  const joinedPerWord = normalizeName(name).split(/\s+/)
+    .map(token => token.replace(/[^a-z0-9]/g, "")).filter(Boolean);
+  const views = [split, mergeSingleLetters(split), joinedPerWord];
+  const phrase = wordTokens.join("");
+  for (const view of views) {
+    for (let index = 0; index <= view.length - wordTokens.length; index += 1) {
+      const candidate = view.slice(index, index + wordTokens.length);
+      const last = candidate[candidate.length - 1] ?? "";
+      const expected = wordTokens[wordTokens.length - 1] ?? "";
+      if (candidate.slice(0, -1).join(" ") === wordTokens.slice(0, -1).join(" ")
+        && (last === expected || last === expected + "s" || last === expected + "es")) return true;
+    }
+    if (wordTokens.length > 1 && view.some(token =>
+      token === phrase || token === phrase + "s" || token === phrase + "es",
+    )) return true;
   }
-  return wordTokens.length > 1 && nameTokensValue.join("") === wordTokens.join("");
+  return false;
 }
 
 export function parseCustomRoleColor(input: string): number | null {
