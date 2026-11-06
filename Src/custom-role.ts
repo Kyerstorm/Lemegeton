@@ -814,6 +814,7 @@ export class CustomRoleCommand implements FeatureCommand {
       const entry = selectedTakeOvers[index]!;
       try {
         if (!await takeOver(entry, false)) continue;
+        takenOver += 1;
       } catch (error) {
         skipped += 1;
         errors.push("Skipped " + (entry.role_name ?? entry.role_id) + ": " + (error instanceof Error ? error.message : "unknown error"));
@@ -836,7 +837,7 @@ export class CustomRoleCommand implements FeatureCommand {
     }
 
     await interaction.editReply(
-      "Legacy import complete. Took over " + takenOver + ", archived " + archived + ", skipped " + skipped + "." +
+      "Legacy import complete. Linked " + takenOver + " eligible role(s), archived " + archived + " ineligible role(s), skipped " + skipped + "." +
       (errors.length ? "\n" + errors.slice(0, 8).join("\n").slice(0, 1200) : ""),
     );
     await this.logEvent(guild, settings, "Imported legacy booster roles: linked eligible records, archived " + archived + ", skipped " + skipped + ".");
