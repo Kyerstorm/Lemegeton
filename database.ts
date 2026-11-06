@@ -263,9 +263,11 @@ const schemaStatements = [
     show_steam BOOLEAN NOT NULL DEFAULT TRUE,
     allow_affinity BOOLEAN NOT NULL DEFAULT FALSE,
     server_taste_opt_in BOOLEAN NOT NULL DEFAULT FALSE,
+    share_leaderboard BOOLEAN NOT NULL DEFAULT FALSE,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (guild_id, user_id)
   )`,
+  "ALTER TABLE profile_preferences ADD COLUMN IF NOT EXISTS share_leaderboard BOOLEAN NOT NULL DEFAULT FALSE",
   `CREATE TABLE IF NOT EXISTS community_daily_schedules (
     guild_id BIGINT PRIMARY KEY,
     channel_id BIGINT NOT NULL,
