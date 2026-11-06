@@ -34,7 +34,7 @@ const DEFAULT_PROTECTED_WORDS = [
 ] as const;
 const HEX_COLOR = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i;
 export const HOLOGRAPHIC_COLORS = [11127295, 16759788, 16761760] as const;
-const STANDARD_EMOJI = /^(?:\\p{Extended_Pictographic}(?:\\uFE0F|\\uFE0E)?\\p{Emoji_Modifier}?(?:\\u200D\\p{Extended_Pictographic}(?:\\uFE0F|\\uFE0E)?\\p{Emoji_Modifier}?)*|\\p{Regional_Indicator}{2}|[0-9#*]\\uFE0F?\\u20E3)$/u;
+const STANDARD_EMOJI = /^(?:\p{Extended_Pictographic}(?:\uFE0F|\uFE0E)?\p{Emoji_Modifier}?(?:\u200D\p{Extended_Pictographic}(?:\uFE0F|\uFE0E)?\p{Emoji_Modifier}?)*|\p{Regional_Indicator}{2}|[0-9#*]\uFE0F?\u20E3)$/u;
 const LEET: Record<string, string> = { "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b", "@": "a", "$": "s", "!": "i", "|": "l" };
 
 function stringList(value: unknown): string[] {
@@ -96,7 +96,12 @@ function containsProtectedWord(name: string, word: string): boolean {
   return false;
 }
 
-export function validateCustomRoleEmoji(input: string): string | null {\n  const emoji = input.trim();\n  return emoji && emoji.length <= 32 && !emoji.startsWith("<") && STANDARD_EMOJI.test(emoji) ? emoji : null;\n}\n\nexport function parseCustomRoleColor(input: string): number | null {
+export function validateCustomRoleEmoji(input: string): string | null {
+  const emoji = input.trim();
+  return emoji && emoji.length <= 32 && !emoji.startsWith("<") && STANDARD_EMOJI.test(emoji) ? emoji : null;
+}
+
+export function parseCustomRoleColor(input: string): number | null {
   const match = HEX_COLOR.exec(input.trim());
   if (!match) return null;
   const digits = match[1] ?? "";
