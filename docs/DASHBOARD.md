@@ -1,6 +1,6 @@
 # Lemegeton web dashboard
 
-The public control plane is a Rust/Axum service with a React + TypeScript frontend in `dashboard-frontend/src/`. Screen components live in `.tsx` and styling is authored in `styles.ts`; Vite builds those sources into `dashboard-frontend/dist/app.js` and `app.css`, which Rust serves from the same origin. The root `railpack.json` explicitly supplies Node 22 for this nested package, so a Python/Rust deployment does not rely on language auto-detection to provide Node. The Rust service binds to loopback by default and refuses non-loopback binding unless `DASHBOARD_ALLOW_PUBLIC_BIND=true`; Railway/container configuration explicitly opts into the platform ingress interface. No handwritten dashboard HTML or standalone CSS/JavaScript source files are used. The Discord bot remains the existing Python/discord.py application. A narrow runtime adapter stays consolidated in `bot.py` because only the live bot process owns its command tree and gateway connection.
+The public control plane is a Rust/Axum service with a Next.js App Router frontend in `dashboard-frontend/app/`. Interactive screens remain React + TypeScript components in `dashboard-frontend/src/`; the stylesheet is authored as CSS in `dashboard-frontend/app/globals.css`. Next.js builds a static export in `dashboard-frontend/out/`; Rust serves the exported `index.html`, `login/index.html`, and hashed `_next/static` assets from the same origin. The root `railpack.json` supplies Node 22 for this nested package. The Rust service binds to loopback by default and refuses non-loopback binding unless `DASHBOARD_ALLOW_PUBLIC_BIND=true`; Railway/container configuration explicitly opts into the platform ingress interface. The Discord bot is being migrated separately to the TypeScript runtime on the v3 PR branch.
 
 ## Capabilities and boundaries
 
@@ -11,7 +11,7 @@ The public control plane is a Rust/Axum service with a React + TypeScript fronte
 - Command changes are written through the bot's existing PostgreSQL configuration layer and are synchronized to Discord before the API confirms success. If synchronization fails, the bridge restores the previous configuration and attempts to restore the prior command set.
 - Extension inventory, runtime status, persisted configuration, audit history, and selected logs reflect the running bot. Runtime load/unload/reload controls are deliberately omitted because the current architecture does not provide a safety contract for unloading arbitrary cogs.
 - Logs and bot-wide integration configuration are owner-only. Only booleans and provider labels are returned for integrations; secrets are never sent to the browser.
-- The existing custom-role picker remains in Python on a second loopback port and is reverse-proxied through Rust so existing picker tokens and role-validation rules remain in effect.
+- The existing custom-role picker is still served from the legacy Python implementation on a second loopback port and is reverse-proxied through Rust. Its token, image and role-validation behavior must be ported before that Python service can be removed.
 
 The service does not expose arbitrary code execution, shell commands, raw SQL, or unrestricted extension operations.
 
@@ -45,13 +45,13 @@ The bot still requires its existing Discord token and PostgreSQL configuration. 
 1. Install Python dependencies with `python -m pip install -r requirements.txt`.
 2. Install Node.js 22 or newer and a current stable Rust toolchain.
 3. Configure the environment values above and the existing bot/database values.
-4. Build the frontend: `npm install --prefix dashboard-frontend && npm run build --prefix dashboard-frontend`.
+4. Build the frontend: `npm install --prefix dashboard-frontend && npm run typecheck --prefix dashboard-frontend && npm run build --prefix dashboard-frontend`.
 5. Build the public service: `cargo build --manifest-path dashboard-rs/Cargo.toml`.
 6. Start the dashboard backend with `cargo run --manifest-path dashboard-rs/Cargo.toml` from the repository root in one terminal.
 7. Start the existing bot with `python bot.py` in another terminal. The bot starts its private runtime adapter and custom-role picker automatically.
 8. Open the public dashboard address. For local development, register `http://localhost:8080/oauth/callback` and use `DASHBOARD_PUBLIC_URL=http://localhost:8080`.
 
-For the combined deployment entry point, build the frontend assets and release binary first, then use `./scripts/start.sh`. The Railway build command installs Node dependencies, generates the frontend assets, compiles the Rust service, and starts both services through this script. `dashboard-frontend/dist/` is generated output and is not a frontend source directory.
+For the combined deployment entry point, build the frontend assets and release binary first, then use `./scripts/start.sh`. The Railway build command installs Node dependencies, generates the frontend assets, compiles the Rust service, and starts both services through this script. `dashboard-frontend/out/` is generated static-export output and is not a frontend source directory.
 
 ## Testing and checks
 
