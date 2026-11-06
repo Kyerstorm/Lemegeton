@@ -33,6 +33,7 @@ import {
   removeCustomRoleBlockedWord,
   getCustomRoleRecord,
   getCustomRoleSettings,
+  listCustomRoleRecords,
   HOLOGRAPHIC_COLORS,
   parseCustomRoleColor,
   saveCustomRole,
@@ -493,7 +494,9 @@ export class CustomRoleCommand implements FeatureCommand {
       const additions = parseCustomRoleWordList(interaction.fields.getTextInputValue("block"));
       const removals = parseCustomRoleWordList(interaction.fields.getTextInputValue("unblock"));
       if (!additions.length && !removals.length) {
-        await interaction.reply({ content: "Enter at least one word to block or unblock.", flags: MessageFlags.Ephemeral });
+        const renamed = await this.sweepBlockedRoleNames(interaction.guild!);
+      if (renamed) outcomes.push("Renamed " + renamed + " existing custom role(s) that no longer met the name rules.");
+      await interaction.reply({ content: "Enter at least one word to block or unblock.", flags: MessageFlags.Ephemeral });
         return true;
       }
       const outcomes: string[] = [];
@@ -506,7 +509,7 @@ export class CustomRoleCommand implements FeatureCommand {
         outcomes.push(`${result.ok ? "✓" : "·"} ${result.message}`);
       }
       await interaction.reply({
-        content: "**Custom role name restrictions**\n" + outcomes.join("\n").slice(0, 1800) + "\n\nThese rules are applied to new names and edits. Existing roles are not renamed automatically yet.",
+        content: "**Custom role name restrictions**\n" + outcomes.join("\n").slice(0, 1800) + "\n\nThese rules are applied to new names and edits.",
         flags: MessageFlags.Ephemeral,
       });
       return true;
@@ -851,6 +854,40 @@ export class CustomRoleCommand implements FeatureCommand {
     } catch (error) {
       return { ok: false, message: error instanceof Error ? `I couldn't take your role off: ${error.message}` : "I couldn't take your role off." };
     }
+  }
+
+  private async sweepBlockedRoleNames(guild: Guild): Promise<number> {
+    const settings = await getCustomRoleSettings(guild.id);
+    const records = await listCustomRoleRecords(guild.id);
+    const botMember = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
+    if (!botMember?.permissions.has(PermissionFlagsBits.ManageRoles)) return 0;
+    const roles = [...guild.roles.cache.values()];
+    let renamed = 0;
+    for (const record of records) {
+      if (record.status !== "active" || !record.role_id) continue;
+      const role = guild.roles.cache.get(record.role_id);
+      if (!role || role.position >= botMember.roles.highest.position) continue;
+      const peers = roles.filter(item => item.id !== role.id);
+      const reserved = peers.filter(item => !item.managed).map(item => item.name);
+      const protectedNames = protectedRoleNames(peers.filter(item =>
+        item.permissions.has(PermissionFlagsBits.Administrator)
+        || item.permissions.has(PermissionFlagsBits.ManageGuild)
+        || item.permissions.has(PermissionFlagsBits.ManageRoles)
+        || item.permissions.has(PermissionFlagsBits.ManageMessages)
+        || item.permissions.has(PermissionFlagsBits.KickMembers)
+        || item.permissions.has(PermissionFlagsBits.BanMembers)
+        || item.permissions.has(PermissionFlagsBits.ModerateMembers),
+      ));
+      if (!validateCustomRoleName(role.name, settings, reserved, protectedNames).error) continue;
+      const fallback = "Member Role " + record.user_id.slice(-6);
+      const validFallback = validateCustomRoleName(fallback, settings, reserved, protectedNames);
+      if (!validFallback.name || validFallback.error) continue;
+      await role.edit({ name: validFallback.name, reason: "Custom Roles: updated name restrictions" });
+      await updateCustomRole(guild.id, record.user_id, { name: validFallback.name });
+      renamed += 1;
+    }
+    if (renamed) await this.logEvent(guild, settings, "Renamed " + renamed + " custom role(s) after an administrator changed blocked-word rules.");
+    return renamed;
   }
 
   private async configureEnabled(interaction: GuildInteraction, enabled: boolean): Promise<void> {
