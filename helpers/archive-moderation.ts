@@ -1,6 +1,8 @@
 import { PermissionsBitField, type GuildMember } from "discord.js";
 import { query, queryOne } from "../database.js";
 import { cleanText } from "./security.js";
+import { GLOBAL_MODERATOR_IDS, isGlobalArchiveModerator } from "./archive-access.js";
+export { isGlobalArchiveModerator } from "./archive-access.js";
 import { getArchiveEntry, parseTags, type ArchiveCategory, type ArchiveEntry, type ArchiveVisibility } from "./archive.js";
 
 export async function addArchiveReport(
@@ -19,10 +21,6 @@ export async function addArchiveReport(
        created_at = NOW(), reviewed_at = NULL`,
     [entry.archive_type, entryId, guildId, reporterId, cleanText(reason, 500)],
   );
-}
-
-export function isGlobalArchiveModerator(userId: string): boolean {
-  return GLOBAL_MODERATOR_IDS.has(userId);
 }
 
 export async function canModerateArchive(member: GuildMember, guildId: string, visibility: ArchiveVisibility): Promise<boolean> {
