@@ -11,7 +11,7 @@ The public control plane is a Rust/Axum service with a Next.js App Router fronte
 - Command changes are written to the selected guild's PostgreSQL feature settings. The bridge publishes the v3 global slash-command registry on an explicit sync; per-guild feature guards remain the source of truth for whether a command action may run. If a write or Discord synchronization fails, the bridge attempts to restore the previous guild setting and reports failure.
 - Registered command inventory, runtime status, persisted configuration, audit history, and recent structured logs reflect the TypeScript bridge process. The current log endpoint returns a bounded in-memory recent-log buffer; it is not a durable log-file reader. Runtime load/unload/reload controls are omitted because the v3 registry is static.
 - Logs and bot-wide integration configuration are owner-only. Only booleans and provider labels are returned for integrations; secrets are never sent to the browser.
-- The custom-role browser picker is served by the TypeScript bot on a private loopback port and reverse-proxied through Rust. Its bearer token is issued in the URL fragment, stored only as a SHA-256 hash in process memory, sent only in the Authorization header, and revoked on replacement, expiry or bot restart. Writes require the configured browser Origin and every request re-checks the current guild member, eligibility, role record and role hierarchy. External icon image links are HTTPS-only, resolved to public addresses and fetched with the resolved IP pinned to the TLS request; redirects are refused.
+- The Knowledge Atlas dashboard page queries the TypeScript bot's private loopback Atlas bridge through Rust. Rust re-checks the signed-in member's Manage Server or Administrator access for the selected guild before forwarding a bounded, source-attributed one-hop graph query. The browser never receives the bot bridge secret. This initial dashboard view expands one relationship at a time; full graph-depth navigation, path finding, image-backed node previews and exports remain future Atlas work. The custom-role browser picker is served by the TypeScript bot on a private loopback port and reverse-proxied through Rust. Its bearer token is issued in the URL fragment, stored only as a SHA-256 hash in process memory, sent only in the Authorization header, and revoked on replacement, expiry or bot restart. Writes require the configured browser Origin and every request re-checks the current guild member, eligibility, role record and role hierarchy. External icon image links are HTTPS-only, resolved to public addresses and fetched with the resolved IP pinned to the TLS request; redirects are refused.
 
 The service does not expose arbitrary code execution, shell commands, raw SQL, or unrestricted extension operations.
 
@@ -29,7 +29,8 @@ Configure the following in the service environment (see `.env.example` for the f
 | `DASHBOARD_OWNER_IDS` | Optional comma-separated Discord IDs with bot-wide log/integration access |
 | `ADMIN_DISCORD_ID` | Existing configured bot administrator; also receives dashboard-owner access |
 | `DASHBOARD_BRIDGE_SECRET` | Long random shared secret, read by Rust and the embedded bot runtime |
-| `DASHBOARD_BRIDGE_URL` | Internal bridge URL; default `http://127.0.0.1:8091` |
+| `DASHBOARD_BRIDGE_URL` | Internal bot-management bridge URL; default `http://127.0.0.1:8091` |
+| `DASHBOARD_ATLAS_BRIDGE_URL` | Private Knowledge Atlas bridge URL; default `http://127.0.0.1:8093` |
 | `DASHBOARD_BRIDGE_HOST` | TypeScript bridge bind host; loopback only, default `127.0.0.1` |
 | `DASHBOARD_BRIDGE_PORT` | TypeScript bridge port; default `8091` |
 | `DASHBOARD_PICKER_URL` | Private picker URL; default `http://127.0.0.1:8092` |

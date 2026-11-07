@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 
-type Page = "overview" | "commands" | "extensions" | "audit" | "diagnostics" | "logs" | "integrations" | "database";
+type Page = "overview" | "commands" | "atlas" | "extensions" | "audit" | "diagnostics" | "logs" | "integrations" | "database";
 type User = { id: string; username: string; global_name?: string | null; avatar?: string | null };
 type Guild = { id: string; name: string; icon?: string | null; administrator?: boolean; member_count?: number | null };
 type Command = { fullname: string; name?: string; description?: string; section?: string; type?: string; scope?: string; enabled: boolean; protected?: boolean; required_permissions?: string | boolean | null };
@@ -17,10 +17,13 @@ type Confirmation = { title: string; message: string; actionLabel: string; run: 
 type Bootstrap = { user: User; guilds: Guild[]; csrf_token: string; selected_guild_id?: string };
 type CommandResponse = { commands: Command[] };
 type ListResponse<T> = { entries?: T[] };
+type AtlasRelation = { title: string; category: string; url: string | null; relationType: string; source: string; sourceKind: "provider" | "recommendation" | "community" };
+type AtlasResponse = { root: { title: string; category: string; url: string | null }; relationships: AtlasRelation[] };
 
 const PAGES: { id: Page; label: string; glyph: string; eyebrow: string; subtitle: string }[] = [
   { id: "overview", label: "Overview", glyph: "◫", eyebrow: "LIVE CONTROL / 01", subtitle: "A clear view of bot health and the current server configuration." },
   { id: "commands", label: "Commands", glyph: "⌘", eyebrow: "COMMAND REGISTRY / 02", subtitle: "Control registered slash commands, scoped to the selected Discord server." },
+  { id: "atlas", label: "Knowledge Atlas", glyph: "⌘", eyebrow: "MEDIA GRAPH / 03", subtitle: "Explore source-attributed media relationships and the connections approved by this server." },
   { id: "extensions", label: "Extensions", glyph: "▦", eyebrow: "BOT MODULES / 03", subtitle: "Review the extension inventory reported by the live bot process." },
   { id: "audit", label: "Audit history", glyph: "◷", eyebrow: "CHANGE RECORD / 04", subtitle: "Review recorded dashboard configuration changes for this server." },
   { id: "diagnostics", label: "Diagnostics", glyph: "⌁", eyebrow: "HEALTH & TELEMETRY / 05", subtitle: "Inspect the bot gateway, runtime version, uptime, and last-known status." },
@@ -182,7 +185,13 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [operationBusy, setOperationBusy] = useState(false);
+  const [atlasTitle, setAtlasTitle] = useState("");
+  const [atlasCategory, setAtlasCategory] = useState("ANIME");
+  const [atlasResult, setAtlasResult] = useState<AtlasResponse | null>(null);
+  const [atlasLoading, setAtlasLoading] = useState(false);
+  const [atlasError, setAtlasError] = useState("");
   const refreshGeneration = useRef(0);
+  const atlasRequestGeneration = useRef(0);
   const activeGuildIdRef = useRef("");
 
   const pushToast = useCallback((message: string, error = false) => {
@@ -196,6 +205,10 @@ export default function App() {
     if (!guilds.some((guild) => String(guild.id) === String(nextId))) return;
     activeGuildIdRef.current = String(nextId);
     refreshGeneration.current += 1;
+    atlasRequestGeneration.current += 1;
+    setAtlasResult(null);
+    setAtlasError("");
+    setAtlasLoading(false);
     try { window.localStorage.setItem("lemegeton:selected-guild", String(nextId)); } catch { /* storage may be disabled */ }
     setGuildId(String(nextId));
     setConfirmation(null);
@@ -417,6 +430,40 @@ export default function App() {
     } catch (error) { pushToast(errorMessage(error), true); }
   };
 
+  const searchAtlas = async (
+    title = atlasTitle,
+    mediaCategory = atlasCategory,
+    mediaUrl?: string | null,
+  ) => {
+    const cleanTitle = title.trim();
+    if (!guildId || !cleanTitle) {
+      setAtlasError("Enter a media title to explore its connections.");
+      return;
+    }
+    const requestedGuild = guildId;
+    const requestId = ++atlasRequestGeneration.current;
+    const params = new URLSearchParams({ title: cleanTitle, category: mediaCategory });
+    if (mediaUrl) params.set("url", mediaUrl);
+    setAtlasTitle(cleanTitle);
+    setAtlasCategory(mediaCategory);
+    setAtlasLoading(true);
+    setAtlasError("");
+    try {
+      const result = await api<AtlasResponse>(
+        "/api/guilds/" + encodeURIComponent(requestedGuild) + "/atlas?" + params.toString(),
+        csrf,
+      );
+      if (requestId !== atlasRequestGeneration.current || activeGuildIdRef.current !== requestedGuild) return;
+      setAtlasResult(result);
+    } catch (error) {
+      if (requestId !== atlasRequestGeneration.current || activeGuildIdRef.current !== requestedGuild) return;
+      setAtlasError(errorMessage(error));
+      setAtlasResult(null);
+    } finally {
+      if (requestId === atlasRequestGeneration.current) setAtlasLoading(false);
+    }
+  };
+
   const navigate = (next: Page) => { setPage(next); setMobileNav(false); };
   const selectedPage = PAGES.find((item) => item.id === page) || PAGES[0];
 
@@ -429,6 +476,17 @@ export default function App() {
   const runtimeStatus = system.status === "unknown" ? "UNKNOWN" : String(system.status || (bot.ready ? "online" : "connecting")).toUpperCase();
   const runtimeOnline = Boolean(bot.ready) && system.status !== "unknown";
   const lastKnown = system.last_known || null;
+  const atlasNodes = useMemo(() => {
+    const relationships = (atlasResult?.relationships ?? []).slice(0, 12);
+    return relationships.map((relationship, index) => {
+      const angle = (index / Math.max(relationships.length, 1)) * Math.PI * 2 - Math.PI / 2;
+      return {
+        ...relationship,
+        x: 50 + Math.cos(angle) * 37,
+        y: 50 + Math.sin(angle) * 37,
+      };
+    });
+  }, [atlasResult]);
 
   if (initialLoading) return <main className="boot-screen"><span className="boot-mark">L.</span><span className="spinner" /><p>Establishing a secure session</p><small>LEMEGETON / CONTROL PLANE</small></main>;
 
@@ -441,6 +499,7 @@ export default function App() {
         {PAGES.map((item) => <button key={item.id} type="button" className={"nav-item" + (page === item.id ? " active" : "")} onClick={() => navigate(item.id)} aria-current={page === item.id ? "page" : undefined}>
           <span className="nav-glyph" aria-hidden="true">{item.glyph}</span><span>{item.label}</span>
           {item.id === "commands" ? <span className="nav-count">{commands.length || "—"}</span> : null}
+          {item.id === "atlas" ? <span className="nav-count">↗</span> : null}
         </button>)}
       </nav>
       <div className="sidebar-spacer" />
@@ -503,6 +562,98 @@ export default function App() {
           <button className={"switch" + (command.enabled ? " checked" : "")} role="switch" type="button" aria-checked={Boolean(command.enabled)} aria-label={"Toggle " + command.fullname} disabled={Boolean(command.protected) || busyCommand === command.fullname || operationBusy} onClick={() => void toggleCommand(command)}><span /></button>
         </article>)}</div>
         <p className="footnote">Only explicitly registered dashboard-managed application commands appear here. Prefix commands and extension load/unload operations are not implied to be manageable.</p>
+      </section> : null}
+
+            {page === "atlas" ? <section className="page">
+        <SectionHeading
+          eyebrow={selectedPage.eyebrow}
+          title={<>Knowledge <span>Atlas.</span></>}
+          subtitle="Follow confirmed provider relationships and server-approved community links. Select a connected node to expand another local neighborhood."
+          actions={<StatusPill ok={Boolean(atlasResult)}>{atlasResult ? atlasResult.relationships.length + " CONNECTIONS" : "GUILD-SCOPED"}</StatusPill>}
+        />
+        <Panel eyebrow="FIND A MEDIA NODE" title="Explore a title">
+          <form className="atlas-search" onSubmit={(event) => { event.preventDefault(); void searchAtlas(); }}>
+            <label className="atlas-search-title">
+              <span>MEDIA TITLE</span>
+              <input
+                type="search"
+                value={atlasTitle}
+                onChange={(event) => setAtlasTitle(event.target.value)}
+                maxLength={256}
+                placeholder="Search a title, for example Frieren"
+                autoComplete="off"
+                required
+              />
+            </label>
+            <label className="filter-control atlas-category">
+              <span>CATEGORY</span>
+              <select value={atlasCategory} onChange={(event) => setAtlasCategory(event.target.value)}>
+                <option value="ANIME">Anime</option>
+                <option value="MANGA">Manga</option>
+                <option value="LIGHT_NOVEL">Light novel</option>
+                <option value="WEBNOVEL">Webnovel</option>
+                <option value="BOOK">Book</option>
+                <option value="MOVIE">Film</option>
+                <option value="TV">Television</option>
+                <option value="GAME">Video game</option>
+              </select>
+            </label>
+            <Button tone="primary" type="submit" disabled={atlasLoading || !guildId}>
+              {atlasLoading ? "Mapping…" : "Explore connections ↗"}
+            </Button>
+          </form>
+          {atlasError ? <p className="atlas-error" role="alert">{atlasError}</p> : null}
+        </Panel>
+
+        {atlasLoading && !atlasResult ? <Panel eyebrow="GRAPH PROJECTION" title="Building the local graph"><Empty loading>Looking up authorized relationships for this server…</Empty></Panel> : null}
+        {atlasResult ? <>
+          <Panel eyebrow="LOCAL GRAPH / ONE HOP" title={atlasResult.root.title} index={atlasResult.root.category}>
+            <p className="atlas-explainer">This view shows the selected title and its direct recorded connections only. Provider links are global; community links are visible only in the selected server.</p>
+            {atlasResult.relationships.length ? <div className="atlas-graph" role="group" aria-label={"Media relationships connected to " + atlasResult.root.title}>
+              <svg className="atlas-edges" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                {atlasNodes.map((node, index) => <line key={node.title + node.category + index} x1="50" y1="50" x2={node.x} y2={node.y} className={"atlas-edge " + node.sourceKind} />)}
+              </svg>
+              <div className="atlas-root-node">
+                <span className="atlas-node-category">{atlasResult.root.category.replaceAll("_", " ")}</span>
+                <strong>{atlasResult.root.title}</strong>
+                {atlasResult.root.url ? <a href={atlasResult.root.url} target="_blank" rel="noreferrer">Provider ↗</a> : null}
+              </div>
+              {atlasNodes.map((node, index) => <button
+                key={node.title + node.category + index}
+                type="button"
+                className={"atlas-node " + node.sourceKind}
+                style={{ left: node.x + "%", top: node.y + "%" }}
+                title={node.title + " · " + node.relationType}
+                onClick={() => void searchAtlas(node.title, node.category, node.url)}
+                disabled={atlasLoading}
+              >
+                <span>{node.category.replaceAll("_", " ")}</span>
+                <strong>{node.title}</strong>
+              </button>)}
+            </div> : <Empty>No connections have been recorded for this title yet. Explore another title or check back after supported provider relationships are indexed.</Empty>}
+            <div className="atlas-legend">
+              <span><i className="provider" /> Provider-confirmed</span>
+              <span><i className="recommendation" /> Recommendation</span>
+              <span><i className="community" /> Community-sourced</span>
+            </div>
+          </Panel>
+          {atlasResult.relationships.length ? <Panel eyebrow="RECORDED EDGES" title="Connections" index={atlasResult.relationships.length + " TOTAL"}>
+            <div className="atlas-connections">
+              {atlasResult.relationships.map((relation, index) => <article className="atlas-connection" key={relation.title + relation.category + index}>
+                <div className="atlas-connection-main">
+                  <span className={"atlas-source " + relation.sourceKind}>{relation.sourceKind.replaceAll("_", " ")}</span>
+                  <strong>{relation.title}</strong>
+                  <small>{relation.category.replaceAll("_", " ")} · {relation.relationType}</small>
+                  <small>Source: {relation.source}</small>
+                </div>
+                <div className="atlas-connection-actions">
+                  <Button onClick={() => void searchAtlas(relation.title, relation.category, relation.url)} disabled={atlasLoading}>Open node ↗</Button>
+                  {relation.url ? <a className="atlas-provider-link" href={relation.url} target="_blank" rel="noreferrer">Source record ↗</a> : null}
+                </div>
+              </article>)}
+            </div>
+          </Panel> : null}
+        </> : !atlasLoading ? <Panel eyebrow="GRAPH PROJECTION" title="Start with a media title"><Empty>The Atlas shows direct recorded relationships for the selected title. Community relationships stay scoped to this server.</Empty></Panel> : null}
       </section> : null}
 
       {page === "extensions" ? <section className="page">

@@ -13,7 +13,7 @@ pub const ADMINISTRATOR: u64 = 1 << 3;
 #[derive(Clone)]
 pub struct AppConfig {
     pub client_id: String, pub client_secret: String, pub redirect_uri: String, pub public_origin: String,
-    pub bridge_url: String, pub bridge_secret: String, pub picker_url: String, pub bind_host: String,
+    pub bridge_url: String, pub atlas_bridge_url: String, pub bridge_secret: String, pub picker_url: String, pub bind_host: String,
     pub port: u16, pub secure_cookie: bool, pub session_ttl: u64, pub owner_ids: HashSet<String>,
 }
 impl AppConfig {
@@ -34,6 +34,7 @@ impl AppConfig {
         Self {
             client_id, client_secret: env::var("DASHBOARD_CLIENT_SECRET").unwrap_or_default(), redirect_uri, public_origin,
             bridge_url: loopback_url(env::var("DASHBOARD_BRIDGE_URL").unwrap_or_else(|_| "http://127.0.0.1:8091".to_string()), "http://127.0.0.1:8091"),
+            atlas_bridge_url: loopback_url(env::var("DASHBOARD_ATLAS_BRIDGE_URL").unwrap_or_else(|_| "http://127.0.0.1:8093".to_string()), "http://127.0.0.1:8093"),
             bridge_secret: env::var("DASHBOARD_BRIDGE_SECRET").unwrap_or_default(),
             picker_url: loopback_url(env::var("DASHBOARD_PICKER_URL").unwrap_or_else(|_| "http://127.0.0.1:8092".to_string()), "http://127.0.0.1:8092"),
             bind_host: env::var("DASHBOARD_HOST").unwrap_or_else(|_| "127.0.0.1".to_string()), port,
@@ -229,9 +230,21 @@ pub async fn allow_oauth_start(state: &AppState) -> bool {
     true
 }
 pub async fn bridge_json(state: &AppState, method: Method, path: &str, body: Option<Value>) -> ApiResult<Value> {
+    bridge_json_at(state, &state.config.bridge_url, method, path, body).await
+}
+pub async fn atlas_bridge_json(state: &AppState, path: &str) -> ApiResult<Value> {
+    bridge_json_at(state, &state.config.atlas_bridge_url, Method::GET, path, None).await
+}
+async fn bridge_json_at(
+    state: &AppState,
+    base_url: &str,
+    method: Method,
+    path: &str,
+    body: Option<Value>,
+) -> ApiResult<Value> {
     if state.config.bridge_secret.as_bytes().len() < 32 { return Err(ApiError::unavailable()); }
     if !path.starts_with('/') || path.contains("..") { return Err(ApiError::bad_request("Invalid management operation.")); }
-    let mut request = state.client.request(method, format!("{}{}", state.config.bridge_url, path))
+    let mut request = state.client.request(method, format!("{base_url}{path}"))
         .header(header::AUTHORIZATION, format!("Bearer {}", state.config.bridge_secret));
     if let Some(data) = body { request = request.json(&data); }
     let response = request.send().await.map_err(|_| ApiError::unavailable())?;
@@ -310,7 +323,7 @@ mod tests {
             client_id: "client".to_string(), client_secret: "secret".to_string(),
             redirect_uri: "https://dashboard.example/oauth/callback".to_string(),
             public_origin: "https://dashboard.example".to_string(),
-            bridge_url: "http://127.0.0.1:8091".to_string(), bridge_secret: "bridge".to_string(),
+            bridge_url: "http://127.0.0.1:8091".to_string(), atlas_bridge_url: "http://127.0.0.1:8093".to_string(), bridge_secret: "bridge".to_string(),
             picker_url: "http://127.0.0.1:8092".to_string(), bind_host: "127.0.0.1".to_string(),
             port: 8080, secure_cookie: true, session_ttl: 3600,
             owner_ids: HashSet::new(),

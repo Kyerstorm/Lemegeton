@@ -2,7 +2,7 @@ use axum::{body::{to_bytes, Body}, extract::{Path, Query, State}, http::{header,
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use crate::state::{authorized_guild, bridge_json, is_owner, session_from_headers, write_session, protected_command, ApiError, ApiResult, AppState};
+use crate::state::{authorized_guild, atlas_bridge_json, bridge_json, is_owner, session_from_headers, write_session, protected_command, ApiError, ApiResult, AppState};
 
 pub async fn system(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Json<Value>> {
     let _ = session_from_headers(&state, &headers).await?;
@@ -64,6 +64,53 @@ pub async fn database(State(state): State<AppState>, headers: HeaderMap, Path(gu
     let _ = authorized_guild(&state, &headers, &guild_id).await?;
     Ok(Json(bridge_json(&state, Method::GET, &format!("/guilds/{guild_id}/database"), None).await?))
 }
+#[derive(Deserialize)]
+pub struct AtlasQuery {
+    title: String,
+    category: String,
+    url: Option<String>,
+}
+
+fn validate_atlas_query(query: &AtlasQuery) -> ApiResult<()> {
+    const CATEGORIES: [&str; 8] = ["ANIME", "MANGA", "LIGHT_NOVEL", "WEBNOVEL", "BOOK", "MOVIE", "TV", "GAME"];
+    if query.title.trim().is_empty() || query.title.chars().count() > 256 {
+        return Err(ApiError::bad_request("Enter a media title between 1 and 256 characters."));
+    }
+    if !CATEGORIES.contains(&query.category.as_str()) {
+        return Err(ApiError::bad_request("Choose a supported Knowledge Atlas media category."));
+    }
+    if let Some(raw_url) = query.url.as_deref() {
+        let url = reqwest::Url::parse(raw_url)
+            .map_err(|_| ApiError::bad_request("The media source URL is invalid."))?;
+        if url.scheme() != "https" || url.host_str().is_none()
+            || !url.username().is_empty() || url.password().is_some() {
+            return Err(ApiError::bad_request("The media source URL must be a public HTTPS URL without credentials."));
+        }
+    }
+    Ok(())
+}
+
+pub async fn atlas(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(guild_id): Path<String>,
+    Query(query): Query<AtlasQuery>,
+) -> ApiResult<Json<Value>> {
+    let _ = authorized_guild(&state, &headers, &guild_id).await?;
+    validate_atlas_query(&query)?;
+    let mut path = format!(
+        "/atlas?guild_id={}&title={}&category={}",
+        urlencoding::encode(&guild_id),
+        urlencoding::encode(query.title.trim()),
+        urlencoding::encode(&query.category),
+    );
+    if let Some(url) = query.url.as_deref() {
+        path.push_str("&url=");
+        path.push_str(&urlencoding::encode(url));
+    }
+    Ok(Json(atlas_bridge_json(&state, &path).await?))
+}
+
 pub async fn logs(State(state): State<AppState>, headers: HeaderMap, Query(query): Query<HashMap<String, String>>) -> ApiResult<Json<Value>> {
     let (_, session) = session_from_headers(&state, &headers).await?;
     if !is_owner(&state, &session.user.id) { return Err(ApiError::forbidden("Runtime logs are restricted to configured dashboard owners.")); }
@@ -109,6 +156,31 @@ pub async fn custom_roles_proxy(State(state): State<AppState>, request: Request<
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn atlas_query_accepts_supported_categories_and_public_https_urls() {
+        let valid = AtlasQuery {
+            title: "Frieren: Beyond Journey's End".to_string(),
+            category: "ANIME".to_string(),
+            url: Some("https://anilist.co/anime/1".to_string()),
+        };
+        assert!(validate_atlas_query(&valid).is_ok());
+    }
+
+    #[test]
+    fn atlas_query_rejects_unknown_categories_and_unsafe_urls() {
+        let unknown = AtlasQuery { title: "Example".to_string(), category: "OTHER".to_string(), url: None };
+        assert!(validate_atlas_query(&unknown).is_err());
+        let unsafe_url = AtlasQuery {
+            title: "Example".to_string(), category: "ANIME".to_string(),
+            url: Some("https://user:pass@example.com/".to_string()),
+        };
+        assert!(validate_atlas_query(&unsafe_url).is_err());
+        let oversized = AtlasQuery {
+            title: "x".repeat(257), category: "ANIME".to_string(), url: None,
+        };
+        assert!(validate_atlas_query(&oversized).is_err());
+    }
+
     #[test]
     fn picker_proxy_forwards_only_required_headers() {
         let mut incoming = HeaderMap::new();
