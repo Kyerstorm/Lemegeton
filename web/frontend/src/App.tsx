@@ -476,17 +476,14 @@ export default function App() {
   const runtimeStatus = system.status === "unknown" ? "UNKNOWN" : String(system.status || (bot.ready ? "online" : "connecting")).toUpperCase();
   const runtimeOnline = Boolean(bot.ready) && system.status !== "unknown";
   const lastKnown = system.last_known || null;
-  const atlasNodes = useMemo(() => {
-    const relationships = (atlasResult?.relationships ?? []).slice(0, 12);
-    return relationships.map((relationship, index) => {
-      const angle = (index / Math.max(relationships.length, 1)) * Math.PI * 2 - Math.PI / 2;
-      return {
-        ...relationship,
-        x: 50 + Math.cos(angle) * 37,
-        y: 50 + Math.sin(angle) * 37,
-      };
-    });
-  }, [atlasResult]);
+  const atlasNodes = (atlasResult?.relationships ?? []).slice(0, 12).map((relationship, index, relationships) => {
+    const angle = (index / Math.max(relationships.length, 1)) * Math.PI * 2 - Math.PI / 2;
+    return {
+      ...relationship,
+      x: 50 + Math.cos(angle) * 37,
+      y: 50 + Math.sin(angle) * 37,
+    };
+  });
 
   if (initialLoading) return <main className="boot-screen"><span className="boot-mark">L.</span><span className="spinner" /><p>Establishing a secure session</p><small>LEMEGETON / CONTROL PLANE</small></main>;
 
