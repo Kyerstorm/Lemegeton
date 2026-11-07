@@ -195,6 +195,7 @@ export default function App() {
   const [atlasZoom, setAtlasZoom] = useState(100);
   const refreshGeneration = useRef(0);
   const atlasRequestGeneration = useRef(0);
+  const atlasDeepLinkConsumed = useRef(false);
   const activeGuildIdRef = useRef("");
 
   const pushToast = useCallback((message: string, error = false) => {
@@ -433,7 +434,7 @@ export default function App() {
     } catch (error) { pushToast(errorMessage(error), true); }
   };
 
-  const searchAtlas = async (
+  const searchAtlas = useCallback(async (
     title = atlasTitle,
     mediaCategory = atlasCategory,
     mediaUrl?: string | null,
@@ -465,7 +466,39 @@ export default function App() {
     } finally {
       if (requestId === atlasRequestGeneration.current) setAtlasLoading(false);
     }
-  };
+  }, [atlasCategory, atlasTitle, csrf, guildId]);
+
+  useEffect(() => {
+    if (!guildId || !csrf || isLogin || atlasDeepLinkConsumed.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const title = params.get("atlas_title");
+    if (!title) {
+      atlasDeepLinkConsumed.current = true;
+      return;
+    }
+    const requestedGuild = params.get("atlas_guild_id");
+    if (requestedGuild && requestedGuild !== guildId) {
+      if (guilds.some((item) => String(item.id) === requestedGuild)) {
+        selectGuild(requestedGuild);
+      } else {
+        atlasDeepLinkConsumed.current = true;
+        setPage("atlas");
+        setAtlasError("This Atlas link belongs to a server where your account does not have dashboard access.");
+      }
+      return;
+    }
+    const requestedCategory = params.get("atlas_category") || "ANIME";
+    const allowedCategories = ["ANIME", "MANGA", "LIGHT_NOVEL", "WEBNOVEL", "BOOK", "MOVIE", "TV", "GAME"];
+    if (!allowedCategories.includes(requestedCategory)) {
+      atlasDeepLinkConsumed.current = true;
+      setPage("atlas");
+      setAtlasError("This Atlas link uses an unsupported media category.");
+      return;
+    }
+    atlasDeepLinkConsumed.current = true;
+    setPage("atlas");
+    void searchAtlas(title, requestedCategory, params.get("atlas_url"));
+  }, [atlasCategory, atlasTitle, csrf, guildId, guilds, isLogin, searchAtlas, selectGuild]);
 
   const navigate = (next: Page) => { setPage(next); setMobileNav(false); };
   const selectedPage = PAGES.find((item) => item.id === page) || PAGES[0];

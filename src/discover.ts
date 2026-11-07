@@ -411,7 +411,25 @@ export class DiscoverCommand implements FeatureCommand {
       embed.addFields({name:"No recorded connections yet",value:"This provider has not supplied related-work edges for this title, and this server has not approved any community links yet.",inline:false});
     }
     embed.setFooter({text:"Knowledge Atlas · Provider provenance and guild-scoped community links"});
-    await interaction.editReply({embeds:[embed],components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],allowedMentions:{parse:[]}});
+    const dashboardUrl = new URL(this.config.customRolesPublicUrl);
+    dashboardUrl.searchParams.set("atlas_title", title);
+    dashboardUrl.searchParams.set("atlas_category", mediaCategory.toUpperCase());
+    dashboardUrl.searchParams.set("atlas_guild_id", interaction.guildId ?? "");
+    const mediaUrl = this.recordUrl(first);
+    if (mediaUrl) dashboardUrl.searchParams.set("atlas_url", mediaUrl);
+    await interaction.editReply({
+      embeds:[embed],
+      components:[
+        navigationButtons("discover",[{id:"home",label:"Back to discovery"}]),
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setLabel("Open dashboard Atlas")
+            .setStyle(ButtonStyle.Link)
+            .setURL(dashboardUrl.toString()),
+        ),
+      ],
+      allowedMentions:{parse:[]},
+    });
   }
 
   private recordTitle(record: SearchRecord): string {
