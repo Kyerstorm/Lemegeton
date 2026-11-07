@@ -241,6 +241,15 @@ function protectedRoleNames(roles: Iterable<Role>): string[] {
   return [...roles].filter(role => flags.some(flag => role.permissions.has(flag))).map(role => role.name);
 }
 
+async function resolveSelectedRole(
+  interaction: ChatInputCommandInteraction,
+  optionName: string,
+): Promise<Role | null> {
+  const selected = interaction.options.getRole(optionName);
+  if (!selected || !interaction.guild) return null;
+  return interaction.guild.roles.fetch(selected.id).catch(() => null);
+}
+
 export class CustomRoleCommand implements FeatureCommand {
   readonly data = new SlashCommandBuilder()
     .setName("custom-role")
@@ -365,7 +374,7 @@ export class CustomRoleCommand implements FeatureCommand {
         }
         case "enable": await this.configureEnabled(interaction, true); return;
         case "disable": await this.configureEnabled(interaction, false); return;
-        case "anchor": await this.configureAnchor(interaction, interaction.options.getRole("role"), interaction.options.getString("placement")); return;
+        case "anchor": await this.configureAnchor(interaction, await resolveSelectedRole(interaction, "role"), interaction.options.getString("placement")); return;
         case "channel": await this.configureChannel(interaction, interaction.options.getChannel("channel")); return;
         case "clear-channel": await this.configureChannel(interaction, null); return;
         case "log-channel": await this.configureLogChannel(interaction, interaction.options.getChannel("log_channel")); return;
@@ -376,8 +385,8 @@ export class CustomRoleCommand implements FeatureCommand {
           await this.configureCooldown(interaction, seconds);
           return;
         }
-        case "allow-role": await this.configureAllowedRole(interaction, interaction.options.getRole("role"), true); return;
-        case "remove-allowed": await this.configureAllowedRole(interaction, interaction.options.getRole("role"), false); return;
+        case "allow-role": await this.configureAllowedRole(interaction, await resolveSelectedRole(interaction, "role"), true); return;
+        case "remove-allowed": await this.configureAllowedRole(interaction, await resolveSelectedRole(interaction, "role"), false); return;
         default: await this.showMemberPanel(interaction, await interaction.guild.members.fetch(interaction.user.id));
       }
     } catch (error) {
@@ -1077,17 +1086,17 @@ export class CustomRoleCommand implements FeatureCommand {
       let colorMode = existing?.color_mode ?? "solid";
       let primaryColor = existing?.primary_color ?? null;
       let secondaryColor = existing?.secondary_color ?? null;
-      let colors: { primaryColor: number; secondaryColor?: number | null; tertiaryColor?: number | null };
+      let colors: { primaryColor: number; secondaryColor?: number; tertiaryColor?: number };
       const savedIcon = roleIcons ? await getCustomRoleIconData(member.guild.id, member.id) : null;
       if (colorMode === "holographic" && enhancedStyles) {
         [primaryColor, secondaryColor] = HOLOGRAPHIC_COLORS;
         colors = { primaryColor: HOLOGRAPHIC_COLORS[0], secondaryColor: HOLOGRAPHIC_COLORS[1], tertiaryColor: HOLOGRAPHIC_COLORS[2] };
       } else if (colorMode === "gradient" && enhancedStyles) {
-        colors = { primaryColor: primaryColor ?? 0, secondaryColor: secondaryColor ?? 0, tertiaryColor: null };
+        colors = { primaryColor: primaryColor ?? 0, secondaryColor: secondaryColor ?? 0 };
       } else {
         if (colorMode !== "solid") colorMode = "solid";
         secondaryColor = null;
-        colors = { primaryColor: primaryColor ?? 0, secondaryColor: null, tertiaryColor: null };
+        colors = { primaryColor: primaryColor ?? 0 };
       }
       role = await member.guild.roles.create({
         name: checked.name,
