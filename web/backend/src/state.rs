@@ -261,7 +261,7 @@ async fn bridge_json_at(
     }
     Ok(data)
 }
-pub async fn manageable_guilds(state: &AppState, session_id: &str, session: &Session) -> ApiResult<Vec<DashboardGuild>> {
+pub async fn manageable_guilds(state: &AppState, session_id: &str, _session: &Session) -> ApiResult<Vec<DashboardGuild>> {
     let token = access_token(state, session_id).await?;
     let user_guilds = discord_json(state, "/users/@me/guilds", &token).await?;
     let bot_guilds = bridge_json(state, Method::GET, "/guilds", None).await?;
