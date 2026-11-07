@@ -49,7 +49,7 @@ export function isPublicImageAddress(address: string): boolean {
   return true;
 }
 
-async function fetchExternalImage(
+export async function fetchExternalImage(
   rawUrl: unknown,
   maxBytes: number,
 ): Promise<{ bytes: Buffer; contentType: "image/png" | "image/jpeg"; host: string }> {

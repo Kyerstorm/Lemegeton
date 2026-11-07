@@ -11,7 +11,7 @@ export const HOLOGRAPHIC_COLORS = [11127295, 16759788, 16761760] as const;
 const STANDARD_EMOJI = /^(?:\p{Extended_Pictographic}(?:\uFE0F|\uFE0E)?\p{Emoji_Modifier}?(?:\u200D\p{Extended_Pictographic}(?:\uFE0F|\uFE0E)?\p{Emoji_Modifier}?)*|\p{Regional_Indicator}{2}|[0-9#*]\uFE0F?\u20E3)$/u;
 const LEET: Record<string, string> = { "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b", "@": "a", "$": "s", "!": "i", "|": "l" };
 
-export const HOLOGRAPHIC_COLORS = [11127295, 16759788, 16761760] as const;
+
 
 function normalizeName(value: string): string {
   return value.normalize("NFKD").replace(/[\p{Cf}\p{Cc}\p{Mn}\p{Me}]/gu, "").toLowerCase()
