@@ -1,7 +1,7 @@
 import { PermissionsBitField, type GuildMember } from "discord.js";
 import { query, queryOne } from "../database.js";
 import { cleanText } from "./security.js";
-import { GLOBAL_MODERATOR_IDS, isGlobalArchiveModerator } from "./archive-access.js";
+import { GLOBAL_MODERATOR_IDS } from "./archive-access.js";
 export { isGlobalArchiveModerator } from "./archive-access.js";
 import { getArchiveEntry, parseTags, type ArchiveCategory, type ArchiveEntry, type ArchiveVisibility } from "./archive.js";
 
