@@ -210,14 +210,16 @@ test("AniList linked profiles preserve provider-reported statistics and supporte
  );
 });
 
-test("AniList profile milestones do not award thresholds before the provider data reaches them",()=>{
+test("AniList profile count milestones stay below threshold while qualifying score is awarded",()=>{
  const profile: Parameters<typeof getAniListProfileAchievements>[0]={
   id:1,name:"test",url:"https://anilist.co/user/test",avatar:null,banner:null,about:null,
   anime:{count:99,meanScore:90,episodesWatched:null,minutesWatched:null,chaptersRead:null,volumesRead:null,genres:[],statuses:[],formats:[]},
   manga:{count:49,meanScore:0,episodesWatched:null,minutesWatched:null,chaptersRead:null,volumesRead:null,genres:[],statuses:[],formats:[]},
   favorites:{anime:[],manga:[],characters:[]},
  };
- assert.deepEqual(getAniListProfileAchievements(profile),[]);
+ assert.deepEqual(getAniListProfileAchievements(profile),[
+  {title:"High anime average",detail:"AniList-reported mean score of 80 or higher across 10+ entries"},
+ ]);
 });
 
 test("AniList random discovery samples a catalogue page rather than the trending feed", async () => {
