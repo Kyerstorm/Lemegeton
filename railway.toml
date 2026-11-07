@@ -1,6 +1,6 @@
 [build]
 builder = "RAILPACK"
-buildCommand = "python -m pip install -r requirements.txt && npm install --prefix web/frontend --no-audit --no-fund && npm run typecheck --prefix web/frontend && npm run build --prefix web/frontend && cargo build --manifest-path web/backend/Cargo.toml --release"
+buildCommand = "npm install --no-audit --no-fund && npm test && python -m pip install -r requirements.txt && npm install --prefix web/frontend --no-audit --no-fund && npm run typecheck --prefix web/frontend && npm run build --prefix web/frontend && cargo build --manifest-path web/backend/Cargo.toml --release"
 
 [deploy]
 startCommand = "./scripts/start.sh"
