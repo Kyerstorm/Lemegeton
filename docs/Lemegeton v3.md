@@ -1315,7 +1315,7 @@ Existing useful functionality must be mapped before implementation. This invento
 | /steam-profile | /profile | Preserve supported Steam profile display |
 | /steam-recommendation | /discover | Merge into gaming discovery |
 | /steam-game | /discover | Merge into game discovery |
-| Free-game notifications | Media Notifications | Audit and preserve only supported game-release/deal notifications that fit the media scope |
+| Free-game notifications | Media Notifications | Do not port the legacy monitor as-is: its Steam path parses storefront search responses and uses undocumented endpoints, while the Epic/GOG storefront feeds also lack a verified supported integration contract. Revisit only with a stable, permitted provider source. |
 | Custom theme commands | Out of approved expansion | Do not build a general theme or appearance system |
 | /invite-stats and /invite-leaderboard | Out of approved expansion | Do not build general invite analytics |
 | /feedback | Out of approved expansion | Do not create a separate generic feedback product as part of this scope |
@@ -1325,7 +1325,7 @@ Existing useful functionality must be mapped before implementation. This invento
 | /news and /test-twitter-scrape | Audit before any migration | Do not preserve brittle or unsupported scraping merely because an old command existed |
 | Generic utilities and invite commands | Out of approved expansion | Do not increase command count with unrelated utilities |
 
-### 15.2 Historical Lemegeton v2 commands
+\n\nThe legacy free-game checker is deliberately not migrated in this phase. Its Steam implementation depends on storefront search parsing and undocumented endpoints; the current Steam Web API reference and Free to Keep documentation do not supply a general public promotions feed. The GOG developer documentation describes the Galaxy SDK rather than a supported public store-catalog API. Do not reintroduce these scrapers as a substitute for a stable provider integration.\n\n### 15.2 Historical Lemegeton v2 commands
 
 The separate lemegeton-v2 branch contains older commands and modules that must remain visible in the migration record so they are not silently forgotten.
 

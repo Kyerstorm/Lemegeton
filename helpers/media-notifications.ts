@@ -173,10 +173,14 @@ async function deliverGuild(
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let running = false;
+let stopping = false;
+let cycleFinished: Promise<void> | null = null;
+let finishCycle: (() => void) | null = null;
 
 export async function runMediaNotificationCycle(client: Client, aniList: AniListClient, now = new Date()): Promise<void> {
-  if (running) return;
+  if (running || stopping) return;
   running = true;
+  cycleFinished = new Promise<void>(resolve => { finishCycle = resolve; });
   try {
     const rows = await query<MediaNotificationSettings>(
       "SELECT guild_id::text, channel_id::text, enabled, include_anime, include_manga, last_run_at FROM media_notification_settings WHERE enabled=TRUE AND channel_id IS NOT NULL",
@@ -201,11 +205,15 @@ export async function runMediaNotificationCycle(client: Client, aniList: AniList
     logger.error("Media notification scan failed", { reason: error instanceof Error ? error.message : "Unknown error" });
   } finally {
     running = false;
+    finishCycle?.();
+    finishCycle = null;
+    cycleFinished = null;
   }
 }
 
 export function startMediaNotificationScheduler(client: Client, config: BotConfig): void {
   if (timer) return;
+  stopping = false;
   const aniList = new AniListClient(config.anilistApiUrl, config.anilistTimeoutMs);
   void runMediaNotificationCycle(client, aniList);
   timer = setInterval(() => void runMediaNotificationCycle(client, aniList), 15 * 60 * 1000);
@@ -213,7 +221,10 @@ export function startMediaNotificationScheduler(client: Client, config: BotConfi
   logger.info("Daily media completion notification scanner started", { intervalMinutes: 15 });
 }
 
-export function stopMediaNotificationScheduler(): void {
+export async function stopMediaNotificationScheduler(): Promise<void> {
+  stopping = true;
   if (timer) clearInterval(timer);
   timer = null;
+  const activeCycle = cycleFinished;
+  if (activeCycle) await activeCycle;
 }

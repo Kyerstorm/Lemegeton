@@ -139,7 +139,11 @@ async function processDailyDrops():Promise<void>{
 }
 let shuttingDown=false;
 async function shutdown(signal:NodeJS.Signals):Promise<void>{
- if(shuttingDown)return;shuttingDown=true;logger.info("Shutting down Lemegeton",{signal});stopMediaNotificationScheduler();await stopCustomRolePicker().catch(error=>logger.error("Custom Roles picker shutdown failed",{reason:error instanceof Error?error.message:"Unknown error"}));
+ if(shuttingDown)return;
+ shuttingDown=true;
+ logger.info("Shutting down Lemegeton",{signal});
+ await stopMediaNotificationScheduler();
+ await stopCustomRolePicker().catch(error=>logger.error("Custom Roles picker shutdown failed",{reason:error instanceof Error?error.message:"Unknown error"}));
  await stopDashboardBridge().catch(error=>logger.error("Dashboard bridge shutdown failed",{reason:error instanceof Error?error.message:"Unknown error"}));
  client.destroy();
  await closeAtlasBridge().catch(error=>logger.error("Atlas bridge shutdown failed",{reason:error instanceof Error?error.message:"Unknown error"}));
