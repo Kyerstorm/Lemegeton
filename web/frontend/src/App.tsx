@@ -190,6 +190,9 @@ export default function App() {
   const [atlasResult, setAtlasResult] = useState<AtlasResponse | null>(null);
   const [atlasLoading, setAtlasLoading] = useState(false);
   const [atlasError, setAtlasError] = useState("");
+  const [atlasCategoryFilter, setAtlasCategoryFilter] = useState("All");
+  const [atlasSourceFilter, setAtlasSourceFilter] = useState("All");
+  const [atlasZoom, setAtlasZoom] = useState(100);
   const refreshGeneration = useRef(0);
   const atlasRequestGeneration = useRef(0);
   const activeGuildIdRef = useRef("");
@@ -476,7 +479,12 @@ export default function App() {
   const runtimeStatus = system.status === "unknown" ? "UNKNOWN" : String(system.status || (bot.ready ? "online" : "connecting")).toUpperCase();
   const runtimeOnline = Boolean(bot.ready) && system.status !== "unknown";
   const lastKnown = system.last_known || null;
-  const atlasNodes = (atlasResult?.relationships ?? []).slice(0, 12).map((relationship, index, relationships) => {
+  const atlasCategories = Array.from(new Set((atlasResult?.relationships ?? []).map((item) => item.category))).sort();
+  const atlasVisibleRelationships = (atlasResult?.relationships ?? []).filter((item) =>
+    (atlasCategoryFilter === "All" || item.category === atlasCategoryFilter)
+    && (atlasSourceFilter === "All" || item.sourceKind === atlasSourceFilter),
+  );
+  const atlasNodes = atlasVisibleRelationships.slice(0, 12).map((relationship, index, relationships) => {
     const angle = (index / Math.max(relationships.length, 1)) * Math.PI * 2 - Math.PI / 2;
     return {
       ...relationship,
@@ -606,37 +614,44 @@ export default function App() {
         {atlasResult ? <>
           <Panel eyebrow="LOCAL GRAPH / ONE HOP" title={atlasResult.root.title} index={atlasResult.root.category}>
             <p className="atlas-explainer">This view shows the selected title and its direct recorded connections only. Provider links are global; community links are visible only in the selected server.</p>
-            {atlasResult.relationships.length ? <div className="atlas-graph" role="group" aria-label={"Media relationships connected to " + atlasResult.root.title}>
-              <svg className="atlas-edges" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                {atlasNodes.map((node, index) => <line key={node.title + node.category + index} x1="50" y1="50" x2={node.x} y2={node.y} className={"atlas-edge " + node.sourceKind} />)}
-              </svg>
-              <div className="atlas-root-node">
-                <span className="atlas-node-category">{atlasResult.root.category.replaceAll("_", " ")}</span>
-                <strong>{atlasResult.root.title}</strong>
-                {atlasResult.root.url ? <a href={atlasResult.root.url} target="_blank" rel="noreferrer">Provider ↗</a> : null}
+            <div className="atlas-tools">
+              <label className="filter-control"><span>MEDIA TYPE</span><select value={atlasCategoryFilter} onChange={(event) => setAtlasCategoryFilter(event.target.value)}><option value="All">All categories</option>{atlasCategories.map((item) => <option key={item} value={item}>{item.replaceAll("_", " ")}</option>)}</select></label>
+              <label className="filter-control"><span>PROVENANCE</span><select value={atlasSourceFilter} onChange={(event) => setAtlasSourceFilter(event.target.value)}><option value="All">All sources</option><option value="provider">Provider</option><option value="recommendation">Recommendation</option><option value="community">Community</option></select></label>
+              <div className="atlas-zoom"><span>ZOOM</span><Button onClick={() => setAtlasZoom((value) => Math.max(80, value - 10))} disabled={atlasZoom <= 80} aria-label="Zoom out">−</Button><strong>{atlasZoom}%</strong><Button onClick={() => setAtlasZoom((value) => Math.min(140, value + 10))} disabled={atlasZoom >= 140} aria-label="Zoom in">+</Button><Button onClick={() => setAtlasZoom(100)}>Fit</Button></div>
+            </div>
+            {atlasVisibleRelationships.length ? <div className="atlas-graph" role="group" aria-label={"Media relationships connected to " + atlasResult.root.title}>
+              <div className="atlas-graph-content" style={{ transform: "scale(" + atlasZoom / 100 + ")" }}>
+                <svg className="atlas-edges" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                  {atlasNodes.map((node, index) => <line key={node.title + node.category + index} x1="50" y1="50" x2={node.x} y2={node.y} className={"atlas-edge " + node.sourceKind} />)}
+                </svg>
+                <div className="atlas-root-node">
+                  <span className="atlas-node-category">{atlasResult.root.category.replaceAll("_", " ")}</span>
+                  <strong>{atlasResult.root.title}</strong>
+                  {atlasResult.root.url ? <a href={atlasResult.root.url} target="_blank" rel="noreferrer">Provider ↗</a> : null}
+                </div>
+                {atlasNodes.map((node, index) => <button
+                  key={node.title + node.category + index}
+                  type="button"
+                  className={"atlas-node " + node.sourceKind}
+                  style={{ left: node.x + "%", top: node.y + "%" }}
+                  title={node.title + " · " + node.relationType}
+                  onClick={() => void searchAtlas(node.title, node.category, node.url)}
+                  disabled={atlasLoading}
+                >
+                  <span>{node.category.replaceAll("_", " ")}</span>
+                  <strong>{node.title}</strong>
+                </button>)}
               </div>
-              {atlasNodes.map((node, index) => <button
-                key={node.title + node.category + index}
-                type="button"
-                className={"atlas-node " + node.sourceKind}
-                style={{ left: node.x + "%", top: node.y + "%" }}
-                title={node.title + " · " + node.relationType}
-                onClick={() => void searchAtlas(node.title, node.category, node.url)}
-                disabled={atlasLoading}
-              >
-                <span>{node.category.replaceAll("_", " ")}</span>
-                <strong>{node.title}</strong>
-              </button>)}
-            </div> : <Empty>No connections have been recorded for this title yet. Explore another title or check back after supported provider relationships are indexed.</Empty>}
+            </div> : <Empty>{atlasResult.relationships.length ? "No connections match these filters." : "No connections have been recorded for this title yet. Explore another title or check back after supported provider relationships are indexed."}</Empty>}
             <div className="atlas-legend">
               <span><i className="provider" /> Provider-confirmed</span>
               <span><i className="recommendation" /> Recommendation</span>
               <span><i className="community" /> Community-sourced</span>
             </div>
           </Panel>
-          {atlasResult.relationships.length ? <Panel eyebrow="RECORDED EDGES" title="Connections" index={atlasResult.relationships.length + " TOTAL"}>
+          {atlasResult.relationships.length ? <Panel eyebrow="RECORDED EDGES" title="Connections" index={atlasVisibleRelationships.length + " SHOWN"}>
             <div className="atlas-connections">
-              {atlasResult.relationships.map((relation, index) => <article className="atlas-connection" key={relation.title + relation.category + index}>
+              {atlasVisibleRelationships.map((relation, index) => <article className="atlas-connection" key={relation.title + relation.category + index}>
                 <div className="atlas-connection-main">
                   <span className={"atlas-source " + relation.sourceKind}>{relation.sourceKind.replaceAll("_", " ")}</span>
                   <strong>{relation.title}</strong>

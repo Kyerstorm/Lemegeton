@@ -362,3 +362,14 @@ body{background:radial-gradient(ellipse at 72% -18%,#171717 0%,transparent 45%),
  .atlas-root-node{width:112px;min-height:82px}
  .atlas-node strong{font-size:8px}
 }
+
+.atlas-tools{display:flex;align-items:end;flex-wrap:wrap;gap:10px;margin:0 0 14px}
+.atlas-tools .filter-control{min-width:150px;min-height:41px;padding:0 10px;border:1px solid var(--line);border-radius:9px;background:#101010;display:grid;align-content:center;gap:2px}
+.atlas-tools .filter-control select{width:100%;max-width:none;font-size:11px}
+.atlas-zoom{display:flex;align-items:center;gap:6px;margin-left:auto}
+.atlas-zoom>span{margin-right:4px;color:#8a8a8a;font:9px var(--mono);letter-spacing:.1em}
+.atlas-zoom>strong{min-width:38px;text-align:center;color:#bbb;font:10px var(--mono)}
+.atlas-zoom .button{min-height:33px;min-width:33px;padding:0 9px}
+.atlas-graph-content{position:absolute;inset:0;transform-origin:center center;transition:transform .18s ease}
+@media(max-width:760px){.atlas-tools{align-items:stretch}.atlas-tools .filter-control{flex:1;min-width:135px}.atlas-zoom{width:100%;margin-left:0;justify-content:flex-end}}
+@media(prefers-reduced-motion:reduce){.atlas-graph-content{transition:none}}
