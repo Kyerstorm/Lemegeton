@@ -1,4 +1,4 @@
-import sharp from "sharp";
+import sharp, { type Metadata } from "sharp";
 
 export const CUSTOM_ROLE_ICON_MAX_SOURCE_BYTES = Math.max(
   256 * 1024,
@@ -70,7 +70,7 @@ export async function processCustomRoleIconImage(
     throw new Error("Only real PNG or JPEG images can be used as role icons.");
   }
 
-  let metadata: sharp.Metadata;
+  let metadata: Metadata;
   try {
     metadata = await sharp(input, { limitInputPixels: CUSTOM_ROLE_ICON_MAX_PIXELS, animated: true }).metadata();
   } catch {
