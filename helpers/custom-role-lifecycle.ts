@@ -1,4 +1,4 @@
-import { PermissionFlagsBits, type Guild, type GuildMember, type Role } from "discord.js";
+import { PermissionFlagsBits, type Guild, type GuildMember, type PartialGuildMember, type Role } from "discord.js";
 import { logger } from "./logger.js";
 import {
   HOLOGRAPHIC_COLORS,
@@ -16,6 +16,7 @@ import {
   saveCustomRole,
   snoozeCustomRoleUsers,
   updateCustomRole,
+  updateCustomRoleSettings,
   updateCustomRolePendingUsers,
 } from "./custom-roles.js";
 
@@ -255,7 +256,8 @@ export async function cancelCustomRolePending(guild: Guild, pendingId: string, a
 async function restoreSavedRole(member: GuildMember): Promise<boolean> {
   const guild = member.guild;
   const settings = await getCustomRoleSettings(guild.id);
-  if (!settings.enabled || !settings.anchor_role_id || !customRoleEligibility(member, settings)) return false;
+  const anchorRoleId = settings.anchor_role_id;
+  if (!settings.enabled || !anchorRoleId || !customRoleEligibility(member, settings)) return false;
 
   return withLock(guild.id, member.id, async () => {
     const record = await getCustomRoleRecord(guild.id, member.id);
@@ -271,7 +273,7 @@ async function restoreSavedRole(member: GuildMember): Promise<boolean> {
     }
 
     const botMember = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
-    const anchor = await guild.roles.fetch(settings.anchor_role_id).catch(() => null);
+    const anchor = await guild.roles.fetch(anchorRoleId).catch(() => null);
     if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageRoles) || !anchor
       || anchor.position >= botMember.roles.highest.position || guild.roles.cache.size >= 250) return false;
 
@@ -280,17 +282,17 @@ async function restoreSavedRole(member: GuildMember): Promise<boolean> {
     let mode = record.color_mode;
     let primary = record.primary_color;
     let secondary = record.secondary_color;
-    let colors: { primaryColor: number; secondaryColor?: number | null; tertiaryColor?: number | null };
+    let colors: { primaryColor: number; secondaryColor?: number; tertiaryColor?: number };
     if (enhanced && mode === "holographic") {
       primary = HOLOGRAPHIC_COLORS[0];
       secondary = HOLOGRAPHIC_COLORS[1];
       colors = { primaryColor: HOLOGRAPHIC_COLORS[0], secondaryColor: HOLOGRAPHIC_COLORS[1], tertiaryColor: HOLOGRAPHIC_COLORS[2] };
     } else if (enhanced && mode === "gradient") {
-      colors = { primaryColor: primary ?? 0, secondaryColor: secondary ?? 0, tertiaryColor: null };
+      colors = { primaryColor: primary ?? 0, secondaryColor: secondary ?? 0 };
     } else {
       mode = "solid";
       secondary = null;
-      colors = { primaryColor: primary ?? 0, secondaryColor: null, tertiaryColor: null };
+      colors = { primaryColor: primary ?? 0 };
     }
 
     const iconData = roleIcons ? await getCustomRoleIconData(guild.id, member.id) : null;
@@ -388,20 +390,31 @@ export async function onCustomRoleRoleDelete(role: Role): Promise<void> {
   }
 }
 
-export async function onCustomRoleMemberUpdate(oldMember: GuildMember, newMember: GuildMember): Promise<void> {
-  const settings = await getCustomRoleSettings(newMember.guild.id);
+export async function onCustomRoleMemberUpdate(
+  oldMember: GuildMember | PartialGuildMember,
+  newMember: GuildMember | PartialGuildMember,
+): Promise<void> {
+  const currentMember = newMember.partial ? await newMember.fetch() : newMember;
+  const settings = await getCustomRoleSettings(currentMember.guild.id);
   if (!settings.enabled) return;
+  const newEligible = customRoleEligibility(currentMember, settings);
+  if (oldMember.partial) {
+    if (newEligible) {
+      queues.get(currentMember.guild.id)?.delete(currentMember.id);
+      await restoreSavedRole(currentMember);
+    }
+    return;
+  }
   const oldEligible = customRoleEligibility(oldMember, settings);
-  const newEligible = customRoleEligibility(newMember, settings);
   if (oldEligible && !newEligible) {
-    await queueArchive(newMember.guild, newMember.id, "stopped boosting or lost the allowed role");
+    await queueArchive(currentMember.guild, currentMember.id, "stopped boosting or lost the allowed role");
   } else if (!oldEligible && newEligible) {
-    queues.get(newMember.guild.id)?.delete(newMember.id);
-    await restoreSavedRole(newMember);
+    queues.get(currentMember.guild.id)?.delete(currentMember.id);
+    await restoreSavedRole(currentMember);
   }
 }
 
-export async function onCustomRoleMemberRemove(member: GuildMember): Promise<void> {
+export async function onCustomRoleMemberRemove(member: Pick<GuildMember, "guild" | "id">): Promise<void> {
   const settings = await getCustomRoleSettings(member.guild.id);
   if (!settings.enabled || !await getCustomRoleRecord(member.guild.id, member.id)) return;
   await queueArchive(member.guild, member.id, "left the server");
@@ -424,7 +437,7 @@ export async function reconcileCustomRoleGuild(guild: Guild): Promise<void> {
 
   let members;
   try {
-    members = await guild.members.fetch({ force: true });
+    members = await guild.members.fetch();
   } catch (error) {
     logger.warn("Skipped Custom Roles reconciliation because member data could not be verified", {
       guildId: guild.id, reason: error instanceof Error ? error.message : "Unknown error",
