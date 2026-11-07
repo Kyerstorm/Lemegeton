@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
-import { logger } from "./Helpers/logger.js";
+import { logger } from "./helpers/logger.js";
 
 let pool: Pool | undefined;
 
@@ -521,7 +521,26 @@ const schemaStatements = [
     details TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`,
-  "CREATE INDEX IF NOT EXISTS dashboard_audit_log_guild_idx ON dashboard_audit_log (guild_id, created_at DESC)",
+  "CREATE INDEX IF NOT EXISTS dashboard_audit_log_guild_idx ON dashboard_audit_log (guild_id, created_at DESC)",,
+
+  `CREATE TABLE IF NOT EXISTS media_notification_settings (
+    guild_id BIGINT PRIMARY KEY,
+    channel_id BIGINT,
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    include_anime BOOLEAN NOT NULL DEFAULT TRUE,
+    include_manga BOOLEAN NOT NULL DEFAULT TRUE,
+    last_run_at TIMESTAMPTZ,
+    updated_by BIGINT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS media_notification_deliveries (
+    guild_id BIGINT NOT NULL,
+    media_type VARCHAR(8) NOT NULL CHECK (media_type IN ('ANIME','MANGA')),
+    media_id BIGINT NOT NULL,
+    delivered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (guild_id, media_type, media_id)
+  )`,
+  "CREATE INDEX IF NOT EXISTS media_notification_deliveries_guild_idx ON media_notification_deliveries (guild_id, delivered_at DESC)",
 ];
 
 export async function initDatabase(): Promise<void> {

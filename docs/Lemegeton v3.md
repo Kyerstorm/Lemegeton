@@ -1439,9 +1439,11 @@ Provider information may be displayed when the member explicitly links and autho
 
 The redevelopment is staged so the new bot does not lose existing behavior during the rewrite.
 
-### Current implementation checkpoint — 6 November 2026
+### Current implementation checkpoint — 7 November 2026
 
-The new TypeScript/Node.js/Discord.js runtime is established under `bot/`. It includes validated startup configuration, structured logging, slash-command registration and interaction routing, an AniList provider adapter, and the first functional `/discover` environment for anime and manga search and trending results. Focused provider/configuration tests and a dedicated CI workflow are included. This is the first migration slice, not feature parity: the existing Python bot, PostgreSQL layer, Rust/Axum dashboard API, and S3 storage remain in place until each replacement workflow has been migrated and verified. The remaining feature environments and production cutover are still outstanding.
+The TypeScript/Node.js/Discord.js runtime now lives in `bot.ts`, with PostgreSQL access in `database.ts`, feature commands in `src/`, and shared providers/domain helpers in `helpers/`. All seven approved feature commands are registered, and the dashboard source is organized under `web/frontend/` and `web/backend/`. The implemented TypeScript workflows are still a staged migration rather than proof of full legacy parity; the Python runtime and its dependencies remain in place until the remaining command, background-job, schema, deployment, and data-compatibility checks pass.
+
+Guild-level media completion notifications now have a durable PostgreSQL settings/delivery store and an administrator-controlled `/settings` panel. The current scanner covers only recently finished or cancelled anime and manga reported by AniList. Per-title subscriptions, additional provider release types, digest scheduling, and media-linked automation remain future migration work.
 
 1. **Repository and behavior audit** — inventory all loaded cogs, commands, interactions, jobs, helpers, providers, schemas, dashboard endpoints, deployment scripts, permissions, and tests. Include both normal cogs and dynamically loaded test-cog paths. Identify which documented features are actually implemented.
 2. **Command consolidation map** — produce the final mapping from existing commands to /discover, /archive, /community, /play, /profile, /custom-role, and /settings. Identify historical, test-only, backup, and out-of-scope commands. Do not implement additional command entry points merely to preserve old CRUD commands.

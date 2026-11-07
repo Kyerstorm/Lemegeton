@@ -46,14 +46,17 @@ export async function setMediaNotificationSettings(
   const current = await getMediaNotificationSettings(guildId);
   const next = { ...current, ...patch };
   if (next.enabled && !next.channel_id) throw new Error("Choose a notification channel before enabling media notifications.");
+  if (next.enabled && !next.include_anime && !next.include_manga) {
+    throw new Error("Enable at least one media category before turning on notifications.");
+  }
   await query(
-    \`INSERT INTO media_notification_settings
+    `INSERT INTO media_notification_settings
        (guild_id, channel_id, enabled, include_anime, include_manga, updated_by, updated_at)
      VALUES ($1,$2,$3,$4,$5,$6,NOW())
      ON CONFLICT (guild_id) DO UPDATE SET
        channel_id=EXCLUDED.channel_id, enabled=EXCLUDED.enabled,
        include_anime=EXCLUDED.include_anime, include_manga=EXCLUDED.include_manga,
-       updated_by=EXCLUDED.updated_by, updated_at=NOW()\`,
+       updated_by=EXCLUDED.updated_by, updated_at=NOW()`,
     [guildId, next.channel_id, next.enabled, next.include_anime, next.include_manga, actorId],
   );
   return { ...next, guild_id: guildId };

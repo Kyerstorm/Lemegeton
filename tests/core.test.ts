@@ -16,6 +16,8 @@ import {normalizeAtlasTitle,normalizeAtlasCategory,safeAtlasUrl} from "../helper
 import {FEATURE_NAMES,isFeatureName} from "../helpers/settings.js";
 import {dashboardCommandRows,dashboardSecretMatches,isDashboardGuildId} from "../helpers/dashboard-bridge.js";
 import {customRoleChannelAllowed,customRoleCooldownMessage,parseCustomRoleColor,parseCustomRoleWordList,validateCustomRoleEmoji,validateCustomRoleName} from "../helpers/custom-roles.js";
+import {filterMediaNotificationCandidates} from "../helpers/media-notifications.js";
+import type {AniListRecentlyFinishedMedia} from "../helpers/anilist.js";
 
 test("bot configuration requires valid Discord credentials and validates the AniList endpoint",()=>{
  assert.throws(()=>loadConfig({}),/DISCORD_TOKEN/);
@@ -236,4 +238,27 @@ test("Archive tag search supports incremental multi-tag selection",()=>{
  assert.ok(searchArchiveTags("sci").includes("sci-fi"));
  assert.equal((ARCHIVE_TAG_CATALOG as readonly string[]).some(tag=>tag==="nsfw"||tag==="mature"),false);
  assert.ok(searchArchiveTags("").length<=25);
+});
+
+test("Media completion notifications filter unsupported and undersized AniList records", () => {
+ const makeItem = (
+  id: number,
+  type: "ANIME" | "MANGA",
+  format: string,
+  episodes: number | null,
+  chapters: number | null,
+ ): AniListRecentlyFinishedMedia => ({
+  id,type,title:`Media ${id}`,description:null,url:`https://anilist.co/${type.toLowerCase()}/${id}`,
+  cover:null,status:"FINISHED",format,episodes,chapters,averageScore:null,genres:[],endDate:null,
+ });
+ const items = [
+  makeItem(1,"ANIME","TV",8,null),
+  makeItem(2,"ANIME","TV",7,null),
+  makeItem(3,"ANIME","OVA",12,null),
+  makeItem(4,"MANGA","MANGA",null,40),
+  makeItem(5,"MANGA","MANGA",null,39),
+  makeItem(6,"MANGA","ONE_SHOT",null,80),
+ ];
+ assert.deepEqual(filterMediaNotificationCandidates(items,"ANIME").map(item=>item.id),[1]);
+ assert.deepEqual(filterMediaNotificationCandidates(items,"MANGA").map(item=>item.id),[4]);
 });
