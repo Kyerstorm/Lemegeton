@@ -1,6 +1,7 @@
 import { randomInt } from "node:crypto";
 import {
   ActionRowBuilder,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
@@ -22,6 +23,8 @@ import { homeEmbed, navigationButtons } from "../helpers/discord.js";
 import { TmdbClient, type TmdbMedia } from "../helpers/tmdb.js";
 import { cleanText } from "../helpers/security.js";
 import { findAtlasRelationships, recordProviderRelationships } from "../helpers/atlas.js";
+import { renderAtlasSnapshot } from "../helpers/atlas-renderer.js";
+import { logger } from "../helpers/logger.js";
 
 
 type Category = "all" | "anime" | "manga" | "light_novel" | "book" | "movie" | "tv" | "game";
@@ -411,6 +414,18 @@ export class DiscoverCommand implements FeatureCommand {
       embed.addFields({name:"No recorded connections yet",value:"This provider has not supplied related-work edges for this title, and this server has not approved any community links yet.",inline:false});
     }
     embed.setFooter({text:"Knowledge Atlas · Provider provenance and guild-scoped community links"});
+    const files: AttachmentBuilder[] = [];
+    if (relationships.length) {
+      try {
+        const image = await renderAtlasSnapshot(title, mediaCategory, relationships);
+        embed.setImage("attachment://knowledge-atlas.png");
+        files.push(new AttachmentBuilder(image, { name: "knowledge-atlas.png" }));
+      } catch (error) {
+        logger.warn("Knowledge Atlas graph snapshot could not be rendered", {
+          reason: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+    }
     const dashboardUrl = new URL(this.config.customRolesPublicUrl);
     dashboardUrl.searchParams.set("atlas_title", title);
     dashboardUrl.searchParams.set("atlas_category", mediaCategory.toUpperCase());
@@ -419,6 +434,7 @@ export class DiscoverCommand implements FeatureCommand {
     if (mediaUrl) dashboardUrl.searchParams.set("atlas_url", mediaUrl);
     await interaction.editReply({
       embeds:[embed],
+      files,
       components:[
         navigationButtons("discover",[{id:"home",label:"Back to discovery"}]),
         new ActionRowBuilder<ButtonBuilder>().addComponents(

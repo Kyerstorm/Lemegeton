@@ -16,6 +16,7 @@ import {normalizeAtlasTitle,normalizeAtlasCategory,safeAtlasUrl} from "../helper
 import {FEATURE_NAMES,isFeatureName} from "../helpers/settings.js";
 import {dashboardCommandRows,dashboardSecretMatches,isDashboardGuildId} from "../helpers/dashboard-bridge.js";
 import {customRoleChannelAllowed,customRoleCooldownMessage,parseCustomRoleColor,parseCustomRoleWordList,validateCustomRoleEmoji,validateCustomRoleName} from "../helpers/custom-roles.js";
+import {renderAtlasSnapshot} from "../helpers/atlas-renderer.js";
 import {filterMediaNotificationCandidates} from "../helpers/media-notifications.js";
 import type {AniListRecentlyFinishedMedia} from "../helpers/anilist.js";
 
@@ -261,4 +262,13 @@ test("Media completion notifications filter unsupported and undersized AniList r
  ];
  assert.deepEqual(filterMediaNotificationCandidates(items,"ANIME").map(item=>item.id),[1]);
  assert.deepEqual(filterMediaNotificationCandidates(items,"MANGA").map(item=>item.id),[4]);
+});
+
+test("Knowledge Atlas snapshots render bounded media nodes and escape provider text", async () => {
+ const image = await renderAtlasSnapshot("<Example & Title>", "ANIME", [
+  {title:"Related <work>",category:"MANGA",url:"https://anilist.co/manga/1",relationType:"Source Material",source:"AniList",sourceKind:"provider"},
+  {title:"Community Pick",category:"BOOK",url:null,relationType:"Community Link",source:"Server archive",sourceKind:"community"},
+ ]);
+ assert.deepEqual([...image.subarray(0,8)],[137,80,78,71,13,10,26,10]);
+ assert.ok(image.byteLength > 1024);
 });
