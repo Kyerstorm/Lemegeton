@@ -7,6 +7,8 @@ import { query, queryOne } from "../database.js";
 import { deleteArchiveAsset } from "./media-storage.js";
 import { archiveUploadAllowed, storeArchiveUpload } from "./media-storage.js";
 import { cleanText, isValidHttpsUrl, normalizeTags } from "./security.js";
+import { GLOBAL_MODERATOR_IDS, isGlobalArchiveModerator } from "./archive-access.js";
+export { isGlobalArchiveModerator } from "./archive-access.js";
 
 export const ARCHIVE_CATEGORIES = [
   { label: "Manga Panels", value: "panels", emoji: "📚" },
@@ -50,13 +52,6 @@ export type ArchiveVisibility = "server" | "global";
 
 const DEFAULT_CATEGORIES = ARCHIVE_CATEGORIES.map((category) => category.value);
 const UPLOAD_KINDS = new Set(["image", "audio", "video"]);
-const GLOBAL_MODERATOR_IDS = new Set(
-  (process.env.ARCHIVE_GLOBAL_MODERATOR_IDS ?? "")
-    .split(",")
-    .map((id) => id.trim())
-    .filter((id) => /^\d{17,20}$/.test(id)),
-);
-
 export interface ArchiveSettings {
   enabledCategories: ArchiveCategory[];
   uploadTypes: string[];
