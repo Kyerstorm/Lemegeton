@@ -521,7 +521,7 @@ const schemaStatements = [
     details TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`,
-  "CREATE INDEX IF NOT EXISTS dashboard_audit_log_guild_idx ON dashboard_audit_log (guild_id, created_at DESC)",,
+  "CREATE INDEX IF NOT EXISTS dashboard_audit_log_guild_idx ON dashboard_audit_log (guild_id, created_at DESC)",
 
   `CREATE TABLE IF NOT EXISTS media_notification_settings (
     guild_id BIGINT PRIMARY KEY,
