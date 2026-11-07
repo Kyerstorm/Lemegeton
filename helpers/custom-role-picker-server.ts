@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { isIP } from "node:net";
 import type { Client } from "discord.js";
 import type { BotConfig } from "./config.js";
 import { logger } from "./logger.js";
