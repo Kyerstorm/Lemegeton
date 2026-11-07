@@ -211,10 +211,12 @@ test("AniList linked profiles preserve provider-reported statistics and supporte
 });
 
 test("AniList profile milestones do not award thresholds before the provider data reaches them",()=>{
- const profile={
+ const profile: Parameters<typeof getAniListProfileAchievements>[0]={
+  id:1,name:"test",url:"https://anilist.co/user/test",avatar:null,banner:null,about:null,
   anime:{count:99,meanScore:90,episodesWatched:null,minutesWatched:null,chaptersRead:null,volumesRead:null,genres:[],statuses:[],formats:[]},
   manga:{count:49,meanScore:0,episodesWatched:null,minutesWatched:null,chaptersRead:null,volumesRead:null,genres:[],statuses:[],formats:[]},
- } as Parameters<typeof getAniListProfileAchievements>[0];
+  favorites:{anime:[],manga:[],characters:[]},
+ };
  assert.deepEqual(getAniListProfileAchievements(profile),[]);
 });
 
