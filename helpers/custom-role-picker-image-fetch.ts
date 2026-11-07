@@ -1,5 +1,5 @@
 import { lookup as dnsLookup } from "node:dns/promises";
-import type { LookupAddress, LookupFunction } from "node:dns";
+import type { LookupAddress } from "node:dns";
 import { isIP } from "node:net";
 import https from "node:https";
 
@@ -79,15 +79,18 @@ export async function fetchExternalImage(
     throw new Error("That link points to a private or local network address, which isn't allowed.");
   }
 
-  const pinnedLookup = ((hostname: string, options: { all?: boolean }, callback: (...args: unknown[]) => void) => {
-    if (hostname.replace(/\.$/, "").toLowerCase() !== host) {
-      callback(new Error("Unexpected host"), undefined);
-      return;
-    }
-    if (options?.all) callback(null, addresses);
-    else callback(null, addresses[0]!.address, addresses[0]!.family);
-  }) as unknown as LookupFunction;
-  const agent = new https.Agent({ keepAlive: false, lookup: pinnedLookup });
+  const agent = new https.Agent({
+    keepAlive: false,
+    lookup: (hostname, options, callback) => {
+      if (hostname.replace(/\.$/, "").toLowerCase() !== host) {
+        if (options.all) callback(new Error("Unexpected host"), []);
+        else callback(new Error("Unexpected host"), "", 0);
+        return;
+      }
+      if (options.all) callback(null, addresses);
+      else callback(null, addresses[0]!.address, addresses[0]!.family);
+    },
+  });
 
   try {
     const result = await new Promise<{ bytes: Buffer; contentType: "image/png" | "image/jpeg" }>((resolveResult, reject) => {
