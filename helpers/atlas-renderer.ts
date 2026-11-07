@@ -4,8 +4,8 @@ import type { AtlasRelation, MediaCategory } from "./atlas.js";
 const WIDTH = 1450;
 const HEIGHT = 950;
 const CENTER_X = WIDTH / 2;
-const CENTER_Y = 470;
-const MAX_NODES = 10;
+const CENTER_Y = 530;
+const MAX_NODES = 8;
 const CARD_WIDTH = 204;
 const CARD_HEIGHT = 136;
 
@@ -50,8 +50,8 @@ export async function renderAtlasSnapshot(
     const angle = (index / Math.max(selected.length, 1)) * Math.PI * 2 - Math.PI / 2;
     return {
       relation,
-      x: CENTER_X + Math.cos(angle) * 355,
-      y: CENTER_Y + Math.sin(angle) * 355,
+      x: CENTER_X + Math.cos(angle) * 280,
+      y: CENTER_Y + Math.sin(angle) * 280,
     };
   });
 
