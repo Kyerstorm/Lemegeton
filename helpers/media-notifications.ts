@@ -56,7 +56,7 @@ export async function setMediaNotificationSettings(
      ON CONFLICT (guild_id) DO UPDATE SET
        channel_id=EXCLUDED.channel_id, enabled=EXCLUDED.enabled,
        include_anime=EXCLUDED.include_anime, include_manga=EXCLUDED.include_manga,
-       updated_by=EXCLUDED.updated_by, updated_at=NOW()`,
+       updated_by=EXCLUDED.updated_by, updated_at=NOW(), last_run_at=NULL`,
     [guildId, next.channel_id, next.enabled, next.include_anime, next.include_manga, actorId],
   );
   return { ...next, guild_id: guildId };

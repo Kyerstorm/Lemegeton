@@ -1325,7 +1325,11 @@ Existing useful functionality must be mapped before implementation. This invento
 | /news and /test-twitter-scrape | Audit before any migration | Do not preserve brittle or unsupported scraping merely because an old command existed |
 | Generic utilities and invite commands | Out of approved expansion | Do not increase command count with unrelated utilities |
 
-\n\nThe legacy free-game checker is deliberately not migrated in this phase. Its Steam implementation depends on storefront search parsing and undocumented endpoints; the current Steam Web API reference and Free to Keep documentation do not supply a general public promotions feed. The GOG developer documentation describes the Galaxy SDK rather than a supported public store-catalog API. Do not reintroduce these scrapers as a substitute for a stable provider integration.\n\n### 15.2 Historical Lemegeton v2 commands
+
+
+The legacy free-game checker is deliberately not migrated in this phase. Its Steam implementation depends on storefront search parsing and undocumented endpoints; the current Steam Web API reference and Free to Keep documentation do not supply a general public promotions feed. The GOG developer documentation describes the Galaxy SDK rather than a supported public store-catalog API. See the [Steam Web API reference](https://partner.steamgames.com/doc/webapi), [Steam Free to Keep documentation](https://partner.steamgames.com/doc/marketing/discounts/freetokeep), and [GOG developer documentation](https://docs.gog.com/) for the published platform interfaces. Do not reintroduce these scrapers as a substitute for a stable provider integration.
+
+### 15.2 Historical Lemegeton v2 commands
 
 The separate lemegeton-v2 branch contains older commands and modules that must remain visible in the migration record so they are not silently forgotten.
 
