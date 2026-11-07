@@ -8,6 +8,17 @@ RUN npm install --no-audit --no-fund \
     && npm audit --audit-level=moderate \
     && npm run build
 
+# Keep the staged TypeScript migration buildable before an image can be released.
+# The Python bot remains the active runtime until all legacy features have parity.
+WORKDIR /src/bot
+COPY package.json tsconfig.json ./
+COPY bot.ts database.ts ./
+COPY src ./src
+COPY helpers ./helpers
+COPY tests ./tests
+RUN npm install --no-audit --no-fund \
+    && npm test
+
 FROM rust:bookworm AS rust-builder
 WORKDIR /src
 COPY Cargo.toml ./Cargo.toml
