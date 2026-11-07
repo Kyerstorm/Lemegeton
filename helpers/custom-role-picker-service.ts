@@ -191,6 +191,10 @@ export async function buildPickerState(
   };
 }
 
+function cooldownMessage(context: PickerContext): string | null {
+  return customRoleCooldownMessage(context.record, context.settings.cooldown_seconds);
+}
+
 export async function pickerSetName(context: PickerContext, rawName: unknown): Promise<PickerResult> {
   if (!context.role) return { ok: false, message: "Your custom role is missing. Reopen /custom-role to restore it." };
   if (typeof rawName !== "string" || rawName.length > 400) return { ok: false, message: "Role names can be at most 100 characters." };
