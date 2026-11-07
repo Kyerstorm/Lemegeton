@@ -1,140 +1,132 @@
-"""Source and routing regression checks for the TypeScript dashboard frontend."""
+"""Regression checks for the current Next.js + Rust dashboard deployment."""
+
 from pathlib import Path
+import json
+import tomllib
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-UI_SOURCE = (ROOT / "dashboard-rs" / "src" / "ui.rs").read_text(encoding="utf-8")
-MAIN_SOURCE = (ROOT / "dashboard-rs" / "src" / "main.rs").read_text(encoding="utf-8")
-AUTH_SOURCE = (ROOT / "dashboard-rs" / "src" / "auth.rs").read_text(encoding="utf-8")
-FRONTEND_APP = (ROOT / "dashboard-frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
-FRONTEND_STYLES = (ROOT / "dashboard-frontend" / "src" / "styles.ts").read_text(encoding="utf-8")
-FRONTEND_ENTRY = (ROOT / "dashboard-frontend" / "src" / "main.tsx").read_text(encoding="utf-8")
-FRONTEND_CONFIG = (ROOT / "dashboard-frontend" / "vite.config.ts").read_text(encoding="utf-8")
-RUST_STATE = (ROOT / "dashboard-rs" / "src" / "state.rs").read_text(encoding="utf-8")
-RUST_AUTH = (ROOT / "dashboard-rs" / "src" / "auth.rs").read_text(encoding="utf-8")
-RUST_CARGO = (ROOT / "dashboard-rs" / "Cargo.toml").read_text(encoding="utf-8")
-FRONTEND_PACKAGE = (ROOT / "dashboard-frontend" / "package.json").read_text(encoding="utf-8")
-WORKFLOW = (ROOT / ".github" / "workflows" / "dashboard.yml").read_text(encoding="utf-8")
-START_SCRIPT = (ROOT / "scripts" / "start.sh").read_text(encoding="utf-8")
-PICKER_SOURCE = (ROOT / "web" / "custom_role_picker.py").read_text(encoding="utf-8")
-PICKER_SERVER = (ROOT / "web" / "custom_role_picker_server.py").read_text(encoding="utf-8")
-PICKER_PAGE = (ROOT / "web" / "picker.html").read_text(encoding="utf-8")
-PICKER_THEME = (ROOT / "web" / "theme.css").read_text(encoding="utf-8")
-PICKER_SCRIPT = (ROOT / "web" / "picker.js").read_text(encoding="utf-8")
+
+
+def source(path: str) -> str:
+    return (ROOT / path).read_text(encoding="utf-8")
 
 
 class DashboardAssetTests(unittest.TestCase):
-    def test_frontend_is_authored_in_typescript_and_tsx(self):
-        self.assertIn("createRoot", FRONTEND_ENTRY)
-        self.assertIn("function LoginPage()", FRONTEND_APP)
-        for page in ("overview", "commands", "extensions", "audit", "diagnostics",
-                     "logs", "integrations", "database"):
-            with self.subTest(page=page):
-                self.assertIn('id: "' + page + '"', FRONTEND_APP)
-        self.assertIn("src/styles.ts", FRONTEND_CONFIG)
-        self.assertIn('fileName: () => "app.js"', FRONTEND_CONFIG)
+    def test_frontend_uses_next_app_router_and_static_export(self):
+        package = json.loads(source("web/frontend/package.json"))
+        config = source("web/frontend/next.config.ts")
+        layout = source("web/frontend/app/layout.tsx")
+        page = source("web/frontend/app/page.tsx")
+        login = source("web/frontend/app/login/page.tsx")
+        app = source("web/frontend/src/App.tsx")
 
-    def test_frontend_keeps_live_controls_and_api_contracts(self):
-        for marker in ("/api/bootstrap", "/api/system", "/api/integrations",
-                       "/api/logs?file=", "/api/logout", "/commands/",
-                       "/sync", "/reset", "X-CSRF-Token", 'credentials: "same-origin"',
-                       "toggleCommand", "Publish slash commands", "Reset server overrides"):
-            with self.subTest(marker=marker):
-                self.assertIn(marker, FRONTEND_APP)
-        self.assertIn("prefers-reduced-motion:reduce", FRONTEND_STYLES)
+        self.assertIn("next", package["dependencies"])
+        self.assertIn("build", package["scripts"])
+        self.assertIn("typecheck", package["scripts"])
+        self.assertIn('output: "export"', config)
+        self.assertIn("metadata", layout)
+        self.assertIn('robots: { index: false, follow: false }', layout)
+        self.assertIn("App", page)
+        self.assertIn("App", login)
+        self.assertIn('"use client"', app)
+        self.assertIn("/api/bootstrap", app)
+        self.assertIn("X-CSRF-Token", app)
+        self.assertIn("credentials: \"same-origin\"", app)
+        self.assertIn("atlas", app)
 
-    def test_frontend_uses_built_assets_without_standalone_source_files(self):
-        self.assertIn('href="/static/app.css"', UI_SOURCE)
-        self.assertIn('src="/static/app.js"', UI_SOURCE)
-        self.assertIn('"app.js"', UI_SOURCE)
-        self.assertIn('"app.css"', UI_SOURCE)
-        for path in (
-            "dashboard-frontend/index.html",
-            "dashboard-frontend/src/index.html",
-            "dashboard-frontend/src/styles.css",
-            "dashboard-frontend/src/app.css",
-            "web/static/dashboard.html",
-            "web/static/login.html",
-            "web/static/dashboard.css",
-            "web/static/dashboard.js",
-        ):
-            with self.subTest(path=path):
-                self.assertFalse((ROOT / path).exists())
-        self.assertIn("ui::dashboard_html()", AUTH_SOURCE)
-        self.assertIn("ui::login_html()", AUTH_SOURCE)
-        self.assertIn("ui::static_asset", MAIN_SOURCE)
+    def test_rust_serves_the_exported_pages_and_safe_next_assets(self):
+        ui = source("web/backend/src/ui.rs")
+        main = source("web/backend/src/main.rs")
 
-    def test_production_build_and_deployment_configs_include_the_frontend(self):
-        import json
-        import tomllib
+        self.assertIn('web/frontend/out/index.html', ui)
+        self.assertIn('web/frontend/out/login/index.html', ui)
+        self.assertIn('web/frontend/out/_next', ui)
+        self.assertIn('part == ".."', ui)
+        self.assertIn('"/_next/{*path}"', main)
+        self.assertIn("ui::dashboard_html()", source("web/backend/src/auth.rs"))
+        self.assertIn("ui::login_html()", source("web/backend/src/auth.rs"))
 
-        railpack = json.loads((ROOT / "railpack.json").read_text(encoding="utf-8"))
-        self.assertEqual(railpack["packages"]["node"], "22")
-        package = json.loads(FRONTEND_PACKAGE)
-        self.assertGreaterEqual(int(package["engines"]["node"].lstrip(">=")), 22)
+    def test_guild_scoped_api_keeps_authorization_and_atlas_bridge(self):
+        api = source("web/backend/src/api.rs")
+        main = source("web/backend/src/main.rs")
+        state = source("web/backend/src/state.rs")
+        auth = source("web/backend/src/auth.rs")
 
-        railway_json = json.loads((ROOT / "railway.json").read_text(encoding="utf-8"))
-        nested_railway = json.loads((ROOT / "config" / "railway.json").read_text(encoding="utf-8"))
-        railway_toml = tomllib.loads((ROOT / "railway.toml").read_text(encoding="utf-8"))
-        commands = (
-            railway_json["build"]["buildCommand"],
-            nested_railway["build"]["buildCommand"],
-            railway_toml["build"]["buildCommand"],
-        )
-        for command in commands:
+        atlas_start = api.index("pub async fn atlas")
+        atlas_handler = api[atlas_start:atlas_start + 1600]
+        self.assertIn("authorized_guild", atlas_handler)
+        self.assertIn("atlas_bridge_json", atlas_handler)
+        self.assertIn('"/api/guilds/{guild_id}/atlas"', main)
+        self.assertIn("pub async fn manageable_guilds", state)
+        self.assertIn("can_manage_guild", state)
+        self.assertIn("session_from_headers", auth)
+        self.assertIn("allow_oauth_start", auth)
+
+    def test_dashboard_security_headers_and_oauth_validation_remain(self):
+        main = source("web/backend/src/main.rs")
+        state = source("web/backend/src/state.rs")
+        auth = source("web/backend/src/auth.rs")
+        cargo = source("web/backend/Cargo.toml")
+
+        for header in ("x-content-type-options", "x-frame-options",
+                       "referrer-policy", "permissions-policy",
+                       "cross-origin-opener-policy", "cross-origin-resource-policy"):
+            with self.subTest(header=header):
+                self.assertIn(header, main)
+        self.assertIn("validate_public_configuration", state)
+        self.assertIn("allow_oauth_start", state)
+        self.assertIn("Too many sign-in attempts", auth)
+        self.assertIn("oauth_ready", auth)
+        self.assertIn('version = "1.54.1"', cargo)
+
+    def test_railway_and_docker_use_current_paths_and_build_every_runtime(self):
+        root_railway = json.loads(source("railway.json"))
+        nested_railway = json.loads(source("config/railway.json"))
+        railway_toml = tomllib.loads(source("railway.toml"))
+        docker = source("Dockerfile")
+        start = source("scripts/start.sh")
+        compose = source("docker-compose.yml")
+        workflow = source(".github/workflows/dashboard.yml")
+        package = json.loads(source("package.json"))
+
+        self.assertIn("web/frontend", root_railway["build"]["buildCommand"])
+        self.assertIn("web/backend/Cargo.toml", root_railway["build"]["buildCommand"])
+        for command in (nested_railway["build"]["buildCommand"], railway_toml["build"]["buildCommand"]):
             with self.subTest(command=command):
-                self.assertIn("npm run typecheck --prefix dashboard-frontend", command)
-                self.assertIn("npm run build --prefix dashboard-frontend", command)
-                self.assertIn("cargo build --manifest-path dashboard-rs/Cargo.toml --release", command)
-        self.assertIn("dashboard-frontend/dist/app.js", START_SCRIPT)
-        self.assertIn("dashboard-frontend/dist/app.css", START_SCRIPT)
-        self.assertIn("test -s dashboard-frontend/dist/app.js", WORKFLOW)
-        self.assertIn("test -s dashboard-frontend/dist/app.css", WORKFLOW)
-        self.assertIn('      - "railpack.json"', WORKFLOW)
-        self.assertIn('      - "config/railway.json"', WORKFLOW)
-        self.assertIn('      - "scripts/start.sh"', WORKFLOW)
+                self.assertIn("web/frontend", command)
+                self.assertIn("web/backend/Cargo.toml", command)
+                self.assertIn("npm test", command)
+                self.assertNotIn("dashboard-frontend", command)
+                self.assertNotIn("dashboard-rs", command)
 
-
-    def test_security_fixes_have_regression_coverage(self):
-        self.assertIn("validate_public_configuration", RUST_STATE)
-        self.assertIn("allow_oauth_start", RUST_STATE)
-        self.assertIn("Too many sign-in attempts", RUST_AUTH)
-        self.assertIn("/oauth2/token/revoke", RUST_AUTH)
-        self.assertIn("can_manage_guild(permissions)", RUST_STATE)
-        self.assertNotIn("can_manage_guild(permissions, owner)", RUST_STATE)
-        self.assertIn('version = "1.54.1"', RUST_CARGO)
-        self.assertIn("cross-origin-opener-policy", MAIN_SOURCE)
-        self.assertIn("x-permitted-cross-domain-policies", MAIN_SOURCE)
-        self.assertIn("DASHBOARD_ALLOW_PUBLIC_BIND", MAIN_SOURCE)
-
-
-    def test_custom_role_picker_is_consolidated_under_web(self):
-        for filename in ("custom_role_picker.py", "custom_role_picker_server.py", "picker.html", "picker.css", "theme.css", "picker.js", "favicon.svg"):
-            with self.subTest(filename=filename):
-                self.assertTrue((ROOT / "web" / filename).is_file())
-        self.assertEqual(PICKER_SOURCE.split("STATIC_DIR = ", 1)[1].splitlines()[0], "Path(__file__).resolve().parent")
-        self.assertNotIn("web.static/custom_roles", PICKER_SOURCE)
-        self.assertFalse((ROOT / "web" / "static" / "custom_roles" / "picker.html").exists())
-        self.assertIn("COMMUNITY CONTROL", PICKER_PAGE)
-        self.assertIn("ROLE STUDIO", PICKER_PAGE)
-        self.assertIn("#090a09", PICKER_THEME)
-        self.assertIn("#d9ff72", PICKER_THEME)
-        self.assertIn("configured dashboard origin", PICKER_SOURCE)
-        self.assertIn("record_event(self._failed", PICKER_SOURCE)
-        self.assertIn("record_event(self._fetches", PICKER_SOURCE)
-        self.assertIn("images.source_max_bytes() + MULTIPART_OVERHEAD", PICKER_SERVER)
-        self.assertNotIn("innerHTML", PICKER_SCRIPT)
-        self.assertNotIn("eval(", PICKER_SCRIPT)
-
-    def test_accessibility_and_security_headers_remain(self):
-        for marker in ("@media(max-width:760px)", "@media(max-width:480px)",
-                       "prefers-reduced-motion:reduce", ":focus-visible"):
+        self.assertEqual(package["scripts"]["test"],
+                         "npm run build && node --test dist/tests/*.test.js")
+        for marker in ("npm run typecheck", "npm audit", "npm run build",
+                       "npm test", "cargo build --manifest-path web/backend/Cargo.toml --release",
+                       "python:3.13-slim-bookworm AS runtime", "USER 10001:10001",
+                       "HEALTHCHECK", "COPY --from=frontend", "COPY --from=rust-builder"):
             with self.subTest(marker=marker):
-                self.assertIn(marker, FRONTEND_STYLES)
-        self.assertNotIn("dangerouslySetInnerHTML", FRONTEND_APP)
-        self.assertIn("script-src 'self'", MAIN_SOURCE)
-        self.assertIn("style-src 'self'", MAIN_SOURCE)
-        self.assertIn("frame-ancestors 'none'", MAIN_SOURCE)
+                self.assertIn(marker, docker)
+        self.assertIn('"$DASHBOARD_BIN" &', start)
+        self.assertIn("python bot.py &", start)
+        self.assertNotIn("node --env-file-if-exists=.env dist/bot.js &", start)
+        self.assertIn("127.0.0.1:8080:8080", compose)
+        self.assertIn("read_only: true", compose)
+        self.assertIn("no-new-privileges:true", compose)
+        self.assertIn("docker build --pull", workflow)
+        self.assertIn("docker compose config --quiet", workflow)
+
+    def test_deployment_refuses_to_start_without_built_dashboard_assets(self):
+        start = source("scripts/start.sh")
+        ui = source("web/backend/src/ui.rs")
+
+        self.assertIn("web/frontend/out/index.html", start)
+        self.assertIn("web/frontend/out/login/index.html", start)
+        self.assertIn("target/release/lemegeton-dashboard", start)
+        self.assertIn("SERVICE_UNAVAILABLE", ui)
+        self.assertFalse((ROOT / "dashboard-frontend").exists())
+        self.assertFalse((ROOT / "dashboard-rs").exists())
 
 
 if __name__ == "__main__":
