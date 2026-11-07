@@ -10,6 +10,10 @@ on:
   pull_request:
     paths:
       - "Cargo.toml"
+      - "src/**"
+      - "helpers/**"
+      - "tests/**"
+      - "tsconfig.json"
       - "web/backend/**"
       - "helpers/dashboard-bridge.ts"
       - "helpers/logger.ts"
@@ -81,6 +85,10 @@ on:
     paths:
       - ".github/workflows/dashboard.yml"
       - "Cargo.toml"
+      - "src/**"
+      - "helpers/**"
+      - "tests/**"
+      - "tsconfig.json"
       - "web/backend/**"
       - "helpers/dashboard-bridge.ts"
       - "helpers/logger.ts"
@@ -185,3 +193,21 @@ jobs:
       - run: python -m unittest discover -s tests -p "test_browse_filters.py"
       - run: python -m unittest discover -s tests -p "test_browse_provider_search.py"
       - run: python -m unittest discover -s tests -p "test_anilist_site_embed.py"
+
+  container:
+    name: Docker build and runtime contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate startup script
+        run: bash -n scripts/start.sh
+      - name: Validate Compose configuration
+        run: |
+          touch .env
+          docker compose config --quiet
+      - name: Build production image
+        run: docker build --pull --progress=plain --tag lemegeton:ci .
+      - name: Verify non-root user and health check
+        run: |
+          test "$(docker image inspect lemegeton:ci --format '{{.Config.User}}')" = "10001:10001"
+          docker image inspect lemegeton:ci --format '{{.Config.Healthcheck.Test}}' | grep -Fq 'http://127.0.0.1:8080/login'
