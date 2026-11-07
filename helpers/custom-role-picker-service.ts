@@ -12,6 +12,7 @@ import {
   getCustomRoleIconData,
   getCustomRoleRecord,
   getCustomRoleSettings,
+  markCustomRoleMissing,
   HOLOGRAPHIC_COLORS,
   parseCustomRoleColor,
   updateCustomRole,
@@ -188,77 +189,6 @@ export async function buildPickerState(
     name_max: 100,
     icon_source_max: config.customRoleIconSourceMaxBytes,
   };
-}
-
-export async function buildPickerState(
-  context: PickerContext,
-  config: BotConfig,
-): Promise<Record<string, unknown>> {
-  const { guild, member, role, record, settings, iconData } = context;
-  let icon: Record<string, unknown> | null = null;
-  const image = iconData?.icon_png ?? record.icon_png ?? null;
-  if (record.icon_emoji) icon = { type: "emoji", value: record.icon_emoji };
-  else if (image) icon = { type: "image", url: asDataUrl(image) };
-  else if (role?.unicodeEmoji) icon = { type: "emoji", value: role.unicodeEmoji };
-  if (icon?.type === "image") {
-    icon.has_source = Boolean(iconData?.icon_source_asset_id || image);
-    try {
-      icon.crop = record.icon_crop ? JSON.parse(record.icon_crop) as Record<string, number> : null;
-    } catch {
-      icon.crop = null;
-    }
-  }
-
-  const changedAt = record.last_changed_at ? new Date(record.last_changed_at).getTime() : Number.NaN;
-  const nextChangeAt = Number.isFinite(changedAt) && settings.cooldown_seconds > 0
-    ? Math.floor(changedAt / 1000) + settings.cooldown_seconds
-    : null;
-  const gradient = guild.features.includes("ENHANCED_ROLE_COLORS");
-  const icons = guild.features.includes("ROLE_ICONS");
-  return {
-    user: {
-      id: member.id,
-      name: member.displayName,
-      avatar_url: await avatarDataUrl(member),
-    },
-    guild: {
-      id: guild.id,
-      name: guild.name,
-      gradient,
-      icons,
-      preview_enhanced: process.env.CUSTOM_ROLES_DEBUG_PREVIEW_ENHANCED_COLORS === "true" && !gradient,
-      preview_icons: process.env.CUSTOM_ROLES_DEBUG_PREVIEW_ROLE_ICONS === "true" && !icons,
-    },
-    role: {
-      name: role?.name ?? record.name,
-      status: record.status,
-      mode: record.color_mode,
-      primary: colorHex(record.primary_color),
-      secondary: record.color_mode !== "solid" ? colorHex(record.secondary_color) : null,
-      icon,
-    },
-    cooldown_seconds: settings.cooldown_seconds,
-    next_change_at: nextChangeAt,
-    name_max: 100,
-    icon_source_max: config.customRoleIconSourceMaxBytes,
-  };
-}
-
-async function avatarDataUrl(member: GuildMember): Promise<string | null> {
-  const url = member.displayAvatarURL({ extension: "png", size: 128 });
-  try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(10_000), redirect: "error" });
-    if (!response.ok) return null;
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (!bytes.length || bytes.length > 2 * 1024 * 1024 || !pickerImageContentType(bytes)) return null;
-    return asDataUrl(bytes);
-  } catch {
-    return null;
-  }
-}
-
-function cooldownMessage(context: PickerContext): string | null {
-  return customRoleCooldownMessage(context.record, context.settings.cooldown_seconds);
 }
 
 export async function pickerSetName(context: PickerContext, rawName: unknown): Promise<PickerResult> {
