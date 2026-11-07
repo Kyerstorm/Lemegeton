@@ -235,8 +235,8 @@ export async function pickerSetColor(
   const colors = mode === "holographic"
     ? { primaryColor: HOLOGRAPHIC_COLORS[0], secondaryColor: HOLOGRAPHIC_COLORS[1], tertiaryColor: HOLOGRAPHIC_COLORS[2] }
     : mode === "gradient"
-      ? { primaryColor: primary, secondaryColor: secondary, tertiaryColor: null }
-      : { primaryColor: primary, secondaryColor: null, tertiaryColor: null };
+      ? { primaryColor: primary, secondaryColor: secondary! }
+      : { primaryColor: primary };
 
   try {
     await context.role.edit({ colors, reason: "Custom Roles: member changed colors in the web picker" });
