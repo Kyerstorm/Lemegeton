@@ -61,6 +61,10 @@ function anilistRecord(item: AniListMedia, category: "anime" | "manga" | "light_
   return { provider: "AniList", category, item };
 }
 
+function randomOne<T>(items: T[]): T[] {
+  return items.length ? [items[randomInt(items.length)]!] : [];
+}
+
 function toEmbed(record: SearchRecord): EmbedBuilder {
   if (record.provider === "AniList") {
     const item = record.item;
@@ -249,12 +253,14 @@ export class DiscoverCommand implements FeatureCommand {
       { name: "Search results", value: "search" }, { name: "Knowledge Atlas", value: "atlas" },
     ));
 
+  private readonly config: BotConfig;
   private readonly anilist: AniListClient;
   private readonly books: GoogleBooksClient;
   private readonly tmdb: TmdbClient;
   private readonly igdb: IgdbClient;
 
   constructor(config: BotConfig) {
+    this.config = config;
     this.anilist = new AniListClient(config.anilistApiUrl, config.anilistTimeoutMs);
     this.books = new GoogleBooksClient(config.googleBooksApiKey);
     this.tmdb = new TmdbClient(config.tmdbBearerToken);
@@ -507,10 +513,10 @@ export class DiscoverCommand implements FeatureCommand {
         case "anime": return (await this.anilist.random("ANIME")).map((media) => anilistRecord(media, "anime"));
         case "manga": return (await this.anilist.random("MANGA")).map((media) => anilistRecord(media, "manga"));
         case "light_novel": return (await this.anilist.random("MANGA", true)).map((media) => anilistRecord(media, "light_novel"));
-        case "book": return (await this.books.random()).map((media) => ({ provider: "Google Books", category: "book", item: media }));
-        case "movie": return (await this.tmdb.random("movie")).map((media) => ({ provider: "TMDB", category: "movie", item: media }));
-        case "tv": return (await this.tmdb.random("tv")).map((media) => ({ provider: "TMDB", category: "tv", item: media }));
-        case "game": return (await this.igdb.random()).map((media) => ({ provider: "IGDB", category: "game", item: media }));
+        case "book": return randomOne(await this.books.search("popular fiction")).map((media) => ({ provider: "Google Books", category: "book", item: media }));
+        case "movie": return randomOne(await this.tmdb.trending("movie")).map((media) => ({ provider: "TMDB", category: "movie", item: media }));
+        case "tv": return randomOne(await this.tmdb.trending("tv")).map((media) => ({ provider: "TMDB", category: "tv", item: media }));
+        case "game": return randomOne(await this.igdb.search("popular")).map((media) => ({ provider: "IGDB", category: "game", item: media }));
       }
     };
     const batches = await Promise.allSettled(categories.map(load));
