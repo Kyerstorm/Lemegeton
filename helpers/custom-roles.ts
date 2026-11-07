@@ -404,7 +404,7 @@ export async function planLegacyCustomRoleImport(guild: Guild): Promise<LegacyCu
 
   let members;
   try {
-    members = await guild.members.fetch({ force: true });
+    members = await guild.members.fetch();
     await guild.roles.fetch();
   } catch (error) {
     throw new Error("I couldn't verify the full member and role lists, so I won't import old booster roles. " +
