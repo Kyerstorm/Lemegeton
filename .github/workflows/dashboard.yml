@@ -81,7 +81,7 @@ on:
       - "config/railway.json"
       - "scripts/start.sh"
   push:
-    branches: [multi_guild]
+    branches: [multi_guild, lemegeton-v3]
     paths:
       - ".github/workflows/dashboard.yml"
       - "Cargo.toml"
