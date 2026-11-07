@@ -166,6 +166,11 @@ The target command surface should be intentionally compact:
 | **/profile** | Social & Profiles | /profile, /login, /user, /affinity, /anilist-leaderboard, /server-taste, and supported Steam/AniList account-linking and profile displays |
 | **/custom-role** | Custom Roles | Existing member custom-role panel and administrator custom-role panel, unified into one command |
 | **/settings** | Selected feature configuration and the existing control plane | Existing /dashboard, dashboard section toggles, and relevant /server-config controls for the selected v3 systems |
+| **/help** | Standalone command guide | Keep independently discoverable; do not absorb it into a feature command or /settings |
+| **/privacy** | Standalone privacy notice | Keep the privacy notice independently accessible; do not hide it inside /profile or /settings |
+| **/feedback** | Standalone feedback intake | Keep feedback submission independent from the seven feature environments |
+
+The seven rows above the standalone utilities are the major feature environments. **/help, /privacy, and /feedback are deliberate standalone exceptions** and must each remain independently registered top-level slash commands. Do not combine them with one another or with the seven feature commands.
 
 This is the target architecture, not a mandate to preserve every old spelling or every undocumented behavior. During the repository audit, verify each command and map it to one of these destinations or to an explicit out-of-scope decision.
 
@@ -1318,9 +1323,11 @@ Existing useful functionality must be mapped before implementation. This invento
 | Free-game notifications | Media Notifications | Do not port the legacy monitor as-is: its Steam path parses storefront search responses and uses undocumented endpoints, while the Epic/GOG storefront feeds also lack a verified supported integration contract. Revisit only with a stable, permitted provider source. |
 | Custom theme commands | Out of approved expansion | Do not build a general theme or appearance system |
 | /invite-stats and /invite-leaderboard | Out of approved expansion | Do not build general invite analytics |
-| /feedback | Out of approved expansion | Do not create a separate generic feedback product as part of this scope |
+| /feedback | Standalone command (explicit exception) | Retain the existing feedback intake as its own top-level command; do not absorb it into a feature environment |
+| /privacy | Standalone command (explicit exception) | Retain the navigable privacy notice as its own top-level command |
+| /help | Standalone command (explicit exception) | Retain a focused command guide as its own top-level command |
+| /discovery-hub | /discover | Move discovery navigation into /discover rather than keep a duplicate command hub |
 | /planned-features | Out of approved expansion | Do not recreate a generic voting backlog |
-| /help and /discovery-hub | Native command discovery and contextual help | Do not add another top-level command hub |
 | /library-backup | Out of approved expansion | Do not create a Lemegeton personal media library or progress system |
 | /news and /test-twitter-scrape | Audit before any migration | Do not preserve brittle or unsupported scraping merely because an old command existed |
 | Generic utilities and invite commands | Out of approved expansion | Do not increase command count with unrelated utilities |
@@ -1362,8 +1369,9 @@ The separate lemegeton-v2 branch contains older commands and modules that must r
 | /invite-stats, /invite-leaderboard, and /invite-theme | Not in the approved expansion. |
 | /anilist-leaderboard | Audit and retain only appropriate provider-based community summaries within /profile or /community. |
 | /affinity | Preserve through /profile with consent and privacy controls. |
-| /feedback | Not in the approved expansion. |
-| /help | Replace command sprawl with Discord-native discoverability and contextual help. |
+| /feedback | Preserve as a standalone top-level feedback command; it is an explicit exception to feature consolidation. |
+| /privacy | Preserve as a standalone top-level privacy notice. |
+| /help | Preserve as a standalone top-level command guide; it is not another feature hub. |
 | /notifications | Narrow to media notifications and subscriptions only. |
 | /say | General utility outside the selected scope. |
 | /userinfo | Merge into /profile where useful. |
@@ -1445,7 +1453,7 @@ The redevelopment is staged so the new bot does not lose existing behavior durin
 
 ### Current implementation checkpoint — 7 November 2026
 
-The TypeScript/Node.js/Discord.js runtime now lives in `bot.ts`, with PostgreSQL access in `database.ts`, feature commands in `src/`, and shared providers/domain helpers in `helpers/`. All seven approved feature commands are registered, and the dashboard source is organized under `web/frontend/` and `web/backend/`. The implemented TypeScript workflows are still a staged migration rather than proof of full legacy parity; the Python runtime and its dependencies remain in place until the remaining command, background-job, schema, deployment, and data-compatibility checks pass.
+The TypeScript/Node.js/Discord.js runtime now lives in `bot.ts`, with PostgreSQL access in `database.ts`, feature commands in `src/`, and shared providers/domain helpers in `helpers/`. All seven major feature commands are registered, and the dashboard source is organized under `web/frontend/` and `web/backend/`. `/help`, `/privacy`, and `/feedback` remain separate standalone commands and are explicit migration items of their own; they must not be folded into the seven feature environments. The TypeScript workflows are still a staged migration rather than proof of full legacy parity; the Python runtime and its dependencies remain in place until the remaining command, background-job, schema, deployment, and data-compatibility checks pass.
 
 Guild-level media completion notifications now have a durable PostgreSQL settings/delivery store and an administrator-controlled `/settings` panel. The current scanner covers only recently finished or cancelled anime and manga reported by AniList. Per-title subscriptions, additional provider release types, digest scheduling, and media-linked automation remain future migration work.
 
@@ -1478,7 +1486,8 @@ The order may change based on dependencies discovered during the audit, but the 
 The v3 redevelopment is ready for release only when:
 
 ### Command architecture
-- The public slash-command surface is limited to the seven feature entry points: /discover, /archive, /community, /play, /profile, /custom-role, and /settings, unless a separately justified exception is approved.
+- The seven major feature entry points are /discover, /archive, /community, /play, /profile, /custom-role, and /settings.
+- /help, /privacy, and /feedback are three explicit standalone top-level command exceptions. Each has its own command module and registration; none is merged into a feature command.
 - Daily, rankings, sessions, discussions, calendar, notifications, and Knowledge Atlas are not separate top-level slash commands.
 - Archive CRUD operations are handled within /archive rather than separate commands.
 - Existing commands are mapped to their new feature environments or explicitly recorded as out of scope.
@@ -1587,7 +1596,7 @@ These links are historical audit starting points, not implementation guarantees.
 
 This catalogue records fifty substantial feature concepts raised during v3 planning. It is deliberately a catalogue of **feature environments, workflows, and specialist views**, not a plan to register fifty top-level Discord slash commands.
 
-The approved public command surface remains the seven feature entry points in Section 3:
+The approved public command surface remains the seven major feature entry points in Section 3, plus the three independently registered /help, /privacy, and /feedback commands:
 
 - `/discover`
 - `/archive`
