@@ -11,6 +11,7 @@ import {dueDailyDeliveries,dueDailySchedules,markDailyDelivery,prepareDailyDeliv
 import {createCommandRegistry} from "./src/registry.js";
 import {isFeatureEnabled} from "./helpers/settings.js";
 import {homeEmbed} from "./helpers/discord.js";
+import {handleConsentButton,initUserConsentSchema,requireCurrentConsent} from "./helpers/terms-consent.js";
 import {createIssueLog,issueHashNotice} from "./helpers/issue-logs.js";
 import {onCustomRoleMemberAdd,onCustomRoleMemberRemove,onCustomRoleMemberUpdate,onCustomRoleRoleDelete,reconcileCustomRoleGuild} from "./helpers/custom-role-lifecycle.js";
 import {startCustomRolePicker,stopCustomRolePicker} from "./helpers/custom-role-picker-server.js";
@@ -81,6 +82,8 @@ async function routeInteraction(interaction:Interaction):Promise<void>{
   }
   return;
  }
+ if(interaction.isButton()&&await handleConsentButton(interaction))return;
+ if(!await requireCurrentConsent(interaction))return;
  if(interaction.isButton()&&Boolean((interaction.component as {disabled?:boolean}).disabled)){
   if(!interaction.replied&&!interaction.deferred)await interaction.reply({content:"This control is disabled and cannot be used.",flags:MessageFlags.Ephemeral});
   return;
@@ -190,7 +193,7 @@ async function shutdown(signal:NodeJS.Signals):Promise<void>{
  await closeDatabase().catch(error=>logger.error("Database shutdown failed",{reason:error instanceof Error?error.message:"Unknown error"}));
 }
 async function start():Promise<void>{
- await initDatabase();await startAtlasBridge();await client.login(config.discordToken);
+ await initDatabase();await initUserConsentSchema();await startAtlasBridge();await client.login(config.discordToken);
  const timer=setInterval(()=>void processDailyDrops(),30_000);timer.unref();
  void processDailyDrops();
 }
