@@ -318,7 +318,9 @@ export class ProfileCommand implements FeatureCommand {
           await interaction.reply({ content: `Steam [${profile.personaName}](${profile.profileUrl}) is connected for this server.`, flags: MessageFlags.Ephemeral });
         }
       } catch (error) {
-        await interaction.reply({ content: error instanceof Error ? error.message : "The account could not be verified.", flags: MessageFlags.Ephemeral });
+        const message = error instanceof Error ? error.message : "The account could not be verified.";
+        const issueHash = await createInteractionIssueLog(interaction, "/profile", error, { action: "account-verification" });
+        await interaction.reply({ content: issueHash ? `${message}\n\n${issueHashNotice(issueHash)}` : message, flags: MessageFlags.Ephemeral });
       }
       return true;
     }
@@ -471,7 +473,9 @@ export class ProfileCommand implements FeatureCommand {
       );
       await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
     } catch (error) {
-      await interaction.reply({ content: error instanceof Error ? error.message : "The AniList leaderboard is unavailable.", flags: MessageFlags.Ephemeral });
+      const message = error instanceof Error ? error.message : "The AniList leaderboard is unavailable.";
+      const issueHash = await createInteractionIssueLog(interaction, "/profile", error, { action: "leaderboard" });
+      await interaction.reply({ content: issueHash ? `${message}\n\n${issueHashNotice(issueHash)}` : message, flags: MessageFlags.Ephemeral });
     }
   }
 
@@ -490,7 +494,9 @@ export class ProfileCommand implements FeatureCommand {
       );
       await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     } catch (error) {
-      await interaction.reply({ content: error instanceof Error ? error.message : "Server Taste is unavailable.", flags: MessageFlags.Ephemeral });
+      const message = error instanceof Error ? error.message : "Server Taste is unavailable.";
+      const issueHash = await createInteractionIssueLog(interaction, "/profile", error, { action: "server-taste" });
+      await interaction.reply({ content: issueHash ? `${message}\n\n${issueHashNotice(issueHash)}` : message, flags: MessageFlags.Ephemeral });
     }
   }
 }

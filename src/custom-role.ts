@@ -252,6 +252,8 @@ async function resolveSelectedRole(
   return interaction.guild.roles.fetch(selected.id).catch(() => null);
 }
 
+type CustomRoleResult = { ok: boolean; message: string; error?: unknown };
+
 export class CustomRoleCommand implements FeatureCommand {
   readonly data = new SlashCommandBuilder()
     .setName("custom-role")
@@ -683,9 +685,13 @@ export class CustomRoleCommand implements FeatureCommand {
     return true;
   }
 
-  private async reportResult(interaction: GuildInteraction, result: { ok: boolean; message: string }): Promise<void> {
-    await interaction.reply({ content: result.message, flags: MessageFlags.Ephemeral }).catch(async () => {
-      if (interaction.isRepliable() && interaction.deferred) await interaction.editReply({ content: result.message });
+  private async reportResult(interaction: GuildInteraction, result: CustomRoleResult): Promise<void> {
+    const issueHash = result.error
+      ? await createInteractionIssueLog(interaction, "/custom-role", result.error)
+      : null;
+    const response = issueHash ? `${result.message}\n\n${issueHashNotice(issueHash)}` : result.message;
+    await interaction.reply({ content: response, flags: MessageFlags.Ephemeral }).catch(async () => {
+      if (interaction.isRepliable() && interaction.deferred) await interaction.editReply({ content: response });
     });
   }
 
@@ -962,7 +968,7 @@ export class CustomRoleCommand implements FeatureCommand {
     interaction: ButtonInteraction,
     targetUserId: string,
     reason: string,
-  ): Promise<{ ok: boolean; message: string }> {
+  ): Promise<CustomRoleResult> {
     const guild = interaction.guild!;
     const record = await getCustomRoleRecord(guild.id, targetUserId);
     if (!record) return { ok: false, message: "That member's Custom Role record was already removed." };
@@ -978,7 +984,7 @@ export class CustomRoleCommand implements FeatureCommand {
       try {
         await role.delete("Custom Roles: removed by " + interaction.user.id + (reason ? " · " + reason : ""));
       } catch (error) {
-        return { ok: false, message: error instanceof Error ? "Discord refused to delete the role: " + error.message : "Discord refused to delete that role. Nothing was changed." };
+        return { ok: false, message: error instanceof Error ? "Discord refused to delete the role: " + error.message : "Discord refused to delete that role. Nothing was changed.", error };
       }
     }
     const deleted = await deleteCustomRoleRecord(guild.id, targetUserId);
@@ -1068,7 +1074,7 @@ export class CustomRoleCommand implements FeatureCommand {
     return validateCustomRoleName(raw, settings, reserved, protectedNames);
   }
 
-  private async createRole(interaction: GuildInteraction, rawName: string): Promise<{ ok: boolean; message: string }> {
+  private async createRole(interaction: GuildInteraction, rawName: string): Promise<CustomRoleResult> {
     const context = await this.memberContext(interaction);
     if ("error" in context) return { ok: false, message: context.error };
     const { member, settings } = context;
@@ -1137,11 +1143,11 @@ export class CustomRoleCommand implements FeatureCommand {
       if (role && !await getCustomRoleRecord(member.guild.id, member.id).catch(() => null)) {
         await role.delete("Custom Roles: roll back incomplete creation").catch(() => undefined);
       }
-      return { ok: false, message: error instanceof Error ? `I couldn't create your role: ${error.message}` : "I couldn't create your role. Check the bot's Manage Roles permission and hierarchy." };
+      return { ok: false, message: error instanceof Error ? `I couldn't create your role: ${error.message}` : "I couldn't create your role. Check the bot's Manage Roles permission and hierarchy.", error };
     }
   }
 
-  private async renameRole(interaction: GuildInteraction, rawName: string): Promise<{ ok: boolean; message: string }> {
+  private async renameRole(interaction: GuildInteraction, rawName: string): Promise<CustomRoleResult> {
     const context = await this.memberContext(interaction);
     if ("error" in context) return { ok: false, message: context.error };
     const { member, settings } = context;
@@ -1159,7 +1165,7 @@ export class CustomRoleCommand implements FeatureCommand {
       await this.logEvent(member.guild, settings, `<@!${member.id}> renamed their custom role.`);
       return { ok: true, message: `Your role is now called **${checked.name}**.` };
     } catch (error) {
-      return { ok: false, message: error instanceof Error ? `I couldn't rename your role: ${error.message}` : "I couldn't rename your role." };
+      return { ok: false, message: error instanceof Error ? `I couldn't rename your role: ${error.message}` : "I couldn't rename your role.", error };
     }
   }
 
@@ -1213,7 +1219,7 @@ export class CustomRoleCommand implements FeatureCommand {
     }
   }
 
-  private async setRoleColor(interaction: GuildInteraction, rawColor: string): Promise<{ ok: boolean; message: string }> {
+  private async setRoleColor(interaction: GuildInteraction, rawColor: string): Promise<CustomRoleResult> {
     const context = await this.memberContext(interaction);
     if ("error" in context) return { ok: false, message: context.error };
     const { member, settings } = context;
@@ -1231,7 +1237,7 @@ export class CustomRoleCommand implements FeatureCommand {
       await this.logEvent(member.guild, settings, `<@!${member.id}> changed their custom role color.`);
       return { ok: true, message: `Your role color is now **${colorLabel(color)}**.` };
     } catch (error) {
-      return { ok: false, message: error instanceof Error ? `I couldn't change your role color: ${error.message}` : "I couldn't change your role color." };
+      return { ok: false, message: error instanceof Error ? `I couldn't change your role color: ${error.message}` : "I couldn't change your role color.", error };
     }
   }
 
@@ -1240,7 +1246,7 @@ export class CustomRoleCommand implements FeatureCommand {
     mode: "gradient" | "holographic",
     rawPrimary?: string,
     rawSecondary?: string,
-  ): Promise<{ ok: boolean; message: string }> {
+  ): Promise<CustomRoleResult> {
     const context = await this.memberContext(interaction);
     if ("error" in context) return { ok: false, message: context.error };
     const { member, settings } = context;
@@ -1273,7 +1279,7 @@ export class CustomRoleCommand implements FeatureCommand {
       await this.logEvent(member.guild, settings, `<@!${member.id}> changed their custom role style to ${mode}.`);
       return { ok: true, message: mode === "holographic" ? "Your role now has the holographic style." : "Your role now has a two-color gradient." };
     } catch (error) {
-      return { ok: false, message: error instanceof Error ? `I couldn't change your role style: ${error.message}` : "I couldn't change your role style." };
+      return { ok: false, message: error instanceof Error ? `I couldn't change your role style: ${error.message}` : "I couldn't change your role style.", error };
     }
   }
 
@@ -1292,7 +1298,7 @@ export class CustomRoleCommand implements FeatureCommand {
     interaction: GuildInteraction,
     attachment: Attachment,
     crop?: CustomRoleIconCrop,
-  ): Promise<{ ok: boolean; message: string }> {
+  ): Promise<CustomRoleResult> {
     const context = await this.memberContext(interaction);
     if ("error" in context) return { ok: false, message: context.error };
     const { member, settings } = context;
@@ -1347,14 +1353,14 @@ export class CustomRoleCommand implements FeatureCommand {
       } else {
         await role.edit({ icon: null, unicodeEmoji: null, reason: "Custom Roles: roll back failed icon save" }).catch(() => undefined);
       }
-      return { ok: false, message: error instanceof Error ? "I couldn't apply that image icon: " + error.message : "I couldn't apply that image icon." };
+      return { ok: false, message: error instanceof Error ? "I couldn't apply that image icon: " + error.message : "I couldn't apply that image icon.", error };
     }
   }
 
   private async recropRoleImageIcon(
     interaction: GuildInteraction,
     crop?: CustomRoleIconCrop,
-  ): Promise<{ ok: boolean; message: string }> {
+  ): Promise<CustomRoleResult> {
     const context = await this.memberContext(interaction);
     if ("error" in context) return { ok: false, message: context.error };
     const { member, settings } = context;
@@ -1388,11 +1394,11 @@ export class CustomRoleCommand implements FeatureCommand {
       await this.logEvent(member.guild, settings, "<@!" + member.id + "> recropped their custom role image icon.");
       return { ok: true, message: "Your custom role image icon has been recropped." };
     } catch (error) {
-      return { ok: false, message: error instanceof Error ? "I couldn't recrop that image: " + error.message : "I couldn't recrop that image." };
+      return { ok: false, message: error instanceof Error ? "I couldn't recrop that image: " + error.message : "I couldn't recrop that image.", error };
     }
   }
 
-  private async setRoleIconEmoji(interaction: GuildInteraction, rawEmoji: string): Promise<{ ok: boolean; message: string }> {
+  private async setRoleIconEmoji(interaction: GuildInteraction, rawEmoji: string): Promise<CustomRoleResult> {
     const context = await this.memberContext(interaction);
     if ("error" in context) return { ok: false, message: context.error };
     const { member, settings } = context;
@@ -1415,14 +1421,14 @@ export class CustomRoleCommand implements FeatureCommand {
       await this.logEvent(member.guild, settings, `<@!${member.id}> changed their custom role icon.`);
       return { ok: true, message: `Your role icon is now ${emoji}.` };
     } catch (error) {
-      return { ok: false, message: error instanceof Error ? `I couldn't set that role icon: ${error.message}` : "I couldn't set that role icon." };
+      return { ok: false, message: error instanceof Error ? `I couldn't set that role icon: ${error.message}` : "I couldn't set that role icon.", error };
     }
   }
 
   private async moveRole(
     interaction: GuildInteraction,
     placement: "above" | "below",
-  ): Promise<{ ok: boolean; message: string }> {
+  ): Promise<CustomRoleResult> {
     const context = await this.memberContext(interaction);
     if ("error" in context) return { ok: false, message: context.error };
     const { member, settings } = context;
@@ -1444,11 +1450,11 @@ export class CustomRoleCommand implements FeatureCommand {
       await this.logEvent(member.guild, settings, `<@!${member.id}> moved their custom role ${placement} the anchor.`);
       return { ok: true, message: `Your role is now positioned directly ${placement} the anchor role.` };
     } catch (error) {
-      return { ok: false, message: error instanceof Error ? `I couldn't move your role: ${error.message}` : "I couldn't move your role." };
+      return { ok: false, message: error instanceof Error ? `I couldn't move your role: ${error.message}` : "I couldn't move your role.", error };
     }
   }
 
-  private async wearRole(interaction: GuildInteraction): Promise<{ ok: boolean; message: string }> {
+  private async wearRole(interaction: GuildInteraction): Promise<CustomRoleResult> {
     const context = await this.memberContext(interaction);
     if ("error" in context) return { ok: false, message: context.error };
     const { member, settings } = context;
@@ -1462,11 +1468,11 @@ export class CustomRoleCommand implements FeatureCommand {
       await this.logEvent(member.guild, settings, `<@!${member.id}> put their custom role on.`);
       return { ok: true, message: `Your role **${role.name}** is back on you.` };
     } catch (error) {
-      return { ok: false, message: error instanceof Error ? `I couldn't put your role on: ${error.message}` : "I couldn't put your role on." };
+      return { ok: false, message: error instanceof Error ? `I couldn't put your role on: ${error.message}` : "I couldn't put your role on.", error };
     }
   }
 
-  private async unwearRole(interaction: GuildInteraction): Promise<{ ok: boolean; message: string }> {
+  private async unwearRole(interaction: GuildInteraction): Promise<CustomRoleResult> {
     const context = await this.memberContext(interaction);
     if ("error" in context) return { ok: false, message: context.error };
     const { member, settings } = context;
@@ -1478,7 +1484,7 @@ export class CustomRoleCommand implements FeatureCommand {
       await this.logEvent(member.guild, settings, `<@!${member.id}> took their custom role off.`);
       return { ok: true, message: `Took **${role.name}** off you. It's still saved; use Put on to wear it again.` };
     } catch (error) {
-      return { ok: false, message: error instanceof Error ? `I couldn't take your role off: ${error.message}` : "I couldn't take your role off." };
+      return { ok: false, message: error instanceof Error ? `I couldn't take your role off: ${error.message}` : "I couldn't take your role off.", error };
     }
   }
 
