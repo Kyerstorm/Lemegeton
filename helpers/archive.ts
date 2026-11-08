@@ -392,6 +392,7 @@ export async function updateArchiveEntry(
     sourceUrl?: string;
     tags?: string[];
     spoiler?: boolean;
+    chapterNumber?: string;
   },
 ): Promise<void> {
   const entry = await queryOne<{ created_by: string; created_guild_id: string; visibility: ArchiveVisibility; status: string; archive_type: ArchiveCategory }>(
@@ -404,13 +405,21 @@ export async function updateArchiveEntry(
   const title = changes.title === undefined ? undefined : cleanText(changes.title, 200);
   const content = changes.content === undefined ? undefined : changes.content.trim();
   if (title !== undefined && !title) throw new Error("An entry title cannot be empty.");
-  if (content !== undefined && !content) throw new Error("An entry description cannot be empty.");
+  if (content !== undefined && !content && entry.archive_type !== "panels") throw new Error("An entry description cannot be empty.");
   if (content !== undefined && content.length > 3_000) throw new Error("Archive descriptions are limited to 3,000 characters.");
   if (entry.archive_type === "quotes" && content !== undefined && content.length > 280) {
     throw new Error("Quotes are limited to 280 characters. Do not submit lyrics or long copyrighted passages.");
   }
-  const sourceUrl = changes.sourceUrl === undefined ? undefined : isValidHttpsUrl(changes.sourceUrl);
+  const panelReference = entry.archive_type === "panels" && changes.sourceUrl !== undefined
+    ? parseAniListMangaReference(changes.sourceUrl)
+    : null;
+  const sourceUrl = changes.sourceUrl === undefined ? undefined
+    : entry.archive_type === "panels" ? panelReference?.url ?? null
+    : isValidHttpsUrl(changes.sourceUrl);
+  const chapterNumber = changes.chapterNumber === undefined ? undefined : changes.chapterNumber.trim();
+  if(entry.archive_type==="panels"&&chapterNumber!==undefined&&!/^(?:\d+(?:\.\d+)?|N\/A)$/i.test(chapterNumber))throw new Error("Manga panel entries need a chapter number or N/A.");
   const tags = changes.tags === undefined ? undefined : normalizeTags(changes.tags.join(","));
+  if(entry.archive_type==="panels"&&tags?.some(tag=>["nsfw","mature","adult"].includes(tag.toLowerCase())))throw new Error("Age-restricted tags are not accepted in the Community Archive.");
   await query(
     `UPDATE community_archive_entries SET
        title = COALESCE($1, title),
@@ -420,10 +429,13 @@ export async function updateArchiveEntry(
        source_url = COALESCE($5, source_url),
        tags = COALESCE($6, tags),
        spoiler = COALESCE($7, spoiler),
+       chapter_number = COALESCE($8, chapter_number),
+       linked_media_provider = COALESCE($9, linked_media_provider),
+       linked_media_id = COALESCE($10, linked_media_id),
        status = CASE WHEN status = 'approved' THEN 'pending' ELSE status END,
        moderation_reason = NULL,
        updated_at = NOW()
-     WHERE id = $8 AND created_guild_id = $9 AND created_by = $10 AND visibility = 'server'`,
+     WHERE id = $11 AND created_guild_id = $12 AND created_by = $13 AND visibility = 'server'`,
     [
       title ?? null,
       content ?? null,
@@ -432,6 +444,9 @@ export async function updateArchiveEntry(
       sourceUrl ?? null,
       tags === undefined ? null : JSON.stringify(tags),
       changes.spoiler ?? null,
+      chapterNumber ?? null,
+      panelReference?.id ? "AniList" : null,
+      panelReference?.id ?? null,
       entryId,
       guildId,
       userId,
