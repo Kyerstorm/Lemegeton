@@ -34,6 +34,38 @@ export interface TmdbVideo {
   url: string;
 }
 
+export interface TmdbPerson {
+  id: number;
+  name: string;
+  sourceUrl: string;
+  image: string | null;
+}
+
+export interface TmdbPersonCredit {
+  id: number;
+  category: TmdbCategory;
+  title: string;
+  releaseDate: string | null;
+  role: string | null;
+  sourceUrl: string;
+  popularity: number;
+}
+
+export interface TmdbCollectionItem {
+  id: number;
+  title: string;
+  releaseDate: string | null;
+  sourceUrl: string;
+}
+
+export interface TmdbCollection {
+  id: number;
+  name: string;
+  sourceUrl: string;
+  image: string | null;
+  items: TmdbCollectionItem[];
+}
+
 type JsonObject = Record<string, unknown>;
 
 function object(value: unknown): JsonObject | null {
@@ -100,6 +132,92 @@ export function normalizeTmdbWatchAvailability(value: unknown, region: string): 
   };
 }
 
+export function normalizeTmdbPeople(value: unknown): TmdbPerson[] {
+  const results = object(value)?.results;
+  if (!Array.isArray(results)) return [];
+  return results.flatMap((entry): TmdbPerson[] => {
+    const item = object(entry);
+    if (!item || typeof item.id !== "number" || !Number.isSafeInteger(item.id) || item.id < 1
+      || typeof item.name !== "string" || !item.name.trim()) return [];
+    const profile = typeof item.profile_path === "string" && item.profile_path.startsWith("/")
+      ? `https://image.tmdb.org/t/p/w500${item.profile_path}`
+      : null;
+    return [{
+      id: item.id,
+      name: item.name.trim().slice(0, 200),
+      sourceUrl: `https://www.themoviedb.org/person/${item.id}`,
+      image: profile,
+    }];
+  }).slice(0, 10);
+}
+
+export function normalizeTmdbPersonCredits(value: unknown): TmdbPersonCredit[] {
+  const payload = object(value);
+  if (!payload) return [];
+  const credits = [
+    ...(Array.isArray(payload.cast) ? payload.cast : []),
+    ...(Array.isArray(payload.crew) ? payload.crew : []),
+  ];
+  const unique = new Map<string, TmdbPersonCredit>();
+  for (const entry of credits) {
+    const item = object(entry);
+    if (!item || !Number.isSafeInteger(item.id) || typeof item.id !== "number" || item.id < 1) continue;
+    if (item.media_type !== "movie" && item.media_type !== "tv") continue;
+    const category = item.media_type;
+    const rawTitle = category === "movie" ? item.title : item.name;
+    if (typeof rawTitle !== "string" || !rawTitle.trim()) continue;
+    const roleValue = item.character ?? item.job ?? item.department;
+    const role = typeof roleValue === "string" && roleValue.trim() ? roleValue.trim().slice(0, 120) : null;
+    const dateValue = category === "movie" ? item.release_date : item.first_air_date;
+    const popularity = typeof item.popularity === "number" && Number.isFinite(item.popularity) ? item.popularity : 0;
+    const credit: TmdbPersonCredit = {
+      id: item.id,
+      category,
+      title: rawTitle.trim().slice(0, 200),
+      releaseDate: typeof dateValue === "string" && dateValue ? dateValue : null,
+      role,
+      sourceUrl: `https://www.themoviedb.org/${category}/${item.id}`,
+      popularity,
+    };
+    const key = `${category}:${item.id}`;
+    const existing = unique.get(key);
+    if (!existing || (!existing.role && credit.role)) unique.set(key, credit);
+  }
+  return [...unique.values()]
+    .sort((left, right) => right.popularity - left.popularity || left.title.localeCompare(right.title))
+    .slice(0, 12);
+}
+
+export function normalizeTmdbCollection(value: unknown): TmdbCollection | null {
+  const item = object(value);
+  if (!item || typeof item.id !== "number" || !Number.isSafeInteger(item.id) || item.id < 1
+    || typeof item.name !== "string" || !item.name.trim()) return null;
+  const parts = Array.isArray(item.parts) ? item.parts : [];
+  const items = parts.flatMap((entry): TmdbCollectionItem[] => {
+    const part = object(entry);
+    if (!part || typeof part.id !== "number" || !Number.isSafeInteger(part.id) || part.id < 1
+      || typeof part.title !== "string" || !part.title.trim()) return [];
+    return [{
+      id: part.id,
+      title: part.title.trim().slice(0, 200),
+      releaseDate: typeof part.release_date === "string" && part.release_date ? part.release_date : null,
+      sourceUrl: `https://www.themoviedb.org/movie/${part.id}`,
+    }];
+  });
+  items.sort((left, right) =>
+    (left.releaseDate ?? "9999-99-99").localeCompare(right.releaseDate ?? "9999-99-99")
+    || left.title.localeCompare(right.title),
+  );
+  const poster = typeof item.poster_path === "string" && item.poster_path.startsWith("/") ? item.poster_path : null;
+  return {
+    id: item.id,
+    name: item.name.trim().slice(0, 200),
+    sourceUrl: `https://www.themoviedb.org/collection/${item.id}`,
+    image: poster ? `https://image.tmdb.org/t/p/w500${poster}` : null,
+    items: items.slice(0, 20),
+  };
+}
+
 export function normalizeTmdbVideos(value: unknown): TmdbVideo[] {
   const record = object(value);
   const results = Array.isArray(record?.results) ? record.results : [];
@@ -140,6 +258,30 @@ export class TmdbClient {
 
   async upcomingMovies(region = "US"): Promise<TmdbMedia[]> {
     return this.searchPath("/movie/upcoming", "movie", { region });
+  }
+
+  async searchPeople(query: string): Promise<TmdbPerson[]> {
+    if (query.trim().length < 2) return [];
+    return normalizeTmdbPeople(await this.request("/search/person", {
+      query: query.trim(),
+      include_adult: "false",
+      page: "1",
+    }));
+  }
+
+  async personCredits(id: number): Promise<TmdbPersonCredit[]> {
+    this.validateMediaId(id);
+    return normalizeTmdbPersonCredits(await this.request(`/person/${id}/combined_credits`));
+  }
+
+  async collectionForMovie(id: number): Promise<TmdbCollection | null> {
+    this.validateMediaId(id);
+    const detail = await this.request(`/movie/${id}`);
+    const collectionRef = object(detail.belongs_to_collection);
+    const collectionId = collectionRef?.id;
+    if (typeof collectionId !== "number" || !Number.isSafeInteger(collectionId) || collectionId < 1) return null;
+    const collection = await this.request(`/collection/${collectionId}`);
+    return normalizeTmdbCollection(collection);
   }
 
   async watchAvailability(id: number, category: TmdbCategory, region: string): Promise<TmdbWatchAvailability | null> {
