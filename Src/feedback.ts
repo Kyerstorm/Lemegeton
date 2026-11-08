@@ -1,4 +1,4 @@
-import { ActionRowBuilder, EmbedBuilder, MessageFlags, ModalBuilder, SlashCommandBuilder, TextInputBuilder, TextInputStyle, type ChatInputCommandInteraction, type ModalSubmitInteraction } from "discord.js";
+import { ActionRowBuilder, EmbedBuilder, MessageFlags, ModalBuilder, SlashCommandBuilder, TextInputBuilder, TextInputStyle, type ChatInputCommandInteraction, type ModalSubmitInteraction, type TextChannel } from "discord.js";
 import type { FeatureCommand } from "../Helpers/command.js";
 import {emoji} from "../Helpers/emoji.js";
 function feedbackModal(): ModalBuilder {
@@ -32,7 +32,7 @@ export class FeedbackCommand implements FeatureCommand {
       { name: "Submitted by", value: interaction.user.username + " (" + interaction.user.id + ")", inline: true },
       ...(issueHash ? [{ name: "Issue hash", value: "```" + issueHash + "```", inline: false }] : [])
     ).setTimestamp();
-    await destination.send({ embeds: [embed], allowedMentions: { parse: [] } });
+    await (destination as TextChannel).send({ embeds: [embed], allowedMentions: { parse: [] } });
     await interaction.editReply({ content: "Feedback submitted. Thank you for helping improve Lemegeton." });
     return true;
   }
