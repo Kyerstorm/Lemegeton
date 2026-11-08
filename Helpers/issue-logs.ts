@@ -39,6 +39,10 @@ function ensureIssueLogSchema(): Promise<void> {
   return schemaPromise;
 }
 
+export async function initializeIssueLogs(): Promise<void> {
+  await ensureIssueLogSchema();
+}
+
 function redact(value: unknown, key = ""): unknown {
   if (/token|password|secret|authorization|api[_-]?key/i.test(key)) return "[REDACTED]";
   if (Array.isArray(value)) return value.slice(0, 50).map((item) => redact(item));
