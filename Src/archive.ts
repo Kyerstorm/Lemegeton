@@ -18,6 +18,7 @@ import {
   type StringSelectMenuInteraction,
 } from "discord.js";
 import type { FeatureCommand } from "../Helpers/command.js";
+import {createIssueLog,issueHashNotice} from "../Helpers/issue-logs.js";
 import { homeEmbed } from "../Helpers/discord.js";
 import {
   ARCHIVE_CATEGORIES,
@@ -441,7 +442,8 @@ export class ArchiveCommand implements FeatureCommand {
         default: throw new Error("That Archive action is not available.");
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "The Archive could not complete that action.";
+      const issue = await createIssueLog(interaction, error, "archive.execute");
+      const message = (error instanceof Error ? error.message : "The Archive could not complete that action.") + issueHashNotice(issue);
       if (interaction.deferred || interaction.replied) await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral });
       else await interaction.reply({ content: message, flags: MessageFlags.Ephemeral });
     }
@@ -506,7 +508,8 @@ export class ArchiveCommand implements FeatureCommand {
           await finishArchiveUpload(interaction.guildId, interaction.user.id, value);
           await interaction.reply({ content: `Submission #${value} is now awaiting moderator review.`, flags: MessageFlags.Ephemeral });
         } catch (error) {
-          await interaction.reply({ content: error instanceof Error ? error.message : "Could not finish the upload.", flags: MessageFlags.Ephemeral });
+          const issue = await createIssueLog(interaction, error, "archive.finish-upload");
+          await interaction.reply({ content: (error instanceof Error ? error.message : "Could not finish the upload.") + issueHashNotice(issue), flags: MessageFlags.Ephemeral });
         }
         return true;
       case "open-entry":
@@ -630,7 +633,8 @@ export class ArchiveCommand implements FeatureCommand {
         return true;
       }
     } catch (error) {
-      await interaction.reply({ content: error instanceof Error ? error.message : "The Archive could not complete that action.", flags: MessageFlags.Ephemeral });
+      const issue = await createIssueLog(interaction, error, "archive.interaction");
+      await interaction.reply({ content: (error instanceof Error ? error.message : "The Archive could not complete that action.") + issueHashNotice(issue), flags: MessageFlags.Ephemeral });
       return true;
     }
     return false;
