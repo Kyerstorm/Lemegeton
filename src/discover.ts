@@ -181,13 +181,20 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
 }
 
 function detailsButtons(record: SearchRecord): ActionRowBuilder<ButtonBuilder>[] {
-  if (record.provider !== "AniList") return [];
-  return [new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`discover:recommend:${record.item.type}:${record.item.id}`)
-      .setLabel("Related recommendations")
-      .setStyle(ButtonStyle.Secondary),
-  )];
+  if (record.provider === "AniList") {
+    return [new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`discover:recommend:${record.item.type}:${record.item.id}`)
+        .setLabel("Related recommendations")
+        .setStyle(ButtonStyle.Secondary),
+    )];
+  }
+  if(record.provider==="IGDB"&&record.category==="game"){
+    return [new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`discover:similar:game:${record.item.id}`).setLabel("Similar games").setStyle(ButtonStyle.Secondary),
+    )];
+  }
+  return [];
 }
 
 function creatorSearchModal():ModalBuilder{
@@ -379,6 +386,14 @@ export class DiscoverCommand implements FeatureCommand {
       await interaction.reply({ content: loadingMessage("Loading media results…"), flags: MessageFlags.Ephemeral });
       const results = await this.anilist.recommendations(mediaId, categoryValue as AniListMediaType);
       await this.presentResults(interaction, results.map((item) => anilistRecord(item, categoryValue === "ANIME" ? "anime" : "manga")), "Related AniList recommendations");
+      return true;
+    }
+    if(action==="similar"&&categoryValue==="game"&&maybeId){
+      const gameId=Number(maybeId);
+      if(!Number.isSafeInteger(gameId)||gameId<1){await interaction.reply({content:"That game reference is invalid.",flags:MessageFlags.Ephemeral});return true;}
+      await interaction.reply({content:loadingMessage("Finding similar games…"),flags:MessageFlags.Ephemeral});
+      const games=await this.igdb.similarGames(gameId);
+      await this.presentResults(interaction,games.map(item=>({provider:"IGDB" as const,category:"game" as const,item})),"Similar games · IGDB relationships");
       return true;
     }
     if (action === "home") {
