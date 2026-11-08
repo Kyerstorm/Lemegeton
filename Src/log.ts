@@ -73,8 +73,8 @@ export class LogCommand implements FeatureCommand {
         { name: "Command / control", value: clip(context.commandName ?? context.customId ?? "unknown", 200), inline: true },
         { name: "Channel", value: context.channelId ? `<#${String(context.channelId)}>\n\`${String(context.channelId)}\`` : "Unavailable", inline: true },
         { name: "Error", value: clip(`${String(error.name ?? "Error")}: ${String(error.message ?? "No message")}`, 1_000), inline: false },
-        { name: "Interaction context", value: "```json\\n" + clip(context, 900) + "\\n```", inline: false },
-        { name: "Stack trace", value: "```text\\n" + clip(error.stack ?? "No stack trace was recorded.", 900) + "\\n```", inline: false },
+        { name: "Interaction context", value: "```json" + String.fromCharCode(10) + clip(context, 900) + String.fromCharCode(10) + "```", inline: false },
+        { name: "Stack trace", value: "```text" + String.fromCharCode(10) + clip(error.stack ?? "No stack trace was recorded.", 900) + String.fromCharCode(10) + "```", inline: false },
       )
       .setFooter({ text: `Lemegeton diagnostics · UUID digest ${record.uuid_hash.slice(0, 16)}…` })
       .setTimestamp(new Date(occurredAt));
