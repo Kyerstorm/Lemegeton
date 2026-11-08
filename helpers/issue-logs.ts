@@ -21,13 +21,20 @@ function redactString(value: string): string {
     .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]{12,}/gi, `$1${REDACTED}`)
     .replace(/((?:token|password|secret|api[_-]?key|authorization)\s*[:=]\s*)[^\s,;]+/gi, `$1${REDACTED}`);
 }
+function isSensitiveKey(key: string): boolean {
+  return /(?:token|password|secret|api[_-]?key|authorization|cookie)/i.test(key);
+}
 function redactValue(value: unknown, key = ""): unknown {
-  if (/(?:token|password|secret|api[_-]?key|authorization|cookie)/i.test(key)) return REDACTED;
+  if (isSensitiveKey(key)) return REDACTED;
   if (typeof value === "string") return redactString(value).slice(0, 12_000);
   if (Array.isArray(value)) return value.slice(0, 100).map((item) => redactValue(item));
   if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-      .slice(0, 100).map(([childKey, childValue]) => [childKey, redactValue(childValue, childKey)]));
+    const record = value as Record<string, unknown>;
+    const namedField = String(record.name ?? record.key ?? "");
+    return Object.fromEntries(Object.entries(record).slice(0, 100).map(([childKey, childValue]) => [
+      childKey,
+      childKey === "value" && isSensitiveKey(namedField) ? REDACTED : redactValue(childValue, childKey),
+    ]));
   }
   if (typeof value === "bigint") return value.toString();
   return value;

@@ -139,11 +139,19 @@ export class PlannedCommand implements FeatureCommand {
 
     await interaction.reply({ content: loadingMessage("Saving the development plan…"), flags: MessageFlags.Ephemeral });
     if (mode === "add") {
-      await query(
+      const created = await query<{ id: string }>(
         `INSERT INTO planned_features (name, description, added_by, status, category)
-         VALUES ($1, $2, $3, $4, $5)`,
+         VALUES ($1, $2, $3, $4, $5) RETURNING id::text`,
         [name, description, interaction.user.id, statusInput, category],
       );
+      const featureId = created[0]?.id;
+      if (featureId) {
+        await query(
+          `INSERT INTO feature_status_history (feature_id, old_status, new_status, changed_by)
+           VALUES ($1, NULL, $2, $3)`,
+          [featureId, statusInput, interaction.user.id],
+        );
+      }
       await interaction.editReply("The planned feature was added.");
       return true;
     }
