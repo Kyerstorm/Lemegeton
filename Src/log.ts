@@ -60,7 +60,7 @@ export class LogCommand implements FeatureCommand {
     const details = record.details ?? {};
     const error = (details.error ?? {}) as Record<string, unknown>;
     const context = (details.interaction ?? {}) as Record<string, unknown>;
-    const occurredAt = new Date(record.created_at).toISOString();
+    const occurredAt = (record.created_at instanceof Date ? record.created_at : new Date(record.created_at)).toISOString();
     const embed = new EmbedBuilder()
       .setColor(0x5865f2)
       .setTitle("Issue diagnostics")
