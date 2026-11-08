@@ -12,7 +12,7 @@ The Draft branch currently has **zero Python files**. That is a file-extension r
 | Snapshot | Python files | TypeScript/TSX files | TypeScript non-test files | TypeScript test files |
 |---|---:|---:|---:|---:|
 | `multi_guild` base | 167 | 0 | 0 | 0 |
-| `lemegeton-v3` Draft head | 0 | 80 | 68 | 12 |
+| `lemegeton-v3` Draft head after the TMDB parity work | 0 | 81 | 68 | 13 |
 
 The base's 167 Python files total approximately 3.68 MB. The Draft head has twelve TypeScript test files, compared with fifty Python files under the base's `tests/` directory. This is a substantial regression-coverage gap until each relevant legacy test has either been ported, replaced by equivalent coverage, or explicitly retired with a reason.
 
@@ -38,7 +38,7 @@ The Draft branch already has a Node.js/TypeScript bot startup path, a TypeScript
 | Media browse/recommend/random/trending | `/discover`, AniList/Steam/IGDB/Books/TMDB helpers | Category search, filters, trending, random, recommendation buttons and supported provider views exist. | Test all supported categories and legacy filter behavior; restore only stable provider-backed fields and ensure recommendations are labelled by provenance. |
 | `cogs/media/airing.py`, `trailer.py`, `tv_guide.py` | `/discover` and `/community` | AniList airing/trailer fields and TMDB film/TV search exist. | Full season/episode detail, pagination, time-zone display, fallback behavior and provider response edge cases are not yet evidenced as parity-complete. |
 | `cogs/media/compare.py` | `/discover` comparison | A second-title comparison option exists. | Verify parity for supported media types, missing fields, IGDB/Steam comparison, normalization and provenance. |
-| `cogs/media/connected_media.py` | `/discover`, Knowledge Atlas, Archive and Community links | Creator exploration and Atlas relationships exist; some category types are represented in Atlas. | **Major gap:** verify or implement reading order, where-to-watch/regional availability, person credits, collection guides, webnovel updates, community relationship suggestions/reviews and the legacy discussion workflow. Keep provider data and community proposals distinct. |
+| `cogs/media/connected_media.py` | `/discover`, Knowledge Atlas, Archive and Community links | Creator exploration and Atlas relationships exist. TMDB regional watch-provider lookup and supported YouTube/Vimeo video listing are now integrated into `/discover`, with exact-title selection and a region option. | **Remaining gap:** persist/use the guild's configured default media region; port person credits, collection guides, reading order, webnovel updates, community relationship suggestions/reviews and the legacy discussion workflow. Keep provider data and community proposals distinct. |
 | `cogs/media/cross_media_recommendations.py` | `/discover` | AniList recommendations and IGDB similar games exist. | Verify cross-category candidate pools, local-match explanations, books/TMDB support and provider failure isolation. |
 | `cogs/media/franchise.py` | `/discover` and Knowledge Atlas | Atlas supports typed, sourced relationships and bounded graph views. | Verify franchise traversal, sequencing, relationship labels, cross-provider joins, duplicate handling and community links. |
 | `cogs/media/three_by_three.py` | `helpers/media-grid.ts`, `/discover`, tests | Nine-title parsing, safe image-host allowlist, bounded image downloads, placeholder covers and PNG generation exist. | Compare input flow, title resolution, IGDB cover lookup, cache semantics, failure messages and image layout. The helper is a port candidate, not proof of full UX parity. |
@@ -208,7 +208,7 @@ under_maintenance/challenges/challenge_progress.py
 under_maintenance/reminders.py
 ```
 
-### Scripts (9 files)
+### Automation and scripts (10 files: one repository workflow helper plus nine scripts)
 
 ```text
 .github/scripts/repository_health.py
