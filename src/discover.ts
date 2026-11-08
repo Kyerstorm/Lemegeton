@@ -297,6 +297,7 @@ export class DiscoverCommand implements FeatureCommand {
       { name: "Creator Explorer", value: "creators" },
       { name: "Where to watch", value: "availability" },
       { name: "Trailers and videos", value: "videos" },
+      { name: "Movie collection guide", value: "collection" },
     ))
     .addStringOption((option) => option.setName("region").setDescription("Two-letter availability region, for example IE or US").setMinLength(2).setMaxLength(2));
 
@@ -352,11 +353,19 @@ export class DiscoverCommand implements FeatureCommand {
       return;
     }
     if(view==="creators"){
-      await this.creatorAndRespond(interaction,query);
+      await this.creatorAndRespond(interaction,query,category);
       return;
     }
     if (view === "atlas") {
       await this.atlasAndRespond(interaction, query, category, filters);
+      return;
+    }
+    if (view === "collection") {
+      if (category !== "movie") {
+        await interaction.reply({content:"Collection guides require the Films category.",flags:MessageFlags.Ephemeral});
+        return;
+      }
+      await this.tmdbCollectionSelectionAndRespond(interaction, query);
       return;
     }
     if (view === "availability" || view === "videos") {
@@ -430,7 +439,53 @@ export class DiscoverCommand implements FeatureCommand {
   async handleSelect(interaction: StringSelectMenuInteraction | RoleSelectMenuInteraction | ChannelSelectMenuInteraction): Promise<boolean> {
     if (!interaction.isStringSelectMenu()) return false;
     const [scope, action, categoryValue, region] = interaction.customId.split(":");
-    if (scope !== "discover" || (action !== "tmdb-watch" && action !== "tmdb-videos")) return false;
+    if (scope !== "discover") return false;
+    if (action === "tmdb-person") {
+      const selectedId = interaction.values[0] ?? "";
+      const personId = Number(selectedId);
+      if (!/^\\d+$/.test(selectedId) || !Number.isSafeInteger(personId) || personId < 1) {
+        await interaction.reply({content:"That TMDB person reference is invalid.",flags:MessageFlags.Ephemeral});
+        return true;
+      }
+      const personName = interaction.component.options.find((option) => option.value === selectedId)?.label ?? "Person";
+      await interaction.deferUpdate();
+      const credits = await this.tmdb.personCredits(personId);
+      const description = credits.length
+        ? credits.map((credit) => {
+          const role = credit.role ? " · "+cleanText(credit.role,100) : "";
+          const date = credit.releaseDate ? " · "+credit.releaseDate : "";
+          return "["+cleanText(credit.title,180).replace(/[\\[\\]]/g,"")+"]("+credit.sourceUrl+") · "+credit.category.toUpperCase()+date+role;
+        }).join("\\n").slice(0,4000)
+        : "TMDB did not return combined movie or television credits for this person.";
+      const embed = homeEmbed("Credits · "+personName,description).setURL("https://www.themoviedb.org/person/"+personId)
+        .setFooter({text:"TMDB · Cast and crew credits deduplicated by work"});
+      await interaction.editReply({content:"Person Credits · "+personName,embeds:[embed],components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],allowedMentions:{parse:[]}});
+      return true;
+    }
+    if (action === "tmdb-collection") {
+      const selectedId = interaction.values[0] ?? "";
+      const movieId = Number(selectedId);
+      if (!/^\\d+$/.test(selectedId) || !Number.isSafeInteger(movieId) || movieId < 1) {
+        await interaction.reply({content:"That TMDB movie reference is invalid.",flags:MessageFlags.Ephemeral});
+        return true;
+      }
+      const movieTitle = interaction.component.options.find((option) => option.value === selectedId)?.label ?? "Selected film";
+      await interaction.deferUpdate();
+      const collection = await this.tmdb.collectionForMovie(movieId);
+      if (!collection) {
+        await interaction.editReply({content:"TMDB does not list this film as a member of a collection.",embeds:[],components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])]});
+        return true;
+      }
+      const description = collection.items.length
+        ? collection.items.map((item) => "["+cleanText(item.title,180).replace(/[\\[\\]]/g,"")+"]("+item.sourceUrl+") · "+(item.releaseDate??"Date unavailable")).join("\\n").slice(0,4000)
+        : "TMDB returned no member films for this collection.";
+      const embed = homeEmbed("Collection · "+collection.name,description).setURL(collection.sourceUrl)
+        .setFooter({text:"TMDB collection membership · Release dates do not establish story chronology"});
+      if (collection.image) embed.setThumbnail(collection.image);
+      await interaction.editReply({content:"Collection guide · "+movieTitle,embeds:[embed],components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],allowedMentions:{parse:[]}});
+      return true;
+    }
+    if (action !== "tmdb-watch" && action !== "tmdb-videos") return false;
     if ((categoryValue !== "movie" && categoryValue !== "tv") || !region || !/^[A-Z]{2}$/.test(region)) {
       await interaction.reply({content:"That TMDB selection is invalid. Reopen /discover and try again.",flags:MessageFlags.Ephemeral});
       return true;
@@ -485,6 +540,31 @@ export class DiscoverCommand implements FeatureCommand {
     return true;
   }
 
+  private async tmdbCollectionSelectionAndRespond(
+    interaction: ChatInputCommandInteraction,
+    query: string,
+  ): Promise<void> {
+    await interaction.reply({content:loadingMessage("Searching TMDB…"),flags:MessageFlags.Ephemeral});
+    const results = await this.tmdb.search(query,"movie");
+    if (!results.length) {
+      await interaction.editReply({content:"TMDB returned no matching films.",embeds:[],components:[]});
+      return;
+    }
+    const select = new StringSelectMenuBuilder()
+      .setCustomId("discover:tmdb-collection")
+      .setPlaceholder("Choose the exact film")
+      .addOptions(results.slice(0,25).map((item)=>({
+        label:item.title.slice(0,100),
+        description:(item.releaseDate??"Release date unavailable")+" · TMDB #"+item.id,
+        value:String(item.id),
+      })));
+    await interaction.editReply({
+      content:"Choose the film whose TMDB collection you want to inspect.",
+      embeds:[],
+      components:[new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)],
+    });
+  }
+
   private async tmdbSelectionAndRespond(
     interaction: ChatInputCommandInteraction,
     query: string,
@@ -529,8 +609,50 @@ export class DiscoverCommand implements FeatureCommand {
   private async creatorAndRespond(
     interaction:ChatInputCommandInteraction|ModalSubmitInteraction,
     query:string,
+    category:Category="anime",
   ):Promise<void>{
     await interaction.reply({content:loadingMessage("Exploring creators…"),flags:MessageFlags.Ephemeral});
+    if(category==="book"){
+      const books=await this.books.search("inauthor:"+query.trim());
+      const embeds=books.slice(0,10).map((book)=>homeEmbed(
+        book.title.slice(0,256),
+        [
+          book.authors.length?"Authors: "+book.authors.join(", "):"Author metadata unavailable",
+          book.publisher?"Publisher: "+book.publisher:"",
+          book.publishedDate?"Published: "+book.publishedDate:"",
+          book.isbn?"ISBN: "+book.isbn:"",
+        ].filter(Boolean).join("\n"),
+        [{name:"Google Books",value:"[Open edition]("+book.sourceUrl+")",inline:false}],
+      ).setFooter({text:"Google Books · Author-attributed editions"}));
+      await interaction.editReply({
+        content:embeds.length?"Author works · "+query.trim().slice(0,80):"Google Books returned no works attributed to that author.",
+        embeds,
+        components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],
+        allowedMentions:{parse:[]},
+      });
+      return;
+    }
+    if(category==="movie"||category==="tv"){
+      const people=await this.tmdb.searchPeople(query);
+      if(!people.length){
+        await interaction.editReply({content:"TMDB returned no matching credited people.",embeds:[],components:[]});
+        return;
+      }
+      const select=new StringSelectMenuBuilder()
+        .setCustomId("discover:tmdb-person")
+        .setPlaceholder("Choose the exact credited person")
+        .addOptions(people.slice(0,10).map((person)=>({
+          label:person.name.slice(0,100),
+          description:"TMDB person #"+person.id,
+          value:String(person.id),
+        })));
+      await interaction.editReply({
+        content:"Choose the exact person to inspect their combined movie and television credits.",
+        embeds:[],
+        components:[new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)],
+      });
+      return;
+    }
     const creators=await this.anilist.searchCreators(query);
     if(!creators.length){await interaction.editReply({content:"AniList returned no matching creators.",embeds:[],components:[]});return;}
     const embeds=creators.slice(0,10).map(creator=>{
