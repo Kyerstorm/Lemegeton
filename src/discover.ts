@@ -488,7 +488,9 @@ export class DiscoverCommand implements FeatureCommand {
   }
 
   private recordUrl(record: SearchRecord): string {
-    return record.provider === "AniList" ? record.item.siteUrl : record.item.sourceUrl;
+    if(record.provider==="AniList")return record.item.siteUrl;
+    if(record.provider==="Steam")return `https://store.steampowered.com/app/${record.item.appId}`;
+    return record.item.sourceUrl;
   }
 
   private async saveProviderEdges(results: SearchRecord[]): Promise<void> {
