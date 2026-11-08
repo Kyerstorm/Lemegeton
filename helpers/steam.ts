@@ -17,6 +17,34 @@ export function validateSteamId(value: string): string | null {
   return /^\d{17}$/.test(id) ? id : null;
 }
 
+export interface SteamStoreGame {
+  appId:number;title:string;shortDescription:string;headerImage:string|null;isFree:boolean;
+  price:{initial:string;final:string;discountPercent:number}|null;releaseDate:string|null;comingSoon:boolean;
+  genres:string[];categories:string[];developers:string[];publishers:string[];platforms:string[];
+}
+
+export function parseSteamStoreGame(value:unknown):SteamStoreGame|null{
+ const item=record(value);
+ if(!item||typeof item.steam_appid!=="number"||!Number.isSafeInteger(item.steam_appid)||item.steam_appid<1||typeof item.name!=="string"||!item.name.trim())return null;
+ const price=record(item.price_overview);
+ const release=record(item.release_date);
+ const strings=(input:unknown,key:"description"|"name"):string[]=>Array.isArray(input)?input.flatMap(entry=>{const obj=record(entry);return typeof obj?.[key]==="string"&&obj[key].trim()?[obj[key].trim()]:[]}).slice(0,12):[];
+ const platforms=record(item.platforms);
+ return {
+  appId:item.steam_appid,title:item.name.trim().slice(0,200),
+  shortDescription:typeof item.short_description==="string"?item.short_description.replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim().slice(0,500):"",
+  headerImage:typeof item.header_image==="string"&&item.header_image.startsWith("https://")?item.header_image:null,
+  isFree:item.is_free===true,
+  price:price&&typeof price.initial_formatted==="string"&&typeof price.final_formatted==="string"?{initial:price.initial_formatted,final:price.final_formatted,discountPercent:typeof price.discount_percent==="number"?Math.max(0,Math.min(100,price.discount_percent)):0}:null,
+  releaseDate:typeof release?.date==="string"?release.date.slice(0,80):null,
+  comingSoon:release?.coming_soon===true,
+  genres:strings(item.genres,"description"),categories:strings(item.categories,"description"),
+  developers:Array.isArray(item.developers)?item.developers.filter((x):x is string=>typeof x==="string").slice(0,8):[],
+  publishers:Array.isArray(item.publishers)?item.publishers.filter((x):x is string=>typeof x==="string").slice(0,8):[],
+  platforms:platforms?Object.entries(platforms).filter(([,enabled])=>enabled===true).map(([name])=>name):[],
+ };
+}
+
 export class SteamClient {
   constructor(private readonly apiKey?: string) {}
 
@@ -84,6 +112,34 @@ export class SteamClient {
       gameCount,
       recentlyPlayed,
     };
+  }
+
+  async getStoreGameDetails(appId:number):Promise<SteamStoreGame|null>{
+    if(!Number.isSafeInteger(appId)||appId<1)throw new Error("Steam app ID is invalid.");
+    const url=new URL("https://store.steampowered.com/api/appdetails");
+    url.searchParams.set("appids",String(appId));url.searchParams.set("cc","us");url.searchParams.set("l","english");
+    const response=await fetch(url,{signal:AbortSignal.timeout(10_000)});
+    if(!response.ok)throw new Error(`Steam Store returned HTTP ${response.status}.`);
+    const body=record(await response.json());
+    const result=record(body?.[String(appId)]);
+    if(result?.success!==true)return null;
+    return parseSteamStoreGame(result.data);
+  }
+
+  async searchStoreGames(query:string,maxResults=5):Promise<SteamStoreGame[]>{
+    const clean=query.replace(/[\u0000-\u001f]/g," ").replace(/\s+/g," ").trim().slice(0,100);
+    if(clean.length<2)return[];
+    const limit=Math.max(1,Math.min(5,Math.trunc(maxResults)||5));
+    const url=new URL(`https://steamcommunity.com/actions/SearchApps/${encodeURIComponent(clean)}`);
+    const response=await fetch(url,{signal:AbortSignal.timeout(10_000),headers:{Accept:"application/json"}});
+    if(!response.ok)throw new Error(`Steam search returned HTTP ${response.status}.`);
+    const raw:unknown=await response.json();
+    const candidates=Array.isArray(raw)?raw.slice(0,limit).flatMap(value=>{
+      const row=record(value);const id=Number(row?.appid);
+      return Number.isSafeInteger(id)&&id>0?[id]:[];
+    }):[];
+    const results=await Promise.allSettled(candidates.map(id=>this.getStoreGameDetails(id)));
+    return results.flatMap(result=>result.status==="fulfilled"&&result.value?[result.value]:[]);
   }
 
   private async getService(path: string, steamId: string, includeOwned = false): Promise<unknown> {
