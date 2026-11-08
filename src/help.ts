@@ -11,7 +11,7 @@ export class HelpCommand implements FeatureCommand {
         { name: "Community", value: "`/archive` — Browse and contribute to the community archive.\n`/community` — Daily Drops, rankings, sessions and discussions.", inline: false },
         { name: "Games & profiles", value: "`/play` — Source-backed media games.\n`/profile` — Connect AniList and Steam, manage privacy and compare interests.", inline: false },
         { name: "Server tools", value: "`/custom-role` — Member custom roles and server configuration.\n`/settings` — Enable or disable supported features.", inline: false },
-        { name: "Support", value: "`/feedback` — Send an idea or bug report; include an issue reference when one was shown.\n`/privacy` — Read the data-use notice.\n`/planned` — View the development plan.", inline: false },
+        { name: "Support", value: "`/feedback` — Send an idea or bug report; include an issue reference when one was shown.\n`/privacy` — Read the data-use notice.\n`/planned` — Browse the development plan.\n`/log` — Inspect issue diagnostics (bot moderators).\n`/adminmoderators` — Manage bot moderators.", inline: false },
       ).setFooter({ text: "Lemegeton · Use commands in a server" });
     await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   }
