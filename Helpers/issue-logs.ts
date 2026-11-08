@@ -9,6 +9,7 @@ export interface CreatedIssue {
 }
 
 export interface IssueLogRow {
+  [column: string]: unknown;
   issue_hash: string;
   uuid_hash: string;
   guild_id: string | null;
