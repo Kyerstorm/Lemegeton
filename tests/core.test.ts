@@ -18,6 +18,8 @@ import {dashboardCommandRows,dashboardSecretMatches,isDashboardGuildId} from "..
 import {customRoleChannelAllowed,customRoleCooldownMessage,parseCustomRoleColor,parseCustomRoleWordList,validateCustomRoleEmoji,validateCustomRoleName} from "../helpers/custom-roles.js";
 import {renderAtlasSnapshot} from "../helpers/atlas-renderer.js";
 import {filterMediaNotificationCandidates} from "../helpers/media-notifications.js";
+import {parseUtcDateTime} from "../src/timestamp.js";
+import {extractAniListUsername} from "../src/convertlinks.js";
 import type {AniListRecentlyFinishedMedia} from "../helpers/anilist.js";
 
 test("bot configuration requires valid Discord credentials and validates the AniList endpoint",()=>{
@@ -275,4 +277,22 @@ test("Knowledge Atlas snapshots render bounded media nodes and escape provider t
  ]);
  assert.deepEqual([...image.subarray(0,8)],[137,80,78,71,13,10,26,10]);
  assert.ok(image.byteLength > 1024);
+});
+
+test("timestamp input validates real UTC dates and 24-hour times", () => {
+ assert.equal(parseUtcDateTime("2024-02-29", "23:59")?.toISOString(), "2024-02-29T23:59:00.000Z");
+ assert.equal(parseUtcDateTime("2026-02-29", "12:00"), null);
+ assert.equal(parseUtcDateTime("2026-04-31", "12:00"), null);
+ assert.equal(parseUtcDateTime("2026-11-08", "24:00"), null);
+ assert.equal(parseUtcDateTime("2026-11-08", "09:60"), null);
+ assert.equal(parseUtcDateTime("08-11-2026", "09:30"), null);
+});
+
+test("AniList link conversion only accepts HTTPS AniList user profiles", () => {
+ assert.equal(extractAniListUsername("https://anilist.co/user/example/"), "example");
+ assert.equal(extractAniListUsername("https://anilist.co/user/example?tab=anime"), "example");
+ assert.equal(extractAniListUsername("http://anilist.co/user/example"), null);
+ assert.equal(extractAniListUsername("https://anilist.co.evil.example/user/example"), null);
+ assert.equal(extractAniListUsername("https://anilist.co/anime/1"), null);
+ assert.equal(extractAniListUsername("not a URL"), null);
 });

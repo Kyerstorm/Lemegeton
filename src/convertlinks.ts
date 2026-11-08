@@ -13,7 +13,7 @@ function extractLinks(value: string): string[] {
   return [...new Set(found)];
 }
 
-function extractUsername(value: string): string | null {
+export function extractAniListUsername(value: string): string | null {
   try {
     const url = new URL(value);
     if (url.protocol !== "https:" || url.hostname.toLowerCase() !== "anilist.co") return null;
@@ -60,7 +60,7 @@ export class ConvertLinksCommand implements FeatureCommand {
     const results: Array<{ input: string; output: string }> = [];
     for (let index = 0; index < limited.length; index += 1) {
       const link = limited[index] ?? "";
-      const username = extractUsername(link);
+      const username = extractAniListUsername(link);
       if (!username) {
         results.push({ input: link, output: "Invalid AniList profile URL" });
       } else {

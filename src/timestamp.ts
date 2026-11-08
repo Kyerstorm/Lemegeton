@@ -1,7 +1,7 @@
 import { EmbedBuilder, MessageFlags, SlashCommandBuilder, type ChatInputCommandInteraction } from "discord.js";
 import type { FeatureCommand } from "../helpers/command.js";
 
-function parseUtcDateTime(date: string, time: string): Date | null {
+export function parseUtcDateTime(date: string, time: string): Date | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) return null;
   const [year, month, day] = date.split("-").map(Number);
   const [hour, minute] = time.split(":").map(Number);
