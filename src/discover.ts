@@ -8,11 +8,15 @@ import {
   MessageFlags,
   ModalBuilder,
   SlashCommandBuilder,
+  StringSelectMenuBuilder,
   TextInputBuilder,
   TextInputStyle,
   type ButtonInteraction,
   type ChatInputCommandInteraction,
   type ModalSubmitInteraction,
+  type StringSelectMenuInteraction,
+  type RoleSelectMenuInteraction,
+  type ChannelSelectMenuInteraction,
 } from "discord.js";
 import type { FeatureCommand } from "../helpers/command.js";
 import type { BotConfig } from "../helpers/config.js";
@@ -286,9 +290,14 @@ export class DiscoverCommand implements FeatureCommand {
       {name:"Winter",value:"WINTER"},{name:"Spring",value:"SPRING"},{name:"Summer",value:"SUMMER"},{name:"Fall",value:"FALL"},
     ))
     .addIntegerOption((option) => option.setName("season_year").setDescription("Anime season year").setMinValue(1970).setMaxValue(2100))
-    .addStringOption((option) => option.setName("view").setDescription("Open search results or the Knowledge Atlas").addChoices(
-      { name: "Search results", value: "search" }, { name: "Knowledge Atlas", value: "atlas" }, {name:"Creator Explorer",value:"creators"},
-    ));
+    .addStringOption((option) => option.setName("view").setDescription("Choose a discovery view").addChoices(
+      { name: "Search results", value: "search" },
+      { name: "Knowledge Atlas", value: "atlas" },
+      { name: "Creator Explorer", value: "creators" },
+      { name: "Where to watch", value: "availability" },
+      { name: "Trailers and videos", value: "videos" },
+    ))
+    .addStringOption((option) => option.setName("region").setDescription("Two-letter availability region, for example IE or US").setMinLength(2).setMaxLength(2));
 
   private readonly config: BotConfig;
   private readonly anilist: AniListClient;
@@ -349,6 +358,19 @@ export class DiscoverCommand implements FeatureCommand {
       await this.atlasAndRespond(interaction, query, category, filters);
       return;
     }
+    if (view === "availability" || view === "videos") {
+      if (category !== "movie" && category !== "tv") {
+        await interaction.reply({content:"Where-to-watch and video views require the Films or Television category.",flags:MessageFlags.Ephemeral});
+        return;
+      }
+      const region = (interaction.options.getString("region") ?? "IE").trim().toUpperCase();
+      if (!/^[A-Z]{2}$/.test(region)) {
+        await interaction.reply({content:"Region must be a two-letter country code, such as IE or US.",flags:MessageFlags.Ephemeral});
+        return;
+      }
+      await this.tmdbSelectionAndRespond(interaction, query, category, view, region);
+      return;
+    }
     if (compareTo) {
       await this.compareAndRespond(interaction, query, compareTo, category, filters);
       return;
@@ -402,6 +424,94 @@ export class DiscoverCommand implements FeatureCommand {
       return true;
     }
     return false;
+  }
+
+  async handleSelect(interaction: StringSelectMenuInteraction | RoleSelectMenuInteraction | ChannelSelectMenuInteraction): Promise<boolean> {
+    if (!interaction.isStringSelectMenu()) return false;
+    const [scope, action, categoryValue, region] = interaction.customId.split(":");
+    if (scope !== "discover" || (action !== "tmdb-watch" && action !== "tmdb-videos")) return false;
+    if ((categoryValue !== "movie" && categoryValue !== "tv") || !region || !/^[A-Z]{2}$/.test(region)) {
+      await interaction.reply({content:"That TMDB selection is invalid. Reopen /discover and try again.",flags:MessageFlags.Ephemeral});
+      return true;
+    }
+    const selectedId = interaction.values[0] ?? "";
+    const mediaId = Number(selectedId);
+    if (!/^\d+$/.test(selectedId) || !Number.isSafeInteger(mediaId) || mediaId < 1) {
+      await interaction.reply({content:"That TMDB title reference is invalid.",flags:MessageFlags.Ephemeral});
+      return true;
+    }
+    const selectedTitle = interaction.component.options.find((option) => option.value === selectedId)?.label ?? "Selected title";
+    await interaction.deferUpdate();
+    if (action === "tmdb-watch") {
+      const availability = await this.tmdb.watchAvailability(mediaId, categoryValue, region);
+      if (!availability) {
+        await interaction.editReply({
+          content:"TMDB has no watch-provider record for this title in " + region + ". This does not prove that the title is unavailable.",
+          embeds:[],components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],
+        });
+        return true;
+      }
+      const embed = homeEmbed(
+        ("Where to watch · " + selectedTitle).slice(0,256),
+        "Region: " + region + ". Provider data can change; verify current availability with the listed service.",
+        availability.groups.map((group) => ({name:group.label,value:group.providers.join(", ").slice(0,1024),inline:false})),
+      ).setFooter({text:"TMDB metadata · Watch-provider data powered by JustWatch"});
+      if (availability.link) embed.setURL(availability.link);
+      if (!availability.groups.length) {
+        embed.setDescription("TMDB returned a regional record but no provider categories. This does not prove that the title is unavailable.");
+      }
+      await interaction.editReply({
+        content:"Availability · " + selectedTitle,
+        embeds:[embed],
+        components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],
+        allowedMentions:{parse:[]},
+      });
+      return true;
+    }
+    const videos = await this.tmdb.videos(mediaId, categoryValue);
+    const embed = homeEmbed(
+      ("Videos · " + selectedTitle).slice(0,256),
+      videos.length
+        ? videos.map((video) => "[" + cleanText(video.name,160).replace(/[\[\]]/g,"") + "](" + video.url + ") · " + video.type + " · " + video.site + (video.official ? " · Official" : "")).join("\n").slice(0,4000)
+        : "TMDB has no supported YouTube or Vimeo video records for this title.",
+    ).setFooter({text:"TMDB video metadata · Video type and official flag are shown as returned"});
+    await interaction.editReply({
+      content:"Trailer and video results · " + selectedTitle,
+      embeds:[embed],
+      components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],
+      allowedMentions:{parse:[]},
+    });
+    return true;
+  }
+
+  private async tmdbSelectionAndRespond(
+    interaction: ChatInputCommandInteraction,
+    query: string,
+    category: "movie" | "tv",
+    action: "availability" | "videos",
+    region: string,
+  ): Promise<void> {
+    await interaction.reply({content:loadingMessage("Searching TMDB…"),flags:MessageFlags.Ephemeral});
+    const results = await this.tmdb.search(query, category);
+    if (!results.length) {
+      await interaction.editReply({content:"TMDB returned no matching titles.",embeds:[],components:[]});
+      return;
+    }
+    const select = new StringSelectMenuBuilder()
+      .setCustomId("discover:" + (action === "availability" ? "tmdb-watch" : "tmdb-videos") + ":" + category + ":" + region)
+      .setPlaceholder("Choose the exact TMDB title")
+      .addOptions(results.slice(0,25).map((item) => ({
+        label:item.title.slice(0,100),
+        description:(item.releaseDate ?? "Release date unavailable") + " · TMDB #" + item.id,
+        value:String(item.id),
+      })));
+    await interaction.editReply({
+      content:action === "availability"
+        ? "Choose the exact title to inspect watch providers in " + region + "."
+        : "Choose the exact title to inspect TMDB-listed videos.",
+      embeds:[],
+      components:[new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)],
+    });
   }
 
   async handleModal(interaction: ModalSubmitInteraction): Promise<boolean> {
