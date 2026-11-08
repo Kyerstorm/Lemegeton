@@ -71,6 +71,9 @@ export interface ArchiveSubmission {
   spoiler: boolean;
   visibility: ArchiveVisibility;
   needsUpload: boolean;
+  chapterNumber?:string;
+  linkedMediaProvider?:string;
+  linkedMediaId?:string;
 }
 
 export interface ArchiveEntry {
@@ -82,6 +85,9 @@ export interface ArchiveEntry {
   creator: string | null;
   media_type: string;
   source_url: string | null;
+  chapter_number:string|null;
+  linked_media_provider:string|null;
+  linked_media_id:string|null;
   tags: string[];
   spoiler: boolean;
   status: string;
@@ -91,6 +97,34 @@ export interface ArchiveEntry {
   media_asset_id: string | null;
   attachment_count?: number;
   created_at: Date;
+}
+
+export function parsePanelChapterCaption(value:string):{chapterNumber:string;caption:string}{
+ const match=/^\\s*(?:(?:chapter|ch\\.?)\\s*)?#?(\\d+(?:\\.\\d+)?|N\\/A)(?:\\s*(?:[-–—:|]\\s*|\\s+)(.*?))?\\s*$/i.exec(value.trim());
+ if(!match||/[–—:|\\-]$/.test(value.trim()))throw new Error("Enter a chapter number or N/A. An optional caption can follow, e.g. Chapter 12 — Final battle.");
+ const chapterNumber=match[1]?.toUpperCase()==="N/A"?"N/A":match[1]!;
+ return{chapterNumber,caption:(match[2]??"").trim()};
+}
+
+export function parseAniListMangaReference(value:string):{id:string|null;url:string|null}{
+ const raw=value.trim();
+ if(!raw)return{id:null,url:null};
+ if(/^\\d+$/.test(raw)){
+  const id=BigInt(raw);
+  if(id<=0n||id>BigInt(Number.MAX_SAFE_INTEGER))throw new Error("AniList manga IDs must be positive safe integers.");
+  const normalized=id.toString();
+  return{id:normalized,url:`https://anilist.co/manga/${normalized}`};
+ }
+ let url:URL;
+ try{url=new URL(raw);}catch{throw new Error("Use a numeric AniList manga ID or an HTTPS AniList manga URL.");}
+ const match=/^\\/manga\\/(\\d+)(?:\\/|$)/i.exec(url.pathname);
+ if(url.protocol!=="https:"||!["anilist.co","www.anilist.co"].includes(url.hostname.toLowerCase())||!match){
+  throw new Error("Use a numeric AniList manga ID or an HTTPS AniList manga URL.");
+ }
+ const id=BigInt(match[1]!);
+ if(id<=0n||id>BigInt(Number.MAX_SAFE_INTEGER))throw new Error("AniList manga IDs must be positive safe integers.");
+ const normalized=id.toString();
+ return{id:normalized,url:`https://anilist.co/manga/${normalized}`};
 }
 
 export function isArchiveCategory(value: string): value is ArchiveCategory {
@@ -154,7 +188,10 @@ export async function submitArchiveEntry(input: ArchiveSubmission): Promise<stri
   const body = input.content.trim();
   const sourceTitle = input.sourceTitle ? cleanText(input.sourceTitle, 200) : null;
   const creator = input.creator ? cleanText(input.creator, 200) : null;
-  if (!title || !body) throw new Error("A title and description/content are both required.");
+  if (!title || (!body && input.category!=="panels")) throw new Error("A title and description/content are both required.");
+  const chapterNumber=input.category==="panels"?input.chapterNumber?.trim():undefined;
+  if(input.category==="panels"&&(!chapterNumber||!(/^(?:\\d+(?:\\.\\d+)?|N\\/A)$/i.test(chapterNumber))))throw new Error("Manga panel entries need a chapter number or N/A.");
+  const linkedMediaId=input.category==="panels"&&input.linkedMediaProvider==="AniList"&&input.linkedMediaId&&/^\\d+$/.test(input.linkedMediaId)?input.linkedMediaId:null;
   if (body.length > 3_000) throw new Error("Archive descriptions are limited to 3,000 characters.");
   if (input.category === "quotes") {
     if (body.length > 280) throw new Error("Quotes are limited to 280 characters. Do not submit lyrics, chapters or long copyrighted passages.");
@@ -165,6 +202,7 @@ export async function submitArchiveEntry(input: ArchiveSubmission): Promise<stri
   }
   const sourceUrl = isValidHttpsUrl(input.sourceUrl, input.category === "fanworks");
   const tags = normalizeTags(input.tags.join(","));
+  if(input.category==="panels"&&tags.some(tag=>["nsfw","mature","adult"].includes(tag.toLowerCase())))throw new Error("Age-restricted tags are not accepted in the Community Archive.");
   const allowedUploads = new Set(settings.uploadTypes);
   const needsUpload = input.needsUpload;
   if (needsUpload && input.category === "soundtracks" && !allowedUploads.has("audio") && !allowedUploads.has("video")) {
@@ -176,8 +214,8 @@ export async function submitArchiveEntry(input: ArchiveSubmission): Promise<stri
   const result = await queryOne<{ id: string }>(
     `INSERT INTO community_archive_entries
      (archive_type, title, content, source_title, creator, media_type, source_url,
-      tags, spoiler, status, created_by, created_guild_id, visibility)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      tags, spoiler, status, created_by, created_guild_id, visibility, chapter_number, linked_media_provider, linked_media_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
      RETURNING id`,
     [
       input.category,
@@ -193,6 +231,9 @@ export async function submitArchiveEntry(input: ArchiveSubmission): Promise<stri
       input.userId,
       input.guildId,
       input.visibility,
+      chapterNumber??null,
+      linkedMediaId?"AniList":null,
+      linkedMediaId,
     ],
   );
   if (!result) throw new Error("The Archive could not save this submission.");
