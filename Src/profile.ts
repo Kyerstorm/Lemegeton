@@ -15,6 +15,7 @@ import {
   type StringSelectMenuInteraction,
 } from "discord.js";
 import type { FeatureCommand } from "../Helpers/command.js";
+import {createIssueLog,issueHashNotice} from "../Helpers/issue-logs.js";
 import type { BotConfig } from "../Helpers/config.js";
 import { AniListClient } from "../Helpers/anilist.js";
 import { SteamClient } from "../Helpers/steam.js";
@@ -203,8 +204,10 @@ export class ProfileCommand implements FeatureCommand {
           return;
       }
     } catch (error) {
-      await interaction.reply({ content: error instanceof Error ? error.message : "The profile action failed.", flags: MessageFlags.Ephemeral }).catch(async () => {
-        await interaction.followUp({ content: error instanceof Error ? error.message : "The profile action failed.", flags: MessageFlags.Ephemeral });
+      const issue = await createIssueLog(interaction, error, "profile.execute");
+      const message = (error instanceof Error ? error.message : "The profile action failed.") + issueHashNotice(issue);
+      await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(async () => {
+        await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral });
       });
     }
   }
@@ -292,7 +295,8 @@ export class ProfileCommand implements FeatureCommand {
           await interaction.reply({ content: `Steam [${profile.personaName}](${profile.profileUrl}) is connected for this server.`, flags: MessageFlags.Ephemeral });
         }
       } catch (error) {
-        await interaction.reply({ content: error instanceof Error ? error.message : "The account could not be verified.", flags: MessageFlags.Ephemeral });
+        const issue = await createIssueLog(interaction, error, "profile.link");
+        await interaction.reply({ content: (error instanceof Error ? error.message : "The account could not be verified.") + issueHashNotice(issue), flags: MessageFlags.Ephemeral });
       }
       return true;
     }
@@ -401,7 +405,8 @@ export class ProfileCommand implements FeatureCommand {
       );
       await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     } catch (error) {
-      await interaction.reply({ content: error instanceof Error ? error.message : "The comparison could not be calculated.", flags: MessageFlags.Ephemeral });
+      const issue = await createIssueLog(interaction, error, "profile.affinity");
+      await interaction.reply({ content: (error instanceof Error ? error.message : "The comparison could not be calculated.") + issueHashNotice(issue), flags: MessageFlags.Ephemeral });
     }
   }
 
@@ -420,7 +425,8 @@ export class ProfileCommand implements FeatureCommand {
       );
       await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     } catch (error) {
-      await interaction.reply({ content: error instanceof Error ? error.message : "Server Taste is unavailable.", flags: MessageFlags.Ephemeral });
+      const issue = await createIssueLog(interaction, error, "profile.taste");
+      await interaction.reply({ content: (error instanceof Error ? error.message : "Server Taste is unavailable.") + issueHashNotice(issue), flags: MessageFlags.Ephemeral });
     }
   }
 }
