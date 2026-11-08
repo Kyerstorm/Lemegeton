@@ -16,7 +16,7 @@ import {
 } from "discord.js";
 import type { FeatureCommand } from "../helpers/command.js";
 import type { BotConfig } from "../helpers/config.js";
-import { AniListClient, type AniListMedia, type AniListMediaType, type AniListSearchFilters } from "../helpers/anilist.js";
+import { AniListClient, type AniListMedia, type AniListMediaType, type AniListSearchFilters, type AniListCreator } from "../helpers/anilist.js";
 import {SteamClient,type SteamStoreGame} from "../helpers/steam.js";
 import { GoogleBooksClient, type GoogleBook } from "../helpers/google-books.js";
 import { IgdbClient, type IgdbGame } from "../helpers/igdb.js";
@@ -190,6 +190,12 @@ function detailsButtons(record: SearchRecord): ActionRowBuilder<ButtonBuilder>[]
   )];
 }
 
+function creatorSearchModal():ModalBuilder{
+ return new ModalBuilder().setCustomId("discover:creator-search").setTitle("Explore a creator").addComponents(
+  new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("query").setLabel("Creator name").setPlaceholder("Writer, artist or voice actor").setStyle(TextInputStyle.Short).setMinLength(2).setMaxLength(80).setRequired(true)),
+ );
+}
+
 function searchModal(category: Category): ModalBuilder {
   return new ModalBuilder()
     .setCustomId(`discover:search:${category}`)
@@ -236,6 +242,7 @@ function homePanel(): { embeds: EmbedBuilder[]; components: ActionRowBuilder<But
     new ButtonBuilder().setCustomId("discover:trending:manga").setLabel("Trending manga").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("discover:trending:movie").setLabel("Trending films").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("discover:random:all").setLabel("Surprise me").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("discover:creator").setLabel("Creator Explorer").setStyle(ButtonStyle.Secondary),
   );
   const random = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("discover:random:anime").setLabel("Random anime").setStyle(ButtonStyle.Secondary),
@@ -272,7 +279,7 @@ export class DiscoverCommand implements FeatureCommand {
     ))
     .addIntegerOption((option) => option.setName("season_year").setDescription("Anime season year").setMinValue(1970).setMaxValue(2100))
     .addStringOption((option) => option.setName("view").setDescription("Open search results or the Knowledge Atlas").addChoices(
-      { name: "Search results", value: "search" }, { name: "Knowledge Atlas", value: "atlas" },
+      { name: "Search results", value: "search" }, { name: "Knowledge Atlas", value: "atlas" }, {name:"Creator Explorer",value:"creators"},
     ));
 
   private readonly config: BotConfig;
@@ -326,6 +333,10 @@ export class DiscoverCommand implements FeatureCommand {
       await interaction.reply({ ...home, flags: MessageFlags.Ephemeral });
       return;
     }
+    if(view==="creators"){
+      await this.creatorAndRespond(interaction,query);
+      return;
+    }
     if (view === "atlas") {
       await this.atlasAndRespond(interaction, query, category, filters);
       return;
@@ -339,6 +350,10 @@ export class DiscoverCommand implements FeatureCommand {
 
   async handleButton(interaction: ButtonInteraction): Promise<boolean> {
     const [, action, categoryValue, maybeId] = interaction.customId.split(":");
+    if(action==="creator"){
+      await interaction.showModal(creatorSearchModal());
+      return true;
+    }
     if (action === "search" && CATEGORIES.some((item) => item.value === categoryValue)) {
       await interaction.showModal(searchModal(categoryValue as Category));
       return true;
@@ -375,9 +390,32 @@ export class DiscoverCommand implements FeatureCommand {
 
   async handleModal(interaction: ModalSubmitInteraction): Promise<boolean> {
     const [, action, categoryValue] = interaction.customId.split(":");
+    if(action==="creator-search"){
+      await this.creatorAndRespond(interaction,interaction.fields.getTextInputValue("query"));
+      return true;
+    }
     if (action !== "search" || !CATEGORIES.some((item) => item.value === categoryValue)) return false;
     await this.searchAndRespond(interaction, interaction.fields.getTextInputValue("query"), categoryValue as Category);
     return true;
+  }
+
+  private async creatorAndRespond(
+    interaction:ChatInputCommandInteraction|ModalSubmitInteraction,
+    query:string,
+  ):Promise<void>{
+    await interaction.reply({content:loadingMessage("Exploring creators…"),flags:MessageFlags.Ephemeral});
+    const creators=await this.anilist.searchCreators(query);
+    if(!creators.length){await interaction.editReply({content:"AniList returned no matching creators.",embeds:[],components:[]});return;}
+    const embeds=creators.slice(0,10).map(creator=>{
+      const embed=homeEmbed(creator.name,safeDescription(creator.description,1200),[
+        {name:"Occupations",value:creator.occupations.join(", ")||"Unavailable",inline:true},
+        {name:"Years active",value:creator.yearsActive.length?creator.yearsActive.join(" – "):"Unavailable",inline:true},
+        {name:"Known work",value:creator.media.slice(0,5).map(item=>`[${item.title}](${item.url}) · ${item.role}`).join("\n")||"No linked media returned",inline:false},
+      ]).setURL(creator.url).setFooter({text:"AniList · Creator metadata"});
+      if(creator.image)embed.setThumbnail(creator.image);
+      return embed;
+    });
+    await interaction.editReply({content:`Creator Explorer · ${query.trim().slice(0,80)}`,embeds,components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],allowedMentions:{parse:[]}});
   }
 
   private async compareAndRespond(
