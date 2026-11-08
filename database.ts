@@ -169,6 +169,7 @@ const schemaStatements = [
   "ALTER TABLE community_archive_entries ADD COLUMN IF NOT EXISTS visibility VARCHAR(16) NOT NULL DEFAULT 'server'",
   "ALTER TABLE community_archive_entries ADD COLUMN IF NOT EXISTS moderation_reason TEXT",
   "ALTER TABLE community_archive_entries ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+  "ALTER TABLE community_archive_entries ADD COLUMN IF NOT EXISTS chapter_number VARCHAR(32)",
   "ALTER TABLE community_archive_entries ADD COLUMN IF NOT EXISTS linked_media_provider VARCHAR(32)",
   "ALTER TABLE community_archive_entries ADD COLUMN IF NOT EXISTS linked_media_id TEXT",
   "CREATE INDEX IF NOT EXISTS community_archive_guild_status_idx ON community_archive_entries (created_guild_id, status, created_at DESC)",
