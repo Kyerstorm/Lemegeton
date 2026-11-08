@@ -91,7 +91,7 @@ export function parseCreator(value:unknown):AniListCreator|null {
   const node=edge.node;const mediaUrl=str(node.siteUrl);
   if(typeof node.id!=="number"||(node.type!=="ANIME"&&node.type!=="MANGA")||!mediaUrl)return[];
   try{const parsed=new URL(mediaUrl);if(parsed.protocol!=="https:"||parsed.hostname!=="anilist.co")return[];}catch{return[];}
-  return[{title:titleOf(node.title),url:mediaUrl,role:str(edge.staffRole)??"Staff",type:node.type}];
+  return[{title:titleOf(node.title),url:mediaUrl,role:str(edge.staffRole)??"Staff",type:node.type as AniListMediaType}];
  }).slice(0,8);
  return {
   id:value.id,name,url,image:imageOf(value.image),description:str(value.description),
