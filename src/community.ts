@@ -903,6 +903,7 @@ export class CommunityCommand implements FeatureCommand {
 
   private async selectReading(interaction: ChatInputCommandInteraction): Promise<void> {
     if(!isGuildManager(interaction)) throw new Error("Manage Server permission is required to select the next community read.");
+    await interaction.deferReply({flags:MessageFlags.Ephemeral});
     const selected=await selectNextReading(interaction.guildId!,interaction.options.getString("reading_nomination_id")??undefined);
     const channel=interaction.channel;
     if(channel?.isTextBased()&&"send" in channel){
@@ -911,7 +912,7 @@ export class CommunityCommand implements FeatureCommand {
         allowedMentions:{parse:[]},
       });
     }
-    await interaction.reply({content:`Nomination #${selected.id} was selected as this server's next community read. The remaining open nominations were closed.`,flags:MessageFlags.Ephemeral});
+    await interaction.editReply({content:`Nomination #${selected.id} was selected as this server's next community read. The remaining open nominations were closed.`});
   }
 
   private async scheduleReadingDiscussion(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -920,6 +921,7 @@ export class CommunityCommand implements FeatureCommand {
     const when=interaction.options.getString("scheduled_at");
     if(!nominationId||!when) throw new Error("Provide reading_nomination_id and scheduled_at.");
     const scheduledAt=parseReadingScheduleTime(when);
+    await interaction.deferReply({flags:MessageFlags.Ephemeral});
     const row=await queryOne<{id:string;title:string;category:string;source_url:string|null;status:string}>(
       "SELECT id,title,category,source_url,status FROM community_reading_nominations WHERE id = $1 AND guild_id = $2",
       [nominationId,interaction.guildId],
@@ -947,10 +949,10 @@ export class CommunityCommand implements FeatureCommand {
       await attachReadingDiscussion({guildId:interaction.guildId!,nominationId,channelId:interaction.channelId!,threadId:thread.id,scheduledAt});
     } catch(error) {
       if(thread) await thread.delete("Could not persist the scheduled Reading Club discussion").catch(()=>undefined);
-      await announcement.delete("Reading Club discussion setup failed").catch(()=>undefined);
+      await announcement.delete().catch(()=>undefined);
       throw error;
     }
-    await interaction.reply({content:`Reading discussion #${nominationId} created in <#${thread.id}> for <t:${Math.floor(scheduledAt.getTime()/1000)}:F>.`,flags:MessageFlags.Ephemeral});
+    await interaction.editReply({content:`Reading discussion #${nominationId} created in <#${thread.id}> for <t:${Math.floor(scheduledAt.getTime()/1000)}:F>.`});
   }
 
   private async showCalendar(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
