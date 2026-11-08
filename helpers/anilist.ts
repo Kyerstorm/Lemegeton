@@ -57,6 +57,18 @@ export interface AniListRecentlyFinishedMedia {
 }
 
 export interface AniListAiring {mediaId:number;title:string;episode:number;airingAt:number;url:string;image:string|null}
+export interface AniListMediaNightCandidate {
+  id:number;
+  type:AniListMediaType;
+  title:string;
+  url:string;
+  image:string|null;
+  overview:string|null;
+  genres:string[];
+  tags:string[];
+  year:number|null;
+  duration:number|null;
+}
 type Obj=Record<string,unknown>;
 const isObj=(v:unknown):v is Obj=>typeof v==="object"&&v!==null&&!Array.isArray(v);
 const str=(v:unknown)=>typeof v==="string"&&v.trim()?v:null;
@@ -168,11 +180,28 @@ const STAFF_SEARCH=`query CreatorSearch($search:String,$page:Int,$perPage:Int){P
 const USER=`query User($name:String){User(name:$name){id name siteUrl avatar{large} bannerImage about(asHtml:false) statistics{anime{count meanScore episodesWatched minutesWatched statuses{status count} formats{format count} genres{genre count}} manga{count meanScore chaptersRead volumesRead statuses{status count} formats{format count} genres{genre count}}} favourites{anime(page:1,perPage:5){nodes{id siteUrl title{romaji english native} coverImage{large}}} manga(page:1,perPage:5){nodes{id siteUrl title{romaji english native} coverImage{large}}} characters(page:1,perPage:5){nodes{id siteUrl name{full} image{large}}}}}}`;
 const TASTE=`query UserTaste($name:String){anime:MediaListCollection(userName:$name,type:ANIME){lists{entries{media{genres tags{name rank isMediaSpoiler}}}}} manga:MediaListCollection(userName:$name,type:MANGA){lists{entries{media{genres tags{name rank isMediaSpoiler}}}}}}}`;
 const AIRING=`query Airing($from:Int,$to:Int){Page(page:1,perPage:50){airingSchedules(airingAt_greater:$from,airingAt_lesser:$to,sort:TIME){airingAt episode media{id title{romaji english} siteUrl coverImage{large} isAdult}}}}`;
+const MEDIA_NIGHT_QUERY=`query MediaNight($type:MediaType!){Page(page:1,perPage:50){media(type:$type,sort:TRENDING_DESC,isAdult:false){id type title{romaji english native} description(asHtml:false) siteUrl coverImage{large} startDate{year} duration genres tags{name isMediaSpoiler} isAdult}}}}`;
 export class AniListError extends Error {constructor(message:string,readonly statusCode?:number){super(message);this.name="AniListError";}}
 export class AniListClient {
  constructor(private readonly endpoint="https://graphql.anilist.co",private readonly timeoutMs=10000,private readonly fetcher:typeof fetch=globalThis.fetch){}
  async search(query:string,type:AniListMediaType,lightNovelOnly=false,filters:AniListSearchFilters={}):Promise<AniListMedia[]>{return this.searchQuery({search:query.trim(),type,...filterVariables(filters),...(lightNovelOnly?{format:"NOVEL"}:{}),sort:"SEARCH_MATCH"});} async random(type:AniListMediaType,lightNovelOnly=false,filters:AniListSearchFilters={}):Promise<AniListMedia[]>{return this.searchQuery({type,...filterVariables(filters),...(lightNovelOnly?{format:"NOVEL"}:{}),sort:"POPULARITY_DESC",page:secureRandBelow(200)+1,perPage:10});}
  async trending(type:AniListMediaType,filters:AniListSearchFilters={}):Promise<AniListMedia[]>{return this.searchQuery({type,...filterVariables(filters),sort:"TRENDING_DESC"});}
+ async mediaNightCandidates(type:AniListMediaType):Promise<AniListMediaNightCandidate[]>{
+  const data=await this.graphql(MEDIA_NIGHT_QUERY,{type});
+  const page=isObj(data.Page)?data.Page:{};
+  const rows=Array.isArray(page.media)?page.media:[];
+  return rows.flatMap((value):AniListMediaNightCandidate[]=>{
+   if(!isObj(value)||value.isAdult===true)return[];
+   const parsed=parseMedia(value);if(!parsed)return[];
+   const start=isObj(value.startDate)?value.startDate:{};
+   const tags=Array.isArray(value.tags)?value.tags.flatMap(tag=>isObj(tag)&&typeof tag.name==="string"&&!tag.isMediaSpoiler?[tag.name]:[]):[];
+   return [{
+    id:parsed.id,type:parsed.type,title:titleOf(value.title),url:parsed.siteUrl,image:parsed.coverImage,
+    overview:parsed.description,genres:parsed.genres,tags,
+    year:num(start.year),duration:num(value.duration),
+   }];
+  });
+ }
  async searchCreators(query:string):Promise<AniListCreator[]>{
   const term=query.trim();if(term.length<2)return[];
   const data=await this.graphql(STAFF_SEARCH,{search:term,page:1,perPage:10});
