@@ -18,6 +18,7 @@ import {
   type TextChannel,
 } from "discord.js";
 import type { FeatureCommand } from "../Helpers/command.js";
+import {createIssueLog,issueHashNotice} from "../Helpers/issue-logs.js";
 import type { BotConfig } from "../Helpers/config.js";
 import { homeEmbed } from "../Helpers/discord.js";
 import { AniListClient } from "../Helpers/anilist.js";
@@ -195,8 +196,10 @@ export class CommunityCommand implements FeatureCommand {
         default: throw new Error("That community action is not available.");
       }
     } catch (error) {
-      await interaction.reply({ content: error instanceof Error ? error.message : "The community action failed.", flags: MessageFlags.Ephemeral }).catch(async () => {
-        await interaction.followUp({ content: error instanceof Error ? error.message : "The community action failed.", flags: MessageFlags.Ephemeral });
+      const issue = await createIssueLog(interaction, error, "community.execute");
+      const message = (error instanceof Error ? error.message : "The community action failed.") + issueHashNotice(issue);
+      await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(async () => {
+        await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral });
       });
     }
   }
@@ -610,7 +613,8 @@ export class CommunityCommand implements FeatureCommand {
         return true;
       }
     } catch (error) {
-      await interaction.reply({ content: error instanceof Error ? error.message : "The community action failed.", flags: MessageFlags.Ephemeral });
+      const issue = await createIssueLog(interaction, error, "community.interaction");
+      await interaction.reply({ content: (error instanceof Error ? error.message : "The community action failed.") + issueHashNotice(issue), flags: MessageFlags.Ephemeral });
       return true;
     }
     return false;
