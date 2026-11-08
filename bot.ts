@@ -12,6 +12,7 @@ import {createCommandRegistry} from "./src/registry.js";
 import {isFeatureEnabled} from "./helpers/settings.js";
 import {homeEmbed} from "./helpers/discord.js";
 import {handleConsentButton,initUserConsentSchema,requireCurrentConsent} from "./helpers/terms-consent.js";
+import {safeInteractionErrorMessage} from "./helpers/command-errors.js";
 import {createIssueLog,issueHashNotice} from "./helpers/issue-logs.js";
 import {onCustomRoleMemberAdd,onCustomRoleMemberRemove,onCustomRoleMemberUpdate,onCustomRoleRoleDelete,reconcileCustomRoleGuild} from "./helpers/custom-role-lifecycle.js";
 import {startCustomRolePicker,stopCustomRolePicker} from "./helpers/custom-role-picker-server.js";
@@ -98,7 +99,7 @@ async function routeInteraction(interaction:Interaction):Promise<void>{
    :await(command.handleModal?.(interaction)??false);
   if(!handled&&!interaction.replied&&!interaction.deferred)await interaction.reply({content:"This control is no longer available. Reopen the feature command and try again.",flags:MessageFlags.Ephemeral});
  }catch(error){
-  const message=error instanceof Error?error.message:"Lemegeton could not complete that action.";
+  const message=safeInteractionErrorMessage(error);
   logger.error("Discord interaction failed",{interactionId:interaction.id,reason:message});
   let reference:string|undefined;
   if(interaction.guildId){
