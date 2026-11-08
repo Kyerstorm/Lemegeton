@@ -530,6 +530,13 @@ const schemaStatements = [
   )`,
   "CREATE INDEX IF NOT EXISTS dashboard_audit_log_guild_idx ON dashboard_audit_log (guild_id, created_at DESC)",
 
+  `CREATE TABLE IF NOT EXISTS connected_media_guild_settings (
+    guild_id BIGINT PRIMARY KEY,
+    release_region VARCHAR(2) NOT NULL DEFAULT 'IE',
+    updated_by BIGINT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  "ALTER TABLE connected_media_guild_settings ADD COLUMN IF NOT EXISTS updated_by BIGINT",
   `CREATE TABLE IF NOT EXISTS media_notification_settings (
     guild_id BIGINT PRIMARY KEY,
     channel_id BIGINT,
