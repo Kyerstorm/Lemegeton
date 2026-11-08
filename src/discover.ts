@@ -87,6 +87,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
         { name: "Genres", value: item.genres.slice(0, 8).join(" · ") || "Unavailable", inline: false },
       )
       .setFooter({ text: `AniList · Source metadata` });
+    if(item.trailer)embed.addFields({name:"Official trailer",value:`[Watch on ${item.trailer.site}](${item.trailer.url})`,inline:true});
     if (item.startDate?.year) embed.addFields({ name: "Release year", value: String(item.startDate.year), inline: true });
     if (item.studios.length) embed.addFields({ name: "Studios", value: item.studios.join(", ").slice(0, 900), inline: false });
     if (item.staff.length) embed.addFields({ name: "Creators / staff", value: item.staff.join(", ").slice(0, 900), inline: false });
