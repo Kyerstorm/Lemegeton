@@ -26,6 +26,7 @@ import { GoogleBooksClient, type GoogleBook } from "../helpers/google-books.js";
 import { IgdbClient, type IgdbGame } from "../helpers/igdb.js";
 import { homeEmbed, navigationButtons } from "../helpers/discord.js";
 import { TmdbClient, type TmdbMedia } from "../helpers/tmdb.js";
+import { getGuildMediaRegion } from "../helpers/media-region.js";
 import { cleanText } from "../helpers/security.js";
 import { findAtlasRelationships, recordProviderRelationships } from "../helpers/atlas.js";
 import { renderAtlasSnapshot } from "../helpers/atlas-renderer.js";
@@ -363,7 +364,7 @@ export class DiscoverCommand implements FeatureCommand {
         await interaction.reply({content:"Where-to-watch and video views require the Films or Television category.",flags:MessageFlags.Ephemeral});
         return;
       }
-      const region = (interaction.options.getString("region") ?? "IE").trim().toUpperCase();
+      const region = (interaction.options.getString("region") ?? await getGuildMediaRegion(interaction.guildId)).trim().toUpperCase();
       if (!/^[A-Z]{2}$/.test(region)) {
         await interaction.reply({content:"Region must be a two-letter country code, such as IE or US.",flags:MessageFlags.Ephemeral});
         return;
