@@ -16,17 +16,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.13"
-
-      - name: Test repository statistics
-        run: python -m unittest discover -s tests -p "test_repo_stats.py"
-
+          node-version: "22"
       - name: Refresh README statistics
-        run: python -m helpers.repo_stats --update-readme
-
+        run: node scripts/repo-stats.mjs --update-readme
       - name: Commit updated statistics
         run: |
           if git diff --quiet -- README.md; then
