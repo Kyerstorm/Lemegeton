@@ -8,6 +8,7 @@ import type {FeatureCommand} from "./helpers/command.js";
 import {handleArchiveUploadMessage} from "./helpers/archive.js";
 import {closeDatabase,initDatabase} from "./database.js";
 import {dueDailyDeliveries,dueDailySchedules,markDailyDelivery,prepareDailyDelivery} from "./helpers/community.js";
+import {claimDueReadingReminders,markReadingReminderSent} from "./helpers/community-reading.js";
 import {createCommandRegistry} from "./src/registry.js";
 import {isFeatureEnabled} from "./helpers/settings.js";
 import {homeEmbed} from "./helpers/discord.js";
@@ -169,6 +170,23 @@ async function processDailyDrops():Promise<void>{
   for(const schedule of await dueDailySchedules()){
    try{await prepareDailyDelivery(schedule);}
    catch(error){logger.error("Could not prepare Daily Drop",{guildId:schedule.guild_id,reason:error instanceof Error?error.message:"Unknown error"});}
+  }
+  for(const reminder of await claimDueReadingReminders()){
+   try{
+    const thread=await client.channels.fetch(reminder.thread_id);
+    if(!thread||!thread.isTextBased()||!("send" in thread))throw new Error("The scheduled Reading Club thread is unavailable.");
+    await (thread as TextChannel).send({
+     content:`🔔 **Community Reading Club starts now:** ${reminder.title}. Keep plot spoilers marked with Discord spoiler tags.`,
+     allowedMentions:{parse:[]},
+    });
+    await markReadingReminderSent(reminder.guild_id,reminder.nomination_id);
+   }catch(error){
+    logger.warn("Scheduled Reading Club notice could not be delivered",{
+     guildId:reminder.guild_id,
+     nominationId:reminder.nomination_id,
+     reason:error instanceof Error?error.message:"Unknown delivery error",
+    });
+   }
   }
   for(const delivery of await dueDailyDeliveries()){
    try{
