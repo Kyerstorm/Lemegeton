@@ -11,7 +11,7 @@ import {dueDailyDeliveries,dueDailySchedules,markDailyDelivery,prepareDailyDeliv
 import {createCommandRegistry} from "./Src/registry.js";
 import {isFeatureEnabled} from "./Helpers/settings.js";
 import {homeEmbed} from "./Helpers/discord.js";
-import {createIssueLog} from "./Helpers/issue-logs.js";
+import {createIssueLog,initializeIssueLogs} from "./Helpers/issue-logs.js";
 
 const config=loadConfig();configureLogger(config.logLevel);
 const client=new Client({intents:[GatewayIntentBits.Guilds,GatewayIntentBits.GuildMessages,GatewayIntentBits.MessageContent]});
@@ -120,7 +120,7 @@ async function shutdown(signal:NodeJS.Signals):Promise<void>{
  await closeDatabase().catch(error=>logger.error("Database shutdown failed",{reason:error instanceof Error?error.message:"Unknown error"}));
 }
 async function start():Promise<void>{
- await initDatabase();await startAtlasBridge();await client.login(config.discordToken);
+ await initDatabase();await initializeIssueLogs();await startAtlasBridge();await client.login(config.discordToken);
  const timer=setInterval(()=>void processDailyDrops(),30_000);timer.unref();
  void processDailyDrops();
 }
