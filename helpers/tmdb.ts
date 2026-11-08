@@ -84,9 +84,10 @@ const PROVIDER_GROUPS = [
 export function normalizeTmdbWatchAvailability(value: unknown, region: string): TmdbWatchAvailability | null {
   const record = object(value);
   if (!record) return null;
-  const groups = PROVIDER_GROUPS.flatMap((group) => {
-    const values = Array.isArray(record[group.key]) ? record[group.key] : [];
-    const providers = [...new Set(values.flatMap((entry) => {
+  const groups = PROVIDER_GROUPS.flatMap((group): TmdbWatchProviderGroup[] => {
+    const rawProviders = record[group.key];
+    const values: unknown[] = Array.isArray(rawProviders) ? rawProviders : [];
+    const providers = [...new Set<string>(values.flatMap((entry: unknown): string[] => {
       const name = object(entry)?.provider_name;
       return typeof name === "string" && name.trim() ? [name.trim()] : [];
     }))].slice(0, 20);
