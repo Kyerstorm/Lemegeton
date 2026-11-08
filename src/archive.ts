@@ -317,14 +317,17 @@ export class ArchiveCommand implements FeatureCommand {
         case "edit": {
           const entryId = interaction.options.getString("entry_id");
           if (!entryId) throw new Error("Provide entry_id.");
+          const chapterInput = interaction.options.getString("chapter_caption");
+          const chapterEdit = chapterInput !== null ? parsePanelChapterCaption(chapterInput) : null;
           await updateArchiveEntry(guildId, userId, entryId, {
             title: interaction.options.getString("title") ?? undefined,
-            content: interaction.options.getString("content") ?? undefined,
+            content: chapterEdit?.caption ?? interaction.options.getString("content") ?? undefined,
             sourceTitle: interaction.options.getString("source_title") ?? undefined,
             creator: interaction.options.getString("creator") ?? undefined,
             sourceUrl: interaction.options.getString("source_url") ?? undefined,
             tags: interaction.options.getString("tags")?.split(","),
             spoiler: interaction.options.getBoolean("spoiler") ?? undefined,
+            chapterNumber: chapterEdit?.chapterNumber,
           });
           await interaction.reply({ content: `Entry #${entryId} updated. Previously approved entries have returned to moderation review.`, flags: MessageFlags.Ephemeral });
           return;
