@@ -17,6 +17,7 @@ import {
 import type { FeatureCommand } from "../helpers/command.js";
 import type { BotConfig } from "../helpers/config.js";
 import { AniListClient, type AniListMedia, type AniListMediaType, type AniListSearchFilters } from "../helpers/anilist.js";
+import {SteamClient,type SteamStoreGame} from "../helpers/steam.js";
 import { GoogleBooksClient, type GoogleBook } from "../helpers/google-books.js";
 import { IgdbClient, type IgdbGame } from "../helpers/igdb.js";
 import { homeEmbed, navigationButtons } from "../helpers/discord.js";
@@ -34,7 +35,8 @@ type SearchRecord =
   | { provider: "AniList"; category: "anime" | "manga" | "light_novel"; item: AniListMedia }
   | { provider: "Google Books"; category: "book"; item: GoogleBook }
   | { provider: "TMDB"; category: "movie" | "tv"; item: TmdbMedia }
-  | { provider: "IGDB"; category: "game"; item: IgdbGame };
+  | { provider: "IGDB"; category: "game"; item: IgdbGame }
+  | { provider: "Steam"; category: "game"; item: SteamStoreGame };
 
 const CATEGORIES: Array<{ label: string; value: Category; emoji: string }> = [
   { label: "All media", value: "all", emoji: "🌐" },
@@ -140,6 +142,25 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
     return embed;
   }
 
+  if (record.provider === "Steam") {
+    const item=record.item;
+    const price=item.isFree?"Free to Play":item.price?`${item.price.final} · US store`: "Price unavailable";
+    const embed=new EmbedBuilder().setColor(item.isFree?0x2ecc71:0x5865f2)
+      .setTitle(item.title.slice(0,256)).setURL(`https://store.steampowered.com/app/${item.appId}`)
+      .setDescription(safeDescription(item.shortDescription,500))
+      .addFields(
+        {name:"Provider",value:"Steam Store",inline:true},
+        {name:"Price",value:price,inline:true},
+        {name:"Release",value:item.comingSoon?"Coming soon":item.releaseDate??"Unavailable",inline:true},
+        {name:"Genres",value:item.genres.join(", ")||"Unavailable",inline:false},
+        {name:"Platforms",value:item.platforms.join(", ")||"Unavailable",inline:true},
+        {name:"Developers",value:item.developers.join(", ")||"Unavailable",inline:true},
+        {name:"Publishers",value:item.publishers.join(", ")||"Unavailable",inline:true},
+      ).setFooter({text:"Steam Store · US store metadata"});
+    if(item.headerImage)embed.setImage(item.headerImage);
+    return embed;
+  }
+
   const item = record.item;
   const embed = new EmbedBuilder()
     .setColor(0x9147ff)
@@ -195,7 +216,7 @@ function homePanel(): { embeds: EmbedBuilder[]; components: ActionRowBuilder<But
       { name: "Anime & manga", value: "AniList", inline: true },
       { name: "Books & light novels", value: "Google Books / AniList", inline: true },
       { name: "Films & television", value: "TMDB", inline: true },
-      { name: "Video games", value: "IGDB, with Steam account support in /profile", inline: true },
+      { name: "Video games", value: "IGDB + Steam Store; account data in /profile", inline: true },
     ],
   );
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
@@ -259,6 +280,7 @@ export class DiscoverCommand implements FeatureCommand {
   private readonly books: GoogleBooksClient;
   private readonly tmdb: TmdbClient;
   private readonly igdb: IgdbClient;
+  private readonly steam:SteamClient;
 
   constructor(config: BotConfig) {
     this.config = config;
@@ -266,6 +288,7 @@ export class DiscoverCommand implements FeatureCommand {
     this.books = new GoogleBooksClient(config.googleBooksApiKey);
     this.tmdb = new TmdbClient(config.tmdbBearerToken);
     this.igdb = new IgdbClient(config.igdbClientId, config.igdbClientSecret);
+    this.steam=new SteamClient(config.steamApiKey);
   }
 
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -491,6 +514,7 @@ export class DiscoverCommand implements FeatureCommand {
         this.tmdb.search(query, "movie").then((items) => items.map((item) => ({ provider: "TMDB" as const, category: "movie" as const, item }))),
         this.tmdb.search(query, "tv").then((items) => items.map((item) => ({ provider: "TMDB" as const, category: "tv" as const, item }))),
         this.igdb.search(query).then((items) => items.map((item) => ({ provider: "IGDB" as const, category: "game" as const, item }))),
+        this.steam.searchStoreGames(query).then((items)=>items.map((item)=>({provider:"Steam" as const,category:"game" as const,item}))),
       ]);
       return providers.flatMap((provider) => provider.status === "fulfilled" ? provider.value : []);
     }
@@ -501,7 +525,13 @@ export class DiscoverCommand implements FeatureCommand {
       case "book": return (await this.books.search(query)).map((item) => ({ provider: "Google Books", category: "book", item }));
       case "movie": return (await this.tmdb.search(query, "movie")).map((item) => ({ provider: "TMDB", category: "movie", item }));
       case "tv": return (await this.tmdb.search(query, "tv")).map((item) => ({ provider: "TMDB", category: "tv", item }));
-      case "game": return (await this.igdb.search(query)).map((item) => ({ provider: "IGDB", category: "game", item }));
+      case "game": {
+        const [igdb,steam]=await Promise.allSettled([this.igdb.search(query),this.steam.searchStoreGames(query)]);
+        return [
+          ...(igdb.status==="fulfilled"?igdb.value.map((item)=>({provider:"IGDB" as const,category:"game" as const,item})):[]),
+          ...(steam.status==="fulfilled"?steam.value.map((item)=>({provider:"Steam" as const,category:"game" as const,item})):[]),
+        ];
+      }
     }
   }
 
@@ -517,7 +547,13 @@ export class DiscoverCommand implements FeatureCommand {
         case "book": return randomOne(await this.books.search("popular fiction")).map((media) => ({ provider: "Google Books", category: "book", item: media }));
         case "movie": return randomOne(await this.tmdb.trending("movie")).map((media) => ({ provider: "TMDB", category: "movie", item: media }));
         case "tv": return randomOne(await this.tmdb.trending("tv")).map((media) => ({ provider: "TMDB", category: "tv", item: media }));
-        case "game": return randomOne(await this.igdb.search("popular")).map((media) => ({ provider: "IGDB", category: "game", item: media }));
+        case "game": {
+          const [igdb,steam]=await Promise.allSettled([this.igdb.search("popular"),this.steam.searchStoreGames("top sellers")]);
+          return [
+            ...(igdb.status==="fulfilled"?randomOne(igdb.value).map((item)=>({provider:"IGDB" as const,category:"game" as const,item})):[]),
+            ...(steam.status==="fulfilled"?randomOne(steam.value).map((item)=>({provider:"Steam" as const,category:"game" as const,item})):[]),
+          ];
+        }
       }
     };
     const batches = await Promise.allSettled(categories.map(load));
@@ -536,6 +572,7 @@ export class DiscoverCommand implements FeatureCommand {
         this.tmdb.trending("movie").then((items) => items.map((item) => ({ provider: "TMDB" as const, category: "movie" as const, item }))),
         this.tmdb.trending("tv").then((items) => items.map((item) => ({ provider: "TMDB" as const, category: "tv" as const, item }))),
         this.igdb.search("popular").then((items) => items.map((item) => ({ provider: "IGDB" as const, category: "game" as const, item }))),
+        this.steam.searchStoreGames("top sellers").then((items)=>items.map((item)=>({provider:"Steam" as const,category:"game" as const,item}))),
       ]);
       return providers.flatMap((provider) => provider.status === "fulfilled" ? provider.value : []);
     }
@@ -546,7 +583,13 @@ export class DiscoverCommand implements FeatureCommand {
       case "book": return (await this.books.search("popular fiction")).map((item) => ({ provider: "Google Books", category: "book", item }));
       case "movie": return (await this.tmdb.trending("movie")).map((item) => ({ provider: "TMDB", category: "movie", item }));
       case "tv": return (await this.tmdb.trending("tv")).map((item) => ({ provider: "TMDB", category: "tv", item }));
-      case "game": return (await this.igdb.search("popular")).map((item) => ({ provider: "IGDB", category: "game", item }));
+      case "game": {
+        const [igdb,steam]=await Promise.allSettled([this.igdb.search("popular"),this.steam.searchStoreGames("top sellers")]);
+        return [
+          ...(igdb.status==="fulfilled"?igdb.value.map((item)=>({provider:"IGDB" as const,category:"game" as const,item})):[]),
+          ...(steam.status==="fulfilled"?steam.value.map((item)=>({provider:"Steam" as const,category:"game" as const,item})):[]),
+        ];
+      }
     }
   }
 
