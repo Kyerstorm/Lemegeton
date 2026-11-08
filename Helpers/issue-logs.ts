@@ -88,6 +88,10 @@ function interactionContext(interaction: Interaction): Record<string, unknown> {
  * The public identifier is a random SHA-512 digest; the UUID is separately
  * hashed and retained for internal correlation without exposing the UUID.
  */
+export function issueHashNotice(issue: CreatedIssue): string {
+  return "\n\nIssue hash:\n" + issue.hash + (issue.persisted ? "" : "\nThe diagnostic record could not be saved.");
+}
+
 export async function createIssueLog(
   interaction: Interaction,
   error: unknown,
