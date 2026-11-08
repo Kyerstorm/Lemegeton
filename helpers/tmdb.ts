@@ -66,6 +66,47 @@ export interface TmdbCollection {
   items: TmdbCollectionItem[];
 }
 
+export interface TmdbTvEpisode {
+  episodeNumber: number;
+  name: string;
+  airDate: string | null;
+  runtime: number | null;
+  overview: string | null;
+  sourceUrl: string;
+}
+
+export interface TmdbTvSeasonSummary {
+  id: number;
+  seasonNumber: number;
+  name: string;
+  episodeCount: number;
+  airDate: string | null;
+}
+
+export interface TmdbTvShowDetails {
+  id: number;
+  name: string;
+  overview: string | null;
+  sourceUrl: string;
+  image: string | null;
+  status: string | null;
+  numberOfSeasons: number;
+  numberOfEpisodes: number;
+  episodeRuntimes: number[];
+  creators: string[];
+  networks: string[];
+  nextEpisode: TmdbTvEpisode | null;
+  seasons: TmdbTvSeasonSummary[];
+}
+
+export interface TmdbTvSeason {
+  showId: number;
+  seasonNumber: number;
+  name: string;
+  sourceUrl: string;
+  episodes: TmdbTvEpisode[];
+}
+
 type JsonObject = Record<string, unknown>;
 
 function object(value: unknown): JsonObject | null {
@@ -188,6 +229,87 @@ export function normalizeTmdbPersonCredits(value: unknown): TmdbPersonCredit[] {
     .slice(0, 12);
 }
 
+function normalizeTmdbEpisode(value: unknown, showId: number): TmdbTvEpisode | null {
+  const item = object(value);
+  if (!item || typeof item.episode_number !== "number" || !Number.isSafeInteger(item.episode_number)
+    || item.episode_number < 0) return null;
+  const id = typeof item.id === "number" && Number.isSafeInteger(item.id) && item.id > 0 ? item.id : null;
+  const name = typeof item.name === "string" && item.name.trim() ? item.name.trim() : `Episode ${item.episode_number}`;
+  return {
+    episodeNumber:item.episode_number,
+    name:name.slice(0,200),
+    airDate:typeof item.air_date === "string" && item.air_date ? item.air_date : null,
+    runtime:typeof item.runtime === "number" && Number.isFinite(item.runtime) && item.runtime > 0 ? item.runtime : null,
+    overview:typeof item.overview === "string" && item.overview.trim() ? item.overview.trim().slice(0,1_000) : null,
+    sourceUrl:id ? `https://www.themoviedb.org/tv/${showId}/episode/${id}` : `https://www.themoviedb.org/tv/${showId}`,
+  };
+}
+
+export function normalizeTmdbTvDetails(value: unknown): TmdbTvShowDetails | null {
+  const item = object(value);
+  if (!item || typeof item.id !== "number" || !Number.isSafeInteger(item.id) || item.id < 1
+    || typeof item.name !== "string" || !item.name.trim()) return null;
+  const poster = typeof item.poster_path === "string" && item.poster_path.startsWith("/") ? item.poster_path : null;
+  const seasons = (Array.isArray(item.seasons) ? item.seasons : []).flatMap((entry): TmdbTvSeasonSummary[] => {
+    const season = object(entry);
+    if (!season || typeof season.season_number !== "number" || !Number.isSafeInteger(season.season_number)
+      || season.season_number < 0) return [];
+    const id = typeof season.id === "number" && Number.isSafeInteger(season.id) && season.id > 0
+      ? season.id : 0;
+    const episodeCount = typeof season.episode_count === "number" && Number.isFinite(season.episode_count)
+      ? Math.max(0,Math.floor(season.episode_count)) : 0;
+    return [{
+      id,
+      seasonNumber:season.season_number,
+      name:typeof season.name === "string" && season.name.trim() ? season.name.trim().slice(0,120) : `Season ${season.season_number}`,
+      episodeCount,
+      airDate:typeof season.air_date === "string" && season.air_date ? season.air_date : null,
+    }];
+  }).sort((left,right)=>left.seasonNumber-right.seasonNumber).slice(0,25);
+  const nextEpisode = normalizeTmdbEpisode(item.next_episode_to_air,item.id);
+  const runtimeValues = Array.isArray(item.episode_run_time) ? item.episode_run_time : [];
+  const episodeRuntimes = runtimeValues.flatMap((value):number[] =>
+    typeof value === "number" && Number.isFinite(value) && value > 0 ? [Math.floor(value)] : [],
+  ).slice(0,10);
+  const creators = (Array.isArray(item.created_by) ? item.created_by : []).flatMap((entry):string[] => {
+    const name = object(entry)?.name;
+    return typeof name === "string" && name.trim() ? [name.trim().slice(0,100)] : [];
+  }).slice(0,10);
+  const networks = (Array.isArray(item.networks) ? item.networks : []).flatMap((entry):string[] => {
+    const name = object(entry)?.name;
+    return typeof name === "string" && name.trim() ? [name.trim().slice(0,100)] : [];
+  }).slice(0,10);
+  return {
+    id:item.id,
+    name:item.name.trim().slice(0,200),
+    overview:typeof item.overview === "string" && item.overview.trim() ? item.overview.trim().slice(0,1_000) : null,
+    sourceUrl:`https://www.themoviedb.org/tv/${item.id}`,
+    image:poster ? `https://image.tmdb.org/t/p/w500${poster}` : null,
+    status:typeof item.status === "string" && item.status.trim() ? item.status.trim() : null,
+    numberOfSeasons:typeof item.number_of_seasons === "number" && Number.isFinite(item.number_of_seasons) ? Math.max(0,Math.floor(item.number_of_seasons)) : seasons.length,
+    numberOfEpisodes:typeof item.number_of_episodes === "number" && Number.isFinite(item.number_of_episodes) ? Math.max(0,Math.floor(item.number_of_episodes)) : 0,
+    episodeRuntimes,creators,networks,nextEpisode,seasons,
+  };
+}
+
+export function normalizeTmdbTvSeason(value: unknown, showId: number): TmdbTvSeason | null {
+  const item = object(value);
+  if (!item || typeof item.season_number !== "number" || !Number.isSafeInteger(item.season_number)
+    || item.season_number < 0 || !Number.isSafeInteger(showId) || showId < 1) return null;
+  const rawEpisodes = Array.isArray(item.episodes) ? item.episodes : [];
+  const episodes = rawEpisodes.flatMap((entry):TmdbTvEpisode[] => {
+    const episode = normalizeTmdbEpisode(entry,showId);
+    return episode ? [episode] : [];
+  }).sort((left,right)=>left.episodeNumber-right.episodeNumber).slice(0,100);
+  return {
+    showId,
+    seasonNumber:item.season_number,
+    name:typeof item.name === "string" && item.name.trim() ? item.name.trim().slice(0,120) : `Season ${item.season_number}`,
+    sourceUrl:`https://www.themoviedb.org/tv/${showId}/season/${item.season_number}`,
+    episodes,
+  };
+}
+
 export function normalizeTmdbCollection(value: unknown): TmdbCollection | null {
   const item = object(value);
   if (!item || typeof item.id !== "number" || !Number.isSafeInteger(item.id) || item.id < 1
@@ -282,6 +404,19 @@ export class TmdbClient {
     if (typeof collectionId !== "number" || !Number.isSafeInteger(collectionId) || collectionId < 1) return null;
     const collection = await this.request(`/collection/${collectionId}`);
     return normalizeTmdbCollection(collection);
+  }
+
+  async tvDetails(id: number): Promise<TmdbTvShowDetails | null> {
+    this.validateMediaId(id);
+    return normalizeTmdbTvDetails(await this.request(`/tv/${id}`));
+  }
+
+  async tvSeason(showId: number, seasonNumber: number): Promise<TmdbTvSeason | null> {
+    this.validateMediaId(showId);
+    if (!Number.isSafeInteger(seasonNumber) || seasonNumber < 0 || seasonNumber > 100) {
+      throw new RangeError("TMDB season number must be between 0 and 100.");
+    }
+    return normalizeTmdbTvSeason(await this.request(`/tv/${showId}/season/${seasonNumber}`),showId);
   }
 
   async watchAvailability(id: number, category: TmdbCategory, region: string): Promise<TmdbWatchAvailability | null> {
