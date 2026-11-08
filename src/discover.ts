@@ -26,7 +26,7 @@ import {SteamClient,type SteamStoreGame} from "../helpers/steam.js";
 import { GoogleBooksClient, type GoogleBook } from "../helpers/google-books.js";
 import { IgdbClient, type IgdbGame } from "../helpers/igdb.js";
 import { homeEmbed, navigationButtons } from "../helpers/discord.js";
-import { TmdbClient, type TmdbMedia } from "../helpers/tmdb.js";
+import { TmdbClient, type TmdbMedia, type TmdbTvSeason } from "../helpers/tmdb.js";
 import { getGuildMediaRegion } from "../helpers/media-region.js";
 import { cleanText } from "../helpers/security.js";
 import { findAtlasRelationships, recordProviderRelationships } from "../helpers/atlas.js";
@@ -306,6 +306,7 @@ export class DiscoverCommand implements FeatureCommand {
       { name: "Where to watch", value: "availability" },
       { name: "Trailers and videos", value: "videos" },
       { name: "Movie collection guide", value: "collection" },
+      { name: "TV season and episode guide", value: "tv-guide" },
       { name: "Suggest a community relationship", value: "suggest-link" },
       { name: "Review server relationship suggestions", value: "review-links" },
     ))
@@ -405,6 +406,14 @@ export class DiscoverCommand implements FeatureCommand {
       await this.tmdbCollectionSelectionAndRespond(interaction, query);
       return;
     }
+    if (view === "tv-guide") {
+      if (category !== "tv") {
+        await interaction.reply({content:"The season and episode guide requires the Television category.",flags:MessageFlags.Ephemeral});
+        return;
+      }
+      await this.tmdbTvGuideSelectionAndRespond(interaction,query);
+      return;
+    }
     if (view === "availability" || view === "videos") {
       if (category !== "movie" && category !== "tv") {
         await interaction.reply({content:"Where-to-watch and video views require the Films or Television category.",flags:MessageFlags.Ephemeral});
@@ -433,6 +442,22 @@ export class DiscoverCommand implements FeatureCommand {
     }
     if (action === "search" && CATEGORIES.some((item) => item.value === categoryValue)) {
       await interaction.showModal(searchModal(categoryValue as Category));
+      return true;
+    }
+    if (action === "tv-page") {
+      const showId=Number(categoryValue), seasonNumber=Number(maybeId), page=Number(interaction.customId.split(":")[4]??0);
+      if(!Number.isSafeInteger(showId)||showId<1||!Number.isSafeInteger(seasonNumber)||seasonNumber<0||!Number.isSafeInteger(page)||page<0){
+        await interaction.reply({content:"That TV guide page reference is invalid.",flags:MessageFlags.Ephemeral});
+        return true;
+      }
+      await interaction.deferUpdate();
+      const [show,season]=await Promise.all([this.tmdb.tvDetails(showId),this.tmdb.tvSeason(showId,seasonNumber)]);
+      if(!show||!season){
+        await interaction.editReply({content:"TMDB could not load this TV season. Reopen the guide and try again.",embeds:[],components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])]});
+        return true;
+      }
+      const view=this.tvSeasonPage(show.name,season,page);
+      await interaction.editReply({content:"TV Guide · "+show.name,embeds:[view.embed],components:view.components,allowedMentions:{parse:[]}});
       return true;
     }
     if (action === "trending" && CATEGORIES.some((item) => item.value === categoryValue)) {
@@ -477,6 +502,63 @@ export class DiscoverCommand implements FeatureCommand {
     if (!interaction.isStringSelectMenu()) return false;
     const [scope, action, categoryValue, region] = interaction.customId.split(":");
     if (scope !== "discover") return false;
+    if (action === "tmdb-tv-guide") {
+      const selectedId=interaction.values[0]??"";
+      const showId=Number(selectedId);
+      if(!/^\\d+$/.test(selectedId)||!Number.isSafeInteger(showId)||showId<1){
+        await interaction.reply({content:"That TMDB series reference is invalid.",flags:MessageFlags.Ephemeral});
+        return true;
+      }
+      await interaction.deferUpdate();
+      const show=await this.tmdb.tvDetails(showId);
+      if(!show){
+        await interaction.editReply({content:"TMDB did not return details for this series.",embeds:[],components:[]});
+        return true;
+      }
+      const fields=[
+        {name:"Status",value:show.status??"Unavailable",inline:true},
+        {name:"Seasons",value:String(show.numberOfSeasons),inline:true},
+        {name:"Episodes",value:String(show.numberOfEpisodes),inline:true},
+        {name:"Episode runtime",value:show.episodeRuntimes.length?show.episodeRuntimes.map(value=>value+" min").join(", "):"Unavailable",inline:true},
+        {name:"Created by",value:show.creators.join(", ")||"Unavailable",inline:true},
+        {name:"Networks",value:show.networks.join(", ")||"Unavailable",inline:true},
+        ...(show.nextEpisode?[{name:"Next episode",value:cleanText(show.nextEpisode.name,120)+" · "+(show.nextEpisode.airDate??"Date unavailable")+" · "+show.nextEpisode.sourceUrl,inline:false}]:[]),
+      ];
+      const embed=homeEmbed(show.name,show.overview?cleanText(show.overview,900):"No series overview was supplied by TMDB.",fields).setURL(show.sourceUrl);
+      if(show.image)embed.setThumbnail(show.image);
+      const components:ActionRowBuilder<StringSelectMenuBuilder|ButtonBuilder>[]=[];
+      if(show.seasons.length){
+        const select=new StringSelectMenuBuilder().setCustomId("discover:tmdb-tv-season:"+showId)
+          .setPlaceholder("Choose a season")
+          .addOptions(show.seasons.map(season=>({
+            label:season.name.slice(0,100),
+            description:season.episodeCount+" episode(s)"+(season.airDate?" · "+season.airDate:""),
+            value:String(season.seasonNumber),
+          })));
+        components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select));
+      }
+      components.push(navigationButtons("discover",[{id:"home",label:"Back to discovery"}]));
+      await interaction.editReply({content:"TV Guide · "+show.name,embeds:[embed],components,allowedMentions:{parse:[]}});
+      return true;
+    }
+    if (action === "tmdb-tv-season") {
+      const showId=Number(interaction.customId.split(":")[2]);
+      const seasonValue=interaction.values[0]??"";
+      const seasonNumber=Number(seasonValue);
+      if(!Number.isSafeInteger(showId)||showId<1||!/^\\d+$/.test(seasonValue)||!Number.isSafeInteger(seasonNumber)||seasonNumber<0||seasonNumber>100){
+        await interaction.reply({content:"That TV season reference is invalid.",flags:MessageFlags.Ephemeral});
+        return true;
+      }
+      await interaction.deferUpdate();
+      const [show,season]=await Promise.all([this.tmdb.tvDetails(showId),this.tmdb.tvSeason(showId,seasonNumber)]);
+      if(!show||!season){
+        await interaction.editReply({content:"TMDB could not load that season.",embeds:[],components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])]});
+        return true;
+      }
+      const view=this.tvSeasonPage(show.name,season,0);
+      await interaction.editReply({content:"TV Guide · "+show.name,embeds:[view.embed],components:view.components,allowedMentions:{parse:[]}});
+      return true;
+    }
     if (action === "tmdb-person") {
       const selectedId = interaction.values[0] ?? "";
       const personId = Number(selectedId);
@@ -575,6 +657,46 @@ export class DiscoverCommand implements FeatureCommand {
       allowedMentions:{parse:[]},
     });
     return true;
+  }
+
+  private async tmdbTvGuideSelectionAndRespond(interaction: ChatInputCommandInteraction,query:string):Promise<void>{
+    await interaction.reply({content:loadingMessage("Searching TV series…"),flags:MessageFlags.Ephemeral});
+    const results=await this.tmdb.search(query,"tv");
+    if(!results.length){
+      await interaction.editReply({content:"TMDB returned no matching TV series.",embeds:[],components:[]});
+      return;
+    }
+    const select=new StringSelectMenuBuilder().setCustomId("discover:tmdb-tv-guide")
+      .setPlaceholder("Choose the exact TV series")
+      .addOptions(results.slice(0,25).map(item=>({
+        label:item.title.slice(0,100),
+        description:(item.releaseDate??"First air date unavailable")+" · TMDB #"+item.id,
+        value:String(item.id),
+      })));
+    await interaction.editReply({content:"Choose a series to inspect its status, creators, networks and season guide.",embeds:[],components:[new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)]});
+  }
+
+  private tvSeasonPage(showName:string,season:TmdbTvSeason,page:number):{
+    embed:EmbedBuilder;
+    components:ActionRowBuilder<ButtonBuilder>[];
+  }{
+    const pageSize=6;
+    const totalPages=Math.max(1,Math.ceil(season.episodes.length/pageSize));
+    const current=Math.min(page,totalPages-1);
+    const visible=season.episodes.slice(current*pageSize,(current+1)*pageSize);
+    const description=visible.map(episode=>{
+      const metadata=[episode.airDate??"Date not announced",episode.runtime?episode.runtime+" min":""].filter(Boolean).join(" · ");
+      const synopsis=episode.overview?"\\n||"+cleanText(episode.overview,280)+"||":"\\n||Episode synopsis unavailable.||";
+      return "**E"+episode.episodeNumber+" · "+cleanText(episode.name,120)+"**\\n"+metadata+synopsis;
+    }).join("\\n\\n")||"TMDB has not listed episode entries for this season.";
+    const embed=homeEmbed(showName+" · "+season.name,description)
+      .setURL(season.sourceUrl)
+      .setFooter({text:"TMDB episode metadata · Synopsis text is spoiler-marked · Page "+(current+1)+"/"+totalPages});
+    const buttons=new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("discover:tv-page:"+season.showId+":"+season.seasonNumber+":"+(current-1)).setLabel("Previous").setStyle(ButtonStyle.Secondary).setDisabled(current===0),
+      new ButtonBuilder().setCustomId("discover:tv-page:"+season.showId+":"+season.seasonNumber+":"+(current+1)).setLabel("Next").setStyle(ButtonStyle.Secondary).setDisabled(current>=totalPages-1),
+    );
+    return {embed,components:[buttons,navigationButtons("discover",[{id:"home",label:"Back to discovery"}])]};
   }
 
   private async tmdbCollectionSelectionAndRespond(
