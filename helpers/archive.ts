@@ -100,8 +100,8 @@ export interface ArchiveEntry {
 }
 
 export function parsePanelChapterCaption(value:string):{chapterNumber:string;caption:string}{
- const match=/^\\s*(?:(?:chapter|ch\\.?)\\s*)?#?(\\d+(?:\\.\\d+)?|N\\/A)(?:\\s*(?:[-–—:|]\\s*|\\s+)(.*?))?\\s*$/i.exec(value.trim());
- if(!match||/[–—:|\\-]$/.test(value.trim()))throw new Error("Enter a chapter number or N/A. An optional caption can follow, e.g. Chapter 12 — Final battle.");
+ const match=/^\s*(?:(?:chapter|ch\.?)\s*)?#?(\d+(?:\.\d+)?|N\/A)(?:\s*(?:[-–—:|]\s*|\s+)(.*?))?\s*$/i.exec(value.trim());
+ if(!match||/[–—:|\-]$/.test(value.trim()))throw new Error("Enter a chapter number or N/A. An optional caption can follow, e.g. Chapter 12 — Final battle.");
  const chapterNumber=match[1]?.toUpperCase()==="N/A"?"N/A":match[1]!;
  return{chapterNumber,caption:(match[2]??"").trim()};
 }
@@ -109,7 +109,7 @@ export function parsePanelChapterCaption(value:string):{chapterNumber:string;cap
 export function parseAniListMangaReference(value:string):{id:string|null;url:string|null}{
  const raw=value.trim();
  if(!raw)return{id:null,url:null};
- if(/^\\d+$/.test(raw)){
+ if(/^\d+$/.test(raw)){
   const id=BigInt(raw);
   if(id<=0n||id>BigInt(Number.MAX_SAFE_INTEGER))throw new Error("AniList manga IDs must be positive safe integers.");
   const normalized=id.toString();
@@ -117,7 +117,7 @@ export function parseAniListMangaReference(value:string):{id:string|null;url:str
  }
  let url:URL;
  try{url=new URL(raw);}catch{throw new Error("Use a numeric AniList manga ID or an HTTPS AniList manga URL.");}
- const match=/^\\/manga\\/(\\d+)(?:\\/|$)/i.exec(url.pathname);
+ const match=/^\/manga\/(\d+)(?:\/|$)/i.exec(url.pathname);
  if(url.protocol!=="https:"||!["anilist.co","www.anilist.co"].includes(url.hostname.toLowerCase())||!match){
   throw new Error("Use a numeric AniList manga ID or an HTTPS AniList manga URL.");
  }
