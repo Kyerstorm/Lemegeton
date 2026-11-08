@@ -13,12 +13,15 @@ import {FeedbackCommand} from "./feedback.js";
 import {LogCommand} from "./log.js";
 import {PlannedCommand} from "./planned.js";
 import {BotModeratorsCommand} from "./moderators.js";
+import {TimestampCommand} from "./timestamp.js";
+import {InviteCommand} from "./invite.js";
+import {ConvertLinksCommand} from "./convertlinks.js";
 
 export function createCommandRegistry(config:BotConfig):FeatureCommand[]{
  const commands:FeatureCommand[]=[
   new DiscoverCommand(config),new ArchiveCommand(),new CommunityCommand(config),
   new PlayCommand(),new ProfileCommand(config),new CustomRoleCommand(),new SettingsCommand(),
-  new HelpCommand(),new PrivacyCommand(),new FeedbackCommand(),new LogCommand(),new PlannedCommand(),new BotModeratorsCommand(),
+  new HelpCommand(),new PrivacyCommand(),new FeedbackCommand(),new LogCommand(),new PlannedCommand(),new BotModeratorsCommand(),new TimestampCommand(),new InviteCommand(config),new ConvertLinksCommand(config),
  ];
  const names=new Set<string>();
  for(const command of commands){
