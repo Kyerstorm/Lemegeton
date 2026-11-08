@@ -33,6 +33,8 @@ import {
   updateArchiveEntry,
   saveArchiveSettings,
   submitArchiveEntry,
+  parsePanelChapterCaption,
+  parseAniListMangaReference,
   type ArchiveCategory,
   type ArchiveEntry,
   type ArchiveVisibility
@@ -120,6 +122,7 @@ function entryEmbed(entry: ArchiveEntry): EmbedBuilder {
       { name: "Contributor", value: `<@${entry.created_by}>`, inline: true },
     )
     .setFooter({ text: "Community Archive · Approved, attributed contribution" });
+  if(entry.chapter_number)embed.addFields({name:"Chapter",value:entry.chapter_number,inline:true});
   if (entry.source_title) embed.addFields({ name: "Work / source", value: safeDisplay(entry.source_title, 250), inline: true });
   if (entry.creator) embed.addFields({ name: "Original creator", value: safeDisplay(entry.creator, 250), inline: true });
   if (entry.source_url) embed.addFields({ name: "Source", value: `[Open original source](${entry.source_url})`, inline: false });
@@ -229,6 +232,7 @@ export class ArchiveCommand implements FeatureCommand {
     ))
     .addStringOption((option) => option.setName("title").setDescription("Entry or collection title").setMaxLength(200))
     .addStringOption((option) => option.setName("content").setDescription("Description or contribution").setMaxLength(3_000))
+    .addStringOption((option) => option.setName("chapter_caption").setDescription("For Manga Panels: Chapter 12 — caption, or N/A").setMaxLength(500))
     .addStringOption((option) => option.setName("source_title").setDescription("Linked work / source title").setMaxLength(200))
     .addStringOption((option) => option.setName("creator").setDescription("Original creator / contributor").setMaxLength(200))
     .addStringOption((option) => option.setName("source_url").setDescription("HTTPS source URL").setMaxLength(1_000))
@@ -298,9 +302,9 @@ export class ArchiveCommand implements FeatureCommand {
           const title = interaction.options.getString("title");
           const content = interaction.options.getString("content");
           if (!category || !isArchiveCategory(category)) throw new Error("Choose an Archive category.");
-          if (!title || !content) {
+          if (!title || (category !== "panels" && !content)) {
             await interaction.reply({
-              content: "Choose a category and fill in a title and description. The quick submission form is also available from the Archive panel.",
+              content: "Choose a category and fill in the required details. Manga Panels also need a chapter caption and image attachment.",
               components: [categorySelect("archive:submit-category")],
               flags: MessageFlags.Ephemeral,
             });
@@ -543,6 +547,10 @@ export class ArchiveCommand implements FeatureCommand {
       await this.presentEntries(interaction, entries, categoryLabel(selected));
       return true;
     }
+    if(action==="submit-category"&&selected==="panels"){
+      await interaction.reply({content:"Manga Panels require an image attachment and a chapter caption. Use /archive with action:submit, category:panels, title, chapter_caption, optional source_url (AniList ID or URL), tags, and file.",flags:MessageFlags.Ephemeral});
+      return true;
+    }
     if (action === "submit-category" && isArchiveCategory(selected)) {
       await interaction.showModal(submitModal(selected, "server"));
       return true;
@@ -649,27 +657,41 @@ export class ArchiveCommand implements FeatureCommand {
 
   private async submitFromCommand(interaction: ChatInputCommandInteraction, category: ArchiveCategory): Promise<void> {
     const title = interaction.options.getString("title", true);
-    const content = interaction.options.getString("content", true);
+    const content = interaction.options.getString("content") ?? "";
     const visibility = (interaction.options.getString("visibility") ?? "server") as ArchiveVisibility;
-    const sourceUrl = interaction.options.getString("source_url");
-    const needsUpload = category === "soundtracks" && !sourceUrl;
+    const submittedSourceUrl = interaction.options.getString("source_url") ?? "";
+    const attachment = interaction.options.getAttachment("file");
     const settings = await getArchiveSettings(interaction.guildId!);
+    const panelChapter = category === "panels" ? parsePanelChapterCaption(interaction.options.getString("chapter_caption") ?? "") : null;
+    const panelReference = category === "panels" ? parseAniListMangaReference(submittedSourceUrl) : null;
+    if (category === "panels") {
+      if (!attachment) throw new Error("Manga Panels require an image attachment.");
+      if (!settings.uploadTypes.includes("image")) throw new Error("This server has not enabled image uploads for the Archive.");
+      const probe = classifyArchiveUpload(category, { name: attachment.name, contentType: attachment.contentType ?? "application/octet-stream", bytes: Buffer.from([1]) });
+      if (probe.kind !== "image") throw new Error("Manga Panels accept image attachments only.");
+      if (attachment.size > 20 * 1024 * 1024) throw new Error("Archive uploads are limited to 20 MB.");
+    }
+    const sourceUrl = category === "panels" ? (panelReference?.url ?? undefined)
+      : category === "fanworks" || (category === "soundtracks" && submittedSourceUrl.trim().startsWith("https://")) ? submittedSourceUrl : undefined;
+    const needsUpload = category === "panels" || (category === "soundtracks" && !sourceUrl);
     const entryId = await submitArchiveEntry({
       guildId: interaction.guildId!,
       userId: interaction.user.id,
       category,
       title,
-      content,
+      content: category === "panels" ? [panelChapter!.caption, content].filter(Boolean).join("\n\n") : content,
       sourceTitle: interaction.options.getString("source_title") ?? undefined,
       creator: interaction.options.getString("creator") ?? undefined,
-      mediaType: interaction.options.getString("media_type") ?? "Other",
+      mediaType: category === "panels" ? "Manga" : interaction.options.getString("media_type") ?? "Other",
       sourceUrl: sourceUrl ?? undefined,
       tags: (interaction.options.getString("tags") ?? "").split(","),
       spoiler: interaction.options.getBoolean("spoiler") ?? category === "theories",
       visibility,
       needsUpload,
+      chapterNumber: panelChapter?.chapterNumber,
+      linkedMediaProvider: panelReference?.id ? "AniList" : undefined,
+      linkedMediaId: panelReference?.id ?? undefined,
     });
-    const attachment = interaction.options.getAttachment("file");
     let savedFile = false;
     if (attachment) {
       const kind = classifyArchiveUpload(category, {
@@ -677,6 +699,7 @@ export class ArchiveCommand implements FeatureCommand {
         contentType: attachment.contentType ?? "application/octet-stream",
         bytes: Buffer.from([1]),
       }).kind;
+      if (category === "panels" && kind !== "image") throw new Error("Manga Panels accept image attachments only.");
       if (!settings.uploadTypes.includes(kind)) throw new Error(`This server has not enabled ${kind} uploads.`);
       if (attachment.size > 20 * 1024 * 1024) throw new Error("Archive uploads are limited to 20 MB.");
       const response = await fetch(attachment.url, { signal: AbortSignal.timeout(15_000) });
