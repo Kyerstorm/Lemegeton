@@ -25,6 +25,7 @@ import { cleanText } from "../helpers/security.js";
 import { findAtlasRelationships, recordProviderRelationships } from "../helpers/atlas.js";
 import { renderAtlasSnapshot } from "../helpers/atlas-renderer.js";
 import { logger } from "../helpers/logger.js";
+import { loadingMessage } from "../helpers/emoji.js";
 
 
 type Category = "all" | "anime" | "manga" | "light_novel" | "book" | "movie" | "tv" | "game";
@@ -320,13 +321,13 @@ export class DiscoverCommand implements FeatureCommand {
       return true;
     }
     if (action === "trending" && CATEGORIES.some((item) => item.value === categoryValue)) {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: loadingMessage("Loading media results…"), flags: MessageFlags.Ephemeral });
       const results = await this.fetchTrending(categoryValue as Category);
       await this.presentResults(interaction, results, `Trending ${categoryLabel(categoryValue as Category)}`);
       return true;
     }
     if (action === "random" && CATEGORIES.some((item) => item.value === categoryValue)) {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: loadingMessage("Loading media results…"), flags: MessageFlags.Ephemeral });
       const results = await this.fetchRandom(categoryValue as Category);
       await this.presentResults(interaction, results, `Random discovery · ${categoryLabel(categoryValue as Category)}`);
       return true;
@@ -337,7 +338,7 @@ export class DiscoverCommand implements FeatureCommand {
         await interaction.reply({ content: "That media reference is invalid.", flags: MessageFlags.Ephemeral });
         return true;
       }
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: loadingMessage("Loading media results…"), flags: MessageFlags.Ephemeral });
       const results = await this.anilist.recommendations(mediaId, categoryValue as AniListMediaType);
       await this.presentResults(interaction, results.map((item) => anilistRecord(item, categoryValue === "ANIME" ? "anime" : "manga")), "Related AniList recommendations");
       return true;
@@ -363,7 +364,7 @@ export class DiscoverCommand implements FeatureCommand {
     category: Category,
     filters: DiscoverFilters = {},
   ): Promise<void> {
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: loadingMessage("Loading media results…"), flags: MessageFlags.Ephemeral });
     const [first, second] = await Promise.all([
       this.fetchSearch(firstTitle, category, filters),
       this.fetchSearch(secondTitle, category, filters),
@@ -391,13 +392,13 @@ export class DiscoverCommand implements FeatureCommand {
     category: Category,
     filters: DiscoverFilters = {},
   ): Promise<void> {
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: loadingMessage("Loading media results…"), flags: MessageFlags.Ephemeral });
     const results = await this.fetchSearch(query, category, filters);
     await this.presentResults(interaction, results, `Search results · ${categoryLabel(category)}`);
   }
 
   private async atlasAndRespond(interaction: ChatInputCommandInteraction, query: string, category: Category, filters: DiscoverFilters = {}): Promise<void> {
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: loadingMessage("Loading media results…"), flags: MessageFlags.Ephemeral });
     const results = await this.fetchSearch(query, category, filters);
     await this.saveProviderEdges(results);
     const first = results[0];

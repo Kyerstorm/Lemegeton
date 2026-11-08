@@ -7,7 +7,22 @@ import {PlayCommand} from "./play.js";
 import {ProfileCommand} from "./profile.js";
 import {SettingsCommand} from "./settings.js";
 import {CustomRoleCommand} from "./custom-role.js";
+import {HelpCommand} from "./help.js";
+import {PrivacyCommand} from "./privacy.js";
+import {FeedbackCommand} from "./feedback.js";
+import {LogCommand} from "./log.js";
+import {PlannedCommand} from "./planned.js";
+
 export function createCommandRegistry(config:BotConfig):FeatureCommand[]{
- const commands:FeatureCommand[]=[new DiscoverCommand(config),new ArchiveCommand(),new CommunityCommand(config),new PlayCommand(),new ProfileCommand(config),new CustomRoleCommand(),new SettingsCommand()];
- const names=new Set<string>();for(const command of commands){if(names.has(command.data.name))throw new Error(`Duplicate feature command: /${command.data.name}`);names.add(command.data.name);}return commands;
+ const commands:FeatureCommand[]=[
+  new DiscoverCommand(config),new ArchiveCommand(),new CommunityCommand(config),
+  new PlayCommand(),new ProfileCommand(config),new CustomRoleCommand(),new SettingsCommand(),
+  new HelpCommand(),new PrivacyCommand(),new FeedbackCommand(),new LogCommand(),new PlannedCommand(),
+ ];
+ const names=new Set<string>();
+ for(const command of commands){
+  if(names.has(command.data.name))throw new Error(`Duplicate command: /${command.data.name}`);
+  names.add(command.data.name);
+ }
+ return commands;
 }

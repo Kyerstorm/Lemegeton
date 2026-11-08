@@ -28,6 +28,7 @@ import { loadConfig } from "../helpers/config.js";
 import { createCustomRolePickerLink } from "../helpers/custom-role-picker-server.js";
 import {archiveLegacyCustomRole,cancelCustomRolePending,confirmCustomRolePending,getPendingCustomRoleRemoval} from "../helpers/custom-role-lifecycle.js";
 import { homeEmbed } from "../helpers/discord.js";
+import { loadingMessage } from "../helpers/emoji.js";
 import { extractCustomRoleAvatarPalette, processCustomRoleIconImage, type CustomRoleIconCrop } from "../helpers/custom-role-images.js";
 import { deleteCustomRoleIconSource, readCustomRoleIconSource, storeCustomRoleIconSource } from "../helpers/media-storage.js";
 import {
@@ -761,7 +762,7 @@ export class CustomRoleCommand implements FeatureCommand {
       return;
     }
 
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: loadingMessage("Revalidating the Custom Roles import…"), flags: MessageFlags.Ephemeral });
     let latest;
     try {
       latest = await planLegacyCustomRoleImport(guild);

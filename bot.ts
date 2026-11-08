@@ -11,6 +11,7 @@ import {dueDailyDeliveries,dueDailySchedules,markDailyDelivery,prepareDailyDeliv
 import {createCommandRegistry} from "./src/registry.js";
 import {isFeatureEnabled} from "./helpers/settings.js";
 import {homeEmbed} from "./helpers/discord.js";
+import {createIssueLog,issueHashNotice} from "./helpers/issue-logs.js";
 import {onCustomRoleMemberAdd,onCustomRoleMemberRemove,onCustomRoleMemberUpdate,onCustomRoleRoleDelete,reconcileCustomRoleGuild} from "./helpers/custom-role-lifecycle.js";
 import {startCustomRolePicker,stopCustomRolePicker} from "./helpers/custom-role-picker-server.js";
 import {startDashboardBridge,stopDashboardBridge} from "./helpers/dashboard-bridge.js";
@@ -72,16 +73,55 @@ async function respondWithError(interaction:Interaction,message:string):Promise<
  catch(error){logger.warn("Failed to respond to interaction error",{reason:error instanceof Error?error.message:"Unknown error"});}
 }
 async function routeInteraction(interaction:Interaction):Promise<void>{
+ if(!interaction.guildId){
+  if(interaction.isAutocomplete()){await interaction.respond([]).catch(()=>undefined);return;}
+  if(interaction.isRepliable()){
+   const message="Lemegeton commands and controls are available inside a Discord server, not in direct messages.";
+   try{if(interaction.deferred)await interaction.editReply(message);else if(!interaction.replied)await interaction.reply({content:message,flags:MessageFlags.Ephemeral});}catch{}
+  }
+  return;
+ }
+ if(interaction.isButton()&&Boolean((interaction.component as {disabled?:boolean}).disabled)){
+  if(!interaction.replied&&!interaction.deferred)await interaction.reply({content:"This control is disabled and cannot be used.",flags:MessageFlags.Ephemeral});
+  return;
+ }
  try{
   if(interaction.isAutocomplete()){const command=commandByName.get(interaction.commandName);if(command?.handleAutocomplete){await command.handleAutocomplete(interaction);}else{await interaction.respond([]);}return;}
-  if(interaction.isChatInputCommand()){const command=commandByName.get(interaction.commandName);if(!command){await interaction.reply({content:"That feature command is not available.",flags:MessageFlags.Ephemeral});return;}if(interaction.guildId&&interaction.commandName!=="settings"&&!await isFeatureEnabled(interaction.guildId,interaction.commandName)){await interaction.reply({content:"This feature is currently disabled by this server’s settings.",flags:MessageFlags.Ephemeral});return;}await command.execute(interaction);return;}
+  if(interaction.isChatInputCommand()){const command=commandByName.get(interaction.commandName);if(!command){await interaction.reply({content:"That feature command is not available.",flags:MessageFlags.Ephemeral});return;}if(["discover","archive","community","play","profile","custom-role"].includes(interaction.commandName)&&interaction.guildId&&interaction.commandName!=="settings"&&!await isFeatureEnabled(interaction.guildId,interaction.commandName)){await interaction.reply({content:"This feature is currently disabled by this server’s settings.",flags:MessageFlags.Ephemeral});return;}await command.execute(interaction);return;}
   if(!interaction.isButton()&&!interaction.isStringSelectMenu()&&!interaction.isRoleSelectMenu()&&!interaction.isChannelSelectMenu()&&!interaction.isModalSubmit())return;
   const prefix=interaction.customId.split(":",1)[0]??"";const command=commandByName.get(prefix);if(!command)return;
   const handled=interaction.isButton()?await(command.handleButton?.(interaction)??false)
    :(interaction.isStringSelectMenu()||interaction.isRoleSelectMenu()||interaction.isChannelSelectMenu())?await(command.handleSelect?.(interaction)??false)
    :await(command.handleModal?.(interaction)??false);
   if(!handled&&!interaction.replied&&!interaction.deferred)await interaction.reply({content:"This control is no longer available. Reopen the feature command and try again.",flags:MessageFlags.Ephemeral});
- }catch(error){const message=error instanceof Error?error.message:"Lemegeton could not complete that action.";logger.error("Discord interaction failed",{interactionId:interaction.id,reason:message});await respondWithError(interaction,message);}
+ }catch(error){
+  const message=error instanceof Error?error.message:"Lemegeton could not complete that action.";
+  logger.error("Discord interaction failed",{interactionId:interaction.id,reason:message});
+  let reference:string|undefined;
+  if(interaction.guildId){
+   try{
+    reference=await createIssueLog({
+     guildId:interaction.guildId,
+     userId:interaction.user.id,
+     username:interaction.user.globalName??interaction.user.username,
+     interactionId:interaction.id,
+     channelId:interaction.channelId,
+     command:interaction.isChatInputCommand()?"/"+interaction.commandName:interaction.isAutocomplete()?"autocomplete":interaction.isMessageComponent()?interaction.customId:"interaction",
+     details:{
+      interactionType:interaction.type,
+      commandOptions:interaction.isChatInputCommand()?interaction.options.data:undefined,
+      componentCustomId:interaction.isMessageComponent()?interaction.customId:undefined,
+      guildId:interaction.guildId,
+      channelId:interaction.channelId,
+     },
+     error,
+    });
+   }catch(logError){
+    logger.error("Could not persist issue diagnostic record",{interactionId:interaction.id,reason:logError instanceof Error?logError.message:"Unknown logging error"});
+   }
+  }
+  await respondWithError(interaction,reference?`${message}\n\n${issueHashNotice(reference)}`:message);
+ }
 }
 client.once(Events.ClientReady,ready=>{
  logger.info("Lemegeton TypeScript bot connected",{user:ready.user.tag,commands:commands.map(command=>command.data.name)});

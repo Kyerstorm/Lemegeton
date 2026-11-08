@@ -1,0 +1,72 @@
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import type { QueryResultRow } from "pg";
+import { query, queryOne } from "../database.js";
+
+const ISSUE_HASH_PATTERN = /^[a-f0-9]{128}$/i;
+const REDACTED = "[REDACTED]";
+
+export interface IssueLogInput {
+  guildId: string; userId: string; username: string; interactionId: string;
+  channelId: string | null; command: string; details: Record<string, unknown>; error: unknown;
+}
+export interface IssueLogRecord extends QueryResultRow {
+  issue_hash: string; guild_id: string; user_id: string; username: string;
+  interaction_id: string; channel_id: string | null; command_name: string;
+  details: Record<string, unknown>; created_at: Date | string;
+}
+
+function redactString(value: string): string {
+  return value
+    .replace(/(Bot\s+)[A-Za-z0-9._-]{20,}/gi, `$1${REDACTED}`)
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]{12,}/gi, `$1${REDACTED}`)
+    .replace(/((?:token|password|secret|api[_-]?key|authorization)\s*[:=]\s*)[^\s,;]+/gi, `$1${REDACTED}`);
+}
+function redactValue(value: unknown, key = ""): unknown {
+  if (/(?:token|password|secret|api[_-]?key|authorization|cookie)/i.test(key)) return REDACTED;
+  if (typeof value === "string") return redactString(value).slice(0, 12_000);
+  if (Array.isArray(value)) return value.slice(0, 100).map((item) => redactValue(item));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .slice(0, 100).map(([childKey, childValue]) => [childKey, redactValue(childValue, childKey)]));
+  }
+  if (typeof value === "bigint") return value.toString();
+  return value;
+}
+export function sanitizeIssueDetails(details: Record<string, unknown>): Record<string, unknown> {
+  return redactValue(details) as Record<string, unknown>;
+}
+export function isIssueHash(value: string): boolean { return ISSUE_HASH_PATTERN.test(value.trim()); }
+
+/** A 128-character SHA-512 reference derived from a numeric nonce and a hashed UUID. */
+export function createIssueHash(interactionId: string): string {
+  const randomSerial = Array.from(randomBytes(32), (byte) => String(byte % 10)).join("");
+  const uuidHash = createHash("sha512").update(randomUUID()).digest("hex");
+  return createHash("sha512").update(`${randomSerial}:${uuidHash}:${interactionId}`).digest("hex");
+}
+export function issueHashNotice(hash: string): string {
+  return `Issue reference: \`${hash}\`. Include this reference in /feedback so a moderator can inspect the diagnostic record with /log.`;
+}
+export async function createIssueLog(input: IssueLogInput): Promise<string> {
+  const issueHash = createIssueHash(input.interactionId);
+  const error = input.error instanceof Error
+    ? { name: input.error.name, message: input.error.message, stack: input.error.stack ?? null }
+    : { name: "UnknownError", message: String(input.error), stack: null };
+  const details = sanitizeIssueDetails({ ...input.details, error });
+  await query(
+    `INSERT INTO issue_logs
+      (issue_hash, guild_id, user_id, username, interaction_id, channel_id, command_name, details)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+    [issueHash, input.guildId, input.userId, input.username.slice(0, 120),
+      input.interactionId, input.channelId, input.command.slice(0, 100), JSON.stringify(details)],
+  );
+  return issueHash;
+}
+export async function findIssueLog(issueHash: string, guildId: string): Promise<IssueLogRecord | null> {
+  if (!isIssueHash(issueHash)) return null;
+  return queryOne<IssueLogRecord>(
+    `SELECT issue_hash, guild_id, user_id, username, interaction_id, channel_id,
+            command_name, details, created_at
+       FROM issue_logs WHERE issue_hash = $1 AND guild_id = $2`,
+    [issueHash.trim().toLowerCase(), guildId],
+  );
+}
