@@ -464,7 +464,7 @@ export class CommunityCommand implements FeatureCommand {
       return true;
     }
     if (action === "reading-vote") {
-      await voteForReading(interaction.guildId,id,interaction.user.id,id);
+      await voteForReading(interaction.guildId,interaction.user.id,id);
       await interaction.reply({content:"Your community reading vote was saved. You may change it while nominations remain open.",flags:MessageFlags.Ephemeral});
       return true;
     }
@@ -907,7 +907,7 @@ export class CommunityCommand implements FeatureCommand {
     const channel=interaction.channel;
     if(channel?.isTextBased()&&"send" in channel){
       await (channel as TextChannel).send({
-        content:`Community read selected: **${safeDisplay(selected.title,180)}** (${selected.category}).${selected.source_url?"\\nSource: "+selected.source_url:""}\\nA moderator can schedule its spoiler-aware discussion using /community action:reading-schedule reading_nomination_id:${selected.id}.`,
+        content:`Community read selected: **${safeDisplay(selected.title,180)}** (${selected.category}).${selected.source_url?"\nSource: "+selected.source_url:""}\nA moderator can schedule its spoiler-aware discussion using /community action:reading-schedule reading_nomination_id:${selected.id}.`,
         allowedMentions:{parse:[]},
       });
     }
@@ -929,7 +929,7 @@ export class CommunityCommand implements FeatureCommand {
     if(!channel?.isTextBased()||!("threads" in channel)||!("send" in channel)) throw new Error("Schedule reading discussions from a text channel that supports public threads.");
     const textChannel=channel as TextChannel;
     const announcement=await textChannel.send({
-      embeds:[homeEmbed("Community Reading Club · "+safeDisplay(row.title,150),`Selected work: ${safeDisplay(row.title,180)} (${row.category})\\nScheduled for <t:${Math.floor(scheduledAt.getTime()/1000)}:F>.\\n\\nKeep plot spoilers inside Discord spoiler tags and respect the shared reading boundary.`,row.source_url?[{name:"Source",value:"[Open metadata source]("+row.source_url+")"}]:[])],
+      embeds:[homeEmbed("Community Reading Club · "+safeDisplay(row.title,150),`Selected work: ${safeDisplay(row.title,180)} (${row.category})\nScheduled for <t:${Math.floor(scheduledAt.getTime()/1000)}:F>.\n\nKeep plot spoilers inside Discord spoiler tags and respect the shared reading boundary.`,row.source_url?[{name:"Source",value:"[Open metadata source]("+row.source_url+")"}]:[])],
       allowedMentions:{parse:[]},
     });
     let thread: Awaited<ReturnType<TextChannel["threads"]["create"]>>|null=null;
@@ -941,7 +941,7 @@ export class CommunityCommand implements FeatureCommand {
         reason:"Scheduled community reading discussion",
       });
       await thread.send({
-        content:`Community reading discussion · ${safeDisplay(row.title,180)}\\nScheduled for <t:${Math.floor(scheduledAt.getTime()/1000)}:F>.\\nMark plot spoilers with Discord spoiler tags (||like this||) and keep unmarked messages within the shared reading boundary.`,
+        content:`Community reading discussion · ${safeDisplay(row.title,180)}\nScheduled for <t:${Math.floor(scheduledAt.getTime()/1000)}:F>.\nMark plot spoilers with Discord spoiler tags (||like this||) and keep unmarked messages within the shared reading boundary.`,
         allowedMentions:{parse:[]},
       });
       await attachReadingDiscussion({guildId:interaction.guildId!,nominationId,channelId:interaction.channelId!,threadId:thread.id,scheduledAt});
