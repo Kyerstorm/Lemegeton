@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  normalizeTmdbCollection,
   normalizeTmdbMedia,
+  normalizeTmdbPeople,
+  normalizeTmdbPersonCredits,
   normalizeTmdbVideos,
   normalizeTmdbWatchAvailability,
 } from "../helpers/tmdb.js";
@@ -95,4 +98,56 @@ test("server media regions normalize valid ISO-style country codes", () => {
   assert.equal(normalizeMediaRegion(" I "), null);
   assert.equal(normalizeMediaRegion("USA"), null);
   assert.equal(normalizeMediaRegion("1E"), null);
+});
+
+test("TMDB people normalization validates IDs and safe profile paths", () => {
+  const people = normalizeTmdbPeople({
+    results: [
+      { id: 4, name: "Example Creator", profile_path: "/creator.jpg" },
+      { id: -1, name: "Invalid" },
+      { id: 5, name: "   " },
+    ],
+  });
+  assert.equal(people.length, 1);
+  assert.equal(people[0]?.name, "Example Creator");
+  assert.equal(people[0]?.sourceUrl, "https://www.themoviedb.org/person/4");
+  assert.equal(people[0]?.image, "https://image.tmdb.org/t/p/w500/creator.jpg");
+});
+
+test("TMDB person credits combine cast and crew, deduplicate and retain role/date", () => {
+  const credits = normalizeTmdbPersonCredits({
+    cast: [
+      { id: 12, media_type: "movie", title: "Film A", release_date: "2024-01-01", character: "Lead", popularity: 8 },
+      { id: 14, media_type: "tv", name: "Series B", first_air_date: "2023-01-01", character: "Guest", popularity: 7 },
+    ],
+    crew: [
+      { id: 12, media_type: "movie", title: "Film A", job: "Director", popularity: 8 },
+      { id: 15, media_type: "unknown", title: "Unsupported" },
+      { id: 16, media_type: "movie", title: "", popularity: 1 },
+    ],
+  });
+  assert.equal(credits.length, 2);
+  assert.equal(credits[0]?.title, "Film A");
+  assert.equal(credits[0]?.role, "Lead");
+  assert.equal(credits[0]?.releaseDate, "2024-01-01");
+  assert.equal(credits[1]?.category, "tv");
+});
+
+test("TMDB collection normalization sorts dates, filters invalid members and limits output", () => {
+  const collection = normalizeTmdbCollection({
+    id: 30,
+    name: "Example Collection",
+    poster_path: "/collection.jpg",
+    parts: [
+      { id: 3, title: "Later", release_date: "2025-01-01" },
+      { id: 2, title: "Earlier", release_date: "2020-01-01" },
+      { id: 4, title: "Date unknown" },
+      { id: -2, title: "Invalid id" },
+      { id: 5, title: "" },
+    ],
+  });
+  assert.equal(collection?.sourceUrl, "https://www.themoviedb.org/collection/30");
+  assert.deepEqual(collection?.items.map((item) => item.title), ["Earlier", "Later", "Date unknown"]);
+  assert.equal(collection?.image, "https://image.tmdb.org/t/p/w500/collection.jpg");
+  assert.equal(normalizeTmdbCollection({ id: 2, name: " " }), null);
 });
