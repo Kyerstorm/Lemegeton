@@ -12,12 +12,13 @@ import {PrivacyCommand} from "./privacy.js";
 import {FeedbackCommand} from "./feedback.js";
 import {LogCommand} from "./log.js";
 import {PlannedCommand} from "./planned.js";
+import {BotModeratorsCommand} from "./moderators.js";
 
 export function createCommandRegistry(config:BotConfig):FeatureCommand[]{
  const commands:FeatureCommand[]=[
   new DiscoverCommand(config),new ArchiveCommand(),new CommunityCommand(config),
   new PlayCommand(),new ProfileCommand(config),new CustomRoleCommand(),new SettingsCommand(),
-  new HelpCommand(),new PrivacyCommand(),new FeedbackCommand(),new LogCommand(),new PlannedCommand(),
+  new HelpCommand(),new PrivacyCommand(),new FeedbackCommand(),new LogCommand(),new PlannedCommand(),new BotModeratorsCommand(),
  ];
  const names=new Set<string>();
  for(const command of commands){
