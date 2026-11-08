@@ -5,6 +5,7 @@ import {
   normalizeTmdbVideos,
   normalizeTmdbWatchAvailability,
 } from "../helpers/tmdb.js";
+import { normalizeMediaRegion } from "../helpers/media-region.js";
 
 test("TMDB media normalization accepts valid movie and TV records", () => {
   const movie = normalizeTmdbMedia({
@@ -86,4 +87,12 @@ test("TMDB video normalization limits results and removes duplicate records", ()
   results.push(results[0]!);
   const videos = normalizeTmdbVideos({ results });
   assert.equal(videos.length, 12);
+});
+
+test("server media regions normalize valid ISO-style country codes", () => {
+  assert.equal(normalizeMediaRegion("ie"), "IE");
+  assert.equal(normalizeMediaRegion("US"), "US");
+  assert.equal(normalizeMediaRegion(" I "), null);
+  assert.equal(normalizeMediaRegion("USA"), null);
+  assert.equal(normalizeMediaRegion("1E"), null);
 });
