@@ -65,15 +65,15 @@ export class LogCommand implements FeatureCommand {
       .setTitle("Issue diagnostics")
       .setDescription("Private server-scoped diagnostic record. Sensitive option values are redacted before storage.")
       .addFields(
-        { name: "Issue hash", value: ```${record.issue_hash.trim()}``` `, inline: false },
+        { name: "Issue hash", value: "```" + record.issue_hash.trim() + "```", inline: false },
         { name: "Occurred", value: `<t:${Math.floor(new Date(occurredAt).getTime() / 1_000)}:F>`, inline: true },
         { name: "User", value: `<@${record.user_id}> · \`${record.user_id}\``, inline: true },
         { name: "Event", value: clip(details.event ?? "interaction", 200), inline: true },
         { name: "Command / control", value: clip(context.commandName ?? context.customId ?? "unknown", 200), inline: true },
         { name: "Channel", value: context.channelId ? `<#${String(context.channelId)}>\n\`${String(context.channelId)}\`` : "Unavailable", inline: true },
         { name: "Error", value: clip(`${String(error.name ?? "Error")}: ${String(error.message ?? "No message")}`, 1_000), inline: false },
-        { name: "Interaction context", value: `\\```json\n${clip(context, 900)}\n\\````, inline: false },
-        { name: "Stack trace", value: `\\```text\n${clip(error.stack ?? "No stack trace was recorded.", 900)}\n\\````, inline: false },
+        { name: "Interaction context", value: "```json\\n" + clip(context, 900) + "\\n```", inline: false },
+        { name: "Stack trace", value: "```text\\n" + clip(error.stack ?? "No stack trace was recorded.", 900) + "\\n```", inline: false },
       )
       .setFooter({ text: `Lemegeton diagnostics · UUID digest ${record.uuid_hash.slice(0, 16)}…` })
       .setTimestamp(new Date(occurredAt));
