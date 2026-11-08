@@ -10,7 +10,7 @@ fail() {
 }
 
 command -v node >/dev/null 2>&1 || fail "Node.js 22 or newer is required."
-node --version | grep -Eq '^v(22|2[3-9]|[3-9][0-9])\.' || fail "Node.js 22 or newer is required."
+node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 9) ? 0 : 1)' || fail "Node.js 22.9 or newer is required."
 
 if [[ ! -s "$ROOT/dist/bot.js" ]]; then
   [[ -x "$ROOT/node_modules/.bin/tsc" ]] || fail "TypeScript output is missing and dependencies are not installed. Run npm install first."
