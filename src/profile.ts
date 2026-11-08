@@ -420,8 +420,17 @@ export class ProfileCommand implements FeatureCommand {
         { name: "Profile visibility", value: profile.steam.visibility, inline: true },
         { name: "Public game count", value: profile.steam.gameCount === null ? "Private / unavailable" : String(profile.steam.gameCount), inline: true },
       );
-      if (profile.steam.visibility === "public" && profile.steam.recentlyPlayed.length) {
-        embed.addFields({ name: "Recently played (public Steam data)", value: profile.steam.recentlyPlayed.map((game) => game.name).join(", ").slice(0, 900), inline: false });
+      if(profile.steam.visibility==="public"){
+        if(profile.steam.totalPlaytimeMinutes!==null){
+          const hours=(profile.steam.totalPlaytimeMinutes/60).toFixed(1);
+          embed.addFields({name:"Public library playtime",value:hours+" hours reported by Steam",inline:true});
+        }
+        if(profile.steam.topGames.length){
+          embed.addFields({name:"Most played games",value:profile.steam.topGames.map(game=>`[${game.name}](https://store.steampowered.com/app/${game.appId}) · ${(game.minutes/60).toFixed(1)}h`).join("\n").slice(0,1000),inline:false});
+        }
+        if(profile.steam.recentlyPlayed.length){
+          embed.addFields({name:"Recently played",value:profile.steam.recentlyPlayed.map(game=>game.name+" · "+(game.minutes/60).toFixed(1)+"h in 2 weeks").join("\n").slice(0,900),inline:false});
+        }
       }
     }
     await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
