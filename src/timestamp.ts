@@ -3,8 +3,8 @@ import type { FeatureCommand } from "../helpers/command.js";
 
 export function parseUtcDateTime(date: string, time: string): Date | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) return null;
-  const [year, month, day] = date.split("-").map(Number);
-  const [hour, minute] = time.split(":").map(Number);
+  const [year = 0, month = 0, day = 0] = date.split("-").map(Number);
+  const [hour = 0, minute = 0] = time.split(":").map(Number);
   if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59) return null;
   const result = new Date(0);
   result.setUTCFullYear(year, month - 1, day);
