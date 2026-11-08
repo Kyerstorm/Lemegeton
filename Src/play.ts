@@ -16,6 +16,7 @@ import {
   type TextChannel,
 } from "discord.js";
 import type { FeatureCommand } from "../Helpers/command.js";
+import {createIssueLog,issueHashNotice} from "../Helpers/issue-logs.js";
 import { homeEmbed } from "../Helpers/discord.js";
 import {
   addQuizQuestion,
@@ -211,7 +212,8 @@ export class PlayCommand implements FeatureCommand {
         default: throw new Error("That game action is not available.");
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "The game action failed.";
+      const issue = await createIssueLog(interaction, error, "play.execute");
+      const message = (error instanceof Error ? error.message : "The game action failed.") + issueHashNotice(issue);
       await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(async () => {
         await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral });
       });
@@ -363,7 +365,8 @@ export class PlayCommand implements FeatureCommand {
         return true;
       }
     } catch (error) {
-      await interaction.reply({ content: error instanceof Error ? error.message : "The game action failed.", flags: MessageFlags.Ephemeral });
+      const issue = await createIssueLog(interaction, error, "play.interaction");
+      await interaction.reply({ content: (error instanceof Error ? error.message : "The game action failed.") + issueHashNotice(issue), flags: MessageFlags.Ephemeral });
       return true;
     }
     return false;
