@@ -83,7 +83,7 @@ async function routeInteraction(interaction:Interaction):Promise<void>{
    :interaction.isStringSelectMenu()?await(command.handleSelect?.(interaction)??false)
    :await(command.handleModal?.(interaction)??false);
   if(!handled&&!interaction.replied&&!interaction.deferred)await interaction.reply({content:"This control is no longer available. Reopen the feature command and try again.",flags:MessageFlags.Ephemeral});
- }catch(error){const message=error instanceof Error?error.message:"Lemegeton could not complete that action.";const issue=await createIssueLog(interaction,error);logger.error("Discord interaction failed",{interactionId:interaction.id,issueHash:issue.hash,persisted:issue.persisted,reason:message});await respondWithError(interaction,`${message}\n\nIssue hash:\n\`${issue.hash}\``);}
+ }catch(error){const message=error instanceof Error?error.message:"Lemegeton could not complete that action.";const issue=await createIssueLog(interaction,error);logger.error("Discord interaction failed",{interactionId:interaction.id,issueHash:issue.hash,persisted:issue.persisted,reason:message});await respondWithError(interaction,message + "\n\nIssue hash:\n" + issue.hash);}
 }
 client.once(Events.ClientReady,ready=>logger.info("Lemegeton TypeScript bot connected",{user:ready.user.tag,commands:commands.map(command=>command.data.name)}));
 client.on(Events.InteractionCreate,interaction=>void routeInteraction(interaction));
