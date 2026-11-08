@@ -11,6 +11,7 @@ import {dueDailyDeliveries,dueDailySchedules,markDailyDelivery,prepareDailyDeliv
 import {createCommandRegistry} from "./Src/registry.js";
 import {isFeatureEnabled} from "./Helpers/settings.js";
 import {homeEmbed} from "./Helpers/discord.js";
+import {createIssueLog} from "./Helpers/issue-logs.js";
 
 const config=loadConfig();configureLogger(config.logLevel);
 const client=new Client({intents:[GatewayIntentBits.Guilds,GatewayIntentBits.GuildMessages,GatewayIntentBits.MessageContent]});
@@ -69,6 +70,11 @@ async function respondWithError(interaction:Interaction,message:string):Promise<
 }
 async function routeInteraction(interaction:Interaction):Promise<void>{
  try{
+  if(!interaction.guildId){
+   if(interaction.isAutocomplete()){await interaction.respond([]);return;}
+   if(interaction.isRepliable())await interaction.reply({content:"Lemegeton commands and controls can only be used inside a server.",flags:MessageFlags.Ephemeral});
+   return;
+  }
   if(interaction.isAutocomplete()){const command=commandByName.get(interaction.commandName);if(command?.handleAutocomplete){await command.handleAutocomplete(interaction);}else{await interaction.respond([]);}return;}
   if(interaction.isChatInputCommand()){const command=commandByName.get(interaction.commandName);if(!command){await interaction.reply({content:"That feature command is not available.",flags:MessageFlags.Ephemeral});return;}if(interaction.guildId&&interaction.commandName!=="settings"&&!await isFeatureEnabled(interaction.guildId,interaction.commandName)){await interaction.reply({content:"This feature is currently disabled by this server’s settings.",flags:MessageFlags.Ephemeral});return;}await command.execute(interaction);return;}
   if(!interaction.isButton()&&!interaction.isStringSelectMenu()&&!interaction.isModalSubmit())return;
@@ -77,7 +83,7 @@ async function routeInteraction(interaction:Interaction):Promise<void>{
    :interaction.isStringSelectMenu()?await(command.handleSelect?.(interaction)??false)
    :await(command.handleModal?.(interaction)??false);
   if(!handled&&!interaction.replied&&!interaction.deferred)await interaction.reply({content:"This control is no longer available. Reopen the feature command and try again.",flags:MessageFlags.Ephemeral});
- }catch(error){const message=error instanceof Error?error.message:"Lemegeton could not complete that action.";logger.error("Discord interaction failed",{interactionId:interaction.id,reason:message});await respondWithError(interaction,message);}
+ }catch(error){const message=error instanceof Error?error.message:"Lemegeton could not complete that action.";const issue=await createIssueLog(interaction,error);logger.error("Discord interaction failed",{interactionId:interaction.id,issueHash:issue.hash,persisted:issue.persisted,reason:message});await respondWithError(interaction,`${message}\n\nIssue hash:\n\`${issue.hash}\``);}
 }
 client.once(Events.ClientReady,ready=>logger.info("Lemegeton TypeScript bot connected",{user:ready.user.tag,commands:commands.map(command=>command.data.name)}));
 client.on(Events.InteractionCreate,interaction=>void routeInteraction(interaction));
