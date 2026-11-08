@@ -6,6 +6,7 @@ import {
   type ChatInputCommandInteraction,
 } from "discord.js";
 import type { FeatureCommand } from "../Helpers/command.js";
+import {emoji} from "../Helpers/emoji.js";
 import { findIssueLog } from "../Helpers/issue-logs.js";
 
 function canViewIssueLog(interaction: ChatInputCommandInteraction): boolean {
@@ -49,7 +50,7 @@ export class LogCommand implements FeatureCommand {
       return;
     }
 
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ content: emoji.loading + " Loading issue diagnostics…", flags: MessageFlags.Ephemeral });
     const record = await findIssueLog(hash, interaction.guildId);
     if (!record) {
       await interaction.editReply({ content: "No issue with that hash exists in this server. Check the copied hash and try again." });
