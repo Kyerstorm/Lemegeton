@@ -190,8 +190,8 @@ export async function submitArchiveEntry(input: ArchiveSubmission): Promise<stri
   const creator = input.creator ? cleanText(input.creator, 200) : null;
   if (!title || (!body && input.category!=="panels")) throw new Error("A title and description/content are both required.");
   const chapterNumber=input.category==="panels"?input.chapterNumber?.trim():undefined;
-  if(input.category==="panels"&&(!chapterNumber||!(/^(?:\\d+(?:\\.\\d+)?|N\\/A)$/i.test(chapterNumber))))throw new Error("Manga panel entries need a chapter number or N/A.");
-  const linkedMediaId=input.category==="panels"&&input.linkedMediaProvider==="AniList"&&input.linkedMediaId&&/^\\d+$/.test(input.linkedMediaId)?input.linkedMediaId:null;
+  if(input.category==="panels"&&(!chapterNumber||!(/^(?:\d+(?:\.\d+)?|N\/A)$/i.test(chapterNumber))))throw new Error("Manga panel entries need a chapter number or N/A.");
+  const linkedMediaId=input.category==="panels"&&input.linkedMediaProvider==="AniList"&&input.linkedMediaId&&/^\d+$/.test(input.linkedMediaId)?input.linkedMediaId:null;
   if (body.length > 3_000) throw new Error("Archive descriptions are limited to 3,000 characters.");
   if (input.category === "quotes") {
     if (body.length > 280) throw new Error("Quotes are limited to 280 characters. Do not submit lyrics, chapters or long copyrighted passages.");
