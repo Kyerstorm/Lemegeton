@@ -1,4 +1,4 @@
-import { ActionRowBuilder, EmbedBuilder, MessageFlags, ModalBuilder, SlashCommandBuilder, TextInputBuilder, TextInputStyle, type ChatInputCommandInteraction, type Client, type ModalSubmitInteraction } from "discord.js";
+import { ActionRowBuilder, EmbedBuilder, MessageFlags, ModalBuilder, SlashCommandBuilder, TextInputBuilder, TextInputStyle, type ChatInputCommandInteraction, type ModalSubmitInteraction } from "discord.js";
 import type { FeatureCommand } from "../Helpers/command.js";
 function feedbackModal(): ModalBuilder {
   return new ModalBuilder().setCustomId("feedback:submit").setTitle("Send feedback").addComponents(
@@ -9,7 +9,6 @@ function feedbackModal(): ModalBuilder {
 }
 export class FeedbackCommand implements FeatureCommand {
   readonly data = new SlashCommandBuilder().setName("feedback").setDescription("Send a bug report or feature idea to the Lemegeton team");
-  constructor(private readonly client: Client) {}
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
     if (!interaction.guildId) { await interaction.reply({ content: "Feedback can only be submitted from a server.", flags: MessageFlags.Ephemeral }); return; }
     await interaction.showModal(feedbackModal());
@@ -25,7 +24,7 @@ export class FeedbackCommand implements FeatureCommand {
     const channelId = process.env.BOT_FEEDBACK_CHANNEL_ID?.trim() ?? "";
     if (!/^\d{17,20}$/.test(channelId)) { await interaction.reply({ content: "The feedback destination is not configured. Please contact a server administrator.", flags: MessageFlags.Ephemeral }); return true; }
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const destination = await this.client.channels.fetch(channelId);
+    const destination = await interaction.client.channels.fetch(channelId);
     if (!destination?.isTextBased() || !("send" in destination)) { await interaction.editReply({ content: "The feedback destination is unavailable right now." }); return true; }
     const embed = new EmbedBuilder().setColor(category.startsWith("bug") ? 0xed4245 : 0x57f287).setTitle(category.startsWith("bug") ? "Bug report" : "Feature idea").setDescription(description.slice(0, 4000)).addFields(
       { name: "Server", value: (interaction.guild?.name ?? "Unknown") + " (" + interaction.guildId + ")", inline: true },
