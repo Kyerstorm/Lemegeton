@@ -6,6 +6,8 @@ export interface SteamProfile {
   visibility: "public" | "private" | "unknown";
   createdAt: number | null;
   gameCount: number | null;
+  totalPlaytimeMinutes:number|null;
+  topGames:Array<{appId:number;name:string;minutes:number;icon:string|null}>;
   recentlyPlayed: Array<{ appId: number; name: string; minutes: number; icon: string | null }>;
 }
 
@@ -45,6 +47,18 @@ export function parseSteamStoreGame(value:unknown):SteamStoreGame|null{
  };
 }
 
+export function parseOwnedSteamGames(value:unknown):{totalPlaytimeMinutes:number;topGames:Array<{appId:number;name:string;minutes:number;icon:string|null}>}{
+ const rows=Array.isArray(value)?value:[];
+ const games=rows.flatMap(raw=>{
+  const game=record(raw);
+  if(!game||typeof game.appid!=="number"||!Number.isSafeInteger(game.appid)||game.appid<1||typeof game.name!=="string"||!game.name.trim())return[];
+  const minutes=typeof game.playtime_forever==="number"&&Number.isFinite(game.playtime_forever)?Math.max(0,Math.floor(game.playtime_forever)):0;
+  const icon=typeof game.img_icon_url==="string"&&game.img_icon_url?"https://media.steampowered.com/steamcommunity/public/images/apps/"+game.appid+"/"+game.img_icon_url+".jpg":null;
+  return[{appId:game.appid,name:game.name.trim().slice(0,120),minutes,icon}];
+ });
+ return{totalPlaytimeMinutes:games.reduce((sum,game)=>sum+game.minutes,0),topGames:games.sort((a,b)=>b.minutes-a.minutes).slice(0,5)};
+}
+
 export class SteamClient {
   constructor(private readonly apiKey?: string) {}
 
@@ -80,6 +94,8 @@ export class SteamClient {
     const state = player.communityvisibilitystate;
     const visibility = state === 3 ? "public" : state === 1 || state === 2 ? "private" : "unknown";
     let gameCount: number | null = null;
+    let totalPlaytimeMinutes:number|null=null;
+    let topGames:SteamProfile["topGames"]=[];
     let recentlyPlayed: SteamProfile["recentlyPlayed"] = [];
     if (visibility === "public") {
       const [owned, recent] = await Promise.all([
@@ -89,6 +105,9 @@ export class SteamClient {
       const ownedResponse = record(record(owned)?.response);
       const recentResponse = record(record(recent)?.response);
       gameCount = typeof ownedResponse?.game_count === "number" ? ownedResponse.game_count : null;
+      const ownedSummary=parseOwnedSteamGames(ownedResponse?.games);
+      totalPlaytimeMinutes=Array.isArray(ownedResponse?.games)?ownedSummary.totalPlaytimeMinutes:null;
+      topGames=ownedSummary.topGames;
       recentlyPlayed = (Array.isArray(recentResponse?.games) ? recentResponse.games : []).flatMap((item) => {
         const game = record(item);
         if (!game || typeof game.appid !== "number" || typeof game.name !== "string") return [];
@@ -110,6 +129,8 @@ export class SteamClient {
       visibility,
       createdAt: typeof player.timecreated === "number" ? player.timecreated : null,
       gameCount,
+      totalPlaytimeMinutes,
+      topGames,
       recentlyPlayed,
     };
   }
