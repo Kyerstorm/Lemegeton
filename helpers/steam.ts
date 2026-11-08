@@ -52,7 +52,8 @@ export function parseOwnedSteamGames(value:unknown):{totalPlaytimeMinutes:number
  const games=rows.flatMap(raw=>{
   const game=record(raw);
   if(!game||typeof game.appid!=="number"||!Number.isSafeInteger(game.appid)||game.appid<1||typeof game.name!=="string"||!game.name.trim())return[];
-  const minutes=typeof game.playtime_forever==="number"&&Number.isFinite(game.playtime_forever)?Math.max(0,Math.floor(game.playtime_forever)):0;
+  if(game.playtime_forever!==undefined&&(typeof game.playtime_forever!=="number"||!Number.isFinite(game.playtime_forever)||game.playtime_forever<0))return[];
+  const minutes=typeof game.playtime_forever==="number"?Math.floor(game.playtime_forever):0;
   const icon=typeof game.img_icon_url==="string"&&game.img_icon_url?"https://media.steampowered.com/steamcommunity/public/images/apps/"+game.appid+"/"+game.img_icon_url+".jpg":null;
   return[{appId:game.appid,name:game.name.trim().slice(0,120),minutes,icon}];
  });
