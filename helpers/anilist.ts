@@ -62,7 +62,7 @@ const isObj=(v:unknown):v is Obj=>typeof v==="object"&&v!==null&&!Array.isArray(
 const str=(v:unknown)=>typeof v==="string"&&v.trim()?v:null;
 const num=(v:unknown)=>typeof v==="number"&&Number.isFinite(v)?v:null;
 function titleOf(v:unknown):string {const t=isObj(v)?v:{};return str(t.english)??str(t.romaji)??str(t.native)??"Untitled";}
-function imageOf(v:unknown):string|null {const o=isObj(v)?v:{};const value=str(o.large);if(!value)return null;try{const u=new URL(value);return u.protocol==="https:"&&u.hostname==="anilist.co"?value:null;}catch{return null;}}
+function imageOf(v:unknown):string|null {const o=isObj(v)?v:{};const value=str(o.large)??str(o.extraLarge)??str(o.medium);if(!value)return null;try{const u=new URL(value);return u.protocol==="https:"&&(u.hostname==="anilist.co"||/^s\d+\.anilist\.co$/i.test(u.hostname))?value:null;}catch{return null;}}
 export function buildAniListTrailerUrl(site:string|null|undefined,id:string|null|undefined):string|null {
  if(!site||!id)return null;
  const provider=site.trim().toLowerCase();
