@@ -89,7 +89,7 @@ function interactionContext(interaction: Interaction): Record<string, unknown> {
  * hashed and retained for internal correlation without exposing the UUID.
  */
 export function issueHashNotice(issue: CreatedIssue): string {
-  return "\n\nIssue hash:\n" + issue.hash + (issue.persisted ? "" : "\nThe diagnostic record could not be saved.");
+  return "\n\nIssue hash:\n```\n" + issue.hash + "\n```" + (issue.persisted ? "" : "\nThe diagnostic record could not be saved.");
 }
 
 export async function createIssueLog(
