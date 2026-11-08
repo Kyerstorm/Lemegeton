@@ -6,13 +6,9 @@
 
 | Language | Bytes | Share |
 | --- | ---: | ---: |
-| Python | 3,683,992 | 85.2% |
-| TypeScript | 474,502 | 11.0% |
-| Rust | 58,941 | 1.4% |
-| JavaScript | 48,182 | 1.1% |
-| CSS | 24,920 | 0.6% |
-| Batchfile | 17,137 | 0.4% |
-| HTML | 13,244 | 0.3% |
+| Python | 3,657,096 | 98.5% |
+| TypeScript | 36,721 | 1.0% |
+| Batchfile | 17,137 | 0.5% |
 | Dockerfile | 2,243 | 0.1% |
 | Shell | 899 | 0.0% |
 | Procfile | 24 | 0.0% |
@@ -74,7 +70,6 @@ _Language source: GitHub Linguist. Percentages describe repository composition, 
 
 ## Declared runtimes
 
-- Node.js >=22
 - Node.js >=22.9.0
 
 ## Detection policy
