@@ -24,6 +24,7 @@ import {
   type RoleSelectMenuInteraction,
 } from "discord.js";
 import type { FeatureCommand } from "../helpers/command.js";
+import { createInteractionIssueLog, issueHashNotice } from "../helpers/issue-logs.js";
 import { loadConfig } from "../helpers/config.js";
 import { createCustomRolePickerLink } from "../helpers/custom-role-picker-server.js";
 import {archiveLegacyCustomRole,cancelCustomRolePending,confirmCustomRolePending,getPendingCustomRoleRemoval} from "../helpers/custom-role-lifecycle.js";
@@ -392,8 +393,10 @@ export class CustomRoleCommand implements FeatureCommand {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Custom Roles could not complete that action.";
-      if (interaction.replied || interaction.deferred) await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral });
-      else await interaction.reply({ content: message, flags: MessageFlags.Ephemeral });
+      const issueHash = await createInteractionIssueLog(interaction, "/custom-role", error);
+      const response = issueHash ? `${message}\n\n${issueHashNotice(issueHash)}` : message;
+      if (interaction.replied || interaction.deferred) await interaction.followUp({ content: response, flags: MessageFlags.Ephemeral });
+      else await interaction.reply({ content: response, flags: MessageFlags.Ephemeral });
     }
   }
 

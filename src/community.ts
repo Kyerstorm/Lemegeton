@@ -18,6 +18,7 @@ import {
   type TextChannel,
 } from "discord.js";
 import type { FeatureCommand } from "../helpers/command.js";
+import { createInteractionIssueLog, issueHashNotice } from "../helpers/issue-logs.js";
 import type { BotConfig } from "../helpers/config.js";
 import { homeEmbed } from "../helpers/discord.js";
 import { AniListClient } from "../helpers/anilist.js";
@@ -195,8 +196,11 @@ export class CommunityCommand implements FeatureCommand {
         default: throw new Error("That community action is not available.");
       }
     } catch (error) {
-      await interaction.reply({ content: error instanceof Error ? error.message : "The community action failed.", flags: MessageFlags.Ephemeral }).catch(async () => {
-        await interaction.followUp({ content: error instanceof Error ? error.message : "The community action failed.", flags: MessageFlags.Ephemeral });
+      const message = error instanceof Error ? error.message : "The community action failed.";
+      const issueHash = await createInteractionIssueLog(interaction, "/community", error);
+      const response = issueHash ? `${message}\n\n${issueHashNotice(issueHash)}` : message;
+      await interaction.reply({ content: response, flags: MessageFlags.Ephemeral }).catch(async () => {
+        await interaction.followUp({ content: response, flags: MessageFlags.Ephemeral });
       });
     }
   }
@@ -610,7 +614,9 @@ export class CommunityCommand implements FeatureCommand {
         return true;
       }
     } catch (error) {
-      await interaction.reply({ content: error instanceof Error ? error.message : "The community action failed.", flags: MessageFlags.Ephemeral });
+      const message = error instanceof Error ? error.message : "The community action failed.";
+      const issueHash = await createInteractionIssueLog(interaction, "/community", error, { action: "component" });
+      await interaction.reply({ content: issueHash ? `${message}\n\n${issueHashNotice(issueHash)}` : message, flags: MessageFlags.Ephemeral });
       return true;
     }
     return false;

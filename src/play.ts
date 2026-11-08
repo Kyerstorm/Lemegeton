@@ -16,6 +16,7 @@ import {
   type TextChannel,
 } from "discord.js";
 import type { FeatureCommand } from "../helpers/command.js";
+import { createInteractionIssueLog, issueHashNotice } from "../helpers/issue-logs.js";
 import { homeEmbed } from "../helpers/discord.js";
 import {
   addQuizQuestion,
@@ -212,8 +213,10 @@ export class PlayCommand implements FeatureCommand {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "The game action failed.";
-      await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(async () => {
-        await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral });
+      const issueHash = await createInteractionIssueLog(interaction, "/play", error);
+      const response = issueHash ? `${message}\n\n${issueHashNotice(issueHash)}` : message;
+      await interaction.reply({ content: response, flags: MessageFlags.Ephemeral }).catch(async () => {
+        await interaction.followUp({ content: response, flags: MessageFlags.Ephemeral });
       });
     }
   }
@@ -363,7 +366,9 @@ export class PlayCommand implements FeatureCommand {
         return true;
       }
     } catch (error) {
-      await interaction.reply({ content: error instanceof Error ? error.message : "The game action failed.", flags: MessageFlags.Ephemeral });
+      const message = error instanceof Error ? error.message : "The game action failed.";
+      const issueHash = await createInteractionIssueLog(interaction, "/play", error, { action: "modal-submit" });
+      await interaction.reply({ content: issueHash ? `${message}\n\n${issueHashNotice(issueHash)}` : message, flags: MessageFlags.Ephemeral });
       return true;
     }
     return false;

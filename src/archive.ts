@@ -18,6 +18,7 @@ import {
   type StringSelectMenuInteraction,
 } from "discord.js";
 import type { FeatureCommand } from "../helpers/command.js";
+import { createInteractionIssueLog, issueHashNotice } from "../helpers/issue-logs.js";
 import { homeEmbed } from "../helpers/discord.js";
 import {
   ARCHIVE_CATEGORIES,
@@ -446,8 +447,10 @@ export class ArchiveCommand implements FeatureCommand {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "The Archive could not complete that action.";
-      if (interaction.deferred || interaction.replied) await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral });
-      else await interaction.reply({ content: message, flags: MessageFlags.Ephemeral });
+      const issueHash = await createInteractionIssueLog(interaction, "/archive", error);
+      const response = issueHash ? `${message}\n\n${issueHashNotice(issueHash)}` : message;
+      if (interaction.deferred || interaction.replied) await interaction.followUp({ content: response, flags: MessageFlags.Ephemeral });
+      else await interaction.reply({ content: response, flags: MessageFlags.Ephemeral });
     }
   }
 
@@ -510,7 +513,9 @@ export class ArchiveCommand implements FeatureCommand {
           await finishArchiveUpload(interaction.guildId, interaction.user.id, value);
           await interaction.reply({ content: `Submission #${value} is now awaiting moderator review.`, flags: MessageFlags.Ephemeral });
         } catch (error) {
-          await interaction.reply({ content: error instanceof Error ? error.message : "Could not finish the upload.", flags: MessageFlags.Ephemeral });
+          const message = error instanceof Error ? error.message : "Could not finish the upload.";
+          const issueHash = await createInteractionIssueLog(interaction, "/archive", error, { action: "finish-upload" });
+          await interaction.reply({ content: issueHash ? `${message}\n\n${issueHashNotice(issueHash)}` : message, flags: MessageFlags.Ephemeral });
         }
         return true;
       case "open-entry":
@@ -634,7 +639,9 @@ export class ArchiveCommand implements FeatureCommand {
         return true;
       }
     } catch (error) {
-      await interaction.reply({ content: error instanceof Error ? error.message : "The Archive could not complete that action.", flags: MessageFlags.Ephemeral });
+      const message = error instanceof Error ? error.message : "The Archive could not complete that action.";
+      const issueHash = await createInteractionIssueLog(interaction, "/archive", error, { action: "modal-submit" });
+      await interaction.reply({ content: issueHash ? `${message}\n\n${issueHashNotice(issueHash)}` : message, flags: MessageFlags.Ephemeral });
       return true;
     }
     return false;

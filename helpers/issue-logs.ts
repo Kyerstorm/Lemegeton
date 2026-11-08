@@ -14,7 +14,12 @@ export interface IssueLogRecord extends QueryResultRow {
   interaction_id: string; channel_id: string | null; command_name: string;
   details: Record<string, unknown>; created_at: Date | string;
 }
-
+export interface IssueInteractionContext {
+  id: string;
+  guildId: string | null;
+  user: { id: string; username: string; globalName?: string | null };
+  channelId: string | null;
+}
 function redactString(value: string): string {
   return value
     .replace(/(Bot\s+)[A-Za-z0-9._-]{20,}/gi, `$1${REDACTED}`)
@@ -32,8 +37,7 @@ function redactValue(value: unknown, key = ""): unknown {
     const record = value as Record<string, unknown>;
     const namedField = String(record.name ?? record.key ?? "");
     return Object.fromEntries(Object.entries(record).slice(0, 100).map(([childKey, childValue]) => [
-      childKey,
-      childKey === "value" && isSensitiveKey(namedField) ? REDACTED : redactValue(childValue, childKey),
+      childKey, childKey === "value" && isSensitiveKey(namedField) ? REDACTED : redactValue(childValue, childKey),
     ]));
   }
   if (typeof value === "bigint") return value.toString();
@@ -67,6 +71,28 @@ export async function createIssueLog(input: IssueLogInput): Promise<string> {
       input.interactionId, input.channelId, input.command.slice(0, 100), JSON.stringify(details)],
   );
   return issueHash;
+}
+export async function createInteractionIssueLog(
+  interaction: IssueInteractionContext,
+  command: string,
+  error: unknown,
+  details: Record<string, unknown> = {},
+): Promise<string | null> {
+  if (!interaction.guildId) return null;
+  try {
+    return await createIssueLog({
+      guildId: interaction.guildId,
+      userId: interaction.user.id,
+      username: interaction.user.globalName ?? interaction.user.username,
+      interactionId: interaction.id,
+      channelId: interaction.channelId,
+      command,
+      details: { ...details, interactionId: interaction.id, guildId: interaction.guildId, channelId: interaction.channelId },
+      error,
+    });
+  } catch {
+    return null;
+  }
 }
 export async function findIssueLog(issueHash: string, guildId: string): Promise<IssueLogRecord | null> {
   if (!isIssueHash(issueHash)) return null;

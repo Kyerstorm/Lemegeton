@@ -15,6 +15,7 @@ import {
   type StringSelectMenuInteraction,
 } from "discord.js";
 import type { FeatureCommand } from "../helpers/command.js";
+import { createInteractionIssueLog, issueHashNotice } from "../helpers/issue-logs.js";
 import type { BotConfig } from "../helpers/config.js";
 import { AniListClient } from "../helpers/anilist.js";
 import { SteamClient } from "../helpers/steam.js";
@@ -215,8 +216,11 @@ export class ProfileCommand implements FeatureCommand {
           return;
       }
     } catch (error) {
-      await interaction.reply({ content: error instanceof Error ? error.message : "The profile action failed.", flags: MessageFlags.Ephemeral }).catch(async () => {
-        await interaction.followUp({ content: error instanceof Error ? error.message : "The profile action failed.", flags: MessageFlags.Ephemeral });
+      const message = error instanceof Error ? error.message : "The profile action failed.";
+      const issueHash = await createInteractionIssueLog(interaction, "/profile", error);
+      const response = issueHash ? `${message}\n\n${issueHashNotice(issueHash)}` : message;
+      await interaction.reply({ content: response, flags: MessageFlags.Ephemeral }).catch(async () => {
+        await interaction.followUp({ content: response, flags: MessageFlags.Ephemeral });
       });
     }
   }
@@ -438,7 +442,9 @@ export class ProfileCommand implements FeatureCommand {
       );
       await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     } catch (error) {
-      await interaction.reply({ content: error instanceof Error ? error.message : "The comparison could not be calculated.", flags: MessageFlags.Ephemeral });
+      const message = error instanceof Error ? error.message : "The comparison could not be calculated.";
+      const issueHash = await createInteractionIssueLog(interaction, "/profile", error, { action: "affinity" });
+      await interaction.reply({ content: issueHash ? `${message}\n\n${issueHashNotice(issueHash)}` : message, flags: MessageFlags.Ephemeral });
     }
   }
 
