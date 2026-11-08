@@ -505,7 +505,7 @@ export class DiscoverCommand implements FeatureCommand {
     if (action === "tmdb-tv-guide") {
       const selectedId=interaction.values[0]??"";
       const showId=Number(selectedId);
-      if(!/^\\d+$/.test(selectedId)||!Number.isSafeInteger(showId)||showId<1){
+      if(!/^\d+$/.test(selectedId)||!Number.isSafeInteger(showId)||showId<1){
         await interaction.reply({content:"That TMDB series reference is invalid.",flags:MessageFlags.Ephemeral});
         return true;
       }
@@ -545,7 +545,7 @@ export class DiscoverCommand implements FeatureCommand {
       const showId=Number(interaction.customId.split(":")[2]);
       const seasonValue=interaction.values[0]??"";
       const seasonNumber=Number(seasonValue);
-      if(!Number.isSafeInteger(showId)||showId<1||!/^\\d+$/.test(seasonValue)||!Number.isSafeInteger(seasonNumber)||seasonNumber<0||seasonNumber>100){
+      if(!Number.isSafeInteger(showId)||showId<1||!/^\d+$/.test(seasonValue)||!Number.isSafeInteger(seasonNumber)||seasonNumber<0||seasonNumber>100){
         await interaction.reply({content:"That TV season reference is invalid.",flags:MessageFlags.Ephemeral});
         return true;
       }
@@ -562,7 +562,7 @@ export class DiscoverCommand implements FeatureCommand {
     if (action === "tmdb-person") {
       const selectedId = interaction.values[0] ?? "";
       const personId = Number(selectedId);
-      if (!/^\\d+$/.test(selectedId) || !Number.isSafeInteger(personId) || personId < 1) {
+      if (!/^\d+$/.test(selectedId) || !Number.isSafeInteger(personId) || personId < 1) {
         await interaction.reply({content:"That TMDB person reference is invalid.",flags:MessageFlags.Ephemeral});
         return true;
       }
@@ -573,8 +573,8 @@ export class DiscoverCommand implements FeatureCommand {
         ? credits.map((credit) => {
           const role = credit.role ? " · "+cleanText(credit.role,100) : "";
           const date = credit.releaseDate ? " · "+credit.releaseDate : "";
-          return "["+cleanText(credit.title,180).replace(/[\\[\\]]/g,"")+"]("+credit.sourceUrl+") · "+credit.category.toUpperCase()+date+role;
-        }).join("\\n").slice(0,4000)
+          return "["+cleanText(credit.title,180).replace(/[\[\]]/g,"")+"]("+credit.sourceUrl+") · "+credit.category.toUpperCase()+date+role;
+        }).join("\n").slice(0,4000)
         : "TMDB did not return combined movie or television credits for this person.";
       const embed = homeEmbed("Credits · "+personName,description).setURL("https://www.themoviedb.org/person/"+personId)
         .setFooter({text:"TMDB · Cast and crew credits deduplicated by work"});
@@ -584,7 +584,7 @@ export class DiscoverCommand implements FeatureCommand {
     if (action === "tmdb-collection") {
       const selectedId = interaction.values[0] ?? "";
       const movieId = Number(selectedId);
-      if (!/^\\d+$/.test(selectedId) || !Number.isSafeInteger(movieId) || movieId < 1) {
+      if (!/^\d+$/.test(selectedId) || !Number.isSafeInteger(movieId) || movieId < 1) {
         await interaction.reply({content:"That TMDB movie reference is invalid.",flags:MessageFlags.Ephemeral});
         return true;
       }
@@ -596,7 +596,7 @@ export class DiscoverCommand implements FeatureCommand {
         return true;
       }
       const description = collection.items.length
-        ? collection.items.map((item) => "["+cleanText(item.title,180).replace(/[\\[\\]]/g,"")+"]("+item.sourceUrl+") · "+(item.releaseDate??"Date unavailable")).join("\\n").slice(0,4000)
+        ? collection.items.map((item) => "["+cleanText(item.title,180).replace(/[\[\]]/g,"")+"]("+item.sourceUrl+") · "+(item.releaseDate??"Date unavailable")).join("\n").slice(0,4000)
         : "TMDB returned no member films for this collection.";
       const embed = homeEmbed("Collection · "+collection.name,description).setURL(collection.sourceUrl)
         .setFooter({text:"TMDB collection membership · Release dates do not establish story chronology"});
@@ -686,9 +686,9 @@ export class DiscoverCommand implements FeatureCommand {
     const visible=season.episodes.slice(current*pageSize,(current+1)*pageSize);
     const description=visible.map(episode=>{
       const metadata=[episode.airDate??"Date not announced",episode.runtime?episode.runtime+" min":""].filter(Boolean).join(" · ");
-      const synopsis=episode.overview?"\\n||"+cleanText(episode.overview,280)+"||":"\\n||Episode synopsis unavailable.||";
-      return "**E"+episode.episodeNumber+" · "+cleanText(episode.name,120)+"**\\n"+metadata+synopsis;
-    }).join("\\n\\n")||"TMDB has not listed episode entries for this season.";
+      const synopsis=episode.overview?"\n||"+cleanText(episode.overview,280)+"||":"\n||Episode synopsis unavailable.||";
+      return "**E"+episode.episodeNumber+" · "+cleanText(episode.name,120)+"**\n"+metadata+synopsis;
+    }).join("\n\n")||"TMDB has not listed episode entries for this season.";
     const embed=homeEmbed(showName+" · "+season.name,description)
       .setURL(season.sourceUrl)
       .setFooter({text:"TMDB episode metadata · Synopsis text is spoiler-marked · Page "+(current+1)+"/"+totalPages});
