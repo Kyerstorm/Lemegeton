@@ -1,5 +1,6 @@
 import { ActionRowBuilder, EmbedBuilder, MessageFlags, ModalBuilder, SlashCommandBuilder, TextInputBuilder, TextInputStyle, type ChatInputCommandInteraction, type ModalSubmitInteraction } from "discord.js";
 import type { FeatureCommand } from "../Helpers/command.js";
+import {emoji} from "../Helpers/emoji.js";
 function feedbackModal(): ModalBuilder {
   return new ModalBuilder().setCustomId("feedback:submit").setTitle("Send feedback").addComponents(
     new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("category").setLabel("Type: bug or idea").setStyle(TextInputStyle.Short).setMaxLength(10).setRequired(true)),
@@ -23,7 +24,7 @@ export class FeedbackCommand implements FeatureCommand {
     if (issueHash && !/^[a-f0-9]{128}$/.test(issueHash)) { await interaction.reply({ content: "The issue hash must be the complete 128-character SHA-512 value.", flags: MessageFlags.Ephemeral }); return true; }
     const channelId = process.env.BOT_FEEDBACK_CHANNEL_ID?.trim() ?? "";
     if (!/^\d{17,20}$/.test(channelId)) { await interaction.reply({ content: "The feedback destination is not configured. Please contact a server administrator.", flags: MessageFlags.Ephemeral }); return true; }
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ content: emoji.loading + " Sending feedback…", flags: MessageFlags.Ephemeral });
     const destination = await interaction.client.channels.fetch(channelId);
     if (!destination?.isTextBased() || !("send" in destination)) { await interaction.editReply({ content: "The feedback destination is unavailable right now." }); return true; }
     const embed = new EmbedBuilder().setColor(category.startsWith("bug") ? 0xed4245 : 0x57f287).setTitle(category.startsWith("bug") ? "Bug report" : "Feature idea").setDescription(description.slice(0, 4000)).addFields(
