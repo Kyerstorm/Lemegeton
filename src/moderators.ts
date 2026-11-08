@@ -17,7 +17,7 @@ import { loadingMessage } from "../helpers/emoji.js";
 import { isBotModerator } from "../helpers/moderation.js";
 import { query } from "../database.js";
 
-type Moderator = { discord_id: string; username: string; added_by: string; created_at: Date | string };
+type Moderator = Record<string, unknown> & { discord_id: string; username: string; added_by: string; created_at: Date | string };
 
 async function getModerators(): Promise<Moderator[]> {
   return query<Moderator>(
