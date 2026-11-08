@@ -6,6 +6,9 @@ import {
   ChannelType,
   EmbedBuilder,
   MessageFlags,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
   PermissionFlagsBits,
   SlashCommandBuilder,
   type ButtonInteraction,
@@ -13,6 +16,7 @@ import {
   type ChatInputCommandInteraction,
   type RoleSelectMenuInteraction,
   type StringSelectMenuInteraction,
+  type ModalSubmitInteraction,
 } from "discord.js";
 import type { FeatureCommand } from "../helpers/command.js";
 import {
@@ -26,18 +30,38 @@ import {
   getMediaNotificationSettings,
   setMediaNotificationSettings,
 } from "../helpers/media-notifications.js";
+import { getGuildMediaRegion, setGuildMediaRegion } from "../helpers/media-region.js";
 
 type SettingsRow =
   | ActionRowBuilder<ButtonBuilder>
   | ActionRowBuilder<ChannelSelectMenuBuilder>;
 
+function mediaRegionModal(region: string): ModalBuilder {
+  return new ModalBuilder()
+    .setCustomId("settings:media-region")
+    .setTitle("Default media region")
+    .addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("region")
+          .setLabel("Two-letter country code")
+          .setPlaceholder("IE, US, GB, JP")
+          .setMinLength(2)
+          .setMaxLength(2)
+          .setRequired(true)
+          .setValue(region),
+      ),
+    );
+}
+
 async function panel(guildId: string): Promise<{
   embeds: EmbedBuilder[];
   components: SettingsRow[];
 }> {
-  const [states, notifications] = await Promise.all([
+  const [states, notifications, mediaRegion] = await Promise.all([
     getFeatureSettings(guildId),
     getMediaNotificationSettings(guildId),
+    getGuildMediaRegion(guildId),
   ]);
   const channelLabel = notifications.channel_id
     ? `<#${notifications.channel_id}>`
@@ -52,6 +76,11 @@ async function panel(guildId: string): Promise<{
         value: states[feature] ? "Enabled" : "Disabled",
         inline: true,
       })),
+      {
+        name: "Default media availability region",
+        value: mediaRegion,
+        inline: true,
+      },
       {
         name: "Media completion notifications",
         value: [
@@ -97,6 +126,10 @@ async function panel(guildId: string): Promise<{
         .setCustomId("settings:notifications:clear-channel")
         .setLabel("Clear channel")
         .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId("settings:media-region:open")
+        .setLabel("Region · " + mediaRegion)
+        .setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
       new ChannelSelectMenuBuilder()
@@ -109,7 +142,7 @@ async function panel(guildId: string): Promise<{
 }
 
 function canManage(
-  interaction: ButtonInteraction | ChatInputCommandInteraction | ChannelSelectMenuInteraction,
+  interaction: ButtonInteraction | ChatInputCommandInteraction | ChannelSelectMenuInteraction | ModalSubmitInteraction,
 ): boolean {
   return interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
 }
@@ -125,6 +158,7 @@ export class SettingsCommand implements FeatureCommand {
           { name: "View all settings", value: "view" },
           { name: "Toggle a feature", value: "toggle" },
           { name: "Media notifications", value: "notifications" },
+          { name: "Change media region", value: "media-region" },
         ),
     )
     .addStringOption((option) =>
@@ -135,6 +169,12 @@ export class SettingsCommand implements FeatureCommand {
     .addBooleanOption((option) =>
       option.setName("enabled")
         .setDescription("Set feature availability explicitly; omit to invert its current state"),
+    )
+    .addStringOption((option) =>
+      option.setName("region")
+        .setDescription("Two-letter country code for the server's media availability region")
+        .setMinLength(2)
+        .setMaxLength(2),
     );
 
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -147,6 +187,24 @@ export class SettingsCommand implements FeatureCommand {
     }
 
     const action = interaction.options.getString("action") ?? "view";
+    if (action === "media-region") {
+      if (!canManage(interaction)) {
+        await interaction.reply({content:"Manage Server permission is required to change the media region.",flags:MessageFlags.Ephemeral});
+        return;
+      }
+      const requestedRegion = interaction.options.getString("region");
+      if (requestedRegion) {
+        try {
+          const savedRegion = await setGuildMediaRegion(interaction.guildId, requestedRegion, interaction.user.id);
+          await interaction.reply({content:"Default media availability region saved as " + savedRegion + ".",flags:MessageFlags.Ephemeral});
+        } catch (error) {
+          await interaction.reply({content:error instanceof Error ? error.message : "The media region could not be saved.",flags:MessageFlags.Ephemeral});
+        }
+        return;
+      }
+      await interaction.showModal(mediaRegionModal(await getGuildMediaRegion(interaction.guildId)));
+      return;
+    }
     if (action === "toggle") {
       const feature = interaction.options.getString("feature");
       const enabled = interaction.options.getBoolean("enabled");
@@ -169,13 +227,19 @@ export class SettingsCommand implements FeatureCommand {
 
   async handleButton(interaction: ButtonInteraction): Promise<boolean> {
     const [, section, target] = interaction.customId.split(":");
-    if (section !== "toggle" && section !== "notifications") return false;
+    if (section !== "toggle" && section !== "notifications" && section !== "media-region") return false;
     if (!interaction.guildId) return false;
     if (!canManage(interaction)) {
       await interaction.reply({
         content: "Manage Server permission is required to change server settings.",
         flags: MessageFlags.Ephemeral,
       });
+      return true;
+    }
+
+    if (section === "media-region") {
+      if (target !== "open") return false;
+      await interaction.showModal(mediaRegionModal(await getGuildMediaRegion(interaction.guildId)));
       return true;
     }
 
@@ -224,6 +288,27 @@ export class SettingsCommand implements FeatureCommand {
     }
     await interaction.update(await panel(interaction.guildId));
     return true;
+  }
+
+  async handleModal(interaction: ModalSubmitInteraction): Promise<boolean> {
+    if (interaction.customId !== "settings:media-region") return false;
+    if (!interaction.guildId) return false;
+    if (!canManage(interaction as ModalSubmitInteraction)) {
+      await interaction.reply({content:"Manage Server permission is required to change the media region.",flags:MessageFlags.Ephemeral});
+      return true;
+    }
+    try {
+      const region = await setGuildMediaRegion(
+        interaction.guildId,
+        interaction.fields.getTextInputValue("region"),
+        interaction.user.id,
+      );
+      await interaction.reply({content:"Default media availability region saved as " + region + ".",flags:MessageFlags.Ephemeral});
+      return true;
+    } catch (error) {
+      await interaction.reply({content:error instanceof Error ? error.message : "The media region could not be saved.",flags:MessageFlags.Ephemeral});
+      return true;
+    }
   }
 
   async handleSelect(
