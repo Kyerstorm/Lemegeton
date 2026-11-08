@@ -51,6 +51,15 @@ import {
 } from "../helpers/community.js";
 import { query, queryOne } from "../database.js";
 import { cleanText, isGuildManager, isValidHttpsUrl, safeDisplay } from "../helpers/security.js";
+import {
+  attachReadingDiscussion,
+  listReadingNominations,
+  nominateReading,
+  parseReadingScheduleTime,
+  READING_CATEGORIES,
+  selectNextReading,
+  voteForReading,
+} from "../helpers/community-reading.js";
 
 const DAILY_FORMATS = [
   { name: "Question", value: "question" },
@@ -132,6 +141,10 @@ export class CommunityCommand implements FeatureCommand {
       { name: "Close discussion", value: "discussion-close" },
       { name: "Release calendar", value: "calendar" },
       { name: "Community history", value: "history" },
+      { name: "Nominate a community read", value: "reading-nominate" },
+      { name: "View reading nominations and vote", value: "reading-list" },
+      { name: "Select the next community read", value: "reading-select" },
+      { name: "Schedule a reading discussion", value: "reading-schedule" },
     ))
     .addStringOption((option) => option.setName("title").setDescription("Title or session name").setMaxLength(180))
     .addStringOption((option) => option.setName("content").setDescription("Description, question or discussion prompt").setMaxLength(1_500))
@@ -150,7 +163,11 @@ export class CommunityCommand implements FeatureCommand {
     .addStringOption((option) => option.setName("media_title").setDescription("Linked media title").setMaxLength(200))
     .addStringOption((option) => option.setName("media_url").setDescription("HTTPS media link").setMaxLength(1_000))
     .addStringOption((option) => option.setName("spoiler_boundary").setDescription("Spoiler boundary, e.g. Volume 4").setMaxLength(120))
-    .addStringOption((option) => option.setName("region").setDescription("Release region (two-letter code)").setMaxLength(2));
+    .addStringOption((option) => option.setName("region").setDescription("Release region (two-letter code)").setMaxLength(2))
+    .addStringOption((option) => option.setName("reading_category").setDescription("Community reading category").addChoices(
+      ...READING_CATEGORIES.map((value) => ({ name: value.replace(/\b\w/g, (letter) => letter.toUpperCase()), value })),
+    ))
+    .addStringOption((option) => option.setName("reading_nomination_id").setDescription("Reading nomination ID").setMaxLength(24));
 
   private readonly anilist: AniListClient;
   private readonly tmdb: TmdbClient;
@@ -193,6 +210,10 @@ export class CommunityCommand implements FeatureCommand {
         case "discussion-close": await this.closeDiscussionCommand(interaction); return;
         case "calendar": await this.showCalendar(interaction); return;
         case "history": await this.showHistory(interaction); return;
+        case "reading-nominate": await this.nominateReading(interaction); return;
+        case "reading-list": await this.showReadingNominations(interaction); return;
+        case "reading-select": await this.selectReading(interaction); return;
+        case "reading-schedule": await this.scheduleReadingDiscussion(interaction); return;
         default: throw new Error("That community action is not available.");
       }
     } catch (error) {
@@ -440,6 +461,11 @@ export class CommunityCommand implements FeatureCommand {
           .addOptions(candidates.map((candidate) => ({ label: candidate.title.slice(0, 100), value: candidate.id }))))],
         flags: MessageFlags.Ephemeral,
       });
+      return true;
+    }
+    if (action === "reading-vote") {
+      await voteForReading(interaction.guildId,id,interaction.user.id,id);
+      await interaction.reply({content:"Your community reading vote was saved. You may change it while nominations remain open.",flags:MessageFlags.Ephemeral});
       return true;
     }
     if (action === "candidate-select" && mode) {
@@ -830,6 +856,101 @@ export class CommunityCommand implements FeatureCommand {
       }
     }
     await interaction.reply({ content: `Discussion #${id} is closed.`, flags: MessageFlags.Ephemeral });
+  }
+
+  private async nominateReading(interaction: ChatInputCommandInteraction): Promise<void> {
+    const title=interaction.options.getString("title");
+    const category=interaction.options.getString("reading_category");
+    if(!title||!category) throw new Error("Provide a title and reading_category.");
+    if(!interaction.channel?.isTextBased()) throw new Error("Nominate community reads from a server text channel.");
+    const id=await nominateReading({
+      guildId:interaction.guildId!,
+      channelId:interaction.channelId!,
+      proposerId:interaction.user.id,
+      title,
+      category,
+      sourceUrl:interaction.options.getString("source_url")??undefined,
+    });
+    await interaction.reply({content:`Community read nomination #${id} was saved for this server. Use /community action:reading-list to browse and vote.`,flags:MessageFlags.Ephemeral});
+  }
+
+  private async showReadingNominations(interaction: ChatInputCommandInteraction): Promise<void> {
+    const nominations=await listReadingNominations(interaction.guildId!);
+    if(!nominations.length){
+      await interaction.reply({content:"There are no open community reading nominations in this server.",flags:MessageFlags.Ephemeral});
+      return;
+    }
+    const fields=nominations.slice(0,10).map(item=>({
+      name:"#"+item.id+" · "+safeDisplay(item.title,140),
+      value:item.category+" · "+(item.vote_count??0)+" vote(s)"+(item.source_url?" · [Source]("+item.source_url+")":""),
+      inline:false,
+    }));
+    const select=new StringSelectMenuBuilder()
+      .setCustomId("community:reading-vote")
+      .setPlaceholder("Choose a nominated read to vote for")
+      .addOptions(nominations.slice(0,25).map(item=>({
+        label:item.title.slice(0,90),
+        description:item.category+" · "+(item.vote_count??0)+" vote(s)",
+        value:item.id,
+      })));
+    await interaction.reply({
+      embeds:[homeEmbed("Community Reading Club","Guild-only nominations · One active vote per member. Votes can be changed while nominations remain open.",fields)],
+      components:[new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)],
+      flags:MessageFlags.Ephemeral,
+      allowedMentions:{parse:[]},
+    });
+  }
+
+  private async selectReading(interaction: ChatInputCommandInteraction): Promise<void> {
+    if(!isGuildManager(interaction)) throw new Error("Manage Server permission is required to select the next community read.");
+    const selected=await selectNextReading(interaction.guildId!,interaction.options.getString("reading_nomination_id")??undefined);
+    const channel=interaction.channel;
+    if(channel?.isTextBased()&&"send" in channel){
+      await (channel as TextChannel).send({
+        content:`Community read selected: **${safeDisplay(selected.title,180)}** (${selected.category}).${selected.source_url?"\\nSource: "+selected.source_url:""}\\nA moderator can schedule its spoiler-aware discussion using /community action:reading-schedule reading_nomination_id:${selected.id}.`,
+        allowedMentions:{parse:[]},
+      });
+    }
+    await interaction.reply({content:`Nomination #${selected.id} was selected as this server's next community read. The remaining open nominations were closed.`,flags:MessageFlags.Ephemeral});
+  }
+
+  private async scheduleReadingDiscussion(interaction: ChatInputCommandInteraction): Promise<void> {
+    if(!isGuildManager(interaction)) throw new Error("Manage Server permission is required to schedule the community reading discussion.");
+    const nominationId=interaction.options.getString("reading_nomination_id");
+    const when=interaction.options.getString("scheduled_at");
+    if(!nominationId||!when) throw new Error("Provide reading_nomination_id and scheduled_at.");
+    const scheduledAt=parseReadingScheduleTime(when);
+    const row=await queryOne<{id:string;title:string;category:string;source_url:string|null;status:string}>(
+      "SELECT id,title,category,source_url,status FROM community_reading_nominations WHERE id = $1 AND guild_id = $2",
+      [nominationId,interaction.guildId],
+    );
+    if(!row||row.status!=="selected") throw new Error("Select this community read before scheduling its discussion.");
+    const channel=interaction.channel;
+    if(!channel?.isTextBased()||!("threads" in channel)||!("send" in channel)) throw new Error("Schedule reading discussions from a text channel that supports public threads.");
+    const textChannel=channel as TextChannel;
+    const announcement=await textChannel.send({
+      embeds:[homeEmbed("Community Reading Club · "+safeDisplay(row.title,150),`Selected work: ${safeDisplay(row.title,180)} (${row.category})\\nScheduled for <t:${Math.floor(scheduledAt.getTime()/1000)}:F>.\\n\\nKeep plot spoilers inside Discord spoiler tags and respect the shared reading boundary.`,row.source_url?[{name:"Source",value:"[Open metadata source]("+row.source_url+")"}]:[])],
+      allowedMentions:{parse:[]},
+    });
+    let thread: Awaited<ReturnType<TextChannel["threads"]["create"]>>|null=null;
+    try {
+      thread=await textChannel.threads.create({
+        name:(row.title+" · Reading Club").slice(0,100),
+        startMessage:announcement.id,
+        autoArchiveDuration:10080,
+        reason:"Scheduled community reading discussion",
+      });
+      await thread.send({
+        content:`Community reading discussion · ${safeDisplay(row.title,180)}\\nScheduled for <t:${Math.floor(scheduledAt.getTime()/1000)}:F>.\\nMark plot spoilers with Discord spoiler tags (||like this||) and keep unmarked messages within the shared reading boundary.`,
+        allowedMentions:{parse:[]},
+      });
+      await attachReadingDiscussion({guildId:interaction.guildId!,nominationId,channelId:interaction.channelId!,threadId:thread.id,scheduledAt});
+    } catch(error) {
+      if(thread) await thread.delete("Could not persist the scheduled Reading Club discussion").catch(()=>undefined);
+      await announcement.delete("Reading Club discussion setup failed").catch(()=>undefined);
+      throw error;
+    }
+    await interaction.reply({content:`Reading discussion #${nominationId} created in <#${thread.id}> for <t:${Math.floor(scheduledAt.getTime()/1000)}:F>.`,flags:MessageFlags.Ephemeral});
   }
 
   private async showCalendar(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
