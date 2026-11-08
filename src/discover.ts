@@ -6,6 +6,7 @@ import {
   ButtonStyle,
   EmbedBuilder,
   MessageFlags,
+  PermissionFlagsBits,
   ModalBuilder,
   SlashCommandBuilder,
   StringSelectMenuBuilder,
@@ -29,6 +30,13 @@ import { TmdbClient, type TmdbMedia } from "../helpers/tmdb.js";
 import { getGuildMediaRegion } from "../helpers/media-region.js";
 import { cleanText } from "../helpers/security.js";
 import { findAtlasRelationships, recordProviderRelationships } from "../helpers/atlas.js";
+import {
+  createMediaLinkSuggestion,
+  getPendingMediaLinkSuggestion,
+  listPendingMediaLinkSuggestions,
+  MEDIA_LINK_RELATIONSHIPS,
+  reviewMediaLinkSuggestion,
+} from "../helpers/media-link-suggestions.js";
 import { renderAtlasSnapshot } from "../helpers/atlas-renderer.js";
 import { logger } from "../helpers/logger.js";
 import { loadingMessage } from "../helpers/emoji.js";
@@ -298,8 +306,29 @@ export class DiscoverCommand implements FeatureCommand {
       { name: "Where to watch", value: "availability" },
       { name: "Trailers and videos", value: "videos" },
       { name: "Movie collection guide", value: "collection" },
+      { name: "Suggest a community relationship", value: "suggest-link" },
+      { name: "Review server relationship suggestions", value: "review-links" },
     ))
-    .addStringOption((option) => option.setName("region").setDescription("Two-letter availability region, for example IE or US").setMinLength(2).setMaxLength(2));
+    .addStringOption((option) => option.setName("region").setDescription("Two-letter availability region, for example IE or US").setMinLength(2).setMaxLength(2))
+    .addStringOption((option) => option.setName("source_title").setDescription("Relationship source title").setMaxLength(200))
+    .addStringOption((option) => option.setName("source_category").setDescription("Source media category").addChoices(
+      ...[["Anime","ANIME"],["Manga / manhwa / manhua","MANGA"],["Light novel","LIGHT_NOVEL"],["Book","BOOK"],["Webnovel","WEBNOVEL"],["Movie","MOVIE"],["TV series","TV"],["Video game","GAME"]].map(([name,value])=>({name:name!,value:value!})),
+    ))
+    .addStringOption((option) => option.setName("source_url").setDescription("HTTPS metadata page for the source title").setMaxLength(1_000))
+    .addStringOption((option) => option.setName("relationship").setDescription("Proposed relationship type").addChoices(
+      ...MEDIA_LINK_RELATIONSHIPS.map((value)=>({name:value.replace(/\\b\\w/g,(letter)=>letter.toUpperCase()),value})),
+    ))
+    .addStringOption((option) => option.setName("target_title").setDescription("Related media title").setMaxLength(200))
+    .addStringOption((option) => option.setName("target_category").setDescription("Related media category").addChoices(
+      ...[["Anime","ANIME"],["Manga / manhwa / manhua","MANGA"],["Light novel","LIGHT_NOVEL"],["Book","BOOK"],["Webnovel","WEBNOVEL"],["Movie","MOVIE"],["TV series","TV"],["Video game","GAME"]].map(([name,value])=>({name:name!,value:value!})),
+    ))
+    .addStringOption((option) => option.setName("target_url").setDescription("HTTPS metadata page for the related title").setMaxLength(1_000))
+    .addStringOption((option) => option.setName("evidence").setDescription("Evidence for the proposed relationship (minimum 15 characters)").setMaxLength(1_500))
+    .addIntegerOption((option) => option.setName("suggestion_id").setDescription("Suggestion ID for inspection or review").setMinValue(1))
+    .addStringOption((option) => option.setName("decision").setDescription("Review decision").addChoices(
+      {name:"List pending",value:"list"},{name:"Inspect",value:"inspect"},{name:"Approve",value:"approved"},{name:"Reject",value:"rejected"},
+    ))
+    .addStringOption((option) => option.setName("reason").setDescription("Optional moderator review note").setMaxLength(1_000));
 
   private readonly config: BotConfig;
   private readonly anilist: AniListClient;
@@ -346,6 +375,14 @@ export class DiscoverCommand implements FeatureCommand {
       if(!allowed.includes(filters.format)){
         await interaction.reply({content:"That format is not supported by the selected media category.",flags:MessageFlags.Ephemeral});return;
       }
+    }
+    if (view === "suggest-link") {
+      await this.suggestRelationshipAndRespond(interaction);
+      return;
+    }
+    if (view === "review-links") {
+      await this.reviewRelationshipAndRespond(interaction);
+      return;
     }
     if (!query) {
       const home = homePanel();
@@ -604,6 +641,100 @@ export class DiscoverCommand implements FeatureCommand {
     if (action !== "search" || !CATEGORIES.some((item) => item.value === categoryValue)) return false;
     await this.searchAndRespond(interaction, interaction.fields.getTextInputValue("query"), categoryValue as Category);
     return true;
+  }
+
+  private async suggestRelationshipAndRespond(interaction: ChatInputCommandInteraction): Promise<void> {
+    if (!interaction.guildId) {
+      await interaction.reply({content:"Community media relationships are scoped to a server.",flags:MessageFlags.Ephemeral});
+      return;
+    }
+    const sourceTitle=interaction.options.getString("source_title");
+    const sourceCategory=interaction.options.getString("source_category");
+    const sourceUrl=interaction.options.getString("source_url");
+    const relationship=interaction.options.getString("relationship");
+    const targetTitle=interaction.options.getString("target_title");
+    const targetCategory=interaction.options.getString("target_category");
+    const targetUrl=interaction.options.getString("target_url");
+    const evidence=interaction.options.getString("evidence");
+    if(!sourceTitle||!sourceCategory||!sourceUrl||!relationship||!targetTitle||!targetCategory||!targetUrl||!evidence){
+      await interaction.reply({content:"Choose Suggest a community relationship and provide both titles, categories, HTTPS metadata links, relationship type and evidence.",flags:MessageFlags.Ephemeral});
+      return;
+    }
+    try {
+      const id=await createMediaLinkSuggestion(interaction.guildId,interaction.user.id,{
+        sourceTitle,sourceCategory,sourceUrl,relationship,targetTitle,targetCategory,targetUrl,evidence,
+      });
+      await interaction.reply({content:`Media relationship suggestion #${id} was saved for moderator review in this server. It is not provider-confirmed metadata.`,flags:MessageFlags.Ephemeral});
+    } catch(error) {
+      await interaction.reply({content:error instanceof Error?error.message:"The media relationship suggestion could not be saved.",flags:MessageFlags.Ephemeral});
+    }
+  }
+
+  private async reviewRelationshipAndRespond(interaction: ChatInputCommandInteraction): Promise<void> {
+    if(!interaction.guildId){
+      await interaction.reply({content:"Media relationship review is scoped to a server.",flags:MessageFlags.Ephemeral});
+      return;
+    }
+    const permissions=interaction.memberPermissions;
+    if(!permissions?.has(PermissionFlagsBits.ManageGuild)&&!permissions?.has(PermissionFlagsBits.ManageMessages)){
+      await interaction.reply({content:"Manage Server or Manage Messages permission is required to review media relationships.",flags:MessageFlags.Ephemeral});
+      return;
+    }
+    const decision=interaction.options.getString("decision")??"list";
+    const suggestionId=interaction.options.getInteger("suggestion_id");
+    if(decision==="list"){
+      const pending=await listPendingMediaLinkSuggestions(interaction.guildId);
+      const fields=pending.slice(0,10).map((item)=>({
+        name:"#"+item.id+" · "+cleanText(item.source_title,100),
+        value:cleanText(item.relationship_type,60)+" → "+cleanText(item.target_title,120)+"\nSubmitted by <@"+item.submitter_id+">",
+        inline:false,
+      }));
+      await interaction.reply({
+        embeds:[homeEmbed("Pending media relationship suggestions",fields.length?"Inspect a suggestion before approving or rejecting it.":"There are no pending media relationship suggestions.",fields)],
+        flags:MessageFlags.Ephemeral,
+        allowedMentions:{parse:[]},
+      });
+      return;
+    }
+    if(!suggestionId){
+      await interaction.reply({content:"Provide suggestion_id. Use decision: list to view pending suggestions.",flags:MessageFlags.Ephemeral});
+      return;
+    }
+    if(decision==="inspect"){
+      const suggestion=await getPendingMediaLinkSuggestion(interaction.guildId,String(suggestionId));
+      if(!suggestion){
+        await interaction.reply({content:"No pending suggestion with that ID exists in this server.",flags:MessageFlags.Ephemeral});
+        return;
+      }
+      const embed=homeEmbed("Media relationship suggestion #"+suggestion.id,
+        "The proposal is pending. Approval means community-verified in this server, not provider-confirmed.",[
+          {name:"Source",value:"["+cleanText(suggestion.source_title,180)+"]("+suggestion.source_url+") · "+suggestion.source_category,inline:false},
+          {name:"Relationship",value:cleanText(suggestion.relationship_type,100),inline:true},
+          {name:"Target",value:"["+cleanText(suggestion.target_title,180)+"]("+suggestion.target_url+") · "+suggestion.target_category,inline:false},
+          {name:"Submitter evidence",value:cleanText(suggestion.evidence,1_000),inline:false},
+        ]).setFooter({text:"Submitted by "+suggestion.submitter_id});
+      await interaction.reply({embeds:[embed],flags:MessageFlags.Ephemeral,allowedMentions:{parse:[]}});
+      return;
+    }
+    if(decision!=="approved"&&decision!=="rejected"){
+      await interaction.reply({content:"Choose List, Inspect, Approve or Reject.",flags:MessageFlags.Ephemeral});
+      return;
+    }
+    const reviewed=await reviewMediaLinkSuggestion({
+      guildId:interaction.guildId,
+      suggestionId:String(suggestionId),
+      reviewerId:interaction.user.id,
+      decision,
+      reason:interaction.options.getString("reason")??undefined,
+    });
+    if(!reviewed){
+      await interaction.reply({content:"That suggestion was already reviewed or does not exist in this server.",flags:MessageFlags.Ephemeral});
+      return;
+    }
+    const result=decision==="approved"
+      ?"approved as a community-verified relationship in this server (not provider-confirmed)"
+      :"rejected";
+    await interaction.reply({content:`Suggestion #${suggestionId} was ${result}.`,flags:MessageFlags.Ephemeral});
   }
 
   private async creatorAndRespond(
