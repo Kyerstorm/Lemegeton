@@ -1,4 +1,4 @@
-import { randomInt } from "node:crypto";
+import { secureRandBelow } from "../helpers/crypto-random.js";
 import {
   ActionRowBuilder,
   AttachmentBuilder,
@@ -63,7 +63,7 @@ function anilistRecord(item: AniListMedia, category: "anime" | "manga" | "light_
 }
 
 function randomOne<T>(items: T[]): T[] {
-  return items.length ? [items[randomInt(items.length)]!] : [];
+  return items.length ? [items[secureRandBelow(items.length)]!] : [];
 }
 
 function toEmbed(record: SearchRecord): EmbedBuilder {
@@ -523,7 +523,7 @@ export class DiscoverCommand implements FeatureCommand {
     const batches = await Promise.allSettled(categories.map(load));
     return batches.flatMap((batch) => {
       if (batch.status !== "fulfilled" || !batch.value.length) return [];
-      return [batch.value[randomInt(batch.value.length)]!];
+      return [batch.value[secureRandBelow(batch.value.length)]!];
     });
   }
 
