@@ -9,7 +9,7 @@ export const emoji = {
   loading: "⏳",
   working: "<a:refresh:1557773578655629424>",
   success: "<a:approved:1559632013034659871>",
-  approved: "<a:approved:1559632013034659871>",
+  approve: "<a:approved:1559632013034659871>",
   reject: "<a:reject:1559632010572734596>",
   warning: "<:error:1557775268146323467>",
   error: "<:error:1557775268146323467>",
