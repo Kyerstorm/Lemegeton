@@ -188,13 +188,17 @@ export async function saveArchiveSettings(
   );
 }
 
+export function isValidArchiveChannelId(channelId:string|null):boolean {
+  return channelId===null || /^\d{17,20}$/.test(channelId);
+}
+
 export async function saveArchiveChannelSetting(
   guildId: string,
   actorId: string,
   kind: "upload" | "moderation",
   channelId: string | null,
 ): Promise<void> {
-  if (channelId !== null && !/^\d{17,20}$/.test(channelId)) {
+  if (!isValidArchiveChannelId(channelId)) {
     throw new Error("Choose a normal text or announcement channel from this server.");
   }
   const column = kind === "upload" ? "upload_channel_id" : "moderation_channel_id";
