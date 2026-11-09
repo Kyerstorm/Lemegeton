@@ -7,9 +7,10 @@ import {configureLogger,logger} from "./helpers/logger.js";
 import type {FeatureCommand} from "./helpers/command.js";
 import {handleArchiveUploadMessage} from "./helpers/archive.js";
 import {AniListClient} from "./helpers/anilist.js";
+import {TmdbClient} from "./helpers/tmdb.js";
 import {handleAniListLinkMessage} from "./helpers/embeds/anilist.js";
 import {closeDatabase,initDatabase} from "./database.js";
-import {claimDueMediaNightResults,dueDailyDeliveries,dueDailySchedules,markDailyDelivery,markMediaNightResultPublished,prepareDailyDelivery,rankingResults} from "./helpers/community.js";
+import {claimDueMediaNightResults,dueDailyDeliveries,dueDailySchedules,markDailyDelivery,markMediaNightResultPublished,prepareDailyDelivery,rankingResults,dueReleaseDeliveries,dueReleaseSchedules,markReleaseDelivery,prepareReleaseDelivery,upcomingProviderReleases} from "./helpers/community.js";
 import {claimDueReadingReminders,markReadingReminderSent} from "./helpers/community-reading.js";
 import {createCommandRegistry} from "./src/registry.js";
 import {isFeatureEnabled} from "./helpers/settings.js";
@@ -25,6 +26,7 @@ import {startMediaNotificationScheduler,stopMediaNotificationScheduler} from "./
 const config=loadConfig();configureLogger(config.logLevel);
 const client=new Client({intents:[GatewayIntentBits.Guilds,GatewayIntentBits.GuildMembers,GatewayIntentBits.GuildMessages,GatewayIntentBits.MessageContent]});
 const aniListEmbedClient=new AniListClient(config.anilistApiUrl,config.anilistTimeoutMs);
+const releaseCalendarTmdbClient=new TmdbClient(config.tmdbBearerToken);
 const commands=createCommandRegistry(config);
 const commandByName=new Map<string,FeatureCommand>(commands.map(command=>[command.data.name,command]));
 let atlasBridge: Server | undefined;
@@ -238,6 +240,42 @@ async function processDailyDrops():Promise<void>{
     const message=await(channel as TextChannel).send({embeds:[homeEmbed(`Daily Drop · ${delivery.title}`,delivery.content,delivery.source_url?[{name:"Source",value:`[Open original source](${delivery.source_url})`}]:[])],allowedMentions:{parse:[]}});
     await markDailyDelivery(delivery.id,"sent",message.id);
    }catch(error){await markDailyDelivery(delivery.id,"pending",undefined,error instanceof Error?error.message:"Unknown delivery error").catch(()=>undefined);}
+  }
+  for(const schedule of await dueReleaseSchedules()){
+   try{await prepareReleaseDelivery(schedule);}
+   catch(error){logger.error("Could not queue a release digest",{guildId:schedule.guild_id,reason:error instanceof Error?error.message:"Unknown error"});}
+  }
+  for(const delivery of await dueReleaseDeliveries()){
+   try{
+    const [releases,channel]=await Promise.all([
+     upcomingProviderReleases(
+      aniListEmbedClient,
+      releaseCalendarTmdbClient,
+      new Date(delivery.window_start),
+      new Date(delivery.window_end),
+      delivery.region,
+      delivery.categories,
+     ),
+     client.channels.fetch(delivery.channel_id),
+    ]);
+    if(!channel||!channel.isTextBased()||!("send" in channel))throw new Error("The configured release digest channel is unavailable.");
+    const fields=releases.slice(0,20).map((item)=>({
+     name:`${item.title.slice(0,180)} · <t:${Math.floor(item.when.getTime()/1000)}:R>`,
+     value:`[${item.provider} source](${item.url})`,
+     inline:false,
+    }));
+    const description=releases.length
+     ? `Upcoming provider-dated releases for <t:${Math.floor(new Date(delivery.window_start).getTime()/1000)}:d> – <t:${Math.floor(new Date(delivery.window_end).getTime()/1000)}:d>. Region: ${delivery.region}.`
+     : `No provider-dated releases were returned for this digest window. Region: ${delivery.region}.`;
+    const message=await (channel as TextChannel).send({
+     embeds:[homeEmbed("Lemegeton · Release digest",description,fields)],
+     allowedMentions:{parse:[]},
+    });
+    await markReleaseDelivery(delivery.id,"sent",message.id);
+   }catch(error){
+    await markReleaseDelivery(delivery.id,"pending",undefined,error instanceof Error?error.message:"Unknown delivery error").catch(()=>undefined);
+    logger.warn("Release digest delivery failed and was queued for retry",{guildId:delivery.guild_id,deliveryId:delivery.id,reason:error instanceof Error?error.message:"Unknown error"});
+   }
   }
   for(const session of await claimDueMediaNightResults()){
    try{
