@@ -103,7 +103,10 @@ function parseMedia(v:unknown):AniListMedia|null {
  const t=isObj(v.title)?v.title:{};const d=isObj(v.startDate)?v.startDate:null;const url=str(v.siteUrl);
  if(!url)return null;try{const u=new URL(url);if(u.protocol!=="https:"||u.hostname!=="anilist.co")return null;}catch{return null;}
  const studios=isObj(v.studios)&&Array.isArray(v.studios.nodes)?v.studios.nodes:[];
- const staff=isObj(v.staff)&&Array.isArray(v.staff.nodes)?v.staff.nodes:[];
+ const staffContainer=isObj(v.staff)?v.staff:{};
+ const staff=Array.isArray(staffContainer.nodes)?staffContainer.nodes
+  :Array.isArray(staffContainer.edges)?staffContainer.edges.flatMap(edge=>isObj(edge)&&isObj(edge.node)?[{...edge.node,role:edge.role}]:[])
+  :[];
  const edges=isObj(v.relations)&&Array.isArray(v.relations.edges)?v.relations.edges:[];
  return {id:v.id,type:v.type,title:{romaji:str(t.romaji),english:str(t.english),native:str(t.native)},
  description:str(v.description),siteUrl:url,coverImage:imageOf(v.coverImage),
