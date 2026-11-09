@@ -56,7 +56,7 @@ export function nextReleaseOccurrence(
   } catch {
     throw new Error("Enter a valid IANA timezone such as Europe/Dublin or America/New_York.");
   }
-  if (!/^([01]\\d|2[0-3]):[0-5]\\d$/.test(localTime)) {
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(localTime)) {
     throw new Error("Enter the digest time as HH:MM in 24-hour format.");
   }
   if (!["daily", "weekly"].includes(cadence)) throw new Error("Choose a daily or weekly release digest.");
