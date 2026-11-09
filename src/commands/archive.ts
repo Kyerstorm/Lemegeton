@@ -332,9 +332,13 @@ export class ArchiveCommand implements FeatureCommand {
     try {
       switch (action) {
         case "home": {
-          const previous = await getLastArchiveCategory(guildId, userId);
+          const [previous, archiveSettings] = await Promise.all([
+            getLastArchiveCategory(guildId, userId),
+            getArchiveSettings(guildId),
+          ]);
+          const usual = previous && archiveSettings.enabledCategories.includes(previous) ? previous : null;
           await interaction.reply({
-            ...(previous ? archiveUsualPrompt(previous) : archiveHome()),
+            ...(usual ? archiveUsualPrompt(usual) : archiveHome()),
             flags: MessageFlags.Ephemeral,
           });
           return;
@@ -496,7 +500,14 @@ export class ArchiveCommand implements FeatureCommand {
           const entryId = interaction.options.getString("entry_id");
           if (!entryId) throw new Error("Provide the pending submission's entry_id.");
           await finishArchiveUpload(guildId, userId, entryId);
-          await interaction.reply({ content: `Archive submission #${entryId} is now awaiting moderator review.`, flags: MessageFlags.Ephemeral });
+          const entry=await getArchiveEntry(guildId,entryId,true);
+          const notified=entry?await this.notifyModerationChannel(
+            interaction.client,guildId,entryId,entry.title,entry.archive_type,entry.visibility,entry.content,entry.source_title??undefined,entry.source_url??undefined,
+          ):false;
+          await interaction.reply({
+            content:`Archive submission #${entryId} is now awaiting moderator review.${notified?" Moderators have been notified.":" Moderators can review it from /archive → Review queue."}`,
+            flags:MessageFlags.Ephemeral,
+          });
           return;
         }
         default: throw new Error("That Archive action is not available.");
