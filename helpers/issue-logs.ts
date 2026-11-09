@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { QueryResultRow } from "pg";
 import { query, queryOne } from "../database.js";
 
-const ISSUE_HASH_PATTERN = /^[a-f0-9]{128}$/i;
+const ISSUE_HASH_PATTERN = /^(?:[a-f0-9]{40}|[a-f0-9]{128})$/i;
 const REDACTED = "[REDACTED]";
 
 export interface IssueLogInput {
@@ -48,29 +48,37 @@ export function sanitizeIssueDetails(details: Record<string, unknown>): Record<s
 }
 export function isIssueHash(value: string): boolean { return ISSUE_HASH_PATTERN.test(value.trim()); }
 
-/** A 128-character SHA-512 reference derived from a numeric nonce and a hashed UUID. */
-export function createIssueHash(interactionId: string): string {
-  const randomSerial = Array.from(randomBytes(32), (byte) => String(byte % 10)).join("");
-  const uuidHash = createHash("sha512").update(randomUUID()).digest("hex");
-  return createHash("sha512").update(`${randomSerial}:${uuidHash}:${interactionId}`).digest("hex");
+/** A 40-character reference seeded with 256 bits of cryptographic randomness. */
+export function createIssueHash(interactionId: string, userId = ""): string {
+  return createHash("sha1")
+    .update(randomBytes(32))
+    .update(randomUUID())
+    .update(interactionId)
+    .update(userId)
+    .digest("hex");
 }
 export function issueHashNotice(hash: string): string {
   return `Issue reference: \`${hash}\`. Include this reference in /feedback so a moderator can inspect the diagnostic record with /log.`;
 }
 export async function createIssueLog(input: IssueLogInput): Promise<string> {
-  const issueHash = createIssueHash(input.interactionId);
   const error = input.error instanceof Error
     ? { name: input.error.name, message: input.error.message, stack: input.error.stack ?? null }
     : { name: "UnknownError", message: String(input.error), stack: null };
   const details = sanitizeIssueDetails({ ...input.details, error });
-  await query(
-    `INSERT INTO issue_logs
-      (issue_hash, guild_id, user_id, username, interaction_id, channel_id, command_name, details)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
-    [issueHash, input.guildId, input.userId, input.username.slice(0, 120),
-      input.interactionId, input.channelId, input.command.slice(0, 100), JSON.stringify(details)],
-  );
-  return issueHash;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const issueHash = createIssueHash(input.interactionId, input.userId);
+    const inserted = await queryOne<{ issue_hash: string }>(
+      `INSERT INTO issue_logs
+        (issue_hash, guild_id, user_id, username, interaction_id, channel_id, command_name, details)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+       ON CONFLICT (issue_hash) DO NOTHING
+       RETURNING issue_hash`,
+      [issueHash, input.guildId, input.userId, input.username.slice(0, 120),
+        input.interactionId, input.channelId, input.command.slice(0, 100), JSON.stringify(details)],
+    );
+    if (inserted) return inserted.issue_hash;
+  }
+  throw new Error("A unique issue reference could not be allocated after repeated collision retries.");
 }
 export async function createInteractionIssueLog(
   interaction: IssueInteractionContext,
