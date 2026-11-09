@@ -12,12 +12,24 @@ The Draft branch currently has **zero Python files**. That is a file-extension r
 | Snapshot | Python files | TypeScript/TSX files | TypeScript non-test files | TypeScript test files |
 |---|---:|---:|---:|---:|
 | `multi_guild` base | 167 | 0 | 0 | 0 |
-| `lemegeton-v3` Draft head after Media Night and release-calendar parity work | 0 | 95 | 75 | 20 |
+| `lemegeton-v3` Draft head after runtime/config audit fixes | 0 | 98 | 76 | 22 |
 
-The base's 167 Python files total approximately 3.68 MB. The Draft head has twenty TypeScript test files, compared with fifty Python files under the base's `tests/` directory. This is a substantial regression-coverage gap until each relevant legacy test has either been ported, replaced by equivalent coverage, or explicitly retired with a reason.
+The base's 167 Python files total approximately 3.68 MB. The current Draft head has twenty-two TypeScript test files, compared with fifty Python files under the base's `tests/` directory. This is a substantial regression-coverage gap until each relevant legacy test has either been ported, replaced by equivalent coverage, or explicitly retired with a reason.
 
 The Draft branch already has a Node.js/TypeScript bot startup path, a TypeScript build/test pipeline, and a Rust dashboard service. The current `scripts/start.sh`, Dockerfile, Compose configuration, and TypeScript CI workflows do not invoke Python. Do not describe the production bot as cut over merely because this branch's startup path is TypeScript.
 
+## Focused follow-up work on 9 November 2026
+
+The current branch tree contains 164 tracked files: zero Python files, ninety-eight TypeScript/TSX files (seventy-six non-test files and twenty-two test files). The TypeScript suite contains ninety-nine individual test cases. This is still not equivalent coverage for all fifty legacy Python test modules.
+
+The following verified follow-ups were made on the Draft branch after the initial audit snapshot:
+
+- bot.ts now retains handles for the Custom Role reconciliation and daily-worker intervals, clears them during shutdown, and waits for an active daily-worker pass before closing the database pool.
+- The /log and /feedback prompts correctly describe new references as 128-character SHA-512 hex while retaining compatibility with legacy 40-character references. The issue-hash test also checks case/whitespace validation.
+- tests/runtime-config.test.ts adds coverage for security-sensitive runtime configuration defaults and validation rules.
+- The dashboard CI job parses .env.example using Node's native env-file parser. Duplicate S3 variables and shell-style export lines were removed from the template, and its bridge-secret example was left empty rather than presenting a reusable credential.
+
+The audit distinguishes source-tree migration from behavior parity. The old Twitch/trending status rotator, generic webhook monitoring, stale-user cleanup, and departed-guild data deletion are not implemented in the new runtime. In particular, v3 currently retains guild data on GuildDelete, unlike the legacy clear_guild_records path. That retention-vs-deletion policy needs an explicit owner decision; this migration does not silently add destructive cleanup.
 ## What “all Python files migrated” means
 
 1. Every in-scope, production behavior from the base is implemented in the v3 TypeScript runtime or its retained Rust/dashboard boundary.
@@ -32,9 +44,9 @@ The Draft branch already has a Node.js/TypeScript bot startup path, a TypeScript
 
 | Legacy source | v3 destination | Current evidence | Remaining parity work |
 |---|---|---|---|
-| `bot.py` | `bot.ts`, `helpers/runtime/config.ts`, logger, security and service helpers | TypeScript gateway runtime, guild-only interaction routing, command dispatch, issue diagnostics, Atlas bridge, Daily Drop and Reading Club delivery, Media Night result delivery, and retryable release-digest scheduling exist. | Complete lifecycle parity for cog loading equivalents, stale-user/left-guild cleanup, status updates, monitoring hooks, bridge endpoints, graceful shutdown and every scheduled job. Verify intents and permission behavior against production. |
-| `config.py` | `helpers/runtime/config.ts` | Typed environment parsing exists. | Compare every active legacy setting, default, validation rule and deployment consumer; remove obsolete values only after confirming no caller needs them. |
-| `database.py` | `database.ts` plus domain-specific helpers | PostgreSQL pool/query/transaction foundation and multiple v3 data services exist. | Audit all legacy tables, indexes, constraints, ID-width assumptions, JSON columns, data ownership, import paths and rollback. Prove existing data survives deployment. |
+| `bot.py` | `bot.ts`, `helpers/runtime/config.ts`, logger, security and service helpers | TypeScript gateway runtime, guild-only interaction routing, command dispatch, issue diagnostics, Atlas bridge, Daily Drop and Reading Club delivery, Media Night result delivery, retryable release-digest scheduling and tracked shutdown for the Custom Role reconciliation/daily worker timers exist. Shutdown clears those intervals and waits for the active daily-worker pass before closing PostgreSQL. | Legacy cog hot-reload is not part of the production TypeScript runtime. The old stale-user and departed-guild cleanup jobs are not ported. The legacy Twitch/trending status rotator and generic webhook monitors are also not ported. Guild deletion currently retains records, whereas legacy on_guild_remove called clear_guild_records; confirm the data-retention policy before implementing destructive deletion. Verify gateway intents, channel permissions, and scheduled-worker recovery with live Discord/PostgreSQL acceptance. |
+| `config.py` | `helpers/runtime/config.ts` | Typed environment parsing exists; focused tests cover required credentials, safe defaults, moderator guild ID, paired IGDB credentials, HTTPS-only remote URLs, and loopback-only picker binding. The CI dashboard job also parses .env.example with Node's native env-file parser. | The full legacy environment surface is not one-for-one: stale Python cog/watch/cleanup, HLTB, generic AI and webhook settings need a final consumer-by-consumer scope decision. Do not retain obsolete settings just for appearance; verify deployment consumers before removal. |
+| `database.py` | `database.ts` plus domain-specific helpers | The legacy multi_guild database layer is PostgreSQL, not SQLite. The v3 schema creates its feature tables transactionally and retains users, steam_users, bot_moderators and Custom Role tables. Startup widens legacy booster_roles snowflakes to BIGINT and backfills missing steam_users.guild_id to the configured/default guild before enforcing a (discord_id, guild_id) primary key. The initializer does not drop legacy-only tables. | The table-name comparison found 38 legacy table definitions and 49 v3 definitions, with only eight identically named tables. Legacy-only news/free-game/challenge/progress/invite/analytics tables have not been data-migrated; several are intentionally out of scope, but existing records remain untouched. Verify table/column/index compatibility against a sanitized production schema, data counts, backups and restore/rollback before cutover. No live database was available for this audit. |
 | Media browse/recommend/random/trending | `/discover`, AniList/Steam/IGDB/Books/TMDB helpers | Category search, filters, trending, random, recommendation buttons and supported provider views exist. | Test all supported categories and legacy filter behavior; restore only stable provider-backed fields and ensure recommendations are labelled by provenance. |
 | `cogs/media/airing.py`, `trailer.py`, `tv_guide.py` | `/discover` and `/community` | AniList airing/trailer fields and TMDB film/TV search exist. | Full season/episode detail, pagination, time-zone display, fallback behavior and provider response edge cases are not yet evidenced as parity-complete. |
 | `cogs/media/compare.py` | `/discover` comparison | A second-title comparison option exists. | Verify parity for supported media types, missing fields, IGDB/Steam comparison, normalization and provenance. |
@@ -73,7 +85,7 @@ The base tree contains backup, under-maintenance, test, and helper files. They m
 
 ## Required TypeScript test parity
 
-The base has fifty Python test files under `tests/`; the Draft has twenty TypeScript test files. The target is not necessarily fifty files with identical names. The target is equivalent coverage for all retained behavior, especially:
+The base has fifty Python test files under `tests/`; the current Draft has twenty-two TypeScript test files (ninety-nine individual Node test cases in the current CI run). The target is not necessarily fifty files with identical names. The target is equivalent coverage for all retained behavior, especially:
 
 - AniList/Steam/IGDB/TMDB/Google Books normalization, empty responses, timeouts, rate limits, and malformed payloads.
 - Media search/filter/random/recommendation/compare/trailer/airing/creator/franchise flows.
