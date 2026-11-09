@@ -1,4 +1,4 @@
-import { secureRandBelow } from "../helpers/crypto-random.js";
+import { secureRandBelow } from "../../helpers/crypto-random.js";
 import {
   ActionRowBuilder,
   AttachmentBuilder,
@@ -19,28 +19,28 @@ import {
   type RoleSelectMenuInteraction,
   type ChannelSelectMenuInteraction,
 } from "discord.js";
-import type { FeatureCommand } from "../helpers/command.js";
-import type { BotConfig } from "../helpers/config.js";
-import { AniListClient, type AniListMedia, type AniListMediaType, type AniListSearchFilters, type AniListCreator } from "../helpers/anilist.js";
-import {SteamClient,type SteamStoreGame} from "../helpers/steam.js";
-import { GoogleBooksClient, type GoogleBook } from "../helpers/google-books.js";
-import { IgdbClient, type IgdbGame } from "../helpers/igdb.js";
-import { homeEmbed, navigationButtons } from "../helpers/discord.js";
-import { TmdbClient, type TmdbMedia, type TmdbTvSeason } from "../helpers/tmdb.js";
-import { getGuildMediaRegion } from "../helpers/media-region.js";
-import { cleanText } from "../helpers/security.js";
-import { createInteractionIssueLog, issueHashNotice } from "../helpers/issue-logs.js";
-import { findAtlasRelationships, recordProviderRelationships } from "../helpers/atlas.js";
+import type { FeatureCommand } from "../../helpers/command.js";
+import type { BotConfig } from "../../helpers/config.js";
+import { AniListClient, type AniListMedia, type AniListMediaType, type AniListSearchFilters, type AniListCreator } from "../../helpers/anilist.js";
+import {SteamClient,type SteamStoreGame} from "../../helpers/steam.js";
+import { GoogleBooksClient, type GoogleBook } from "../../helpers/google-books.js";
+import { IgdbClient, type IgdbGame } from "../../helpers/igdb.js";
+import { homeEmbed, navigationButtons } from "../../helpers/discord.js";
+import { TmdbClient, type TmdbMedia, type TmdbTvSeason } from "../../helpers/tmdb.js";
+import { getGuildMediaRegion } from "../../helpers/media-region.js";
+import { cleanText } from "../../helpers/security.js";
+import { createInteractionIssueLog, issueHashNotice } from "../../helpers/issue-logs.js";
+import { findAtlasRelationships, recordProviderRelationships } from "../../helpers/atlas.js";
 import {
   createMediaLinkSuggestion,
   getPendingMediaLinkSuggestion,
   listPendingMediaLinkSuggestions,
   MEDIA_LINK_RELATIONSHIPS,
   reviewMediaLinkSuggestion,
-} from "../helpers/media-link-suggestions.js";
-import { renderAtlasSnapshot } from "../helpers/atlas-renderer.js";
-import { logger } from "../helpers/logger.js";
-import { loadingMessage } from "../helpers/emoji.js";
+} from "../../helpers/media-link-suggestions.js";
+import { renderAtlasSnapshot } from "../../helpers/atlas-renderer.js";
+import { logger } from "../../helpers/logger.js";
+import { loadingMessage } from "../../helpers/emoji.js";
 
 
 type Category = "all" | "anime" | "manga" | "light_novel" | "book" | "movie" | "tv" | "game";
