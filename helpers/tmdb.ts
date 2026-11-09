@@ -395,13 +395,18 @@ export class TmdbClient {
     const details = await Promise.allSettled(
       shows.slice(0, 8).map((show) => this.tvDetails(show.id)),
     );
+    if (details.length > 0 && details.every((result) => result.status === "rejected")) {
+      throw new Error("TMDB could not load details for the currently airing TV series.");
+    }
+    const fromDay = from.toISOString().slice(0, 10);
+    const toDay = to.toISOString().slice(0, 10);
     const releases = details.flatMap((result): TmdbUpcomingTvEpisode[] => {
       if (result.status !== "fulfilled" || !result.value?.nextEpisode) return [];
       const detail = result.value;
       const episode = detail.nextEpisode;
-      if (!episode.airDate || !/^\d{4}-\d{2}-\d{2}$/.test(episode.airDate)) return [];
+      if (!episode.airDate || !/^\\d{4}-\\d{2}-\\d{2}$/.test(episode.airDate)) return [];
       const when = new Date(`${episode.airDate}T00:00:00.000Z`);
-      if (!Number.isFinite(when.getTime()) || when < from || when > to) return [];
+      if (!Number.isFinite(when.getTime()) || episode.airDate < fromDay || episode.airDate > toDay) return [];
       return [{ showId: detail.id, showTitle: detail.name, episode }];
     });
     return releases.sort((a, b) =>
