@@ -3,7 +3,7 @@
 **Status:** Approved product direction; implementation in progress  
 **Target branch:** lemegeton-v3  
 **Pull request:** #17 — keep Draft  
-**Implementation status:** TypeScript runtime foundation and the first AniList-backed `/discover` vertical slice are implemented; remaining feature migrations and production cutover are not complete.  
+**Implementation status:** the TypeScript runtime foundation and first AniList-backed `/discover` vertical slice are implemented; selected-feature parity and release readiness are not complete. This PR does not deploy the bot.  
 **Product scope:** Media Intelligence, Community Archive, Community Activities, Interactive Media Games, Social & Profiles, Custom Roles, Media Notifications & Automation, Community Knowledge Atlas, and Operations & Infrastructure.
 
 ---
@@ -76,9 +76,9 @@ This does not remove essential permissions, reporting, review queues, audit reco
 | Media objects | Keep the existing S3-compatible storage and private/public separation |
 | Metadata | Migrate and reuse existing provider integrations after verification |
 | Background processing | Durable, idempotent jobs using the existing infrastructure where suitable |
-| Hosting | Preserve the current deployment model until the migration audit establishes what must change |
+| Hosting | Verify the intended deployment model as part of release readiness; do not infer a live deployment from source files |
 
-The repository currently has a Python/discord.py bot. The dashboard is a React + TypeScript frontend built with Vite and served by the existing Rust/Axum service. The frontend migration therefore means replacing the Vite frontend with Next.js; it does **not** mean rewriting the Rust API or creating a second bot backend.
+The `multi_guild` source branch contains the earlier Python/discord.py bot implementation; the `lemegeton-v3` branch develops the replacement TypeScript/Discord.js runtime. The Python files are source references for reviewing selected behavior, not evidence that a Python bot is currently deployed. The dashboard source is a React + TypeScript frontend built with Vite and served by the Rust/Axum service. The frontend work replaces Vite with Next.js; it does **not** mean rewriting the Rust API or creating a second bot backend.
 
 The existing PostgreSQL schema, S3 asset registry, private/public storage rules, OAuth2 flow, bot bridge, and deployment configuration must be inspected before changes are made. Reuse them where they still meet v3 requirements. Do not introduce a parallel database, storage layer, command registry, permission model, or authentication system.
 
@@ -105,11 +105,11 @@ The TypeScript runtime currently requests the `Guilds`, `GuildMembers`, `GuildMe
 - `MessageContent` is used by the configured Community Archive upload-channel workflow.
 - When the bot cannot fetch a complete member list, Custom Role reconciliation must fail closed: skip the automatic archive pass, log the reason, and leave saved roles untouched. Do not infer ineligibility from a partial cache.
 
-The PostgreSQL startup migration widens the existing `booster_roles.discord_id`, `guild_id`, and `role_id` columns to `BIGINT` when that pre-v3 table exists. This is a widening conversion that preserves existing rows and its primary key; the legacy table remains read-only during the one-time import.
+The PostgreSQL startup migration widens the existing `booster_roles.discord_id`, `guild_id`, and `role_id` columns to `BIGINT` when that pre-v3 table exists. This is a widening conversion that preserves existing rows and its primary key; the existing source table remains read-only during any approved one-time import.
 
 ### 2.2 Dashboard responsibilities
 
-The dashboard remains the control plane for the running bot, not a second Discord client or an alternate command registry.
+Once v3 is deployed, the dashboard is the control plane for the bot, not a second Discord client or an alternate command registry.
 
 The Next.js frontend should provide larger-screen interfaces for:
 
@@ -1224,7 +1224,7 @@ Do not create extensive test infrastructure for trivial changes. Add tests propo
 - Preserve migration history and deployment configuration.
 - Define recovery steps for failed schema migrations.
 - Make scheduled-job recovery safe after restart.
-- Keep production cutover reversible until the new bot has passed parity checks.
+- Keep the first deployment and rollback reversible until the new bot has passed parity checks.
 - Protect backup access and never publish private user data in repository artifacts.
 
 ### 13.9 Security and privacy
@@ -1249,7 +1249,7 @@ Do not create extensive test infrastructure for trivial changes. Add tests propo
 - Separate required startup configuration from optional provider credentials.
 - Fail clearly when required configuration is missing.
 - Provide safe graceful shutdown and restart behavior.
-- Verify bot command registration and dashboard compatibility before production cutover.
+- Verify bot command registration and dashboard compatibility before the first deployment.
 - Keep environment examples synchronized with actual configuration.
 - Do not report a deployment or command sync as successful without confirming the result.
 
@@ -1332,7 +1332,7 @@ Existing useful functionality must be mapped before implementation. This invento
 | /steam-profile | /profile | Preserve supported Steam profile display |
 | /steam-recommendation | /discover | Merge into gaming discovery |
 | /steam-game | /discover | Merge into game discovery |
-| Free-game notifications | Media Notifications | Do not port the legacy monitor as-is: its Steam path parses storefront search responses and uses undocumented endpoints, while the Epic/GOG storefront feeds also lack a verified supported integration contract. Revisit only with a stable, permitted provider source. |
+| Free-game notifications | Media Notifications | Do not port the previous Python monitor as-is: its Steam path parses storefront search responses and uses undocumented endpoints, while the Epic/GOG storefront feeds also lack a verified supported integration contract. Revisit only with a stable, permitted provider source. |
 | Custom theme commands | Out of approved expansion | Do not build a general theme or appearance system |
 | /invite-stats and /invite-leaderboard | Out of approved expansion | Do not build general invite analytics |
 | /feedback | Standalone command (explicit exception) | Retain the existing feedback intake as its own top-level command; do not absorb it into a feature environment |
@@ -1461,11 +1461,11 @@ Provider information may be displayed when the member explicitly links and autho
 
 ## 17. Migration plan
 
-The redevelopment is staged so the new bot does not lose existing behavior during the rewrite.
+The redevelopment is staged so selected behavior from the source implementation is preserved during the TypeScript rebuild.
 
-### Current implementation checkpoint — 7 November 2026
+### Current implementation checkpoint — 9 November 2026
 
-The current PR head contains the TypeScript/Node.js/Discord.js runtime in `bot.ts`, PostgreSQL access in `database.ts`, feature commands in `src/`, shared providers/domain helpers in `helpers/`, a Next.js frontend in `web/frontend/`, and the existing Rust/Axum backend in `web/backend/`. The PR head contains zero `.py` or `.pyi` files. That is not evidence of complete behavior parity: the `multi_guild` base contained 167 Python files at the 8 November 2026 audit snapshot, including 63 cogs, 31 helpers, 50 test/fixture files, runtime/configuration/database code, scripts, backups and under-maintenance modules. Some behaviors have TypeScript equivalents, some are only partially covered, and some are deliberately out of scope. The file-by-file disposition and verified gaps are recorded in `docs/MIGRATION_PARITY_AUDIT.md`; do not claim full migration merely because Python files are absent. `scripts/start.sh`, the Docker/Compose runtime and the TypeScript CI workflows on this branch use Node.js/TypeScript, but a branch build is not evidence of a live deployment. `/help`, `/privacy`, and `/feedback` remain separate standalone commands and must not be folded into the seven feature environments.
+The current PR head contains the TypeScript/Node.js/Discord.js runtime in `bot.ts`, PostgreSQL access in `database.ts`, feature commands in `src/`, shared providers/domain helpers in `helpers/`, a Next.js frontend in `web/frontend/`, and the existing Rust/Axum backend in `web/backend/`. The PR head contains zero `.py` or `.pyi` files. That is not evidence of complete behavior parity: the `multi_guild` base contained 167 Python files at the 8 November 2026 audit snapshot, including 63 cogs, 31 helpers, 50 test/fixture files, runtime/configuration/database code, scripts, backups and under-maintenance modules. Some behaviors have TypeScript equivalents, some are only partially covered, and some are deliberately out of scope. The source-to-TypeScript disposition and verified gaps are recorded in `docs/MIGRATION_PARITY_AUDIT.md`; do not claim feature parity merely because Python files are absent. `scripts/start.sh`, the Docker/Compose runtime and the TypeScript CI workflows on this branch use Node.js/TypeScript, but a branch build is not evidence of a live deployment. `/help`, `/privacy`, and `/feedback` remain separate standalone commands and must not be folded into the seven feature environments.
 
 Guild-level media completion notifications now have a durable PostgreSQL settings/delivery store and an administrator-controlled `/settings` panel. The current scanner covers only recently finished or cancelled anime and manga reported by AniList. Per-title subscriptions, additional provider release types, digest scheduling, and media-linked automation remain future migration work.
 

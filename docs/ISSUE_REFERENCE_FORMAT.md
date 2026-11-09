@@ -14,6 +14,8 @@ This is intentionally a 40-character SHA-512-derived reference. Do not change it
 
 ## User flow
 
+Generated references are lowercase. Input validation trims surrounding whitespace and accepts uppercase hexadecimal by normalizing it to lowercase before lookup.
+
 1. When a guild interaction fails, the bot attempts to store a sanitized diagnostic record and shows the 40-character reference.
 2. The user can paste that reference into the optional issue-reference field in `/feedback`.
 3. `/feedback` validates the exact 40-character format and confirms that the reference belongs to the submitting guild before attaching it to feedback.
