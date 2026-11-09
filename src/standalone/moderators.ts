@@ -49,18 +49,18 @@ function panel(rows: Moderator[]): EmbedBuilder {
 function controls(): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId("adminmoderators:refresh").setLabel("Refresh").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("adminmoderators:add").setLabel("Add moderator").setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId("adminmoderators:remove").setLabel("Remove moderator").setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId("moderators:refresh").setLabel("Refresh").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("moderators:add").setLabel("Add moderator").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("moderators:remove").setLabel("Remove moderator").setStyle(ButtonStyle.Danger),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId("adminmoderators:about").setLabel("About permissions").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("moderators:about").setLabel("About permissions").setStyle(ButtonStyle.Secondary),
     ),
   ];
 }
 
 function moderatorModal(action: "add" | "remove"): ModalBuilder {
-  return new ModalBuilder().setCustomId("adminmoderators:" + action)
+  return new ModalBuilder().setCustomId("moderators:" + action)
     .setTitle(action === "add" ? "Add bot moderator" : "Remove bot moderator")
     .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
       new TextInputBuilder().setCustomId("user_id").setLabel("Discord user ID or mention")
@@ -100,7 +100,7 @@ export class BotModeratorsCommand implements FeatureCommand {
   }
 
   async handleButton(interaction: ButtonInteraction): Promise<boolean> {
-    if (!interaction.customId.startsWith("adminmoderators:")) return false;
+    if (!interaction.customId.startsWith("moderators:")) return false;
     if (!await this.authorize(interaction)) return true;
     const action = interaction.customId.split(":")[1];
     if (action === "add" || action === "remove") {
@@ -126,7 +126,7 @@ export class BotModeratorsCommand implements FeatureCommand {
   }
 
   async handleModal(interaction: ModalSubmitInteraction): Promise<boolean> {
-    if (!["adminmoderators:add", "adminmoderators:remove"].includes(interaction.customId)) return false;
+    if (!["moderators:add", "moderators:remove"].includes(interaction.customId)) return false;
     if (!await this.authorize(interaction)) return true;
     const action = interaction.customId.endsWith(":add") ? "add" : "remove";
     const userId = parseDiscordId(interaction.fields.getTextInputValue("user_id"));
