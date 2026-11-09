@@ -3,17 +3,32 @@ import {loadConfig} from "../helpers/config.js";
 import {configureLogger,logger} from "../helpers/logger.js";
 import {createCommandRegistry} from "./registry.js";
 
+const MODERATOR_COMMANDS=new Set(["log","moderators","planned"]);
+
 async function deploy():Promise<void>{
  const config=loadConfig();
  configureLogger(config.logLevel);
- const commands=createCommandRegistry(config).map(command=>({
-  ...command.data.toJSON(),
-  contexts:[InteractionContextType.Guild],
-  integration_types:[ApplicationIntegrationType.GuildInstall],
- }));
+ const commands=createCommandRegistry(config);
  const rest=new REST({version:"10"}).setToken(config.discordToken);
- await rest.put(Routes.applicationCommands(config.applicationId),{body:commands});
- logger.info("Deployed server-only Lemegeton commands",{names:commands.map(command=>command.name)});
+ const globalCommands=commands
+  .filter(command=>!MODERATOR_COMMANDS.has(command.data.name))
+  .map(command=>({
+   ...command.data.toJSON(),
+   contexts:[InteractionContextType.Guild],
+   integration_types:[ApplicationIntegrationType.GuildInstall],
+  }));
+ await rest.put(Routes.applicationCommands(config.applicationId),{body:globalCommands});
+
+ const moderatorCommands=commands
+  .filter(command=>MODERATOR_COMMANDS.has(command.data.name))
+  .map(command=>command.data.toJSON());
+ if(config.botModeratorGuildId){
+  await rest.put(Routes.applicationGuildCommands(config.applicationId,config.botModeratorGuildId),{body:moderatorCommands});
+  logger.info("Deployed bot-moderator commands to their dedicated server",{guildId:config.botModeratorGuildId,names:moderatorCommands.map(command=>command.name)});
+ }else{
+  logger.warn("Bot-moderator commands were not registered; BOT_MODERATOR_GUILD_ID is not configured.");
+ }
+ logger.info("Deployed server-only Lemegeton feature commands",{names:globalCommands.map(command=>command.name)});
 }
 void deploy().catch(error=>{
  logger.error("Slash command deployment failed",{reason:error instanceof Error?error.message:"Unknown error"});
