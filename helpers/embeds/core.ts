@@ -161,7 +161,10 @@ export function buildMediaEmbed(mediaValue: unknown): EmbedBuilder {
     text(media.source) ? `🔗 Source: ${text(media.source)}` : null,
   ].filter((item): item is string => Boolean(item));
   if (stats.length) embed.addFields({ name: "Stats", value: stats.join("\n").slice(0, 900), inline: true });
-  const characters = list(record(media.characters).edges);
+  const characterValue=media.characters;
+  const characters=Array.isArray(characterValue)
+    ? characterValue.map(item=>({role:record(item).role,node:{id:record(item).id,name:{full:record(item).name}}}))
+    : list(record(characterValue).edges);
   const main = characters.filter(item => text(record(item).role).toUpperCase() === "MAIN");
   const preview = (main.length ? main : characters).slice(0, 6).flatMap(item => {
     const node = record(record(item).node);
