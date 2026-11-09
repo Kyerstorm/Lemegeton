@@ -330,7 +330,14 @@ export class ArchiveCommand implements FeatureCommand {
     const userId = interaction.user.id;
     try {
       switch (action) {
-        case "home": await interaction.reply({ ...archiveHome(), flags: MessageFlags.Ephemeral }); return;
+        case "home": {
+          const previous = await getLastArchiveCategory(guildId, userId);
+          await interaction.reply({
+            ...(previous ? archiveUsualPrompt(previous) : archiveHome()),
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
         case "browse": await this.browse(interaction, interaction.options.getString("category") as ArchiveCategory | null); return;
         case "search": {
           const keyword = interaction.options.getString("keyword") ?? "";
