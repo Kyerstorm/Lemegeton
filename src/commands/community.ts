@@ -17,12 +17,12 @@ import {
   type StringSelectMenuInteraction,
   type TextChannel,
 } from "discord.js";
-import type { FeatureCommand } from "../helpers/command.js";
-import { createInteractionIssueLog, issueHashNotice } from "../helpers/issue-logs.js";
-import type { BotConfig } from "../helpers/config.js";
-import { homeEmbed } from "../helpers/discord.js";
-import { AniListClient } from "../helpers/anilist.js";
-import { TmdbClient } from "../helpers/tmdb.js";
+import type { FeatureCommand } from "../../helpers/command.js";
+import { createInteractionIssueLog, issueHashNotice } from "../../helpers/issue-logs.js";
+import type { BotConfig } from "../../helpers/config.js";
+import { homeEmbed } from "../../helpers/discord.js";
+import { AniListClient } from "../../helpers/anilist.js";
+import { TmdbClient } from "../../helpers/tmdb.js";
 import {
   addRankingCandidate,
   closeDiscussion,
@@ -48,9 +48,9 @@ import {
   setSessionRsvp,
   submitDailyItem,
   voteForRanking,
-} from "../helpers/community.js";
-import { query, queryOne } from "../database.js";
-import { cleanText, isGuildManager, isValidHttpsUrl, safeDisplay } from "../helpers/security.js";
+} from "../../helpers/community.js";
+import { query, queryOne } from "../../database.js";
+import { cleanText, isGuildManager, isValidHttpsUrl, safeDisplay } from "../../helpers/security.js";
 import {
   attachReadingDiscussion,
   listReadingNominations,
@@ -59,7 +59,7 @@ import {
   READING_CATEGORIES,
   selectNextReading,
   voteForReading,
-} from "../helpers/community-reading.js";
+} from "../../helpers/community-reading.js";
 
 const DAILY_FORMATS = [
   { name: "Question", value: "question" },
