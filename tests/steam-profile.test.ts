@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {parseOwnedSteamGames} from "../helpers/steam.js";
+import {parseOwnedSteamGames} from "../helpers/providers/steam.js";
 
 test("owned Steam games normalize total playtime and top games",()=>{
  const summary=parseOwnedSteamGames([{appid:1,name:"First",playtime_forever:120,img_icon_url:"abc"},{appid:2,name:"Second",playtime_forever:360},{appid:3,name:"Invalid",playtime_forever:-20},{appid:0,name:"Invalid app"},{appid:4,name:"Third",playtime_forever:60}]);

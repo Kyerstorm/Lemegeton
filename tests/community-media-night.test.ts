@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import {
   filterMediaNightCandidates,
   sampleMediaNightCandidates,
-} from "../helpers/community-rankings.js";
-import type { AniListMediaNightCandidate } from "../helpers/anilist.js";
+} from "../helpers/community/community-rankings.js";
+import type { AniListMediaNightCandidate } from "../helpers/providers/anilist.js";
 
 const candidates: AniListMediaNightCandidate[] = [
   {

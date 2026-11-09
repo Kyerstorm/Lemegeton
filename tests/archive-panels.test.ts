@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {parseAniListMangaReference,parsePanelChapterCaption} from "../helpers/archive.js";
+import {parseAniListMangaReference,parsePanelChapterCaption} from "../helpers/archive/archive.js";
 
 test("Manga panel chapter metadata supports numbered and unknown chapters",()=>{
  assert.deepEqual(parsePanelChapterCaption("Chapter 12 — Final battle"),{chapterNumber:"12",caption:"Final battle"});

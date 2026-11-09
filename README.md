@@ -42,7 +42,7 @@ Slash commands and their components are intended to be used in a Discord server,
 | /planned | Browse the development plan and moderator controls |
 | /feedback | Submit ideas or report bugs with an optional issue reference |
 | /log | Retrieve a server-scoped diagnostic record (bot moderators only) |
-| /adminmoderators | Manage the bot-wide moderator list (restricted) |
+| /moderators | Manage the bot-wide moderator list (restricted to the configured moderator server) |
 | /help, /privacy | Standalone help and privacy information |
 | /timestamp, /invite, /convertlinks | Server utility commands |
 
@@ -164,7 +164,7 @@ The dashboard workflow also audits frontend/Rust dependencies and builds the pro
 bot.ts                         Discord.js gateway, events, and runtime
 database.ts                    PostgreSQL schema, pool, and transactions
 src/                           Slash commands and interaction handlers
-helpers/                       Provider clients and domain services
+helpers/                       Grouped providers, commands, security, media, and domain services
 tests/                          TypeScript tests
 scripts/start.sh                Combined bot/dashboard startup
 scripts/repo-stats.mjs          Generated README statistics
@@ -197,6 +197,7 @@ Statistics are generated from tracked text and source files after changes are in
 
 - [Media discovery](docs/MEDIA_DISCOVERY.md)
 - [Dashboard setup and architecture](docs/DASHBOARD.md)
+- [Interaction and UX guidelines](docs/UX_GUIDELINES.md)
 - [Security review](docs/SECURITY_AUDIT.md)
 - [Custom Roles specification](docs/CUSTOM_ROLES_SPEC.md)
 - [VPS deployment](deploy/vps/README.md)

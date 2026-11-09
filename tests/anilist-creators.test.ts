@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {parseCreator} from "../helpers/anilist.js";
+import {parseCreator} from "../helpers/providers/anilist.js";
 
 test("AniList creator records preserve occupations and linked media",()=>{
  const creator=parseCreator({id:42,name:{full:"Example Creator"},siteUrl:"https://anilist.co/staff/42",image:{large:"https://s4.anilist.co/file/anilistcdn/staff/large/b42.jpg"},description:"A creator",primaryOccupations:["Writer","Illustrator"],yearsActive:[2000],staffMedia:{edges:[{staffRole:"Original Creator",node:{id:9,type:"MANGA",siteUrl:"https://anilist.co/manga/9",title:{english:"Example Comic"}}}]}});

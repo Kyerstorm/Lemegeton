@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { upcomingProviderReleases } from "../helpers/community-sessions.js";
-import type { AniListClient } from "../helpers/anilist.js";
-import type { TmdbClient } from "../helpers/tmdb.js";
+import { upcomingProviderReleases } from "../helpers/community/community-sessions.js";
+import type { AniListClient } from "../helpers/providers/anilist.js";
+import type { TmdbClient } from "../helpers/providers/tmdb.js";
 import {
   nextReleaseOccurrence,
   normalizeReleaseCategories,
-} from "../helpers/community-releases.js";
+} from "../helpers/community/community-releases.js";
 
 test("daily release digest uses the selected timezone and next local time", () => {
   const next = nextReleaseOccurrence("Europe/Dublin", "18:30", "daily", 1, new Date("2026-11-09T17:00:00.000Z"));

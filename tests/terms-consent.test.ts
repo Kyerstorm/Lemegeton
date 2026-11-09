@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {buildConsentComponents,buildConsentEmbed,CONSENT_POLICY_VERSIONS,POLICY_LINKS,parseConsentAction} from "../helpers/terms-consent.js";
-import {secureChoice,secureRandBelow} from "../helpers/crypto-random.js";
+import {buildConsentComponents,buildConsentEmbed,CONSENT_POLICY_VERSIONS,POLICY_LINKS,parseConsentAction} from "../helpers/security/terms-consent.js";
+import {secureChoice,secureRandBelow} from "../helpers/security/crypto-random.js";
 
 test("first-use consent prompt links all published policies",()=>{
  const embed=buildConsentEmbed().toJSON();

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeMediaLinkSuggestion } from "../helpers/media-link-suggestions.js";
+import { normalizeMediaLinkSuggestion } from "../helpers/media/media-link-suggestions.js";
 
 const valid = {
   sourceTitle: "  Source   Work ",

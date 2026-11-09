@@ -7,7 +7,7 @@ import {
   type AniListPublicEntity,
   type AniListReviewRecord,
   type AniListUserProfile,
-} from "../anilist.js";
+} from "../providers/anilist.js";
 import {
   buildCharactersEmbeds,
   buildMediaEmbed,

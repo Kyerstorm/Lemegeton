@@ -4,7 +4,7 @@ import {
   isValidArchiveChannelId,
   parseAniListMangaReference,
   parsePanelChapterCaption,
-} from "../helpers/archive.js";
+} from "../helpers/archive/archive.js";
 
 test("Archive channel setting accepts normal Discord text-channel snowflakes and clearing", () => {
   assert.equal(isValidArchiveChannelId("123456789012345678"), true);

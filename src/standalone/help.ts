@@ -1,5 +1,5 @@
 import { EmbedBuilder, MessageFlags, SlashCommandBuilder, type ChatInputCommandInteraction } from "discord.js";
-import type { FeatureCommand } from "../../helpers/command.js";
+import type { FeatureCommand } from "../../helpers/commands/command.js";
 
 export class HelpCommand implements FeatureCommand {
   readonly data = new SlashCommandBuilder().setName("help").setDescription("Explore Lemegeton's commands and features");

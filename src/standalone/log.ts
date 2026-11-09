@@ -1,10 +1,10 @@
 import {
   EmbedBuilder, MessageFlags, SlashCommandBuilder, type ChatInputCommandInteraction,
 } from "discord.js";
-import type { FeatureCommand } from "../../helpers/command.js";
+import type { FeatureCommand } from "../../helpers/commands/command.js";
 import { loadingMessage } from "../../helpers/emoji.js";
-import { findIssueLog, isIssueHash } from "../../helpers/issue-logs.js";
-import { isBotModerator, isModeratorCommandGuild } from "../../helpers/moderation.js";
+import { findIssueLog, isIssueHash } from "../../helpers/runtime/issue-logs.js";
+import { isBotModerator, isModeratorCommandGuild } from "../../helpers/commands/moderation.js";
 
 function display(value: unknown, limit = 950): string {
   const text = typeof value === "string" ? value : JSON.stringify(value, null, 2) ?? String(value);

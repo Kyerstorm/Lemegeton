@@ -2,9 +2,9 @@ import {
   ActionRowBuilder, EmbedBuilder, MessageFlags, ModalBuilder, SlashCommandBuilder,
   TextInputBuilder, TextInputStyle, type ChatInputCommandInteraction, type ModalSubmitInteraction,
 } from "discord.js";
-import type { BotConfig } from "../../helpers/config.js";
-import type { FeatureCommand } from "../../helpers/command.js";
-import { AniListClient } from "../../helpers/anilist.js";
+import type { BotConfig } from "../../helpers/runtime/config.js";
+import type { FeatureCommand } from "../../helpers/commands/command.js";
+import { AniListClient } from "../../helpers/providers/anilist.js";
 import { loadingMessage } from "../../helpers/emoji.js";
 
 function extractLinks(value: string): string[] {

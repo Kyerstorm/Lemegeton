@@ -18,20 +18,20 @@ import {
   type StringSelectMenuInteraction,
   type ModalSubmitInteraction,
 } from "discord.js";
-import type { FeatureCommand } from "../../helpers/command.js";
+import type { FeatureCommand } from "../../helpers/commands/command.js";
 import {
   FEATURE_NAMES,
   getFeatureSettings,
   isFeatureName,
   setFeatureEnabled,
   type FeatureName,
-} from "../../helpers/settings.js";
+} from "../../helpers/runtime/settings.js";
 import {
   getMediaNotificationSettings,
   setMediaNotificationSettings,
-} from "../../helpers/media-notifications.js";
-import { getGuildMediaRegion, setGuildMediaRegion } from "../../helpers/media-region.js";
-import { createInteractionIssueLog, issueHashNotice } from "../../helpers/issue-logs.js";
+} from "../../helpers/media/media-notifications.js";
+import { getGuildMediaRegion, setGuildMediaRegion } from "../../helpers/media/media-region.js";
+import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
 
 type SettingsRow =
   | ActionRowBuilder<ButtonBuilder>

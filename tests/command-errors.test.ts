@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {safeInteractionErrorMessage} from "../helpers/command-errors.js";
+import {safeInteractionErrorMessage} from "../helpers/commands/command-errors.js";
 
 test("interaction errors map permission, missing-resource and expiry failures safely",()=>{
  assert.match(safeInteractionErrorMessage({code:50013}),/missing a required permission/i);

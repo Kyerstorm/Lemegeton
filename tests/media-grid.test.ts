@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {parseGridTitles} from "../helpers/media-grid.js";
+import {parseGridTitles} from "../helpers/media/media-grid.js";
 
 test("3x3 grid title parser keeps exactly nine cleaned titles",()=>{
  const titles=parseGridTitles(" One \n Two\nThree\nFour\nFive\nSix\nSeven\nEight\nNine ");

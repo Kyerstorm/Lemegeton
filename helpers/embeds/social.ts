@@ -1,5 +1,5 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type Message } from "discord.js";
-import { SteamClient, type SteamStoreGame } from "../steam.js";
+import { SteamClient, type SteamStoreGame } from "../providers/steam.js";
 
 const SOCIAL_HOSTS = new Map<string,string>([
   ["x.com","xeezz.com"],

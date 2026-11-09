@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {colorForState,PALETTE} from "../helpers/color-palette.js";
+import {colorForState,PALETTE} from "../helpers/runtime/color-palette.js";
 
 test("semantic palette exposes the legacy values and maps states",()=>{
  assert.equal(PALETTE.PRIMARY,0x7c5cff);

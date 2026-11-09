@@ -1,6 +1,6 @@
 import {ApplicationIntegrationType,InteractionContextType,REST,Routes} from "discord.js";
-import {loadConfig} from "../helpers/config.js";
-import {configureLogger,logger} from "../helpers/logger.js";
+import {loadConfig} from "../helpers/runtime/config.js";
+import {configureLogger,logger} from "../helpers/runtime/logger.js";
 import {createCommandRegistry} from "./registry.js";
 
 const MODERATOR_COMMANDS=new Set(["log","moderators","planned"]);

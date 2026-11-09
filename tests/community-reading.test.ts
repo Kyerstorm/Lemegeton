@@ -4,7 +4,7 @@ import {
   normalizeReadingCategory,
   parseReadingScheduleTime,
   READING_CATEGORIES,
-} from "../helpers/community-reading.js";
+} from "../helpers/community/community-reading.js";
 
 test("community reading accepts the supported legacy publication categories", () => {
   assert.deepEqual(READING_CATEGORIES, [

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createIssueHash, isIssueHash, sanitizeIssueDetails } from "../helpers/issue-logs.js";
+import { createIssueHash, isIssueHash, sanitizeIssueDetails } from "../helpers/runtime/issue-logs.js";
 
 test("new issue references match the 40-character hexadecimal format and are unique", () => {
   const first = createIssueHash("interaction-1", "user-1");

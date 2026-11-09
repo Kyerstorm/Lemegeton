@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
-import { logger } from "./helpers/logger.js";
+import { logger } from "./helpers/runtime/logger.js";
 
 let pool: Pool | undefined;
 
@@ -626,173 +626,11 @@ const schemaStatements = [
     guild_id BIGINT PRIMARY KEY,
     channel_id BIGINT NOT NULL,
     time_zone VARCHAR(80) NOT NULL,
-    local_time VARCHAR(5) NOT NULL CHECK (local_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]
-];
-
-export async function initDatabase(): Promise<void> {
-  const activePool = databasePool();
-  await activePool.query("SELECT 1");
-  const client = await activePool.connect();
-  try {
-    await client.query("BEGIN");
-    for (const statement of schemaStatements) await client.query(statement);
-
-    const legacyRoleColumns = await client.query<{ column_name: string; data_type: string }>(
-      `SELECT column_name, data_type FROM information_schema.columns
-       WHERE table_schema = current_schema() AND table_name = 'booster_roles'
-         AND column_name = ANY($1::text[])`,
-      [["discord_id", "guild_id", "role_id"]],
-    );
-    if (legacyRoleColumns.rows.length === 3) {
-      const types = new Map(legacyRoleColumns.rows.map(row => [row.column_name, row.data_type]));
-      for (const column of ["discord_id", "guild_id", "role_id"] as const) {
-        if (types.get(column) !== "bigint") {
-          await client.query(
-            `ALTER TABLE booster_roles ALTER COLUMN ${column} TYPE BIGINT USING ${column}::BIGINT`,
-          );
-        }
-      }
-      logger.info("Legacy booster role identifiers widened to BIGINT for Discord snowflakes");
-    } else if (legacyRoleColumns.rows.length > 0) {
-      logger.warn("Legacy booster_roles table is incomplete; its records were not changed");
-    }
-
-    const defaultGuildId = process.env.GUILD_ID?.trim() || process.env.PRIMARY_GUILD_ID?.trim() || "897814031346319382";
-    if (!/^\d{17,20}$/.test(defaultGuildId)) throw new Error("GUILD_ID / PRIMARY_GUILD_ID must be a valid Discord snowflake.");
-    await client.query("UPDATE steam_users SET guild_id = $1 WHERE guild_id IS NULL", [defaultGuildId]);
-    await client.query("ALTER TABLE steam_users ALTER COLUMN discord_id TYPE BIGINT");
-    await client.query("ALTER TABLE steam_users ALTER COLUMN guild_id TYPE BIGINT");
-    await client.query("ALTER TABLE steam_users ALTER COLUMN guild_id SET NOT NULL");
-
-    const primaryKey = await client.query<{ constraint_name: string }>(
-      `SELECT constraint_name FROM information_schema.table_constraints
-       WHERE table_schema = current_schema() AND table_name = 'steam_users'
-         AND constraint_type = 'PRIMARY KEY' LIMIT 1`,
-    );
-    const keyName = primaryKey.rows[0]?.constraint_name;
-    let hasGuildComposite = false;
-    if (keyName) {
-      const columns = await client.query<{ column_name: string; ordinal_position: number }>(
-        `SELECT column_name, ordinal_position FROM information_schema.key_column_usage
-         WHERE table_schema = current_schema() AND table_name = 'steam_users' AND constraint_name = $1
-         ORDER BY ordinal_position`,
-        [keyName],
-      );
-      hasGuildComposite = columns.rows.map((row) => row.column_name).join(",") === "discord_id,guild_id";
-      if (!hasGuildComposite) {
-        const safeKeyName = keyName.replaceAll('"', '""');
-        await client.query(`ALTER TABLE steam_users DROP CONSTRAINT "${safeKeyName}"`);
-      }
-    }
-    if (!hasGuildComposite) {
-      await client.query("ALTER TABLE steam_users ADD CONSTRAINT steam_users_discord_guild_pk PRIMARY KEY (discord_id, guild_id)");
-    }
-    await client.query("CREATE INDEX IF NOT EXISTS steam_users_guild_lookup_idx ON steam_users (guild_id, discord_id)");
-    await client.query("COMMIT");
-    logger.info("PostgreSQL connected and v3 feature schema verified");
-  } catch (error) {
-    await client.query("ROLLBACK");
-    logger.error("PostgreSQL schema initialization failed", {
-      reason: error instanceof Error ? error.message : "Unknown error",
-    });
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
-export async function closeDatabase(): Promise<void> {
-  if (!pool) return;
-  const activePool = pool;
-  pool = undefined;
-  await activePool.end();
-}
-),
+    local_time VARCHAR(5) NOT NULL CHECK (local_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'),
     cadence VARCHAR(8) NOT NULL CHECK (cadence IN ('daily','weekly')),
     weekday SMALLINT NOT NULL DEFAULT 1 CHECK (weekday BETWEEN 0 AND 6),
     categories TEXT[] NOT NULL DEFAULT ARRAY['anime','tv','movies']::TEXT[],
-    region VARCHAR(2) NOT NULL DEFAULT 'IE' CHECK (region ~ '^[A-Z]{2}
-];
-
-export async function initDatabase(): Promise<void> {
-  const activePool = databasePool();
-  await activePool.query("SELECT 1");
-  const client = await activePool.connect();
-  try {
-    await client.query("BEGIN");
-    for (const statement of schemaStatements) await client.query(statement);
-
-    const legacyRoleColumns = await client.query<{ column_name: string; data_type: string }>(
-      `SELECT column_name, data_type FROM information_schema.columns
-       WHERE table_schema = current_schema() AND table_name = 'booster_roles'
-         AND column_name = ANY($1::text[])`,
-      [["discord_id", "guild_id", "role_id"]],
-    );
-    if (legacyRoleColumns.rows.length === 3) {
-      const types = new Map(legacyRoleColumns.rows.map(row => [row.column_name, row.data_type]));
-      for (const column of ["discord_id", "guild_id", "role_id"] as const) {
-        if (types.get(column) !== "bigint") {
-          await client.query(
-            `ALTER TABLE booster_roles ALTER COLUMN ${column} TYPE BIGINT USING ${column}::BIGINT`,
-          );
-        }
-      }
-      logger.info("Legacy booster role identifiers widened to BIGINT for Discord snowflakes");
-    } else if (legacyRoleColumns.rows.length > 0) {
-      logger.warn("Legacy booster_roles table is incomplete; its records were not changed");
-    }
-
-    const defaultGuildId = process.env.GUILD_ID?.trim() || process.env.PRIMARY_GUILD_ID?.trim() || "897814031346319382";
-    if (!/^\d{17,20}$/.test(defaultGuildId)) throw new Error("GUILD_ID / PRIMARY_GUILD_ID must be a valid Discord snowflake.");
-    await client.query("UPDATE steam_users SET guild_id = $1 WHERE guild_id IS NULL", [defaultGuildId]);
-    await client.query("ALTER TABLE steam_users ALTER COLUMN discord_id TYPE BIGINT");
-    await client.query("ALTER TABLE steam_users ALTER COLUMN guild_id TYPE BIGINT");
-    await client.query("ALTER TABLE steam_users ALTER COLUMN guild_id SET NOT NULL");
-
-    const primaryKey = await client.query<{ constraint_name: string }>(
-      `SELECT constraint_name FROM information_schema.table_constraints
-       WHERE table_schema = current_schema() AND table_name = 'steam_users'
-         AND constraint_type = 'PRIMARY KEY' LIMIT 1`,
-    );
-    const keyName = primaryKey.rows[0]?.constraint_name;
-    let hasGuildComposite = false;
-    if (keyName) {
-      const columns = await client.query<{ column_name: string; ordinal_position: number }>(
-        `SELECT column_name, ordinal_position FROM information_schema.key_column_usage
-         WHERE table_schema = current_schema() AND table_name = 'steam_users' AND constraint_name = $1
-         ORDER BY ordinal_position`,
-        [keyName],
-      );
-      hasGuildComposite = columns.rows.map((row) => row.column_name).join(",") === "discord_id,guild_id";
-      if (!hasGuildComposite) {
-        const safeKeyName = keyName.replaceAll('"', '""');
-        await client.query(`ALTER TABLE steam_users DROP CONSTRAINT "${safeKeyName}"`);
-      }
-    }
-    if (!hasGuildComposite) {
-      await client.query("ALTER TABLE steam_users ADD CONSTRAINT steam_users_discord_guild_pk PRIMARY KEY (discord_id, guild_id)");
-    }
-    await client.query("CREATE INDEX IF NOT EXISTS steam_users_guild_lookup_idx ON steam_users (guild_id, discord_id)");
-    await client.query("COMMIT");
-    logger.info("PostgreSQL connected and v3 feature schema verified");
-  } catch (error) {
-    await client.query("ROLLBACK");
-    logger.error("PostgreSQL schema initialization failed", {
-      reason: error instanceof Error ? error.message : "Unknown error",
-    });
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
-export async function closeDatabase(): Promise<void> {
-  if (!pool) return;
-  const activePool = pool;
-  pool = undefined;
-  await activePool.end();
-}
-),
+    region VARCHAR(2) NOT NULL DEFAULT 'IE' CHECK (region ~ '^[A-Z]{2}$'),
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
     next_run_at TIMESTAMPTZ NOT NULL,
     created_by BIGINT NOT NULL,

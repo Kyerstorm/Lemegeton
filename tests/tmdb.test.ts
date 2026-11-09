@@ -9,8 +9,8 @@ import {
   normalizeTmdbTvSeason,
   normalizeTmdbVideos,
   normalizeTmdbWatchAvailability,
-} from "../helpers/tmdb.js";
-import { normalizeMediaRegion } from "../helpers/media-region.js";
+} from "../helpers/providers/tmdb.js";
+import { normalizeMediaRegion } from "../helpers/media/media-region.js";
 
 test("TMDB media normalization accepts valid movie and TV records", () => {
   const movie = normalizeTmdbMedia({

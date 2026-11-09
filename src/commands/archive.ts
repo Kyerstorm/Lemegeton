@@ -20,9 +20,9 @@ import {
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction,
 } from "discord.js";
-import type { FeatureCommand } from "../../helpers/command.js";
-import { createInteractionIssueLog, issueHashNotice } from "../../helpers/issue-logs.js";
-import { homeEmbed } from "../../helpers/discord.js";
+import type { FeatureCommand } from "../../helpers/commands/command.js";
+import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
+import { homeEmbed } from "../../helpers/runtime/discord.js";
 import {
   ARCHIVE_CATEGORIES,
   searchArchiveTags,
@@ -44,7 +44,7 @@ import {
   type ArchiveCategory,
   type ArchiveEntry,
   type ArchiveVisibility
-} from "../../helpers/archive.js";
+} from "../../helpers/archive/archive.js";
 import {
   canModerateArchive,
   isGlobalArchiveModerator,
@@ -53,7 +53,7 @@ import {
   addArchiveReport,
   listArchiveReports,
   reviewArchiveReport
-} from "../../helpers/archive-moderation.js";
+} from "../../helpers/archive/archive-moderation.js";
 import {
   addEntryToCollection,
   addEntryToTrail,
@@ -66,11 +66,11 @@ import {
   getCollectionItems,
   saveArchiveCollection,
   saveArchiveTrail
-} from "../../helpers/archive-collections.js";
+} from "../../helpers/archive/archive-collections.js";
 import { query, queryOne } from "../../database.js";
-import { deleteArchiveAsset, signedArchiveAssetUrl, storeArchiveUpload, classifyArchiveUpload } from "../../helpers/media-storage.js";
-import { cleanText, isGuildManager, isValidHttpsUrl, safeDisplay } from "../../helpers/security.js";
-import { logger } from "../../helpers/logger.js";
+import { deleteArchiveAsset, signedArchiveAssetUrl, storeArchiveUpload, classifyArchiveUpload } from "../../helpers/media/media-storage.js";
+import { cleanText, isGuildManager, isValidHttpsUrl, safeDisplay } from "../../helpers/security/security.js";
+import { logger } from "../../helpers/runtime/logger.js";
 
 const ACTIONS = [
   { name: "Browse approved entries", value: "browse" },

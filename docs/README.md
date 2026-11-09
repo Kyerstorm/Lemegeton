@@ -6,6 +6,8 @@ Start with the repository [README](../README.md) for installation and setup.
 
 ## Core guides
 
+- [Interaction and UX guidelines](UX_GUIDELINES.md): loading states, component behaviour, embeds, and diagnostic responses.
+
 - [Media Discovery](MEDIA_DISCOVERY.md): supported providers, browsing, relationships, and source attribution.
 - [Dashboard](DASHBOARD.md): Discord OAuth, Rust API, TypeScript bridge, and deployment.
 - [Security audit](SECURITY_AUDIT.md): authorization boundaries and operational checks.
