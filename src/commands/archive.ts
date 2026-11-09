@@ -2,6 +2,8 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ChannelSelectMenuBuilder,
+  ChannelType,
   EmbedBuilder,
   MessageFlags,
   ModalBuilder,
@@ -13,6 +15,7 @@ import {
   type AutocompleteInteraction,
   type ButtonInteraction,
   type ChatInputCommandInteraction,
+  type ChannelSelectMenuInteraction,
   type GuildMember,
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction,
@@ -26,12 +29,15 @@ import {
   finishArchiveUpload,
   getArchiveEntry,
   getArchiveSettings,
+  getLastArchiveCategory,
   getOwnSubmissions,
   isArchiveCategory,
   listArchiveEntries,
   deleteArchiveEntry,
   updateArchiveEntry,
   saveArchiveSettings,
+  saveArchiveChannelSetting,
+  rememberArchiveCategory,
   submitArchiveEntry,
   parsePanelChapterCaption,
   parseAniListMangaReference,
@@ -149,6 +155,41 @@ function submitModal(category: ArchiveCategory, visibility: ArchiveVisibility): 
       new ActionRowBuilder<TextInputBuilder>().addComponents(creator),
       new ActionRowBuilder<TextInputBuilder>().addComponents(tags),
     );
+}
+
+function quickPanelModal(): ModalBuilder {
+  return new ModalBuilder()
+    .setCustomId("archive:quick-panel")
+    .setTitle("Quick submit · Manga Panel")
+    .addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("title").setLabel("Panel title").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(200),
+      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("chapter_caption").setLabel("Chapter number and optional caption").setPlaceholder("Chapter 12 — Final battle").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(500),
+      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("source_url").setLabel("AniList manga ID or HTTPS URL (optional)").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(500),
+      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("tags").setLabel("Tags (comma separated, optional)").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(400),
+      ),
+    );
+}
+
+function archiveUsualPrompt(category: ArchiveCategory): {
+  embeds: EmbedBuilder[];
+  components: ActionRowBuilder<ButtonBuilder>[];
+} {
+  const embed = homeEmbed(
+    "Welcome back to the Archive",
+    "Your last contribution was **" + categoryLabel(category) + "**. Open that submission flow again, or choose something else?",
+  );
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("archive:usual:yes:" + category).setLabel("Yes · " + categoryLabel(category)).setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("archive:usual:no").setLabel("Something else").setStyle(ButtonStyle.Secondary),
+  );
+  return { embeds: [embed], components: [row] };
 }
 
 function reportModal(entryId: string): ModalBuilder {
