@@ -4,13 +4,15 @@ import {
 import type { FeatureCommand } from "../../helpers/command.js";
 import { loadingMessage } from "../../helpers/emoji.js";
 import { findIssueLog, isIssueHash } from "../../helpers/issue-logs.js";
-import { isBotModerator } from "../../helpers/moderation.js";
+import { isBotModerator, isModeratorCommandGuild } from "../../helpers/moderation.js";
 
 function display(value: unknown, limit = 950): string {
   const text = typeof value === "string" ? value : JSON.stringify(value, null, 2) ?? String(value);
   return text.replace(/`/g, "'").slice(0, limit) || "Unavailable";
 }
 export class LogCommand implements FeatureCommand {
+  constructor(private readonly moderatorGuildId: string | null) {}
+
   readonly data = new SlashCommandBuilder().setName("log")
     .setDescription("Inspect a diagnostic issue reference (bot moderators only)")
     .addStringOption((option) => option.setName("issue_hash")
@@ -18,6 +20,14 @@ export class LogCommand implements FeatureCommand {
       .setMinLength(40).setMaxLength(128).setRequired(true));
 
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
+    if (!isModeratorCommandGuild(interaction.guildId, this.moderatorGuildId)) {
+      await interaction.reply({ content: "This command is available only in the configured bot operations server.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (!interaction.guildId) {
+      await interaction.reply({ content: "Diagnostic logs can only be inspected inside the configured server.", flags: MessageFlags.Ephemeral });
+      return;
+    }
     const hash = interaction.options.getString("issue_hash", true).trim().toLowerCase();
     if (!await isBotModerator(interaction.user.id)) {
       await interaction.reply({ content: "You are not authorised to inspect diagnostic logs.", flags: MessageFlags.Ephemeral });
