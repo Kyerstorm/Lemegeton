@@ -70,20 +70,19 @@ test("Knowledge Atlas normalizes media identities and rejects unsafe URLs",()=>{
  assert.equal(safeAtlasUrl("http://example.com"),null);
  assert.equal(safeAtlasUrl("https://user:pass@example.com"),null);
 });
-test("Dashboard bridge exposes only the guild's six feature flags and protects settings",()=>{
- const commands=[
-  {data:{name:"discover",toJSON:()=>({description:"Find media"})}},
-  {data:{name:"custom-role",toJSON:()=>({description:"Manage a personal role"})}},
-  {data:{name:"settings",toJSON:()=>({description:"Server settings"})}},
- ] as unknown as Parameters<typeof dashboardCommandRows>[0];
+test("Dashboard bridge excludes bot-operator commands from global sync and keeps standalone commands",()=>{
+ const names=["discover","custom-role","settings","log","moderators","planned","help","privacy","feedback"];
+ const commands=names.map(name=>({data:{name,toJSON:()=>({description:name})}}))
+  as unknown as Parameters<typeof dashboardCommandRows>[0];
  const settings={discover:false,archive:true,community:true,play:true,profile:true,"custom-role":false};
  const rows=dashboardCommandRows(commands,settings);
+ assert.deepEqual(rows.map(row=>row.name),["discover","custom-role","settings","help","privacy","feedback"]);
  assert.equal(rows[0]?.enabled,false);
  assert.equal(rows[1]?.enabled,false);
  assert.equal(rows[2]?.enabled,true);
  assert.equal(rows[2]?.protected,true);
- assert.equal(rows[2]?.scope,"global");
- assert.equal(rows.length,3);
+ assert.equal(rows[2]?.scope,"guild");
+ assert.equal(rows.length,6);
 });
 
 test("Dashboard bridge uses exact shared-secret matching and Discord ID validation",()=>{
