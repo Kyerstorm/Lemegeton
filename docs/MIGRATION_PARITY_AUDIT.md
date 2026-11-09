@@ -32,6 +32,15 @@ The following verified follow-ups were made on the Draft branch after the initia
 - The dashboard CI job parses .env.example using Node's native env-file parser. Duplicate S3 variables and shell-style export lines were removed from the template, and its bridge-secret example was left empty rather than presenting a reusable credential.
 - Dashboard command listing and sync now exclude `/log`, `/moderators` and `/planned`; the sync payload is guild-context-only, and a test asserts the operator-command exclusion while keeping `/help`, `/privacy` and `/feedback` present.
 
+## CI verification — 9 November 2026
+
+The latest code-bearing revision is `71628702d166cfed1e633e8166909243432ab62f`. Both workflows completed successfully on that revision:
+
+- [TypeScript bot checks](https://github.com/Kyerstorm/Lemegeton/actions/runs/42690822301) — typecheck and test job passed.
+- [Dashboard, Rust and container checks](https://github.com/Kyerstorm/Lemegeton/actions/runs/42690822344) — frontend typecheck/build and high-severity dependency audit, Rust tests and `cargo audit`, Docker build, Compose validation, startup-script syntax and non-root/health-check assertions passed.
+
+The current PR head is `38cae8b3f72f275249094a091ab5c291eff4c73a`; the commits after the code-bearing revision update documentation only. These green checks verify the code on the branch, not a live Discord deployment, provider credentials, or a target PostgreSQL database.
+
 The audit distinguishes source inventory from selected-feature parity. The previous Twitch/trending status rotator, generic webhook monitoring, stale-user cleanup, and departed-guild data deletion are not implemented in the new runtime. In particular, v3 currently retains guild data on GuildDelete, unlike the previous clear_guild_records path. That retention-vs-deletion policy needs an explicit owner decision; no destructive cleanup is added without that decision.
 ## What source-to-TypeScript migration completion means
 
