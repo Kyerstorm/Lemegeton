@@ -2,14 +2,23 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createIssueHash, isIssueHash, sanitizeIssueDetails } from "../helpers/issue-logs.js";
 
-test("issue references are unique 128-character SHA-512 strings", () => {
-  const first = createIssueHash("interaction-1");
-  const second = createIssueHash("interaction-1");
-  assert.equal(first.length, 128);
-  assert.match(first, /^[a-f0-9]{128}$/);
+test("new issue references match the 40-character hexadecimal format and are unique", () => {
+  const first = createIssueHash("interaction-1", "user-1");
+  const second = createIssueHash("interaction-1", "user-1");
+  const otherUser = createIssueHash("interaction-1", "user-2");
+  assert.equal(first.length, 40);
+  assert.match(first, /^[a-f0-9]{40}$/);
   assert.notEqual(first, second);
+  assert.notEqual(first, otherUser);
   assert.equal(isIssueHash(first), true);
+  assert.equal(isIssueHash("a5f322fe4eaf90a58c92291f68dee87d2c3c648f"), true);
+  assert.equal(isIssueHash("a".repeat(128)), true);
+  assert.equal(isIssueHash("a".repeat(39)), false);
+  assert.equal(isIssueHash("g".repeat(40)), false);
   assert.equal(isIssueHash("not-a-hash"), false);
+
+  const issued = new Set(Array.from({ length: 2_000 }, (_, index) => createIssueHash("interaction-" + index, "user-" + (index % 17))));
+  assert.equal(issued.size, 2_000);
 });
 
 test("diagnostic details redact secrets recursively and in stack text", () => {
