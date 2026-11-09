@@ -143,12 +143,12 @@ client.once(Events.ClientReady,ready=>{
  for(const guild of ready.guilds.cache.values()){
   void reconcileCustomRoleGuild(guild).catch(error=>logger.error("Initial Custom Roles reconciliation failed",{guildId:guild.id,reason:error instanceof Error?error.message:"Unknown error"}));
  }
- const reconcileTimer=setInterval(()=>{
+ reconciliationTimer=setInterval(()=>{
   for(const guild of client.guilds.cache.values()){
    void reconcileCustomRoleGuild(guild).catch(error=>logger.error("Custom Roles reconciliation failed",{guildId:guild.id,reason:error instanceof Error?error.message:"Unknown error"}));
   }
  },30*60_000);
- reconcileTimer.unref();
+ reconciliationTimer.unref();
 });
 client.on(Events.GuildCreate,guild=>{
  logger.info("Lemegeton joined a Discord server",{guildId:guild.id,guildName:guild.name,memberCount:guild.memberCount});
@@ -229,6 +229,11 @@ client.on(Events.MessageCreate,message=>{
 });
 
 let workerRunning=false;
+let dailyWorkerPromise:Promise<void>|undefined;
+function scheduleDailyDrops():void{
+ if(shuttingDown||dailyWorkerPromise)return;
+ dailyWorkerPromise=processDailyDrops().finally(()=>{dailyWorkerPromise=undefined;});
+}
 async function processDailyDrops():Promise<void>{
  if(workerRunning||!client.isReady())return;workerRunning=true;
  try{
@@ -331,6 +336,9 @@ async function shutdown(signal:NodeJS.Signals):Promise<void>{
  if(shuttingDown)return;
  shuttingDown=true;
  logger.info("Shutting down Lemegeton",{signal});
+ if(reconciliationTimer){clearInterval(reconciliationTimer);reconciliationTimer=undefined;}
+ if(dailyWorkerTimer){clearInterval(dailyWorkerTimer);dailyWorkerTimer=undefined;}
+ await dailyWorkerPromise?.catch(error=>logger.error("Daily worker shutdown failed",{reason:error instanceof Error?error.message:"Unknown error"}));
  await stopMediaNotificationScheduler();
  await stopCustomRolePicker().catch(error=>logger.error("Custom Roles picker shutdown failed",{reason:error instanceof Error?error.message:"Unknown error"}));
  await stopDashboardBridge().catch(error=>logger.error("Dashboard bridge shutdown failed",{reason:error instanceof Error?error.message:"Unknown error"}));
@@ -340,8 +348,8 @@ async function shutdown(signal:NodeJS.Signals):Promise<void>{
 }
 async function start():Promise<void>{
  await initDatabase();await initUserConsentSchema();await startAtlasBridge();await client.login(config.discordToken);
- const timer=setInterval(()=>void processDailyDrops(),30_000);timer.unref();
- void processDailyDrops();
+ dailyWorkerTimer=setInterval(()=>scheduleDailyDrops(),30_000);dailyWorkerTimer.unref();
+ scheduleDailyDrops();
 }
 process.once("SIGINT",()=>void shutdown("SIGINT"));process.once("SIGTERM",()=>void shutdown("SIGTERM"));
 void start().catch(async error=>{logger.error("Lemegeton startup failed",{reason:error instanceof Error?error.message:"Unknown error"});await shutdown("SIGTERM");process.exitCode=1;});
