@@ -35,10 +35,12 @@ The following verified follow-ups were made on the Draft branch after the initia
 
 ## CI verification — 9 November 2026
 
-The latest code-bearing revision is `5504d3ab5be6dce630eb91319ae9a1f8b6ac5648`. Both workflows completed successfully on that revision:
+The latest code-bearing revision is `37341507354295566315ce7f6afa94fa273fddf3`. Both workflows completed successfully on that revision:
 
-- [TypeScript bot checks](https://github.com/Kyerstorm/Lemegeton/actions/runs/42692313192) — typecheck and test job passed.
-- [Dashboard, Rust and container checks](https://github.com/Kyerstorm/Lemegeton/actions/runs/42692313061) — frontend typecheck/build and high-severity dependency audit, Rust tests and `cargo audit`, Docker build, Compose validation, startup-script syntax and non-root/health-check assertions passed.
+- [TypeScript bot checks](https://github.com/Kyerstorm/Lemegeton/actions/runs/42693672499) — typecheck and test job passed.
+- [Dashboard, Rust and container checks](https://github.com/Kyerstorm/Lemegeton/actions/runs/42693672137) — frontend typecheck/build and high-severity dependency audit, Rust tests and `cargo audit`, Docker build, Compose validation, startup-script syntax and non-root/health-check assertions passed.
+
+The current branch head is `e10fc07825fee5971b0c9cb787e907ad1b6b0c0d`; commits after the code-bearing revision update documentation only.
 
 These green checks verify the code on the branch, not a live Discord deployment, provider credentials, or a target PostgreSQL database.
 
