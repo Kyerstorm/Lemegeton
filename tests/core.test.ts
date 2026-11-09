@@ -18,8 +18,8 @@ import {dashboardCommandRows,dashboardSecretMatches,isDashboardGuildId} from "..
 import {customRoleChannelAllowed,customRoleCooldownMessage,parseCustomRoleColor,parseCustomRoleWordList,validateCustomRoleEmoji,validateCustomRoleName} from "../helpers/custom-roles.js";
 import {renderAtlasSnapshot} from "../helpers/atlas-renderer.js";
 import {filterMediaNotificationCandidates} from "../helpers/media-notifications.js";
-import {parseUtcDateTime} from "../src/timestamp.js";
-import {extractAniListUsername} from "../src/convertlinks.js";
+import {parseUtcDateTime} from "../src/utility/timestamp.js";
+import {extractAniListUsername} from "../src/utility/convertlinks.js";
 import type {AniListRecentlyFinishedMedia} from "../helpers/anilist.js";
 
 test("bot configuration requires valid Discord credentials and validates the AniList endpoint",()=>{
