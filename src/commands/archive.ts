@@ -783,13 +783,15 @@ export class ArchiveCommand implements FeatureCommand {
     const sourceUrl = category === "panels" ? (panelReference?.url ?? undefined)
       : category === "fanworks" || (category === "soundtracks" && submittedSourceUrl.trim().startsWith("https://")) ? submittedSourceUrl : undefined;
     const needsUpload = category === "panels" || (category === "soundtracks" && !sourceUrl);
+    const entryContent = category === "panels" ? [panelChapter!.caption, content].filter(Boolean).join("\n\n") : content;
+    const sourceTitle = interaction.options.getString("source_title") ?? undefined;
     const entryId = await submitArchiveEntry({
       guildId: interaction.guildId!,
       userId: interaction.user.id,
       category,
       title,
-      content: category === "panels" ? [panelChapter!.caption, content].filter(Boolean).join("\n\n") : content,
-      sourceTitle: interaction.options.getString("source_title") ?? undefined,
+      content: entryContent,
+      sourceTitle,
       creator: interaction.options.getString("creator") ?? undefined,
       mediaType: category === "panels" ? "Manga" : interaction.options.getString("media_type") ?? "Other",
       sourceUrl: sourceUrl ?? undefined,
@@ -801,6 +803,7 @@ export class ArchiveCommand implements FeatureCommand {
       linkedMediaProvider: panelReference?.id ? "AniList" : undefined,
       linkedMediaId: panelReference?.id ?? undefined,
     });
+    await rememberArchiveCategory(interaction.guildId!, interaction.user.id, category);
     let savedFile = false;
     if (attachment) {
       const kind = classifyArchiveUpload(category, {
@@ -828,8 +831,21 @@ export class ArchiveCommand implements FeatureCommand {
       if (needsUpload) await finishArchiveUpload(interaction.guildId!, interaction.user.id, entryId);
       savedFile = true;
     }
+    const moderationPosted = !needsUpload || savedFile
+      ? await this.notifyModerationChannel(
+          interaction.client,interaction.guildId!,entryId,title,category,visibility,entryContent,sourceTitle,sourceUrl ?? undefined,
+        )
+      : false;
+    const uploadNotice = needsUpload && !savedFile
+      ? settings.uploadChannelId
+        ? " Upload the required media in <#" + settings.uploadChannelId + "> and then press Finish upload."
+        : " The server manager must configure an Archive upload channel before you can send the media."
+      : "";
+    const moderationNotice = !needsUpload || savedFile
+      ? moderationPosted ? " The moderators have been notified." : " Moderators can review it from /archive → Review queue."
+      : "";
     await interaction.reply({
-      content: `Saved Archive submission #${entryId}. It is awaiting moderator review.${needsUpload && !savedFile ? " Add the required audio/video using the configured upload channel, then run /archive action:finish-upload." : ""}`,
+      content: `Saved Archive submission #${entryId}. It is pending review and is not public until approved.${uploadNotice}${moderationNotice}`,
       flags: MessageFlags.Ephemeral,
     });
   }
