@@ -100,7 +100,7 @@ The base source tree also contains backup, under-maintenance, test, and helper f
 
 ## Integration and environment-dependent acceptance
 
-- GitHub currently reports PR #17 as `mergeable=false` / `mergeable_state=dirty` against `multi_guild`. No synchronization or conflict resolution was attempted in this audit; any resolution must change the PR head only and preserve the base branch.
+- GitHub's branch comparison reports `lemegeton-v3` as diverged from `multi_guild`: **454 commits ahead, 86 commits behind**, merge base `e7c7c99728fc71c30a9bff65d5eed194ae8ffaf1`. PR #17 currently reports `mergeable=false` / `mergeable_state=dirty`. No synchronization or conflict resolution was attempted in this audit; resolve deliberately on the PR branch only, preserving the base branch and all work from both sides.
 - No live Discord test server/application credentials were available for gateway-intent, channel-permission, component-authorization, command-registration, thread and scheduled-delivery acceptance.
 - No target PostgreSQL instance or sanitized target schema/data snapshot was available. CI verifies Rust/TypeScript builds and tests, not real source-to-target data import, restore, or rollback.
 - Guild departure currently retains guild-owned records. Whether a future guild removal should retain or purge those records is an owner/privacy decision; no destructive cleanup is inferred.
