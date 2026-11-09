@@ -107,6 +107,12 @@ export interface TmdbTvSeason {
   episodes: TmdbTvEpisode[];
 }
 
+export interface TmdbUpcomingTvEpisode {
+  showId: number;
+  showTitle: string;
+  episode: TmdbTvEpisode;
+}
+
 type JsonObject = Record<string, unknown>;
 
 function object(value: unknown): JsonObject | null {
@@ -380,6 +386,25 @@ export class TmdbClient {
 
   async upcomingMovies(region = "US"): Promise<TmdbMedia[]> {
     return this.searchPath("/movie/upcoming", "movie", { region });
+  }
+
+  async upcomingTvEpisodes(from: Date, to: Date): Promise<TmdbUpcomingTvEpisode[]> {
+    const shows = await this.searchPath("/tv/on_the_air", "tv", {});
+    const details = await Promise.allSettled(
+      shows.slice(0, 8).map((show) => this.tvDetails(show.id)),
+    );
+    const releases = details.flatMap((result): TmdbUpcomingTvEpisode[] => {
+      if (result.status !== "fulfilled" || !result.value?.nextEpisode) return [];
+      const detail = result.value;
+      const episode = detail.nextEpisode;
+      if (!episode.airDate || !/^\\d{4}-\\d{2}-\\d{2}$/.test(episode.airDate)) return [];
+      const when = new Date(`${episode.airDate}T00:00:00.000Z`);
+      if (!Number.isFinite(when.getTime()) || when < from || when > to) return [];
+      return [{ showId: detail.id, showTitle: detail.name, episode }];
+    });
+    return releases.sort((a, b) =>
+      (a.episode.airDate ?? "").localeCompare(b.episode.airDate ?? "") || a.showTitle.localeCompare(b.showTitle),
+    );
   }
 
   async searchPeople(query: string): Promise<TmdbPerson[]> {
