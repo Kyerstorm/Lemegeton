@@ -14,10 +14,10 @@ import {
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction,
 } from "discord.js";
-import type { FeatureCommand } from "../helpers/command.js";
-import { loadingMessage } from "../helpers/emoji.js";
-import { isBotModerator } from "../helpers/moderation.js";
-import { query, queryOne, transaction } from "../database.js";
+import type { FeatureCommand } from "../../helpers/command.js";
+import { loadingMessage } from "../../helpers/emoji.js";
+import { isBotModerator } from "../../helpers/moderation.js";
+import { query, queryOne, transaction } from "../../database.js";
 
 type PlannedFeature = Record<string, unknown> & {
   id: string;
