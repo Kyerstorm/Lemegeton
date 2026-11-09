@@ -12,10 +12,10 @@ import {
   type ChatInputCommandInteraction,
   type ModalSubmitInteraction,
 } from "discord.js";
-import type { FeatureCommand } from "../helpers/command.js";
-import { loadingMessage } from "../helpers/emoji.js";
-import { isBotModerator } from "../helpers/moderation.js";
-import { query } from "../database.js";
+import type { FeatureCommand } from "../../helpers/command.js";
+import { loadingMessage } from "../../helpers/emoji.js";
+import { isBotModerator } from "../../helpers/moderation.js";
+import { query } from "../../database.js";
 
 type Moderator = Record<string, unknown> & { discord_id: string; username: string; added_by: string; created_at: Date | string };
 
