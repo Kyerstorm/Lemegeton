@@ -14,7 +14,7 @@ test("loads safe defaults for a local TypeScript bot", () => {
   const config = loadConfig(environment());
 
   assert.equal(config.applicationId, "123456789012345678");
-  assert.equal(config.anilistApiUrl, "https://graphql.anilist.co");
+  assert.equal(config.anilistApiUrl, "https://graphql.anilist.co/");
   assert.equal(config.anilistTimeoutMs, 10_000);
   assert.equal(config.archiveUploadMaxBytes, 20 * 1024 * 1024);
   assert.equal(config.customRolePickerEnabled, true);
