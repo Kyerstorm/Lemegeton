@@ -116,8 +116,8 @@ export class BotModeratorsCommand implements FeatureCommand {
       const embed = new EmbedBuilder().setColor(0x5865f2).setTitle("About bot moderators")
         .setDescription("Bot moderators have global permissions across all guilds.")
         .addFields(
-          { name: "Access", value: "Inspect server-scoped diagnostic records with /log and manage the bot moderator list.", inline: false },
-          { name: "Security", value: "Grant this access only to highly trusted people. Every diagnostic lookup remains scoped to the server where /log is run.", inline: false },
+          { name: "Access", value: "Inspect issue records from any connected server using /log in the dedicated operations server, and manage the bot moderator list.", inline: false },
+          { name: "Security", value: "Grant this access only to highly trusted people. Lookups require this configured operations server and bot-moderator authorization; each result shows the server where the issue occurred.", inline: false },
         );
       await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       return true;

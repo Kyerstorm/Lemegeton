@@ -15,7 +15,8 @@ import sharp from "sharp";
 import {processCustomRoleIconImage,extractCustomRoleAvatarPalette} from "../helpers/custom-roles/custom-role-images.js";
 import {normalizeAtlasTitle,normalizeAtlasCategory,safeAtlasUrl} from "../helpers/providers/atlas.js";
 import {FEATURE_NAMES,isFeatureName} from "../helpers/runtime/settings.js";
-import {collectRuntimeHealth,dashboardCommandRows,dashboardSecretMatches,isDashboardGuildId} from "../helpers/runtime/dashboard-bridge.js";
+import {collectRuntimeHealth,dashboardCommandRows,dashboardGlobalCommandPayload,dashboardSecretMatches,isDashboardGuildId} from "../helpers/runtime/dashboard-bridge.js";
+import {ApplicationIntegrationType,InteractionContextType} from "discord.js";
 import {customRoleChannelAllowed,customRoleCooldownMessage,parseCustomRoleColor,parseCustomRoleWordList,validateCustomRoleEmoji,validateCustomRoleName} from "../helpers/custom-roles/custom-roles.js";
 import {renderAtlasSnapshot} from "../helpers/media/atlas-renderer.js";
 import {filterMediaNotificationCandidates} from "../helpers/media/media-notifications.js";
@@ -84,6 +85,14 @@ test("Dashboard bridge excludes bot-operator commands from global sync and keeps
  assert.equal(rows.length,6);
 });
 
+test("Dashboard global command payload cannot publish bot-operator commands",()=>{
+ const names=["discover","log","moderators","planned","help","privacy","feedback"];
+ const commands=names.map(name=>({data:{name,toJSON:()=>({name,description:name})}})) as unknown as Parameters<typeof dashboardGlobalCommandPayload>[0];
+ const payload=dashboardGlobalCommandPayload(commands);
+ assert.deepEqual(payload.map(command=>command.name),["discover","help","privacy","feedback"]);
+ assert.deepEqual(payload[0]?.contexts,[InteractionContextType.Guild]);
+ assert.deepEqual(payload[0]?.integration_types,[ApplicationIntegrationType.GuildInstall]);
+});
 test("Dashboard bridge uses exact shared-secret matching and Discord ID validation",()=>{
  assert.equal(dashboardSecretMatches("same-secret-value","same-secret-value"),true);
  assert.equal(dashboardSecretMatches("same-secret-value","same-secret-value-extra"),false);

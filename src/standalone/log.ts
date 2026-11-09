@@ -36,7 +36,7 @@ export class LogCommand implements FeatureCommand {
     await interaction.reply({ content: loadingMessage("Finding the diagnostic record…"), flags: MessageFlags.Ephemeral });
     const record = await findIssueLog(hash);
     if (!record) {
-      await interaction.editReply("No matching issue record was found in this server.");
+      await interaction.editReply("No matching diagnostic record was found.");
       return;
     }
 
@@ -54,7 +54,7 @@ export class LogCommand implements FeatureCommand {
         { name: "Error", value: display(error.message, 950), inline: false },
         { name: "Context", value: display(context, 950), inline: false },
         { name: "Stack trace", value: `\`\`\`\n${display(error.stack, 950)}\n\`\`\``, inline: false },
-      ).setFooter({ text: `Server-scoped diagnostics · ${record.guild_id}` });
+      ).setFooter({ text: `Origin server · ${record.guild_id}` });
     await interaction.editReply({ content: null, embeds: [embed] });
   }
 }

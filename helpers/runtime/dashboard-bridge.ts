@@ -1,8 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { ApplicationIntegrationType, InteractionContextType } from "discord.js";
 import { timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
-import type { Client, Guild } from "discord.js";
+import { ApplicationIntegrationType, InteractionContextType, type Client, type Guild } from "discord.js";
 import type { FeatureCommand } from "../commands/command.js";
 import type { BotConfig } from "./config.js";
 import { FEATURE_NAMES, getFeatureSettings, isFeatureName, setFeatureEnabled, type FeatureName } from "./settings.js";
@@ -111,15 +110,19 @@ async function recordAudit(guildId: string, actorId: string, action: string, det
   );
 }
 
-async function syncGlobalCommands(client: Client, commands: FeatureCommand[]): Promise<number> {
-  if (!client.application) throw new Error("The Discord application is not ready.");
-  const registered = await client.application.commands.set(commands
+export function dashboardGlobalCommandPayload(commands: FeatureCommand[]) {
+  return commands
     .filter(command => !MODERATOR_COMMANDS.has(command.data.name))
     .map(command => ({
       ...command.data.toJSON(),
       contexts: [InteractionContextType.Guild],
       integration_types: [ApplicationIntegrationType.GuildInstall],
-    })));
+    }));
+}
+
+async function syncGlobalCommands(client: Client, commands: FeatureCommand[]): Promise<number> {
+  if (!client.application) throw new Error("The Discord application is not ready.");
+  const registered = await client.application.commands.set(dashboardGlobalCommandPayload(commands));
   return registered.size;
 }
 
