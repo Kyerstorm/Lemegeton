@@ -91,13 +91,13 @@ async function routeInteraction(interaction:Interaction):Promise<void>{
   }
   return;
  }
- if(interaction.isButton()&&await handleConsentButton(interaction))return;
- if(!await requireCurrentConsent(interaction))return;
- if(interaction.isButton()&&Boolean((interaction.component as {disabled?:boolean}).disabled)){
-  if(!interaction.replied&&!interaction.deferred)await interaction.reply({content:"This control is disabled and cannot be used.",flags:MessageFlags.Ephemeral});
-  return;
- }
  try{
+  if(interaction.isButton()&&await handleConsentButton(interaction))return;
+  if(!await requireCurrentConsent(interaction))return;
+  if(interaction.isButton()&&Boolean((interaction.component as {disabled?:boolean}).disabled)){
+   if(!interaction.replied&&!interaction.deferred)await interaction.reply({content:"This control is disabled and cannot be used.",flags:MessageFlags.Ephemeral});
+   return;
+  }
   if(interaction.isAutocomplete()){const command=commandByName.get(interaction.commandName);if(command?.handleAutocomplete){await command.handleAutocomplete(interaction);}else{await interaction.respond([]);}return;}
   if(interaction.isChatInputCommand()){const command=commandByName.get(interaction.commandName);if(!command){await interaction.reply({content:"That feature command is not available.",flags:MessageFlags.Ephemeral});return;}if(["discover","archive","community","play","profile","custom-role"].includes(interaction.commandName)&&interaction.guildId&&interaction.commandName!=="settings"&&!await isFeatureEnabled(interaction.guildId,interaction.commandName)){await interaction.reply({content:"This feature is currently disabled by this server’s settings.",flags:MessageFlags.Ephemeral});return;}await command.execute(interaction);return;}
   if(!interaction.isButton()&&!interaction.isStringSelectMenu()&&!interaction.isRoleSelectMenu()&&!interaction.isChannelSelectMenu()&&!interaction.isModalSubmit())return;
