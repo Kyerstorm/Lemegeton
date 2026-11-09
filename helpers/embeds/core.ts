@@ -91,7 +91,7 @@ export function buildActivityEmbed(
   });
   const cleanBody = plainText(body, 3_500);
   if (activityType === "MessageActivity") {
-    embed.setDescription(`To **${plainText(record(activity).recipient && record(record(activity).recipient).name, "Unknown")}**\n\n${cleanBody || "*No message text*"}`);
+    embed.setDescription(`To **${plainText(text(record(record(activity).recipient).name, "Unknown"))}**\n\n${cleanBody || "*No message text*"}`);
   } else if (activityType === "ListActivity") {
     const item = record(record(activity).media);
     const title = mediaTitle(item.title);
