@@ -105,7 +105,7 @@ The TypeScript runtime currently requests the `Guilds`, `GuildMembers`, `GuildMe
 - `MessageContent` is used by the configured Community Archive upload-channel workflow.
 - When the bot cannot fetch a complete member list, Custom Role reconciliation must fail closed: skip the automatic archive pass, log the reason, and leave saved roles untouched. Do not infer ineligibility from a partial cache.
 
-The PostgreSQL startup migration widens the existing `booster_roles.discord_id`, `guild_id`, and `role_id` columns to `BIGINT` when that legacy table exists. This is a widening conversion that preserves existing rows and its primary key; the legacy table remains read-only during the one-time import.
+The PostgreSQL startup migration widens the existing `booster_roles.discord_id`, `guild_id`, and `role_id` columns to `BIGINT` when that pre-v3 table exists. This is a widening conversion that preserves existing rows and its primary key; the legacy table remains read-only during the one-time import.
 
 ### 2.2 Dashboard responsibilities
 
@@ -1346,7 +1346,7 @@ Existing useful functionality must be mapped before implementation. This invento
 
 
 
-The legacy free-game checker is deliberately not migrated in this phase. Its Steam implementation depends on storefront search parsing and undocumented endpoints; the current Steam Web API reference and Free to Keep documentation do not supply a general public promotions feed. The GOG developer documentation describes the Galaxy SDK rather than a supported public store-catalog API. See the [Steam Web API reference](https://partner.steamgames.com/doc/webapi), [Steam Free to Keep documentation](https://partner.steamgames.com/doc/marketing/discounts/freetokeep), and [GOG developer documentation](https://docs.gog.com/) for the published platform interfaces. Do not reintroduce these scrapers as a substitute for a stable provider integration.
+The previous free-game checker is deliberately not included in this phase. Its Steam implementation depends on storefront search parsing and undocumented endpoints; the current Steam Web API reference and Free to Keep documentation do not supply a general public promotions feed. The GOG developer documentation describes the Galaxy SDK rather than a supported public store-catalog API. See the [Steam Web API reference](https://partner.steamgames.com/doc/webapi), [Steam Free to Keep documentation](https://partner.steamgames.com/doc/marketing/discounts/freetokeep), and [GOG developer documentation](https://docs.gog.com/) for the published platform interfaces. Do not reintroduce these scrapers as a substitute for a stable provider integration.
 
 ### 15.2 Historical Lemegeton v2 commands
 
@@ -1465,7 +1465,7 @@ The redevelopment is staged so the new bot does not lose existing behavior durin
 
 ### Current implementation checkpoint — 7 November 2026
 
-The current PR head contains the TypeScript/Node.js/Discord.js runtime in `bot.ts`, PostgreSQL access in `database.ts`, feature commands in `src/`, shared providers/domain helpers in `helpers/`, a Next.js frontend in `web/frontend/`, and the existing Rust/Axum backend in `web/backend/`. The PR head contains zero `.py` or `.pyi` files. That is not evidence of complete behavior parity: the `multi_guild` base contained 167 Python files at the 8 November 2026 audit snapshot, including 63 cogs, 31 helpers, 50 test/fixture files, runtime/configuration/database code, scripts, backups and under-maintenance modules. Some behaviors have TypeScript equivalents, some are only partially covered, and some are deliberately out of scope. The file-by-file disposition and verified gaps are recorded in `docs/MIGRATION_PARITY_AUDIT.md`; do not claim full migration merely because Python files are absent. `scripts/start.sh`, the Docker/Compose runtime and the TypeScript CI workflows on this branch use Node.js/TypeScript, but a branch build is not a production cutover. `/help`, `/privacy`, and `/feedback` remain separate standalone commands and must not be folded into the seven feature environments.
+The current PR head contains the TypeScript/Node.js/Discord.js runtime in `bot.ts`, PostgreSQL access in `database.ts`, feature commands in `src/`, shared providers/domain helpers in `helpers/`, a Next.js frontend in `web/frontend/`, and the existing Rust/Axum backend in `web/backend/`. The PR head contains zero `.py` or `.pyi` files. That is not evidence of complete behavior parity: the `multi_guild` base contained 167 Python files at the 8 November 2026 audit snapshot, including 63 cogs, 31 helpers, 50 test/fixture files, runtime/configuration/database code, scripts, backups and under-maintenance modules. Some behaviors have TypeScript equivalents, some are only partially covered, and some are deliberately out of scope. The file-by-file disposition and verified gaps are recorded in `docs/MIGRATION_PARITY_AUDIT.md`; do not claim full migration merely because Python files are absent. `scripts/start.sh`, the Docker/Compose runtime and the TypeScript CI workflows on this branch use Node.js/TypeScript, but a branch build is not evidence of a live deployment. `/help`, `/privacy`, and `/feedback` remain separate standalone commands and must not be folded into the seven feature environments.
 
 Guild-level media completion notifications now have a durable PostgreSQL settings/delivery store and an administrator-controlled `/settings` panel. The current scanner covers only recently finished or cancelled anime and manga reported by AniList. Per-title subscriptions, additional provider release types, digest scheduling, and media-linked automation remain future migration work.
 
@@ -1486,8 +1486,8 @@ The Next.js dashboard now has an initial Knowledge Atlas explorer. It uses the e
 13. **Community Knowledge Atlas** — establish stable graph identities and provenance, then deliver Discord graph snapshots and the interactive Next.js graph canvas with image-backed nodes.
 14. **Next.js dashboard** — replace the current Vite frontend while retaining the Rust/Axum API and existing authorization model. Integrate the Atlas and selected configuration views.
 15. **Operations & Infrastructure hardening** — complete observability, job reliability, backups, recovery, tests, deployment gates, and production diagnostics.
-16. **Parity and production cutover** — test multi-guild isolation, providers, interactions, dashboard authorization, graph visibility, scheduled jobs, data compatibility, and deployment. Switch the live bot only after the selected feature inventory has acceptable parity.
-17. **Retire the Python runtime** — remove the old runtime only after the TypeScript bot is running successfully and the migration has been explicitly verified. Do not delete legacy code early merely to make the repository look cleaner.
+16. **Parity and release readiness** — test multi-guild isolation, providers, interactions, dashboard authorization, graph visibility, scheduled jobs, schema compatibility, startup/shutdown, and recovery.
+17. **Owner-authorized first deployment** — treat deployment as a separate release action after the selected feature inventory has acceptable parity. This PR does not assume a previously deployed Python bot or authorize deletion from the `multi_guild` source branch.
 
 The order may change based on dependencies discovered during the audit, but the compact command surface, selected product scope, and preservation of existing useful behavior remain fixed requirements.
 
@@ -1555,7 +1555,7 @@ The v3 redevelopment is ready for release only when:
 - Interaction failures, expired controls, missing permissions, provider outages, and disabled features produce clear feedback.
 - CI runs the relevant type, build, lint, and test checks.
 - Documentation and deployment instructions reflect the actual implementation.
-- Python is not retired until parity and production cutover checks have passed.
+- This PR does not delete Python reference files from `multi_guild`; v3 first deployment is a separate, owner-authorized release action.
 
 ---
 

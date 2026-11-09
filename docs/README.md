@@ -11,6 +11,7 @@ Start with the repository [README](../README.md) for installation and setup.
 - [Media Discovery](MEDIA_DISCOVERY.md): supported providers, browsing, relationships, and source attribution.
 - [Dashboard](DASHBOARD.md): Discord OAuth, Rust API, TypeScript bridge, and deployment.
 - [Security audit](SECURITY_AUDIT.md): authorization boundaries and operational checks.
+- [Issue reference format](ISSUE_REFERENCE_FORMAT.md): fixed 40-character SHA-512-derived diagnostic reference contract.
 - [Custom Roles](CUSTOM_ROLES_SPEC.md): server configuration and member controls.
 - [VPS deployment](../deploy/vps/README.md): Node.js bot, Rust dashboard, systemd, and Nginx.
 

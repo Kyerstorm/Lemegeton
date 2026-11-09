@@ -1,66 +1,68 @@
-# Lemegeton v3 — Python-to-TypeScript parity audit
+# Lemegeton v3 — Python-source-to-TypeScript parity audit
 
 **Target:** existing Draft PR #17, branch `lemegeton-v3`  
 **Base under audit:** `multi_guild`  
 **Audit basis:** current Git trees, PR diff, the v3 command modules, and targeted source inspection.  
-**Status:** inventory completed; behavior parity is **not** complete or accepted.
+**Status:** source inventory completed; selected-feature parity is **not** complete or accepted.
+
+**Deployment note:** This is a pre-release redevelopment in an existing repository branch. The Python files on `multi_guild` are source references for feature and test review; this audit does not claim that a Python bot is deployed or running. The v3 Discord bot is being developed in this PR and has not been deployed by this work.
 
 ## Executive result
 
-The Draft branch currently has **zero Python files**. That is a file-extension result, not proof that the removed Python behavior has all been rebuilt.
+The Draft branch currently has **zero Python files**. That is a file-extension result, not proof that all behavior represented by the Python reference sources has been rebuilt.
 
 | Snapshot | Python files | TypeScript/TSX files | TypeScript non-test files | TypeScript test files |
 |---|---:|---:|---:|---:|
 | `multi_guild` base | 167 | 0 | 0 | 0 |
 | `lemegeton-v3` Draft head after the 9 November migration audit updates | 0 | 99 | 76 | 23 |
 
-The base's 167 Python files total approximately 3.68 MB. The current Draft head has twenty-three TypeScript test files, compared with fifty Python files under the base's `tests/` directory. This is a substantial regression-coverage gap until each relevant legacy test has either been ported, replaced by equivalent coverage, or explicitly retired with a reason.
+The base's 167 Python files total approximately 3.68 MB. The current Draft head has twenty-three TypeScript test files, compared with fifty Python files under the base's `tests/` directory. This is a coverage gap until the test scenarios relevant to the selected v3 feature scope have been ported or replaced by equivalent TypeScript coverage. The goal is not to reproduce every source test file one-for-one.
 
-The Draft branch already has a Node.js/TypeScript bot startup path, a TypeScript build/test pipeline, and a Rust dashboard service. The current `scripts/start.sh`, Dockerfile, Compose configuration, and TypeScript CI workflows do not invoke Python. Do not describe the production bot as cut over merely because this branch's startup path is TypeScript.
+The Draft branch already has a Node.js/TypeScript bot startup path, a TypeScript build/test pipeline, and a Rust dashboard service. The current `scripts/start.sh`, Dockerfile, Compose configuration, and TypeScript CI workflows do not invoke Python. A TypeScript startup path and passing branch CI are repository evidence only; they do not establish that any bot has been deployed.
 
 ## Focused follow-up work on 9 November 2026
 
-The current branch tree contains 165 tracked files: zero Python files, ninety-nine TypeScript/TSX files (seventy-six non-test files and twenty-three test files). The TypeScript suite contains 111 individual test cases. This is still not equivalent coverage for all fifty legacy Python test modules.
+The current branch tree contains 165 tracked files: zero Python files, ninety-nine TypeScript/TSX files (seventy-six non-test files and twenty-three test files). The TypeScript suite contains 111 individual test cases. This is still not equivalent coverage for all in-scope scenarios represented by the fifty Python reference test modules.
 
 The following verified follow-ups were made on the Draft branch after the initial audit snapshot:
 
 - bot.ts now retains handles for the Custom Role reconciliation and daily-worker intervals, clears them during shutdown, and waits for an active daily-worker pass before closing the database pool.
-- The /log and /feedback prompts correctly describe new references as 128-character SHA-512 hex while retaining compatibility with legacy 40-character references. The issue-hash test also checks case/whitespace validation.
+- The /log and /feedback surfaces now share the fixed 40-character SHA-512-derived issue-reference contract documented in [ISSUE_REFERENCE_FORMAT.md](ISSUE_REFERENCE_FORMAT.md). Generator, PostgreSQL constraint, command input limits, and tests must remain aligned.
 - tests/runtime-config.test.ts adds coverage for security-sensitive runtime configuration defaults and validation rules.
 - The dashboard CI job parses .env.example using Node's native env-file parser. Duplicate S3 variables and shell-style export lines were removed from the template, and its bridge-secret example was left empty rather than presenting a reusable credential.
 - Dashboard command listing and sync now exclude `/log`, `/moderators` and `/planned`; the sync payload is guild-context-only, and a test asserts the operator-command exclusion while keeping `/help`, `/privacy` and `/feedback` present.
 
-The audit distinguishes source-tree migration from behavior parity. The old Twitch/trending status rotator, generic webhook monitoring, stale-user cleanup, and departed-guild data deletion are not implemented in the new runtime. In particular, v3 currently retains guild data on GuildDelete, unlike the legacy clear_guild_records path. That retention-vs-deletion policy needs an explicit owner decision; this migration does not silently add destructive cleanup.
-## What “all Python files migrated” means
+The audit distinguishes source inventory from selected-feature parity. The previous Twitch/trending status rotator, generic webhook monitoring, stale-user cleanup, and departed-guild data deletion are not implemented in the new runtime. In particular, v3 currently retains guild data on GuildDelete, unlike the previous clear_guild_records path. That retention-vs-deletion policy needs an explicit owner decision; no destructive cleanup is added without that decision.
+## What source-to-TypeScript migration completion means
 
-1. Every in-scope, production behavior from the base is implemented in the v3 TypeScript runtime or its retained Rust/dashboard boundary.
-2. The behavior is mapped to the approved compact command surface; legacy command count is not copied one-for-one.
+1. Every in-scope feature behavior selected from the Python source tree is implemented in the v3 TypeScript runtime or its retained Rust/dashboard boundary.
+2. The behavior is mapped to the approved compact command surface; the previous command count is not copied one-for-one.
 3. Guild scoping, permissions, provider attribution, storage semantics, and privacy are preserved.
-4. Every meaningful legacy test is ported or superseded by a focused TypeScript test. Test harnesses, fixtures, and maintenance scripts receive a deliberate disposition.
+4. Every meaningful source test scenario for an in-scope feature is ported or superseded by a focused TypeScript test. Test harnesses, fixtures, and maintenance scripts receive a deliberate disposition.
 5. Backup, experimental, broken, unsupported, and out-of-scope code is recorded as excluded rather than silently called “migrated.”
-6. PostgreSQL compatibility, existing data, scheduled work, deployment, rollback, and cutover have explicit evidence.
-7. Only after those checks pass can the old Python runtime be considered retired.
+6. PostgreSQL schema compatibility, any explicitly required data import, scheduled work, startup/shutdown, and recovery have implementation and test evidence.
+7. Source parity does not itself authorize deployment. First deployment and rollback remain a separate, owner-approved release activity.
 
 ## Command and runtime parity register
 
-| Legacy source | v3 destination | Current evidence | Remaining parity work |
+| Python reference source | v3 destination | Current evidence | Remaining parity work |
 |---|---|---|---|
-| `bot.py` | `bot.ts`, `helpers/runtime/config.ts`, logger, security and service helpers | TypeScript gateway runtime, guild-only interaction routing, command dispatch, issue diagnostics, Atlas bridge, Daily Drop and Reading Club delivery, Media Night result delivery, retryable release-digest scheduling and tracked shutdown for the Custom Role reconciliation/daily worker timers exist. Shutdown clears those intervals and waits for the active daily-worker pass before closing PostgreSQL. | Legacy cog hot-reload is not part of the production TypeScript runtime. The old stale-user and departed-guild cleanup jobs are not ported. The legacy Twitch/trending status rotator and generic webhook monitors are also not ported. Guild deletion currently retains records, whereas legacy on_guild_remove called clear_guild_records; confirm the data-retention policy before implementing destructive deletion. Verify gateway intents, channel permissions, and scheduled-worker recovery with live Discord/PostgreSQL acceptance. |
-| `config.py` | `helpers/runtime/config.ts` | Typed environment parsing exists; focused tests cover required credentials, safe defaults, moderator guild ID, paired IGDB credentials, HTTPS-only remote URLs, and loopback-only picker binding. The CI dashboard job also parses .env.example with Node's native env-file parser. | The full legacy environment surface is not one-for-one: stale Python cog/watch/cleanup, HLTB, generic AI and webhook settings need a final consumer-by-consumer scope decision. Do not retain obsolete settings just for appearance; verify deployment consumers before removal. |
-| `database.py` | `database.ts` plus domain-specific helpers | The legacy multi_guild database layer is PostgreSQL, not SQLite. The v3 schema creates its feature tables transactionally and retains users, steam_users, bot_moderators and Custom Role tables. Startup widens legacy booster_roles snowflakes to BIGINT and backfills missing steam_users.guild_id to the configured/default guild before enforcing a (discord_id, guild_id) primary key. The initializer does not drop legacy-only tables. | The table-name comparison found 38 legacy table definitions and 49 v3 definitions, with only eight identically named tables. Legacy-only news/free-game/challenge/progress/invite/analytics tables have not been data-migrated; several are intentionally out of scope, but existing records remain untouched. Verify table/column/index compatibility against a sanitized production schema, data counts, backups and restore/rollback before cutover. No live database was available for this audit. |
-| Media browse/recommend/random/trending | `/discover`, AniList/Steam/IGDB/Books/TMDB helpers | Category search, filters, trending, random, recommendation buttons and supported provider views exist. | Test all supported categories and legacy filter behavior; restore only stable provider-backed fields and ensure recommendations are labelled by provenance. |
+| `bot.py` | `bot.ts`, `helpers/runtime/config.ts`, logger, security and service helpers | TypeScript gateway runtime, guild-only interaction routing, command dispatch, issue diagnostics, Atlas bridge, Daily Drop and Reading Club delivery, Media Night result delivery, retryable release-digest scheduling and tracked shutdown for the Custom Role reconciliation/daily worker timers exist. Shutdown clears those intervals and waits for the active daily-worker pass before closing PostgreSQL. | Python cog hot-reload is not part of the TypeScript runtime being built. The old stale-user and departed-guild cleanup jobs are not ported. The previous Twitch/trending status rotator and generic webhook monitors are also not ported. Guild deletion currently retains records, whereas previous on_guild_remove called clear_guild_records; confirm the data-retention policy before implementing destructive deletion. Verify gateway intents, channel permissions, and scheduled-worker recovery with live Discord/PostgreSQL acceptance. |
+| `config.py` | `helpers/runtime/config.ts` | Typed environment parsing exists; focused tests cover required credentials, safe defaults, moderator guild ID, paired IGDB credentials, HTTPS-only remote URLs, and loopback-only picker binding. The CI dashboard job also parses .env.example with Node's native env-file parser. | The full previous environment surface is not one-for-one: settings for unselected cog/watch/cleanup, HLTB, generic AI and webhook behavior need a final consumer-by-consumer scope decision. Do not retain obsolete settings just for appearance; verify deployment consumers before removal. |
+| `database.py` | `database.ts` plus domain-specific helpers | The existing multi_guild source database layer is PostgreSQL, not SQLite. The v3 schema creates its feature tables transactionally and retains users, steam_users, bot_moderators and Custom Role tables. Startup widens existing booster_roles snowflakes to BIGINT and backfills missing steam_users.guild_id to the configured/default guild before enforcing a (discord_id, guild_id) primary key. The initializer does not drop tables that are outside the current v3 feature scope. | The table-name comparison found 38 source table definitions and 49 v3 definitions, with only eight identically named tables. Tables used only by news/free-game/challenge/progress/invite/analytics features have not been imported; several are intentionally out of scope, and the initializer leaves source-only tables untouched. Verify table/column/index compatibility against the repository schema and the intended deployment schema, with data counts and backup/restore checks if an import is required. No live target database was available for this audit. |
+| Media browse/recommend/random/trending | `/discover`, AniList/Steam/IGDB/Books/TMDB helpers | Category search, filters, trending, random, recommendation buttons and supported provider views exist. | Test all supported categories and previous filter behavior; restore only stable provider-backed fields and ensure recommendations are labelled by provenance. |
 | `cogs/media/airing.py`, `trailer.py`, `tv_guide.py` | `/discover` and `/community` | AniList airing/trailer fields and TMDB film/TV search exist. | Full season/episode detail, pagination, time-zone display, fallback behavior and provider response edge cases are not yet evidenced as parity-complete. |
 | `cogs/media/compare.py` | `/discover` comparison | A second-title comparison option exists. | Verify parity for supported media types, missing fields, IGDB/Steam comparison, normalization and provenance. |
-| `cogs/media/connected_media.py` | `/discover`, Knowledge Atlas, Archive and Community links | Creator exploration and Atlas relationships exist. TMDB regional watch-provider lookup and supported YouTube/Vimeo video listing are integrated into `/discover`, with exact-title selection. The server's default media region now persists through `/settings`; `/discover` accepts a per-request region override. | Guild-scoped relationship suggestion/review is now integrated into `/discover`; submissions require distinct titles, supported categories, HTTPS links and evidence, and moderators with Manage Server or Manage Messages can list, inspect, approve or reject them. Approval adds a guild-only community-sourced Atlas edge. `/community` already creates spoiler-aware threads, saves the thread ID, and closes/archives threads with creator-or-manager authorization. Creator search routes to TMDB person credits for films/TV and Google Books `inauthor:` results for books; AniList creator search remains for anime/manga/light novels. Collection guides use exact TMDB movie selection and date-ordered collection membership. The TV Guide now resolves exact series, displays show status, creators, networks, season/episode counts and runtimes, lets users select seasons, and paginates spoiler-marked episode summaries. Reading-order parity still needs a provider-backed sequencing rule; webnovel live updates remain excluded because the legacy source is a scraper rather than a verified official API. |
+| `cogs/media/connected_media.py` | `/discover`, Knowledge Atlas, Archive and Community links | Creator exploration and Atlas relationships exist. TMDB regional watch-provider lookup and supported YouTube/Vimeo video listing are integrated into `/discover`, with exact-title selection. The server's default media region now persists through `/settings`; `/discover` accepts a per-request region override. | Guild-scoped relationship suggestion/review is now integrated into `/discover`; submissions require distinct titles, supported categories, HTTPS links and evidence, and moderators with Manage Server or Manage Messages can list, inspect, approve or reject them. Approval adds a guild-only community-sourced Atlas edge. `/community` already creates spoiler-aware threads, saves the thread ID, and closes/archives threads with creator-or-manager authorization. Creator search routes to TMDB person credits for films/TV and Google Books `inauthor:` results for books; AniList creator search remains for anime/manga/light novels. Collection guides use exact TMDB movie selection and date-ordered collection membership. The TV Guide now resolves exact series, displays show status, creators, networks, season/episode counts and runtimes, lets users select seasons, and paginates spoiler-marked episode summaries. Reading-order parity still needs a provider-backed sequencing rule; webnovel live updates remain excluded because the previous Python implementation is a scraper rather than a verified official API. |
 | `cogs/media/cross_media_recommendations.py` | `/discover` | AniList recommendations and IGDB similar games exist. | Verify cross-category candidate pools, local-match explanations, books/TMDB support and provider failure isolation. |
 | `cogs/media/franchise.py` | `/discover` and Knowledge Atlas | Atlas supports typed, sourced relationships and bounded graph views. | Verify franchise traversal, sequencing, relationship labels, cross-provider joins, duplicate handling and community links. |
 | `cogs/media/three_by_three.py` | `helpers/media/media-grid.ts`, `/discover`, tests | Nine-title parsing, safe image-host allowlist, bounded image downloads, placeholder covers and PNG generation exist. | Compare input flow, title resolution, IGDB cover lookup, cache semantics, failure messages and image layout. The helper is a port candidate, not proof of full UX parity. |
-| `cogs/media/community_archives.py`, `panel.py` | `/archive` | Unified Archive categories, server/global scope, uploads, collections, collaborators and Archive Trails exist. | Confirm legacy panel CRUD, pagination, attachment lifecycle, all categories, moderator review, cleanup and S3 privacy; preserve Panels as an Archive category, not a separate command. |
-| `cogs/media/reading_club.py` | `/community` plus `helpers/community/community-reading.ts` | Guild-scoped nominations for manga/manhwa/manhua/webtoon/light novels/webnovels/books; one active vote per member with vote changes; manager selection by vote count (earliest nomination breaks ties) or explicit nomination; selected-read thread scheduling with future timezone-aware timestamps; persistent due-time notices with a five-minute retry window. No individual reading progress is stored. | Verify PostgreSQL migration/recovery and live Discord thread permissions. Legacy reading-order exploration is intentionally not guessed; connect it to verified provider relationship edges only when sequence semantics are explicit. |
+| `cogs/media/community_archives.py`, `panel.py` | `/archive` | Unified Archive categories, server/global scope, uploads, collections, collaborators and Archive Trails exist. | Confirm existing panel CRUD, pagination, attachment lifecycle, all categories, moderator review, cleanup and S3 privacy; preserve Panels as an Archive category, not a separate command. |
+| `cogs/media/reading_club.py` | `/community` plus `helpers/community/community-reading.ts` | Guild-scoped nominations for manga/manhwa/manhua/webtoon/light novels/webnovels/books; one active vote per member with vote changes; manager selection by vote count (earliest nomination breaks ties) or explicit nomination; selected-read thread scheduling with future timezone-aware timestamps; persistent due-time notices with a five-minute retry window. No individual reading progress is stored. | Verify PostgreSQL migration/recovery and live Discord thread permissions. Previous reading-order exploration is intentionally not guessed; connect it to verified provider relationship edges only when sequence semantics are explicit. |
 | `cogs/media/media_night.py` | `/community` Media Night | AniList candidates are provider-backed and adult-flagged entries are excluded; mood matching uses provider genres/tags; unbiased random sampling selects distinct entries; session and candidate rows persist in PostgreSQL; public buttons use database candidate IDs; one vote per member is locked; expired sessions close and final results are published through a retryable worker. | Run end-to-end Discord/PostgreSQL acceptance, verify candidate-tag behavior against live AniList responses, and keep the UI explicit that tag filtering is not an age rating. No adult-content recommendations or gambling are ported. |
 | `cogs/media/release_calendar.py` | `/community` release calendar and guild digest worker | On-demand previews combine AniList airings, region-aware TMDB movie dates and TMDB next-episode dates with season/episode metadata. PostgreSQL stores per-guild channel, timezone, daily/weekly cadence, weekday, categories, region and next run; managers can preview, configure and disable; the bot queues due deliveries and retries failures. | Run end-to-end Discord/PostgreSQL acceptance, verify the TMDB `/tv/on_the_air` detail coverage and selected region behavior, and exercise schedule recovery after downtime. Release dates remain provider-sourced rather than inferred. |
 | `cogs/gaming/game.py`, Steam modules | `/discover`, `/profile`, `/play` | Steam and IGDB helpers, game discovery, similar games, linked Steam profile and quiz sessions exist. | Verify all supported Steam profile/store fields, game recommendation behavior, pagination and safe provider failure. |
-| `cogs/gaming/free_games_checker.py` | No current v3 destination | Explicitly excluded in the v3 specification because the legacy implementation relies on storefront parsing/undocumented interfaces. | Do not port the scraper. Reconsider only if a stable, permitted promotions API is verified. |
+| `cogs/gaming/free_games_checker.py` | No current v3 destination | Explicitly excluded in the v3 specification because the previous implementation relies on storefront parsing/undocumented interfaces. | Do not port the scraper. Reconsider only if a stable, permitted promotions API is verified. |
 | Custom-role cogs and helpers | `/custom-role`, `helpers/custom-role-*` | TypeScript lifecycle, validation, image/picker and storage helpers exist. | Port and run the complete lifecycle/picker/admin regression suite; verify ownership, guild boundaries, cooldowns, role hierarchy, asset validation and rollback. |
 | `cogs/admin/dashboard.py`, dashboard frontend | `/settings`, Next.js frontend, Rust/Axum backend | A TS bot bridge and authenticated Atlas dashboard path exist. | Verify all in-scope guild configuration, channel selectors, feature visibility, authorization and audit behavior. Dashboard sync now filters `/log`, `/moderators` and `/planned` out of global command publication and keeps every published feature command restricted to guild context. `/help`, `/privacy` and `/feedback` remain separate standalone commands. Preserve the Rust trust boundary. |
 | `cogs/server_management/server_check.py`, selected `server_config.py` behavior | `/settings` diagnostics | Some setting and channel controls exist. | Port only diagnostics/configuration needed by approved v3 features; prove channel permission checks and server isolation. General server administration is not an automatic migration target. |
@@ -70,29 +72,29 @@ The audit distinguishes source-tree migration from behavior parity. The old Twit
 | Other utility commands | Existing TS modules include invite, link conversion and timestamp | Implementations exist in the Draft branch. | Reconcile them against the approved public surface and existing user decisions; do not expand into an unrelated utility collection. |
 | Bot-moderator operations | `/log`, `/moderators`, and `/planned` remain independent standalone command modules | Diagnostic lookup, bot moderator management, and planned-feature management modules exist. | Keep all three commands separate, bot-moderator-only, and guild-registered exclusively to the one `BOT_MODERATOR_GUILD_ID`. Guard every command and component interaction at runtime. Rename the existing `/adminmoderators` command to `/moderators`. Do not register these commands globally. |
 
-## Legacy files that are not automatic production migrations
+## Python reference files outside the selected v3 scope
 
-The base tree contains backup, under-maintenance, test, and helper files. They must be audited, but a Python file does not become an approved runtime feature just because it existed.
+The base source tree also contains backup, under-maintenance, test, and helper files. They are reviewed for useful behavior, but their presence alone does not make them part of the v3 product scope.
 
-- `backup/bot.py`, `backup/hltb.py`, `backup/metacritic.py`: historical backup scripts, not production bot cogs.
+- `backup/bot.py`, `backup/hltb.py`, `backup/metacritic.py`: backup artifacts, not selected v3 features.
 - `under_maintenance/challenges/challenge_progress.py`: personal AniList manga progress behavior conflicts with the explicit no-personal-progress rule.
 - `under_maintenance/reminders.py`: general reminders conflict with the media-only automation scope.
 - `under_maintenance/challenges/challenge_manage.py` and `challenge_leaderboard.py`: inspect whether any community-only challenge behavior is still wanted; do not reintroduce personal progress tracking.
 - Theme/decor files: a general theme system or marketplace is explicitly outside the current approved scope. Custom Roles remain in scope.
 - Free-game/news/web-scraping code: only reconsider when an official, stable, terms-compliant provider source is established.
 - Invite tracking, generic server analytics, generic admin cleanup and broad moderation backups are not automatically in the selected v3 scope.
-- Temporary scripts and migration helpers must be converted only when they still serve a necessary release/data migration task; otherwise document retirement.
-- Tests and test fixtures are not runtime features. Their useful assertions and scenarios must be ported into TypeScript tests or explicitly retired with a reason.
+- Temporary scripts and migration helpers are kept only when they still serve a necessary development, release, or data-migration task; otherwise document why they are not part of v3.
+- Tests and fixtures are not runtime features. Port the assertions that protect selected v3 behavior into TypeScript tests; document excluded scenarios without requiring a matching number of test files.
 
-## Required TypeScript test parity
+## Required TypeScript coverage
 
-The base has fifty Python test files under `tests/`; the current Draft has twenty-two TypeScript test files (ninety-nine individual Node test cases in the current CI run). The target is not necessarily fifty files with identical names. The target is equivalent coverage for all retained behavior, especially:
+The source tree has fifty Python test files under `tests/`; the current Draft snapshot has twenty-three TypeScript test files (111 individual Node test cases in the audited run). The target is not fifty matching files. The target is focused coverage for every selected v3 behavior, especially:
 
 - AniList/Steam/IGDB/TMDB/Google Books normalization, empty responses, timeouts, rate limits, and malformed payloads.
 - Media search/filter/random/recommendation/compare/trailer/airing/creator/franchise flows.
 - Archive submission, permissions, S3 assets, global/server visibility, collections, trails, moderation, edit/delete and attachment cleanup.
 - Guild isolation for settings, activities, rankings, sessions, notifications and graph data.
-- Custom-role lifecycle, picker, image fetching, permissions, role hierarchy, cooldown and legacy data import.
+- Custom-role lifecycle, picker, image fetching, permissions, role hierarchy, cooldown and existing data import.
 - Dashboard OAuth, Rust bridge authentication, guild authorization and channel permissions.
 - Terms/privacy, issue hash creation, feedback/log authorization, diagnostic redaction and interaction error handling.
 - Database transaction behavior, migration compatibility, backup/restore and shutdown/job recovery.
@@ -142,7 +144,7 @@ utils/bot_monitoring.py
 utils/monitoring_system.py
 ```
 
-### Legacy cogs (63 files)
+### Previous cogs (63 files)
 
 ```text
 cogs/account/__init__.py
@@ -247,7 +249,7 @@ tests/custom_roles/run_all.py
 tests/custom_roles/seed_test_server.py
 tests/custom_roles/test_admin_extras.py
 tests/custom_roles/test_enable_gate.py
-tests/custom_roles/test_legacy_import.py
+tests/custom_roles/test_previous_import.py
 tests/custom_roles/test_lifecycle.py
 tests/custom_roles/test_names_and_roles.py
 tests/custom_roles/test_palette_and_icons.py
@@ -296,4 +298,4 @@ tests/test_web_scraper.py
 
 ## Exit gate
 
-Do not mark migration complete until the relevant rows above have implementation/test evidence, the 50 legacy Python test scenarios have explicit dispositions, CI passes on the current Draft head, multi-guild isolation and data compatibility are proven, and deployment/cutover is reversible. The PR remains Draft until the repository owner explicitly says otherwise.
+Do not mark source migration complete until each in-scope row above has implementation/test evidence, the Python reference test scenarios relevant to selected v3 features have explicit dispositions, CI passes on the current Draft head, multi-guild isolation and schema compatibility are proven, and startup/shutdown/recovery are covered. This audit does not assert that a previous bot was deployed and does not authorize a production release. The PR remains Draft until the repository owner explicitly says otherwise.
