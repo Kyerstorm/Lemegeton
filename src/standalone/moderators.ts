@@ -14,7 +14,7 @@ import {
 } from "discord.js";
 import type { FeatureCommand } from "../../helpers/command.js";
 import { loadingMessage } from "../../helpers/emoji.js";
-import { isBotModerator } from "../../helpers/moderation.js";
+import { isBotModerator, isModeratorCommandGuild } from "../../helpers/moderation.js";
 import { query } from "../../database.js";
 
 type Moderator = Record<string, unknown> & { discord_id: string; username: string; added_by: string; created_at: Date | string };
@@ -76,24 +76,32 @@ function parseDiscordId(value: string): string | null {
 }
 
 export class BotModeratorsCommand implements FeatureCommand {
-  readonly data = new SlashCommandBuilder().setName("adminmoderators")
+  constructor(private readonly moderatorGuildId: string | null) {}
+
+  private async authorize(interaction: ChatInputCommandInteraction | ButtonInteraction | ModalSubmitInteraction): Promise<boolean> {
+    if (!isModeratorCommandGuild(interaction.guildId, this.moderatorGuildId)) {
+      await interaction.reply({ content: "This command is available only in the configured bot operations server.", flags: MessageFlags.Ephemeral });
+      return false;
+    }
+    if (!await isBotModerator(interaction.user.id)) {
+      await interaction.reply({ content: "Only existing bot moderators can manage this list.", flags: MessageFlags.Ephemeral });
+      return false;
+    }
+    return true;
+  }
+
+  readonly data = new SlashCommandBuilder().setName("moderators")
     .setDescription("Manage bot-wide moderators (bot moderators only)");
 
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
-    if (!await isBotModerator(interaction.user.id)) {
-      await interaction.reply({ content: "Only existing bot moderators can manage this list.", flags: MessageFlags.Ephemeral });
-      return;
-    }
+    if (!await this.authorize(interaction)) return;
     await interaction.reply({ content: loadingMessage("Loading bot moderators…"), flags: MessageFlags.Ephemeral });
     await interaction.editReply({ content: null, embeds: [panel(await getModerators())], components: controls() });
   }
 
   async handleButton(interaction: ButtonInteraction): Promise<boolean> {
     if (!interaction.customId.startsWith("adminmoderators:")) return false;
-    if (!await isBotModerator(interaction.user.id)) {
-      await interaction.reply({ content: "Only existing bot moderators can manage this list.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
+    if (!await this.authorize(interaction)) return true;
     const action = interaction.customId.split(":")[1];
     if (action === "add" || action === "remove") {
       await interaction.showModal(moderatorModal(action));
@@ -119,10 +127,7 @@ export class BotModeratorsCommand implements FeatureCommand {
 
   async handleModal(interaction: ModalSubmitInteraction): Promise<boolean> {
     if (!["adminmoderators:add", "adminmoderators:remove"].includes(interaction.customId)) return false;
-    if (!await isBotModerator(interaction.user.id)) {
-      await interaction.reply({ content: "Only existing bot moderators can manage this list.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
+    if (!await this.authorize(interaction)) return true;
     const action = interaction.customId.endsWith(":add") ? "add" : "remove";
     const userId = parseDiscordId(interaction.fields.getTextInputValue("user_id"));
     if (!userId) {
