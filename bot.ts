@@ -9,7 +9,7 @@ import {handleArchiveUploadMessage} from "./helpers/archive.js";
 import {AniListClient} from "./helpers/anilist.js";
 import {handleAniListLinkMessage} from "./helpers/embeds/anilist.js";
 import {closeDatabase,initDatabase} from "./database.js";
-import {dueDailyDeliveries,dueDailySchedules,markDailyDelivery,prepareDailyDelivery} from "./helpers/community.js";
+import {claimDueMediaNightResults,dueDailyDeliveries,dueDailySchedules,markDailyDelivery,markMediaNightResultPublished,prepareDailyDelivery,rankingResults} from "./helpers/community.js";
 import {claimDueReadingReminders,markReadingReminderSent} from "./helpers/community-reading.js";
 import {createCommandRegistry} from "./src/registry.js";
 import {isFeatureEnabled} from "./helpers/settings.js";
@@ -238,6 +238,32 @@ async function processDailyDrops():Promise<void>{
     const message=await(channel as TextChannel).send({embeds:[homeEmbed(`Daily Drop · ${delivery.title}`,delivery.content,delivery.source_url?[{name:"Source",value:`[Open original source](${delivery.source_url})`}]:[])],allowedMentions:{parse:[]}});
     await markDailyDelivery(delivery.id,"sent",message.id);
    }catch(error){await markDailyDelivery(delivery.id,"pending",undefined,error instanceof Error?error.message:"Unknown delivery error").catch(()=>undefined);}
+  }
+  for(const session of await claimDueMediaNightResults()){
+   try{
+    const [results,channel]=await Promise.all([
+     rankingResults(session.guild_id,session.id),
+     client.channels.fetch(session.channel_id),
+    ]);
+    if(!channel||!channel.isTextBased()||!("send" in channel))throw new Error("The Media Night channel is unavailable.");
+    const fields=results.map((item,index)=>({
+     name:`${index+1}. ${item.title.slice(0,180)}`,
+     value:`${item.votes} vote${item.votes===1?"":"s"}`,
+     inline:false,
+    }));
+    const description=results.length
+     ? "Final community vote results. Ties are ordered by the time the candidate was submitted."
+     : "Media Night closed without any votes.";
+    await (channel as TextChannel).send({
+     embeds:[homeEmbed(`Media Night results · ${session.title}`,description,fields)],
+     allowedMentions:{parse:[]},
+    });
+    await markMediaNightResultPublished(session.id);
+   }catch(error){
+    logger.warn("Media Night final results could not be delivered; the session remains queued for retry",{
+     guildId:session.guild_id,sessionId:session.id,reason:error instanceof Error?error.message:"Unknown delivery error",
+    });
+   }
   }
  }catch(error){logger.error("Daily Drop worker failed",{reason:error instanceof Error?error.message:"Unknown error"});}
  finally{workerRunning=false;}
