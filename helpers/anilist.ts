@@ -164,9 +164,11 @@ function parsePublicEntity(value:unknown,kind:AniListEntityKind):AniListPublicEn
   ? (isObj(value.staffMedia)&&Array.isArray(value.staffMedia.edges)?value.staffMedia.edges:[])
   : (isObj(value.media)&&Array.isArray(value.media.nodes)?value.media.nodes:[]);
  const works=rawWorks.flatMap(entry=>{
-  const row=kind==="STAFF"&&isObj(entry)?entry:{node:entry};
-  const node=isObj(row.node)?row.node:{};
-  const work=parsePublicWork(node,kind==="STAFF"?str(row.staffRole):null);
+  const isCredit=kind==="STAFF"&&isObj(entry);
+  const nodeValue=isCredit?entry.node:entry;
+  const roleValue=isCredit?entry.staffRole:null;
+  const node=isObj(nodeValue)?nodeValue:{};
+  const work=parsePublicWork(node,str(roleValue));
   return work?[work]:[];
  }).slice(0,12);
  return{
