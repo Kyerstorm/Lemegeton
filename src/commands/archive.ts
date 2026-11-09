@@ -619,10 +619,31 @@ export class ArchiveCommand implements FeatureCommand {
     }
   }
 
-  async handleSelect(interaction: StringSelectMenuInteraction): Promise<boolean> {
+  async handleSelect(interaction: StringSelectMenuInteraction | ChannelSelectMenuInteraction): Promise<boolean> {
     if (!interaction.guildId) return false;
     const [prefix, action] = interaction.customId.split(":");
     if (prefix !== "archive") return false;
+    if (interaction.isChannelSelectMenu()) {
+      if (action !== "configure-upload" && action !== "configure-moderation") return false;
+      if (!isGuildManager(interaction)) {
+        await interaction.reply({content:"Manage Server permission is required to change Archive channels.",flags:MessageFlags.Ephemeral});
+        return true;
+      }
+      const selectedChannel=interaction.channels.first();
+      if (!selectedChannel || (selectedChannel.type !== ChannelType.GuildText && selectedChannel.type !== ChannelType.GuildAnnouncement)) {
+        await interaction.reply({content:"Choose a normal text or announcement channel from this server.",flags:MessageFlags.Ephemeral});
+        return true;
+      }
+      const kind=action==="configure-upload"?"upload":"moderation";
+      await saveArchiveChannelSetting(interaction.guildId,interaction.user.id,kind,selectedChannel.id);
+      await interaction.reply({
+        content:kind==="upload"
+          ? "Archive media uploads will now be received in <#"+selectedChannel.id+">."
+          : "New Archive submissions will now be sent to <#"+selectedChannel.id+"> for moderation.",
+        flags:MessageFlags.Ephemeral,
+      });
+      return true;
+    }
     const selected = interaction.values[0];
     if (!selected) return false;
     if (action === "browse-category" && isArchiveCategory(selected)) {
