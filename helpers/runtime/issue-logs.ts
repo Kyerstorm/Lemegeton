@@ -48,9 +48,9 @@ export function sanitizeIssueDetails(details: Record<string, unknown>): Record<s
 }
 export function isIssueHash(value: string): boolean { return ISSUE_HASH_PATTERN.test(value.trim()); }
 
-/** A 40-character reference seeded with 256 bits of cryptographic randomness. */
+/** A 128-character SHA-512 reference seeded with cryptographic randomness and a UUID. */
 export function createIssueHash(interactionId: string, userId = ""): string {
-  return createHash("sha1")
+  return createHash("sha512")
     .update(randomBytes(32))
     .update(randomUUID())
     .update(interactionId)

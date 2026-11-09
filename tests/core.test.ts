@@ -15,7 +15,7 @@ import sharp from "sharp";
 import {processCustomRoleIconImage,extractCustomRoleAvatarPalette} from "../helpers/custom-roles/custom-role-images.js";
 import {normalizeAtlasTitle,normalizeAtlasCategory,safeAtlasUrl} from "../helpers/providers/atlas.js";
 import {FEATURE_NAMES,isFeatureName} from "../helpers/runtime/settings.js";
-import {dashboardCommandRows,dashboardSecretMatches,isDashboardGuildId} from "../helpers/runtime/dashboard-bridge.js";
+import {collectRuntimeHealth,dashboardCommandRows,dashboardSecretMatches,isDashboardGuildId} from "../helpers/runtime/dashboard-bridge.js";
 import {customRoleChannelAllowed,customRoleCooldownMessage,parseCustomRoleColor,parseCustomRoleWordList,validateCustomRoleEmoji,validateCustomRoleName} from "../helpers/custom-roles/custom-roles.js";
 import {renderAtlasSnapshot} from "../helpers/media/atlas-renderer.js";
 import {filterMediaNotificationCandidates} from "../helpers/media/media-notifications.js";
@@ -305,4 +305,28 @@ test("AniList link conversion only accepts HTTPS AniList user profiles", () => {
  assert.equal(extractAniListUsername("https://anilist.co.evil.example/user/example"), null);
  assert.equal(extractAniListUsername("https://anilist.co/anime/1"), null);
  assert.equal(extractAniListUsername("not a URL"), null);
+});
+
+test("dashboard health reports PostgreSQL online and degrades safely when it is unavailable", async () => {
+  const client = {
+    isReady: () => true,
+    ws: { ping: 42 },
+    guilds: { cache: { size: 2 } },
+  } as unknown as import("discord.js").Client;
+  const commands = [{ data: { name: "discover" } }] as unknown as import("../helpers/commands/command.js").FeatureCommand[];
+
+  const online = await collectRuntimeHealth(client, commands, async () => undefined);
+  assert.equal(online.status, "online");
+  const onlineDatabase = online.database as { status: string; latency_ms: number | null };
+  assert.equal(onlineDatabase.status, "online");
+  assert.equal(typeof onlineDatabase.latency_ms, "number");
+  assert.equal(online.guild_count, 2);
+
+  const unavailable = await collectRuntimeHealth(client, commands, async () => {
+    throw new Error("Sensitive database connection details must not be returned.");
+  });
+  assert.equal(unavailable.status, "degraded");
+  const unavailableDatabase = unavailable.database as { status: string; latency_ms: number | null };
+  assert.deepEqual(unavailableDatabase, { status: "offline", latency_ms: null });
+  assert.equal(JSON.stringify(unavailable).includes("Sensitive database"), false);
 });

@@ -30,6 +30,8 @@ const releaseCalendarTmdbClient=new TmdbClient(config.tmdbBearerToken);
 const commands=createCommandRegistry(config);
 const commandByName=new Map<string,FeatureCommand>(commands.map(command=>[command.data.name,command]));
 let atlasBridge: Server | undefined;
+let reconciliationTimer: NodeJS.Timeout | undefined;
+let dailyWorkerTimer: NodeJS.Timeout | undefined;
 async function startAtlasBridge(): Promise<void> {
  const secret=process.env.DASHBOARD_BRIDGE_SECRET?.trim()??"";
  if(Buffer.byteLength(secret)<32){logger.warn("Knowledge Atlas dashboard bridge disabled; DASHBOARD_BRIDGE_SECRET must contain at least 32 bytes.");return;}
@@ -147,6 +149,24 @@ client.once(Events.ClientReady,ready=>{
   }
  },30*60_000);
  reconcileTimer.unref();
+});
+client.on(Events.GuildCreate,guild=>{
+ logger.info("Lemegeton joined a Discord server",{guildId:guild.id,guildName:guild.name,memberCount:guild.memberCount});
+});
+client.on(Events.GuildDelete,guild=>{
+ logger.info("Lemegeton left or lost access to a Discord server; retained server data was not deleted",{guildId:guild.id,guildName:guild.name});
+});
+client.on(Events.ShardDisconnect,(event,shardId)=>{
+ logger.warn("Discord gateway shard disconnected",{shardId,code:event.code,reason:event.reason||"No reason supplied"});
+});
+client.on(Events.ShardResume,(shardId,replayedEvents)=>{
+ logger.info("Discord gateway shard resumed",{shardId,replayedEvents});
+});
+client.on(Events.ShardReconnecting,shardId=>{
+ logger.warn("Discord gateway shard reconnecting",{shardId});
+});
+client.on(Events.Error,error=>{
+ logger.error("Discord client emitted an error",{reason:error.message});
 });
 client.on(Events.GuildMemberUpdate,(oldMember,newMember)=>{
  void onCustomRoleMemberUpdate(oldMember,newMember).catch(error=>logger.error("Custom Roles member update failed",{guildId:newMember.guild.id,userId:newMember.id,reason:error instanceof Error?error.message:"Unknown error"}));

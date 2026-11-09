@@ -130,15 +130,37 @@ async function withGuildLock<T>(guildId: string, operation: () => Promise<T>): P
   }
 }
 
-async function health(client: Client, commands: FeatureCommand[]): Promise<Record<string, unknown>> {
+export async function collectRuntimeHealth(
+  client: Client,
+  commands: FeatureCommand[],
+  databasePing: () => Promise<void> = async () => {
+    await queryOne<{ ready: number }>("SELECT 1 AS ready");
+  },
+): Promise<Record<string, unknown>> {
   const ready = client.isReady();
   if (ready) hasBeenReady = true;
   const latency = ready && client.ws.ping >= 0 ? client.ws.ping : null;
-  const status = ready ? latency !== null && latency >= 500 ? "degraded" : "online" : hasBeenReady ? "offline" : "connecting";
+  let databaseStatus: "online" | "offline" = "offline";
+  let databaseLatency: number | null = null;
+  const databaseStartedAt = Date.now();
+  try {
+    await databasePing();
+    databaseStatus = "online";
+    databaseLatency = Math.max(0, Date.now() - databaseStartedAt);
+  } catch {
+    // Report dependency state, not driver errors or connection details.
+  }
+  const status = ready
+    ? latency !== null && latency >= 500 || databaseStatus === "offline" ? "degraded" : "online"
+    : hasBeenReady ? "offline" : "connecting";
   return {
     status,
     ready,
     latency_ms: latency,
+    database: {
+      status: databaseStatus,
+      latency_ms: databaseLatency,
+    },
     guild_count: client.guilds.cache.size,
     extension_count: commands.length,
     extensions: commands.map(command => command.data.name),
@@ -384,7 +406,7 @@ async function handleRequest(
     return;
   }
   if (request.method === "GET" && request.url === "/health") {
-    jsonResponse(response, 200, await health(client, commands));
+    jsonResponse(response, 200, await collectRuntimeHealth(client, commands));
     return;
   }
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
