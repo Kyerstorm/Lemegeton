@@ -2,8 +2,8 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags,
   PermissionsBitField, SlashCommandBuilder, type ChatInputCommandInteraction,
 } from "discord.js";
-import type { BotConfig } from "../helpers/config.js";
-import type { FeatureCommand } from "../helpers/command.js";
+import type { BotConfig } from "../../helpers/config.js";
+import type { FeatureCommand } from "../../helpers/command.js";
 
 export class InviteCommand implements FeatureCommand {
   readonly data = new SlashCommandBuilder().setName("invite").setDescription("Get an invite link for Lemegeton");
