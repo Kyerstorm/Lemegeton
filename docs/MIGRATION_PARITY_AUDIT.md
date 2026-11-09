@@ -34,12 +34,12 @@ The following verified follow-ups were made on the Draft branch after the initia
 
 ## CI verification — 9 November 2026
 
-The latest code-bearing revision is `71628702d166cfed1e633e8166909243432ab62f`. Both workflows completed successfully on that revision:
+The latest code-bearing revision is `5504d3ab5be6dce630eb91319ae9a1f8b6ac5648`. Both workflows completed successfully on that revision:
 
-- [TypeScript bot checks](https://github.com/Kyerstorm/Lemegeton/actions/runs/42690822301) — typecheck and test job passed.
-- [Dashboard, Rust and container checks](https://github.com/Kyerstorm/Lemegeton/actions/runs/42690822344) — frontend typecheck/build and high-severity dependency audit, Rust tests and `cargo audit`, Docker build, Compose validation, startup-script syntax and non-root/health-check assertions passed.
+- [TypeScript bot checks](https://github.com/Kyerstorm/Lemegeton/actions/runs/42692313192) — typecheck and test job passed.
+- [Dashboard, Rust and container checks](https://github.com/Kyerstorm/Lemegeton/actions/runs/42692313061) — frontend typecheck/build and high-severity dependency audit, Rust tests and `cargo audit`, Docker build, Compose validation, startup-script syntax and non-root/health-check assertions passed.
 
-The current PR head is `38cae8b3f72f275249094a091ab5c291eff4c73a`; the commits after the code-bearing revision update documentation only. These green checks verify the code on the branch, not a live Discord deployment, provider credentials, or a target PostgreSQL database.
+These green checks verify the code on the branch, not a live Discord deployment, provider credentials, or a target PostgreSQL database.
 
 The audit distinguishes source inventory from selected-feature parity. The previous Twitch/trending status rotator, generic webhook monitoring, stale-user cleanup, and departed-guild data deletion are not implemented in the new runtime. In particular, v3 currently retains guild data on GuildDelete, unlike the previous clear_guild_records path. That retention-vs-deletion policy needs an explicit owner decision; no destructive cleanup is added without that decision.
 ## What source-to-TypeScript migration completion means
@@ -94,6 +94,14 @@ The base source tree also contains backup, under-maintenance, test, and helper f
 - Invite tracking, generic server analytics, generic admin cleanup and broad moderation backups are not automatically in the selected v3 scope.
 - Temporary scripts and migration helpers are kept only when they still serve a necessary development, release, or data-migration task; otherwise document why they are not part of v3.
 - Tests and fixtures are not runtime features. Port the assertions that protect selected v3 behavior into TypeScript tests; document excluded scenarios without requiring a matching number of test files.
+
+## Integration and environment-dependent acceptance
+
+- GitHub currently reports PR #17 as `mergeable=false` / `mergeable_state=dirty` against `multi_guild`. No synchronization or conflict resolution was attempted in this audit; any resolution must change the PR head only and preserve the base branch.
+- No live Discord test server/application credentials were available for gateway-intent, channel-permission, component-authorization, command-registration, thread and scheduled-delivery acceptance.
+- No target PostgreSQL instance or sanitized target schema/data snapshot was available. CI verifies Rust/TypeScript builds and tests, not real source-to-target data import, restore, or rollback.
+- Guild departure currently retains guild-owned records. Whether a future guild removal should retain or purge those records is an owner/privacy decision; no destructive cleanup is inferred.
+- Release-calendar provider requests are currently all-or-nothing: a failed selected AniList or TMDB request rejects the combined lookup. Scheduled digest delivery is retried, but the interactive preview does not yet provide partial results with a provider-failure notice. Any partial-results behavior should be designed together with retry/deduplication semantics before implementation.
 
 ## Required TypeScript coverage
 
