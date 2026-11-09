@@ -17,7 +17,7 @@ function feedbackModal(): ModalBuilder {
     new ActionRowBuilder<TextInputBuilder>().addComponents(
       new TextInputBuilder().setCustomId("issue_hash").setLabel("Issue reference (optional)")
         .setStyle(TextInputStyle.Short).setMaxLength(128).setRequired(false)
-        .setPlaceholder("Paste the 128-character reference shown with an error"),
+        .setPlaceholder("Paste the 40-character reference shown with an error"),
     ),
     new ActionRowBuilder<TextInputBuilder>().addComponents(
       new TextInputBuilder().setCustomId("description").setLabel("What happened or what would you improve?")
@@ -38,7 +38,7 @@ export class FeedbackCommand implements FeatureCommand {
       return true;
     }
     if (issueHash && !isIssueHash(issueHash)) {
-      await interaction.reply({ content: "That issue reference must be the full 128-character SHA-512 hash.", flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: "That issue reference must be a 40-character hexadecimal reference (or a legacy 128-character reference).", flags: MessageFlags.Ephemeral });
       return true;
     }
     if (issueHash && !await findIssueLog(issueHash, interaction.guildId!)) {
