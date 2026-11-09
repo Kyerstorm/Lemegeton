@@ -24,10 +24,6 @@ export class LogCommand implements FeatureCommand {
       await interaction.reply({ content: "This command is available only in the configured bot operations server.", flags: MessageFlags.Ephemeral });
       return;
     }
-    if (!interaction.guildId) {
-      await interaction.reply({ content: "Diagnostic logs can only be inspected inside the configured server.", flags: MessageFlags.Ephemeral });
-      return;
-    }
     const hash = interaction.options.getString("issue_hash", true).trim().toLowerCase();
     if (!await isBotModerator(interaction.user.id)) {
       await interaction.reply({ content: "You are not authorised to inspect diagnostic logs.", flags: MessageFlags.Ephemeral });
@@ -38,7 +34,7 @@ export class LogCommand implements FeatureCommand {
       return;
     }
     await interaction.reply({ content: loadingMessage("Finding the diagnostic record…"), flags: MessageFlags.Ephemeral });
-    const record = await findIssueLog(hash, interaction.guildId!);
+    const record = await findIssueLog(hash);
     if (!record) {
       await interaction.editReply("No matching issue record was found in this server.");
       return;

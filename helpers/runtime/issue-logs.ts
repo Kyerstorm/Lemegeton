@@ -102,12 +102,21 @@ export async function createInteractionIssueLog(
     return null;
   }
 }
-export async function findIssueLog(issueHash: string, guildId: string): Promise<IssueLogRecord | null> {
+export async function findIssueLog(issueHash: string, guildId?: string): Promise<IssueLogRecord | null> {
   if (!isIssueHash(issueHash)) return null;
+  const normalizedHash = issueHash.trim().toLowerCase();
+  if (!guildId) {
+    return queryOne<IssueLogRecord>(
+      `SELECT issue_hash, guild_id, user_id, username, interaction_id, channel_id,
+              command_name, details, created_at
+         FROM issue_logs WHERE issue_hash = $1`,
+      [normalizedHash],
+    );
+  }
   return queryOne<IssueLogRecord>(
     `SELECT issue_hash, guild_id, user_id, username, interaction_id, channel_id,
             command_name, details, created_at
        FROM issue_logs WHERE issue_hash = $1 AND guild_id = $2`,
-    [issueHash.trim().toLowerCase(), guildId],
+    [normalizedHash, guildId],
   );
 }
