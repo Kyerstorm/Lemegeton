@@ -188,13 +188,14 @@ async function overview(
 ): Promise<Record<string, unknown>> {
   const settings = await getFeatureSettings(guild.id);
   const rows = dashboardCommandRows(commands, settings);
-  const state = await health(client, commands);
+  const state = await collectRuntimeHealth(client, commands);
   return {
     guild: { id: guild.id, name: guild.name },
     bot: {
       ready: state.ready,
       status: state.status,
       latency_ms: state.latency_ms,
+      database: state.database,
       guild_count: state.guild_count,
       member_count: guild.memberCount ?? null,
       extension_count: commands.length,
