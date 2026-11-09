@@ -1,8 +1,11 @@
 import { EmbedBuilder, type Message } from "discord.js";
 import {
   AniListClient,
+  type AniListEntityKind,
   type AniListMedia,
   type AniListPublicActivity,
+  type AniListPublicEntity,
+  type AniListReviewRecord,
   type AniListUserProfile,
 } from "../anilist.js";
 import {
@@ -22,6 +25,9 @@ import {
 export type AniListProfileSection = "overview" | "stats" | "favorites" | "activity";
 export type AniListLinkTarget =
   | { kind: "media"; id: number; type: "ANIME" | "MANGA" }
+  | { kind: "entity"; id: number; entityKind: AniListEntityKind }
+  | { kind: "review"; id: number }
+  | { kind: "activity"; id: number }
   | { kind: "user"; username: string; section: AniListProfileSection };
 
 const IGNORED_USER_ROUTES = new Set([
@@ -44,6 +50,15 @@ export function parseAniListUrl(value: string | URL): AniListLinkTarget | null {
     const id = Number(segments[1]);
     if (!/^\d+$/.test(segments[1] ?? "") || !Number.isSafeInteger(id) || id < 1) return null;
     return { kind: "media", id, type: route === "anime" ? "ANIME" : "MANGA" };
+  }
+
+  if (["character","staff","studio","review","activity"].includes(route)) {
+    const id = Number(segments[1]);
+    if (!/^\d+$/.test(segments[1] ?? "") || !Number.isSafeInteger(id) || id < 1) return null;
+    if (route === "character" || route === "staff" || route === "studio") {
+      return { kind:"entity", id, entityKind:route.toUpperCase() as AniListEntityKind };
+    }
+    return { kind:route,id } as AniListLinkTarget;
   }
 
   if (route !== "user" || !segments[1]) return null;
@@ -116,6 +131,67 @@ function detailEmbeds(media: AniListMedia): EmbedBuilder[] {
   return result.slice(0, 10);
 }
 
+function entityEmbed(entity:AniListPublicEntity):EmbedBuilder {
+  const embed=new EmbedBuilder()
+    .setColor(entity.kind==="CHARACTER"?EMBED_COLOURS.primary:entity.kind==="STAFF"?EMBED_COLOURS.secondary:EMBED_COLOURS.info)
+    .setTitle(entity.name.slice(0,256))
+    .setURL(entity.url)
+    .setDescription((entity.description?.replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim().slice(0,1_000))||"No description supplied by AniList.")
+    .setFooter({text:"AniList · "+entity.kind.toLowerCase()+" metadata"});
+  if(entity.image)embed.setThumbnail(entity.image);
+  if(entity.roles.length)embed.addFields({name:entity.kind==="STAFF"?"Occupations":"Details",value:entity.roles.join(", ").slice(0,900),inline:true});
+  if(entity.yearsActive.length)embed.addFields({name:"Years active",value:entity.yearsActive.join(", "),inline:true});
+  if(entity.works.length)embed.addFields({
+    name:"Known works",
+    value:entity.works.slice(0,10).map(work=>{
+      const label=work.title.slice(0,120);
+      return "["+label+"]("+work.url+") · "+work.type+(work.role?" · "+work.role:"");
+    }).join("\n").slice(0,1_000),
+    inline:false,
+  });
+  return embed;
+}
+
+function reviewEmbed(review:AniListReviewRecord):EmbedBuilder {
+  const body=(review.body??review.summary??"No review text was supplied by AniList.")
+    .replace(/<br\s*\/?\s*>/gi,"\n")
+    .replace(/<[^>]*>/g," ")
+    .replace(/\s+/g," ")
+    .trim()
+    .slice(0,3_000);
+  const embed=new EmbedBuilder()
+    .setColor(EMBED_COLOURS.warning)
+    .setTitle("AniList Review · "+review.mediaTitle.slice(0,190))
+    .setURL(review.url)
+    .setDescription(body||"No review text was supplied by AniList.")
+    .addFields(
+      {name:"Media",value:"["+review.mediaTitle.slice(0,150)+"]("+review.mediaUrl+")",inline:true},
+      {name:"Reviewer",value:"["+review.userName.slice(0,100)+"]("+review.userUrl+")",inline:true},
+      {name:"Score",value:review.score===null?"Not scored":String(review.score),inline:true},
+      {name:"Rating",value:review.rating===null?"Unavailable":String(review.rating),inline:true},
+      {name:"Rating count",value:review.ratingAmount===null?"Unavailable":String(review.ratingAmount),inline:true},
+    )
+    .setFooter({text:"AniList · Review metadata"});
+  if(review.createdAt>0)embed.setTimestamp(new Date(review.createdAt*1000));
+  return embed;
+}
+
+function linkedActivityEmbed(activity:AniListPublicActivity):EmbedBuilder {
+  const body=activity.text.replace(/<br\s*\/?\s*>/gi,"\n").replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim().slice(0,2_500);
+  const title=activity.kind==="MESSAGE"&&activity.recipientName
+    ?"Message to "+activity.recipientName
+    :activity.kind==="MESSAGE"?"AniList Message":"AniList Activity";
+  const embed=new EmbedBuilder()
+    .setColor(EMBED_COLOURS.info)
+    .setTitle(title.slice(0,256))
+    .setURL(activity.url)
+    .setDescription(body||"No public text was supplied by AniList.")
+    .addFields({name:"Author",value:activity.userName.slice(0,150),inline:true})
+    .setFooter({text:"AniList · Public activity"});
+  embed.setTimestamp(new Date(activity.createdAt*1000));
+  return embed;
+}
+
 function profileEmbed(user: AniListUserProfile, section: AniListProfileSection): EmbedBuilder {
   switch (section) {
     case "stats": return buildUserStatsEmbed(user);
@@ -131,6 +207,36 @@ export async function handleAniListLinkMessage(message: Message, client: AniList
   if (!url) return false;
   const target = parseAniListUrl(url);
   if (!target) return false;
+
+  if (target.kind === "entity") {
+    const entity=await client.getPublicEntity(target.id,target.entityKind);
+    if(!entity){
+      await message.reply({content:"AniList did not return a public record for that "+target.entityKind.toLowerCase()+".",allowedMentions:{parse:[]}});
+      return true;
+    }
+    await message.reply({embeds:[entityEmbed(entity)],allowedMentions:{parse:[]}});
+    return true;
+  }
+
+  if (target.kind === "review") {
+    const review=await client.getReviewById(target.id);
+    if(!review){
+      await message.reply({content:"AniList did not return a public review for that link.",allowedMentions:{parse:[]}});
+      return true;
+    }
+    await message.reply({embeds:[reviewEmbed(review)],allowedMentions:{parse:[]}});
+    return true;
+  }
+
+  if (target.kind === "activity") {
+    const activity=await client.getActivityById(target.id);
+    if(!activity){
+      await message.reply({content:"AniList did not return a public text or message activity for that link.",allowedMentions:{parse:[]}});
+      return true;
+    }
+    await message.reply({embeds:[linkedActivityEmbed(activity)],allowedMentions:{parse:[]}});
+    return true;
+  }
 
   if (target.kind === "media") {
     const media = await client.getMediaById(target.id, target.type);
