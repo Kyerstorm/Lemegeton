@@ -9,7 +9,15 @@ export interface AniListMedia {
   averageScore:number|null; status:string|null; format:string|null;
   startDate:{year:number|null;month:number|null;day:number|null}|null;
   episodes:number|null; chapters:number|null; volumes:number|null;
-  genres:string[]; studios:string[]; staff:string[];
+  genres:string[];
+  studios:string[];
+  staff:string[];
+  staffCredits:Array<{id:number;name:string;role:string;url:string;image:string|null}>;
+  characters:Array<{id:number;name:string;role:string;url:string;image:string|null}>;
+  tags:Array<{name:string;rank:number|null;isSpoiler:boolean}>;
+  popularity:number|null;favourites:number|null;source:string|null;
+  stats:{statusDistribution:Array<{status:string;amount:number}>;scoreDistribution:Array<{score:number;amount:number}>};
+  recommendations:Array<{id:number;title:string;url:string;image:string|null}>;
   relations:Array<{id:number;title:string;relation:string;url:string;category:"anime"|"manga"}>;
   trailer:{id:string;site:string;url:string}|null;
 }
@@ -19,6 +27,8 @@ export interface AniListCreator {
 }
 export interface AniListFavoriteMedia {id:number;title:string;url:string;image:string|null}
 export interface AniListFavoriteCharacter {id:number;name:string;url:string;image:string|null}
+export interface AniListFavoritePerson {id:number;name:string;url:string;image:string|null}
+export interface AniListPublicActivity {id:number;kind:"TEXT"|"MESSAGE";createdAt:number;url:string;text:string;userName:string;recipientName:string|null}
 export interface AniListUserInterests {
   anime:{genres:string[];tags:string[]};
   manga:{genres:string[];tags:string[]};
@@ -38,7 +48,7 @@ export interface AniListUserProfile {
   id:number; name:string; url:string; avatar:string|null; banner:string|null; about:string|null;
   anime:AniListUserStatistics;
   manga:AniListUserStatistics;
-  favorites:{anime:AniListFavoriteMedia[];manga:AniListFavoriteMedia[];characters:AniListFavoriteCharacter[]};
+  favorites:{anime:AniListFavoriteMedia[];manga:AniListFavoriteMedia[];characters:AniListFavoriteCharacter[];staff:AniListFavoritePerson[];studios:AniListFavoritePerson[]};
 }
 export interface AniListRecentlyFinishedMedia {
   id: number;
@@ -103,7 +113,32 @@ function parseMedia(v:unknown):AniListMedia|null {
  genres:Array.isArray(v.genres)?v.genres.filter((x):x is string=>typeof x==="string").slice(0,20):[],
  studios:studios.flatMap(x=>isObj(x)&&typeof x.name==="string"?[x.name]:[]).slice(0,8),
  staff:staff.flatMap(x=>isObj(x)&&isObj(x.name)&&typeof x.name.full==="string"?[x.name.full]:[]).slice(0,8),
- relations:edges.flatMap(x=>{if(!isObj(x)||!isObj(x.node)||x.node.isAdult===true)return[];const n=x.node;const u=str(n.siteUrl);if(!u||typeof n.id!=="number"||(n.type!=="ANIME"&&n.type!=="MANGA"))return[];try{const parsed=new URL(u);if(parsed.protocol!=="https:"||parsed.hostname!=="anilist.co")return[];}catch{return[];}return[{id:n.id,title:titleOf(n.title),relation:str(x.relationType)??"RELATED",url:u,category:n.type==="ANIME"?"anime" as const:"manga" as const}];}).slice(0,10),trailer:parseTrailer(v.trailer)};
+ staffCredits:staff.flatMap(x=>{
+   if(!isObj(x)||!isObj(x.name)||typeof x.id!=="number")return[];
+   const url=str(x.siteUrl);if(!url)return[];
+   try{const parsed=new URL(url);if(parsed.protocol!=="https:"||parsed.hostname!=="anilist.co")return[];}catch{return[];}
+   return[{id:x.id,name:str(x.name.full)??"Unknown",role:str(x.role)??"Staff",url,image:imageOf(x.image)}];
+  }).slice(0,16),
+  characters:(isObj(v.characters)&&Array.isArray(v.characters.edges)?v.characters.edges:[]).flatMap(x=>{
+   if(!isObj(x)||!isObj(x.node)||typeof x.node.id!=="number"||x.node.isAdult===true)return[];
+   const node=x.node,name=isObj(node.name)?str(node.name.full):null;
+   if(!name)return[];
+   return[{id:node.id,name,role:str(x.role)??"SUPPORTING",url:`https://anilist.co/character/${node.id}`,image:imageOf(node.image)}];
+  }).slice(0,24),
+  tags:(Array.isArray(v.tags)?v.tags:[]).flatMap(x=>isObj(x)&&typeof x.name==="string"&&!x.isAdult?[{name:x.name,rank:num(x.rank),isSpoiler:x.isMediaSpoiler===true}]:[]).slice(0,40),
+  popularity:num(v.popularity),favourites:num(v.favourites),source:str(v.source),
+  stats:{
+   statusDistribution:(isObj(v.stats)&&Array.isArray(v.stats.statusDistribution)?v.stats.statusDistribution:[]).flatMap(x=>isObj(x)&&typeof x.status==="string"?[{status:x.status,amount:num(x.amount)??0}]:[]),
+   scoreDistribution:(isObj(v.stats)&&Array.isArray(v.stats.scoreDistribution)?v.stats.scoreDistribution:[]).flatMap(x=>isObj(x)&&num(x.score)!==null?[{score:num(x.score)!,amount:num(x.amount)??0}]:[]),
+  },
+  recommendations:(isObj(v.recommendations)&&Array.isArray(v.recommendations.edges)?v.recommendations.edges:[]).flatMap(x=>{
+   if(!isObj(x)||!isObj(x.node)||!isObj(x.node.mediaRecommendation))return[];
+   const item=x.node.mediaRecommendation,u=str(item.siteUrl);
+   if(typeof item.id!=="number"||!u)return[];
+   try{const parsed=new URL(u);if(parsed.protocol!=="https:"||parsed.hostname!=="anilist.co")return[];}catch{return[];}
+   return[{id:item.id,title:titleOf(item.title),url:u,image:imageOf(item.coverImage)}];
+  }).slice(0,10),
+  relations:edges.flatMap(x=>{if(!isObj(x)||!isObj(x.node)||x.node.isAdult===true)return[];const n=x.node;const u=str(n.siteUrl);if(!u||typeof n.id!=="number"||(n.type!=="ANIME"&&n.type!=="MANGA"))return[];try{const parsed=new URL(u);if(parsed.protocol!=="https:"||parsed.hostname!=="anilist.co")return[];}catch{return[];}return[{id:n.id,title:titleOf(n.title),relation:str(x.relationType)??"RELATED",url:u,category:n.type==="ANIME"?"anime" as const:"manga" as const}];}).slice(0,10),trailer:parseTrailer(v.trailer)};
 }
 export function parseCreator(value:unknown):AniListCreator|null {
  if(!isObj(value)||typeof value.id!=="number"||!Number.isSafeInteger(value.id))return null;
@@ -177,8 +212,10 @@ function parseInterestSection(value:unknown):AniListUserInterests["anime"] {
 }
 const SEARCH=`query Search($search:String,$type:MediaType!,$format:MediaFormat,$sort:[MediaSort],$page:Int,$perPage:Int,$genreIn:[String],$startDateGreater:FuzzyDateInt,$startDateLesser:FuzzyDateInt,$status:MediaStatus,$season:MediaSeason,$seasonYear:Int){Page(page:$page,perPage:$perPage){media(search:$search,type:$type,format:$format,sort:$sort,genre_in:$genreIn,startDate_greater:$startDateGreater,startDate_lesser:$startDateLesser,status:$status,season:$season,seasonYear:$seasonYear){id type title{romaji english native} description(asHtml:false) siteUrl coverImage{large} bannerImage averageScore status format startDate{year month day} episodes chapters volumes genres studios{nodes{name}} staff(page:1,perPage:8){nodes{name{full}}} relations{edges{relationType node{id type isAdult siteUrl title{romaji english}}}} trailer{id site} isAdult}}}}`;
 const STAFF_SEARCH=`query CreatorSearch($search:String,$page:Int,$perPage:Int){Page(page:$page,perPage:$perPage){staff(search:$search,sort:SEARCH_MATCH){id name{full} siteUrl image{large} description(asHtml:false) primaryOccupations yearsActive staffMedia(page:1,perPage:8,sort:POPULARITY_DESC){edges{staffRole node{id type isAdult siteUrl title{romaji english native}}}}}}}}`;
-const USER=`query User($name:String){User(name:$name){id name siteUrl avatar{large} bannerImage about(asHtml:false) statistics{anime{count meanScore episodesWatched minutesWatched statuses{status count} formats{format count} genres{genre count}} manga{count meanScore chaptersRead volumesRead statuses{status count} formats{format count} genres{genre count}}} favourites{anime(page:1,perPage:5){nodes{id siteUrl title{romaji english native} coverImage{large}}} manga(page:1,perPage:5){nodes{id siteUrl title{romaji english native} coverImage{large}}} characters(page:1,perPage:5){nodes{id siteUrl name{full} image{large}}}}}}`;
+const USER=`query User($name:String){User(name:$name){id name siteUrl avatar{large} bannerImage about(asHtml:false) statistics{anime{count meanScore episodesWatched minutesWatched statuses{status count} formats{format count} genres{genre count}} manga{count meanScore chaptersRead volumesRead statuses{status count} formats{format count} genres{genre count}}} favourites{anime(page:1,perPage:5){nodes{id siteUrl title{romaji english native} coverImage{large}}} manga(page:1,perPage:5){nodes{id siteUrl title{romaji english native} coverImage{large}}} characters(page:1,perPage:5){nodes{id siteUrl name{full} image{large}}} staff(page:1,perPage:5){nodes{id siteUrl name{full} image{large}}} studios(page:1,perPage:5){nodes{id siteUrl name}}}}}`;
 const TASTE=`query UserTaste($name:String){anime:MediaListCollection(userName:$name,type:ANIME){lists{entries{media{genres tags{name rank isMediaSpoiler}}}}} manga:MediaListCollection(userName:$name,type:MANGA){lists{entries{media{genres tags{name rank isMediaSpoiler}}}}}}}`;
+const USER_ACTIVITIES=`query UserActivities($id:Int){User(id:$id){activities(page:1,perPage:8,sort:ID_DESC){... on TextActivity{id siteUrl createdAt text user{name}} ... on MessageActivity{id siteUrl createdAt message user{name} recipient{name}}}}}`;
+const MEDIA_DETAILS=`query MediaDetails($id:Int!,$type:MediaType!){Media(id:$id,type:$type){id type isAdult title{romaji english native} description(asHtml:false) siteUrl coverImage{large} bannerImage averageScore status format startDate{year month day} endDate{year month day} episodes chapters volumes genres studios(isMain:true){nodes{name}} popularity favourites source staff(page:1,perPage:16,sort:RELEVANCE){edges{role node{id name{full} siteUrl image{large}}}} characters(page:1,perPage:24,sort:ROLE){edges{role node{id name{full} image{large} isAdult}}} tags{name rank isMediaSpoiler isAdult} stats{statusDistribution{status amount} scoreDistribution{score amount}} recommendations(sort:RATING,perPage:10){edges{node{mediaRecommendation{id siteUrl title{romaji english native} coverImage{large} isAdult}}}} relations{edges{relationType node{id type isAdult siteUrl title{romaji english}}}} trailer{id site}}}`;
 const AIRING=`query Airing($from:Int,$to:Int){Page(page:1,perPage:50){airingSchedules(airingAt_greater:$from,airingAt_lesser:$to,sort:TIME){airingAt episode media{id title{romaji english} siteUrl coverImage{large} isAdult}}}}`;
 const MEDIA_NIGHT_QUERY=`query MediaNight($type:MediaType!){Page(page:1,perPage:50){media(type:$type,sort:TRENDING_DESC,isAdult:false){id type title{romaji english native} description(asHtml:false) siteUrl coverImage{large} startDate{year} duration genres tags{name isMediaSpoiler} isAdult}}}}`;
 export class AniListError extends Error {constructor(message:string,readonly statusCode?:number){super(message);this.name="AniListError";}}
@@ -242,10 +279,33 @@ export class AniListClient {
    } satisfies AniListRecentlyFinishedMedia];
   });
  }
+ async getMediaById(id:number,type:AniListMediaType):Promise<AniListMedia|null>{
+  if(!Number.isSafeInteger(id)||id<1)throw new RangeError("AniList media ID must be a positive integer.");
+  const data=await this.graphql(MEDIA_DETAILS,{id,type});
+  return parseMedia(data.Media);
+ }
+ async getRecentActivities(username:string):Promise<AniListPublicActivity[]>{
+  const profile=await this.getUser(username);
+  if(!profile)return[];
+  const data=await this.graphql(USER_ACTIVITIES,{id:profile.id});
+  const user=isObj(data.User)?data.User:{};
+  const rows=Array.isArray(user.activities)?user.activities:[];
+  return rows.flatMap((value):AniListPublicActivity[]=>{
+   if(!isObj(value))return[];
+   const id=num(value.id),createdAt=num(value.createdAt),url=str(value.siteUrl),actor=isObj(value.user)?str(value.user.name):null;
+   if(!id||!createdAt||!url||!actor)return[];
+   try{const parsed=new URL(url);if(parsed.protocol!=="https:"||parsed.hostname!=="anilist.co")return[];}catch{return[];}
+   const kind=value.message!==undefined?"MESSAGE":value.text!==undefined?"TEXT":null;
+   if(!kind)return[];
+   const body=kind==="MESSAGE"?str(value.message):str(value.text);
+   const recipient=isObj(value.recipient)?str(value.recipient.name):null;
+   return[{id,kind,createdAt,url,text:body??"",userName:actor,recipientName:recipient}];
+  }).slice(0,8);
+ }
  async getUser(username:string):Promise<AniListUserProfile|null>{
   const data=await this.graphql(USER,{name:username.trim()});if(!isObj(data.User))return null;const u=data.User;
   const id=num(u.id),name=str(u.name),url=str(u.siteUrl);if(!id||!name||!url||!url.startsWith("https://anilist.co/"))return null;
-  const s=isObj(u.statistics)?u.statistics:{},f=isObj(u.favourites)?u.favourites:{};return{id,name,url,avatar:imageOf(u.avatar),banner:str(u.bannerImage),about:str(u.about),anime:stats(s.anime),manga:stats(s.manga),favorites:{anime:favoriteMedia(f.anime),manga:favoriteMedia(f.manga),characters:favoriteCharacters(f.characters)}};
+  const s=isObj(u.statistics)?u.statistics:{},f=isObj(u.favourites)?u.favourites:{};return{id,name,url,avatar:imageOf(u.avatar),banner:str(u.bannerImage),about:str(u.about),anime:stats(s.anime),manga:stats(s.manga),favorites:{anime:favoriteMedia(f.anime),manga:favoriteMedia(f.manga),characters:favoriteCharacters(f.characters),staff:favoritePeople(f.staff,"staff"),studios:favoritePeople(f.studios,"studio")}};
  }
  async getUserInterests(username:string):Promise<AniListUserInterests|null>{
   const data=await this.graphql(TASTE,{name:username.trim()});
