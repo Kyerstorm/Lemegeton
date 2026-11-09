@@ -29,6 +29,7 @@ import { homeEmbed, navigationButtons } from "../helpers/discord.js";
 import { TmdbClient, type TmdbMedia, type TmdbTvSeason } from "../helpers/tmdb.js";
 import { getGuildMediaRegion } from "../helpers/media-region.js";
 import { cleanText } from "../helpers/security.js";
+import { createInteractionIssueLog, issueHashNotice } from "../helpers/issue-logs.js";
 import { findAtlasRelationships, recordProviderRelationships } from "../helpers/atlas.js";
 import {
   createMediaLinkSuggestion,
@@ -788,7 +789,9 @@ export class DiscoverCommand implements FeatureCommand {
       });
       await interaction.reply({content:`Media relationship suggestion #${id} was saved for moderator review in this server. It is not provider-confirmed metadata.`,flags:MessageFlags.Ephemeral});
     } catch(error) {
-      await interaction.reply({content:error instanceof Error?error.message:"The media relationship suggestion could not be saved.",flags:MessageFlags.Ephemeral});
+      const issueHash=await createInteractionIssueLog(interaction,"/discover",error,{action:"suggest-link"});
+      const message=error instanceof Error?error.message:"The media relationship suggestion could not be saved.";
+      await interaction.reply({content:issueHash?message+"\n\n"+issueHashNotice(issueHash):message,flags:MessageFlags.Ephemeral});
     }
   }
 
