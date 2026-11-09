@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {loadConfig} from "../helpers/config.js";
+import {isModeratorCommandGuild} from "../helpers/moderation.js";
 import {isValidHttpsUrl,normalizeTags} from "../helpers/security.js";
 import {validateSteamId} from "../helpers/steam.js";
 import {nextLocalOccurrence} from "../helpers/community.js";
@@ -27,7 +28,16 @@ test("bot configuration requires valid Discord credentials and validates the Ani
  const config=loadConfig({DISCORD_TOKEN:"token",BOT_ID:"123456789012345678"});
  assert.equal(config.applicationId,"123456789012345678");
  assert.equal(config.anilistApiUrl,"https://graphql.anilist.co/");
+ assert.equal(config.botModeratorGuildId,null);
+ assert.equal(loadConfig({DISCORD_TOKEN:"token",BOT_ID:"123456789012345678",BOT_MODERATOR_GUILD_ID:"987654321098765432"}).botModeratorGuildId,"987654321098765432");
+ assert.throws(()=>loadConfig({DISCORD_TOKEN:"token",BOT_ID:"123456789012345678",BOT_MODERATOR_GUILD_ID:"not-a-guild"}),/BOT_MODERATOR_GUILD_ID/);
  assert.throws(()=>loadConfig({DISCORD_TOKEN:"token",BOT_ID:"123456789012345678",ANILIST_API_URL:"http://example.com"}),/HTTPS/);
+});
+test("bot moderator commands fail closed outside their configured guild",()=>{
+ assert.equal(isModeratorCommandGuild("987654321098765432","987654321098765432"),true);
+ assert.equal(isModeratorCommandGuild("111111111111111111","987654321098765432"),false);
+ assert.equal(isModeratorCommandGuild(null,"987654321098765432"),false);
+ assert.equal(isModeratorCommandGuild("987654321098765432",null),false);
 });
 test("source URLs and Archive tags are normalized and validated",()=>{
  assert.equal(isValidHttpsUrl("https://example.com/a"),"https://example.com/a");
