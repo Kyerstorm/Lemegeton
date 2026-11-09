@@ -72,8 +72,7 @@ test("Knowledge Atlas normalizes media identities and rejects unsafe URLs",()=>{
 });
 test("Dashboard bridge excludes bot-operator commands from global sync and keeps standalone commands",()=>{
  const names=["discover","custom-role","settings","log","moderators","planned","help","privacy","feedback"];
- const commands=names.map(name=>({data:{name,toJSON:()=>({description:name})}}))
-  as unknown as Parameters<typeof dashboardCommandRows>[0];
+ const commands=names.map(name=>({data:{name,toJSON:()=>({description:name})}})) as unknown as Parameters<typeof dashboardCommandRows>[0];
  const settings={discover:false,archive:true,community:true,play:true,profile:true,"custom-role":false};
  const rows=dashboardCommandRows(commands,settings);
  assert.deepEqual(rows.map(row=>row.name),["discover","custom-role","settings","help","privacy","feedback"]);
