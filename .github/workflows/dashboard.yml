@@ -59,6 +59,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Validate Node.js environment template
+        run: node --env-file=.env.example -e "process.exit(0)"
       - run: npm install --prefix web/frontend --no-audit --no-fund
       - run: npm run typecheck --prefix web/frontend
       - run: npm audit --prefix web/frontend --audit-level=high
