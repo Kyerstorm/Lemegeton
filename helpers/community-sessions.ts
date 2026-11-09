@@ -144,13 +144,19 @@ export async function upcomingProviderReleases(
   tmdb: TmdbClient,
   from: Date,
   to: Date,
+  region = "IE",
+  categories: readonly ("anime" | "tv" | "movies")[] = ["anime", "tv", "movies"],
 ): Promise<Array<{ title: string; when: Date; provider: string; url: string }>> {
-  const [airings, movies] = await Promise.allSettled([
-    anilist.upcomingAirings(from, to),
-    tmdb.upcomingMovies(),
+  if (from.getTime() > to.getTime()) throw new Error("The release calendar start must be before its end.");
+  const include = new Set(categories);
+  const requests = await Promise.allSettled([
+    include.has("anime") ? anilist.upcomingAirings(from, to) : Promise.resolve([]),
+    include.has("movies") ? tmdb.upcomingMovies(region) : Promise.resolve([]),
+    include.has("tv") ? tmdb.upcomingTvEpisodes(from, to) : Promise.resolve([]),
   ]);
   const results: Array<{ title: string; when: Date; provider: string; url: string }> = [];
-  if (airings.status === "fulfilled") {
+  const airings = requests[0];
+  if (airings?.status === "fulfilled") {
     for (const airing of airings.value) {
       const when = new Date(airing.airingAt * 1000);
       if (when >= from && when <= to) {
@@ -158,14 +164,29 @@ export async function upcomingProviderReleases(
       }
     }
   }
-  if (movies.status === "fulfilled") {
+  const movies = requests[1];
+  if (movies?.status === "fulfilled") {
     for (const movie of movies.value) {
       if (!movie.releaseDate) continue;
       const when = new Date(`${movie.releaseDate}T00:00:00.000Z`);
-      if (when >= from && when <= to) results.push({ title: movie.title, when, provider: "TMDB", url: movie.sourceUrl });
+      if (Number.isFinite(when.getTime()) && when >= from && when <= to) {
+        results.push({ title: movie.title, when, provider: `TMDB Movies · ${region.toUpperCase()}`, url: movie.sourceUrl });
+      }
     }
   }
-  return results.sort((a, b) => a.when.getTime() - b.when.getTime()).slice(0, 20);
+  const episodes = requests[2];
+  if (episodes?.status === "fulfilled") {
+    for (const release of episodes.value) {
+      const when = new Date(`${release.episode.airDate}T00:00:00.000Z`);
+      results.push({
+        title: `${release.showTitle} · S${release.episode.sourceUrl.match(/season\/(\d+)/)?.[1] ?? "?"} E${release.episode.episodeNumber} · ${release.episode.name}`,
+        when,
+        provider: "TMDB TV",
+        url: release.episode.sourceUrl,
+      });
+    }
+  }
+  return results.sort((a, b) => a.when.getTime() - b.when.getTime()).slice(0, 30);
 }
 
 export function formatActivity(activity: CommunityActivity): string {
