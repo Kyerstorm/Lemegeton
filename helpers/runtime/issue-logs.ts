@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { QueryResultRow } from "pg";
 import { query, queryOne } from "../../database.js";
 
-const ISSUE_HASH_PATTERN = /^(?:[a-f0-9]{40}|[a-f0-9]{128})$/i;
+const ISSUE_HASH_PATTERN = /^[a-f0-9]{40}$/i;
 const REDACTED = "[REDACTED]";
 
 export interface IssueLogInput {
@@ -48,14 +48,14 @@ export function sanitizeIssueDetails(details: Record<string, unknown>): Record<s
 }
 export function isIssueHash(value: string): boolean { return ISSUE_HASH_PATTERN.test(value.trim()); }
 
-/** A 128-character SHA-512 reference seeded with cryptographic randomness and a UUID. */
+/** A 40-character SHA-512 reference seeded with cryptographic randomness and a UUID. */
 export function createIssueHash(interactionId: string, userId = ""): string {
   return createHash("sha512")
     .update(randomBytes(32))
     .update(randomUUID())
     .update(interactionId)
     .update(userId)
-    .digest("hex");
+    .digest("hex").slice(0, 40);
 }
 export function issueHashNotice(hash: string): string {
   return `Issue reference: \`${hash}\`. Include this reference in /feedback so a moderator can inspect the diagnostic record with /log.`;

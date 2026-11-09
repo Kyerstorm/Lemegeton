@@ -2,18 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createIssueHash, isIssueHash, sanitizeIssueDetails } from "../helpers/runtime/issue-logs.js";
 
-test("new issue references use 128-character SHA-512 hex and remain unique", () => {
+test("new issue references use 40-character SHA-512 hex and remain unique", () => {
   const first = createIssueHash("interaction-1", "user-1");
   const second = createIssueHash("interaction-1", "user-1");
   const otherUser = createIssueHash("interaction-1", "user-2");
-  assert.equal(first.length, 128);
-  assert.match(first, /^[a-f0-9]{128}$/);
+  assert.equal(first.length, 40);
+  assert.match(first, /^[a-f0-9]{40}$/);
   assert.notEqual(first, second);
   assert.notEqual(first, otherUser);
   assert.equal(isIssueHash(first), true);
   assert.equal(isIssueHash(" " + first.toUpperCase() + " "), true);
-  assert.equal(isIssueHash("a5f322fe4eaf90a58c92291f68dee87d2c3c648f"), true); // Legacy SHA-1 references remain readable.
-  assert.equal(isIssueHash("a".repeat(128)), true);
+  assert.equal(isIssueHash("a".repeat(40)), true);
+  assert.equal(isIssueHash("a".repeat(128)), false);
   assert.equal(isIssueHash("a".repeat(39)), false);
   assert.equal(isIssueHash("g".repeat(40)), false);
   assert.equal(isIssueHash("not-a-hash"), false);
