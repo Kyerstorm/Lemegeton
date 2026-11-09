@@ -27,8 +27,13 @@ import {
   addRankingCandidate,
   closeDiscussion,
   closeRanking,
+  claimDueMediaNightResults,
+  markMediaNightResultPublished,
   createCommunitySession,
   createRanking,
+  createMediaNight,
+  filterMediaNightCandidates,
+  sampleMediaNightCandidates,
   createSpoilerDiscussion,
   disableDailySchedule,
   dueDailyDeliveries,
@@ -101,6 +106,7 @@ function communityHome(): { embeds: EmbedBuilder[]; components: ActionRowBuilder
       { name: "Rankings", value: "Create candidate lists and vote; one current vote per member.", inline: true },
       { name: "Sessions", value: "Plan watch, read, play and discussion meetups with RSVP and waitlists.", inline: true },
       { name: "Discussions", value: "Start spoiler-aware media threads and close them when finished.", inline: true },
+      { name: "Media Night", value: "A short, family-aware media vote with locked choices and scheduled results.", inline: true },
       { name: "Release calendar", value: "Upcoming provider-dated anime airings and film releases.", inline: true },
       { name: "History", value: "Recent rankings, sessions and discussions.", inline: true },
     ],
@@ -139,6 +145,7 @@ export class CommunityCommand implements FeatureCommand {
       { name: "Close session", value: "session-close" },
       { name: "Start discussion", value: "discussion-create" },
       { name: "Close discussion", value: "discussion-close" },
+      { name: "Start Media Night", value: "media-night" },
       { name: "Release calendar", value: "calendar" },
       { name: "Community history", value: "history" },
       { name: "Nominate a community read", value: "reading-nominate" },
@@ -167,7 +174,16 @@ export class CommunityCommand implements FeatureCommand {
     .addStringOption((option) => option.setName("reading_category").setDescription("Community reading category").addChoices(
       ...READING_CATEGORIES.map((value) => ({ name: value.replace(/\b\w/g, (letter) => letter.toUpperCase()), value })),
     ))
-    .addStringOption((option) => option.setName("reading_nomination_id").setDescription("Reading nomination ID").setMaxLength(24));
+    .addStringOption((option) => option.setName("reading_nomination_id").setDescription("Reading nomination ID").setMaxLength(24))
+    .addStringOption((option) => option.setName("media_category").setDescription("Media Night category").addChoices(
+      { name: "Anime", value: "ANIME" }, { name: "Manga", value: "MANGA" },
+    ))
+    .addStringOption((option) => option.setName("media_mood").setDescription("Media Night mood").addChoices(
+      { name: "Any mood", value: "all" }, { name: "Cozy", value: "cozy" }, { name: "Comedy", value: "comedy" },
+      { name: "Adventure", value: "adventure" }, { name: "Mystery", value: "mystery" },
+      { name: "Romance", value: "romance" }, { name: "Drama", value: "drama" },
+    ))
+    .addIntegerOption((option) => option.setName("duration_hours").setDescription("Voting duration in hours (1–12)").setMinValue(1).setMaxValue(12));
 
   private readonly anilist: AniListClient;
   private readonly tmdb: TmdbClient;
@@ -208,6 +224,7 @@ export class CommunityCommand implements FeatureCommand {
         case "session-close": await this.closeSession(interaction); return;
         case "discussion-create": await this.createDiscussion(interaction); return;
         case "discussion-close": await this.closeDiscussionCommand(interaction); return;
+        case "media-night": await this.startMediaNight(interaction); return;
         case "calendar": await this.showCalendar(interaction); return;
         case "history": await this.showHistory(interaction); return;
         case "reading-nominate": await this.nominateReading(interaction); return;
@@ -227,6 +244,12 @@ export class CommunityCommand implements FeatureCommand {
   }
 
   async handleButton(interaction: ButtonInteraction): Promise<boolean> {
+    const mediaNightVote = interaction.customId.match(/^community:media-night-vote:(\\d+):(\\d+)$/);
+    if (mediaNightVote && interaction.guildId) {
+      await voteForRanking(interaction.guildId, interaction.user.id, mediaNightVote[1]!, mediaNightVote[2]!);
+      await interaction.reply({ content: "Your Media Night vote is locked in and cannot be changed.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
     const [, action, id] = interaction.customId.split(":");
     if (!interaction.guildId) return false;
     if (action === "daily") {
@@ -238,7 +261,6 @@ export class CommunityCommand implements FeatureCommand {
             new ButtonBuilder().setCustomId("community:daily-configure").setLabel("Configure schedule").setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId("community:daily-submit").setLabel("Submit an item").setStyle(ButtonStyle.Success),
             new ButtonBuilder().setCustomId("community:daily-review").setLabel("Review queue").setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId("community:daily-pause").setLabel("Pause schedule").setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId("community:daily-pause").setLabel("Pause schedule").setStyle(ButtonStyle.Secondary),
           ),
         ],
@@ -953,6 +975,49 @@ export class CommunityCommand implements FeatureCommand {
       throw error;
     }
     await interaction.editReply({content:`Reading discussion #${nominationId} created in <#${thread.id}> for <t:${Math.floor(scheduledAt.getTime()/1000)}:F>.`});
+  }
+
+  private async startMediaNight(interaction: ChatInputCommandInteraction): Promise<void> {
+    if (!interaction.channel?.isTextBased() || !("send" in interaction.channel)) {
+      throw new Error("Start Media Night in a server text channel so its vote can be posted publicly.");
+    }
+    const category = (interaction.options.getString("media_category") ?? "ANIME") as "ANIME" | "MANGA";
+    const mood = (interaction.options.getString("media_mood") ?? "all") as "all" | "cozy" | "comedy" | "adventure" | "mystery" | "romance" | "drama";
+    const hours = interaction.options.getInteger("duration_hours") ?? 3;
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const candidates = filterMediaNightCandidates(await this.anilist.mediaNightCandidates(category), mood);
+    const selected = sampleMediaNightCandidates(candidates, 5);
+    if (selected.length < 2) {
+      await interaction.editReply("AniList did not return enough distinct candidates for that mood. Try a broader mood or the full list.");
+      return;
+    }
+    const closesAt = new Date(Date.now() + hours * 60 * 60 * 1000);
+    const title = category === "ANIME" ? "Anime Media Night" : "Manga Media Night";
+    const rankingId = await createMediaNight({
+      guildId: interaction.guildId!,
+      channelId: interaction.channelId,
+      creatorId: interaction.user.id,
+      title,
+      description: `${mood === "all" ? "All moods" : mood[0]!.toUpperCase() + mood.slice(1)} · ${hours} hour vote`,
+      closesAt,
+      candidates: selected,
+    });
+    const fields = selected.map((candidate, index) => ({
+      name: `${index + 1}. ${safeDisplay(candidate.title, 180)}`,
+      value: `[AniList source](${candidate.url})${candidate.year ? ` · ${candidate.year}` : ""}`,
+      inline: false,
+    }));
+    const message = await (interaction.channel as TextChannel).send({
+      embeds: [homeEmbed(title, `Choose one title below. Votes are final and locked once cast. Voting closes <t:${Math.floor(closesAt.getTime() / 1000)}:R>. Provider-tagged adult and sensitive-content entries are excluded; this is a metadata filter, not an age rating.`, fields)],
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+        ...selected.map((candidate) => new ButtonBuilder()
+          .setCustomId(`community:media-night-vote:${rankingId}:${candidate.id}`)
+          .setLabel(candidate.title.slice(0, 80))
+          .setStyle(ButtonStyle.Primary)),
+      )],
+      allowedMentions: { parse: [] },
+    });
+    await interaction.editReply(`Media Night #${rankingId} is live in <#${interaction.channelId}>: ${message.url}`);
   }
 
   private async showCalendar(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
