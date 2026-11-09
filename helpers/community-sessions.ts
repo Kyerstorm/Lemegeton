@@ -149,6 +149,8 @@ export async function upcomingProviderReleases(
 ): Promise<Array<{ title: string; when: Date; provider: string; url: string }>> {
   if (from.getTime() > to.getTime()) throw new Error("The release calendar start must be before its end.");
   const include = new Set(categories);
+  const fromDay = from.toISOString().slice(0, 10);
+  const toDay = to.toISOString().slice(0, 10);
   const requests = await Promise.all([
     include.has("anime") ? anilist.upcomingAirings(from, to) : Promise.resolve([]),
     include.has("movies") ? tmdb.upcomingMovies(region) : Promise.resolve([]),
@@ -169,7 +171,7 @@ export async function upcomingProviderReleases(
     for (const movie of movies) {
       if (!movie.releaseDate) continue;
       const when = new Date(`${movie.releaseDate}T00:00:00.000Z`);
-      if (Number.isFinite(when.getTime()) && when >= from && when <= to) {
+      if (Number.isFinite(when.getTime()) && movie.releaseDate >= fromDay && movie.releaseDate <= toDay) {
         results.push({ title: movie.title, when, provider: `TMDB Movies · ${region.toUpperCase()}`, url: movie.sourceUrl });
       }
     }
@@ -177,7 +179,10 @@ export async function upcomingProviderReleases(
   const episodes = requests[2];
   {
     for (const release of episodes) {
-      const when = new Date(`${release.episode.airDate}T00:00:00.000Z`);
+      const airDate = release.episode.airDate;
+      if (!airDate || airDate < fromDay || airDate > toDay) continue;
+      const when = new Date(`${airDate}T00:00:00.000Z`);
+      if (!Number.isFinite(when.getTime())) continue;
       results.push({
         title: `${release.showTitle} · S${release.episode.seasonNumber ?? "?"} E${release.episode.episodeNumber} · ${release.episode.name}`,
         when,
