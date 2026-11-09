@@ -14,11 +14,11 @@ import {
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction,
 } from "discord.js";
-import type { FeatureCommand } from "../helpers/command.js";
-import { createInteractionIssueLog, issueHashNotice } from "../helpers/issue-logs.js";
-import type { BotConfig } from "../helpers/config.js";
-import { AniListClient } from "../helpers/anilist.js";
-import { SteamClient } from "../helpers/steam.js";
+import type { FeatureCommand } from "../../helpers/command.js";
+import { createInteractionIssueLog, issueHashNotice } from "../../helpers/issue-logs.js";
+import type { BotConfig } from "../../helpers/config.js";
+import { AniListClient } from "../../helpers/anilist.js";
+import { SteamClient } from "../../helpers/steam.js";
 import {
   getAniListAffinity,
   getAniListLeaderboard,
@@ -31,10 +31,10 @@ import {
   unlinkAniListAccount,
   unlinkSteamAccount,
   updateProfilePreferences,
-} from "../helpers/profile.js";
-import { homeEmbed } from "../helpers/discord.js";
-import { queryOne } from "../database.js";
-import { isDiscordSnowflake, safeDisplay } from "../helpers/security.js";
+} from "../../helpers/profile.js";
+import { homeEmbed } from "../../helpers/discord.js";
+import { queryOne } from "../../database.js";
+import { isDiscordSnowflake, safeDisplay } from "../../helpers/security.js";
 
 function profileHome(): { embeds: EmbedBuilder[]; components: ActionRowBuilder<ButtonBuilder>[] } {
   const embed = homeEmbed(
