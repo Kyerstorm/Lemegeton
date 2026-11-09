@@ -149,11 +149,10 @@ export async function prepareReleaseDelivery(schedule: ReleaseSchedule): Promise
     const current = locked.rows[0] as ReleaseSchedule | undefined;
     if (!current) return;
     const scheduledFor = new Date(current.next_run_at);
-    const intervalDays = current.cadence === "weekly" ? 7 : 1;
-    const windowEnd = new Date(scheduledFor.getTime() + intervalDays * 24 * 60 * 60 * 1000);
     const nextRunAt = nextReleaseOccurrence(
       current.time_zone, current.local_time, current.cadence, Number(current.weekday), scheduledFor,
     );
+    const windowEnd = nextRunAt;
     await client.query(
       "UPDATE community_release_schedules SET next_run_at=$1, updated_at=NOW() WHERE guild_id=$2",
       [nextRunAt, current.guild_id],
