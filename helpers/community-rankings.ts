@@ -53,12 +53,12 @@ export async function createMediaNight(input: {
   description: string;
   closesAt: Date;
   candidates: readonly AniListMediaNightCandidate[];
-}): Promise<string> {
+}): Promise<{ id: string; candidates: Array<{ id: string; title: string; url: string; year: number | null }> }> {
   if (input.closesAt.getTime() <= Date.now()) throw new Error("Media Night must end in the future.");
   const candidates = input.candidates.slice(0, 5);
   if (candidates.length < 2) throw new Error("Media Night needs at least two distinct provider-backed candidates.");
-  const unique = new Map(candidates.map((item) => [item.id, item]));
-  if (unique.size < 2) throw new Error("Media Night candidates must be distinct.");
+  const unique = new Map(candidates.map((item) => [item.title.trim().toLowerCase(), item]));
+  if (unique.size < 2) throw new Error("Media Night candidates must have distinct titles.");
   return transaction(async (client) => {
     const session = await client.query<{ id: string }>(
       `INSERT INTO community_rankings
@@ -68,16 +68,20 @@ export async function createMediaNight(input: {
     );
     const rankingId = session.rows[0]?.id;
     if (!rankingId) throw new Error("The Media Night session could not be created.");
+    const insertedCandidates: Array<{ id: string; title: string; url: string; year: number | null }> = [];
     for (const candidate of unique.values()) {
       const url = isValidHttpsUrl(candidate.url);
       if (!url || !url.startsWith("https://anilist.co/")) throw new Error("A Media Night candidate did not have a trusted AniList source.");
-      await client.query(
+      const inserted = await client.query<{ id: string }>(
         `INSERT INTO community_ranking_candidates (ranking_id, title, source_url, submitted_by, status)
-         VALUES ($1, $2, $3, $4, 'approved')`,
+         VALUES ($1, $2, $3, $4, 'approved') RETURNING id::text`,
         [rankingId, cleanText(candidate.title, 200), url, input.creatorId],
       );
+      const candidateId = inserted.rows[0]?.id;
+      if (!candidateId) throw new Error("A Media Night candidate could not be saved.");
+      insertedCandidates.push({ id: candidateId, title: cleanText(candidate.title, 200), url, year: candidate.year });
     }
-    return rankingId;
+    return { id: rankingId, candidates: insertedCandidates };
   });
 }
 
