@@ -70,6 +70,7 @@ import {
 import { query, queryOne } from "../../database.js";
 import { deleteArchiveAsset, signedArchiveAssetUrl, storeArchiveUpload, classifyArchiveUpload } from "../../helpers/media-storage.js";
 import { cleanText, isGuildManager, isValidHttpsUrl, safeDisplay } from "../../helpers/security.js";
+import { logger } from "../../helpers/logger.js";
 
 const ACTIONS = [
   { name: "Browse approved entries", value: "browse" },
@@ -704,6 +705,63 @@ export class ArchiveCommand implements FeatureCommand {
       return true;
     }
     return false;
+  }
+
+  private async notifyModerationChannel(
+    client: ChatInputCommandInteraction["client"],
+    guildId: string,
+    entryId: string,
+    title: string,
+    category: ArchiveCategory,
+    visibility: ArchiveVisibility,
+    content: string,
+    sourceTitle?: string,
+    sourceUrl?: string,
+  ): Promise<boolean> {
+    const settings = await getArchiveSettings(guildId);
+    if (!settings.moderationChannelId) return false;
+    try {
+      const channel = await client.channels.fetch(settings.moderationChannelId);
+      if (!channel || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)) {
+        logger.warn("Archive moderation channel is no longer a normal text channel", {
+          guildId, channelId: settings.moderationChannelId,
+        });
+        return false;
+      }
+      const embed = homeEmbed(
+        "Archive submission · #" + entryId,
+        safeDisplay(title, 180),
+        [
+          { name: "Category", value: categoryLabel(category), inline: true },
+          { name: "Visibility", value: visibility === "global" ? "Global" : "This server", inline: true },
+          { name: "Submitted by", value: "<@" + (await queryOne<{ created_by: string }>(
+            "SELECT created_by::text FROM community_archive_entries WHERE id = $1 AND created_guild_id = $2",
+            [entryId, guildId],
+          ))?.created_by + ">", inline: true },
+          ...(sourceTitle ? [{ name: "Work / source", value: safeDisplay(sourceTitle, 200), inline: true }] : []),
+          ...(sourceUrl ? [{ name: "Source link", value: "[Open metadata source](" + sourceUrl + ")", inline: false }] : []),
+          { name: "Contribution", value: safeDisplay(content || "Media attachment submitted.", 900), inline: false },
+        ],
+      ).setFooter({ text: "Pending moderator review · Entry visibility is not public until approved" });
+      const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId("archive:approve:" + entryId + ":" + visibility).setLabel("Approve").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId("archive:reject:" + entryId + ":" + visibility).setLabel("Reject").setStyle(ButtonStyle.Danger),
+      );
+      await (channel as import("discord.js").TextChannel | import("discord.js").NewsChannel).send({
+        embeds: [embed],
+        components: [row],
+        allowedMentions: { parse: [] },
+      });
+      return true;
+    } catch (error) {
+      logger.warn("Archive submission was saved but could not be posted to its moderation channel", {
+        guildId,
+        channelId: settings.moderationChannelId,
+        entryId,
+        reason: error instanceof Error ? error.message : "Unknown error",
+      });
+      return false;
+    }
   }
 
   private async submitFromCommand(interaction: ChatInputCommandInteraction, category: ArchiveCategory): Promise<void> {
