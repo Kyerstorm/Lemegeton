@@ -16,7 +16,7 @@ import {
 } from "discord.js";
 import type { FeatureCommand } from "../../helpers/command.js";
 import { loadingMessage } from "../../helpers/emoji.js";
-import { isBotModerator } from "../../helpers/moderation.js";
+import { isBotModerator, isModeratorCommandGuild } from "../../helpers/moderation.js";
 import { query, queryOne, transaction } from "../../database.js";
 
 type PlannedFeature = Record<string, unknown> & {
@@ -233,9 +233,24 @@ function featureSelect(customId: string, features: PlannedFeature[], placeholder
 }
 
 export class PlannedCommand implements FeatureCommand {
+  constructor(private readonly moderatorGuildId: string | null) {}
+
   readonly data = new SlashCommandBuilder().setName("planned").setDescription("Browse the development plan");
 
+  private async authorize(interaction: ChatInputCommandInteraction | ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction): Promise<boolean> {
+    if (!isModeratorCommandGuild(interaction.guildId, this.moderatorGuildId)) {
+      await interaction.reply({ content: "This command is available only in the configured bot operations server.", flags: MessageFlags.Ephemeral });
+      return false;
+    }
+    if (!await isBotModerator(interaction.user.id)) {
+      await interaction.reply({ content: "Only bot moderators can access the development plan.", flags: MessageFlags.Ephemeral });
+      return false;
+    }
+    return true;
+  }
+
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
+    if (!await this.authorize(interaction)) return;
     await interaction.reply({ content: loadingMessage("Loading the development plan…"), flags: MessageFlags.Ephemeral });
     await this.render(interaction, 1, null, null);
   }
@@ -263,6 +278,7 @@ export class PlannedCommand implements FeatureCommand {
 
   async handleButton(interaction: ButtonInteraction): Promise<boolean> {
     if (!interaction.customId.startsWith("planned:")) return false;
+    if (!await this.authorize(interaction)) return true;
     const parts = interaction.customId.split(":");
     const action = parts[1];
     if (action === "previous" || action === "next") {
@@ -336,6 +352,8 @@ export class PlannedCommand implements FeatureCommand {
   }
 
   async handleSelect(interaction: StringSelectMenuInteraction): Promise<boolean> {
+    if (!interaction.customId.startsWith("planned:")) return false;
+    if (!await this.authorize(interaction)) return true;
     const parts = interaction.customId.split(":");
     const action = parts[1];
     if (action === "status" || action === "category") {
@@ -396,10 +414,7 @@ export class PlannedCommand implements FeatureCommand {
 
   async handleModal(interaction: ModalSubmitInteraction): Promise<boolean> {
     if (!interaction.customId.startsWith("planned:modal:")) return false;
-    if (!await isBotModerator(interaction.user.id)) {
-      await interaction.reply({ content: "Only bot moderators can change planned features.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
+    if (!await this.authorize(interaction)) return true;
     const mode = interaction.customId === "planned:modal:add" ? "add" : interaction.customId.startsWith("planned:modal:edit:") ? "edit" : null;
     if (!mode) return false;
     const id = mode === "edit" ? interaction.customId.slice("planned:modal:edit:".length) : null;
