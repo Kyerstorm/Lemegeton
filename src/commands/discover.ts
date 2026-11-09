@@ -30,7 +30,7 @@ import { TmdbClient, type TmdbMedia, type TmdbTvSeason } from "../../helpers/pro
 import { getGuildMediaRegion } from "../../helpers/media/media-region.js";
 import { cleanText } from "../../helpers/security/security.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
-import { findAtlasRelationships, recordProviderRelationships } from "../../helpers/providers/atlas.js";
+import { findAtlasRelationships, recordAtlasRelationship, recordProviderRelationships } from "../../helpers/providers/atlas.js";
 import {
   createMediaLinkSuggestion,
   getPendingMediaLinkSuggestion,
@@ -42,6 +42,7 @@ import { renderAtlasSnapshot } from "../../helpers/media/atlas-renderer.js";
 import { logger } from "../../helpers/runtime/logger.js";
 import { loadingMessage } from "../../helpers/emoji.js";
 import { parseGridTitles, renderMediaGrid } from "../../helpers/media/media-grid.js";
+import { rankCrossMediaCandidates, recommendationGenreLabels, type CrossMediaCandidate } from "../../helpers/media/cross-media-recommendations.js";
 
 
 type Category = "all" | "anime" | "manga" | "light_novel" | "book" | "movie" | "tv" | "game";
@@ -305,6 +306,7 @@ export class DiscoverCommand implements FeatureCommand {
     .addStringOption((option) => option.setName("view").setDescription("Choose a discovery view").addChoices(
       { name: "Search results", value: "search" },
       { name: "3×3 media cover grid", value: "grid" },
+      { name: "Cross-media similarity", value: "similar" },
       { name: "Knowledge Atlas", value: "atlas" },
       { name: "Creator Explorer", value: "creators" },
       { name: "Where to watch", value: "availability" },
@@ -412,6 +414,14 @@ export class DiscoverCommand implements FeatureCommand {
     }
     if(view==="creators"){
       await this.creatorAndRespond(interaction,query,category);
+      return;
+    }
+    if (view === "similar") {
+      if (category === "all") {
+        await interaction.reply({ content: "Choose a starting category to find cross-media matches.", flags: MessageFlags.Ephemeral });
+        return;
+      }
+      await this.crossMediaSimilarityAndRespond(interaction, query, category);
       return;
     }
     if (view === "atlas") {
@@ -984,6 +994,159 @@ export class DiscoverCommand implements FeatureCommand {
       components: [],
       allowedMentions: { parse: [] },
     });
+  }
+
+  private async crossMediaSimilarityAndRespond(
+    interaction: ChatInputCommandInteraction,
+    query: string,
+    category: Exclude<Category, "all">,
+  ): Promise<void> {
+    await interaction.reply({
+      content: loadingMessage("Finding source-backed cross-media matches…"),
+      flags: MessageFlags.Ephemeral,
+    });
+
+    const seeds = await this.fetchSearch(query, category);
+    const first = seeds[0];
+    if (!first) {
+      await interaction.editReply({ content: "No starting title was returned by the selected provider.", embeds: [], components: [] });
+      return;
+    }
+
+    let seed: SearchRecord = first;
+    if (seed.provider === "AniList") {
+      seed = { ...seed, item: await this.anilist.getMediaById(seed.item.id, seed.item.type) ?? seed.item };
+    } else if (seed.provider === "TMDB") {
+      seed = { ...seed, item: await this.tmdb.details(seed.item.id, seed.item.category) ?? seed.item };
+    }
+
+    const seedTitle = this.recordTitle(seed);
+    const seedUrl = this.recordUrl(seed);
+    const seedCategory = seed.category as CrossMediaCandidate["category"];
+    const seedGenres = seed.provider === "AniList"
+      ? [
+          ...seed.item.genres,
+          ...seed.item.tags.filter(tag => !tag.isSpoiler && (tag.rank ?? 0) >= 75).map(tag => tag.name),
+        ]
+      : seed.provider === "Google Books"
+        ? seed.item.categories
+        : seed.item.genres;
+    const genreLabels = recommendationGenreLabels([...new Set(seedGenres)]);
+    const localLookups: Array<Promise<CrossMediaCandidate[]>> = [];
+
+    if (genreLabels.length) {
+      const aniListGenres = genreLabels.map(label => label === "Science Fiction" ? "Sci-Fi" : label);
+      localLookups.push(
+        this.anilist.searchByGenres("ANIME", aniListGenres).then(items => items.map(item => ({
+          title: item.title.english ?? item.title.romaji ?? item.title.native ?? "Untitled",
+          category: "anime" as const, provider: "AniList", url: item.siteUrl, genres: item.genres,
+        }))),
+        this.anilist.searchByGenres("MANGA", aniListGenres).then(items => items
+          .filter(item => item.format !== "NOVEL")
+          .map(item => ({
+            title: item.title.english ?? item.title.romaji ?? item.title.native ?? "Untitled",
+            category: "manga" as const, provider: "AniList", url: item.siteUrl, genres: item.genres,
+          }))),
+        this.anilist.searchByGenres("MANGA", aniListGenres, [], true).then(items => items.map(item => ({
+          title: item.title.english ?? item.title.romaji ?? item.title.native ?? "Untitled",
+          category: "light_novel" as const, provider: "AniList", url: item.siteUrl, genres: item.genres,
+        }))),
+        ...genreLabels.map(label => this.books.searchBySubject(label).then(items => items.map(item => ({
+          title: item.title, category: "book" as const, provider: "Google Books", url: item.sourceUrl, genres: item.categories,
+        })))),
+        this.tmdb.discoverByGenres("movie", genreLabels).then(items => items.map(item => ({
+          title: item.title, category: "movie" as const, provider: "TMDB", url: item.sourceUrl, genres: item.genres,
+        }))),
+        this.tmdb.discoverByGenres("tv", genreLabels).then(items => items.map(item => ({
+          title: item.title, category: "tv" as const, provider: "TMDB", url: item.sourceUrl, genres: item.genres,
+        }))),
+      );
+    }
+
+    const localResults: CrossMediaCandidate[] = [];
+    const settled = await Promise.allSettled(localLookups);
+    for (const result of settled) {
+      if (result.status === "fulfilled") localResults.push(...result.value);
+      else logger.warn("Cross-media provider lookup failed", {
+        category,
+        reason: result.reason instanceof Error ? result.reason.message : "Unknown provider error",
+      });
+    }
+    const ranked = rankCrossMediaCandidates(seedTitle, seedCategory, seedGenres, localResults, 10);
+
+    let providerRecommendations: SearchRecord[] = [];
+    try {
+      if (seed.provider === "AniList") {
+        providerRecommendations = (await this.anilist.recommendations(seed.item.id, seed.item.type))
+          .map(item => ({ provider: "AniList" as const, category: seed.category, item }));
+      } else if (seed.provider === "TMDB") {
+        providerRecommendations = (await this.tmdb.recommendations(seed.item.id, seed.item.category))
+          .map(item => ({ provider: "TMDB" as const, category: seed.category, item }));
+      } else if (seed.provider === "IGDB") {
+        providerRecommendations = (await this.igdb.similarGames(seed.item.id))
+          .map(item => ({ provider: "IGDB" as const, category: "game" as const, item }));
+      }
+    } catch (error) {
+      logger.warn("Provider-native recommendations could not be loaded", {
+        provider: seed.provider,
+        reason: error instanceof Error ? error.message : "Unknown provider error",
+      });
+    }
+
+    const sourceCategory = ({
+      anime: "ANIME", manga: "MANGA", light_novel: "LIGHT_NOVEL",
+      book: "BOOK", movie: "MOVIE", tv: "TV", game: "GAME",
+    } as const)[seedCategory];
+    const writes = await Promise.allSettled(ranked.map(candidate => recordAtlasRelationship({
+      sourceTitle: seedTitle,
+      sourceCategory,
+      sourceUrl: seedUrl,
+      targetTitle: candidate.title,
+      targetCategory: ({
+        anime: "ANIME", manga: "MANGA", light_novel: "LIGHT_NOVEL",
+        book: "BOOK", movie: "MOVIE", tv: "TV", game: "GAME",
+      } as const)[candidate.category],
+      targetUrl: candidate.url,
+      relationshipType: "genre overlap",
+      sourceKind: "recommendation",
+      sourceLabel: "Genre overlap recommendation",
+    })));
+    for (const write of writes) {
+      if (write.status === "rejected") logger.debug("Cross-media recommendation relationship was not saved", {
+        reason: write.reason instanceof Error ? write.reason.message : "Unknown error",
+      });
+    }
+
+    const embed = homeEmbed(
+      "Cross-media matches · " + seedTitle,
+      "Local matches are ranked by the number of shared provider-reported genres. This is a transparent metadata heuristic, not an AI score.",
+    ).setURL(seedUrl);
+    if (ranked.length) {
+      embed.addFields({
+        name: "Shared-genre matches",
+        value: ranked.map((item, index) => {
+          const label = item.url ? `[${item.title}](${item.url})` : item.title;
+          return `**${index + 1}. ${item.category.replaceAll("_", " ")} · ${label}**\n${item.provider} · Shared genres: ${item.sharedGenres.join(", ")}`;
+        }).join("\n\n").slice(0, 4_000),
+        inline: false,
+      });
+    }
+    if (providerRecommendations.length) {
+      embed.addFields({
+        name: "Provider-generated recommendations · separate source",
+        value: providerRecommendations.slice(0, 5).map(item => {
+          const title = this.recordTitle(item);
+          const url = this.recordUrl(item);
+          return `• ${url ? `[${title}](${url})` : title} · ${item.provider}`;
+        }).join("\n").slice(0, 1_000),
+        inline: false,
+      });
+    }
+    if (!ranked.length && !providerRecommendations.length) {
+      embed.setDescription("No comparable provider genre metadata or provider-generated recommendations were returned for this title.");
+    }
+    embed.setFooter({ text: "Sources: AniList · Google Books · TMDB · IGDB · No Novel Updates scraping or inferred adaptations" });
+    await interaction.editReply({ content: "", embeds: [embed], components: [], allowedMentions: { parse: [] } });
   }
 
   private async compareAndRespond(

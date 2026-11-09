@@ -302,6 +302,23 @@ export class AniListClient {
  constructor(private readonly endpoint="https://graphql.anilist.co",private readonly timeoutMs=10000,private readonly fetcher:typeof fetch=globalThis.fetch){}
  async search(query:string,type:AniListMediaType,lightNovelOnly=false,filters:AniListSearchFilters={}):Promise<AniListMedia[]>{return this.searchQuery({search:query.trim(),type,...filterVariables(filters),...(lightNovelOnly?{format:"NOVEL"}:{}),sort:"SEARCH_MATCH"});} async random(type:AniListMediaType,lightNovelOnly=false,filters:AniListSearchFilters={}):Promise<AniListMedia[]>{return this.searchQuery({type,...filterVariables(filters),...(lightNovelOnly?{format:"NOVEL"}:{}),sort:"POPULARITY_DESC",page:secureRandBelow(200)+1,perPage:10});}
  async trending(type:AniListMediaType,filters:AniListSearchFilters={}):Promise<AniListMedia[]>{return this.searchQuery({type,...filterVariables(filters),sort:"TRENDING_DESC"});}
+ async searchByGenres(type:AniListMediaType,genres:readonly string[],tags:readonly string[]=[],lightNovelOnly=false):Promise<AniListMedia[]>{
+  const genreValues=[...new Set(genres.map(value=>value.trim()).filter(Boolean))].slice(0,3);
+  const tagValues=[...new Set(tags.map(value=>value.trim()).filter(Boolean))].slice(0,3);
+  if(!genreValues.length&&!tagValues.length)return[];
+  const query=`query CrossMedia($type:MediaType!,$genres:[String],$tags:[String],$format:MediaFormat){
+   Page(page:1,perPage:15){media(type:$type,genre_in:$genres,tag_in:$tags,format:$format,sort:POPULARITY_DESC,isAdult:false){
+    id type isAdult title{romaji english native} description(asHtml:false) siteUrl coverImage{large} bannerImage
+    averageScore status format startDate{year month day} episodes chapters volumes genres
+    tags{name rank isMediaSpoiler isAdult} stats{statusDistribution{status amount} scoreDistribution{score amount}}
+    recommendations{edges{node{mediaRecommendation{id siteUrl title{romaji english native} coverImage{large} isAdult}}}}
+    relations{edges{relationType node{id type isAdult siteUrl title{romaji english}}}} trailer{id site}
+   }}
+  }`;
+  const data=await this.graphql(query,{type,genres:genreValues,tags:tagValues,format:lightNovelOnly?"NOVEL":null});
+  const page=isObj(data.Page)?data.Page:{};
+  return(Array.isArray(page.media)?page.media:[]).flatMap(value=>{const media=parseMedia(value);return media?[media]:[];});
+ }
  async mediaNightCandidates(type:AniListMediaType):Promise<AniListMediaNightCandidate[]>{
   const data=await this.graphql(MEDIA_NIGHT_QUERY,{type});
   const page=isObj(data.Page)?data.Page:{};

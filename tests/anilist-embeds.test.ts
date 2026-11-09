@@ -239,3 +239,20 @@ test("shared embed builders produce consistent titled status and profile embeds"
   assert.equal(buildUserProfileEmbed(user).data.url, user.url);
   assert.equal(buildUserFavoritesEmbed(user).data.fields?.length, 5);
 });
+
+test("AniList genre discovery uses provider genres, optional tags and adult exclusion", async () => {
+  const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
+  const client = new AniListClient("https://graphql.anilist.co", 1_000, async (_input, init) => {
+    requests.push(JSON.parse(String(init?.body)) as { query: string; variables: Record<string, unknown> });
+    return new Response(JSON.stringify({ data: { Page: { media: [{
+      id: 321, type: "ANIME", isAdult: false, title: { english: "Fantasy Work" },
+      siteUrl: "https://anilist.co/anime/321", genres: ["Fantasy"],
+      tags: [{ name: "Found Family", rank: 90, isMediaSpoiler: false, isAdult: false }],
+    }] } } }), { status: 200, headers: { "content-type": "application/json" } });
+  });
+  const results = await client.searchByGenres("ANIME", ["Fantasy"], ["Found Family"]);
+  assert.equal(results[0]?.title.english, "Fantasy Work");
+  assert.deepEqual(requests[0]?.variables, { type: "ANIME", genres: ["Fantasy"], tags: ["Found Family"], format: null });
+  assert.match(requests[0]?.query ?? "", /isAdult:false/);
+  assert.deepEqual(await client.searchByGenres("ANIME", []), []);
+});

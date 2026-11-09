@@ -200,3 +200,37 @@ test("TMDB TV season normalization validates episode data and sorts episode numb
   assert.equal(season?.sourceUrl, "https://www.themoviedb.org/tv/99/season/1");
   assert.equal(normalizeTmdbTvSeason({ season_number: -1 }, 99), null);
 });
+
+test("TMDB genre discovery maps provider IDs and requests exclude adult results", async () => {
+  const urls: URL[] = [];
+  const payloads = [
+    { genres: [{ id: 14, name: "Fantasy" }, { id: 18, name: "Drama" }] },
+    { results: [{ id: 44, title: "Fantasy Film", genre_ids: [14], release_date: "2025-01-01" }] },
+  ];
+  const client = new TmdbClient("test-token", async input => {
+    urls.push(new URL(String(input)));
+    return new Response(JSON.stringify(payloads.shift()), { status: 200, headers: { "content-type": "application/json" } });
+  });
+  const results = await client.discoverByGenres("movie", ["Fantasy"]);
+  assert.equal(results[0]?.title, "Fantasy Film");
+  assert.deepEqual(results[0]?.genres, ["Fantasy"]);
+  assert.equal(urls[1]?.pathname, "/3/discover/movie");
+  assert.equal(urls[1]?.searchParams.get("include_adult"), "false");
+  assert.equal(urls[1]?.searchParams.get("with_genres"), "14");
+});
+
+test("TMDB recommendation and detail lookups validate IDs and preserve category", async () => {
+  const paths: string[] = [];
+  const client = new TmdbClient("test-token", async input => {
+    const url = new URL(String(input));
+    paths.push(url.pathname);
+    if (url.pathname.endsWith("/recommendations")) {
+      return new Response(JSON.stringify({ results: [{ id: 7, title: "Related Film" }] }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ id: 6, title: "Seed Film", genres: [{ id: 14, name: "Fantasy" }] }), { status: 200 });
+  });
+  assert.equal((await client.details(6, "movie"))?.title, "Seed Film");
+  assert.equal((await client.recommendations(6, "movie"))[0]?.title, "Related Film");
+  assert.deepEqual(paths, ["/3/movie/6", "/3/movie/6/recommendations"]);
+  await assert.rejects(() => client.recommendations(0, "movie"), /positive integer/);
+});

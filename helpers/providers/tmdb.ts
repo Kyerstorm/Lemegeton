@@ -148,7 +148,12 @@ export function normalizeTmdbMedia(value: unknown, category: TmdbCategory): Tmdb
     image: poster && poster.startsWith("/") ? `https://image.tmdb.org/t/p/w500${poster}` : null,
     releaseDate: typeof date === "string" && date ? date : null,
     rating: typeof item.vote_average === "number" && Number.isFinite(item.vote_average) ? item.vote_average : null,
-    genres: [],
+    genres: Array.isArray(item.genres)
+      ? item.genres.flatMap(entry => {
+          const genre = object(entry)?.name;
+          return typeof genre === "string" && genre.trim() ? [genre.trim()] : [];
+        }).slice(0, 20)
+      : [],
     status: typeof item.status === "string" ? item.status : null,
   };
 }
@@ -376,7 +381,7 @@ export function normalizeTmdbVideos(value: unknown): TmdbVideo[] {
 }
 
 export class TmdbClient {
-  constructor(private readonly token?: string) {}
+  constructor(private readonly token?: string, private readonly fetcher: typeof fetch = globalThis.fetch) {}
 
   async search(query: string, category: TmdbCategory): Promise<TmdbMedia[]> {
     return this.searchPath(`/search/${category}`, category, { query: query.trim(), include_adult: "false" });
@@ -384,6 +389,48 @@ export class TmdbClient {
 
   async trending(category: TmdbCategory): Promise<TmdbMedia[]> {
     return this.searchPath(`/trending/${category}/week`, category, {});
+  }
+
+  async details(id: number, category: TmdbCategory): Promise<TmdbMedia | null> {
+    this.validateMediaId(id);
+    return normalizeTmdbMedia(await this.request(`/${category}/${id}`), category);
+  }
+
+  async recommendations(id: number, category: TmdbCategory): Promise<TmdbMedia[]> {
+    this.validateMediaId(id);
+    return this.searchPath(`/${category}/${id}/recommendations`, category, { page: "1" });
+  }
+
+  async discoverByGenres(category: TmdbCategory, genres: readonly string[]): Promise<TmdbMedia[]> {
+    const requested = new Set(genres.map(value => value.trim().toLocaleLowerCase("en-US")).filter(Boolean));
+    if (!requested.size) return [];
+    const payload = await this.request(`/genre/${category}/list`);
+    const genreRows = Array.isArray(payload.genres) ? payload.genres : [];
+    const genresById = new Map<number, string>();
+    for (const entry of genreRows) {
+      const item = object(entry);
+      if (typeof item?.id === "number" && Number.isSafeInteger(item.id) && typeof item.name === "string") {
+        genresById.set(item.id, item.name);
+      }
+    }
+    const selectedIds = [...genresById]
+      .filter(([, name]) => requested.has(name.toLocaleLowerCase("en-US")))
+      .map(([id]) => id);
+    if (!selectedIds.length) return [];
+    const results = await this.request(`/discover/${category}`, {
+      include_adult: "false", sort_by: "popularity.desc", page: "1",
+      with_genres: selectedIds.join("|"),
+    });
+    return (Array.isArray(results.results) ? results.results : []).flatMap(entry => {
+      const media = normalizeTmdbMedia(entry, category);
+      const item = object(entry);
+      if (!media || !item) return [];
+      const itemGenres = Array.isArray(item.genre_ids) ? item.genre_ids : [];
+      media.genres = itemGenres.flatMap(value =>
+        typeof value === "number" && genresById.has(value) ? [genresById.get(value)!] : [],
+      );
+      return [media];
+    }).slice(0, 20);
   }
 
   async upcomingMovies(region = "US"): Promise<TmdbMedia[]> {
@@ -484,7 +531,7 @@ export class TmdbClient {
     const url = new URL(`https://api.themoviedb.org/3${path}`);
     url.searchParams.set("language", "en-US");
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
-    const response = await fetch(url, {
+    const response = await this.fetcher(url, {
       headers: { Authorization: `Bearer ${this.token}`, Accept: "application/json" },
       signal: AbortSignal.timeout(12_000),
     });
