@@ -41,6 +41,7 @@ import {
 import { renderAtlasSnapshot } from "../../helpers/media/atlas-renderer.js";
 import { logger } from "../../helpers/runtime/logger.js";
 import { loadingMessage } from "../../helpers/emoji.js";
+import { parseGridTitles, renderMediaGrid } from "../../helpers/media/media-grid.js";
 
 
 type Category = "all" | "anime" | "manga" | "light_novel" | "book" | "movie" | "tv" | "game";
@@ -281,6 +282,7 @@ export class DiscoverCommand implements FeatureCommand {
     .setName("discover")
     .setDescription("Explore media across supported metadata providers")
     .addStringOption((option) => option.setName("query").setDescription("Search for a title").setMinLength(2).setMaxLength(100))
+    .addStringOption((option) => option.setName("grid_titles").setDescription("Nine titles, one per line, for the 3×3 cover grid").setMaxLength(1_000))
     .addStringOption((option) => option.setName("category").setDescription("Media category").addChoices(
       ...CATEGORIES.map((category) => ({ name: category.label, value: category.value })),
     ))
@@ -302,6 +304,7 @@ export class DiscoverCommand implements FeatureCommand {
     .addIntegerOption((option) => option.setName("season_year").setDescription("Anime season year").setMinValue(1970).setMaxValue(2100))
     .addStringOption((option) => option.setName("view").setDescription("Choose a discovery view").addChoices(
       { name: "Search results", value: "search" },
+      { name: "3×3 media cover grid", value: "grid" },
       { name: "Knowledge Atlas", value: "atlas" },
       { name: "Creator Explorer", value: "creators" },
       { name: "Where to watch", value: "availability" },
@@ -384,6 +387,22 @@ export class DiscoverCommand implements FeatureCommand {
     }
     if (view === "review-links") {
       await this.reviewRelationshipAndRespond(interaction);
+      return;
+    }
+    if (view === "grid") {
+      if (!["anime", "manga", "light_novel", "game"].includes(category)) {
+        await interaction.reply({ content: "The 3×3 grid supports anime, manga, light novels and IGDB games.", flags: MessageFlags.Ephemeral });
+        return;
+      }
+      const rawTitles = interaction.options.getString("grid_titles") ?? "";
+      let titles: string[];
+      try {
+        titles = parseGridTitles(rawTitles);
+      } catch (error) {
+        await interaction.reply({ content: error instanceof Error ? error.message : "Enter nine titles, one per line.", flags: MessageFlags.Ephemeral });
+        return;
+      }
+      await this.mediaGridAndRespond(interaction, titles, category as "anime" | "manga" | "light_novel" | "game");
       return;
     }
     if (!query) {
@@ -921,6 +940,50 @@ export class DiscoverCommand implements FeatureCommand {
       return embed;
     });
     await interaction.editReply({content:`Creator Explorer · ${query.trim().slice(0,80)}`,embeds,components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],allowedMentions:{parse:[]}});
+  }
+
+  private async mediaGridAndRespond(
+    interaction: ChatInputCommandInteraction,
+    titles: string[],
+    category: "anime" | "manga" | "light_novel" | "game",
+  ): Promise<void> {
+    await interaction.reply({
+      content: loadingMessage("Resolving the nine media covers…"),
+      flags: MessageFlags.Ephemeral,
+    });
+    const items: Array<{ title: string; image: string | null }> = [];
+    for (const title of titles) {
+      try {
+        if (category === "game") {
+          const record = (await this.igdb.search(title))[0];
+          items.push({ title: record?.title ?? title, image: record?.image ?? null });
+        } else {
+          const records = await this.anilist.search(title, category === "anime" ? "ANIME" : "MANGA", category === "light_novel");
+          const record = records[0];
+          items.push({
+            title: record?.title.english ?? record?.title.romaji ?? record?.title.native ?? title,
+            image: record?.coverImage ?? null,
+          });
+        }
+      } catch {
+        // A single provider lookup must not prevent the remaining grid tiles from rendering.
+        items.push({ title, image: null });
+      }
+    }
+    const image = await renderMediaGrid(items);
+    const unresolved = items.filter(item => !item.image).length;
+    const description = unresolved
+      ? `${9 - unresolved} of 9 covers were found. Missing covers use safe placeholders.`
+      : "Nine provider-backed covers, arranged in a 3×3 grid.";
+    const embed = homeEmbed(`3×3 · ${categoryLabel(category)}`, description)
+      .setImage("attachment://media-grid.png");
+    await interaction.editReply({
+      content: "",
+      embeds: [embed],
+      files: [new AttachmentBuilder(image, { name: "media-grid.png" })],
+      components: [],
+      allowedMentions: { parse: [] },
+    });
   }
 
   private async compareAndRespond(

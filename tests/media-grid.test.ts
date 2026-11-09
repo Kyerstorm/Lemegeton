@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {parseGridTitles} from "../helpers/media/media-grid.js";
+import {parseGridTitles,renderMediaGrid} from "../helpers/media/media-grid.js";
+import sharp from "sharp";
 
 test("3x3 grid title parser keeps exactly nine cleaned titles",()=>{
  const titles=parseGridTitles(" One \n Two\nThree\nFour\nFive\nSix\nSeven\nEight\nNine ");
@@ -14,4 +15,12 @@ test("3x3 grid title parser rejects wrong counts and oversized entries",()=>{
  assert.throws(()=>parseGridTitles(Array.from({length:10},(_,i)=>"Title "+i).join("\n")),/exactly nine/);
  assert.throws(()=>parseGridTitles(["x",...Array.from({length:8},(_,i)=>"Title "+i)].join("\n")),/between 2 and 100/);
  assert.throws(()=>parseGridTitles(["x".repeat(101),...Array.from({length:8},(_,i)=>"Title "+i)].join("\n")),/between 2 and 100/);
+});
+
+test("3x3 media grid renders a bounded PNG with placeholders for unresolved covers",async()=>{
+ const image=await renderMediaGrid(Array.from({length:9},(_,index)=>({title:`Title ${index+1}`,image:null})));
+ const metadata=await sharp(image).metadata();
+ assert.equal(metadata.format,"png");
+ assert.equal(metadata.width,692);
+ assert.equal(metadata.height,1022);
 });
