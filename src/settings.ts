@@ -31,6 +31,7 @@ import {
   setMediaNotificationSettings,
 } from "../helpers/media-notifications.js";
 import { getGuildMediaRegion, setGuildMediaRegion } from "../helpers/media-region.js";
+import { createInteractionIssueLog, issueHashNotice } from "../helpers/issue-logs.js";
 
 type SettingsRow =
   | ActionRowBuilder<ButtonBuilder>
@@ -198,7 +199,9 @@ export class SettingsCommand implements FeatureCommand {
           const savedRegion = await setGuildMediaRegion(interaction.guildId, requestedRegion, interaction.user.id);
           await interaction.reply({content:"Default media availability region saved as " + savedRegion + ".",flags:MessageFlags.Ephemeral});
         } catch (error) {
-          await interaction.reply({content:error instanceof Error ? error.message : "The media region could not be saved.",flags:MessageFlags.Ephemeral});
+          const issueHash=await createInteractionIssueLog(interaction,"/settings",error,{action:"media-region"});
+          const message=error instanceof Error ? error.message : "The media region could not be saved.";
+          await interaction.reply({content:issueHash?message+"\n\n"+issueHashNotice(issueHash):message,flags:MessageFlags.Ephemeral});
         }
         return;
       }
@@ -306,7 +309,9 @@ export class SettingsCommand implements FeatureCommand {
       await interaction.reply({content:"Default media availability region saved as " + region + ".",flags:MessageFlags.Ephemeral});
       return true;
     } catch (error) {
-      await interaction.reply({content:error instanceof Error ? error.message : "The media region could not be saved.",flags:MessageFlags.Ephemeral});
+      const issueHash=await createInteractionIssueLog(interaction,"/settings",error,{action:"media-region-modal"});
+      const message=error instanceof Error ? error.message : "The media region could not be saved.";
+      await interaction.reply({content:issueHash?message+"\n\n"+issueHashNotice(issueHash):message,flags:MessageFlags.Ephemeral});
       return true;
     }
   }
