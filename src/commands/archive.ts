@@ -704,6 +704,7 @@ export class ArchiveCommand implements FeatureCommand {
         const body = interaction.fields.getTextInputValue("content");
         const sourceUrl = category === "fanworks" || (category === "soundtracks" && source.trim().startsWith("https://")) ? source : undefined;
         const needsUpload = category === "soundtracks" && !sourceUrl;
+        if(needsUpload&&!settings.uploadChannelId) throw new Error("A server manager must configure the Archive upload channel before submitting media without a source link.");
         const sourceTitle = category === "quotes" ? source : category === "soundtracks" && !sourceUrl ? source : undefined;
         const id = await submitArchiveEntry({
           guildId: interaction.guildId,
@@ -886,6 +887,7 @@ export class ArchiveCommand implements FeatureCommand {
     const sourceUrl = category === "panels" ? (panelReference?.url ?? undefined)
       : category === "fanworks" || (category === "soundtracks" && submittedSourceUrl.trim().startsWith("https://")) ? submittedSourceUrl : undefined;
     const needsUpload = category === "panels" || (category === "soundtracks" && !sourceUrl);
+    if(needsUpload&&!attachment&&!settings.uploadChannelId) throw new Error("A server manager must configure the Archive upload channel before submitting media without a direct attachment.");
     const entryContent = category === "panels" ? [panelChapter!.caption, content].filter(Boolean).join("\n\n") : content;
     const sourceTitle = interaction.options.getString("source_title") ?? undefined;
     const entryId = await submitArchiveEntry({
