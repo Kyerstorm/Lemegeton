@@ -8,7 +8,7 @@ import {
 
 test("cross-media genre normalization maps provider vocabulary conservatively", () => {
   assert.deepEqual(
-    [...normalizeGenreTokens(["Science Fiction", "Slice of Life", "Historical", "War"])].sort(),
+    [...normalizeGenreTokens(["Science Fiction", "Sci-Fi", "Slice of Life", "Historical", "War"])].sort(),
     ["historical", "sci-fi", "slice of life", "war"],
   );
   assert.equal(normalizeGenreTokens(["Stewardship"]).has("war"), false);

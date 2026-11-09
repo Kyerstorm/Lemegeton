@@ -16,6 +16,7 @@ export interface RankedCrossMediaCandidate extends CrossMediaCandidate {
 const GENRE_ALIASES: Record<string, string> = {
   "science fiction": "sci-fi",
   "sci-fi": "sci-fi",
+  "sci fi": "sci-fi",
   "slice of life": "slice of life",
   psychological: "psychological",
   supernatural: "supernatural",

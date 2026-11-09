@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createIssueHash, isIssueHash, sanitizeIssueDetails } from "../helpers/runtime/issue-logs.js";
 
-test("new issue references match the 40-character hexadecimal format and are unique", () => {
+test("new issue references use 128-character SHA-512 hex and remain unique", () => {
   const first = createIssueHash("interaction-1", "user-1");
   const second = createIssueHash("interaction-1", "user-1");
   const otherUser = createIssueHash("interaction-1", "user-2");
