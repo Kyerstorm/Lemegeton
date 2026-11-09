@@ -172,6 +172,18 @@ The target command surface should be intentionally compact:
 
 The seven rows above the standalone utilities are the major feature environments. **/help, /privacy, and /feedback are deliberate standalone exceptions** and must each remain independently registered top-level slash commands. Do not combine them with one another or with the seven feature commands.
 
+#### 3.2.1 Standalone bot-moderator commands
+
+The following operational commands are also independent top-level slash commands and must never be absorbed into a feature command:
+
+| Command | Purpose | Access |
+|---|---|---|
+| **/log** | Inspect a server-scoped diagnostic issue reference | Bot moderator only |
+| **/moderators** | Manage the bot-wide moderator allowlist | Bot moderator only |
+| **/planned** | Browse and maintain the internal development plan | Bot moderator only |
+
+These three commands are restricted to one explicitly configured Discord server through `BOT_MODERATOR_GUILD_ID`. They must be registered as guild commands for that server, never as global application commands. Runtime handlers must independently verify the configured guild ID and bot-moderator authorization on every command, button, select-menu, and modal interaction. A missing or invalid guild configuration must fail closed: do not register these commands anywhere and reject their interactions. This restriction applies only to these three operational commands; the seven feature environments and the three standalone member utility commands remain available in their configured guild installations.
+
 This is the target architecture, not a mandate to preserve every old spelling or every undocumented behavior. During the repository audit, verify each command and map it to one of these destinations or to an explicit out-of-scope decision.
 
 The Knowledge Atlas is a substantial view inside /discover, not an additional public slash command. Its graph can also be opened from relevant archive entries, profiles, media cards, collections, discussions, and the dashboard.
