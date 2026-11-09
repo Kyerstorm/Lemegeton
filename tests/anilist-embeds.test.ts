@@ -31,6 +31,69 @@ test("AniList URL parser recognizes media and supported profile sections", () =>
   assert.equal(parseAniListUrl("https://anilist.co/user/example/activity")?.kind, "user");
 });
 
+test("AniList URL parser recognizes character, staff, studio, review and activity routes", () => {
+  assert.deepEqual(parseAniListUrl("https://anilist.co/character/101"), {kind:"entity",id:101,entityKind:"CHARACTER"});
+  assert.deepEqual(parseAniListUrl("https://anilist.co/staff/202/example"), {kind:"entity",id:202,entityKind:"STAFF"});
+  assert.deepEqual(parseAniListUrl("https://anilist.co/studio/303"), {kind:"entity",id:303,entityKind:"STUDIO"});
+  assert.deepEqual(parseAniListUrl("https://anilist.co/review/404"), {kind:"review",id:404});
+  assert.deepEqual(parseAniListUrl("https://anilist.co/activity/505"), {kind:"activity",id:505});
+  assert.equal(parseAniListUrl("https://anilist.co/staff/nope"), null);
+  assert.equal(parseAniListUrl("https://anilist.co/activity/0"), null);
+});
+
+test("AniList public entity, review and activity methods use provider IDs and normalize safe links", async () => {
+  const replies: unknown[] = [
+    { data: { Character: {
+      id: 101, name: { full: "Example Character" }, siteUrl: "https://anilist.co/character/101",
+      image: { large: "https://s4.anilist.co/file/anilistcdn/character/large/101.jpg" },
+      description: "A character",
+      media: { nodes: [{ id: 11, type: "ANIME", isAdult: false, title: { romaji: "Example Show" }, siteUrl: "https://anilist.co/anime/11" }] },
+    } } },
+    { data: { Staff: {
+      id: 202, name: { full: "Example Creator" }, siteUrl: "https://anilist.co/staff/202",
+      image: { large: "https://s4.anilist.co/file/anilistcdn/staff/large/202.jpg" },
+      primaryOccupations: ["Writer"], yearsActive: [2010],
+      staffMedia: { edges: [{ staffRole: "Original Creator", node: {
+        id: 12, type: "MANGA", isAdult: false, title: { romaji: "Example Manga" }, siteUrl: "https://anilist.co/manga/12",
+      } }] },
+    } } },
+    { data: { Studio: {
+      id: 303, name: "Example Studio", siteUrl: "https://anilist.co/studio/303",
+      media: { nodes: [{ id: 13, type: "ANIME", isAdult: false, title: { romaji: "Studio Work" }, siteUrl: "https://anilist.co/anime/13" }] },
+    } } },
+    { data: { Review: {
+      id: 404, summary: "Short summary", body: "Review body", score: 85, rating: 4,
+      ratingAmount: 20, createdAt: 1_700_000_000, siteUrl: "https://anilist.co/review/404",
+      user: { name: "Reviewer", siteUrl: "https://anilist.co/user/Reviewer" },
+      media: { id: 14, type: "ANIME", isAdult: false, title: { romaji: "Reviewed Anime" }, siteUrl: "https://anilist.co/anime/14" },
+    } } },
+    { data: { Activity: {
+      id: 505, siteUrl: "https://anilist.co/activity/505", createdAt: 1_700_000_100,
+      text: "Public post", user: { name: "Poster", siteUrl: "https://anilist.co/user/Poster" },
+    } } },
+  ];
+  let index = 0;
+  const client = new AniListClient("https://graphql.anilist.co", 1_000, async (_input, init) => {
+    const payload = replies[index++];
+    assert.ok(payload);
+    return new Response(JSON.stringify(payload), {status:200,headers:{"content-type":"application/json"}});
+  });
+  const character = await client.getPublicEntity(101,"CHARACTER");
+  assert.equal(character?.name,"Example Character");
+  assert.equal(character?.works[0]?.title,"Example Show");
+  const staff = await client.getPublicEntity(202,"STAFF");
+  assert.equal(staff?.roles[0],"Writer");
+  assert.equal(staff?.works[0]?.role,"Original Creator");
+  const studio = await client.getPublicEntity(303,"STUDIO");
+  assert.equal(studio?.name,"Example Studio");
+  assert.equal(studio?.works[0]?.type,"ANIME");
+  const review = await client.getReviewById(404);
+  assert.equal(review?.mediaTitle,"Reviewed Anime");
+  assert.equal(review?.userName,"Reviewer");
+  const activity = await client.getActivityById(505);
+  assert.equal(activity?.text,"Public post");
+  assert.equal(activity?.userName,"Poster");
+});
 test("AniList URL parser ignores personal list routes and unsafe or malformed URLs", () => {
   for (const route of ["animelist", "anime", "anime-list", "mangalist", "manga", "manga-list"]) {
     assert.equal(parseAniListUrl("https://anilist.co/user/example/" + route), null);
