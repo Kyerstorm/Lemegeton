@@ -6,8 +6,7 @@
 
 | Language | Bytes | Share |
 | --- | ---: | ---: |
-| Python | 3,657,096 | 98.5% |
-| TypeScript | 36,721 | 1.0% |
+| Python | 3,657,096 | 99.4% |
 | Batchfile | 17,137 | 0.5% |
 | Dockerfile | 2,243 | 0.1% |
 | Shell | 899 | 0.0% |
