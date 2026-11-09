@@ -27,8 +27,6 @@ import {
   addRankingCandidate,
   closeDiscussion,
   closeRanking,
-  claimDueMediaNightResults,
-  markMediaNightResultPublished,
   createCommunitySession,
   createRanking,
   createMediaNight,
@@ -244,7 +242,7 @@ export class CommunityCommand implements FeatureCommand {
   }
 
   async handleButton(interaction: ButtonInteraction): Promise<boolean> {
-    const mediaNightVote = interaction.customId.match(/^community:media-night-vote:(\\d+):(\\d+)$/);
+    const mediaNightVote = interaction.customId.match(/^community:media-night-vote:(\d+):(\d+)$/);
     if (mediaNightVote && interaction.guildId) {
       await voteForRanking(interaction.guildId, interaction.user.id, mediaNightVote[1]!, mediaNightVote[2]!);
       await interaction.reply({ content: "Your Media Night vote is locked in and cannot be changed.", flags: MessageFlags.Ephemeral });
