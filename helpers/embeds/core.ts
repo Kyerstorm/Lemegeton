@@ -149,8 +149,9 @@ export function buildMediaEmbed(mediaValue: unknown): EmbedBuilder {
   if (start) meta.push(`**Start:** ${start}`);
   if (end) meta.push(`**End:** ${end}`);
   if (meta.length) embed.addFields({ name: "Info", value: meta.join("\n").slice(0, 1_000), inline: false });
-  const studios = list(record(media.studios).nodes)
-    .map(item => text(record(item).name))
+  const studioValues=Array.isArray(media.studios)?media.studios:list(record(media.studios).nodes);
+  const studios = studioValues
+    .map(item => typeof item==="string"?item:text(record(item).name))
     .filter(Boolean)
     .slice(0, 8);
   if (studios.length) embed.addFields({ name: "Studio", value: studios.join(", ").slice(0, 900), inline: true });
@@ -173,7 +174,10 @@ export function buildMediaEmbed(mediaValue: unknown): EmbedBuilder {
 }
 
 export function buildRelationsEmbeds(mediaValue: unknown): EmbedBuilder[] {
-  const edges = list(record(record(mediaValue).relations).edges);
+  const relationsValue=record(mediaValue).relations;
+  const edges = Array.isArray(relationsValue)
+    ? relationsValue.map(item=>({relationType:record(item).relation,node:{id:record(item).id,title:{romaji:record(item).title},siteUrl:record(item).url,category:record(item).category}}))
+    : list(record(relationsValue).edges);
   if (!edges.length) return [new EmbedBuilder().setColor(EMBED_COLOURS.neutral).setDescription("No relations found.")];
   const embeds: EmbedBuilder[] = [];
   for (let index = 0; index < edges.length; index += 6) {
@@ -198,7 +202,11 @@ export function buildRelationsEmbeds(mediaValue: unknown): EmbedBuilder[] {
 }
 
 export function buildCharactersEmbeds(mediaValue: unknown, support = false): EmbedBuilder[] {
-  const edges = list(record(record(mediaValue).characters).edges);
+  const media=record(mediaValue);
+  const normalized=Array.isArray(media.characters)?media.characters:null;
+  const edges = normalized
+    ? normalized.map(item=>({role:record(item).role,node:{id:record(item).id,name:{full:record(item).name},image:{large:record(item).image}}}))
+    : list(record(media.characters).edges);
   const selected = edges.filter(edge => (text(record(edge).role).toUpperCase() === "MAIN") !== support);
   const items = (selected.length ? selected : edges).slice(0, 48);
   if (!items.length) return [new EmbedBuilder().setColor(EMBED_COLOURS.neutral).setDescription("No characters found.")];
@@ -220,7 +228,10 @@ export function buildCharactersEmbeds(mediaValue: unknown, support = false): Emb
 }
 
 export function buildStaffEmbeds(mediaValue: unknown): EmbedBuilder[] {
-  const edges = list(record(record(mediaValue).staff).edges);
+  const media=record(mediaValue);
+  const edges = Array.isArray(media.staffCredits)
+    ? media.staffCredits.map(item=>({role:record(item).role,node:{id:record(item).id,name:{full:record(item).name},siteUrl:record(item).url,image:{large:record(item).image}}}))
+    : list(record(media.staff).edges);
   if (!edges.length) return [new EmbedBuilder().setColor(EMBED_COLOURS.neutral).setDescription("No staff information found.")];
   const embeds: EmbedBuilder[] = [];
   for (let index = 0; index < edges.length; index += 8) {
@@ -255,7 +266,10 @@ export function buildStatsEmbed(mediaValue: unknown): EmbedBuilder {
 }
 
 export function buildRecommendationsEmbed(mediaValue: unknown, maxItems = 5): EmbedBuilder {
-  const edges = list(record(record(mediaValue).recommendations).edges);
+  const media=record(mediaValue);
+  const edges = Array.isArray(media.recommendations)
+    ? media.recommendations.map(item=>({node:{mediaRecommendation:{id:record(item).id,title:{romaji:record(item).title},siteUrl:record(item).url,coverImage:{large:record(item).image}}}}))
+    : list(record(media.recommendations).edges);
   const embed = new EmbedBuilder().setColor(EMBED_COLOURS.warning).setTitle("🎯 Recommendations")
     .setDescription("Top recommendations from AniList");
   let count = 0;
@@ -348,8 +362,9 @@ export function buildUserFavoritesEmbed(userValue: unknown): EmbedBuilder {
     ["anime","🎞️ Anime","media"],["manga","📖 Manga","media"],["characters","🎭 Characters","character"],
     ["staff","🎙️ Staff","staff"],["studios","🏢 Studios","studio"],
   ] as const) {
-    const section = record(favorites[key]);
-    const nodes = list(section.nodes ?? section);
+    const rawSection=favorites[key];
+    const section=record(rawSection);
+    const nodes=Array.isArray(rawSection)?rawSection:list(section.nodes);
     const links = nodes.slice(0,5).flatMap(item => {
       const row = record(item);
       const title = kind === "media" ? mediaTitle(row.title)
