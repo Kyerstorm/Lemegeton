@@ -32,6 +32,9 @@ import {
   createMediaNight,
   filterMediaNightCandidates,
   sampleMediaNightCandidates,
+  disableReleaseSchedule,
+  getReleaseSchedule,
+  saveReleaseSchedule,
   createSpoilerDiscussion,
   disableDailySchedule,
   dueDailyDeliveries,
@@ -144,7 +147,9 @@ export class CommunityCommand implements FeatureCommand {
       { name: "Start discussion", value: "discussion-create" },
       { name: "Close discussion", value: "discussion-close" },
       { name: "Start Media Night", value: "media-night" },
-      { name: "Release calendar", value: "calendar" },
+      { name: "Preview release calendar", value: "calendar" },
+      { name: "Configure release digests", value: "calendar-configure" },
+      { name: "Disable release digests", value: "calendar-disable" },
       { name: "Community history", value: "history" },
       { name: "Nominate a community read", value: "reading-nominate" },
       { name: "View reading nominations and vote", value: "reading-list" },
@@ -181,7 +186,17 @@ export class CommunityCommand implements FeatureCommand {
       { name: "Adventure", value: "adventure" }, { name: "Mystery", value: "mystery" },
       { name: "Romance", value: "romance" }, { name: "Drama", value: "drama" },
     ))
-    .addIntegerOption((option) => option.setName("duration_hours").setDescription("Voting duration in hours (1–12)").setMinValue(1).setMaxValue(12));
+    .addIntegerOption((option) => option.setName("duration_hours").setDescription("Voting duration in hours (1–12)").setMinValue(1).setMaxValue(12))
+    .addStringOption((option) => option.setName("release_cadence").setDescription("Release digest frequency").addChoices(
+      { name: "Daily", value: "daily" }, { name: "Weekly", value: "weekly" },
+    ))
+    .addStringOption((option) => option.setName("release_categories").setDescription("Digest categories").addChoices(
+      { name: "All categories", value: "anime,tv,movies" }, { name: "Anime only", value: "anime" },
+      { name: "TV only", value: "tv" }, { name: "Movies only", value: "movies" },
+      { name: "Anime and TV", value: "anime,tv" }, { name: "Anime and movies", value: "anime,movies" },
+      { name: "TV and movies", value: "tv,movies" },
+    ))
+    .addIntegerOption((option) => option.setName("weekday").setDescription("Weekly digest day (0 Sunday – 6 Saturday)").setMinValue(0).setMaxValue(6));
 
   private readonly anilist: AniListClient;
   private readonly tmdb: TmdbClient;
@@ -223,6 +238,8 @@ export class CommunityCommand implements FeatureCommand {
         case "discussion-create": await this.createDiscussion(interaction); return;
         case "discussion-close": await this.closeDiscussionCommand(interaction); return;
         case "media-night": await this.startMediaNight(interaction); return;
+        case "calendar-configure": await this.configureReleaseCalendar(interaction); return;
+        case "calendar-disable": await this.disableReleaseCalendar(interaction); return;
         case "calendar": await this.showCalendar(interaction); return;
         case "history": await this.showHistory(interaction); return;
         case "reading-nominate": await this.nominateReading(interaction); return;
@@ -318,6 +335,19 @@ export class CommunityCommand implements FeatureCommand {
     }
     if (action === "calendar") {
       await this.showCalendar(interaction);
+      return true;
+    }
+    if (action === "calendar-configure") {
+      await interaction.reply({ content: "Configure the digest with /community action:calendar-configure and provide channel, time_zone, local_time and release_cadence. Choose categories, region and weekday as needed.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (action === "calendar-disable") {
+      if (!isGuildManager(interaction)) {
+        await interaction.reply({ content: "Manage Server permission is required.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      await disableReleaseSchedule(interaction.guildId);
+      await interaction.reply({ content: "Release digests are disabled for this server.", flags: MessageFlags.Ephemeral });
       return true;
     }
     if (action === "history") {
@@ -1018,20 +1048,68 @@ export class CommunityCommand implements FeatureCommand {
     await interaction.editReply(`Media Night #${rankingId} is live in <#${interaction.channelId}>: ${message.url}`);
   }
 
+  private async configureReleaseCalendar(interaction: ChatInputCommandInteraction): Promise<void> {
+    if (!isGuildManager(interaction)) throw new Error("Manage Server permission is required to configure release digests.");
+    const channelInput = interaction.options.getString("channel");
+    const channelMatch = channelInput?.match(/^(?:<#(\d{17,20})>|(\d{17,20}))$/);
+    const channelId = channelMatch?.[1] ?? channelMatch?.[2] ?? null;
+    const timeZone = interaction.options.getString("time_zone");
+    const localTime = interaction.options.getString("local_time");
+    const cadence = interaction.options.getString("release_cadence") as "daily" | "weekly" | null;
+    const categories = (interaction.options.getString("release_categories") ?? "anime,tv,movies").split(",");
+    const weekday = interaction.options.getInteger("weekday") ?? 1;
+    const region = interaction.options.getString("region") ?? "IE";
+    if (!channelId || !timeZone || !localTime || !cadence) {
+      throw new Error("Provide channel, time_zone, local_time and release_cadence. Choose release_categories and weekday for a weekly digest.");
+    }
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const target = await interaction.guild!.channels.fetch(channelId);
+    if (!target?.isTextBased() || !("send" in target)) throw new Error("Choose a server text channel where release digests can be posted.");
+    const me = interaction.guild!.members.me;
+    if (!me || !target.permissionsFor(me)?.has(["ViewChannel", "SendMessages", "EmbedLinks"])) {
+      throw new Error("The bot needs View Channel, Send Messages and Embed Links in the selected digest channel.");
+    }
+    const next = await saveReleaseSchedule({
+      guildId: interaction.guildId!,
+      channelId,
+      actorId: interaction.user.id,
+      timeZone,
+      localTime,
+      cadence,
+      weekday,
+      categories,
+      region,
+    });
+    await interaction.editReply(`Release digests are enabled in <#${channelId}>. Next run: <t:${Math.floor(next.getTime() / 1000)}:F>. Categories: ${categories.join(", ")} · Region: ${region.toUpperCase()}.`);
+  }
+
+  private async disableReleaseCalendar(interaction: ChatInputCommandInteraction): Promise<void> {
+    if (!isGuildManager(interaction)) throw new Error("Manage Server permission is required to disable release digests.");
+    await disableReleaseSchedule(interaction.guildId!);
+    await interaction.reply({ content: "Release digests are disabled for this server. The on-demand calendar remains available.", flags: MessageFlags.Ephemeral });
+  }
+
   private async showCalendar(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
     const from = new Date();
     const to = new Date(from.getTime() + 14 * 24 * 60 * 60 * 1000);
-    const results = await upcomingProviderReleases(this.anilist, this.tmdb, from, to);
-    if (!results.length) {
-      await interaction.reply({ content: "No provider-dated anime airings or upcoming film releases were returned for the next 14 days. Missing provider data is not guessed.", flags: MessageFlags.Ephemeral });
-      return;
-    }
+    const schedule = await getReleaseSchedule(interaction.guildId!);
+    const region = schedule?.region ?? "IE";
+    const categories = schedule?.categories ?? ["anime", "tv", "movies"];
+    const results = await upcomingProviderReleases(this.anilist, this.tmdb, from, to, region, categories);
+    const settings = schedule?.enabled
+      ? `Digest: ${schedule.cadence} · ${schedule.local_time} ${schedule.time_zone} · ${region} · ${categories.join(", ")} · <#${schedule.channel_id}>.`
+      : "Automatic digests are currently disabled. A server manager can configure them with /community action:calendar-configure.";
+    const fields = results.slice(0, 12).map((item) => ({
+      name: `${safeDisplay(item.title, 180)} · <t:${Math.floor(item.when.getTime() / 1000)}:R>`,
+      value: `[${item.provider} source](${item.url})`,
+      inline: false,
+    }));
     await interaction.reply({
-      embeds: [homeEmbed("Release calendar · Next 14 days", "Dates are taken directly from AniList and TMDB and retain their provider links.", results.slice(0, 12).map((item) => ({
-        name: `${safeDisplay(item.title, 180)} · <t:${Math.floor(item.when.getTime() / 1000)}:R>`,
-        value: `[${item.provider} source](${item.url})`,
-        inline: false,
-      })))],
+      embeds: [homeEmbed("Release calendar · Next 14 days", `Dates come directly from AniList and TMDB. Missing provider data is not guessed.\n\n${settings}`, fields.length ? fields : [{ name: "No releases returned", value: "No provider-dated anime airings, TV episodes or movie releases were found in the selected categories for this window." }])],
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId("community:calendar-configure").setLabel("Configure digests").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId("community:calendar-disable").setLabel("Disable digests").setStyle(ButtonStyle.Secondary).setDisabled(!schedule?.enabled),
+      )],
       flags: MessageFlags.Ephemeral,
     });
   }
