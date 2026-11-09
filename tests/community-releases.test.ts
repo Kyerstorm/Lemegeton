@@ -53,8 +53,8 @@ test("release calendar includes date-only movie and TV releases scheduled today"
     }],
   } as unknown as TmdbClient;
   const results = await upcomingProviderReleases(anilist, tmdb, from, to, "IE", ["anime", "tv", "movies"]);
-  assert.deepEqual(results.map((item) => item.provider), ["AniList", "TMDB Movies · IE", "TMDB TV"]);
-  assert.equal(results[1]?.title, "Release Today");
+  assert.deepEqual(results.map((item) => item.provider), ["TMDB Movies · IE", "AniList", "TMDB TV"]);
+  assert.equal(results[0]?.title, "Release Today");
   assert.equal(results[2]?.title, "Returning Series · S2 E4 · Next Episode");
 });
 
