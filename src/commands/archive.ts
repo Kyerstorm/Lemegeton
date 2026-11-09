@@ -513,6 +513,30 @@ export class ArchiveCommand implements FeatureCommand {
   async handleButton(interaction: ButtonInteraction): Promise<boolean> {
     if (!interaction.guildId) return false;
     const [, action, value, scope] = interaction.customId.split(":");
+    if (action === "usual") {
+      if (value === "no") {
+        await interaction.reply({ ...archiveHome(), flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      if (value !== "yes" || !scope || !isArchiveCategory(scope)) return false;
+      await interaction.showModal(scope === "panels" ? quickPanelModal() : submitModal(scope,"server"));
+      return true;
+    }
+    if (action === "configure-types" || action === "configure-clear-upload" || action === "configure-clear-moderation") {
+      if (!isGuildManager(interaction)) {
+        await interaction.reply({content:"Manage Server permission is required to change Archive settings.",flags:MessageFlags.Ephemeral});
+        return true;
+      }
+      if (action === "configure-types") {
+        const settings=await getArchiveSettings(interaction.guildId);
+        await interaction.showModal(configureModal(settings.enabledCategories,settings.uploadTypes));
+        return true;
+      }
+      const kind=action==="configure-clear-upload"?"upload":"moderation";
+      await saveArchiveChannelSetting(interaction.guildId,interaction.user.id,kind,null);
+      await interaction.reply({content:kind==="upload"?"The Archive upload channel was cleared.":"The Archive moderation channel was cleared.",flags:MessageFlags.Ephemeral});
+      return true;
+    }
     if (action === "approve" || action === "reject") {
       if (!value || (scope !== "server" && scope !== "global")) return false;
       const member = await interaction.guild!.members.fetch(interaction.user.id);
@@ -567,7 +591,14 @@ export class ArchiveCommand implements FeatureCommand {
         if (!value) return false;
         try {
           await finishArchiveUpload(interaction.guildId, interaction.user.id, value);
-          await interaction.reply({ content: `Submission #${value} is now awaiting moderator review.`, flags: MessageFlags.Ephemeral });
+          const entry=await getArchiveEntry(interaction.guildId,value,true);
+          const notified=entry?await this.notifyModerationChannel(
+            interaction.client,interaction.guildId,value,entry.title,entry.archive_type,entry.visibility,entry.content,entry.source_title??undefined,entry.source_url??undefined,
+          ):false;
+          await interaction.reply({
+            content: `Submission #${value} is now awaiting moderator review.${notified?" Moderators have been notified.":" Moderators can review it from /archive → Review queue."}`,
+            flags: MessageFlags.Ephemeral,
+          });
         } catch (error) {
           const message = error instanceof Error ? error.message : "Could not finish the upload.";
           const issueHash = await createInteractionIssueLog(interaction, "/archive", error, { action: "finish-upload" });
