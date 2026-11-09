@@ -28,6 +28,7 @@ The following verified follow-ups were made on the Draft branch after the initia
 
 - bot.ts now retains handles for the Custom Role reconciliation and daily-worker intervals, clears them during shutdown, and waits for an active daily-worker pass before closing the database pool.
 - The /log and /feedback surfaces now share the fixed 40-character SHA-512-derived issue-reference contract documented in [ISSUE_REFERENCE_FORMAT.md](ISSUE_REFERENCE_FORMAT.md). Generator, PostgreSQL constraint, command input limits, and tests must remain aligned.
+- Guild interaction failures, including consent/preflight checks, now enter the same issue-diagnostic boundary. User-triggered Archive upload and AniList embed message failures also persist a reference and return it to the user. A reference is only available when the diagnostic insert succeeds; database failure is logged separately and cannot produce a retrievable issue record.
 - tests/runtime-config.test.ts adds coverage for security-sensitive runtime configuration defaults and validation rules.
 - The dashboard CI job parses .env.example using Node's native env-file parser. Duplicate S3 variables and shell-style export lines were removed from the template, and its bridge-secret example was left empty rather than presenting a reusable credential.
 - Dashboard command listing and sync now exclude `/log`, `/moderators` and `/planned`; the sync payload is guild-context-only, and a test asserts the operator-command exclusion while keeping `/help`, `/privacy` and `/feedback` present.
