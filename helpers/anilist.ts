@@ -201,7 +201,7 @@ function parseReview(value:unknown):AniListReviewRecord|null {
   createdAt:num(value.createdAt)??0,userName,userUrl,mediaTitle:mediaTitleValue,mediaUrl,
  };
 }
-function parseCreator(value:unknown):AniListCreator|null {
+export function parseCreator(value:unknown):AniListCreator|null {
  if(!isObj(value)||typeof value.id!=="number"||!Number.isSafeInteger(value.id))return null;
  const name=isObj(value.name)?str(value.name.full):null;
  const url=str(value.siteUrl);
