@@ -171,7 +171,7 @@ test("TMDB TV detail normalization includes creators, networks, runtimes and sea
       { id: 1, season_number: 1, name: "First", episode_count: 8, air_date: "2023-01-01" },
       { id: 3, season_number: -1, name: "Invalid" },
     ],
-    next_episode_to_air: { id: 990, episode_number: 1, name: "Next", air_date: "2026-01-01", runtime: 45 },
+    next_episode_to_air: { id: 990, episode_number: 1, season_number: 2, name: "Next", air_date: "2026-01-01", runtime: 45 },
   });
   assert.equal(details?.name, "Example Series");
   assert.equal(details?.numberOfEpisodes, 16);
@@ -180,6 +180,7 @@ test("TMDB TV detail normalization includes creators, networks, runtimes and sea
   assert.deepEqual(details?.networks, ["Network A"]);
   assert.deepEqual(details?.seasons.map((season) => season.seasonNumber), [1, 2]);
   assert.equal(details?.nextEpisode?.sourceUrl, "https://www.themoviedb.org/tv/99/episode/990");
+  assert.equal(details?.nextEpisode?.seasonNumber, 2);
   assert.equal(normalizeTmdbTvDetails({ id: 0, name: "Bad" }), null);
 });
 
@@ -188,13 +189,14 @@ test("TMDB TV season normalization validates episode data and sorts episode numb
     season_number: 1,
     name: "Season One",
     episodes: [
-      { id: 22, episode_number: 2, name: "Second", air_date: "2025-02-01", runtime: 45, overview: "Second." },
-      { id: 21, episode_number: 1, name: "First", air_date: "2025-01-01", runtime: 43, overview: "First." },
+      { id: 22, episode_number: 2, season_number: 1, name: "Second", air_date: "2025-02-01", runtime: 45, overview: "Second." },
+      { id: 21, episode_number: 1, season_number: 1, name: "First", air_date: "2025-01-01", runtime: 43, overview: "First." },
       { id: -1, episode_number: -5, name: "Bad" },
     ],
   }, 99);
   assert.deepEqual(season?.episodes.map((episode) => episode.episodeNumber), [1, 2]);
   assert.equal(season?.episodes[0]?.sourceUrl, "https://www.themoviedb.org/tv/99/episode/21");
+  assert.equal(season?.episodes[0]?.seasonNumber, 1);
   assert.equal(season?.sourceUrl, "https://www.themoviedb.org/tv/99/season/1");
   assert.equal(normalizeTmdbTvSeason({ season_number: -1 }, 99), null);
 });
