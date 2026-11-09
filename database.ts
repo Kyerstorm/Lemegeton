@@ -665,14 +665,14 @@ export async function initDatabase(): Promise<void> {
     await client.query("BEGIN");
     for (const statement of schemaStatements) await client.query(statement);
 
-    const legacyRoleColumns = await client.query<{ column_name: string; data_type: string }>(
+    const existingRoleColumns = await client.query<{ column_name: string; data_type: string }>(
       `SELECT column_name, data_type FROM information_schema.columns
        WHERE table_schema = current_schema() AND table_name = 'booster_roles'
          AND column_name = ANY($1::text[])`,
       [["discord_id", "guild_id", "role_id"]],
     );
-    if (legacyRoleColumns.rows.length === 3) {
-      const types = new Map(legacyRoleColumns.rows.map(row => [row.column_name, row.data_type]));
+    if (existingRoleColumns.rows.length === 3) {
+      const types = new Map(existingRoleColumns.rows.map(row => [row.column_name, row.data_type]));
       for (const column of ["discord_id", "guild_id", "role_id"] as const) {
         if (types.get(column) !== "bigint") {
           await client.query(
@@ -680,9 +680,9 @@ export async function initDatabase(): Promise<void> {
           );
         }
       }
-      logger.info("Legacy booster role identifiers widened to BIGINT for Discord snowflakes");
-    } else if (legacyRoleColumns.rows.length > 0) {
-      logger.warn("Legacy booster_roles table is incomplete; its records were not changed");
+      logger.info("Existing booster role identifiers widened to BIGINT for Discord snowflakes");
+    } else if (existingRoleColumns.rows.length > 0) {
+      logger.warn("Existing booster_roles table is incomplete; its records were not changed");
     }
 
     const defaultGuildId = process.env.GUILD_ID?.trim() || process.env.PRIMARY_GUILD_ID?.trim() || "897814031346319382";
