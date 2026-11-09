@@ -6,7 +6,7 @@ import {
   READING_CATEGORIES,
 } from "../helpers/community/community-reading.js";
 
-test("community reading accepts the supported legacy publication categories", () => {
+test("community reading accepts the supported publication categories", () => {
   assert.deepEqual(READING_CATEGORIES, [
     "manga",
     "manhwa",
