@@ -159,7 +159,25 @@ client.on(Events.InteractionCreate,interaction=>void routeInteraction(interactio
 client.on(Events.MessageCreate,message=>{
  void handleArchiveUploadMessage(message,client).catch(async error=>{
   logger.error("Archive upload processing failed",{guildId:message.guildId,channelId:message.channelId,reason:error instanceof Error?error.message:"Unknown error"});
-  if(!message.author.bot)await message.reply("The Archive could not store that upload privately. No public file link was created.").catch(()=>undefined);
+  if(!message.author.bot&&message.guildId){
+   let reference:string|undefined;
+   try{
+    reference=await createIssueLog({
+     guildId:message.guildId,
+     userId:message.author.id,
+     username:message.author.globalName??message.author.username,
+     interactionId:message.id,
+     channelId:message.channelId,
+     command:"/archive upload",
+     details:{messageId:message.id,attachmentCount:message.attachments.size,attachmentNames:[...message.attachments.values()].slice(0,5).map(item=>item.name)},
+     error,
+    });
+   }catch(logError){
+    logger.error("Could not persist Archive upload issue reference",{messageId:message.id,reason:logError instanceof Error?logError.message:"Unknown logging error"});
+   }
+   const response="The Archive could not store that upload privately. No public file link was created."+(reference?"\n\n"+issueHashNotice(reference):"");
+   await message.reply({content:response,allowedMentions:{parse:[]}}).catch(()=>undefined);
+  }
  });
 });
 
