@@ -1007,17 +1007,42 @@ export class ArchiveCommand implements FeatureCommand {
       return;
     }
     const settings = await getArchiveSettings(interaction.guildId!);
-    await interaction.showModal(new ModalBuilder()
-      .setCustomId("archive:configure")
-      .setTitle("Archive server settings")
-      .addComponents(
-        new ActionRowBuilder<TextInputBuilder>().addComponents(
-          new TextInputBuilder().setCustomId("categories").setLabel("Enabled categories (comma separated)").setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(300).setValue(settings.enabledCategories.join(",")),
-        ),
-        new ActionRowBuilder<TextInputBuilder>().addComponents(
-          new TextInputBuilder().setCustomId("uploads").setLabel("Accepted uploads: image, audio, video").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(40).setValue(settings.uploadTypes.join(",")),
-        ),
-      ));
+    const embed = homeEmbed(
+      "Archive · Server settings",
+      "Choose normal text or announcement channels. The upload channel receives private media uploads for pending contributions; the moderation channel receives new submission cards with approve/reject controls.",
+      [
+        {name:"Upload channel",value:settings.uploadChannelId?"<#"+settings.uploadChannelId+">":"Not configured",inline:true},
+        {name:"Moderation channel",value:settings.moderationChannelId?"<#"+settings.moderationChannelId+">":"Not configured",inline:true},
+        {name:"Enabled categories",value:settings.enabledCategories.map(categoryLabel).join(", ")||"None",inline:false},
+        {name:"Accepted uploads",value:settings.uploadTypes.join(", ")||"None",inline:true},
+      ],
+    );
+    const upload = new ChannelSelectMenuBuilder()
+      .setCustomId("archive:configure-upload")
+      .setPlaceholder("Choose the media upload channel")
+      .setChannelTypes(ChannelType.GuildText,ChannelType.GuildAnnouncement)
+      .setMinValues(1)
+      .setMaxValues(1);
+    const moderation = new ChannelSelectMenuBuilder()
+      .setCustomId("archive:configure-moderation")
+      .setPlaceholder("Choose the moderation log channel")
+      .setChannelTypes(ChannelType.GuildText,ChannelType.GuildAnnouncement)
+      .setMinValues(1)
+      .setMaxValues(1);
+    const controls = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("archive:configure-types").setLabel("Categories & uploads").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("archive:configure-clear-upload").setLabel("Clear upload channel").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("archive:configure-clear-moderation").setLabel("Clear moderation channel").setStyle(ButtonStyle.Secondary),
+    );
+    await interaction.reply({
+      embeds:[embed],
+      components:[
+        new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(upload),
+        new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(moderation),
+        controls,
+      ],
+      flags:MessageFlags.Ephemeral,
+    });
   }
 
   private async showCollections(interaction: ButtonInteraction | ChatInputCommandInteraction): Promise<void> {
