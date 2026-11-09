@@ -55,6 +55,8 @@ const UPLOAD_KINDS = new Set(["image", "audio", "video"]);
 export interface ArchiveSettings {
   enabledCategories: ArchiveCategory[];
   uploadTypes: string[];
+  uploadChannelId: string | null;
+  moderationChannelId: string | null;
 }
 
 export interface ArchiveSubmission {
@@ -132,11 +134,16 @@ export function isArchiveCategory(value: string): value is ArchiveCategory {
 }
 
 export async function getArchiveSettings(guildId: string): Promise<ArchiveSettings> {
-  const row = await queryOne<{ enabled_categories: string; upload_types: string }>(
-    "SELECT enabled_categories, upload_types FROM guild_archive_settings WHERE guild_id = $1",
+  const row = await queryOne<{
+    enabled_categories: string;
+    upload_types: string;
+    upload_channel_id: string | null;
+    moderation_channel_id: string | null;
+  }>(
+    "SELECT enabled_categories, upload_types, upload_channel_id::text, moderation_channel_id::text FROM guild_archive_settings WHERE guild_id = $1",
     [guildId],
   );
-  if (!row) return { enabledCategories: DEFAULT_CATEGORIES, uploadTypes: ["image"] };
+  if (!row) return { enabledCategories: DEFAULT_CATEGORIES, uploadTypes: ["image"], uploadChannelId: null, moderationChannelId: null };
   try {
     const categories = JSON.parse(row.enabled_categories) as unknown;
     const uploads = JSON.parse(row.upload_types) as unknown;
@@ -149,10 +156,12 @@ export async function getArchiveSettings(guildId: string): Promise<ArchiveSettin
     return {
       enabledCategories: [...new Set(categories as ArchiveCategory[])],
       uploadTypes: [...new Set(uploads as string[])],
+      uploadChannelId: row.upload_channel_id,
+      moderationChannelId: row.moderation_channel_id,
     };
   } catch {
     // Invalid settings fail closed instead of enabling categories/uploads by accident.
-    return { enabledCategories: [], uploadTypes: [] };
+    return { enabledCategories: [], uploadTypes: [], uploadChannelId: row.upload_channel_id, moderationChannelId: row.moderation_channel_id };
   }
 }
 
@@ -176,6 +185,43 @@ export async function saveArchiveSettings(
        updated_by = EXCLUDED.updated_by,
        updated_at = NOW()`,
     [guildId, JSON.stringify(normalizedCategories), JSON.stringify(normalizedUploads), actorId],
+  );
+}
+
+export async function saveArchiveChannelSetting(
+  guildId: string,
+  actorId: string,
+  kind: "upload" | "moderation",
+  channelId: string | null,
+): Promise<void> {
+  if (channelId !== null && !/^\d{17,20}$/.test(channelId)) {
+    throw new Error("Choose a normal text or announcement channel from this server.");
+  }
+  const column = kind === "upload" ? "upload_channel_id" : "moderation_channel_id";
+  await query(
+    `INSERT INTO guild_archive_settings (guild_id, ${column}, updated_by, updated_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (guild_id) DO UPDATE
+       SET ${column} = EXCLUDED.${column}, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+    [guildId, channelId, actorId],
+  );
+}
+
+export async function getLastArchiveCategory(guildId: string, userId: string): Promise<ArchiveCategory | null> {
+  const row = await queryOne<{ last_category: string }>(
+    "SELECT last_category FROM archive_user_preferences WHERE guild_id = $1 AND user_id = $2",
+    [guildId, userId],
+  );
+  return row && isArchiveCategory(row.last_category) ? row.last_category : null;
+}
+
+export async function rememberArchiveCategory(guildId: string, userId: string, category: ArchiveCategory): Promise<void> {
+  await query(
+    `INSERT INTO archive_user_preferences (guild_id,user_id,last_category,updated_at)
+     VALUES ($1,$2,$3,NOW())
+     ON CONFLICT (guild_id,user_id)
+     DO UPDATE SET last_category = EXCLUDED.last_category, updated_at = NOW()`,
+    [guildId,userId,category],
   );
 }
 
@@ -311,11 +357,8 @@ export async function getOwnSubmissions(guildId: string, userId: string): Promis
 
 export async function handleArchiveUploadMessage(message: Message, _client: Client): Promise<boolean> {
   if (!message.guildId || message.author.bot || !message.attachments.size) return false;
-  const settingsRow = await queryOne<{ panel_storage_channel_id: string | null }>(
-    "SELECT panel_storage_channel_id FROM guild_settings WHERE guild_id = $1",
-    [message.guildId],
-  ).catch(() => null);
-  if (!settingsRow?.panel_storage_channel_id || settingsRow.panel_storage_channel_id !== message.channelId) return false;
+  const settings = await getArchiveSettings(message.guildId);
+  if (!settings.uploadChannelId || settings.uploadChannelId !== message.channelId) return false;
   const pending = await queryOne<{ id: string; archive_type: ArchiveCategory }>(
     `SELECT id, archive_type FROM community_archive_entries
      WHERE created_guild_id = $1 AND created_by = $2 AND status = 'pending_upload'
@@ -326,7 +369,6 @@ export async function handleArchiveUploadMessage(message: Message, _client: Clie
     await message.reply("There is no pending Archive submission waiting for an upload from you.");
     return true;
   }
-  const settings = await getArchiveSettings(message.guildId);
   let stored = 0;
   for (const attachment of [...message.attachments.values()].slice(0, 5)) {
     const upload = {
