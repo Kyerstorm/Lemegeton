@@ -2,11 +2,11 @@ import {
   ActionRowBuilder, EmbedBuilder, MessageFlags, ModalBuilder, SlashCommandBuilder,
   TextInputBuilder, TextInputStyle, type ChatInputCommandInteraction, type ModalSubmitInteraction,
 } from "discord.js";
-import type { FeatureCommand } from "../helpers/command.js";
-import { loadingMessage } from "../helpers/emoji.js";
-import { findIssueLog, isIssueHash } from "../helpers/issue-logs.js";
-import { logger } from "../helpers/logger.js";
-import { query } from "../database.js";
+import type { FeatureCommand } from "../../helpers/command.js";
+import { loadingMessage } from "../../helpers/emoji.js";
+import { findIssueLog, isIssueHash } from "../../helpers/issue-logs.js";
+import { logger } from "../../helpers/logger.js";
+import { query } from "../../database.js";
 
 function feedbackModal(): ModalBuilder {
   return new ModalBuilder().setCustomId("feedback:submit").setTitle("Send feedback").addComponents(
