@@ -637,15 +637,18 @@ export class ArchiveCommand implements FeatureCommand {
         const creator = interaction.fields.getTextInputValue("creator");
         const tags = interaction.fields.getTextInputValue("tags");
         const settings = await getArchiveSettings(interaction.guildId);
+        const title = interaction.fields.getTextInputValue("title");
+        const body = interaction.fields.getTextInputValue("content");
         const sourceUrl = category === "fanworks" || (category === "soundtracks" && source.trim().startsWith("https://")) ? source : undefined;
         const needsUpload = category === "soundtracks" && !sourceUrl;
+        const sourceTitle = category === "quotes" ? source : category === "soundtracks" && !sourceUrl ? source : undefined;
         const id = await submitArchiveEntry({
           guildId: interaction.guildId,
           userId: interaction.user.id,
           category,
-          title: interaction.fields.getTextInputValue("title"),
-          content: interaction.fields.getTextInputValue("content"),
-          sourceTitle: category === "quotes" ? source : category === "soundtracks" && !sourceUrl ? source : undefined,
+          title,
+          content: body,
+          sourceTitle,
           creator: category === "fanworks" ? creator : undefined,
           mediaType: "Other",
           sourceUrl,
@@ -654,21 +657,58 @@ export class ArchiveCommand implements FeatureCommand {
           visibility: (visibility ?? "server") as ArchiveVisibility,
           needsUpload,
         });
-        const uploadChannel = await queryOne<{ panel_storage_channel_id: string | null }>(
-          "SELECT panel_storage_channel_id FROM guild_settings WHERE guild_id = $1",
-          [interaction.guildId],
-        ).catch(() => null);
+        await rememberArchiveCategory(interaction.guildId,interaction.user.id,category);
+        const settingsAfterSubmit = await getArchiveSettings(interaction.guildId);
+        const moderationPosted = !needsUpload
+          ? await this.notifyModerationChannel(interaction.client,interaction.guildId,id,title,category,(visibility ?? "server") as ArchiveVisibility,body,sourceTitle,sourceUrl)
+          : false;
         const uploadText = needsUpload
-          ? uploadChannel?.panel_storage_channel_id
-            ? `\nUpload the media in <#${uploadChannel.panel_storage_channel_id}> and then press **Finish upload** below.`
-            : "\nThis category needs an audio/video upload; ask a server manager to configure the Archive upload channel."
+          ? settingsAfterSubmit.uploadChannelId
+            ? `\nUpload the media in <#${settingsAfterSubmit.uploadChannelId}> and then press **Finish upload** below.`
+            : "\nA server manager must configure the Archive upload channel before media can be added."
+          : "";
+        const moderationText = !needsUpload
+          ? moderationPosted ? "\nThe moderators have been notified." : "\nModerators can review it from /archive → Review queue."
           : "";
         await interaction.reply({
-          content: `Saved Archive submission #${id}. It is pending review; it will not appear in public browsing until approved.${uploadText}`,
+          content: `Saved Archive submission #${id}. It is pending review; it will not appear in public browsing until approved.${uploadText}${moderationText}`,
           ...(needsUpload ? { components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
             new ButtonBuilder().setCustomId(`archive:finish:${id}`).setLabel("Finish upload").setStyle(ButtonStyle.Success),
           )] } : {}),
           flags: MessageFlags.Ephemeral,
+        });
+        return true;
+      }
+      if (action === "quick-panel") {
+        const title=interaction.fields.getTextInputValue("title").trim();
+        const chapter=parsePanelChapterCaption(interaction.fields.getTextInputValue("chapter_caption"));
+        const mangaReference=parseAniListMangaReference(interaction.fields.getTextInputValue("source_url"));
+        const settings=await getArchiveSettings(interaction.guildId);
+        if(!settings.uploadTypes.includes("image")) throw new Error("This server has not enabled image uploads for the Archive.");
+        if(!settings.uploadChannelId) throw new Error("A server manager must configure the Archive upload channel before using the quick Manga Panels flow.");
+        const id=await submitArchiveEntry({
+          guildId:interaction.guildId,
+          userId:interaction.user.id,
+          category:"panels",
+          title,
+          content:chapter.caption,
+          mediaType:"Manga",
+          sourceUrl:mangaReference.url??undefined,
+          tags:interaction.fields.getTextInputValue("tags").split(","),
+          spoiler:false,
+          visibility:"server",
+          needsUpload:true,
+          chapterNumber:chapter.chapterNumber,
+          linkedMediaProvider:mangaReference.id?"AniList":undefined,
+          linkedMediaId:mangaReference.id??undefined,
+        });
+        await rememberArchiveCategory(interaction.guildId,interaction.user.id,"panels");
+        await interaction.reply({
+          content:`Created Manga Panels submission #${id}. Upload the image(s) in <#${settings.uploadChannelId}> and then press Finish upload below.`,
+          components:[new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId(`archive:finish:${id}`).setLabel("Finish upload").setStyle(ButtonStyle.Success),
+          )],
+          flags:MessageFlags.Ephemeral,
         });
         return true;
       }
