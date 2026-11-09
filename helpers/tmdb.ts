@@ -404,7 +404,7 @@ export class TmdbClient {
       if (result.status !== "fulfilled" || !result.value?.nextEpisode) return [];
       const detail = result.value;
       const episode = detail.nextEpisode;
-      if (!episode.airDate || !/^\\d{4}-\\d{2}-\\d{2}$/.test(episode.airDate)) return [];
+      if (!episode.airDate || !/^\d{4}-\d{2}-\d{2}$/.test(episode.airDate)) return [];
       const when = new Date(`${episode.airDate}T00:00:00.000Z`);
       if (!Number.isFinite(when.getTime()) || episode.airDate < fromDay || episode.airDate > toDay) return [];
       return [{ showId: detail.id, showTitle: detail.name, episode }];
