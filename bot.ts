@@ -6,6 +6,8 @@ import {loadConfig} from "./helpers/config.js";
 import {configureLogger,logger} from "./helpers/logger.js";
 import type {FeatureCommand} from "./helpers/command.js";
 import {handleArchiveUploadMessage} from "./helpers/archive.js";
+import {AniListClient} from "./helpers/anilist.js";
+import {handleAniListLinkMessage} from "./helpers/embeds/anilist.js";
 import {closeDatabase,initDatabase} from "./database.js";
 import {dueDailyDeliveries,dueDailySchedules,markDailyDelivery,prepareDailyDelivery} from "./helpers/community.js";
 import {claimDueReadingReminders,markReadingReminderSent} from "./helpers/community-reading.js";
@@ -22,6 +24,7 @@ import {startMediaNotificationScheduler,stopMediaNotificationScheduler} from "./
 
 const config=loadConfig();configureLogger(config.logLevel);
 const client=new Client({intents:[GatewayIntentBits.Guilds,GatewayIntentBits.GuildMembers,GatewayIntentBits.GuildMessages,GatewayIntentBits.MessageContent]});
+const aniListEmbedClient=new AniListClient(config.anilistApiUrl,config.anilistTimeoutMs);
 const commands=createCommandRegistry(config);
 const commandByName=new Map<string,FeatureCommand>(commands.map(command=>[command.data.name,command]));
 let atlasBridge: Server | undefined;
@@ -176,6 +179,28 @@ client.on(Events.MessageCreate,message=>{
     logger.error("Could not persist Archive upload issue reference",{messageId:message.id,reason:logError instanceof Error?logError.message:"Unknown logging error"});
    }
    const response="The Archive could not store that upload privately. No public file link was created."+(reference?"\n\n"+issueHashNotice(reference):"");
+   await message.reply({content:response,allowedMentions:{parse:[]}}).catch(()=>undefined);
+  }
+ });
+ void handleAniListLinkMessage(message,aniListEmbedClient).catch(async error=>{
+  logger.error("AniList link embed failed",{guildId:message.guildId,channelId:message.channelId,messageId:message.id,reason:error instanceof Error?error.message:"Unknown error"});
+  if(!message.author.bot&&message.guildId){
+   let reference:string|undefined;
+   try{
+    reference=await createIssueLog({
+     guildId:message.guildId,
+     userId:message.author.id,
+     username:message.author.globalName??message.author.username,
+     interactionId:message.id,
+     channelId:message.channelId,
+     command:"AniList link embed",
+     details:{messageId:message.id,urlCount:(message.content.match(/https?:\\/\\//gi)??[]).length},
+     error,
+    });
+   }catch(logError){
+    logger.error("Could not persist AniList embed issue reference",{messageId:message.id,reason:logError instanceof Error?logError.message:"Unknown logging error"});
+   }
+   const response="I could not build the AniList embed for that link."+(reference?"\\n\\n"+issueHashNotice(reference):"");
    await message.reply({content:response,allowedMentions:{parse:[]}}).catch(()=>undefined);
   }
  });
