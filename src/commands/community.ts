@@ -1021,7 +1021,7 @@ export class CommunityCommand implements FeatureCommand {
     }
     const closesAt = new Date(Date.now() + hours * 60 * 60 * 1000);
     const title = category === "ANIME" ? "Anime Media Night" : "Manga Media Night";
-    const rankingId = await createMediaNight({
+    const session = await createMediaNight({
       guildId: interaction.guildId!,
       channelId: interaction.channelId,
       creatorId: interaction.user.id,
@@ -1030,7 +1030,7 @@ export class CommunityCommand implements FeatureCommand {
       closesAt,
       candidates: selected,
     });
-    const fields = selected.map((candidate, index) => ({
+    const fields = session.candidates.map((candidate, index) => ({
       name: `${index + 1}. ${safeDisplay(candidate.title, 180)}`,
       value: `[AniList source](${candidate.url})${candidate.year ? ` · ${candidate.year}` : ""}`,
       inline: false,
@@ -1038,14 +1038,14 @@ export class CommunityCommand implements FeatureCommand {
     const message = await (interaction.channel as TextChannel).send({
       embeds: [homeEmbed(title, `Choose one title below. Votes are final and locked once cast. Voting closes <t:${Math.floor(closesAt.getTime() / 1000)}:R>. Provider-tagged adult and sensitive-content entries are excluded; this is a metadata filter, not an age rating.`, fields)],
       components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-        ...selected.map((candidate) => new ButtonBuilder()
-          .setCustomId(`community:media-night-vote:${rankingId}:${candidate.id}`)
+        ...session.candidates.map((candidate) => new ButtonBuilder()
+          .setCustomId(`community:media-night-vote:${session.id}:${candidate.id}`)
           .setLabel(candidate.title.slice(0, 80))
           .setStyle(ButtonStyle.Primary)),
       )],
       allowedMentions: { parse: [] },
     });
-    await interaction.editReply(`Media Night #${rankingId} is live in <#${interaction.channelId}>: ${message.url}`);
+    await interaction.editReply(`Media Night #${session.id} is live in <#${interaction.channelId}>: ${message.url}`);
   }
 
   private async configureReleaseCalendar(interaction: ChatInputCommandInteraction): Promise<void> {
