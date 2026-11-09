@@ -16,7 +16,7 @@ export class LogCommand implements FeatureCommand {
   readonly data = new SlashCommandBuilder().setName("log")
     .setDescription("Inspect a diagnostic issue reference (bot moderators only)")
     .addStringOption((option) => option.setName("issue_hash")
-      .setDescription("Paste the 40-character issue reference")
+      .setDescription("Paste the 128-character SHA-512 reference (legacy 40-character references also work)")
       .setMinLength(40).setMaxLength(128).setRequired(true));
 
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -34,7 +34,7 @@ export class LogCommand implements FeatureCommand {
       return;
     }
     if (!isIssueHash(hash)) {
-      await interaction.reply({ content: "Enter a valid 40-character hexadecimal issue reference (or a legacy 128-character reference).", flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: "Enter a valid 128-character SHA-512 hexadecimal reference or a legacy 40-character reference.", flags: MessageFlags.Ephemeral });
       return;
     }
     await interaction.reply({ content: loadingMessage("Finding the diagnostic record…"), flags: MessageFlags.Ephemeral });
