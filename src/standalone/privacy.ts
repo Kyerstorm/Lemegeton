@@ -2,7 +2,7 @@ import {
   ActionRowBuilder, EmbedBuilder, MessageFlags, SlashCommandBuilder, StringSelectMenuBuilder,
   type ChatInputCommandInteraction, type StringSelectMenuInteraction,
 } from "discord.js";
-import type { FeatureCommand } from "../helpers/command.js";
+import type { FeatureCommand } from "../../helpers/command.js";
 
 const SECTIONS = [
   { label: "Information processed", description: "Identifiers and feature inputs.", body: "Depending on the feature, Lemegeton may process Discord user, guild, channel, message and interaction IDs; display names and avatars; role and configuration data; search terms and URLs; provider account identifiers; archive submissions; votes, RSVPs and discussions; feedback; and diagnostic records. The bot does not provide personal watch, reading or play-progress tracking." },
