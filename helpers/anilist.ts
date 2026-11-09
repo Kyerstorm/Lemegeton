@@ -29,6 +29,10 @@ export interface AniListFavoriteMedia {id:number;title:string;url:string;image:s
 export interface AniListFavoriteCharacter {id:number;name:string;url:string;image:string|null}
 export interface AniListFavoritePerson {id:number;name:string;url:string;image:string|null}
 export interface AniListPublicActivity {id:number;kind:"TEXT"|"MESSAGE";createdAt:number;url:string;text:string;userName:string;recipientName:string|null}
+export type AniListEntityKind = "CHARACTER" | "STAFF" | "STUDIO";
+export interface AniListPublicWork {id:number;type:AniListMediaType;title:string;url:string;image:string|null;role:string|null}
+export interface AniListPublicEntity {id:number;kind:AniListEntityKind;name:string;url:string;image:string|null;description:string|null;roles:string[];yearsActive:number[];works:AniListPublicWork[]}
+export interface AniListReviewRecord {id:number;url:string;summary:string|null;body:string|null;score:number|null;rating:number|null;ratingAmount:number|null;createdAt:number;userName:string;userUrl:string;mediaTitle:string;mediaUrl:string}
 export interface AniListUserInterests {
   anime:{genres:string[];tags:string[]};
   manga:{genres:string[];tags:string[]};
@@ -145,7 +149,59 @@ function parseMedia(v:unknown):AniListMedia|null {
   }).slice(0,10),
   relations:edges.flatMap(x=>{if(!isObj(x)||!isObj(x.node)||x.node.isAdult===true)return[];const n=x.node;const u=str(n.siteUrl);if(!u||typeof n.id!=="number"||(n.type!=="ANIME"&&n.type!=="MANGA"))return[];try{const parsed=new URL(u);if(parsed.protocol!=="https:"||parsed.hostname!=="anilist.co")return[];}catch{return[];}return[{id:n.id,title:titleOf(n.title),relation:str(x.relationType)??"RELATED",url:u,category:n.type==="ANIME"?"anime" as const:"manga" as const}];}).slice(0,10),trailer:parseTrailer(v.trailer)};
 }
-export function parseCreator(value:unknown):AniListCreator|null {
+export function parsePublicWork(value:unknown,role:string|null=null):AniListPublicWork|null {
+ if(!isObj(value)||typeof value.id!=="number"||(value.type!=="ANIME"&&value.type!=="MANGA")||value.isAdult===true)return null;
+ const url=str(value.siteUrl);if(!url)return null;
+ try{const parsed=new URL(url);if(parsed.protocol!=="https:"||parsed.hostname!=="anilist.co")return null;}catch{return null;}
+ return{id:value.id,type:value.type,title:titleOf(value.title),url,image:imageOf(value.coverImage),role};
+}
+function parsePublicEntity(value:unknown,kind:AniListEntityKind):AniListPublicEntity|null {
+ if(!isObj(value)||typeof value.id!=="number")return null;
+ const name=kind==="STUDIO"?str(value.name):isObj(value.name)?str(value.name.full):null;
+ const url=str(value.siteUrl);if(!name||!url)return null;
+ try{const parsed=new URL(url);if(parsed.protocol!=="https:"||parsed.hostname!=="anilist.co")return null;}catch{return null;}
+ const rawWorks=kind==="STAFF"
+  ? (isObj(value.staffMedia)&&Array.isArray(value.staffMedia.edges)?value.staffMedia.edges:[])
+  : (isObj(value.media)&&Array.isArray(value.media.nodes)?value.media.nodes:[]);
+ const works=rawWorks.flatMap(entry=>{
+  const row=kind==="STAFF"&&isObj(entry)?entry:{node:entry};
+  const node=isObj(row.node)?row.node:{};
+  const work=parsePublicWork(node,kind==="STAFF"?str(row.staffRole):null);
+  return work?[work]:[];
+ }).slice(0,12);
+ return{
+  id:value.id,kind,name,url,image:imageOf(kind==="STUDIO"?value:value.image),
+  description:str(value.description),
+  roles:Array.isArray(value.primaryOccupations)?value.primaryOccupations.filter((item):item is string=>typeof item==="string").slice(0,8):[],
+  yearsActive:Array.isArray(value.yearsActive)?value.yearsActive.filter((item):item is number=>typeof item==="number"&&Number.isInteger(item)).slice(0,8):[],
+  works,
+ };
+}
+function parsePublicActivity(value:unknown):AniListPublicActivity|null {
+ if(!isObj(value))return null;
+ const id=num(value.id),createdAt=num(value.createdAt),url=str(value.siteUrl);
+ const user=isObj(value.user)?value.user:{},userName=str(user.name);
+ if(!id||!createdAt||!url||!userName)return null;
+ try{const parsed=new URL(url);if(parsed.protocol!=="https:"||parsed.hostname!=="anilist.co")return null;}catch{return null;}
+ const kind=value.message!==undefined?"MESSAGE":value.text!==undefined?"TEXT":null;
+ if(!kind)return null;
+ return{id,kind,createdAt,url,text:str(kind==="MESSAGE"?value.message:value.text)??"",userName,recipientName:isObj(value.recipient)?str(value.recipient.name):null};
+}
+function parseReview(value:unknown):AniListReviewRecord|null {
+ if(!isObj(value)||typeof value.id!=="number")return null;
+ const url=str(value.siteUrl),user=isObj(value.user)?value.user:{},media=isObj(value.media)?value.media:{};
+ const userUrl=str(user.siteUrl),mediaUrl=str(media.siteUrl),userName=str(user.name),mediaTitleValue=titleOf(media.title);
+ if(!url||!userUrl||!mediaUrl||!userName||media.isAdult===true)return null;
+ for(const candidate of [url,userUrl,mediaUrl]){
+  try{const parsed=new URL(candidate);if(parsed.protocol!=="https:"||parsed.hostname!=="anilist.co")return null;}catch{return null;}
+ }
+ return{
+  id:value.id,url,summary:str(value.summary),body:str(value.body),
+  score:num(value.score),rating:num(value.rating),ratingAmount:num(value.ratingAmount),
+  createdAt:num(value.createdAt)??0,userName,userUrl,mediaTitle:mediaTitleValue,mediaUrl,
+ };
+}
+function parseCreator(value:unknown):AniListCreator|null {
  if(!isObj(value)||typeof value.id!=="number"||!Number.isSafeInteger(value.id))return null;
  const name=isObj(value.name)?str(value.name.full):null;
  const url=str(value.siteUrl);
@@ -231,6 +287,11 @@ const STAFF_SEARCH=`query CreatorSearch($search:String,$page:Int,$perPage:Int){P
 const USER=`query User($name:String){User(name:$name){id name siteUrl avatar{large} bannerImage about(asHtml:false) statistics{anime{count meanScore episodesWatched minutesWatched statuses{status count} formats{format count} genres{genre count}} manga{count meanScore chaptersRead volumesRead statuses{status count} formats{format count} genres{genre count}}} favourites{anime(page:1,perPage:5){nodes{id siteUrl title{romaji english native} coverImage{large}}} manga(page:1,perPage:5){nodes{id siteUrl title{romaji english native} coverImage{large}}} characters(page:1,perPage:5){nodes{id siteUrl name{full} image{large}}} staff(page:1,perPage:5){nodes{id siteUrl name{full} image{large}}} studios(page:1,perPage:5){nodes{id siteUrl name}}}}}`;
 const TASTE=`query UserTaste($name:String){anime:MediaListCollection(userName:$name,type:ANIME){lists{entries{media{genres tags{name rank isMediaSpoiler}}}}} manga:MediaListCollection(userName:$name,type:MANGA){lists{entries{media{genres tags{name rank isMediaSpoiler}}}}}}}`;
 const USER_ACTIVITIES=`query UserActivities($id:Int){User(id:$id){activities(page:1,perPage:8,sort:ID_DESC){... on TextActivity{id siteUrl createdAt text user{name}} ... on MessageActivity{id siteUrl createdAt message user{name} recipient{name}}}}}`;
+const CHARACTER_DETAILS=`query CharacterDetails($id:Int!){Character(id:$id){id name{full} siteUrl image{large} description(asHtml:false) gender age favourites media(page:1,perPage:12,sort:POPULARITY_DESC){nodes{id type isAdult title{romaji english native} siteUrl coverImage{large}}}}}`;
+const STAFF_DETAILS=`query StaffDetails($id:Int!){Staff(id:$id){id name{full} siteUrl image{large} description(asHtml:false) primaryOccupations yearsActive staffMedia(page:1,perPage:12,sort:POPULARITY_DESC){edges{staffRole node{id type isAdult title{romaji english native} siteUrl coverImage{large}}}}}}`;
+const STUDIO_DETAILS=`query StudioDetails($id:Int!){Studio(id:$id){id name siteUrl isAnimationStudio media(page:1,perPage:12,sort:POPULARITY_DESC){nodes{id type isAdult title{romaji english native} siteUrl coverImage{large}}}}}`;
+const REVIEW_DETAILS=`query ReviewDetails($id:Int!){Review(id:$id){id summary body score rating ratingAmount createdAt siteUrl user{name siteUrl} media{id type isAdult title{romaji english native} siteUrl}}}`;
+const ACTIVITY_DETAILS=`query ActivityDetails($id:Int!){Activity(id:$id){... on TextActivity{id siteUrl createdAt text user{name siteUrl}} ... on MessageActivity{id siteUrl createdAt message user{name siteUrl} recipient{name}}}}`;
 const MEDIA_DETAILS=`query MediaDetails($id:Int!,$type:MediaType!){Media(id:$id,type:$type){id type isAdult title{romaji english native} description(asHtml:false) siteUrl coverImage{large} bannerImage averageScore status format startDate{year month day} endDate{year month day} episodes chapters volumes genres studios(isMain:true){nodes{name}} popularity favourites source staff(page:1,perPage:16,sort:RELEVANCE){edges{role node{id name{full} siteUrl image{large}}}} characters(page:1,perPage:24,sort:ROLE){edges{role node{id name{full} image{large} isAdult}}} tags{name rank isMediaSpoiler isAdult} stats{statusDistribution{status amount} scoreDistribution{score amount}} recommendations(sort:RATING,perPage:10){edges{node{mediaRecommendation{id siteUrl title{romaji english native} coverImage{large} isAdult}}}} relations{edges{relationType node{id type isAdult siteUrl title{romaji english}}}} trailer{id site}}}`;
 const AIRING=`query Airing($from:Int,$to:Int){Page(page:1,perPage:50){airingSchedules(airingAt_greater:$from,airingAt_lesser:$to,sort:TIME){airingAt episode media{id title{romaji english} siteUrl coverImage{large} isAdult}}}}`;
 const MEDIA_NIGHT_QUERY=`query MediaNight($type:MediaType!){Page(page:1,perPage:50){media(type:$type,sort:TRENDING_DESC,isAdult:false){id type title{romaji english native} description(asHtml:false) siteUrl coverImage{large} startDate{year} duration genres tags{name isMediaSpoiler} isAdult}}}}`;
@@ -295,6 +356,23 @@ export class AniListClient {
    } satisfies AniListRecentlyFinishedMedia];
   });
  }
+ async getPublicEntity(id:number,kind:AniListEntityKind):Promise<AniListPublicEntity|null>{
+  if(!Number.isSafeInteger(id)||id<1)throw new RangeError("AniList entity ID must be a positive integer.");
+  const query=kind==="CHARACTER"?CHARACTER_DETAILS:kind==="STAFF"?STAFF_DETAILS:STUDIO_DETAILS;
+  const field=kind==="CHARACTER"?"Character":kind==="STAFF"?"Staff":"Studio";
+  const data=await this.graphql(query,{id});
+  return parsePublicEntity(data[field],kind);
+ }
+ async getReviewById(id:number):Promise<AniListReviewRecord|null>{
+  if(!Number.isSafeInteger(id)||id<1)throw new RangeError("AniList review ID must be a positive integer.");
+  const data=await this.graphql(REVIEW_DETAILS,{id});
+  return parseReview(data.Review);
+ }
+ async getActivityById(id:number):Promise<AniListPublicActivity|null>{
+  if(!Number.isSafeInteger(id)||id<1)throw new RangeError("AniList activity ID must be a positive integer.");
+  const data=await this.graphql(ACTIVITY_DETAILS,{id});
+  return parsePublicActivity(data.Activity);
+ }
  async getMediaById(id:number,type:AniListMediaType):Promise<AniListMedia|null>{
   if(!Number.isSafeInteger(id)||id<1)throw new RangeError("AniList media ID must be a positive integer.");
   const data=await this.graphql(MEDIA_DETAILS,{id,type});
@@ -308,14 +386,8 @@ export class AniListClient {
   const rows=Array.isArray(user.activities)?user.activities:[];
   return rows.flatMap((value):AniListPublicActivity[]=>{
    if(!isObj(value))return[];
-   const id=num(value.id),createdAt=num(value.createdAt),url=str(value.siteUrl),actor=isObj(value.user)?str(value.user.name):null;
-   if(!id||!createdAt||!url||!actor)return[];
-   try{const parsed=new URL(url);if(parsed.protocol!=="https:"||parsed.hostname!=="anilist.co")return[];}catch{return[];}
-   const kind=value.message!==undefined?"MESSAGE":value.text!==undefined?"TEXT":null;
-   if(!kind)return[];
-   const body=kind==="MESSAGE"?str(value.message):str(value.text);
-   const recipient=isObj(value.recipient)?str(value.recipient.name):null;
-   return[{id,kind,createdAt,url,text:body??"",userName:actor,recipientName:recipient}];
+   const activity=parsePublicActivity(value);
+   return activity?[activity]:[];
   }).slice(0,8);
  }
  async getUser(username:string):Promise<AniListUserProfile|null>{
