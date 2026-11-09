@@ -48,7 +48,7 @@ export interface AniListUserProfile {
   id:number; name:string; url:string; avatar:string|null; banner:string|null; about:string|null;
   anime:AniListUserStatistics;
   manga:AniListUserStatistics;
-  favorites:{anime:AniListFavoriteMedia[];manga:AniListFavoriteMedia[];characters:AniListFavoriteCharacter[];staff:AniListFavoritePerson[];studios:AniListFavoritePerson[]};
+  favorites:{anime:AniListFavoriteMedia[];manga:AniListFavoriteMedia[];characters:AniListFavoriteCharacter[];staff?:AniListFavoritePerson[];studios?:AniListFavoritePerson[]};
 }
 export interface AniListRecentlyFinishedMedia {
   id: number;
@@ -120,13 +120,15 @@ function parseMedia(v:unknown):AniListMedia|null {
    if(!isObj(x)||!isObj(x.name)||typeof x.id!=="number")return[];
    const url=str(x.siteUrl);if(!url)return[];
    try{const parsed=new URL(url);if(parsed.protocol!=="https:"||parsed.hostname!=="anilist.co")return[];}catch{return[];}
-   return[{id:x.id,name:str(x.name.full)??"Unknown",role:str(x.role)??"Staff",url,image:imageOf(x.image)}];
+   const id=num(x.id);if(id===null)return[];
+   return[{id,name:str(x.name.full)??"Unknown",role:str(x.role)??"Staff",url,image:imageOf(x.image)}];
   }).slice(0,16),
   characters:(isObj(v.characters)&&Array.isArray(v.characters.edges)?v.characters.edges:[]).flatMap(x=>{
    if(!isObj(x)||!isObj(x.node)||typeof x.node.id!=="number"||x.node.isAdult===true)return[];
    const node=x.node,name=isObj(node.name)?str(node.name.full):null;
    if(!name)return[];
-   return[{id:node.id,name,role:str(x.role)??"SUPPORTING",url:`https://anilist.co/character/${node.id}`,image:imageOf(node.image)}];
+   const id=num(node.id);if(id===null)return[];
+   return[{id,name,role:str(x.role)??"SUPPORTING",url:`https://anilist.co/character/${id}`,image:imageOf(node.image)}];
   }).slice(0,24),
   tags:(Array.isArray(v.tags)?v.tags:[]).flatMap(x=>isObj(x)&&typeof x.name==="string"&&!x.isAdult?[{name:x.name,rank:num(x.rank),isSpoiler:x.isMediaSpoiler===true}]:[]).slice(0,40),
   popularity:num(v.popularity),favourites:num(v.favourites),source:str(v.source),
@@ -195,6 +197,17 @@ function favoriteCharacters(v:unknown):AniListFavoriteCharacter[] {
   if(!name||!url)return[];
   try{const parsed=new URL(url);if(parsed.protocol!=="https:"||parsed.hostname!=="anilist.co")return[];}catch{return[];}
   return[{id:item.id,name,url,image:imageOf(item.image)}];
+ }).slice(0,5);
+}
+function favoritePeople(value:unknown,kind:"staff"|"studio"):AniListFavoritePerson[] {
+ const nodes=isObj(value)&&Array.isArray(value.nodes)?value.nodes:[];
+ return nodes.flatMap(item=>{
+  if(!isObj(item)||typeof item.id!=="number")return[];
+  const name=kind==="studio"?str(item.name):isObj(item.name)?str(item.name.full):null;
+  const url=str(item.siteUrl);
+  if(!name||!url)return[];
+  try{const parsed=new URL(url);if(parsed.protocol!=="https:"||parsed.hostname!=="anilist.co")return[];}catch{return[];}
+  return[{id:item.id,name,url,image:imageOf(kind==="studio"?item:item.image)}];
  }).slice(0,5);
 }
 function parseInterestSection(value:unknown):AniListUserInterests["anime"] {
