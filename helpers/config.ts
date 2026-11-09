@@ -12,7 +12,7 @@ export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
  const discordToken=required(env,"DISCORD_TOKEN");const applicationId=env.DISCORD_CLIENT_ID?.trim()||required(env,"BOT_ID");
  if(!/^\d{17,20}$/.test(applicationId))throw new Error("BOT_ID / DISCORD_CLIENT_ID must be a valid Discord application ID.");
  const botModeratorGuildId=env.BOT_MODERATOR_GUILD_ID?.trim()||null;
- if(botModeratorGuildId&&!/^\\d{17,20}$/.test(botModeratorGuildId))throw new Error("BOT_MODERATOR_GUILD_ID must be a valid 17–20 digit Discord server ID.");
+ if(botModeratorGuildId&&!/^\d{17,20}$/.test(botModeratorGuildId))throw new Error("BOT_MODERATOR_GUILD_ID must be a valid 17–20 digit Discord server ID.");
  const anilistApiUrl=env.ANILIST_API_URL?.trim()||"https://graphql.anilist.co";const parsed=new URL(anilistApiUrl);
  const local=["localhost","127.0.0.1","[::1]"].includes(parsed.hostname);
  if(parsed.protocol!=="https:"&&!(parsed.protocol==="http:"&&local))throw new Error("ANILIST_API_URL must use HTTPS (HTTP only for loopback development).");
