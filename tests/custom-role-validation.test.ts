@@ -44,7 +44,7 @@ test("role names reject empty, invisible, mass-mention and overlong values", () 
 test("role names reject protected words including common leetspeak and spaced evasions", () => {
   assert.match(validateCustomRoleName("M0d Squad", nameSettings).error ?? "", /moderator|mod/i);
   assert.match(validateCustomRoleName("s t a f f team", nameSettings).error ?? "", /staff/i);
-  assert.match(validateCustomRoleName("b0t helper", nameSettings).error ?? "", /bot/i);
+  assert.match(validateCustomRoleName("b0t crew", nameSettings).error ?? "", /bot/i);
 });
 
 test("server roles and duplicate role names are reserved", () => {
