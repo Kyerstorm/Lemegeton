@@ -68,6 +68,7 @@ export interface TmdbCollection {
 
 export interface TmdbTvEpisode {
   episodeNumber: number;
+  seasonNumber: number | null;
   name: string;
   airDate: string | null;
   runtime: number | null;
@@ -243,6 +244,7 @@ function normalizeTmdbEpisode(value: unknown, showId: number): TmdbTvEpisode | n
   const name = typeof item.name === "string" && item.name.trim() ? item.name.trim() : `Episode ${item.episode_number}`;
   return {
     episodeNumber:item.episode_number,
+    seasonNumber:typeof item.season_number === "number" && Number.isSafeInteger(item.season_number) && item.season_number >= 0 ? item.season_number : null,
     name:name.slice(0,200),
     airDate:typeof item.air_date === "string" && item.air_date ? item.air_date : null,
     runtime:typeof item.runtime === "number" && Number.isFinite(item.runtime) && item.runtime > 0 ? item.runtime : null,
@@ -397,7 +399,7 @@ export class TmdbClient {
       if (result.status !== "fulfilled" || !result.value?.nextEpisode) return [];
       const detail = result.value;
       const episode = detail.nextEpisode;
-      if (!episode.airDate || !/^\\d{4}-\\d{2}-\\d{2}$/.test(episode.airDate)) return [];
+      if (!episode.airDate || !/^\d{4}-\d{2}-\d{2}$/.test(episode.airDate)) return [];
       const when = new Date(`${episode.airDate}T00:00:00.000Z`);
       if (!Number.isFinite(when.getTime()) || when < from || when > to) return [];
       return [{ showId: detail.id, showTitle: detail.name, episode }];
