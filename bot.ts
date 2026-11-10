@@ -18,7 +18,7 @@ import {claimDueMediaNightResults,dueDailyDeliveries,dueDailySchedules,markDaily
 import {claimDueReadingReminders,markReadingReminderSent} from "./helpers/community/community-reading.js";
 import {createCommandRegistry} from "./src/registry.js";
 import {isFeatureEnabled} from "./helpers/runtime/settings.js";
-import {deleteGuildData,ensureGuildRetentionSettings,getGuildRetentionSettings,isGuildRetentionConfigured,recordGuildInviter} from "./helpers/runtime/guild-retention.js";
+import {deleteGuildData,ensureGuildRetentionSettings,getGuildRetentionSettings,isGuildRetentionConfigured,recordGuildInviter,retryDepartedGuildDeletions} from "./helpers/runtime/guild-retention.js";
 import {homeEmbed} from "./helpers/runtime/discord.js";
 import {handleConsentButton,initUserConsentSchema,requireCurrentConsent} from "./helpers/security/terms-consent.js";
 import {safeInteractionErrorMessage} from "./helpers/commands/command-errors.js";
@@ -202,9 +202,14 @@ client.once(Events.ClientReady,ready=>{
    if(await isGuildRetentionConfigured(guild.id))await reconcileCustomRoleGuild(guild,config.customRolesMassArchiveThreshold);
   }).catch(error=>logger.error("Guild retention setup initialization failed",{guildId:guild.id,reason:error instanceof Error?error.message:"Unknown error"}));
  }
+ void retryDepartedGuildDeletions(ready.guilds.cache.keys()).then(result=>{
+  if(result.deleted||result.failed)logger.info("Retried incomplete guild-leave data deletion",{...result});
+ }).catch(error=>logger.error("Guild-leave deletion retry scan failed",{reason:error instanceof Error?error.message:"Unknown error"}));
  void startCustomRolePicker(client,config).catch(error=>logger.error("Custom Roles picker startup failed",{reason:error instanceof Error?error.message:"Unknown error"}));
  void startDashboardBridge(client,commands,config).catch(error=>logger.error("Dashboard bot bridge startup failed",{reason:error instanceof Error?error.message:"Unknown error"}));
  reconciliationTimer=setInterval(async()=>{
+  const deletion=await retryDepartedGuildDeletions(client.guilds.cache.keys());
+  if(deletion.deleted||deletion.failed)logger.info("Retried incomplete guild-leave data deletion",deletion);
   for(const guild of client.guilds.cache.values()){
    if(await isGuildRetentionConfigured(guild.id))void reconcileCustomRoleGuild(guild,config.customRolesMassArchiveThreshold).catch(error=>logger.error("Custom Roles reconciliation failed",{guildId:guild.id,reason:error instanceof Error?error.message:"Unknown error"}));
   }
