@@ -41,7 +41,7 @@ import {
 import { renderAtlasSnapshot } from "../../helpers/media/atlas-renderer.js";
 import { logger } from "../../helpers/runtime/logger.js";
 import { loadingMessage } from "../../helpers/emoji.js";
-import { parseGridTitles, renderMediaGrid } from "../../helpers/media/media-grid.js";
+import { parseGridSourceUrls, parseGridTitles, renderMediaGrid, type MediaGridSource } from "../../helpers/media/media-grid.js";
 import { parseMediaComparisonEntries, type MediaComparisonCategory } from "../../helpers/media/media-comparison.js";
 import { rankCrossMediaCandidates, recommendationGenreLabels, type CrossMediaCandidate } from "../../helpers/media/cross-media-recommendations.js";
 
@@ -318,7 +318,7 @@ export class DiscoverCommand implements FeatureCommand {
     .setName("discover")
     .setDescription("Explore media across supported metadata providers")
     .addStringOption((option) => option.setName("query").setDescription("Search for a title").setMinLength(2).setMaxLength(100))
-    .addStringOption((option) => option.setName("grid_titles").setDescription("Nine titles, one per line, for the 3×3 cover grid").setMaxLength(1_000))
+    .addStringOption((option) => option.setName("grid_titles").setDescription("Nine titles or exact AniList/IGDB URLs, one per line").setMaxLength(2_000))
     .addStringOption((option) => option.setName("category").setDescription("Media category").addChoices(
       ...CATEGORIES.map((category) => ({ name: category.label, value: category.value })),
     ))
@@ -433,13 +433,15 @@ export class DiscoverCommand implements FeatureCommand {
       }
       const rawTitles = interaction.options.getString("grid_titles") ?? "";
       let titles: string[];
+      let sources: MediaGridSource[] | null;
       try {
         titles = parseGridTitles(rawTitles);
+        sources = parseGridSourceUrls(titles);
       } catch (error) {
-        await interaction.reply({ content: error instanceof Error ? error.message : "Enter nine titles, one per line.", flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: error instanceof Error ? error.message : "Enter nine titles or provider URLs, one per line.", flags: MessageFlags.Ephemeral });
         return;
       }
-      await this.mediaGridAndRespond(interaction, titles, category as "anime" | "manga" | "light_novel" | "game");
+      await this.mediaGridAndRespond(interaction, titles, category as "anime" | "manga" | "light_novel" | "game", sources);
       return;
     }
     if (!query) {
@@ -1153,36 +1155,71 @@ export class DiscoverCommand implements FeatureCommand {
     interaction: ChatInputCommandInteraction,
     titles: string[],
     category: "anime" | "manga" | "light_novel" | "game",
+    sources: MediaGridSource[] | null = null,
   ): Promise<void> {
     await interaction.reply({
       content: loadingMessage("Resolving the nine media covers…"),
       flags: MessageFlags.Ephemeral,
     });
-    const items: Array<{ title: string; image: string | null }> = [];
-    for (const title of titles) {
-      try {
-        if (category === "game") {
-          const record = (await this.igdb.search(title))[0];
-          items.push({ title: record?.title ?? title, image: record?.image ?? null });
-        } else {
-          const records = await this.anilist.search(title, category === "anime" ? "ANIME" : "MANGA", category === "light_novel");
-          const record = records[0];
-          items.push({
-            title: record?.title.english ?? record?.title.romaji ?? record?.title.native ?? title,
-            image: record?.coverImage ?? null,
-          });
-        }
-      } catch {
-        // A single provider lookup must not prevent the remaining grid tiles from rendering.
-        items.push({ title, image: null });
-      }
-    }
+    const fallbackTitle = (source: MediaGridSource): string =>
+      source.kind === "game" ? source.slug.replaceAll("-", " ") : source.kind + " #" + source.id;
+    const items = sources
+      ? await Promise.all(sources.map(async source => {
+          const fallback = fallbackTitle(source);
+          try {
+            if (source.kind === "anime" || source.kind === "manga") {
+              const record = await this.anilist.getMediaById(source.id, source.kind === "anime" ? "ANIME" : "MANGA");
+              return {
+                title: record?.title.english ?? record?.title.romaji ?? record?.title.native ?? fallback,
+                image: record?.coverImage ?? null,
+              };
+            }
+            if (source.kind === "character") {
+              const record = await this.anilist.getPublicEntity(source.id, "CHARACTER");
+              return { title: record?.name ?? fallback, image: record?.image ?? null };
+            }
+            const records = await this.igdb.search(source.slug);
+            const record = records.find(item => {
+              try {
+                const url = new URL(item.sourceUrl);
+                return (url.hostname === "igdb.com" || url.hostname === "www.igdb.com")
+                  && url.pathname.replace(/\\/$/, "") === "/games/" + source.slug;
+              } catch {
+                return false;
+              }
+            });
+            return { title: record?.title ?? fallback, image: record?.image ?? null };
+          } catch {
+            return { title: fallback, image: null };
+          }
+        }))
+      : await Promise.all(titles.map(async title => {
+          try {
+            if (category === "game") {
+              const record = (await this.igdb.search(title))[0];
+              return { title: record?.title ?? title, image: record?.image ?? null };
+            }
+            const records = await this.anilist.search(title, category === "anime" ? "ANIME" : "MANGA", category === "light_novel");
+            const record = records[0];
+            return {
+              title: record?.title.english ?? record?.title.romaji ?? record?.title.native ?? title,
+              image: record?.coverImage ?? null,
+            };
+          } catch {
+            return { title, image: null };
+          }
+        }));
     const image = await renderMediaGrid(items);
     const unresolved = items.filter(item => !item.image).length;
     const description = unresolved
       ? `${9 - unresolved} of 9 covers were found. Missing covers use safe placeholders.`
       : "Nine provider-backed covers, arranged in a 3×3 grid.";
-    const embed = homeEmbed(`3×3 · ${categoryLabel(category)}`, description)
+    const firstSource = sources?.[0];
+    const label = firstSource?.kind === "character" ? "Characters"
+      : firstSource?.kind === "game" ? "Games"
+      : firstSource ? categoryLabel(firstSource.kind)
+      : categoryLabel(category);
+    const embed = homeEmbed(`3×3 · ${label}`, description)
       .setImage("attachment://media-grid.png");
     await interaction.editReply({
       content: "",
