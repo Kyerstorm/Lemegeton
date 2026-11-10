@@ -14,7 +14,7 @@ The Draft branch currently has **zero Python files**. That is a file-extension r
 | Snapshot | Python files | TypeScript/TSX files | TypeScript non-test files | TypeScript test files |
 |---|---:|---:|---:|---:|
 | `multi_guild` base | 167 | 0 | 0 | 0 |
-| `lemegeton-v3` Draft head after the 9 November migration audit updates | 0 | 99 | 76 | 23 |
+| `lemegeton-v3` Draft head at `2f4f2d0` (10 November 2026) | 0 | 101 | 76 | 25 |
 
 The base's 167 Python files total approximately 3.68 MB. The current Draft head has twenty-three TypeScript test files, compared with fifty Python files under the base's `tests/` directory. This is a coverage gap until the test scenarios relevant to the selected v3 feature scope have been ported or replaced by equivalent TypeScript coverage. The goal is not to reproduce every source test file one-for-one.
 
@@ -22,7 +22,7 @@ The Draft branch already has a Node.js/TypeScript bot startup path, a TypeScript
 
 ## Focused follow-up work on 9 November 2026
 
-The current branch tree contains 165 tracked files: zero Python files, ninety-nine TypeScript/TSX files (seventy-six non-test files and twenty-three test files). The TypeScript suite contains 111 individual test cases. This is still not equivalent coverage for all in-scope scenarios represented by the fifty Python reference test modules.
+The current branch tree contains 168 tracked files: zero Python files, 101 TypeScript/TSX files (76 non-test files and 25 test files). The number of test modules is not a parity metric; coverage must be assessed against the selected behavior and scenarios represented by the source test modules.
 
 The following verified follow-ups were made on the Draft branch after the initial audit snapshot:
 
@@ -35,12 +35,12 @@ The following verified follow-ups were made on the Draft branch after the initia
 
 ## CI verification — 9 November 2026
 
-The latest code-bearing revision is `37341507354295566315ce7f6afa94fa273fddf3`. Both workflows completed successfully on that revision:
+The latest verified branch head is `2f4f2d0ea6cbfb844f78a9d6557a22a830245a11` (10 November 2026). Both workflows completed successfully on that exact commit:
 
-- [TypeScript bot checks](https://github.com/Kyerstorm/Lemegeton/actions/runs/42693672499) — typecheck and test job passed.
-- [Dashboard, Rust and container checks](https://github.com/Kyerstorm/Lemegeton/actions/runs/42693672137) — frontend typecheck/build and high-severity dependency audit, Rust tests and `cargo audit`, Docker build, Compose validation, startup-script syntax and non-root/health-check assertions passed.
+- [TypeScript bot checks](https://github.com/Kyerstorm/Lemegeton/actions/runs/42786081504) — TypeScript type-check, build and test job passed.
+- [Dashboard, Rust and container checks](https://github.com/Kyerstorm/Lemegeton/actions/runs/42786081287) — frontend typecheck/build and high-severity dependency audit, Rust tests and `cargo audit`, Docker build, Compose validation, startup-script syntax, non-root image user and health-check assertions passed.
 
-The current branch head is `e10fc07825fee5971b0c9cb787e907ad1b6b0c0d`; commits after the code-bearing revision update documentation only.
+These workflows validate the current branch snapshot; they do not prove live Discord permissions, third-party credentials, or target-database migration and restore.
 
 These green checks verify the code on the branch, not a live Discord deployment, provider credentials, or a target PostgreSQL database.
 
@@ -63,7 +63,7 @@ The audit distinguishes source inventory from selected-feature parity. The previ
 | `config.py` | `helpers/runtime/config.ts` | Typed environment parsing exists; focused tests cover required credentials, safe defaults, moderator guild ID, paired IGDB credentials, HTTPS-only remote URLs, and loopback-only picker binding. The CI dashboard job also parses .env.example with Node's native env-file parser. The duplicate DASHBOARD_BRIDGE_PORT entry has been removed. | The full previous environment surface is not one-for-one: settings for unselected cog/watch/cleanup, HLTB, generic AI and webhook behavior need a final consumer-by-consumer scope decision. Do not retain obsolete settings just for appearance; verify deployment consumers before removal. |
 | `database.py` | `database.ts` plus domain-specific helpers | The existing multi_guild source database layer is PostgreSQL, not SQLite. The v3 schema creates its feature tables transactionally and retains users, steam_users, bot_moderators and Custom Role tables. Startup widens existing booster_roles snowflakes to BIGINT and backfills missing steam_users.guild_id to the configured/default guild before enforcing a (discord_id, guild_id) primary key. The initializer does not drop tables that are outside the current v3 feature scope. | The table-name comparison found 38 source table definitions and 49 v3 definitions, with only eight identically named tables. Tables used only by news/free-game/challenge/progress/invite/analytics features have not been imported; several are intentionally out of scope, and the initializer leaves source-only tables untouched. Verify table/column/index compatibility against the repository schema and the intended deployment schema, with data counts and backup/restore checks if an import is required. No live target database was available for this audit. |
 | Media browse/recommend/random/trending | `/discover`, AniList/Steam/IGDB/Books/TMDB helpers | Category search, filters, trending, random, recommendation buttons and supported provider views exist. | Test all supported categories and previous filter behavior; restore only stable provider-backed fields and ensure recommendations are labelled by provenance. |
-| `cogs/media/airing.py`, `trailer.py`, `tv_guide.py` | `/discover` and `/community` | AniList airing/trailer fields and TMDB film/TV search exist. | Full season/episode detail, pagination, time-zone display, fallback behavior and provider response edge cases are not yet evidenced as parity-complete. |
+| `cogs/media/airing.py`, `trailer.py`, `tv_guide.py` | `/discover` and `/community` | AniList airing/trailer fields and TMDB film/TV search exist. The TMDB TV Guide path resolves exact series, exposes season metadata and paginates spoiler-marked episode details (see the connected-media row). | Verify AniList airing/trailer time-zone display, date boundaries, pagination where supported, provider fallbacks and malformed/empty response behavior. |
 | `cogs/media/compare.py` | `/discover` comparison | A second-title comparison option exists. | Verify parity for supported media types, missing fields, IGDB/Steam comparison, normalization and provenance. |
 | `cogs/media/connected_media.py` | `/discover`, Knowledge Atlas, Archive and Community links | Creator exploration and Atlas relationships exist. TMDB regional watch-provider lookup and supported YouTube/Vimeo video listing are integrated into `/discover`, with exact-title selection. The server's default media region now persists through `/settings`; `/discover` accepts a per-request region override. | Guild-scoped relationship suggestion/review is now integrated into `/discover`; submissions require distinct titles, supported categories, HTTPS links and evidence, and moderators with Manage Server or Manage Messages can list, inspect, approve or reject them. Approval adds a guild-only community-sourced Atlas edge. `/community` already creates spoiler-aware threads, saves the thread ID, and closes/archives threads with creator-or-manager authorization. Creator search routes to TMDB person credits for films/TV and Google Books `inauthor:` results for books; AniList creator search remains for anime/manga/light novels. Collection guides use exact TMDB movie selection and date-ordered collection membership. The TV Guide now resolves exact series, displays show status, creators, networks, season/episode counts and runtimes, lets users select seasons, and paginates spoiler-marked episode summaries. Reading-order parity still needs a provider-backed sequencing rule; webnovel live updates remain excluded because the previous Python implementation is a scraper rather than a verified official API. |
 | `cogs/media/cross_media_recommendations.py` | `/discover` | AniList recommendations and IGDB similar games exist. | Verify cross-category candidate pools, local-match explanations, books/TMDB support and provider failure isolation. |
@@ -100,15 +100,15 @@ The base source tree also contains backup, under-maintenance, test, and helper f
 
 ## Integration and environment-dependent acceptance
 
-- GitHub's branch comparison reports `lemegeton-v3` as diverged from `multi_guild`: **454 commits ahead, 86 commits behind**, merge base `e7c7c99728fc71c30a9bff65d5eed194ae8ffaf1`. PR #17 currently reports `mergeable=false` / `mergeable_state=dirty`. No synchronization or conflict resolution was attempted in this audit; resolve deliberately on the PR branch only, preserving the base branch and all work from both sides.
+- GitHub's branch comparison reports `lemegeton-v3` as diverged from `multi_guild`: **465 commits ahead, 86 commits behind**, merge base `e7c7c99728fc71c30a9bff65d5eed194ae8ffaf1`. PR #17 currently reports `mergeable=false` / `mergeable_state=dirty`. No synchronization or conflict resolution was attempted in this audit; resolve deliberately on the PR branch only, preserving the base branch and all work from both sides.
 - No live Discord test server/application credentials were available for gateway-intent, channel-permission, component-authorization, command-registration, thread and scheduled-delivery acceptance.
 - No target PostgreSQL instance or sanitized target schema/data snapshot was available. CI verifies Rust/TypeScript builds and tests, not real source-to-target data import, restore, or rollback.
 - Guild departure currently retains guild-owned records. Whether a future guild removal should retain or purge those records is an owner/privacy decision; no destructive cleanup is inferred.
-- Release-calendar provider requests are currently all-or-nothing: a failed selected AniList or TMDB request rejects the combined lookup. Scheduled digest delivery is retried, but the interactive preview does not yet provide partial results with a provider-failure notice. Any partial-results behavior should be designed together with retry/deduplication semantics before implementation.
+- Interactive release-calendar previews use independent provider requests and retain successful provider results when another selected provider fails; `/community` names unavailable providers and makes clear that the remaining results are partial. Tests cover one-provider failure and the all-selected-providers-unavailable case. Scheduled release digests deliberately use stricter delivery semantics: if any selected provider is unavailable, the digest is not sent or marked complete and the delivery remains queued for retry. Verify this retry behavior against PostgreSQL and a live Discord test channel.
 
 ## Required TypeScript coverage
 
-The source tree has fifty Python test files under `tests/`; the current Draft snapshot has twenty-three TypeScript test files (111 individual Node test cases in the audited run). The target is not fifty matching files. The target is focused coverage for every selected v3 behavior, especially:
+The source tree has fifty Python test modules under `tests/`; the current Draft snapshot has twenty-five TypeScript test modules. The target is not fifty matching files. The target is focused coverage for every selected v3 behavior, especially:
 
 - AniList/Steam/IGDB/TMDB/Google Books normalization, empty responses, timeouts, rate limits, and malformed payloads.
 - Media search/filter/random/recommendation/compare/trailer/airing/creator/franchise flows.
