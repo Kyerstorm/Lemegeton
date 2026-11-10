@@ -94,7 +94,7 @@ export async function linkAniListAccount(
        updated_at = NOW()`,
     [userId, guildId, cleanText(discordUsername, 100), profile.name, profile.id],
   );
-  await updateProfilePreferences(guildId, userId, { show_anilist: true });
+  // Provider linking never overrides the member's existing display/privacy consent.
   return profile;
 }
 
@@ -123,7 +123,7 @@ export async function linkSteamAccount(
        updated_at = NOW()`,
     [userId, guildId, steamId, profile.personaName],
   );
-  await updateProfilePreferences(guildId, userId, { show_steam: true });
+  // Provider linking never overrides the member's existing display/privacy consent.
   return profile;
 }
 
