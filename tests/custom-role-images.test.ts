@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import sharp from "sharp";
 import {
   CUSTOM_ROLE_ICON_MAX_SOURCE_BYTES,
+  configureCustomRoleIconSourceLimit,
   extractCustomRoleAvatarPalette,
   processCustomRoleIconImage,
 } from "../helpers/custom-roles/custom-role-images.js";
@@ -85,4 +86,17 @@ test("avatar palette extraction returns distinct colors and ignores invalid inpu
   assert.ok(palette.length >= 1);
   assert.ok(palette.length <= 5);
   assert.ok(palette.every(color => Number.isSafeInteger(color) && color >= 0 && color <= 0xffffff));
+});
+
+
+test("Custom Role image source limit follows typed runtime configuration", async () => {
+  configureCustomRoleIconSourceLimit(256 * 1024);
+  try {
+    await assert.rejects(
+      processCustomRoleIconImage(Buffer.alloc(256 * 1024 + 1)),
+      /image is too large/i,
+    );
+  } finally {
+    configureCustomRoleIconSourceLimit(8 * 1024 * 1024);
+  }
 });
