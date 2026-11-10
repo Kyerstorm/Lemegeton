@@ -1095,17 +1095,25 @@ export class CommunityCommand implements FeatureCommand {
     const schedule = await getReleaseSchedule(interaction.guildId!);
     const region = schedule?.region ?? "IE";
     const categories = schedule?.categories ?? ["anime", "tv", "movies"];
-    const results = await upcomingProviderReleases(this.anilist, this.tmdb, from, to, region, categories);
+    const calendar = await upcomingProviderReleases(this.anilist, this.tmdb, from, to, region, categories);
     const settings = schedule?.enabled
-      ? `Digest: ${schedule.cadence} · ${schedule.local_time} ${schedule.time_zone} · ${region} · ${categories.join(", ")} · <#${schedule.channel_id}>.`
+      ? \`Digest: \${schedule.cadence} · \${schedule.local_time} \${schedule.time_zone} · \${region} · \${categories.join(", ")} · <#\${schedule.channel_id}>.\`
       : "Automatic digests are currently disabled. A server manager can configure them with /community action:calendar-configure.";
-    const fields = results.slice(0, 12).map((item) => ({
-      name: `${safeDisplay(item.title, 180)} · <t:${Math.floor(item.when.getTime() / 1000)}:R>`,
-      value: `[${item.provider} source](${item.url})`,
+    const providerNotice = calendar.unavailableProviders.length
+      ? \`Partial results. Unavailable providers: \${calendar.unavailableProviders.join(", ")}. Other returned results are still shown.\\n\\n\`
+      : "";
+    const fields = calendar.results.slice(0, 12).map((item) => ({
+      name: \`\${safeDisplay(item.title, 180)} · <t:\${Math.floor(item.when.getTime() / 1000)}:R>\`,
+      value: \`[\${item.provider} source](\${item.url})\`,
       inline: false,
     }));
+    if (!fields.length && calendar.unavailableProviders.length) {
+      fields.push({ name: "Provider data unavailable", value: \`No results could be retrieved from: \${calendar.unavailableProviders.join(", ")}.\`, inline: false });
+    } else if (!fields.length) {
+      fields.push({ name: "No releases returned", value: "No provider-dated anime airings, TV episodes or movie releases were found in the selected categories for this window.", inline: false });
+    }
     await interaction.reply({
-      embeds: [homeEmbed("Release calendar · Next 14 days", `Dates come directly from AniList and TMDB. Missing provider data is not guessed.\n\n${settings}`, fields.length ? fields : [{ name: "No releases returned", value: "No provider-dated anime airings, TV episodes or movie releases were found in the selected categories for this window." }])],
+      embeds: [homeEmbed("Release calendar · Next 14 days", \`\${providerNotice}Dates come directly from AniList and TMDB. Missing provider data is not guessed.\\n\\n\${settings}\`, fields)],
       components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId("community:calendar-configure").setLabel("Configure digests").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId("community:calendar-disable").setLabel("Disable digests").setStyle(ButtonStyle.Secondary).setDisabled(!schedule?.enabled),

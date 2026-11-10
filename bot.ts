@@ -272,7 +272,7 @@ async function processDailyDrops():Promise<void>{
   }
   for(const delivery of await dueReleaseDeliveries()){
    try{
-    const [releases,channel]=await Promise.all([
+    const [calendar,channel]=await Promise.all([
      upcomingProviderReleases(
       aniListEmbedClient,
       releaseCalendarTmdbClient,
@@ -283,7 +283,9 @@ async function processDailyDrops():Promise<void>{
      ),
      client.channels.fetch(delivery.channel_id),
     ]);
+    if(calendar.unavailableProviders.length)throw new Error(\`Release digest providers unavailable: \${calendar.unavailableProviders.join(", ")}\`);
     if(!channel||!channel.isTextBased()||!("send" in channel))throw new Error("The configured release digest channel is unavailable.");
+    const releases=calendar.results;
     const fields=releases.slice(0,20).map((item)=>({
      name:`${item.title.slice(0,180)} · <t:${Math.floor(item.when.getTime()/1000)}:R>`,
      value:`[${item.provider} source](${item.url})`,
