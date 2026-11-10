@@ -172,7 +172,7 @@ function communityRelation(
 ): AtlasRelation {
   return {
     title: row.title, category,
-    url: createAtlasDiscordUrl(guildId, channelId ?? row.thread_id ?? null),
+    url: createAtlasDiscordUrl(guildId, row.thread_id ?? channelId ?? null),
     relationType, source, sourceKind: "community",
   };
 }
@@ -219,28 +219,30 @@ export async function findAtlasCommunityLinks(
       [guildId,title,safeUrl,archiveTypes,aniListId,maximum],
     ) : Promise.resolve([] as AtlasCommunityRow[]),
     query<AtlasCommunityRow>(
-      "SELECT d.id::text AS id, d.title, d.thread_id::text AS thread_id " +
+      "SELECT d.id::text AS id, d.title, d.channel_id::text AS channel_id, d.thread_id::text AS thread_id " +
       "FROM community_discussions d WHERE d.guild_id = $1 AND d.status = 'open' " +
+      "AND (d.closes_at IS NULL OR d.closes_at > NOW()) " +
       "AND (lower(btrim(COALESCE(d.media_title, ''))) = lower(btrim($2)) OR ($3 <> '' AND d.media_url = $3)) " +
       "ORDER BY d.created_at DESC LIMIT $4",
       [guildId,title,safeUrl,maximum],
     ),
     query<AtlasCommunityRow>(
-      "SELECT s.id::text AS id, s.title, s.thread_id::text AS thread_id, s.activity_type " +
-      "FROM community_sessions s WHERE s.guild_id = $1 AND s.status = 'scheduled' " +
+      "SELECT s.id::text AS id, s.title, s.channel_id::text AS channel_id, s.thread_id::text AS thread_id, s.activity_type " +
+      "FROM community_sessions s WHERE s.guild_id = $1 AND s.status IN ('scheduled','open') " +
+      "AND s.scheduled_at >= NOW() " +
       "AND (lower(btrim(COALESCE(s.media_title, ''))) = lower(btrim($2)) OR ($3 <> '' AND s.media_url = $3)) " +
       "ORDER BY s.scheduled_at ASC LIMIT $4",
       [guildId,title,safeUrl,maximum],
     ),
     query<AtlasCommunityRow>(
-      "SELECT n.id::text AS id, n.title, n.thread_id::text AS thread_id " +
+      "SELECT n.id::text AS id, n.title, n.channel_id::text AS channel_id, n.thread_id::text AS thread_id " +
       "FROM community_reading_nominations n WHERE n.guild_id = $1 AND n.status IN ('open','selected') " +
       "AND (lower(btrim(n.title)) = lower(btrim($2)) OR ($3 <> '' AND n.source_url = $3)) " +
       "ORDER BY n.created_at DESC LIMIT $4",
       [guildId,title,safeUrl,maximum],
     ),
     query<AtlasCommunityRow>(
-      "SELECT r.id::text AS id, r.title FROM community_rankings r " +
+      "SELECT r.id::text AS id, r.title, r.channel_id::text AS channel_id FROM community_rankings r " +
       "JOIN community_ranking_candidates c ON c.ranking_id = r.id " +
       "WHERE r.guild_id = $1 AND r.status IN ('open','closed') AND c.status = 'approved' " +
       "AND (lower(btrim(c.title)) = lower(btrim($2)) OR ($3 <> '' AND c.source_url = $3)) " +
@@ -252,11 +254,11 @@ export async function findAtlasCommunityLinks(
   const relations: AtlasRelation[] = [
     ...archives.map(row => communityRelation(row,"ARCHIVE_ENTRY","Contributed to","Community Archive",guildId)),
     ...collections.map(row => communityRelation(row,"ARCHIVE_COLLECTION","Included in","Archive collection",guildId)),
-    ...discussions.map(row => communityRelation(row,"DISCUSSION","Discussed in","Spoiler-aware discussion",guildId)),
+    ...discussions.map(row => communityRelation(row,"DISCUSSION","Discussed in","Spoiler-aware discussion",guildId,row.channel_id)),
     ...sessions.map(row => communityRelation(row,"ACTIVITY","Scheduled community session",
-      "Community session · " + (row.activity_type ?? "activity"),guildId)),
-    ...reading.map(row => communityRelation(row,"ACTIVITY","Nominated for","Community reading club",guildId)),
-    ...rankings.map(row => communityRelation(row,"ACTIVITY","Included in","Community ranking",guildId)),
+      "Community session · " + (row.activity_type ?? "activity"),guildId,row.channel_id)),
+    ...reading.map(row => communityRelation(row,"ACTIVITY","Nominated for","Community reading club",guildId,row.channel_id)),
+    ...rankings.map(row => communityRelation(row,"ACTIVITY","Included in","Community ranking",guildId,row.channel_id)),
   ];
   const seen = new Set<string>();
   return relations.filter(relation => {
