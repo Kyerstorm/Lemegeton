@@ -11,6 +11,7 @@ import type { Guild } from "discord.js";
 import type { DatabaseConfig } from "../helpers/runtime/config.js";
 import { getPanelOfTheDay } from "../helpers/archive/archive.js";
 import { removeGuildMemberProfileData } from "../helpers/runtime/profile.js";
+import { deleteGuildData } from "../helpers/runtime/guild-retention.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
 
@@ -1000,6 +1001,43 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     assert.deepEqual(
       await queryOne<{ count: string }>("SELECT COUNT(*)::text AS count FROM steam_users WHERE discord_id = $1", ["76561198000000000"]),
       { count: "1" },
+    );
+
+    const retentionGuild = "333333333333333333";
+    const otherGuild = "333333333333333334";
+    await query(
+      "INSERT INTO guild_retention_settings (guild_id, invited_by, leave_action) VALUES ($1,$2,'delete')",
+      [retentionGuild, "444444444444444444"],
+    );
+    await query(
+      "INSERT INTO users (discord_id, guild_id, username) VALUES ($1,$2,'to-delete'),($3,$4,'keep')",
+      ["555555555555555551", retentionGuild, "555555555555555552", otherGuild],
+    );
+    await query(
+      `INSERT INTO community_archive_entries
+        (archive_type,title,content,media_type,tags,created_by,created_guild_id,visibility,status)
+       VALUES ('panels','Guild-owned entry','','Manga','[]',$1,$2,'server','approved')`,
+      ["555555555555555551", retentionGuild],
+    );
+    await query(
+      "INSERT INTO community_daily_items (guild_id, format, title, content) VALUES ($1,'quote','Guild item','Guild content'),($2,'quote','Other item','Other content')",
+      [retentionGuild, otherGuild],
+    );
+    const purge = await deleteGuildData(retentionGuild);
+    assert.equal(purge.assetsAttempted, 0);
+    assert.equal(purge.assetsPending, 0);
+    assert.ok(purge.deletedRows >= 4);
+    assert.equal((await query("SELECT discord_id FROM users WHERE guild_id = $1", [retentionGuild])).length, 0);
+    assert.equal((await query("SELECT discord_id FROM users WHERE guild_id = $1", [otherGuild])).length, 1);
+    assert.equal((await query("SELECT id FROM community_archive_entries WHERE created_guild_id = $1", [retentionGuild])).length, 0);
+    assert.equal((await query("SELECT id FROM community_daily_items WHERE guild_id = $1", [retentionGuild])).length, 0);
+    assert.equal((await query("SELECT id FROM community_daily_items WHERE guild_id = $1", [otherGuild])).length, 1);
+    assert.deepEqual(
+      await queryOne<{ invited_by: string; leave_action: string }>(
+        "SELECT invited_by::text, leave_action FROM guild_retention_settings WHERE guild_id = $1",
+        [retentionGuild],
+      ),
+      { invited_by: "444444444444444444", leave_action: "delete" },
     );
   } finally {
     await closeDatabase();
