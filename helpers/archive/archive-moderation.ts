@@ -1,5 +1,5 @@
 import { PermissionsBitField, type GuildMember } from "discord.js";
-import { query, queryOne } from "../../database.js";
+import { query, queryOne, transaction } from "../../database.js";
 import { cleanText } from "../security/security.js";
 import { GLOBAL_MODERATOR_IDS } from "./archive-access.js";
 export { isGlobalArchiveModerator } from "./archive-access.js";
@@ -48,6 +48,11 @@ export async function listPendingEntries(guildId: string, visibility: ArchiveVis
   return rows.map((entry) => ({ ...entry, tags: parseTags(String((entry as unknown as { tags: string }).tags ?? "[]")) }));
 }
 
+export function canModerateArchiveStatus(status: string, action: "approve" | "reject" | "remove"): boolean {
+  if (status === "pending" || status === "pending_upload") return true;
+  return status === "approved" && action === "remove";
+}
+
 export async function moderateArchiveEntry(
   guildId: string,
   moderatorId: string,
@@ -56,45 +61,57 @@ export async function moderateArchiveEntry(
   reason: string,
   global = false,
 ): Promise<void> {
-  const row = await queryOne<{
-    id: string;
-    created_guild_id: string;
-    visibility: ArchiveVisibility;
-    status: string;
-    archive_type: ArchiveCategory;
-    source_url: string | null;
-  }>(
-    `SELECT id, created_guild_id, visibility, status, archive_type, source_url FROM community_archive_entries
-     WHERE id = $1 AND ${global ? "visibility = 'global'" : "visibility = 'server' AND created_guild_id = $2"}`,
-    global ? [entryId] : [entryId, guildId],
-  );
-  if (!row) throw new Error("That pending entry was not found in this moderation scope.");
-  if (row.status !== "pending" && row.status !== "pending_upload") {
-    throw new Error("That contribution has already been reviewed.");
+  if (global && !GLOBAL_MODERATOR_IDS.has(moderatorId)) {
+    throw new Error("Only configured global Archive moderators can review global entries.");
   }
-  if (row.status === "pending_upload" && action === "approve") {
-    const count = await queryOne<{ count: string }>(
-      "SELECT COUNT(*) AS count FROM community_archive_entry_assets WHERE entry_id = $1",
-      [entryId],
+  const cleanReason = cleanText(reason, 500);
+  await transaction(async (client) => {
+    const scope = global
+      ? "id = $1 AND visibility = 'global'"
+      : "id = $1 AND visibility = 'server' AND created_guild_id = $2";
+    const selected = await client.query<{
+      id: string;
+      created_guild_id: string;
+      visibility: ArchiveVisibility;
+      status: string;
+      archive_type: ArchiveCategory;
+      source_url: string | null;
+    }>(
+      "SELECT id, created_guild_id, visibility, status, archive_type, source_url FROM community_archive_entries WHERE " + scope + " FOR UPDATE",
+      global ? [entryId] : [entryId, guildId],
     );
-    const hasAsset = Number(count?.count ?? 0) > 0;
-    const hasSource = row.archive_type === "soundtracks" && Boolean(row.source_url);
-    if (!hasAsset && !hasSource) {
-      throw new Error("This soundtrack submission still needs an accepted private upload or HTTPS music source before approval.");
+    const row = selected.rows[0];
+    if (!row) throw new Error("That entry was not found in this moderation scope.");
+    if (!canModerateArchiveStatus(row.status, action)) {
+      throw new Error("That contribution has already been reviewed.");
     }
-  }
-  const newStatus = action === "approve" ? "approved" : action === "reject" ? "rejected" : "removed";
-  await query(
-    `UPDATE community_archive_entries SET status = $1, moderation_reason = $2, updated_at = NOW()
-     WHERE id = $3 AND ${global ? "visibility = 'global'" : "visibility = 'server' AND created_guild_id = $4"}`,
-    global ? [newStatus, cleanText(reason, 500), entryId] : [newStatus, cleanText(reason, 500), entryId, guildId],
-  );
-  await query(
-    `INSERT INTO community_archive_moderation_log
-     (entry_id, guild_id, moderator_id, action, reason, is_global)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [entryId, row.created_guild_id, moderatorId, action, cleanText(reason, 500), global],
-  );
+    if (row.status === "pending_upload" && action === "approve") {
+      const count = await client.query<{ count: string }>(
+        "SELECT COUNT(*) AS count FROM community_archive_entry_assets WHERE entry_id = $1",
+        [entryId],
+      );
+      const hasAsset = Number(count.rows[0]?.count ?? 0) > 0;
+      const hasSource = row.archive_type === "soundtracks" && Boolean(row.source_url);
+      if (!hasAsset && !hasSource) {
+        throw new Error("This soundtrack submission still needs an accepted private upload or HTTPS music source before approval.");
+      }
+    }
+    const newStatus = action === "approve" ? "approved" : action === "reject" ? "rejected" : "removed";
+    const updateScope = global
+      ? "id = $3 AND visibility = 'global' AND status = $4"
+      : "id = $3 AND visibility = 'server' AND created_guild_id = $4 AND status = $5";
+    const updated = await client.query(
+      "UPDATE community_archive_entries SET status = $1, moderation_reason = $2, updated_at = NOW() WHERE " + updateScope,
+      global
+        ? [newStatus, cleanReason, entryId, row.status]
+        : [newStatus, cleanReason, entryId, guildId, row.status],
+    );
+    if (updated.rowCount !== 1) throw new Error("That contribution changed before moderation could be saved. Refresh the queue and try again.");
+    await client.query(
+      "INSERT INTO community_archive_moderation_log (entry_id, guild_id, moderator_id, action, reason, is_global) VALUES ($1, $2, $3, $4, $5, $6)",
+      [entryId, row.created_guild_id, moderatorId, action, cleanReason, global],
+    );
+  });
 }
 
 export interface ArchiveReport {
@@ -135,29 +152,29 @@ export async function reviewArchiveReport(
   reason: string,
   global = false,
 ): Promise<void> {
-  const report = await queryOne<{ entry_id: string; visibility: ArchiveVisibility; created_guild_id: string }>(
-    `SELECT r.entry_id, e.visibility, e.created_guild_id
-     FROM community_archive_reports r
-     JOIN community_archive_entries e ON e.id = r.entry_id
-     WHERE r.id = $1 AND ${global ? "e.visibility = 'global'" : "r.guild_id = $2 AND e.visibility = 'server' AND e.created_guild_id = $2"}
-       AND r.status = 'pending'`,
+  if (global && !GLOBAL_MODERATOR_IDS.has(moderatorId)) {
+    throw new Error("Only configured global Archive moderators can review global reports.");
+  }
+  const scope = global
+    ? "e.visibility = 'global'"
+    : "r.guild_id = $2 AND e.visibility = 'server' AND e.created_guild_id = $2";
+  const report = await queryOne<{
+    entry_id: string;
+    visibility: ArchiveVisibility;
+    created_guild_id: string;
+    entry_status: string;
+  }>(
+    "SELECT r.entry_id, e.visibility, e.created_guild_id, e.status AS entry_status " +
+    "FROM community_archive_reports r JOIN community_archive_entries e ON e.id = r.entry_id " +
+    "WHERE r.id = $1 AND " + scope + " AND r.status = 'pending'",
     global ? [reportId] : [reportId, guildId],
   );
   if (!report) throw new Error("That pending Archive report was not found in this moderation scope.");
+  if (decision === "remove" && report.entry_status !== "removed") {
+    await moderateArchiveEntry(guildId, moderatorId, report.entry_id, "remove", reason, global);
+  }
   await query(
-    `UPDATE community_archive_reports
-     SET status = $1, reviewed_by = $2, review_reason = $3, reviewed_at = NOW()
-     WHERE id = $4 AND status = 'pending'`,
+    "UPDATE community_archive_reports SET status = $1, reviewed_by = $2, review_reason = $3, reviewed_at = NOW() WHERE id = $4 AND status = 'pending'",
     [decision === "dismiss" ? "dismissed" : "actioned", moderatorId, cleanText(reason, 500), reportId],
   );
-  if (decision === "remove") {
-    await moderateArchiveEntry(
-      guildId,
-      moderatorId,
-      report.entry_id,
-      "remove",
-      reason,
-      global,
-    );
-  }
 }
