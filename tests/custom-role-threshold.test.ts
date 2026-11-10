@@ -4,6 +4,7 @@ import { parseCustomRoleMassArchiveThreshold } from "../helpers/custom-roles/cus
 
 test("Custom Roles mass-archive threshold preserves default, zero floor and valid overrides", () => {
   assert.equal(parseCustomRoleMassArchiveThreshold(undefined), 10);
+  assert.equal(parseCustomRoleMassArchiveThreshold(""), 10);
   assert.equal(parseCustomRoleMassArchiveThreshold("10"), 10);
   assert.equal(parseCustomRoleMassArchiveThreshold("3"), 3);
   assert.equal(parseCustomRoleMassArchiveThreshold("0"), 0);
