@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {loadConfig} from "../helpers/runtime/config.js";
 import {isModeratorCommandGuild} from "../helpers/commands/moderation.js";
+import {isBotModerator} from "../helpers/commands/moderation.js";
 import {isValidHttpsUrl,normalizeTags} from "../helpers/security/security.js";
 import {validateSteamId} from "../helpers/integration/steam.js";
 import {nextLocalOccurrence} from "../helpers/community/community.js";
@@ -34,6 +35,11 @@ test("bot configuration requires valid Discord credentials and validates the Ani
  assert.throws(()=>loadConfig({DISCORD_TOKEN:"token",BOT_ID:"123456789012345678",BOT_MODERATOR_GUILD_ID:"not-a-guild"}),/BOT_MODERATOR_GUILD_ID/);
  assert.throws(()=>loadConfig({DISCORD_TOKEN:"token",BOT_ID:"123456789012345678",ANILIST_API_URL:"http://example.com"}),/HTTPS/);
 });
+test("configured bot administrator is recognized without a database lookup", async () => {
+ const administratorId = "123456789012345678";
+ assert.equal(await isBotModerator(administratorId, administratorId), true);
+});
+
 test("bot moderator commands fail closed outside their configured guild",()=>{
  assert.equal(isModeratorCommandGuild("987654321098765432","987654321098765432"),true);
  assert.equal(isModeratorCommandGuild("111111111111111111","987654321098765432"),false);
