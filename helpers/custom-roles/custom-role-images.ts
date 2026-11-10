@@ -1,11 +1,14 @@
 import sharp, { type Metadata } from "sharp";
 
-export const CUSTOM_ROLE_ICON_MAX_SOURCE_BYTES = Math.max(
-  256 * 1024,
-  Number.isSafeInteger(Number(process.env.CUSTOM_ROLES_ICON_SOURCE_MAX_BYTES))
-    ? Number(process.env.CUSTOM_ROLES_ICON_SOURCE_MAX_BYTES)
-    : 8 * 1024 * 1024,
-);
+export const CUSTOM_ROLE_ICON_MAX_SOURCE_BYTES = 8 * 1024 * 1024;
+let maximumSourceBytes = CUSTOM_ROLE_ICON_MAX_SOURCE_BYTES;
+
+export function configureCustomRoleIconSourceLimit(maxBytes: number): void {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 256 * 1024) {
+    throw new Error("CUSTOM_ROLES_ICON_SOURCE_MAX_BYTES must be at least 262144 bytes.");
+  }
+  maximumSourceBytes = maxBytes;
+}
 export const CUSTOM_ROLE_ICON_MAX_SIDE = 8192;
 export const CUSTOM_ROLE_ICON_MAX_PIXELS = 16_000_000;
 export const CUSTOM_ROLE_ICON_MAX_OUTPUT_BYTES = 256 * 1024;
@@ -60,9 +63,9 @@ export async function processCustomRoleIconImage(
   crop?: CustomRoleIconCrop,
 ): Promise<ProcessedCustomRoleIcon> {
   if (input.byteLength < 1) throw new Error("The role icon image is empty.");
-  if (input.byteLength > CUSTOM_ROLE_ICON_MAX_SOURCE_BYTES) {
+  if (input.byteLength > maximumSourceBytes) {
     throw new Error("That image is too large. The original upload limit is "
-      + Math.ceil(CUSTOM_ROLE_ICON_MAX_SOURCE_BYTES / (1024 * 1024)) + " MB.");
+      + Math.ceil(maximumSourceBytes / (1024 * 1024)) + " MB.");
   }
   const sourceType = imageKind(input);
   if (!sourceType) {
