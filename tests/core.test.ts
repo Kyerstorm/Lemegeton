@@ -22,6 +22,7 @@ import {customRoleChannelAllowed,customRoleCooldownMessage,parseCustomRoleColor,
 import {renderAtlasSnapshot} from "../helpers/media/atlas-renderer.js";
 import {filterMediaNotificationCandidates} from "../helpers/media/media-notifications.js";
 import {canConfigureGuildLeaveAction,isGuildLeaveAction} from "../helpers/runtime/guild-retention.js";
+import {missingChannelPermissions} from "../helpers/runtime/server-diagnostics.js";
 import {parseUtcDateTime} from "../src/utility/timestamp.js";
 import {extractAniListUsername} from "../src/utility/convertlinks.js";
 import type {AniListRecentlyFinishedMedia} from "../helpers/integration/anilist.js";
@@ -122,6 +123,11 @@ test("guild leave policy accepts only its two actions and limits selection to in
  assert.equal(canConfigureGuildLeaveAction("111111111111111111","222222222222222222",true),true);
  assert.equal(canConfigureGuildLeaveAction("111111111111111111","222222222222222222",false),false);
  assert.equal(canConfigureGuildLeaveAction(null,"222222222222222222",false),false);
+});
+
+test("server diagnostics report only missing required channel permissions",()=>{
+ assert.deepEqual(missingChannelPermissions({viewChannel:true,sendMessages:true,embedLinks:true}),[]);
+ assert.deepEqual(missingChannelPermissions({viewChannel:false,sendMessages:true,embedLinks:false}),["View Channel","Embed Links"]);
 });
 
 test("Server settings expose all six configurable feature environments",()=>{
