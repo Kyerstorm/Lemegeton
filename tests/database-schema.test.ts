@@ -118,7 +118,7 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     const pendingId = (await admin.query(
       `INSERT INTO "${schema}".custom_role_pending_removals (guild_id, user_ids, reason)
        VALUES ($1, $2, $3) RETURNING id`,
-      ["987654321098765432", JSON.stringify(["111111111111111111"]), "legacy pending removal"],
+      ["404", JSON.stringify(["111111111111111111"]), "legacy pending removal"],
     )).rows[0].id as string;
 
     const scopedUrl = new URL(databaseUrl);
