@@ -12,6 +12,8 @@ import type { DatabaseConfig } from "../helpers/runtime/config.js";
 import { getPanelOfTheDay } from "../helpers/archive/archive.js";
 import { removeGuildMemberProfileData } from "../helpers/runtime/profile.js";
 import { deleteGuildData } from "../helpers/runtime/guild-retention.js";
+import { claimDueReadingReminders } from "../helpers/community/community-reading.js";
+import { claimDueMediaNightResults } from "../helpers/community/community-rankings.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
 
@@ -1001,6 +1003,41 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     assert.deepEqual(
       await queryOne<{ count: string }>("SELECT COUNT(*)::text AS count FROM steam_users WHERE discord_id = $1", ["76561198000000000"]),
       { count: "1" },
+    );
+
+    const lockedGuild = "333333333333333335";
+    await query("INSERT INTO guild_retention_settings (guild_id) VALUES ($1)", [lockedGuild]);
+    await query(
+      `INSERT INTO community_reading_nominations
+        (guild_id, channel_id, proposer_id, title, category, status, scheduled_at, thread_id)
+       VALUES ($1,$2,$3,'Locked reading reminder','manga','selected',NOW() - INTERVAL '1 day',$4)`,
+      [lockedGuild, "666666666666666661", "555555555555555551", "666666666666666662"],
+    );
+    const lockedRanking = await queryOne<{ id: string }>(
+      `INSERT INTO community_rankings
+        (guild_id, creator_id, title, kind, status, closes_at, channel_id)
+       VALUES ($1,$2,'Locked Media Night','media_night','open',NOW() - INTERVAL '1 minute',$3)
+       RETURNING id::text AS id`,
+      [lockedGuild, "555555555555555551", "666666666666666663"],
+    );
+    assert.ok(lockedRanking);
+    const remindersBeforeSetup = await claimDueReadingReminders();
+    assert.equal(remindersBeforeSetup.some(row => row.guild_id === lockedGuild), false);
+    assert.equal(
+      (await queryOne<{ last_reminder_attempt_at: Date | null }>(
+        "SELECT last_reminder_attempt_at FROM community_reading_nominations WHERE guild_id = $1",
+        [lockedGuild],
+      ))?.last_reminder_attempt_at ?? null,
+      null,
+    );
+    const mediaNightBeforeSetup = await claimDueMediaNightResults();
+    assert.equal(mediaNightBeforeSetup.some(row => row.id === lockedRanking.id), false);
+    assert.deepEqual(
+      await queryOne<{ status: string; results_attempts: number }>(
+        "SELECT status, results_attempts FROM community_rankings WHERE id = $1",
+        [lockedRanking.id],
+      ),
+      { status: "open", results_attempts: 0 },
     );
 
     const retentionGuild = "333333333333333333";
