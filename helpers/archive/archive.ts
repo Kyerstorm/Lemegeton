@@ -335,16 +335,24 @@ export async function listArchiveEntries(
   }));
 }
 
-export async function getArchiveEntry(guildId: string, entryId: string, includePending = false): Promise<ArchiveEntry | null> {
-  const conditions = includePending
-    ? "(visibility = 'global' OR created_guild_id = $1)"
-    : "(visibility = 'global' OR (visibility = 'server' AND created_guild_id = $1)) AND status = 'approved'";
+export function archiveEntryLookupScope(includePending: boolean, globalOnly: boolean): string {
+  if (globalOnly) return "visibility = 'global'";
+  if (includePending) return "visibility = 'server' AND created_guild_id = $2";
+  return "(visibility = 'global' OR (visibility = 'server' AND created_guild_id = $2)) AND status = 'approved'";
+}
+
+export async function getArchiveEntry(
+  guildId: string,
+  entryId: string,
+  includePending = false,
+  globalOnly = false,
+): Promise<ArchiveEntry | null> {
   const row = await queryOne<ArchiveEntry>(
     `SELECT e.*,
        (SELECT COUNT(*) FROM community_archive_entry_assets a WHERE a.entry_id = e.id) AS attachment_count
      FROM community_archive_entries e
-     WHERE id = $2 AND ${conditions}`,
-    [guildId, entryId],
+     WHERE id = $1 AND ${archiveEntryLookupScope(includePending, globalOnly)}`,
+    globalOnly ? [entryId] : [entryId, guildId],
   );
   return row ? { ...row, tags: parseTags(String((row as unknown as { tags: string }).tags ?? "[]")) } : null;
 }

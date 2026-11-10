@@ -388,11 +388,15 @@ export class ArchiveCommand implements FeatureCommand {
         case "delete": {
           const entryId = interaction.options.getString("entry_id");
           if (!entryId) throw new Error("Provide entry_id.");
-          const entry = await getArchiveEntry(guildId, entryId, true);
-          if (!entry) throw new Error("That Archive entry was not found.");
+          const global = interaction.options.getString("visibility") === "global";
+          if (global && !isGlobalArchiveModerator(userId)) {
+            throw new Error("Only configured global Archive moderators can delete global entries.");
+          }
+          const entry = await getArchiveEntry(guildId, entryId, true, global);
+          if (!entry) throw new Error("That Archive entry was not found in the selected visibility scope.");
           const member = await interaction.guild!.members.fetch(userId);
-          const canModerate = await canModerateArchive(member, guildId, entry.visibility);
-          await deleteArchiveEntry(guildId, userId, entryId, canModerate, entry.visibility === "global");
+          const canModerate = await canModerateArchive(member, guildId, global ? "global" : "server");
+          await deleteArchiveEntry(guildId, userId, entryId, canModerate, global);
           await interaction.reply({ content: `Entry #${entryId} was deleted.`, flags: MessageFlags.Ephemeral });
           return;
         }
