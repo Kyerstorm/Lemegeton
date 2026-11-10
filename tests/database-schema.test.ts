@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { closeDatabase, initDatabase, query, queryOne } from "../database.js";
-import { getLinkedProfile, getProfilePreferences, unlinkAniListAccount, unlinkSteamAccount, updateProfilePreferences } from "../helpers/runtime/profile.js";
+import { getAniListAffinity, getAniListLeaderboard, getLinkedProfile, getProfilePreferences, getServerTaste, unlinkAniListAccount, unlinkSteamAccount, updateProfilePreferences } from "../helpers/runtime/profile.js";
 import type { AniListClient } from "../helpers/integration/anilist.js";
 import type { SteamClient } from "../helpers/integration/steam.js";
 import type { DatabaseConfig } from "../helpers/runtime/config.js";
@@ -307,6 +307,58 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     await query(
       "UPDATE users SET anilist_username = $3, anilist_id = $4 WHERE discord_id = $1 AND guild_id = $2",
       [profileUser, otherGuild, "other-profile", 22],
+    );
+
+    const secondProfileUser = "444444444444444444";
+    await query(
+      `INSERT INTO users (discord_id, guild_id, username, anilist_username, anilist_id)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [secondProfileUser, primaryGuild, "another-member", "secondary-profile", 33],
+    );
+    const affinityClient = {
+      getUser: async (username: string) => ({
+        name: username,
+        anime: {
+          genres: username === "primary-profile"
+            ? [{ genre: "Fantasy", count: 4 }, { genre: "Sci-Fi", count: 2 }]
+            : [{ genre: "Fantasy", count: 3 }, { genre: "Sci-Fi", count: 6 }],
+        },
+        manga: { genres: [] },
+      }),
+    } as unknown as AniListClient;
+    await assert.rejects(
+      getAniListAffinity(primaryGuild, profileUser, secondProfileUser, affinityClient),
+      /Both members must opt in/,
+    );
+    await updateProfilePreferences(primaryGuild, secondProfileUser, { allow_affinity: true });
+    const affinity = await getAniListAffinity(primaryGuild, profileUser, secondProfileUser, affinityClient);
+    assert.equal(affinity.first, "primary-profile");
+    assert.equal(affinity.second, "secondary-profile");
+    assert.equal(affinity.percent, 30);
+    assert.deepEqual(affinity.sharedAnime, ["Fantasy", "Sci-Fi"]);
+
+    await updateProfilePreferences(primaryGuild, profileUser, {
+      show_anilist: true,
+      server_taste_opt_in: true,
+      share_leaderboard: true,
+    });
+    await updateProfilePreferences(primaryGuild, secondProfileUser, {
+      show_anilist: true,
+      server_taste_opt_in: true,
+      share_leaderboard: true,
+    });
+    await assert.rejects(
+      getAniListLeaderboard(
+        primaryGuild,
+        new Set([profileUser, secondProfileUser]),
+        "anime",
+        affinityClient,
+      ),
+      /at least three current server members opt in/,
+    );
+    await assert.rejects(
+      getServerTaste(primaryGuild, affinityClient),
+      /at least three members opt in/,
     );
     await query(
       `INSERT INTO steam_users (discord_id, guild_id, steam_id, vanity_name)
