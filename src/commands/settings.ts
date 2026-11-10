@@ -265,7 +265,7 @@ function canManage(
 export class SettingsCommand implements FeatureCommand {
   readonly data = new SlashCommandBuilder()
     .setName("settings")
-    .setDescription("Configure this server's features and media notifications")
+    .setDescription("Configure this server's features, data retention, notifications and diagnostics")
     .addStringOption((option) =>
       option.setName("action")
         .setDescription("Open settings or choose a settings area")
