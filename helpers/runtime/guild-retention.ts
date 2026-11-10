@@ -71,6 +71,7 @@ export async function setGuildLeaveAction(
      ON CONFLICT (guild_id) DO UPDATE
        SET leave_action = EXCLUDED.leave_action,
            updated_by = EXCLUDED.updated_by,
+           deleted_at = NULL,
            updated_at = NOW()`,
     [guildId, action, actorId],
   );
@@ -158,5 +159,31 @@ export async function deleteGuildData(guildId: string): Promise<{
       assetsPending += 1;
     }
   }
+  await query(
+    "UPDATE guild_retention_settings SET deleted_at = NOW(), updated_at = NOW() WHERE guild_id = $1 AND leave_action = 'delete'",
+    [guildId],
+  );
   return { deletedRows, assetsAttempted: assets.length, assetsPending };
+}
+
+export async function retryDepartedGuildDeletions(activeGuildIds: Iterable<string>): Promise<{
+  checked: number;
+  deleted: number;
+}> {
+  const active = [...activeGuildIds];
+  const pending = await query<{ guild_id: string }>(
+    `SELECT guild_id::text
+       FROM guild_retention_settings
+      WHERE leave_action = 'delete' AND deleted_at IS NULL
+        AND NOT (guild_id = ANY($1::bigint[]))
+      ORDER BY created_at ASC LIMIT 25`,
+    [active],
+  );
+
+  let deleted = 0;
+  for (const row of pending) {
+    await deleteGuildData(row.guild_id);
+    deleted += 1;
+  }
+  return { checked: pending.length, deleted };
 }
