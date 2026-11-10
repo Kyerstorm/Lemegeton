@@ -1,0 +1,156 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { Pool } from "pg";
+import { closeDatabase, initDatabase, query, queryOne } from "../database.js";
+import type { DatabaseConfig } from "../helpers/runtime/config.js";
+
+const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
+
+test("PostgreSQL initialization preserves legacy guild data and is repeatable", {
+  skip: databaseUrl ? false : "TEST_DATABASE_URL is not configured",
+}, async () => {
+  assert.ok(databaseUrl);
+  const admin = new Pool({ connectionString: databaseUrl });
+  const schema = "lemegeton_migration_" + randomUUID().replaceAll("-", "");
+
+  try {
+    await admin.query(`CREATE SCHEMA "${schema}"`);
+
+    await admin.query(`
+      CREATE TABLE "${schema}".steam_users (
+        discord_id BIGINT NOT NULL PRIMARY KEY,
+        steam_id TEXT NOT NULL,
+        vanity_name TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await admin.query(
+      `INSERT INTO "${schema}".steam_users (discord_id, steam_id, vanity_name)
+       VALUES ($1, $2, $3)`,
+      ["76561198000000000", "76561198000000000", "legacy-player"],
+    );
+
+    await admin.query(`
+      CREATE TABLE "${schema}".booster_roles (
+        discord_id INTEGER NOT NULL,
+        guild_id INTEGER NOT NULL,
+        role_id INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (discord_id, guild_id)
+      )
+    `);
+    await admin.query(
+      `INSERT INTO "${schema}".booster_roles (discord_id, guild_id, role_id)
+       VALUES (101, 202, 303)`,
+    );
+
+    const scopedUrl = new URL(databaseUrl);
+    scopedUrl.searchParams.set("options", "-c search_path=" + schema);
+    const parsedUrl = new URL(databaseUrl);
+    const config: DatabaseConfig = {
+      connectionString: scopedUrl.toString(),
+      host: parsedUrl.hostname,
+      port: Number(parsedUrl.port || 5432),
+      database: decodeURIComponent(parsedUrl.pathname.replace(/^\//, "")),
+      user: decodeURIComponent(parsedUrl.username),
+      password: decodeURIComponent(parsedUrl.password),
+      ssl: false,
+      poolSize: 2,
+      primaryGuildId: "987654321098765432",
+    };
+
+    await initDatabase(config);
+
+    const steam = await queryOne<{ guild_id: string; steam_id: string }>(
+      "SELECT guild_id, steam_id FROM steam_users WHERE discord_id = $1",
+      ["76561198000000000"],
+    );
+    assert.deepEqual(steam, {
+      guild_id: "987654321098765432",
+      steam_id: "76561198000000000",
+    });
+
+    const steamColumns = await query<{ column_name: string; data_type: string }>(
+      `SELECT column_name, data_type FROM information_schema.columns
+       WHERE table_schema = current_schema() AND table_name = 'steam_users'`,
+    );
+    assert.equal(steamColumns.find(column => column.column_name === "guild_id")?.data_type, "bigint");
+
+    const steamPrimaryKey = await query<{ column_name: string; ordinal_position: number }>(
+      `SELECT column_name, ordinal_position FROM information_schema.key_column_usage
+       WHERE table_schema = current_schema() AND table_name = 'steam_users'
+         AND constraint_name = (
+           SELECT constraint_name FROM information_schema.table_constraints
+           WHERE table_schema = current_schema() AND table_name = 'steam_users'
+             AND constraint_type = 'PRIMARY KEY'
+         )
+       ORDER BY ordinal_position`,
+    );
+    assert.deepEqual(steamPrimaryKey.map(column => column.column_name), ["discord_id", "guild_id"]);
+
+    const boosterColumns = await query<{ column_name: string; data_type: string }>(
+      `SELECT column_name, data_type FROM information_schema.columns
+       WHERE table_schema = current_schema() AND table_name = 'booster_roles'`,
+    );
+    for (const column of ["discord_id", "guild_id", "role_id"]) {
+      assert.equal(boosterColumns.find(item => item.column_name === column)?.data_type, "bigint");
+    }
+    assert.deepEqual(
+      await queryOne<{ role_id: string }>(
+        "SELECT role_id FROM booster_roles WHERE discord_id = $1 AND guild_id = $2",
+        [101, 202],
+      ),
+      { role_id: "303" },
+    );
+
+    await query(
+      `INSERT INTO users (discord_id, guild_id, username)
+       VALUES ($1, $2, $3), ($1, $4, $5)`,
+      ["111111111111111111", "222222222222222222", "same-member", "333333333333333333", "same-member"],
+    );
+    assert.equal(
+      (await query("SELECT discord_id FROM users WHERE discord_id = $1", ["111111111111111111"])).length,
+      2,
+    );
+    await assert.rejects(
+      query(
+        "INSERT INTO users (discord_id, guild_id, username) VALUES ($1, $2, $3)",
+        ["111111111111111111", "222222222222222222", "duplicate"],
+      ),
+      /users_discord_guild_idx|users_discord_id_guild_id_key|duplicate key/i,
+    );
+
+    await assert.rejects(
+      query(
+        `INSERT INTO issue_logs
+          (issue_hash, guild_id, user_id, username, interaction_id, command_name)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        ["a".repeat(39), "222222222222222222", "111111111111111111", "member", "444444444444444444", "/discover"],
+      ),
+      /issue_logs_issue_hash_format_check|check constraint/i,
+    );
+    await query(
+      `INSERT INTO issue_logs
+        (issue_hash, guild_id, user_id, username, interaction_id, command_name)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      ["a".repeat(40), "222222222222222222", "111111111111111111", "member", "444444444444444444", "/discover"],
+    );
+
+    await initDatabase(config);
+    assert.deepEqual(
+      await queryOne<{ count: string }>("SELECT COUNT(*)::text AS count FROM issue_logs"),
+      { count: "1" },
+    );
+    assert.deepEqual(
+      await queryOne<{ count: string }>("SELECT COUNT(*)::text AS count FROM steam_users"),
+      { count: "1" },
+    );
+  } finally {
+    await closeDatabase();
+    await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => undefined);
+    await admin.end();
+  }
+});
