@@ -32,6 +32,8 @@ import {
 } from "../../helpers/media/media-notifications.js";
 import { getGuildMediaRegion, setGuildMediaRegion } from "../../helpers/media/media-region.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
+import { query } from "../../database.js";
+import { missingChannelPermissions } from "../../helpers/runtime/server-diagnostics.js";
 import {
   canConfigureGuildLeaveAction,
   getGuildRetentionSettings,
@@ -179,6 +181,81 @@ async function retentionPanel(guildId: string): Promise<{
   return { embeds: [embed], components: [row] };
 }
 
+async function serverDiagnostics(guildId: string, currentChannelId: string, guild: NonNullable<ChatInputCommandInteraction["guild"]>): Promise<EmbedBuilder> {
+  const rows = await query<{ name: string; channel_id: string }>(
+    `SELECT 'Current media notifications' AS name, channel_id::text AS channel_id
+       FROM media_notification_settings WHERE guild_id = $1 AND channel_id IS NOT NULL
+     UNION ALL
+     SELECT 'Archive uploads', upload_channel_id::text
+       FROM guild_archive_settings WHERE guild_id = $1 AND upload_channel_id IS NOT NULL
+     UNION ALL
+     SELECT 'Archive moderation', moderation_channel_id::text
+       FROM guild_archive_settings WHERE guild_id = $1 AND moderation_channel_id IS NOT NULL
+     UNION ALL
+     SELECT 'Custom Roles commands', command_channel_id::text
+       FROM custom_role_guild_settings WHERE guild_id = $1 AND command_channel_id IS NOT NULL
+     UNION ALL
+     SELECT 'Custom Roles logs', log_channel_id::text
+       FROM custom_role_guild_settings WHERE guild_id = $1 AND log_channel_id IS NOT NULL
+     UNION ALL
+     SELECT 'Daily Drop', channel_id::text
+       FROM community_daily_schedules WHERE guild_id = $1 AND enabled = TRUE
+     UNION ALL
+     SELECT 'Release digest', channel_id::text
+       FROM community_release_schedules WHERE guild_id = $1 AND enabled = TRUE
+     ORDER BY name`,
+    [guildId],
+  );
+  const checks = [{ name: "Current channel", channel_id: currentChannelId }, ...rows];
+  const embed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle("Server Check")
+    .setFooter({ text: "Read-only diagnostics · No server settings were changed" });
+
+  let botMember;
+  try {
+    botMember = await guild.members.fetchMe();
+  } catch {
+    embed.setDescription("The bot's server member could not be resolved. No channel permissions could be verified.");
+    return embed;
+  }
+
+  const results: Array<{ name: string; status: string; detail: string }> = [];
+  for (const check of checks) {
+    const channel = await guild.channels.fetch(check.channel_id).catch(() => null);
+    if (!channel || channel.guildId !== guildId) {
+      results.push({ name: check.name, status: "Needs attention", detail: "The configured channel is missing or inaccessible in this server." });
+      continue;
+    }
+    const permissions = channel.permissionsFor(botMember);
+    const missing = missingChannelPermissions({
+      viewChannel: permissions?.has(PermissionFlagsBits.ViewChannel) ?? false,
+      sendMessages: permissions?.has(PermissionFlagsBits.SendMessages) ?? false,
+      embedLinks: permissions?.has(PermissionFlagsBits.EmbedLinks) ?? false,
+    });
+    results.push({
+      name: check.name,
+      status: missing.length ? "Needs attention" : "Healthy",
+      detail: missing.length ? "Missing bot permissions: " + missing.join(", ") + "." : "View Channel, Send Messages and Embed Links are available.",
+    });
+  }
+
+  const healthy = results.filter(item => item.status === "Healthy").length;
+  const attention = results.filter(item => item.status === "Needs attention").length;
+  embed.setDescription(`**Healthy:** ${healthy} · **Needs attention:** ${attention}\nChecks include this channel and configured v3 notification, Archive, Custom Roles and scheduled-delivery channels.`);
+  for (const result of results) {
+    embed.addFields({
+      name: (result.status === "Healthy" ? "✓ " : "⚠ ") + result.name + " · " + result.status,
+      value: result.detail,
+      inline: false,
+    });
+  }
+  if (rows.length === 0) {
+    embed.addFields({ name: "Optional channels", value: "No additional delivery channels are configured.", inline: false });
+  }
+  return embed;
+}
+
 function canManage(
   interaction: ButtonInteraction | ChatInputCommandInteraction | ChannelSelectMenuInteraction | ModalSubmitInteraction,
 ): boolean {
@@ -198,6 +275,7 @@ export class SettingsCommand implements FeatureCommand {
           { name: "Media notifications", value: "notifications" },
           { name: "Change media region", value: "media-region" },
           { name: "Data retention when the bot leaves", value: "retention" },
+          { name: "Run server diagnostics", value: "diagnostics" },
         ),
     )
     .addStringOption((option) =>
@@ -238,6 +316,23 @@ export class SettingsCommand implements FeatureCommand {
     }
     if (!configured) {
       await interaction.reply({content:"Choose the server data-retention setting before using other Lemegeton settings.",flags:MessageFlags.Ephemeral});
+      return;
+    }
+    if (action === "diagnostics") {
+      if (!canManage(interaction)) {
+        await interaction.reply({content:"Manage Server permission is required to run diagnostics.",flags:MessageFlags.Ephemeral});
+        return;
+      }
+      await interaction.deferReply({flags:MessageFlags.Ephemeral});
+      try {
+        const guild = interaction.guild ?? await interaction.client.guilds.fetch(interaction.guildId);
+        const embed = await serverDiagnostics(interaction.guildId, interaction.channelId, guild);
+        await interaction.editReply({embeds:[embed]});
+      } catch (error) {
+        const issueHash = await createInteractionIssueLog(interaction, "/settings", error, { action: "diagnostics" });
+        const message = "Server diagnostics could not be completed.";
+        await interaction.editReply({content:issueHash ? message + "\n\n" + issueHashNotice(issueHash) : message});
+      }
       return;
     }
     if (action === "media-region") {
