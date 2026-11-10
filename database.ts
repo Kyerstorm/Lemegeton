@@ -158,6 +158,7 @@ const schemaStatements = [
   "ALTER TABLE community_archive_entries ADD COLUMN IF NOT EXISTS chapter_number VARCHAR(32)",
   "ALTER TABLE community_archive_entries ADD COLUMN IF NOT EXISTS linked_media_provider VARCHAR(32)",
   "ALTER TABLE community_archive_entries ADD COLUMN IF NOT EXISTS linked_media_id TEXT",
+  "ALTER TABLE community_archive_entries ADD COLUMN IF NOT EXISTS source_legacy_panel_id BIGINT",
   "CREATE INDEX IF NOT EXISTS community_archive_guild_status_idx ON community_archive_entries (created_guild_id, status, created_at DESC)",
   "CREATE INDEX IF NOT EXISTS community_archive_visibility_idx ON community_archive_entries (visibility, status, created_at DESC)",
   `CREATE TABLE IF NOT EXISTS guild_archive_settings (
@@ -166,11 +167,13 @@ const schemaStatements = [
     upload_types TEXT NOT NULL DEFAULT '["image"]',
     upload_channel_id BIGINT,
     moderation_channel_id BIGINT,
+    moderator_role_id BIGINT,
     updated_by BIGINT,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`,
   "ALTER TABLE guild_archive_settings ADD COLUMN IF NOT EXISTS upload_channel_id BIGINT",
   "ALTER TABLE guild_archive_settings ADD COLUMN IF NOT EXISTS moderation_channel_id BIGINT",
+  "ALTER TABLE guild_archive_settings ADD COLUMN IF NOT EXISTS moderator_role_id BIGINT",
   `CREATE TABLE IF NOT EXISTS archive_user_preferences (
     guild_id BIGINT NOT NULL,
     user_id BIGINT NOT NULL,
@@ -697,6 +700,107 @@ export async function initDatabase(config: DatabaseConfig): Promise<void> {
     }
     if (!hasGuildScopedUserKey) {
       await client.query("ALTER TABLE users ADD CONSTRAINT users_discord_guild_unique UNIQUE (discord_id, guild_id)");
+    }
+
+    const legacyGuildSettings = await client.query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_schema = current_schema() AND table_name = 'guild_settings'
+         AND column_name = ANY($1::text[])`,
+      [["guild_id", "panel_mod_role_id", "archive_scope"]],
+    );
+    const legacyGuildColumns = new Set(legacyGuildSettings.rows.map(row => row.column_name));
+    if (legacyGuildColumns.has("guild_id") && legacyGuildColumns.has("panel_mod_role_id")) {
+      await client.query(
+        `INSERT INTO guild_archive_settings (guild_id, moderator_role_id)
+         SELECT guild_id, panel_mod_role_id FROM guild_settings WHERE panel_mod_role_id IS NOT NULL
+         ON CONFLICT (guild_id) DO UPDATE
+           SET moderator_role_id = COALESCE(guild_archive_settings.moderator_role_id, EXCLUDED.moderator_role_id)`,
+      );
+    }
+
+    const legacyPanelsTable = await client.query<{ exists: boolean }>(
+      "SELECT to_regclass('panels') IS NOT NULL AS exists",
+    );
+    if (legacyPanelsTable.rows[0]?.exists) {
+      await client.query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS community_archive_legacy_panel_idx ON community_archive_entries (source_legacy_panel_id) WHERE source_legacy_panel_id IS NOT NULL",
+      );
+      const legacyPanelColumns = await client.query<{ column_name: string }>(
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = 'panels'`,
+      );
+      const availablePanelColumns = new Set(legacyPanelColumns.rows.map(row => row.column_name));
+      const requiredPanelColumns = ["id", "uploader_id", "uploader_guild_id", "filename", "title", "created_at"];
+      if (requiredPanelColumns.every(column => availablePanelColumns.has(column))) {
+        const hasPanelTags = await client.query<{ exists: boolean }>(
+          "SELECT to_regclass('panel_tags') IS NOT NULL AS exists",
+        );
+        const tagsExpression = hasPanelTags.rows[0]?.exists
+          ? "COALESCE((SELECT json_agg(tag ORDER BY tag)::text FROM panel_tags WHERE panel_id = p.id), '[]')"
+          : "'[]'";
+        const archiveScopeExpression = legacyGuildColumns.has("archive_scope")
+          ? "CASE WHEN LOWER(COALESCE(gs.archive_scope, 'global')) = 'global' THEN 'global' ELSE 'server' END"
+          : "'global'";
+        const guildSettingsJoin = legacyGuildColumns.has("guild_id") && legacyGuildColumns.has("archive_scope")
+          ? "LEFT JOIN guild_settings gs ON gs.guild_id = p.uploader_guild_id"
+          : "";
+        const optionalPanelColumn = (column: string, fallback: string) =>
+          availablePanelColumns.has(column) ? "p." + column : fallback;
+        const nsfwFilter = availablePanelColumns.has("is_nsfw") ? "AND COALESCE(p.is_nsfw, FALSE) = FALSE" : "";
+        const importResult = await client.query(
+          `INSERT INTO community_archive_entries (
+             archive_type, title, content, media_type, source_url, tags, spoiler, status,
+             created_by, created_guild_id, visibility, media_asset_id, attachment_filename,
+             attachment_content_type, attachment_url, storage_message_id, storage_channel_id,
+             chapter_number, linked_media_provider, linked_media_id, source_legacy_panel_id, created_at
+           )
+           SELECT
+             'panels', LEFT(p.title, 200), COALESCE(${optionalPanelColumn("caption", "''")}, ''),
+             'Manga',
+             CASE WHEN ${optionalPanelColumn("source_url", "NULL")} LIKE 'https://%' THEN ${optionalPanelColumn("source_url", "NULL")} ELSE NULL END,
+             ${tagsExpression}, FALSE, 'approved', p.uploader_id, COALESCE(p.uploader_guild_id, $1),
+             ${archiveScopeExpression},
+             ${optionalPanelColumn("media_asset_id", "NULL")},
+             ${optionalPanelColumn("filename", "NULL")}, NULL,
+             CASE WHEN ${optionalPanelColumn("attachment_url", "NULL")} LIKE 'https://%' THEN ${optionalPanelColumn("attachment_url", "NULL")} ELSE NULL END,
+             ${optionalPanelColumn("storage_message_id", "NULL")},
+             ${optionalPanelColumn("storage_channel_id", "NULL")},
+             ${optionalPanelColumn("chapter_number", "NULL")},
+             CASE WHEN ${optionalPanelColumn("anilist_id", "NULL")} IS NOT NULL THEN 'anilist' ELSE NULL END,
+             ${optionalPanelColumn("anilist_id", "NULL")}::text, p.id, p.created_at
+           FROM panels p
+           ${guildSettingsJoin}
+           WHERE COALESCE(p.uploader_guild_id, $1) IS NOT NULL
+             ${nsfwFilter}
+           ON CONFLICT (source_legacy_panel_id) WHERE source_legacy_panel_id IS NOT NULL DO NOTHING`,
+          [config.primaryGuildId],
+        );
+        if (importResult.rowCount) {
+          logger.info("Imported legacy Manga Panels into the unified Archive", { imported: importResult.rowCount });
+        }
+        if (!config.primaryGuildId) {
+          const unassigned = await client.query<{ count: string }>(
+            "SELECT COUNT(*)::text AS count FROM panels WHERE uploader_guild_id IS NULL",
+          );
+          if (Number(unassigned.rows[0]?.count ?? 0) > 0) {
+            logger.warn("Legacy Panels without a source guild were left in the original table; configure GUILD_ID to migrate them safely", {
+              skipped: Number(unassigned.rows[0]?.count ?? 0),
+            });
+          }
+        }
+        if (availablePanelColumns.has("is_nsfw")) {
+          const excluded = await client.query<{ count: string }>(
+            "SELECT COUNT(*)::text AS count FROM panels WHERE is_nsfw = TRUE",
+          );
+          if (Number(excluded.rows[0]?.count ?? 0) > 0) {
+            logger.warn("NSFW legacy Panels were retained in the original table and not exposed in the unified Archive", {
+              excluded: Number(excluded.rows[0]?.count ?? 0),
+            });
+          }
+        }
+      } else {
+        logger.warn("Legacy panels table has an incomplete schema; records were left in place and not imported");
+      }
     }
 
     const legacySnowflakeColumns = [
