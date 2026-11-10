@@ -401,33 +401,33 @@ The `.env.example` was cleaned in this migration pass: removed old generic-role/
 
 ## Final source-to-TypeScript audit snapshot — 11 November 2026
 
-**Audited code head:** \`e4f3276f5bc9c24875b88c490079cf847e82b4f1\`  
-**Pull request:** #17, \`lemegeton-v3\` → \`multi_guild\`; remains open and Draft.  
+**Audited code head:** `e4f3276f5bc9c24875b88c490079cf847e82b4f1`  
+**Pull request:** #17, `lemegeton-v3` → `multi_guild`; remains open and Draft.  
 **Inventory source:** the recursive Git tree for the audited head; the tree response was complete (not truncated).
 
 | Inventory | Current PR tree |
 |---|---:|
 | Tracked files | 183 |
-| Python source files (\`.py\`) | **0** |
-| TypeScript files (\`.ts\`) | 112 |
-| TSX files (\`.tsx\`) | 4 |
-| JavaScript files (\`.js\`) | 1 |
+| Python source files (`.py`) | **0** |
+| TypeScript files (`.ts`) | 112 |
+| TSX files (`.tsx`) | 4 |
+| JavaScript files (`.js`) | 1 |
 | TypeScript test/spec modules | 35 |
 | Markdown documents | 21 |
 
-The 167 Python reference files and 50 Python test/fixture modules from \`multi_guild\` remain enumerated in the source inventory above. Their selected v3 destinations, replacement behavior, intentional retirements and unresolved acceptance items are recorded in the parity register and exclusions sections. The target is behavior-level coverage for approved v3 functionality, not a one-file-per-file translation or a matching test-module count. No Python runtime/source file remains in the v3 PR tree.
+The 167 Python reference files and 50 Python test/fixture modules from `multi_guild` remain enumerated in the source inventory above. Their selected v3 destinations, replacement behavior, intentional retirements and unresolved acceptance items are recorded in the parity register and exclusions sections. The target is behavior-level coverage for approved v3 functionality, not a one-file-per-file translation or a matching test-module count. No Python runtime/source file remains in the v3 PR tree.
 
 ### Requested diagnostics and coordination commits
 
 The requested commit sequence is preserved at the start of the current PR history:
 
-1. **\`Issue Hash Log\`** — \`8218122a1f3daa5927f56b8cd0792894995c7c56\`
-2. **\`coordinating\`** — \`87afb6af63f3247f7d95a38f5c81c7cdc45a8447\`
+1. **`Issue Hash Log`** — `8218122a1f3daa5927f56b8cd0792894995c7c56`
+2. **`coordinating`** — `87afb6af63f3247f7d95a38f5c81c7cdc45a8447`
 
-The follow-up commits on this same PR branch are \`Atlas community links\`, \`Command error coverage\`, \`Command error coverage follow-up\`, and \`Issue source links\`.
+The follow-up commits on this same PR branch are `Atlas community links`, `Command error coverage`, `Command error coverage follow-up`, and `Issue source links`.
 
 - Issue references remain exactly 40 lowercase hexadecimal characters (160 bits derived from a domain-separated SHA-512 digest). Fresh cryptographic entropy and length-framed interaction, user and guild context distinguish occurrences. The database primary-key constraint and bounded collision retry remain the final uniqueness guard. No sequential counter, timestamp, UUID-shaped replacement or 128-character digest was substituted.
-- \`/log\` checks bot-moderator authorization and the configured operations guild, returns a bounded embed plus a full sanitized JSON attachment, preserves error code/cause/stack/context and links to the originating Discord message when the interaction originated from a message. Button/select message IDs are added by the shared recorder.
+- `/log` checks bot-moderator authorization and the configured operations guild, returns a bounded embed plus a full sanitized JSON attachment, preserves error code/cause/stack/context and links to the originating Discord message when the interaction originated from a message. Button/select message IDs are added by the shared recorder.
 - The central interaction boundary labels the actual slash command, autocomplete action or component action. Local command handlers that translate genuine failures into a response were checked and connected to the same issue recorder; expected input validation and intentional fallback behavior remain non-error outcomes.
 - Secret redaction is recursive and bounded for depth, nodes, item count and text size; it handles sensitive field names, common credential formats, bearer values, URL credentials and circular values. The user-facing reference is only shown when the diagnostic record was saved.
 - Knowledge Atlas combines provider relationships with guild-scoped community links from approved/visible Archive entries, active collections, open unexpired discussions, future scheduled/open sessions, current reading nominations and eligible ranking candidates. Provider, recommendation and community provenance remain distinct; community links are never labelled as provider-confirmed. Session/discussion links prefer their thread and fall back to their parent channel. Archive panel embeds surface a stored AniList manga link only when its provider and identifier validate.
@@ -439,7 +439,7 @@ The workflow results below are for the audited code head above, not an earlier c
 
 - **TypeScript bot:** passed. Type-check succeeded; build completed; Node test runner reports **170 passed, 0 failed, 0 skipped**. [Workflow job](https://github.com/Kyerstorm/Lemegeton/actions/runs/42914837864/job/130174499218)
 - **Docker build and runtime contract:** passed. Startup script and Compose validation, production image build, non-root user and image health-check assertions succeeded. [Workflow job](https://github.com/Kyerstorm/Lemegeton/actions/runs/42914837854/job/130174499540)
-- **Frontend/Rust workflow:** frontend type-check, high-severity npm audit, production build/static output checks and Rust tests passed at the last inspection. The workflow was still running its \`cargo-audit\` installation/audit step when this snapshot was written; it is not marked green here. [Workflow job](https://github.com/Kyerstorm/Lemegeton/actions/runs/42914837854/job/130174499195)
+- **Frontend/Rust workflow:** passed. Frontend type-check, high-severity npm audit, production build/static output checks, Rust tests, `cargo-audit` installation and `cargo audit` all succeeded. [Workflow job](https://github.com/Kyerstorm/Lemegeton/actions/runs/42914837854/job/130174499195)
 - **GitGuardian:** failed on an existing test-service credential finding in the PostgreSQL test workflow from an earlier PR commit. The reported value is a test fixture, not a production credential, but the check itself remains failed and is not represented as a pass. No production secret was added by this audit.
 
 ### Code-audit result and remaining acceptance gates
@@ -450,8 +450,8 @@ The source inventory, in-scope behavior dispositions, tracked Python removal, sh
 2. Use a real test Discord application/guild to verify bot intents, inviter audit-log availability, retention-choice permissions, command registration, channel/thread permissions, component authorization, guild leave/rejoin and scheduled-worker recovery.
 3. Exercise private S3 uploads, Archive visibility, Custom Role image-source retention, database rollback, retry queue recovery and deletion behavior under real S3 failure conditions.
 4. Validate live AniList, Steam, IGDB, TMDB and Google Books responses/rate limits, plus dashboard OAuth, bridge authentication and guild authorization using the deployment's configured services.
-5. Decide how any legacy deployment using \`panel_storage_channel_id\` should transition. It is not equivalent to v3's member-facing \`upload_channel_id\`; configure private S3 or approve a separate storage replacement first.
+5. Decide how any legacy deployment using `panel_storage_channel_id` should transition. It is not equivalent to v3's member-facing `upload_channel_id`; configure private S3 or approve a separate storage replacement first.
 6. Retain the documented privacy decision that the v3 AniList leaderboard is narrower than the previous personal-progress metrics. Do not silently restore chapter/episode/completion totals without a separate decision and storage/privacy design.
-7. Resolve the existing \`multi_guild\` / \`lemegeton-v3\` history divergence deliberately on the PR branch. GitHub reports the PR as non-mergeable/dirty; neither branch has been synchronized or modified by this audit.
+7. Resolve the existing `multi_guild` / `lemegeton-v3` history divergence deliberately on the PR branch. GitHub reports the PR as non-mergeable/dirty; neither branch has been synchronized or modified by this audit.
 
-**Disposition:** the code-level migration audit is complete for the current tracked source and approved v3 scope; the migration is not certified for production cutover. PR #17 remains Draft, no deployment was performed, and \`multi_guild\` was not changed.
+**Disposition:** the code-level migration audit is complete for the current tracked source and approved v3 scope; the migration is not certified for production cutover. PR #17 remains Draft, no deployment was performed, and `multi_guild` was not changed.
