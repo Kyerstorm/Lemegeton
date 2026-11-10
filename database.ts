@@ -649,6 +649,28 @@ export async function initDatabase(config: DatabaseConfig): Promise<void> {
     await client.query("BEGIN");
     for (const statement of schemaStatements) await client.query(statement);
 
+    const legacySnowflakeColumns = [
+      ["bot_moderators", ["discord_id", "added_by"]],
+      ["custom_role_records", ["guild_id", "user_id", "role_id", "icon_source_asset_id"]],
+      ["custom_role_guild_settings", ["guild_id", "anchor_role_id", "command_channel_id", "log_channel_id"]],
+      ["custom_role_pending_removals", ["guild_id", "log_channel_id", "log_message_id", "resolved_by"]],
+      ["custom_role_archive_snoozes", ["guild_id", "user_id"]],
+    ] as const;
+    for (const [table, columns] of legacySnowflakeColumns) {
+      const existingColumns = await client.query<{ column_name: string; data_type: string }>(
+        `SELECT column_name, data_type FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = $1 AND column_name = ANY($2::text[])`,
+        [table, [...columns]],
+      );
+      for (const column of existingColumns.rows) {
+        if (column.data_type !== "bigint") {
+          await client.query(
+            `ALTER TABLE ${table} ALTER COLUMN ${column.column_name} TYPE BIGINT USING ${column.column_name}::BIGINT`,
+          );
+        }
+      }
+    }
+
     const pendingUserIdsColumn = await client.query<{ data_type: string }>(
       `SELECT data_type FROM information_schema.columns
        WHERE table_schema = current_schema() AND table_name = 'custom_role_pending_removals'
