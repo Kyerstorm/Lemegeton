@@ -1020,8 +1020,8 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       ["555555555555555551", retentionGuild],
     );
     await query(
-      "INSERT INTO community_daily_items (guild_id, format, title, content) VALUES ($1,'quote','Guild item','Guild content'),($2,'quote','Other item','Other content')",
-      [retentionGuild, retentionOtherGuild],
+      "INSERT INTO community_daily_items (guild_id, format, title, content, created_by) VALUES ($1,'quote','Guild item','Guild content',$3),($2,'quote','Other item','Other content',$4)",
+      [retentionGuild, retentionOtherGuild, "555555555555555551", "555555555555555552"],
     );
     const purge = await deleteGuildData(retentionGuild);
     assert.equal(purge.assetsAttempted, 0);
