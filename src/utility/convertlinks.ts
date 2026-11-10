@@ -7,6 +7,7 @@ import type { FeatureCommand } from "../../helpers/commands/command.js";
 import { AniListClient } from "../../helpers/integration/anilist.js";
 import { loadingMessage } from "../../helpers/emoji.js";
 import { isModeratorCommandGuild } from "../../helpers/commands/moderation.js";
+import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
 
 function extractLinks(value: string): string[] {
   const found = [...value.matchAll(/https?:\/\/[^\s]+/gi)]
@@ -69,6 +70,7 @@ export class ConvertLinksCommand implements FeatureCommand {
     const limited = links.slice(0, 25);
     await interaction.reply({ content: loadingMessage("Converting " + limited.length + " AniList link(s)…"), flags: MessageFlags.Ephemeral });
     const results: Array<{ input: string; output: string }> = [];
+    const lookupFailures: Array<{ input: string; error: unknown }> = [];
     for (let index = 0; index < limited.length; index += 1) {
       const link = limited[index] ?? "";
       const username = extractAniListUsername(link);
@@ -81,13 +83,19 @@ export class ConvertLinksCommand implements FeatureCommand {
             input: link,
             output: user ? "https://anilist.co/user/" + user.id : "AniList user not found",
           });
-        } catch {
+        } catch (error) {
+          lookupFailures.push({ input: link, error });
           results.push({ input: link, output: "AniList lookup failed; try again later" });
         }
       }
       await interaction.editReply(loadingMessage("Converted " + (index + 1) + " of " + limited.length + " link(s)…"));
     }
 
+    const issueHash = lookupFailures.length
+      ? await createInteractionIssueLog(interaction, "/convertlinks",
+          new AggregateError(lookupFailures.map(item => item.error), "One or more AniList profile lookups failed."),
+          { action: "profile-lookup", failureCount: lookupFailures.length, failedInputs: lookupFailures.map(item => item.input) })
+      : null;
     const embed = new EmbedBuilder().setColor(0x5865f2).setTitle("AniList link conversion")
       .setDescription(results.map((item, index) =>
         "**" + (index + 1) + ".** " + item.output + "\nInput: " + item.input,
@@ -96,6 +104,7 @@ export class ConvertLinksCommand implements FeatureCommand {
     if (links.length > limited.length) {
       embed.addFields({ name: "Limit", value: "Only the first 25 unique links were processed. Run the command again for the remainder." });
     }
+    if (issueHash) embed.addFields({ name: "Diagnostic issue", value: issueHashNotice(issueHash), inline: false });
     await interaction.editReply({ content: null, embeds: [embed] });
     return true;
   }

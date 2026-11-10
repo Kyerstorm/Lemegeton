@@ -477,8 +477,10 @@ export class CustomRoleCommand implements FeatureCommand {
           flags: MessageFlags.Ephemeral,
         });
       } catch (error) {
+        const issueHash = await createInteractionIssueLog(interaction, "/custom-role", error, { action: "studio-link" });
+        const message = error instanceof Error ? error.message : "The Custom Role Studio couldn't be opened.";
         await interaction.reply({
-          content: error instanceof Error ? error.message : "The Custom Role Studio couldn't be opened.",
+          content: issueHash ? message + "\n\n" + issueHashNotice(issueHash) : message,
           flags: MessageFlags.Ephemeral,
         });
       }
@@ -779,7 +781,9 @@ export class CustomRoleCommand implements FeatureCommand {
     try {
       latest = await planLegacyCustomRoleImport(guild);
     } catch (error) {
-      await interaction.editReply(error instanceof Error ? error.message : "I couldn't revalidate the legacy role data.");
+      const issueHash = await createInteractionIssueLog(interaction, "/custom-role", error, { action: "legacy-import-preview" });
+      const message = error instanceof Error ? error.message : "I couldn't revalidate the legacy role data.";
+      await interaction.editReply(issueHash ? message + "\n\n" + issueHashNotice(issueHash) : message);
       return;
     }
 
@@ -791,6 +795,7 @@ export class CustomRoleCommand implements FeatureCommand {
     let archived = 0;
     let skipped = 0;
     const errors: string[] = [];
+    const failures: unknown[] = [];
 
     const takeOver = async (
       entry: { user_id: string; role_id: string; role_name: string | null },
@@ -871,8 +876,9 @@ export class CustomRoleCommand implements FeatureCommand {
             icon_crop: JSON.stringify(processed.crop),
             icon_source_asset_id: assetId,
           });
-        } catch {
+        } catch (error) {
           if (assetId) await deleteCustomRoleIconSource(assetId, guild.id).catch(() => undefined);
+          failures.push(error);
           errors.push("Could not preserve the image icon for " + role.name + ".");
         }
       }
@@ -887,6 +893,7 @@ export class CustomRoleCommand implements FeatureCommand {
         takenOver += 1;
       } catch (error) {
         skipped += 1;
+        failures.push(error);
         errors.push("Skipped " + (entry.role_name ?? entry.role_id) + ": " + (error instanceof Error ? error.message : "unknown error"));
       }
       if ((index + 1) % 5 === 0 && index + 1 < selectedTakeOvers.length) await new Promise(resolve => setTimeout(resolve, 2_000));
@@ -901,15 +908,20 @@ export class CustomRoleCommand implements FeatureCommand {
         else skipped += 1;
       } catch (error) {
         skipped += 1;
+        failures.push(error);
         errors.push("Could not archive " + (entry.role_name ?? entry.role_id) + ": " + (error instanceof Error ? error.message : "unknown error"));
       }
       if ((index + 1) % 5 === 0 && index + 1 < selectedArchives.length) await new Promise(resolve => setTimeout(resolve, 2_000));
     }
 
-    await interaction.editReply(
-      "Legacy import complete. Linked " + takenOver + " eligible role(s), archived " + archived + " ineligible role(s), skipped " + skipped + "." +
-      (errors.length ? "\n" + errors.slice(0, 8).join("\n").slice(0, 1200) : ""),
-    );
+    const summary = "Legacy import complete. Linked " + takenOver + " eligible role(s), archived " + archived + " ineligible role(s), skipped " + skipped + "." +
+      (errors.length ? "\n" + errors.slice(0, 8).join("\n").slice(0, 1200) : "");
+    const issueHash = failures.length
+      ? await createInteractionIssueLog(interaction, "/custom-role", new AggregateError(failures, "Some legacy custom roles could not be imported."), {
+          action: "legacy-import", attempted: selectedTakeOvers.length + selectedArchives.length, skipped,
+        })
+      : null;
+    await interaction.editReply(issueHash ? summary + "\n\n" + issueHashNotice(issueHash) : summary);
     await this.logEvent(guild, settings, "Imported legacy booster roles: linked eligible records, archived " + archived + ", skipped " + skipped + ".");
   }
 

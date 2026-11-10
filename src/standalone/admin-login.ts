@@ -6,6 +6,8 @@ import type { BotConfig } from "../../helpers/runtime/config.js";
 import type { FeatureCommand } from "../../helpers/commands/command.js";
 import { isBotModerator, isModeratorCommandGuild } from "../../helpers/commands/moderation.js";
 import { linkAniListAccount } from "../../helpers/runtime/profile.js";
+import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
+import { safeInteractionErrorMessage } from "../../helpers/commands/command-errors.js";
 import { queryOne } from "../../database.js";
 import { AniListClient } from "../../helpers/integration/anilist.js";
 
@@ -81,7 +83,9 @@ export class AdminLoginCommand implements FeatureCommand {
       const profile = await linkAniListAccount(interaction.guildId!, member.id, member.user.username, this.client, username);
       await interaction.editReply({ embeds: [successEmbed(member.displayName ?? member.user.username, profile)], components: [] });
     } catch (error) {
-      await interaction.editReply(error instanceof Error ? error.message : "The AniList account could not be connected.");
+      const issueHash = await createInteractionIssueLog(interaction, "/adminlogin", error, { action: "connect-account" });
+      const message = safeInteractionErrorMessage(error);
+      await interaction.editReply(issueHash ? message + "\n\n" + issueHashNotice(issueHash) : message);
     }
   }
 
@@ -106,7 +110,9 @@ export class AdminLoginCommand implements FeatureCommand {
       const profile = await linkAniListAccount(interaction.guildId!, member.id, member.user.username, this.client, username);
       await interaction.editReply({ content: null, embeds: [successEmbed(member.displayName ?? member.user.username, profile)], components: [] });
     } catch (error) {
-      await interaction.editReply({ content: error instanceof Error ? error.message : "The AniList account could not be updated.", embeds: [], components: [] });
+      const issueHash = await createInteractionIssueLog(interaction, "/adminlogin", error, { action: "replace-account" });
+      const message = safeInteractionErrorMessage(error);
+      await interaction.editReply({ content: issueHash ? message + "\n\n" + issueHashNotice(issueHash) : message, embeds: [], components: [] });
     }
     return true;
   }
