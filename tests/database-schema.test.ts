@@ -544,12 +544,14 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     assert.deepEqual(legacyPlan.not_qualifying.map(entry => entry.user_id).sort(), [
       legacyIds.ineligibleUser,
       legacyIds.departedUser,
+      legacyIds.missingUser,
     ].sort());
     const skippedReasons = new Map(legacyPlan.skipped.map(entry => [entry.user_id, entry.reason]));
+    const notQualifyingReasons = new Map(legacyPlan.not_qualifying.map(entry => [entry.user_id, entry.reason]));
+    assert.match(notQualifyingReasons.get(legacyIds.missingUser) ?? "", /no longer in this server/);
     assert.match(skippedReasons.get(legacyIds.aboveUser) ?? "", /bot's highest role/);
     assert.match(skippedReasons.get(legacyIds.moderatorUser) ?? "", /moderation or administration permissions/);
     assert.match(skippedReasons.get(legacyIds.managedUser) ?? "", /managed by Discord/);
-    assert.match(skippedReasons.get(legacyIds.missingUser) ?? "", /no longer exists/);
     assert.match(skippedReasons.get(legacyIds.linkedUser) ?? "", /already linked/);
     assert.equal(skippedReasons.get(legacyIds.importedUser), "Already imported.");
     assert.match(skippedReasons.get(legacyIds.duplicateSecondUser) ?? "", /already linked/);
