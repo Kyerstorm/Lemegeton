@@ -27,7 +27,7 @@ import type { FeatureCommand } from "../../helpers/commands/command.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
 import { loadConfig } from "../../helpers/runtime/config.js";
 import { createCustomRolePickerLink } from "../../helpers/custom-roles/custom-role-picker-server.js";
-import {archiveLegacyCustomRole,cancelCustomRolePending,confirmCustomRolePending,getPendingCustomRoleRemoval} from "../../helpers/custom-roles/custom-role-lifecycle.js";
+import {archiveLegacyCustomRole,cancelCustomRolePending,confirmCustomRolePending,getPendingCustomRoleRemoval,withCustomRoleLock} from "../../helpers/custom-roles/custom-role-lifecycle.js";
 import { homeEmbed } from "../../helpers/runtime/discord.js";
 import { loadingMessage } from "../../helpers/emoji.js";
 import { extractCustomRoleAvatarPalette, processCustomRoleIconImage, type CustomRoleIconCrop } from "../../helpers/custom-roles/custom-role-images.js";
@@ -44,8 +44,11 @@ import {
   planLegacyCustomRoleImport,
   removeCustomRoleBlockedWord,
   getCustomRoleIconData,
+  getCustomRoleOwnerForRole,
   getCustomRoleRecord,
   getCustomRoleSettings,
+  getLegacyBoosterRoleId,
+  legacyRoleTakeoverProblem,
   listCustomRoleRecords,
   HOLOGRAPHIC_COLORS,
   parseCustomRoleColor,
@@ -838,9 +841,11 @@ export class CustomRoleCommand implements FeatureCommand {
       });
       await updateCustomRole(guild.id, entry.user_id, {
         icon_png: null,
+        icon_source: null,
         icon_crop: null,
         icon_source_asset_id: null,
         icon_emoji: emoji,
+        last_changed_at: null,
       });
       if (previousIcon?.icon_source_asset_id) {
         await deleteCustomRoleIconSource(previousIcon.icon_source_asset_id, guild.id).catch(() => undefined);
@@ -1078,9 +1083,75 @@ export class CustomRoleCommand implements FeatureCommand {
     const context = await this.memberContext(interaction);
     if ("error" in context) return { ok: false, message: context.error };
     const { member, settings } = context;
-    const existing = await getCustomRoleRecord(member.guild.id, member.id);
-    const live = existing?.role_id ? member.guild.roles.cache.get(existing.role_id) : null;
-    if (live) return { ok: false, message: `Your role already exists as **${live.name}**. Use Rename or Put on from the panel.` };
+    return withCustomRoleLock(member.guild.id, member.id, async () => {
+      const existing = await getCustomRoleRecord(member.guild.id, member.id);
+      const live = existing?.role_id ? member.guild.roles.cache.get(existing.role_id) : null;
+      if (live) return { ok: false, message: "Your role already exists as **" + live.name + "**. Use Rename or Put on from the panel." };
+
+      const legacyRoleId = await getLegacyBoosterRoleId(member.guild.id, member.id);
+      const legacyRole = legacyRoleId
+        ? member.guild.roles.cache.get(legacyRoleId) ?? await member.guild.roles.fetch(legacyRoleId).catch(() => null)
+        : null;
+      if (legacyRole) {
+        const botMember = member.guild.members.me;
+        const owner = await getCustomRoleOwnerForRole(member.guild.id, legacyRole.id, member.id);
+        const problem = owner
+          ? "it already belongs to another member's custom role"
+          : legacyRoleTakeoverProblem(
+            member.guild.id,
+            legacyRole,
+            settings,
+            botMember?.roles.highest.position ?? null,
+          );
+        if (problem) {
+          return {
+            ok: false,
+            message: "You still have your old booster role **" + legacyRole.name + "**, but I can't take it over (" + problem + "), and I won't create a second role. Ask a server manager to use **Import old roles** in /custom-role.",
+          };
+        }
+
+        const roleColors = legacyRole.colors as {
+          primaryColor?: number;
+          secondaryColor?: number | null;
+          tertiaryColor?: number | null;
+        };
+        const hasSecondary = typeof roleColors.secondaryColor === "number";
+        const hasTertiary = typeof roleColors.tertiaryColor === "number";
+        const previousIcon = await getCustomRoleIconData(member.guild.id, member.id);
+        await saveCustomRole({
+          guild_id: member.guild.id,
+          user_id: member.id,
+          role_id: legacyRole.id,
+          position_hint: legacyRole.position,
+          status: "active",
+          name: legacyRole.name,
+          color_mode: hasTertiary ? "holographic" : hasSecondary ? "gradient" : "solid",
+          primary_color: (roleColors.primaryColor ?? legacyRole.color) || 0x010101,
+          secondary_color: hasSecondary ? roleColors.secondaryColor ?? null : null,
+          icon_emoji: legacyRole.unicodeEmoji ?? null,
+        });
+        await updateCustomRole(member.guild.id, member.id, {
+          icon_png: null,
+          icon_source: null,
+          icon_crop: null,
+          icon_source_asset_id: null,
+          icon_emoji: legacyRole.unicodeEmoji ?? null,
+          last_changed_at: null,
+        });
+        if (previousIcon?.icon_source_asset_id) {
+          await deleteCustomRoleIconSource(previousIcon.icon_source_asset_id, member.guild.id).catch(() => undefined);
+        }
+        await this.logEvent(
+          member.guild,
+          settings,
+          "<@!" + member.id + "> took over their old booster role <@&" + legacyRole.id + "> as their custom role.",
+        );
+        return {
+          ok: true,
+          message: "You already had a booster role, so it's now your custom role: **" + legacyRole.name + "**, with the same name, color and position. Press **Rename** to change it.",
+        };
+      }
+
     const name = rawName.trim() || existing?.name || "";
     const checked = await this.validateName(member, name, settings, existing?.role_id ?? null);
     if (checked.error || !checked.name) return { ok: false, message: checked.error ?? "Choose a role name." };
@@ -1145,6 +1216,7 @@ export class CustomRoleCommand implements FeatureCommand {
       }
       return { ok: false, message: error instanceof Error ? `I couldn't create your role: ${error.message}` : "I couldn't create your role. Check the bot's Manage Roles permission and hierarchy.", error };
     }
+    });
   }
 
   private async renameRole(interaction: GuildInteraction, rawName: string): Promise<CustomRoleResult> {
