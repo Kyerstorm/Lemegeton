@@ -70,7 +70,13 @@ export interface AniListRecentlyFinishedMedia {
   endDate: { year: number; month: number; day: number } | null;
 }
 
-export interface AniListAiring {mediaId:number;title:string;episode:number;airingAt:number;url:string;image:string|null}
+export interface AniListAiring {
+ mediaId:number;title:string;episode:number;airingAt:number;url:string;image:string|null;
+ format:string|null;status:string|null;season:string|null;seasonYear:number|null;
+}
+export interface AniListAiringFilters {
+ title?:string;day?:string;season?:string;year?:number;days?:number;
+}
 export interface AniListMediaNightCandidate {
   id:number;
   type:AniListMediaType;
@@ -295,8 +301,24 @@ const STUDIO_DETAILS=`query StudioDetails($id:Int!){Studio(id:$id){id name siteU
 const REVIEW_DETAILS=`query ReviewDetails($id:Int!){Review(id:$id){id summary body score rating ratingAmount createdAt siteUrl user{name siteUrl} media{id type isAdult title{romaji english native} siteUrl}}}`;
 const ACTIVITY_DETAILS=`query ActivityDetails($id:Int!){Activity(id:$id){... on TextActivity{id siteUrl createdAt text user{name siteUrl}} ... on MessageActivity{id siteUrl createdAt message user{name siteUrl} recipient{name}}}}`;
 const MEDIA_DETAILS=`query MediaDetails($id:Int!,$type:MediaType!){Media(id:$id,type:$type){id type isAdult title{romaji english native} description(asHtml:false) siteUrl coverImage{large} bannerImage averageScore status format startDate{year month day} endDate{year month day} episodes chapters volumes genres studios(isMain:true){nodes{name}} popularity favourites source staff(page:1,perPage:16,sort:RELEVANCE){edges{role node{id name{full} siteUrl image{large}}}} characters(page:1,perPage:24,sort:ROLE){edges{role node{id name{full} image{large} isAdult}}} tags{name rank isMediaSpoiler isAdult} stats{statusDistribution{status amount} scoreDistribution{score amount}} recommendations(sort:RATING,perPage:10){edges{node{mediaRecommendation{id siteUrl title{romaji english native} coverImage{large} isAdult}}}} relations{edges{relationType node{id type isAdult siteUrl title{romaji english}}}} trailer{id site}}}`;
-const AIRING=`query Airing($from:Int,$to:Int){Page(page:1,perPage:50){airingSchedules(airingAt_greater:$from,airingAt_lesser:$to,sort:TIME){airingAt episode media{id title{romaji english} siteUrl coverImage{large} isAdult}}}}`;
+const AIRING=`query Airing($from:Int,$to:Int){Page(page:1,perPage:50){airingSchedules(airingAt_greater:$from,airingAt_lesser:$to,sort:TIME){airingAt episode media{id title{romaji english native} siteUrl coverImage{large} format status season seasonYear isAdult}}}}`;
+const AIRING_TITLE=`query TitleAiring($search:String!){Page(page:1,perPage:5){media(search:$search,type:ANIME,sort:SEARCH_MATCH,isAdult:false){id title{romaji english native} siteUrl coverImage{large} format status season seasonYear isAdult airingSchedule(notYetAired:true,perPage:10,sort:TIME){nodes{airingAt episode}}}}}`;
+const AIRING_SEASON=`query SeasonAiring($season:MediaSeason,$year:Int){Page(page:1,perPage:50){media(type:ANIME,season:$season,seasonYear:$year,sort:POPULARITY_DESC,isAdult:false){id title{romaji english native} siteUrl coverImage{large} format status season seasonYear isAdult airingSchedule(notYetAired:true,perPage:10,sort:TIME){nodes{airingAt episode}}}}}`;
+const AIRING_DAYS=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 const MEDIA_NIGHT_QUERY=`query MediaNight($type:MediaType!){Page(page:1,perPage:50){media(type:$type,sort:TRENDING_DESC,isAdult:false){id type title{romaji english native} description(asHtml:false) siteUrl coverImage{large} startDate{year} duration genres tags{name isMediaSpoiler} isAdult}}}}`;
+function parseAiringRows(rows:unknown[]):AniListAiring[]{
+ return rows.flatMap(value=>{
+  if(!isObj(value)||!isObj(value.media)||value.media.isAdult===true)return[];
+  const media=value.media;
+  const mediaId=num(media.id),airingAt=num(value.airingAt),episode=num(value.episode),url=str(media.siteUrl);
+  if(mediaId===null||mediaId<1||airingAt===null||episode===null||!url)return[];
+  try{const parsed=new URL(url);if(parsed.protocol!=="https:"||parsed.hostname!=="anilist.co")return[];}catch{return[];}
+  return[{
+   mediaId,title:titleOf(media.title),episode,airingAt,url,image:imageOf(media.coverImage),
+   format:str(media.format),status:str(media.status),season:str(media.season),seasonYear:num(media.seasonYear),
+  }];
+ });
+}
 export class AniListError extends Error {constructor(message:string,readonly statusCode?:number){super(message);this.name="AniListError";}}
 export class AniListClient {
  constructor(private readonly endpoint="https://graphql.anilist.co",private readonly timeoutMs=10000,private readonly fetcher:typeof fetch=globalThis.fetch){}
@@ -419,10 +441,51 @@ export class AniListClient {
   if(!isObj(data.anime)||!isObj(data.manga))return null;
   return{anime:parseInterestSection(data.anime),manga:parseInterestSection(data.manga)};
  }
+ async searchUpcomingAirings(filters:AniListAiringFilters={},now:Date=new Date()):Promise<AniListAiring[]>{
+  const days=filters.days??7;
+  if(!Number.isInteger(days)||days<1||days>14)throw new Error("Airing window must be between 1 and 14 days.");
+  const season=filters.season?.trim().toUpperCase();
+  if(season&&!["WINTER","SPRING","SUMMER","FALL"].includes(season))throw new Error("Choose a valid AniList season.");
+  if(filters.year!==undefined&&(!Number.isInteger(filters.year)||filters.year<1970||filters.year>2100))throw new Error("Season year must be between 1970 and 2100.");
+  const day=filters.day?.trim();
+  if(day&&!AIRING_DAYS.some(value=>value.toLowerCase()===day.toLowerCase()))throw new Error("Choose a valid UTC weekday.");
+  const title=filters.title?.trim();
+  if(title&&title.length>100)throw new Error("Airing title must be 100 characters or fewer.");
+  const from=Math.floor(now.getTime()/1000),to=from+days*86400;
+  let rows:unknown[]=[];
+  if(title){
+   const data=await this.graphql(AIRING_TITLE,{search:title});
+   const page=isObj(data.Page)?data.Page:{};
+   const mediaRows=Array.isArray(page.media)?page.media:[];
+   const selected=mediaRows.find(value=>isObj(value)&&value.isAdult!==true&&isObj(value.airingSchedule)
+    &&Array.isArray(value.airingSchedule.nodes)&&value.airingSchedule.nodes.length>0);
+   if(isObj(selected)&&isObj(selected.airingSchedule)&&Array.isArray(selected.airingSchedule.nodes)){
+    rows=selected.airingSchedule.nodes.map(node=>({airingAt:isObj(node)?node.airingAt:null,episode:isObj(node)?node.episode:null,media:selected}));
+   }
+  }else if(season||filters.year!==undefined){
+   const data=await this.graphql(AIRING_SEASON,{season:season??null,year:filters.year??null});
+   const page=isObj(data.Page)?data.Page:{};
+   const mediaRows=Array.isArray(page.media)?page.media:[];
+   rows=mediaRows.flatMap(media=>{
+    if(!isObj(media)||media.isAdult===true||!isObj(media.airingSchedule)||!Array.isArray(media.airingSchedule.nodes))return[];
+    return media.airingSchedule.nodes.map(node=>({airingAt:isObj(node)?node.airingAt:null,episode:isObj(node)?node.episode:null,media}));
+   });
+  }else{
+   const data=await this.graphql(AIRING,{from,to});
+   const page=isObj(data.Page)?data.Page:{};
+   rows=Array.isArray(page.airingSchedules)?page.airingSchedules:[];
+  }
+  return parseAiringRows(rows)
+   .filter(entry=>entry.airingAt>from&&entry.airingAt<=to
+    &&(!day||AIRING_DAYS[new Date(entry.airingAt*1000).getUTCDay()]?.toLowerCase()===day.toLowerCase())
+    &&(!season||entry.season===season)
+    &&(filters.year===undefined||entry.seasonYear===filters.year))
+   .sort((left,right)=>left.airingAt-right.airingAt);
+ }
  async upcomingAirings(from:Date,to:Date):Promise<AniListAiring[]>{
   const data=await this.graphql(AIRING,{from:Math.floor(from.getTime()/1000),to:Math.floor(to.getTime()/1000)});
   const p=isObj(data.Page)?data.Page:{};const rows=Array.isArray(p.airingSchedules)?p.airingSchedules:[];
-  return rows.flatMap(x=>{if(!isObj(x)||!isObj(x.media)||x.media.isAdult===true)return[];const m=x.media;const id=num(m.id),at=num(x.airingAt),ep=num(x.episode),url=str(m.siteUrl);if(!id||!at||ep===null||!url?.startsWith("https://anilist.co/"))return[];return[{mediaId:id,title:titleOf(m.title),episode:ep,airingAt:at,url,image:imageOf(m.coverImage)}];});
+  return parseAiringRows(rows);
  }
  private async searchQuery(vars:Record<string,unknown>):Promise<AniListMedia[]>{const d=await this.graphql(SEARCH,{page:1,perPage:10,...vars});const p=isObj(d.Page)?d.Page:{};return(Array.isArray(p.media)?p.media:[]).flatMap(x=>{const m=parseMedia(x);return m?[m]:[];});}
  private async graphql(query:string,variables:Record<string,unknown>):Promise<Obj>{
