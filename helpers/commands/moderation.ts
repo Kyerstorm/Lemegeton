@@ -6,8 +6,7 @@ export function isModeratorCommandGuild(guildId: string | null, configuredGuildI
 }
 
 /** Bot-wide moderators are deliberately separate from each guild's role permissions. */
-export async function isBotModerator(userId: string): Promise<boolean> {
-  const administratorId = process.env.ADMIN_DISCORD_ID?.trim();
+export async function isBotModerator(userId: string, administratorId: string | null = null): Promise<boolean> {
   if (administratorId && administratorId === userId) return true;
   const moderator = await queryOne<{ discord_id: string }>(
     "SELECT discord_id FROM bot_moderators WHERE discord_id = $1",
