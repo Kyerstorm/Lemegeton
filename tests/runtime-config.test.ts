@@ -16,10 +16,20 @@ test("loads safe defaults for a local TypeScript bot", () => {
   assert.equal(config.applicationId, "123456789012345678");
   assert.equal(config.anilistApiUrl, "https://graphql.anilist.co/");
   assert.equal(config.anilistTimeoutMs, 10_000);
+  assert.equal(config.customRolesReconcileMinutes, 30);
   assert.equal(config.archiveUploadMaxBytes, 20 * 1024 * 1024);
   assert.equal(config.customRolePickerEnabled, true);
   assert.equal(config.customRolesTrustProxy, false);
   assert.equal(config.botModeratorGuildId, null);
+});
+
+test("loads and validates the configured Custom Roles reconciliation interval", () => {
+  const config = loadConfig(environment({ CUSTOM_ROLES_RECONCILE_MINUTES: "7" }));
+  assert.equal(config.customRolesReconcileMinutes, 7);
+  assert.throws(
+    () => loadConfig(environment({ CUSTOM_ROLES_RECONCILE_MINUTES: "0" })),
+    /CUSTOM_ROLES_RECONCILE_MINUTES must be a positive integer/,
+  );
 });
 
 test("accepts a valid dedicated bot-moderator guild and paired IGDB credentials", () => {
