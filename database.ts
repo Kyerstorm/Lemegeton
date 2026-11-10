@@ -706,15 +706,21 @@ export async function initDatabase(config: DatabaseConfig): Promise<void> {
       `SELECT column_name FROM information_schema.columns
        WHERE table_schema = current_schema() AND table_name = 'guild_settings'
          AND column_name = ANY($1::text[])`,
-      [["guild_id", "panel_mod_role_id", "archive_scope"]],
+      [["guild_id", "panel_log_channel_id", "panel_mod_role_id", "archive_scope"]],
     );
     const legacyGuildColumns = new Set(legacyGuildSettings.rows.map(row => row.column_name));
-    if (legacyGuildColumns.has("guild_id") && legacyGuildColumns.has("panel_mod_role_id")) {
+    if (legacyGuildColumns.has("guild_id")) {
+      const legacySettingColumn = (column: string): string =>
+        legacyGuildColumns.has(column) ? column : "NULL::BIGINT";
       await client.query(
-        `INSERT INTO guild_archive_settings (guild_id, moderator_role_id)
-         SELECT guild_id, panel_mod_role_id FROM guild_settings WHERE panel_mod_role_id IS NOT NULL
-         ON CONFLICT (guild_id) DO UPDATE
-           SET moderator_role_id = COALESCE(guild_archive_settings.moderator_role_id, EXCLUDED.moderator_role_id)`,
+        `INSERT INTO guild_archive_settings (guild_id, moderation_channel_id, moderator_role_id)
+         SELECT guild_id, ${legacySettingColumn("panel_log_channel_id")}, ${legacySettingColumn("panel_mod_role_id")}
+           FROM guild_settings
+          WHERE ${legacySettingColumn("panel_log_channel_id")} IS NOT NULL
+             OR ${legacySettingColumn("panel_mod_role_id")} IS NOT NULL
+         ON CONFLICT (guild_id) DO UPDATE SET
+           moderation_channel_id = COALESCE(guild_archive_settings.moderation_channel_id, EXCLUDED.moderation_channel_id),
+           moderator_role_id = COALESCE(guild_archive_settings.moderator_role_id, EXCLUDED.moderator_role_id)`,
       );
     }
 

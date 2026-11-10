@@ -291,12 +291,17 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       (await query("SELECT id FROM community_archive_entries WHERE source_legacy_panel_id IS NOT NULL")).length,
       1,
     );
-    assert.equal(
-      (await queryOne<{ moderator_role_id: string }>(
-        "SELECT moderator_role_id::text FROM guild_archive_settings WHERE guild_id = $1",
+    assert.deepEqual(
+      await queryOne<{ upload_channel_id: string | null; moderation_channel_id: string; moderator_role_id: string }>(
+        `SELECT upload_channel_id::text, moderation_channel_id::text, moderator_role_id::text
+           FROM guild_archive_settings WHERE guild_id = $1`,
         ["987654321098765432"],
-      ))?.moderator_role_id,
-      "222222222222222222",
+      ),
+      {
+        upload_channel_id: null,
+        moderation_channel_id: "444444444444444444",
+        moderator_role_id: "222222222222222222",
+      },
     );
     assert.equal(
       (await query("SELECT id FROM panels")).length,
