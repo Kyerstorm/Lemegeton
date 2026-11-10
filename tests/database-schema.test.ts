@@ -373,7 +373,7 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       { count: "1" },
     );
     assert.deepEqual(
-      await queryOne<{ count: string }>("SELECT COUNT(*)::text AS count FROM steam_users"),
+      await queryOne<{ count: string }>("SELECT COUNT(*)::text AS count FROM steam_users WHERE discord_id = $1", ["76561198000000000"]),
       { count: "1" },
     );
   } finally {
