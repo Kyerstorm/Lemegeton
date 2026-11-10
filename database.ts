@@ -488,9 +488,11 @@ const schemaStatements = [
     invited_by BIGINT,
     leave_action VARCHAR(16) CHECK (leave_action IN ('delete','retain')),
     updated_by BIGINT,
+    deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`,
+  "ALTER TABLE guild_retention_settings ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
   `CREATE TABLE IF NOT EXISTS guild_feature_settings (
     guild_id BIGINT NOT NULL,
     feature_name VARCHAR(32) NOT NULL CHECK (feature_name IN ('discover','archive','community','play','profile','custom-role')),
