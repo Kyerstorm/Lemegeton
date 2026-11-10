@@ -7,8 +7,9 @@ This is a fixed user-facing contract shared by automatic diagnostics, `/feedback
 - Exactly **40 characters**.
 - Lowercase hexadecimal (`0-9`, `a-f`).
 - No prefix, separator, numeric counter, or shortened display form.
-- The 40 characters are the first 40 hexadecimal characters of a SHA-512 digest. The digest input includes 32 cryptographically random bytes, a freshly generated UUID, the Discord interaction ID, and the affected user ID.
-- A new reference is generated for every issue occurrence. The database primary key and bounded collision retry are the final uniqueness guard.
+- The 40 characters are the first 40 lowercase hexadecimal characters of a SHA-512 digest: a fixed 160-bit public reference.
+- Each occurrence uses 64 fresh bytes from Node's cryptographic random generator, a cryptographic UUID, and length-framed guild, interaction, and user identifiers. A versioned domain separator protects the input format; identifiers are never exposed in the reference.
+- A new reference is generated for every issue occurrence. The database primary key and eight bounded collision retries are the final uniqueness guard. The format does not become a counter, timestamp, UUID, or full 128-character digest.
 
 This is intentionally a 40-character SHA-512-derived reference. Do not change it to a 128-character full digest, a sequential value (for example `Q120`), a UUID by itself, or a different hash format without an explicit product decision.
 
@@ -27,10 +28,10 @@ The diagnostic record remains guild-scoped. Moderator lookup is intentionally cr
 
 When touching issue references, update and test all of these together:
 
-- `helpers/runtime/issue-logs.ts`: generator and validator.
+- `helpers/runtime/issue-logs.ts`: generator, validator, bounded secret redaction, error/cause serialization, and diagnostic export.
 - `database.ts`: `issue_logs.issue_hash` check constraint.
 - `src/standalone/feedback.ts`: modal max length, placeholder, validation text, and originating-guild check.
-- `src/standalone/log.ts`: required option length, help text, and moderator authorization.
+- `src/standalone/log.ts`: required option length, help text, moderator authorization, full sanitized JSON attachment, and source-message link when the failed event originated from a Discord message.
 - `tests/issue-logs.test.ts`: exact length, hex format, per-occurrence uniqueness, and invalid-length cases.
 
 Never make only the generator change. The schema, both command surfaces, and tests must keep the same 40-character contract.

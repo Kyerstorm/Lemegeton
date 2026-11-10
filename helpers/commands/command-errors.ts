@@ -30,5 +30,5 @@ export function safeInteractionErrorMessage(error:unknown):string{
  if(error instanceof TypeError){
   return "⚠️ The request could not be completed. Check the supplied information and try again.";
  }
- return "⚠️ Something went wrong while running this feature. Please report it with /feedback and include the issue reference shown in the response.";
+ return "⚠️ Something went wrong while running this feature. Please report it with /feedback and include the issue reference if one is shown.";
 }

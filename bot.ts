@@ -93,6 +93,12 @@ async function respondWithError(interaction:Interaction,message:string):Promise<
  else await interaction.reply({content:message,flags:MessageFlags.Ephemeral});}
  catch(error){logger.warn("Failed to respond to interaction error",{reason:error instanceof Error?error.message:"Unknown error"});}
 }
+function interactionIssueAction(interaction:Interaction):string{
+ if(interaction.isChatInputCommand())return "/"+interaction.commandName;
+ if(interaction.isAutocomplete())return "/"+interaction.commandName+" autocomplete";
+ if(interaction.isMessageComponent())return "/"+(interaction.customId.split(":",1)[0]??"component")+" component · "+interaction.customId;
+ return "Discord interaction";
+}
 async function routeInteraction(interaction:Interaction):Promise<void>{
  if(!interaction.guildId){
   if(interaction.isAutocomplete()){await interaction.respond([]).catch(()=>undefined);return;}
@@ -138,9 +144,11 @@ async function routeInteraction(interaction:Interaction):Promise<void>{
      username:interaction.user.globalName??interaction.user.username,
      interactionId:interaction.id,
      channelId:interaction.channelId,
-     command:interaction.isChatInputCommand()?"/"+interaction.commandName:interaction.isAutocomplete()?"autocomplete":interaction.isMessageComponent()?interaction.customId:"interaction",
+     command:interactionIssueAction(interaction),
      details:{
       interactionType:interaction.type,
+       commandAction:interactionIssueAction(interaction),
+       focusedOption:interaction.isAutocomplete()?interaction.options.getFocused(true):undefined,
       commandOptions:interaction.isChatInputCommand()?interaction.options.data:undefined,
       componentCustomId:interaction.isMessageComponent()?interaction.customId:undefined,
       guildId:interaction.guildId,
