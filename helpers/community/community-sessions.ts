@@ -139,6 +139,11 @@ export async function getCommunityHistory(guildId: string): Promise<{
   return { closedRankings, pastSessions, discussions };
 }
 
+export interface ProviderReleaseCalendarResult {
+  results: Array<{ title: string; when: Date; provider: string; url: string }>;
+  unavailableProviders: string[];
+}
+
 export async function upcomingProviderReleases(
   anilist: AniListClient,
   tmdb: TmdbClient,
@@ -146,52 +151,50 @@ export async function upcomingProviderReleases(
   to: Date,
   region = "IE",
   categories: readonly ("anime" | "tv" | "movies")[] = ["anime", "tv", "movies"],
-): Promise<Array<{ title: string; when: Date; provider: string; url: string }>> {
+): Promise<ProviderReleaseCalendarResult> {
   if (from.getTime() > to.getTime()) throw new Error("The release calendar start must be before its end.");
   const include = new Set(categories);
   const fromDay = from.toISOString().slice(0, 10);
   const toDay = to.toISOString().slice(0, 10);
-  const requests = await Promise.all([
+  const requests = await Promise.allSettled([
     include.has("anime") ? anilist.upcomingAirings(from, to) : Promise.resolve([]),
     include.has("movies") ? tmdb.upcomingMovies(region) : Promise.resolve([]),
     include.has("tv") ? tmdb.upcomingTvEpisodes(from, to) : Promise.resolve([]),
   ]);
+  const unavailableProviders: string[] = [];
+  const airings = requests[0].status === "fulfilled" ? requests[0].value : (unavailableProviders.push("AniList"), []);
+  const movies = requests[1].status === "fulfilled" ? requests[1].value : (unavailableProviders.push("TMDB Movies"), []);
+  const episodes = requests[2].status === "fulfilled" ? requests[2].value : (unavailableProviders.push("TMDB TV"), []);
   const results: Array<{ title: string; when: Date; provider: string; url: string }> = [];
-  const airings = requests[0];
-  {
-    for (const airing of airings) {
-      const when = new Date(airing.airingAt * 1000);
-      if (when >= from && when <= to) {
-        results.push({ title: `${airing.title} · Episode ${airing.episode}`, when, provider: "AniList", url: airing.url });
-      }
+  for (const airing of airings) {
+    const when = new Date(airing.airingAt * 1000);
+    if (when >= from && when <= to) {
+      results.push({ title: \`\${airing.title} · Episode \${airing.episode}\`, when, provider: "AniList", url: airing.url });
     }
   }
-  const movies = requests[1];
-  {
-    for (const movie of movies) {
-      if (!movie.releaseDate) continue;
-      const when = new Date(`${movie.releaseDate}T00:00:00.000Z`);
-      if (Number.isFinite(when.getTime()) && movie.releaseDate >= fromDay && movie.releaseDate <= toDay) {
-        results.push({ title: movie.title, when, provider: `TMDB Movies · ${region.toUpperCase()}`, url: movie.sourceUrl });
-      }
+  for (const movie of movies) {
+    if (!movie.releaseDate) continue;
+    const when = new Date(\`\${movie.releaseDate}T00:00:00.000Z\`);
+    if (Number.isFinite(when.getTime()) && movie.releaseDate >= fromDay && movie.releaseDate <= toDay) {
+      results.push({ title: movie.title, when, provider: \`TMDB Movies · \${region.toUpperCase()}\`, url: movie.sourceUrl });
     }
   }
-  const episodes = requests[2];
-  {
-    for (const release of episodes) {
-      const airDate = release.episode.airDate;
-      if (!airDate || airDate < fromDay || airDate > toDay) continue;
-      const when = new Date(`${airDate}T00:00:00.000Z`);
-      if (!Number.isFinite(when.getTime())) continue;
-      results.push({
-        title: `${release.showTitle} · S${release.episode.seasonNumber ?? "?"} E${release.episode.episodeNumber} · ${release.episode.name}`,
-        when,
-        provider: "TMDB TV",
-        url: release.episode.sourceUrl,
-      });
-    }
+  for (const release of episodes) {
+    const airDate = release.episode.airDate;
+    if (!airDate || airDate < fromDay || airDate > toDay) continue;
+    const when = new Date(\`\${airDate}T00:00:00.000Z\`);
+    if (!Number.isFinite(when.getTime())) continue;
+    results.push({
+      title: \`\${release.showTitle} · S\${release.episode.seasonNumber ?? "?"} E\${release.episode.episodeNumber} · \${release.episode.name}\`,
+      when,
+      provider: "TMDB TV",
+      url: release.episode.sourceUrl,
+    });
   }
-  return results.sort((a, b) => a.when.getTime() - b.when.getTime()).slice(0, 30);
+  return {
+    results: results.sort((a, b) => a.when.getTime() - b.when.getTime()).slice(0, 30),
+    unavailableProviders,
+  };
 }
 
 export function formatActivity(activity: CommunityActivity): string {
