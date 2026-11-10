@@ -46,7 +46,7 @@ export function parseGridSourceUrls(titles:readonly string[]):MediaGridSource[]|
 export function parseGridTitles(value:string):string[]{
  const titles=value.split(/\r?\n/).map(item=>item.trim()).filter(Boolean);
  if(titles.length!==9)throw new Error("Enter exactly nine titles, one per line.");
- if(titles.some(title=>title.length<2||title.length>200))throw new Error("Each title must contain between 2 and 100 characters.");
+ if(titles.some(title=>title.length<2||title.length>200))throw new Error("Each title must contain between 2 and 200 characters.");
  return titles;
 }
 
