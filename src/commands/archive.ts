@@ -31,6 +31,7 @@ import {
   finishArchiveUpload,
   getArchiveEntry,
   getArchiveSettings,
+  getPanelOfTheDay,
   getLastArchiveCategory,
   getOwnSubmissions,
   isArchiveCategory,
@@ -77,6 +78,7 @@ import { logger } from "../../helpers/runtime/logger.js";
 
 const ACTIONS = [
   { name: "Browse approved entries", value: "browse" },
+  { name: "Panel of the Day", value: "panel-of-the-day" },
   { name: "Search the archive", value: "search" },
   { name: "Submit a contribution", value: "submit" },
   { name: "My submissions", value: "mine" },
@@ -347,6 +349,7 @@ export class ArchiveCommand implements FeatureCommand {
           return;
         }
         case "browse": await this.browse(interaction, interaction.options.getString("category") as ArchiveCategory | null); return;
+        case "panel-of-the-day": await this.showPanelOfTheDay(interaction); return;
         case "search": {
           const keyword = interaction.options.getString("keyword") ?? "";
           const entries = await listArchiveEntries(guildId, interaction.options.getString("category") as ArchiveCategory | undefined, keyword, 0, 5);
@@ -1036,6 +1039,23 @@ export class ArchiveCommand implements FeatureCommand {
     await interaction.reply({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
   }
 
+  private async showPanelOfTheDay(interaction: ChatInputCommandInteraction): Promise<void> {
+    const entry = await getPanelOfTheDay(interaction.guildId!, interaction.user.id);
+    if (!entry) {
+      await interaction.reply({ content: "No approved, safe Manga Panels with an available image can be featured today.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const embed = entryEmbed(entry).setFooter({ text: "Panel of the Day · Selected once per server per day · Safe, approved Archive entry" });
+    let imageUrl: string | null = null;
+    if (entry.media_asset_id) imageUrl = await signedArchiveAssetUrl(Number(entry.media_asset_id)).catch(() => null);
+    if (!imageUrl) {
+      const asset = await queryOne<{ asset_id: string }>("SELECT asset_id FROM community_archive_entry_assets WHERE entry_id = $1 ORDER BY position ASC LIMIT 1", [entry.id]);
+      if (asset) imageUrl = await signedArchiveAssetUrl(Number(asset.asset_id)).catch(() => null);
+    }
+    if (!imageUrl && entry.attachment_url?.startsWith("https://")) imageUrl = entry.attachment_url;
+    if (imageUrl) embed.setImage(imageUrl);
+    await interaction.reply({ embeds: [embed], allowedMentions: { parse: [] } });
+  }
   private async showMine(
     interaction: ChatInputCommandInteraction | ButtonInteraction,
   ): Promise<void> {

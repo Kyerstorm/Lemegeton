@@ -9,6 +9,7 @@ import type { SteamClient } from "../helpers/integration/steam.js";
 import { getCustomRoleOwnerForRole, getCustomRoleRecord, getLegacyBoosterRoleId, planLegacyCustomRoleImport, updateCustomRoleSettings } from "../helpers/custom-roles/custom-roles.js";
 import type { Guild } from "discord.js";
 import type { DatabaseConfig } from "../helpers/runtime/config.js";
+import { getPanelOfTheDay } from "../helpers/archive/archive.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
 
@@ -77,11 +78,11 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     `);
     await admin.query(
       `INSERT INTO "${schema}".panels
-        (id, uploader_id, uploader_guild_id, filename, title, anilist_id, chapter_number, caption, source_url, is_nsfw)
+        (id, uploader_id, uploader_guild_id, attachment_url, filename, title, anilist_id, chapter_number, caption, source_url, is_nsfw)
        VALUES
-        (1, 101, 987654321098765432, 'legacy-panel.png', 'Legacy Manga Panel', 4242, '12', 'Legacy caption',
+        (1, 101, 987654321098765432, 'https://cdn.example/panel.png', 'legacy-panel.png', 'Legacy Manga Panel', 4242, '12', 'Legacy caption',
          'https://anilist.co/manga/4242', FALSE),
-        (2, 102, 987654321098765432, 'private-panel.png', 'Private Legacy Panel', NULL, NULL, 'Not imported',
+        (2, 102, 987654321098765432, 'https://cdn.example/private.png', 'private-panel.png', 'Private Legacy Panel', NULL, NULL, 'Not imported',
          NULL, TRUE)`,
     );
     await admin.query(`
@@ -348,6 +349,30 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     );
     assert.ok(userKeyColumns.some(row => row.column_name === "discord_id") && userKeyColumns.some(row => row.column_name === "guild_id"));
     assert.equal(userKeyColumns.some(row => row.column_name === "discord_id" && !userKeyColumns.some(other => other.constraint_name === row.constraint_name && other.column_name === "guild_id")), false);
+
+    await query(
+      `INSERT INTO community_archive_entries
+        (archive_type, title, content, media_type, tags, created_by, created_guild_id, visibility, status, attachment_url)
+       VALUES ('panels', 'Private panel from another server', '', 'Manga', '[]', 999, 111111111111111111, 'server', 'approved', 'https://cdn.example/private-server.png')`,
+    );
+    const panelOfTheDay = await getPanelOfTheDay("987654321098765432", "101");
+    assert.ok(panelOfTheDay);
+    assert.equal(panelOfTheDay.title, "Legacy Manga Panel");
+    assert.equal(
+      (await getPanelOfTheDay("987654321098765432", "102"))?.id,
+      panelOfTheDay.id,
+      "The selected panel must remain stable within the same server day",
+    );
+    assert.equal(
+      (await query("SELECT entry_id FROM community_panel_daily_log WHERE guild_id = $1 AND feature_date = CURRENT_DATE", ["987654321098765432"])).length,
+      1,
+      "Only one panel may be featured per server calendar day",
+    );
+    assert.equal(
+      await getPanelOfTheDay("111111111111111112", "103"),
+      null,
+      "A server-only panel must not be exposed to another server",
+    );
 
     const migratedPanel = await queryOne<{
       archive_type: string;

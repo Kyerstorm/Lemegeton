@@ -99,6 +99,7 @@ export interface ArchiveEntry {
   visibility: ArchiveVisibility;
   media_asset_id: string | null;
   attachment_count?: number;
+  attachment_url: string | null;
   created_at: Date;
 }
 
@@ -381,6 +382,34 @@ export async function getArchiveEntry(
   return row ? { ...row, tags: parseTags(String((row as unknown as { tags: string }).tags ?? "[]")) } : null;
 }
 
+export async function getPanelOfTheDay(guildId: string, featuredBy: string): Promise<ArchiveEntry | null> {
+  return transaction(async (client) => {
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", ["community-panel-of-day:" + guildId]);
+    const eligible = "e.archive_type = 'panels' AND e.status = 'approved' AND e.spoiler = FALSE AND (e.visibility = 'global' OR (e.visibility = 'server' AND e.created_guild_id = $1)) AND (e.media_asset_id IS NOT NULL OR (e.attachment_url IS NOT NULL AND e.attachment_url LIKE 'https://%') OR EXISTS (SELECT 1 FROM community_archive_entry_assets a WHERE a.entry_id = e.id))";
+    let result = await client.query<ArchiveEntry>(
+      "SELECT e.*, (SELECT COUNT(*) FROM community_archive_entry_assets a WHERE a.entry_id = e.id) AS attachment_count FROM community_panel_daily_log d JOIN community_archive_entries e ON e.id = d.entry_id WHERE d.guild_id = $1 AND d.feature_date = CURRENT_DATE AND " + eligible + " LIMIT 1",
+      [guildId],
+    );
+    if (result.rows[0]) {
+      const entry = result.rows[0];
+      return { ...entry, tags: parseTags(String((entry as unknown as { tags: string }).tags ?? "[]")) };
+    }
+    await client.query("DELETE FROM community_panel_daily_log WHERE guild_id = $1 AND feature_date = CURRENT_DATE", [guildId]);
+    result = await client.query<ArchiveEntry>(
+      "SELECT e.*, (SELECT COUNT(*) FROM community_archive_entry_assets a WHERE a.entry_id = e.id) AS attachment_count FROM community_archive_entries e WHERE " + eligible + " ORDER BY RANDOM() LIMIT 1",
+      [guildId],
+    );
+    const selected = result.rows[0];
+    if (!selected) return null;
+    await client.query("INSERT INTO community_panel_daily_log (guild_id, feature_date, entry_id, featured_by) VALUES ($1, CURRENT_DATE, $2, $3) ON CONFLICT (guild_id, feature_date) DO NOTHING", [guildId, selected.id, featuredBy]);
+    const daily = await client.query<ArchiveEntry>(
+      "SELECT e.*, (SELECT COUNT(*) FROM community_archive_entry_assets a WHERE a.entry_id = e.id) AS attachment_count FROM community_panel_daily_log d JOIN community_archive_entries e ON e.id = d.entry_id WHERE d.guild_id = $1 AND d.feature_date = CURRENT_DATE",
+      [guildId],
+    );
+    const entry = daily.rows[0];
+    return entry ? { ...entry, tags: parseTags(String((entry as unknown as { tags: string }).tags ?? "[]")) } : null;
+  });
+}
 export async function getOwnSubmissions(guildId: string, userId: string): Promise<ArchiveEntry[]> {
   const rows = await query<ArchiveEntry>(
     `SELECT * FROM community_archive_entries
