@@ -186,6 +186,20 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     );
 
     await admin.query(`
+      CREATE TABLE "${schema}".guild_manga_channels (
+        guild_id BIGINT NOT NULL UNIQUE,
+        channel_id BIGINT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await admin.query(
+      `INSERT INTO "${schema}".guild_manga_channels (guild_id, channel_id)
+       VALUES ($1, $2)`,
+      ["987654321098765432", "555555555555555555"],
+    );
+
+    await admin.query(`
       CREATE TABLE "${schema}".steam_users (
         discord_id BIGINT NOT NULL PRIMARY KEY,
         steam_id TEXT NOT NULL,
@@ -456,6 +470,14 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     );
     assert.deepEqual(importedPollVote, { title: "Manga version", user_id: "202" });
 
+    assert.deepEqual(
+      await queryOne<{ channel_id: string; enabled: boolean; include_anime: boolean; include_manga: boolean }>(
+        `SELECT channel_id::text, enabled, include_anime, include_manga
+           FROM media_notification_settings WHERE guild_id = $1`,
+        ["987654321098765432"],
+      ),
+      { channel_id: "555555555555555555", enabled: true, include_anime: true, include_manga: true },
+    );
     const importedQuizPack = await queryOne<{ id: string; status: string; title: string }>(
       `SELECT id, status, title FROM community_quiz_packs
        WHERE legacy_import_key = $1`,
@@ -927,6 +949,11 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       (await query("SELECT id FROM community_quiz_packs WHERE legacy_import_key IS NOT NULL")).length,
       1,
       "Legacy Media Quiz pack import must be idempotent",
+    );
+    assert.equal(
+      (await query("SELECT guild_id FROM media_notification_settings WHERE guild_id = $1", ["987654321098765432"])).length,
+      1,
+      "Legacy completion channel migration must be idempotent",
     );
     assert.equal(
       (await query("SELECT id FROM community_quiz_questions WHERE source_legacy_question_id IS NOT NULL")).length,

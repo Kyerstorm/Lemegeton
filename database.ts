@@ -975,6 +975,25 @@ export async function initDatabase(config: DatabaseConfig): Promise<void> {
     }
 
 
+    const legacyMangaChannels = await client.query<{ exists: boolean }>(
+      "SELECT to_regclass('guild_manga_channels') IS NOT NULL AS exists",
+    );
+    if (legacyMangaChannels.rows[0]?.exists) {
+      const imported = await client.query(
+        `INSERT INTO media_notification_settings
+           (guild_id, channel_id, enabled, include_anime, include_manga, updated_at)
+         SELECT guild_id::BIGINT, channel_id::BIGINT, TRUE, TRUE, TRUE, NOW()
+           FROM guild_manga_channels
+          WHERE length(guild_id::text) BETWEEN 17 AND 20
+            AND guild_id::text !~ '[^0-9]'
+            AND length(channel_id::text) BETWEEN 17 AND 20
+            AND channel_id::text !~ '[^0-9]'
+         ON CONFLICT (guild_id) DO NOTHING`,
+      );
+      if (imported.rowCount) {
+        logger.info("Imported existing per-server AniManga completion channels into media notifications", { imported: imported.rowCount });
+      }
+    }
     const legacyQuizTable = await client.query<{ exists: boolean }>(
       "SELECT to_regclass('community_media_quiz_questions') IS NOT NULL AS exists",
     );
