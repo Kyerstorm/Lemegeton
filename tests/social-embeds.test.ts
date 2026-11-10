@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isSupportedSocialUrl, rewriteSocialUrl } from "../helpers/embeds/social.js";
+import { isSupportedSocialUrl, rewriteSocialUrl } from "../src/integrations/social-embed.js";
 
 test("legacy social embed rewrites supported exact hosts and subdomains", () => {
   assert.equal(rewriteSocialUrl("https://x.com/user/status/1"), "https://xeezz.com/user/status/1");

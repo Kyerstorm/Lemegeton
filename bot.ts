@@ -37,9 +37,9 @@ let atlasBridge: Server | undefined;
 let reconciliationTimer: NodeJS.Timeout | undefined;
 let dailyWorkerTimer: NodeJS.Timeout | undefined;
 async function startAtlasBridge(): Promise<void> {
- const secret=process.env.DASHBOARD_BRIDGE_SECRET?.trim()??"";
+ const secret=config.dashboardBridgeSecret;
  if(Buffer.byteLength(secret)<32){logger.warn("Knowledge Atlas dashboard bridge disabled; DASHBOARD_BRIDGE_SECRET must contain at least 32 bytes.");return;}
- const port=Number(process.env.DASHBOARD_ATLAS_BRIDGE_PORT??"8093");
+ const port=config.dashboardAtlasBridgePort;
  if(!Number.isInteger(port)||port<1||port>65535)throw new Error("DASHBOARD_ATLAS_BRIDGE_PORT must be a valid TCP port.");
  const expected=Buffer.from(secret);
  const server=createServer((request,response)=>{
@@ -381,7 +381,7 @@ async function shutdown(signal:NodeJS.Signals):Promise<void>{
  await closeDatabase().catch(error=>logger.error("Database shutdown failed",{reason:error instanceof Error?error.message:"Unknown error"}));
 }
 async function start():Promise<void>{
- await initDatabase();await initUserConsentSchema();await startAtlasBridge();await client.login(config.discordToken);
+ await initDatabase(config.database);await initUserConsentSchema();await startAtlasBridge();await client.login(config.discordToken);
  dailyWorkerTimer=setInterval(()=>scheduleDailyDrops(),30_000);dailyWorkerTimer.unref();
  scheduleDailyDrops();
 }

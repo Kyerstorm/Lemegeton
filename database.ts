@@ -95,7 +95,6 @@ const schemaStatements = [
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (discord_id, guild_id)
   )`,
-  "CREATE UNIQUE INDEX IF NOT EXISTS users_discord_guild_idx ON users (discord_id, guild_id)",
   `CREATE TABLE IF NOT EXISTS steam_users (
     discord_id BIGINT NOT NULL,
     guild_id BIGINT NOT NULL,

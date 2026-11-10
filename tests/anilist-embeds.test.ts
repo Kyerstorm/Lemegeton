@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { AniListClient } from "../helpers/integration/anilist.js";
-import { parseAniListUrl } from "../helpers/embeds/anilist.js";
+import { parseAniListUrl } from "../src/integrations/anilist-embed.js";
 import {
   buildErrorEmbed,
   buildInfoEmbed,
