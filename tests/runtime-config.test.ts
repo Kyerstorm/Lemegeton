@@ -167,4 +167,9 @@ test("loads operator and Atlas bridge settings into typed configuration", () => 
   assert.equal(config.dashboardBridgePort, 8094);
   assert.equal(config.dashboardAtlasBridgePort, 9000);
   assert.throws(() => loadConfig(environment({ ADMIN_DISCORD_ID: "bad" })), /ADMIN_DISCORD_ID/);
+  assert.equal(loadConfig(environment({ ADMIN_DISCORD_ID: "123456789012345679" })).adminDiscordId, "123456789012345679");
+  assert.equal(loadConfig(environment({ BOT_FEEDBACK_CHANNEL_ID: "123456789012345680" })).botFeedbackChannelId, "123456789012345680");
+  assert.throws(() => loadConfig(environment({ BOT_FEEDBACK_CHANNEL_ID: "invalid" })), /BOT_FEEDBACK_CHANNEL_ID/);
+  assert.deepEqual(loadConfig(environment({ ARCHIVE_GLOBAL_MODERATOR_IDS: "123456789012345681,invalid,123456789012345682,123456789012345681" })).archiveGlobalModeratorIds,
+    ["123456789012345681", "123456789012345682"]);
 });
