@@ -5,7 +5,7 @@ import {
 } from "discord.js";
 import { query, queryOne, transaction } from "../../database.js";
 import { deleteArchiveAsset } from "../media/media-storage.js";
-import { archiveUploadAllowed, storeArchiveUpload } from "../media/media-storage.js";
+import { archiveUploadAllowed, getArchiveUploadMaxBytes, storeArchiveUpload } from "../media/media-storage.js";
 import { cleanText, isValidHttpsUrl, normalizeTags } from "../security/security.js";
 import { GLOBAL_MODERATOR_IDS, isGlobalArchiveModerator } from "./archive-access.js";
 export { isGlobalArchiveModerator } from "./archive-access.js";
@@ -389,7 +389,7 @@ export async function handleArchiveUploadMessage(message: Message, _client: Clie
       bytes: Buffer.alloc(0),
     };
     if (!archiveUploadAllowed(pending.archive_type, settings.uploadTypes, upload)) continue;
-    if (attachment.size > MAX_UPLOAD_BYTES) continue;
+    if (attachment.size > getArchiveUploadMaxBytes()) continue;
     const response = await fetch(attachment.url, { signal: AbortSignal.timeout(15_000) });
     if (!response.ok) continue;
     const bytes = Buffer.from(await response.arrayBuffer());
@@ -415,7 +415,6 @@ export async function handleArchiveUploadMessage(message: Message, _client: Clie
   return true;
 }
 
-const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
 export async function finishArchiveUpload(guildId: string, userId: string, entryId: string): Promise<void> {
   const pending = await queryOne<{ id: string; archive_type: ArchiveCategory; source_url: string | null }>(
