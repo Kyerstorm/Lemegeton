@@ -1,6 +1,6 @@
 import { query, queryOne } from "../../database.js";
 
-export type MediaCategory = "ANIME" | "MANGA" | "LIGHT_NOVEL" | "WEBNOVEL" | "BOOK" | "MOVIE" | "TV" | "GAME";
+export type MediaCategory = "ANIME" | "MANGA" | "LIGHT_NOVEL" | "WEBNOVEL" | "BOOK" | "MOVIE" | "TV" | "GAME" | "CREATOR" | "FRANCHISE" | "ARCHIVE_ENTRY" | "ARCHIVE_COLLECTION" | "DISCUSSION" | "ACTIVITY";
 export type RelationshipSource = "provider" | "recommendation" | "community";
 export interface AtlasRelationInput {
   title: string;
@@ -21,7 +21,7 @@ interface AtlasRow {
   target_title: string; target_title_key: string; target_category: string; target_url: string | null;
   relationship_type: string; source_kind: RelationshipSource; source_label: string;
 }
-const CATEGORIES = new Set<MediaCategory>(["ANIME","MANGA","LIGHT_NOVEL","WEBNOVEL","BOOK","MOVIE","TV","GAME"]);
+const CATEGORIES = new Set<MediaCategory>(["ANIME","MANGA","LIGHT_NOVEL","WEBNOVEL","BOOK","MOVIE","TV","GAME","CREATOR","FRANCHISE","ARCHIVE_ENTRY","ARCHIVE_COLLECTION","DISCUSSION","ACTIVITY"]);
 const SOURCES = new Set<RelationshipSource>(["provider","recommendation","community"]);
 
 export function normalizeAtlasTitle(value: string): string {
@@ -127,7 +127,7 @@ export async function findAtlasRelationships(
     if (!relatedTitle || !relatedCategory) continue;
     let relationType = row.relationship_type.replace(/_/g, " ").replace(/\b\w/g, (v) => v.toUpperCase());
     if (!outgoing) relationType = `Incoming: ${relationType}`;
-    if (row.source_kind === "community") relationType = `Community-verified: ${relationType}`;
+    if (row.source_kind === "community") relationType = `Community-sourced: ${relationType}`;
     if (row.source_kind === "recommendation") relationType = `Recommendation: ${relationType}`;
     const relation: AtlasRelation = {
       title: relatedTitle, category: relatedCategory, url: safeAtlasUrl(outgoing ? row.target_url : row.source_url),
@@ -137,4 +137,132 @@ export async function findAtlasRelationships(
     if (!seen.has(key)) { seen.add(key); result.push(relation); }
   }
   return result;
+}
+
+export function createAtlasDiscordUrl(guildId: string, channelId: string | null): string | null {
+  if (!/^\d{17,20}$/.test(guildId) || !channelId || !/^\d{17,20}$/.test(channelId)) return null;
+  return "https://discord.com/channels/" + guildId + "/" + channelId;
+}
+
+export function archiveMediaTypesForCategory(category: string): string[] {
+  switch (normalizeAtlasCategory(category)) {
+    case "ANIME": return ["anime"];
+    case "MANGA": return ["manga", "manhwa", "manhua", "webtoon"];
+    case "LIGHT_NOVEL": return ["light novel", "light_novel"];
+    case "WEBNOVEL": return ["webnovel", "web novel"];
+    case "BOOK": return ["book"];
+    case "MOVIE": return ["movie", "film"];
+    case "TV": return ["tv", "television", "series"];
+    case "GAME": return ["game", "video game"];
+    default: return [];
+  }
+}
+
+interface AtlasCommunityRow {
+  id: string;
+  title: string;
+  channel_id?: string | null;
+  thread_id?: string | null;
+  activity_type?: string | null;
+}
+
+function communityRelation(
+  row: AtlasCommunityRow, category: MediaCategory, relationType: string,
+  source: string, guildId: string, channelId?: string | null,
+): AtlasRelation {
+  return {
+    title: row.title, category,
+    url: createAtlasDiscordUrl(guildId, channelId ?? row.thread_id ?? null),
+    relationType, source, sourceKind: "community",
+  };
+}
+
+/**
+ * Read community entities associated with a selected media identity.
+ * Every query is scoped to the invoking guild; archive entries must be approved
+ * and visible, and discussions/sessions must still be active before appearing.
+ */
+export async function findAtlasCommunityLinks(
+  guildId: string | null, title: string, category: string,
+  url?: string | null, providerId?: string | null, limit = 20,
+): Promise<AtlasRelation[]> {
+  const titleKey = normalizeAtlasTitle(title);
+  const mediaCategory = normalizeAtlasCategory(category);
+  if (!guildId || !/^\d{17,20}$/.test(guildId) || !titleKey || !mediaCategory) return [];
+
+  const safeUrl = safeAtlasUrl(url) ?? "";
+  const aniListId = providerId && /^\d{1,12}$/.test(providerId)
+    && (mediaCategory === "MANGA" || mediaCategory === "LIGHT_NOVEL") ? providerId : "";
+  const archiveTypes = archiveMediaTypesForCategory(mediaCategory);
+  const maximum = Math.max(1, Math.min(limit, 20));
+  const matchArchive =
+    "e.status = 'approved' " +
+    "AND (e.visibility = 'global' OR (e.visibility = 'server' AND e.created_guild_id = $1)) " +
+    "AND lower(btrim(e.media_type)) = ANY($4::text[]) " +
+    "AND ((lower(btrim(COALESCE(e.source_title, ''))) = lower(btrim($2)) " +
+    "AND (e.source_url IS NULL OR $3 = '' OR e.source_url = $3)) " +
+    "OR ($5 <> '' AND e.linked_media_provider = 'AniList' AND e.linked_media_id = $5))";
+
+  const [archives, collections, discussions, sessions, reading, rankings] = await Promise.all([
+    archiveTypes.length ? query<AtlasCommunityRow>(
+      "SELECT e.id::text AS id, e.title FROM community_archive_entries e WHERE " + matchArchive +
+      " ORDER BY e.created_at DESC LIMIT $6",
+      [guildId,title,safeUrl,archiveTypes,aniListId,maximum],
+    ) : Promise.resolve([] as AtlasCommunityRow[]),
+    archiveTypes.length ? query<AtlasCommunityRow>(
+      "SELECT DISTINCT c.id::text AS id, c.title FROM archive_collections c " +
+      "WHERE c.guild_id = $1 AND c.status = 'active' AND EXISTS (" +
+      " SELECT 1 FROM archive_collection_items ci " +
+      " JOIN community_archive_entries e ON e.id = ci.entry_id " +
+      " WHERE ci.collection_id = c.id AND " + matchArchive +
+      ") ORDER BY c.title LIMIT $6",
+      [guildId,title,safeUrl,archiveTypes,aniListId,maximum],
+    ) : Promise.resolve([] as AtlasCommunityRow[]),
+    query<AtlasCommunityRow>(
+      "SELECT d.id::text AS id, d.title, d.thread_id::text AS thread_id " +
+      "FROM community_discussions d WHERE d.guild_id = $1 AND d.status = 'open' " +
+      "AND (lower(btrim(COALESCE(d.media_title, ''))) = lower(btrim($2)) OR ($3 <> '' AND d.media_url = $3)) " +
+      "ORDER BY d.created_at DESC LIMIT $4",
+      [guildId,title,safeUrl,maximum],
+    ),
+    query<AtlasCommunityRow>(
+      "SELECT s.id::text AS id, s.title, s.thread_id::text AS thread_id, s.activity_type " +
+      "FROM community_sessions s WHERE s.guild_id = $1 AND s.status = 'scheduled' " +
+      "AND (lower(btrim(COALESCE(s.media_title, ''))) = lower(btrim($2)) OR ($3 <> '' AND s.media_url = $3)) " +
+      "ORDER BY s.scheduled_at ASC LIMIT $4",
+      [guildId,title,safeUrl,maximum],
+    ),
+    query<AtlasCommunityRow>(
+      "SELECT n.id::text AS id, n.title, n.thread_id::text AS thread_id " +
+      "FROM community_reading_nominations n WHERE n.guild_id = $1 AND n.status IN ('open','selected') " +
+      "AND (lower(btrim(n.title)) = lower(btrim($2)) OR ($3 <> '' AND n.source_url = $3)) " +
+      "ORDER BY n.created_at DESC LIMIT $4",
+      [guildId,title,safeUrl,maximum],
+    ),
+    query<AtlasCommunityRow>(
+      "SELECT r.id::text AS id, r.title FROM community_rankings r " +
+      "JOIN community_ranking_candidates c ON c.ranking_id = r.id " +
+      "WHERE r.guild_id = $1 AND r.status IN ('open','closed') AND c.status = 'approved' " +
+      "AND (lower(btrim(c.title)) = lower(btrim($2)) OR ($3 <> '' AND c.source_url = $3)) " +
+      "ORDER BY r.created_at DESC LIMIT $4",
+      [guildId,title,safeUrl,maximum],
+    ),
+  ]);
+
+  const relations: AtlasRelation[] = [
+    ...archives.map(row => communityRelation(row,"ARCHIVE_ENTRY","Contributed to","Community Archive",guildId)),
+    ...collections.map(row => communityRelation(row,"ARCHIVE_COLLECTION","Included in","Archive collection",guildId)),
+    ...discussions.map(row => communityRelation(row,"DISCUSSION","Discussed in","Spoiler-aware discussion",guildId)),
+    ...sessions.map(row => communityRelation(row,"ACTIVITY","Scheduled community session",
+      "Community session · " + (row.activity_type ?? "activity"),guildId)),
+    ...reading.map(row => communityRelation(row,"ACTIVITY","Nominated for","Community reading club",guildId)),
+    ...rankings.map(row => communityRelation(row,"ACTIVITY","Included in","Community ranking",guildId)),
+  ];
+  const seen = new Set<string>();
+  return relations.filter(relation => {
+    const key = [relation.category,normalizeAtlasTitle(relation.title),relation.url ?? "",relation.source].join("|");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0,maximum);
 }

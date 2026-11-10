@@ -138,6 +138,9 @@ function entryEmbed(entry: ArchiveEntry): EmbedBuilder {
   if (entry.source_title) embed.addFields({ name: "Work / source", value: safeDisplay(entry.source_title, 250), inline: true });
   if (entry.creator) embed.addFields({ name: "Original creator", value: safeDisplay(entry.creator, 250), inline: true });
   if (entry.source_url) embed.addFields({ name: "Source", value: `[Open original source](${entry.source_url})`, inline: false });
+  if (entry.archive_type === "panels" && entry.linked_media_provider === "AniList" && entry.linked_media_id && /^\d{1,12}$/.test(entry.linked_media_id)) {
+    embed.addFields({ name: "Linked media", value: `[Open AniList manga](https://anilist.co/manga/${entry.linked_media_id})`, inline: false });
+  }
   if (tags.length) embed.addFields({ name: "Tags", value: tags.map((tag) => safeDisplay(tag, 40)).join(" · ").slice(0, 900), inline: false });
   return embed;
 }

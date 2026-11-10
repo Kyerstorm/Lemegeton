@@ -30,7 +30,7 @@ import { TmdbClient, type TmdbMedia, type TmdbTvSeason } from "../../helpers/int
 import { getGuildMediaRegion } from "../../helpers/media/media-region.js";
 import { cleanText } from "../../helpers/security/security.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
-import { findAtlasRelationships, normalizeAtlasTitle, recordAtlasRelationship, recordProviderRelationships } from "../../helpers/integration/atlas.js";
+import { findAtlasCommunityLinks, findAtlasRelationships, normalizeAtlasTitle, recordAtlasRelationship, recordProviderRelationships } from "../../helpers/integration/atlas.js";
 import { aniListReleaseOrder, tmdbCollectionReleaseOrder } from "../../helpers/media/franchise-order.js";
 import {
   createMediaLinkSuggestion,
@@ -1488,9 +1488,13 @@ export class DiscoverCommand implements FeatureCommand {
         reason:error instanceof Error?error.message:"Unknown error",
       });
     }
-    const relationships = await findAtlasRelationships(interaction.guildId, title, mediaCategory, this.recordUrl(first), 20);
+    const [providerRelationships, communityRelationships] = await Promise.all([
+      findAtlasRelationships(interaction.guildId, title, mediaCategory, this.recordUrl(first), 20),
+      findAtlasCommunityLinks(interaction.guildId, title, mediaCategory, this.recordUrl(first), first.provider === "AniList" ? String(first.item.id) : null, 20),
+    ]);
+    const relationships = [...providerRelationships, ...communityRelationships].slice(0, 20);
     const embed = toEmbed(first).setTitle(`Knowledge Atlas · ${title}`.slice(0,256))
-      .setDescription("A source-attributed view of recorded relationships. Provider links are global; community links are visible only inside the server that approved them.");
+      .setDescription("Provider-confirmed relationships are global, recommendations are explicitly unverified, and community links remain limited to their originating server.");
     if (relationships.length) {
       for (const relation of relationships.slice(0,20)) {
         const label = relation.url ? `[${relation.title.slice(0,180)}](${relation.url})` : relation.title.slice(0,180);
