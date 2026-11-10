@@ -17,7 +17,7 @@ test("AniList franchise release order requires complete dates and sorts provider
   ]);
   assert.equal(aniListReleaseOrder(
     { title: "Seed", url: null, startDate: { year: 2020, month: 1, day: null } },
-    [{ title: "Related", url: null, startDate: { year: 2021, month: 1, day: 1 } }],
+    [{ title: "Related", url: "https://anilist.co/anime/4", startDate: { year: 2021, month: 1, day: 1 } }],
   ), null);
 });
 
