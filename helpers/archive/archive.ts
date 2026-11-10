@@ -336,7 +336,7 @@ export async function listArchiveEntries(
 }
 
 export function archiveEntryLookupScope(includePending: boolean, globalOnly: boolean): string {
-  if (globalOnly) return "visibility = 'global'";
+  if (globalOnly) return includePending ? "visibility = 'global'" : "visibility = 'global' AND status = 'approved'";
   if (includePending) return "visibility = 'server' AND created_guild_id = $2";
   return "(visibility = 'global' OR (visibility = 'server' AND created_guild_id = $2)) AND status = 'approved'";
 }

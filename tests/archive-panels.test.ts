@@ -36,6 +36,6 @@ test("Archive pending-entry lookups stay guild-scoped unless global scope is exp
  );
  assert.equal(
   archiveEntryLookupScope(false,true),
-  "visibility = 'global'",
+  "visibility = 'global' AND status = 'approved'",
  );
 });
