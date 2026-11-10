@@ -173,8 +173,8 @@ export async function buildPickerState(
       name: guild.name,
       gradient: enhanced,
       icons,
-      preview_enhanced: process.env.CUSTOM_ROLES_DEBUG_PREVIEW_ENHANCED_COLORS === "true" && !enhanced,
-      preview_icons: process.env.CUSTOM_ROLES_DEBUG_PREVIEW_ROLE_ICONS === "true" && !icons,
+      preview_enhanced: config.customRolesDebugPreviewEnhancedColors && !enhanced,
+      preview_icons: config.customRolesDebugPreviewRoleIcons && !icons,
     },
     role: {
       name: role?.name ?? record.name,
