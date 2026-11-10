@@ -3,7 +3,7 @@ import {loadConfig} from "../helpers/runtime/config.js";
 import {configureLogger,logger} from "../helpers/runtime/logger.js";
 import {createCommandRegistry} from "./registry.js";
 
-const MODERATOR_COMMANDS=new Set(["log","moderators","planned"]);
+const MODERATOR_COMMANDS=new Set(["log","moderators","planned","adminlogin","convertlinks"]);
 
 async function deploy():Promise<void>{
  const config=loadConfig();
