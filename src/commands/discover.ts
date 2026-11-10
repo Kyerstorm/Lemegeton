@@ -30,7 +30,7 @@ import { TmdbClient, type TmdbMedia, type TmdbTvSeason } from "../../helpers/pro
 import { getGuildMediaRegion } from "../../helpers/media/media-region.js";
 import { cleanText } from "../../helpers/security/security.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
-import { findAtlasRelationships, recordAtlasRelationship, recordProviderRelationships } from "../../helpers/providers/atlas.js";
+import { findAtlasRelationships, normalizeAtlasTitle, recordAtlasRelationship, recordProviderRelationships } from "../../helpers/providers/atlas.js";
 import { aniListReleaseOrder, tmdbCollectionReleaseOrder } from "../../helpers/media/franchise-order.js";
 import {
   createMediaLinkSuggestion,
@@ -1464,6 +1464,29 @@ export class DiscoverCommand implements FeatureCommand {
           reason:error instanceof Error?error.message:"Unknown error",
         });
       }
+    }
+    try{
+      const matches=await this.fetchSearch(title,"all");
+      const exactMatches=matches.filter(record=>
+        record.category!==first.category
+        &&normalizeAtlasTitle(this.recordTitle(record))===normalizeAtlasTitle(title)
+        &&this.recordUrl(record)!==this.recordUrl(first)
+      ).slice(0,12);
+      await Promise.allSettled(exactMatches.map(record=>recordAtlasRelationship({
+        sourceTitle:title,
+        sourceCategory:mediaCategory,
+        sourceUrl:this.recordUrl(first),
+        targetTitle:this.recordTitle(record),
+        targetCategory:record.category,
+        targetUrl:this.recordUrl(record),
+        relationshipType:"exact-title match (unverified adaptation)",
+        sourceKind:"recommendation",
+        sourceLabel:"Cross-provider exact-title match; not a verified adaptation",
+      })));
+    }catch(error){
+      logger.warn("Cross-provider exact-title Atlas enrichment failed",{
+        reason:error instanceof Error?error.message:"Unknown error",
+      });
     }
     const relationships = await findAtlasRelationships(interaction.guildId, title, mediaCategory, this.recordUrl(first), 20);
     const embed = toEmbed(first).setTitle(`Knowledge Atlas · ${title}`.slice(0,256))
