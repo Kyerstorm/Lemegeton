@@ -4,6 +4,10 @@ export interface MediaGridItem {
   title:string;
   image:string|null;
 }
+export type MediaGridSource =
+  | { kind: "anime" | "manga" | "character"; id: number }
+  | { kind: "game"; slug: string };
+
 
 const TILE_WIDTH=220;
 const TILE_HEIGHT=330;
@@ -12,10 +16,37 @@ const GRID_SIZE=3;
 const MAX_IMAGE_BYTES=5*1024*1024;
 const ALLOWED_IMAGE_HOSTS=new Set(["s4.anilist.co","images.igdb.com"]);
 
+export function parseGridSourceUrls(titles:readonly string[]):MediaGridSource[]|null{
+ const hasUrl=titles.some(title=>/^[a-z][a-z0-9+.-]*:\/\//i.test(title));
+ if(!hasUrl)return null;
+ if(titles.length!==9)throw new Error("Enter exactly nine provider URLs, one per line.");
+ if(titles.some(title=>!/^https:\/\//i.test(title)))throw new Error("Use HTTPS AniList or IGDB URLs for every grid entry.");
+ const sources=titles.map((raw,index):MediaGridSource=>{
+  let url:URL;
+  try{url=new URL(raw);}catch{throw new Error("Grid entry "+(index+1)+" is not a valid provider URL.");}
+  if(url.username||url.password||url.port||url.search||url.hash)throw new Error("Grid entry "+(index+1)+" contains unsupported URL details.");
+  if(url.hostname==="anilist.co"){
+   const match=/^\/(anime|manga|character)\/(\d+)(?:\/[^/]*)?\/?$/.exec(url.pathname);
+   const id=match?Number(match[2]):Number.NaN;
+   if(!match||!Number.isSafeInteger(id)||id<1)throw new Error("Grid entry "+(index+1)+" must be a valid AniList anime, manga or character URL.");
+   return{kind:match[1] as "anime"|"manga"|"character",id};
+  }
+  if(url.hostname==="www.igdb.com"||url.hostname==="igdb.com"){
+   const match=/^\/games\/([a-z0-9]+(?:-[a-z0-9]+)*)\/?$/i.exec(url.pathname);
+   if(!match)throw new Error("Grid entry "+(index+1)+" must be a valid IGDB game URL.");
+   return{kind:"game",slug:match[1]!.toLowerCase()};
+  }
+  throw new Error("Grid entry "+(index+1)+" must use an AniList or IGDB provider URL.");
+ });
+ const kinds=new Set(sources.map(source=>source.kind));
+ if(kinds.size!==1)throw new Error("All nine grid URLs must use the same media type.");
+ return sources;
+}
+
 export function parseGridTitles(value:string):string[]{
  const titles=value.split(/\r?\n/).map(item=>item.trim()).filter(Boolean);
  if(titles.length!==9)throw new Error("Enter exactly nine titles, one per line.");
- if(titles.some(title=>title.length<2||title.length>100))throw new Error("Each title must contain between 2 and 100 characters.");
+ if(titles.some(title=>title.length<2||title.length>200))throw new Error("Each title must contain between 2 and 100 characters.");
  return titles;
 }
 
