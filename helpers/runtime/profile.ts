@@ -40,6 +40,20 @@ function defaultPreferences(guildId: string, userId: string): ProfilePreferences
   };
 }
 
+export async function getGuildProfileUserIds(guildId: string): Promise<string[]> {
+  const rows = await query<{ discord_id: string }>(
+    `SELECT discord_id::text FROM users WHERE guild_id = $1
+     UNION
+     SELECT discord_id::text FROM steam_users WHERE guild_id = $1`,
+    [guildId],
+  );
+  return rows.map(row => row.discord_id);
+}
+
+export function findDepartedGuildProfileIds(profileUserIds: readonly string[], memberIds: Iterable<string>): string[] {
+  const members = new Set(memberIds);
+  return [...new Set(profileUserIds)].filter(userId => !members.has(userId));
+}
 export async function removeGuildMemberProfileData(guildId: string, userId: string): Promise<void> {
   await transaction(async (client) => {
     await client.query("DELETE FROM users WHERE guild_id = $1 AND discord_id = $2", [guildId, userId]);

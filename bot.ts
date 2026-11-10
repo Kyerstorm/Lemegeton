@@ -1,4 +1,4 @@
-import {Client,Events,GatewayIntentBits,MessageFlags,type Interaction,type TextChannel} from "discord.js";
+import {Client,Events,GatewayIntentBits,MessageFlags,type Guild,type Interaction,type TextChannel} from "discord.js";
 import {createServer, type Server} from "node:http";
 import {timingSafeEqual} from "node:crypto";
 import {findAtlasRelationships,normalizeAtlasCategory,safeAtlasUrl} from "./helpers/integration/atlas.js";
@@ -7,7 +7,7 @@ import {configureLogger,logger} from "./helpers/runtime/logger.js";
 import type {FeatureCommand} from "./helpers/commands/command.js";
 import {handleArchiveUploadMessage} from "./helpers/archive/archive.js";
 import {configureArchiveAccess} from "./helpers/archive/archive-access.js";
-import {removeGuildMemberProfileData} from "./helpers/runtime/profile.js";
+import {findDepartedGuildProfileIds,getGuildProfileUserIds,removeGuildMemberProfileData} from "./helpers/runtime/profile.js";
 import {AniListClient} from "./helpers/integration/anilist.js";
 import {TmdbClient} from "./helpers/integration/tmdb.js";
 import {handleAniListLinkMessage} from "./src/integrations/anilist-embed.js";
@@ -142,8 +142,30 @@ async function routeInteraction(interaction:Interaction):Promise<void>{
   await respondWithError(interaction,reference?`${message}\n\n${issueHashNotice(reference)}`:message);
  }
 }
+async function reconcileDepartedGuildProfiles(guilds: Iterable<Guild>): Promise<void> {
+ for (const guild of guilds) {
+  try {
+   const profileUserIds = await getGuildProfileUserIds(guild.id);
+   if (!profileUserIds.length) continue;
+   const members = await guild.members.fetch();
+   const botId = client.user?.id;
+   if (!botId || !members.has(botId) || members.size < guild.memberCount) {
+    logger.warn("Skipped departed-member profile reconciliation because Discord returned an incomplete guild member list", { guildId: guild.id, expected: guild.memberCount, received: members.size });
+    continue;
+   }
+   const departed = findDepartedGuildProfileIds(profileUserIds, members.keys());
+   for (const userId of departed) {
+    await removeGuildMemberProfileData(guild.id, userId);
+    logger.info("Removed stale guild-scoped profile data for a member who is no longer in the server", { guildId: guild.id, userId });
+   }
+  } catch (error) {
+   logger.warn("Departed-member profile reconciliation failed; no incomplete membership results were used for deletion", { guildId: guild.id, reason: error instanceof Error ? error.message : "Unknown error" });
+  }
+ }
+}
 client.once(Events.ClientReady,ready=>{
  logger.info("Lemegeton TypeScript bot connected",{user:ready.user.tag,commands:commands.map(command=>command.data.name)});
+ void reconcileDepartedGuildProfiles(ready.guilds.cache.values());
  startMediaNotificationScheduler(client,config);
  void startCustomRolePicker(client,config).catch(error=>logger.error("Custom Roles picker startup failed",{reason:error instanceof Error?error.message:"Unknown error"}));
  void startDashboardBridge(client,commands,config).catch(error=>logger.error("Dashboard bot bridge startup failed",{reason:error instanceof Error?error.message:"Unknown error"}));

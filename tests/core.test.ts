@@ -9,7 +9,7 @@ import {nextLocalOccurrence} from "../helpers/community/community.js";
 import {classifyArchiveUpload} from "../helpers/media/media-storage.js";
 import {ARCHIVE_TAG_CATALOG,searchArchiveTags} from "../helpers/archive/archive.js";
 import {AniListClient} from "../helpers/integration/anilist.js";
-import {getAniListProfileAchievements} from "../helpers/runtime/profile.js";
+import {findDepartedGuildProfileIds,getAniListProfileAchievements} from "../helpers/runtime/profile.js";
 import {allowPickerCall,clearPickerLinks,createPickerLink,lookupPickerLink} from "../helpers/custom-roles/custom-role-picker-tokens.js";
 import {isPublicImageAddress} from "../helpers/custom-roles/custom-role-picker-server.js";
 import sharp from "sharp";
@@ -45,6 +45,10 @@ test("bot moderator commands fail closed outside their configured guild",()=>{
  assert.equal(isModeratorCommandGuild("111111111111111111","987654321098765432"),false);
  assert.equal(isModeratorCommandGuild(null,"987654321098765432"),false);
  assert.equal(isModeratorCommandGuild("987654321098765432",null),false);
+});
+test("departed profile reconciliation removes only IDs missing from the complete guild member set",()=>{
+ assert.deepEqual(findDepartedGuildProfileIds(["1","2","2","3"],["1","3","4"]),["2"]);
+ assert.deepEqual(findDepartedGuildProfileIds([],["1"]),[]);
 });
 test("source URLs and Archive tags are normalized and validated",()=>{
  assert.equal(isValidHttpsUrl("https://example.com/a"),"https://example.com/a");
