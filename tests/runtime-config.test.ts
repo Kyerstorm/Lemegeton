@@ -42,6 +42,7 @@ test("Custom Roles preview switches are development-only", () => {
 
   const nodeProduction = loadConfig(environment({
     NODE_ENV: "production",
+    CUSTOM_ROLES_PICKER_ENABLED: "false",
     CUSTOM_ROLES_DEBUG_PREVIEW_ENHANCED_COLORS: "true",
     CUSTOM_ROLES_DEBUG_PREVIEW_ROLE_ICONS: "true",
   }));
