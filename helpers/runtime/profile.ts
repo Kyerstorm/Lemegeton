@@ -1,8 +1,8 @@
 import { query, queryOne } from "../../database.js";
-import type { AniListUserInterests, AniListUserProfile } from "../providers/anilist.js";
-import { AniListClient } from "../providers/anilist.js";
-import type { SteamProfile } from "../providers/steam.js";
-import { SteamClient } from "../providers/steam.js";
+import type { AniListUserInterests, AniListUserProfile } from "../integration/anilist.js";
+import { AniListClient } from "../integration/anilist.js";
+import type { SteamProfile } from "../integration/steam.js";
+import { SteamClient } from "../integration/steam.js";
 import { cleanText } from "../security/security.js";
 
 export interface ProfilePreferences {

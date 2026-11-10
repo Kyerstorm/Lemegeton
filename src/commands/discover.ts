@@ -21,16 +21,16 @@ import {
 } from "discord.js";
 import type { FeatureCommand } from "../../helpers/commands/command.js";
 import type { BotConfig } from "../../helpers/runtime/config.js";
-import { AniListClient, type AniListAiring, type AniListAiringFilters, type AniListMedia, type AniListMediaType, type AniListSearchFilters, type AniListCreator } from "../../helpers/providers/anilist.js";
-import {SteamClient,type SteamStoreGame} from "../../helpers/providers/steam.js";
-import { GoogleBooksClient, type GoogleBook } from "../../helpers/providers/google-books.js";
-import { IgdbClient, type IgdbGame } from "../../helpers/providers/igdb.js";
+import { AniListClient, type AniListAiring, type AniListAiringFilters, type AniListMedia, type AniListMediaType, type AniListSearchFilters, type AniListCreator } from "../../helpers/integration/anilist.js";
+import {SteamClient,type SteamStoreGame} from "../../helpers/integration/steam.js";
+import { GoogleBooksClient, type GoogleBook } from "../../helpers/integration/google-books.js";
+import { IgdbClient, type IgdbGame } from "../../helpers/integration/igdb.js";
 import { homeEmbed, navigationButtons } from "../../helpers/runtime/discord.js";
-import { TmdbClient, type TmdbMedia, type TmdbTvSeason } from "../../helpers/providers/tmdb.js";
+import { TmdbClient, type TmdbMedia, type TmdbTvSeason } from "../../helpers/integration/tmdb.js";
 import { getGuildMediaRegion } from "../../helpers/media/media-region.js";
 import { cleanText } from "../../helpers/security/security.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
-import { findAtlasRelationships, normalizeAtlasTitle, recordAtlasRelationship, recordProviderRelationships } from "../../helpers/providers/atlas.js";
+import { findAtlasRelationships, normalizeAtlasTitle, recordAtlasRelationship, recordProviderRelationships } from "../../helpers/integration/atlas.js";
 import { aniListReleaseOrder, tmdbCollectionReleaseOrder } from "../../helpers/media/franchise-order.js";
 import {
   createMediaLinkSuggestion,

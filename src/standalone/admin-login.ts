@@ -7,7 +7,7 @@ import type { FeatureCommand } from "../../helpers/commands/command.js";
 import { isBotModerator, isModeratorCommandGuild } from "../../helpers/commands/moderation.js";
 import { linkAniListAccount } from "../../helpers/runtime/profile.js";
 import { queryOne } from "../../database.js";
-import { AniListClient } from "../../helpers/providers/anilist.js";
+import { AniListClient } from "../../helpers/integration/anilist.js";
 
 const USERNAME_PATTERN = /^[A-Za-z0-9_-]{1,30}$/;
 

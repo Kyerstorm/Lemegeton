@@ -7,7 +7,7 @@ import {
   type AniListPublicEntity,
   type AniListReviewRecord,
   type AniListUserProfile,
-} from "../providers/anilist.js";
+} from "../../helpers/integration/anilist.js";
 import {
   buildCharactersEmbeds,
   buildMediaEmbed,
@@ -20,7 +20,7 @@ import {
   buildUserProfileEmbed,
   buildUserStatsEmbed,
   EMBED_COLOURS,
-} from "./core.js";
+} from "../../helpers/embeds/core.js";
 
 export type AniListProfileSection = "overview" | "stats" | "favorites" | "activity";
 export type AniListLinkTarget =

@@ -1,5 +1,5 @@
 import { query, queryOne } from "../../database.js";
-import { normalizeAtlasCategory, recordAtlasRelationship, safeAtlasUrl, type MediaCategory } from "../providers/atlas.js";
+import { normalizeAtlasCategory, recordAtlasRelationship, safeAtlasUrl, type MediaCategory } from "../integration/atlas.js";
 
 export const MEDIA_LINK_RELATIONSHIPS = [
   "adaptation",

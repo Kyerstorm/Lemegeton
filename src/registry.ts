@@ -15,8 +15,8 @@ import {PlannedCommand} from "./utility/planned.js";
 import {BotModeratorsCommand} from "./standalone/moderators.js";
 import {TimestampCommand} from "./utility/timestamp.js";
 import {InviteCommand} from "./utility/invite.js";
-import {ConvertLinksCommand} from "./integrations/convertlinks.js";
-import {AdminLoginCommand} from "./integrations/admin-login.js";
+import {ConvertLinksCommand} from "./utility/convertlinks.js";
+import {AdminLoginCommand} from "./standalone/admin-login.js";
 
 export function createCommandRegistry(config:BotConfig):FeatureCommand[]{
  const commands:FeatureCommand[]=[

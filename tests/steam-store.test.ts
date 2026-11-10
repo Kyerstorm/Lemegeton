@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {parseSteamStoreGame,validateSteamId} from "../helpers/providers/steam.js";
+import {parseSteamStoreGame,validateSteamId} from "../helpers/integration/steam.js";
 
 test("Steam Store details are normalized without inventing missing metadata",()=>{
  const item=parseSteamStoreGame({

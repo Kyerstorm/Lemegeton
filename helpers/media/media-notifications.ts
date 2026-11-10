@@ -11,7 +11,7 @@ import {
   type TextChannel,
 } from "discord.js";
 import { logger } from "../runtime/logger.js";
-import { AniListClient, type AniListRecentlyFinishedMedia } from "../providers/anilist.js";
+import { AniListClient, type AniListRecentlyFinishedMedia } from "../integration/anilist.js";
 import type { BotConfig } from "../runtime/config.js";
 import { query, queryOne } from "../../database.js";
 

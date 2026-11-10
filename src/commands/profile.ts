@@ -17,8 +17,8 @@ import {
 import type { FeatureCommand } from "../../helpers/commands/command.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
 import type { BotConfig } from "../../helpers/runtime/config.js";
-import { AniListClient } from "../../helpers/providers/anilist.js";
-import { SteamClient } from "../../helpers/providers/steam.js";
+import { AniListClient } from "../../helpers/integration/anilist.js";
+import { SteamClient } from "../../helpers/integration/steam.js";
 import {
   getAniListAffinity,
   getAniListLeaderboard,

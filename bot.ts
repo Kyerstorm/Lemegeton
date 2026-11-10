@@ -1,14 +1,16 @@
 import {Client,Events,GatewayIntentBits,MessageFlags,type Interaction,type TextChannel} from "discord.js";
 import {createServer, type Server} from "node:http";
 import {timingSafeEqual} from "node:crypto";
-import {findAtlasRelationships,normalizeAtlasCategory,safeAtlasUrl} from "./helpers/providers/atlas.js";
+import {findAtlasRelationships,normalizeAtlasCategory,safeAtlasUrl} from "./helpers/integration/atlas.js";
 import {loadConfig} from "./helpers/runtime/config.js";
 import {configureLogger,logger} from "./helpers/runtime/logger.js";
 import type {FeatureCommand} from "./helpers/commands/command.js";
 import {handleArchiveUploadMessage} from "./helpers/archive/archive.js";
-import {AniListClient} from "./helpers/providers/anilist.js";
-import {TmdbClient} from "./helpers/providers/tmdb.js";
-import {handleAniListLinkMessage} from "./helpers/embeds/anilist.js";
+import {AniListClient} from "./helpers/integration/anilist.js";
+import {TmdbClient} from "./helpers/integration/tmdb.js";
+import {handleAniListLinkMessage} from "./src/integrations/anilist-embed.js";
+import {handleSocialLinkMessage} from "./src/integrations/social-embed.js";
+import {SteamClient} from "./helpers/integration/steam.js";
 import {closeDatabase,initDatabase} from "./database.js";
 import {claimDueMediaNightResults,dueDailyDeliveries,dueDailySchedules,markDailyDelivery,markMediaNightResultPublished,prepareDailyDelivery,rankingResults,dueReleaseDeliveries,dueReleaseSchedules,markReleaseDelivery,prepareReleaseDelivery,upcomingProviderReleases} from "./helpers/community/community.js";
 import {claimDueReadingReminders,markReadingReminderSent} from "./helpers/community/community-reading.js";
@@ -27,6 +29,7 @@ import {processArchiveAssetCleanup} from "./helpers/media/media-storage.js";
 const config=loadConfig();configureLogger(config.logLevel);
 const client=new Client({intents:[GatewayIntentBits.Guilds,GatewayIntentBits.GuildMembers,GatewayIntentBits.GuildMessages,GatewayIntentBits.MessageContent]});
 const aniListEmbedClient=new AniListClient(config.anilistApiUrl,config.anilistTimeoutMs);
+const socialEmbedSteamClient=new SteamClient(config.steamApiKey);
 const releaseCalendarTmdbClient=new TmdbClient(config.tmdbBearerToken);
 const commands=createCommandRegistry(config);
 const commandByName=new Map<string,FeatureCommand>(commands.map(command=>[command.data.name,command]));
@@ -227,8 +230,30 @@ client.on(Events.MessageCreate,message=>{
    await message.reply({content:response,allowedMentions:{parse:[]}}).catch(()=>undefined);
   }
  });
+ void handleSocialLinkMessage(message,socialEmbedSteamClient).catch(async error=>{
+  logger.error("Social link integration failed",{guildId:message.guildId,channelId:message.channelId,messageId:message.id,reason:error instanceof Error?error.message:"Unknown error"});
+  if(!message.author.bot&&message.guildId){
+   let reference:string|undefined;
+   try{
+    reference=await createIssueLog({
+     guildId:message.guildId,
+     userId:message.author.id,
+     username:message.author.globalName??message.author.username,
+     interactionId:message.id,
+     channelId:message.channelId,
+     command:"Social link integration",
+     details:{messageId:message.id,urlCount:(message.content.match(/https?:\\/\\//gi)??[]).length},
+     error,
+    });
+   }catch(logError){
+    logger.error("Could not persist social link issue reference",{messageId:message.id,reason:logError instanceof Error?logError.message:"Unknown logging error"});
+   }
+   const response="The social link preview could not be created."+(reference?"\\n\\n"+issueHashNotice(reference):"");
+   await message.reply({content:response,allowedMentions:{parse:[]}}).catch(()=>undefined);
+  }
+ });
 });
-
+ 
 let workerRunning=false;
 let dailyWorkerPromise:Promise<void>|undefined;
 function scheduleDailyDrops():void{

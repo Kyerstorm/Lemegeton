@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AniListClient } from "../helpers/providers/anilist.js";
+import { AniListClient } from "../helpers/integration/anilist.js";
 
 test("AniList detail preserves full release metadata on related titles", async () => {
   let query = "";

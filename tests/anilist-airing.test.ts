@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AniListClient } from "../helpers/providers/anilist.js";
+import { AniListClient } from "../helpers/integration/anilist.js";
 
 const now = new Date("2026-11-10T00:00:00.000Z");
 const start = Math.floor(now.getTime() / 1000);

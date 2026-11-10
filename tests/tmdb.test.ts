@@ -10,7 +10,7 @@ import {
   normalizeTmdbTvSeason,
   normalizeTmdbVideos,
   normalizeTmdbWatchAvailability,
-} from "../helpers/providers/tmdb.js";
+} from "../helpers/integration/tmdb.js";
 import { normalizeMediaRegion } from "../helpers/media/media-region.js";
 
 test("TMDB media normalization accepts valid movie and TV records", () => {

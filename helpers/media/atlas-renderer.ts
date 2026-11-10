@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import type { AtlasRelation, MediaCategory } from "../providers/atlas.js";
+import type { AtlasRelation, MediaCategory } from "../integration/atlas.js";
 
 const WIDTH = 1450;
 const HEIGHT = 950;

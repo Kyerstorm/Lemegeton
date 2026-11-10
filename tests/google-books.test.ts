@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { GoogleBooksClient } from "../helpers/providers/google-books.js";
+import { GoogleBooksClient } from "../helpers/integration/google-books.js";
 
 async function withFetch<T>(
   implementation: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,

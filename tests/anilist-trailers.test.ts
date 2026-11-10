@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {buildAniListTrailerUrl} from "../helpers/providers/anilist.js";
+import {buildAniListTrailerUrl} from "../helpers/integration/anilist.js";
 
 test("AniList trailers produce safe YouTube and Dailymotion links",()=>{
  assert.equal(buildAniListTrailerUrl("youtube","aBC_123-XYZ"),"https://youtu.be/aBC_123-XYZ");

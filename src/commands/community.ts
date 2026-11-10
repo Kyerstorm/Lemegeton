@@ -21,8 +21,8 @@ import type { FeatureCommand } from "../../helpers/commands/command.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
 import type { BotConfig } from "../../helpers/runtime/config.js";
 import { homeEmbed } from "../../helpers/runtime/discord.js";
-import { AniListClient } from "../../helpers/providers/anilist.js";
-import { TmdbClient } from "../../helpers/providers/tmdb.js";
+import { AniListClient } from "../../helpers/integration/anilist.js";
+import { TmdbClient } from "../../helpers/integration/tmdb.js";
 import {
   addRankingCandidate,
   closeDiscussion,
