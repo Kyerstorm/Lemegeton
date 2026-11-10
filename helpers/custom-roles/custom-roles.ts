@@ -144,7 +144,7 @@ export async function saveCustomRole(record: Omit<CustomRoleRecord, "last_change
 export async function updateCustomRole(
   guildId: string,
   userId: string,
-  fields: { name?: string; color_mode?: string; primary_color?: number | null; secondary_color?: number | null; icon_emoji?: string | null; icon_png?: Buffer | null; icon_crop?: string | null; icon_source_asset_id?: number | null; position_hint?: number | null; status?: CustomRoleRecord["status"]; role_id?: string | null },
+  fields: { name?: string; color_mode?: string; primary_color?: number | null; secondary_color?: number | null; icon_emoji?: string | null; icon_png?: Buffer | null; icon_source?: Buffer | null; icon_crop?: string | null; icon_source_asset_id?: number | null; position_hint?: number | null; status?: CustomRoleRecord["status"]; role_id?: string | null; last_changed_at?: Date | null },
   changed = false,
 ): Promise<void> {
   const assignments: string[] = [];
@@ -159,10 +159,12 @@ export async function updateCustomRole(
   if (fields.secondary_color !== undefined) add("secondary_color", fields.secondary_color);
   if (fields.icon_emoji !== undefined) add("icon_emoji", fields.icon_emoji);
   if (fields.icon_png !== undefined) add("icon_png", fields.icon_png);
+  if (fields.icon_source !== undefined) add("icon_source", fields.icon_source);
   if (fields.icon_crop !== undefined) add("icon_crop", fields.icon_crop);
   if (fields.icon_source_asset_id !== undefined) add("icon_source_asset_id", fields.icon_source_asset_id);
   if (fields.status !== undefined) add("status", fields.status);
   if (fields.role_id !== undefined) add("role_id", fields.role_id);
+  if (fields.last_changed_at !== undefined) add("last_changed_at", fields.last_changed_at);
   if (fields.position_hint !== undefined) add("position_hint", fields.position_hint);
   if (changed) assignments.push("last_changed_at = NOW()");
   if (!assignments.length) return;
