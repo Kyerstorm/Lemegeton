@@ -323,3 +323,21 @@ tests/test_web_scraper.py
 ## Exit gate
 
 Do not mark source migration complete until each in-scope row above has implementation/test evidence, the Python reference test scenarios relevant to selected v3 features have explicit dispositions, CI passes on the current Draft head, multi-guild isolation and schema compatibility are proven, and startup/shutdown/recovery are covered. This audit does not assert that a previous bot was deployed and does not authorize a production release. The PR remains Draft until the repository owner explicitly says otherwise.
+
+
+## Integration and runtime boundary correction — 10 November 2026
+
+Verified on Draft head `7198ac4` and the preceding structural commits:
+
+- `src/integrations/` contains only message-driven integration modules: `anilist-embed.ts` and `social-embed.ts`. These are not slash commands.
+- Provider clients and shared integration logic live under `helpers/integration/`: AniList, Atlas, Google Books, IGDB, Steam and TMDB.
+- The old `helpers/providers/` directory is removed. Imports in bot, commands, community helpers, profile helpers and provider tests now target `helpers/integration/`.
+- `/adminlogin` is back under `src/standalone/admin-login.ts`; `/convertlinks` is back under `src/utility/convertlinks.ts`. Both are registered only in `BOT_MODERATOR_GUILD_ID`, excluded from global deployment and dashboard command synchronization. `/adminlogin` additionally requires bot-moderator authorization.
+- The redundant `helpers/embeds/anilist.ts` and `helpers/embeds/social.ts` wildcard re-export shims were removed. Embed builders remain in `helpers/embeds/core.ts`; message handlers live in `src/integrations/`.
+- `bot.ts` now starts the social/Steam link integration, uses typed configuration for the Atlas bridge secret and port, and passes `config.database` to PostgreSQL initialization.
+- `database.ts` keeps the documented 40-character lowercase hexadecimal issue-reference constraint. No sequential or alternate reference format was introduced. The redundant second unique index on `users(discord_id, guild_id)` was removed because the table's unique constraint already supplies that index.
+- The TypeScript test suite was updated for the new import boundaries and asserts that `adminlogin` and `convertlinks` are excluded from dashboard/global command synchronization.
+
+The current tree snapshot at this audit update contains 219 tracked paths, 112 TypeScript/TSX files (33 test modules), and zero Python files. These counts are inventory only.
+
+The TypeScript bot workflow passed on head `7198ac4` (type-check and test job). Dashboard/container checks were still running at the time of this update. Live Discord authorization, a target PostgreSQL migration/restore, and full source-feature parity remain separate acceptance gates; this structural correction does not close the overall migration exit gate.
