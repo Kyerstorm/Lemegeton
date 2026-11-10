@@ -6,13 +6,14 @@ export interface BotConfig {
  discordToken:string; applicationId:string; anilistApiUrl:string; anilistTimeoutMs:number;
  database:DatabaseConfig; adminDiscordId:string|null; dashboardBridgeSecret:string; dashboardAtlasBridgePort:number;
  customRolePickerEnabled:boolean; customRolePickerHost:string; customRolePickerPort:number;
- customRolesReconcileMinutes:number; customRolePickerIdleTtl:number; customRolePickerMaxTtl:number; customRolesPublicUrl:string;
+ customRolesReconcileMinutes:number; customRolesMassArchiveThreshold:number; customRolePickerIdleTtl:number; customRolePickerMaxTtl:number; customRolesPublicUrl:string;
  customRolesTrustProxy:boolean; customRoleIconSourceMaxBytes:number;
  tmdbBearerToken?:string; googleBooksApiKey?:string; igdbClientId?:string; igdbClientSecret?:string;
  steamApiKey?:string; archiveUploadMaxBytes:number; logLevel:"debug"|"info"|"warn"|"error"; botModeratorGuildId:string|null;
 }
 function required(env:NodeJS.ProcessEnv,key:string):string{const value=env[key]?.trim();if(!value)throw new Error(`Missing required environment variable: ${key}`);return value;}
 function positive(value:string|undefined,fallback:number,key:string):number{if(!value?.trim())return fallback;const n=Number(value);if(!Number.isSafeInteger(n)||n<1)throw new Error(`${key} must be a positive integer.`);return n;}
+export function parseCustomRoleMassArchiveThreshold(raw:string|undefined):number{if(!raw?.trim())return 10;const value=Number(raw);return Number.isSafeInteger(value)?Math.max(0,value):10;}
 function loopbackDatabaseHost(host:string):boolean {
  const normalized=host.trim().toLowerCase().replace(/^\[|\]$/g,"");
  return normalized==="localhost"||normalized==="127.0.0.1"||normalized==="::1";
@@ -84,6 +85,7 @@ export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
  const pickerPort=positive(env.DASHBOARD_PICKER_PORT,8092,"DASHBOARD_PICKER_PORT");
  if(pickerPort>65535)throw new Error("DASHBOARD_PICKER_PORT must be between 1 and 65535.");
  const customRolesReconcileMinutes=positive(env.CUSTOM_ROLES_RECONCILE_MINUTES,30,"CUSTOM_ROLES_RECONCILE_MINUTES");
+ const customRolesMassArchiveThreshold=parseCustomRoleMassArchiveThreshold(env.CUSTOM_ROLES_MASS_ARCHIVE_THRESHOLD);
  const pickerIdleTtl=Math.max(60,positive(env.CUSTOM_ROLES_PICKER_IDLE_TTL,3600,"CUSTOM_ROLES_PICKER_IDLE_TTL"));
  const pickerMaxTtl=Math.max(pickerIdleTtl,positive(env.CUSTOM_ROLES_PICKER_MAX_TTL,10800,"CUSTOM_ROLES_PICKER_MAX_TTL"));
  const trustProxy=(env.CUSTOM_ROLES_TRUST_PROXY?.trim().toLowerCase()??"false");
