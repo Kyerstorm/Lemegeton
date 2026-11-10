@@ -57,6 +57,7 @@ export interface ArchiveSettings {
   uploadTypes: string[];
   uploadChannelId: string | null;
   moderationChannelId: string | null;
+  moderatorRoleId: string | null;
 }
 
 export interface ArchiveSubmission {
@@ -139,11 +140,12 @@ export async function getArchiveSettings(guildId: string): Promise<ArchiveSettin
     upload_types: string;
     upload_channel_id: string | null;
     moderation_channel_id: string | null;
+    moderator_role_id: string | null;
   }>(
-    "SELECT enabled_categories, upload_types, upload_channel_id::text, moderation_channel_id::text FROM guild_archive_settings WHERE guild_id = $1",
+    "SELECT enabled_categories, upload_types, upload_channel_id::text, moderation_channel_id::text, moderator_role_id::text FROM guild_archive_settings WHERE guild_id = $1",
     [guildId],
   );
-  if (!row) return { enabledCategories: DEFAULT_CATEGORIES, uploadTypes: ["image"], uploadChannelId: null, moderationChannelId: null };
+  if (!row) return { enabledCategories: DEFAULT_CATEGORIES, uploadTypes: ["image"], uploadChannelId: null, moderationChannelId: null, moderatorRoleId: null };
   try {
     const categories = JSON.parse(row.enabled_categories) as unknown;
     const uploads = JSON.parse(row.upload_types) as unknown;
@@ -158,10 +160,11 @@ export async function getArchiveSettings(guildId: string): Promise<ArchiveSettin
       uploadTypes: [...new Set(uploads as string[])],
       uploadChannelId: row.upload_channel_id,
       moderationChannelId: row.moderation_channel_id,
+      moderatorRoleId: row.moderator_role_id,
     };
   } catch {
     // Invalid settings fail closed instead of enabling categories/uploads by accident.
-    return { enabledCategories: [], uploadTypes: [], uploadChannelId: row.upload_channel_id, moderationChannelId: row.moderation_channel_id };
+    return { enabledCategories: [], uploadTypes: [], uploadChannelId: row.upload_channel_id, moderationChannelId: row.moderation_channel_id, moderatorRoleId: row.moderator_role_id };
   }
 }
 
@@ -208,6 +211,27 @@ export async function saveArchiveChannelSetting(
      ON CONFLICT (guild_id) DO UPDATE
        SET ${column} = EXCLUDED.${column}, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
     [guildId, channelId, actorId],
+  );
+}
+
+export function isValidArchiveModeratorRoleId(roleId: string | null): boolean {
+  return roleId === null || /^\\d{17,20}$/.test(roleId);
+}
+
+export async function saveArchiveModeratorRole(
+  guildId: string,
+  actorId: string,
+  roleId: string | null,
+): Promise<void> {
+  if (!isValidArchiveModeratorRoleId(roleId) || roleId === guildId) {
+    throw new Error("Choose a valid server role. @everyone cannot be an Archive moderator role.");
+  }
+  await query(
+    `INSERT INTO guild_archive_settings (guild_id, moderator_role_id, updated_by, updated_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (guild_id) DO UPDATE
+       SET moderator_role_id = EXCLUDED.moderator_role_id, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+    [guildId, roleId, actorId],
   );
 }
 

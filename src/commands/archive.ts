@@ -8,6 +8,7 @@ import {
   MessageFlags,
   ModalBuilder,
   PermissionsBitField,
+  RoleSelectMenuBuilder,
   SlashCommandBuilder,
   StringSelectMenuBuilder,
   TextInputBuilder,
@@ -19,6 +20,7 @@ import {
   type GuildMember,
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction,
+  type RoleSelectMenuInteraction,
 } from "discord.js";
 import type { FeatureCommand } from "../../helpers/commands/command.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
@@ -37,6 +39,7 @@ import {
   updateArchiveEntry,
   saveArchiveSettings,
   saveArchiveChannelSetting,
+  saveArchiveModeratorRole,
   rememberArchiveCategory,
   submitArchiveEntry,
   parsePanelChapterCaption,
@@ -537,6 +540,15 @@ export class ArchiveCommand implements FeatureCommand {
       await interaction.showModal(scope === "panels" ? quickPanelModal() : submitModal(scope,"server"));
       return true;
     }
+    if (action === "configure-clear-moderator-role") {
+      if (!isGuildManager(interaction)) {
+        await interaction.reply({content:"Manage Server permission is required to change Archive settings.",flags:MessageFlags.Ephemeral});
+        return true;
+      }
+      await saveArchiveModeratorRole(interaction.guildId, interaction.user.id, null);
+      await interaction.reply({content:"The Archive moderator role was cleared.",flags:MessageFlags.Ephemeral});
+      return true;
+    }
     if (action === "configure-types" || action === "configure-clear-upload" || action === "configure-clear-moderation") {
       if (!isGuildManager(interaction)) {
         await interaction.reply({content:"Manage Server permission is required to change Archive settings.",flags:MessageFlags.Ephemeral});
@@ -634,10 +646,25 @@ export class ArchiveCommand implements FeatureCommand {
     }
   }
 
-  async handleSelect(interaction: StringSelectMenuInteraction | ChannelSelectMenuInteraction): Promise<boolean> {
+  async handleSelect(interaction: StringSelectMenuInteraction | ChannelSelectMenuInteraction | RoleSelectMenuInteraction): Promise<boolean> {
     if (!interaction.guildId) return false;
     const [prefix, action] = interaction.customId.split(":");
     if (prefix !== "archive") return false;
+    if (interaction.isRoleSelectMenu()) {
+      if (action !== "configure-moderator-role") return false;
+      if (!isGuildManager(interaction)) {
+        await interaction.reply({content:"Manage Server permission is required to change Archive settings.",flags:MessageFlags.Ephemeral});
+        return true;
+      }
+      const role = interaction.roles.first();
+      if (!role || role.id === interaction.guildId) {
+        await interaction.reply({content:"Choose a normal server role. @everyone cannot moderate the Archive.",flags:MessageFlags.Ephemeral});
+        return true;
+      }
+      await saveArchiveModeratorRole(interaction.guildId, interaction.user.id, role.id);
+      await interaction.reply({content:"Archive moderation now accepts the configured role <@&"+role.id+">.",flags:MessageFlags.Ephemeral});
+      return true;
+    }
     if (interaction.isChannelSelectMenu()) {
       if (action !== "configure-upload" && action !== "configure-moderation") return false;
       if (!isGuildManager(interaction)) {
@@ -1082,6 +1109,7 @@ export class ArchiveCommand implements FeatureCommand {
       [
         {name:"Upload channel",value:settings.uploadChannelId?"<#"+settings.uploadChannelId+">":"Not configured",inline:true},
         {name:"Moderation channel",value:settings.moderationChannelId?"<#"+settings.moderationChannelId+">":"Not configured",inline:true},
+        {name:"Moderator role",value:settings.moderatorRoleId?"<@&"+settings.moderatorRoleId+">":"Not configured",inline:true},
         {name:"Enabled categories",value:settings.enabledCategories.map(categoryLabel).join(", ")||"None",inline:false},
         {name:"Accepted uploads",value:settings.uploadTypes.join(", ")||"None",inline:true},
       ],
@@ -1098,16 +1126,23 @@ export class ArchiveCommand implements FeatureCommand {
       .setChannelTypes(ChannelType.GuildText,ChannelType.GuildAnnouncement)
       .setMinValues(1)
       .setMaxValues(1);
+    const moderatorRole = new RoleSelectMenuBuilder()
+      .setCustomId("archive:configure-moderator-role")
+      .setPlaceholder("Choose the Archive moderator role")
+      .setMinValues(1)
+      .setMaxValues(1);
     const controls = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId("archive:configure-types").setLabel("Categories & uploads").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId("archive:configure-clear-upload").setLabel("Clear upload channel").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("archive:configure-clear-moderation").setLabel("Clear moderation channel").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("archive:configure-clear-moderator-role").setLabel("Clear moderator role").setStyle(ButtonStyle.Secondary),
     );
     await interaction.reply({
       embeds:[embed],
       components:[
         new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(upload),
         new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(moderation),
+        new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(moderatorRole),
         controls,
       ],
       flags:MessageFlags.Ephemeral,

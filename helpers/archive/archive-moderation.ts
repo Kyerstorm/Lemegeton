@@ -29,11 +29,11 @@ export async function canModerateArchive(member: GuildMember, guildId: string, v
     || member.permissions.has(PermissionsBitField.Flags.ManageMessages);
   if (visibility === "global") return GLOBAL_MODERATOR_IDS.has(member.id);
   if (canManage) return true;
-  const row = await queryOne<{ panel_mod_role_id: string | null }>(
-    "SELECT panel_mod_role_id FROM guild_settings WHERE guild_id = $1",
+  const row = await queryOne<{ moderator_role_id: string | null }>(
+    "SELECT moderator_role_id FROM guild_archive_settings WHERE guild_id = $1",
     [guildId],
   ).catch(() => null);
-  return Boolean(row?.panel_mod_role_id && member.roles.cache.has(row.panel_mod_role_id));
+  return Boolean(row?.moderator_role_id && member.roles.cache.has(row.moderator_role_id));
 }
 
 export async function listPendingEntries(guildId: string, visibility: ArchiveVisibility): Promise<ArchiveEntry[]> {
