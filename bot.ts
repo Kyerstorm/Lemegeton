@@ -148,7 +148,7 @@ client.once(Events.ClientReady,ready=>{
   for(const guild of client.guilds.cache.values()){
    void reconcileCustomRoleGuild(guild).catch(error=>logger.error("Custom Roles reconciliation failed",{guildId:guild.id,reason:error instanceof Error?error.message:"Unknown error"}));
   }
- },30*60_000);
+ },config.customRolesReconcileMinutes*60_000);
  reconciliationTimer.unref();
 });
 client.on(Events.GuildCreate,guild=>{
