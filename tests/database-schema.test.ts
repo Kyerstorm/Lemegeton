@@ -11,7 +11,7 @@ import type { Guild } from "discord.js";
 import type { DatabaseConfig } from "../helpers/runtime/config.js";
 import { getPanelOfTheDay } from "../helpers/archive/archive.js";
 import { removeGuildMemberProfileData } from "../helpers/runtime/profile.js";
-import { deleteGuildData } from "../helpers/runtime/guild-retention.js";
+import { deleteGuildData, retryDepartedGuildDeletions } from "../helpers/runtime/guild-retention.js";
 import { claimDueReadingReminders } from "../helpers/community/community-reading.js";
 import { claimDueMediaNightResults } from "../helpers/community/community-rankings.js";
 
@@ -1069,13 +1069,32 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     assert.equal((await query("SELECT id FROM community_archive_entries WHERE created_guild_id = $1", [retentionGuild])).length, 0);
     assert.equal((await query("SELECT id FROM community_daily_items WHERE guild_id = $1", [retentionGuild])).length, 0);
     assert.equal((await query("SELECT id FROM community_daily_items WHERE guild_id = $1", [retentionOtherGuild])).length, 1);
-    assert.deepEqual(
-      await queryOne<{ invited_by: string; leave_action: string }>(
-        "SELECT invited_by::text, leave_action FROM guild_retention_settings WHERE guild_id = $1",
-        [retentionGuild],
-      ),
-      { invited_by: "444444444444444444", leave_action: "delete" },
+    const savedRetention = await queryOne<{ invited_by: string; leave_action: string; deleted_at: Date | null }>(
+      "SELECT invited_by::text, leave_action, deleted_at FROM guild_retention_settings WHERE guild_id = $1",
+      [retentionGuild],
     );
+    assert.equal(savedRetention?.invited_by, "444444444444444444");
+    assert.equal(savedRetention?.leave_action, "delete");
+    assert.ok(savedRetention?.deleted_at instanceof Date);
+
+    const retryGuild = "333333333333333336";
+    const activeDeleteGuild = "333333333333333337";
+    await query(
+      "INSERT INTO guild_retention_settings (guild_id, leave_action) VALUES ($1,'delete'),($2,'delete')",
+      [retryGuild, activeDeleteGuild],
+    );
+    await query(
+      "INSERT INTO users (discord_id, guild_id, username) VALUES ($1,$2,'retry-delete'),($3,$4,'active-server')",
+      ["555555555555555561", retryGuild, "555555555555555562", activeDeleteGuild],
+    );
+    const retryResult = await retryDepartedGuildDeletions([retentionGuild, activeDeleteGuild]);
+    assert.deepEqual(retryResult, { checked: 1, deleted: 1, failed: 0 });
+    assert.equal((await query("SELECT discord_id FROM users WHERE guild_id = $1", [retryGuild])).length, 0);
+    assert.equal((await query("SELECT discord_id FROM users WHERE guild_id = $1", [activeDeleteGuild])).length, 1);
+    assert.ok((await queryOne<{ deleted_at: Date | null }>(
+      "SELECT deleted_at FROM guild_retention_settings WHERE guild_id = $1",
+      [retryGuild],
+    ))?.deleted_at instanceof Date);
   } finally {
     await closeDatabase();
     await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => undefined);
