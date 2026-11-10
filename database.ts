@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { DatabaseConfig } from "./helpers/runtime/config.js";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { logger } from "./helpers/runtime/logger.js";
 
@@ -10,61 +11,36 @@ function isLoopbackHost(host: string | undefined): boolean {
 }
 
 function databasePool(): Pool {
-  if (pool) return pool;
+  if (!pool) throw new Error("PostgreSQL has not been initialized. Call initDatabase(config.database) before querying.");
+  return pool;
+}
 
-  const dsn = process.env.DATABASE_URL?.trim()
-    || process.env.POSTGRES_DSN?.trim()
-    || process.env.POSTGRES_URL?.trim();
-  const environment = (process.env.ENVIRONMENT ?? "").trim().toLowerCase();
-  const host = dsn ? new URL(dsn.replace(/^postgres:/, "postgresql:")).hostname : (process.env.POSTGRES_HOST ?? "127.0.0.1");
-  const explicitSsl = process.env.POSTGRES_SSL?.trim().toLowerCase();
-  let sslEnabled: boolean;
-  if (explicitSsl) {
-    if (["1", "true", "yes", "on", "require", "required", "verify-ca", "verify-full"].includes(explicitSsl)) {
-      sslEnabled = true;
-    } else if (["0", "false", "no", "off", "disable", "disabled"].includes(explicitSsl)) {
-      sslEnabled = false;
-    } else {
-      throw new Error("POSTGRES_SSL must be a boolean value.");
-    }
-  } else {
-    sslEnabled = environment === "production" || !isLoopbackHost(host);
-  }
-  if (!sslEnabled && environment === "production") {
-    throw new Error("PostgreSQL TLS cannot be disabled in production.");
-  }
-  if (!sslEnabled && !isLoopbackHost(host)) {
-    throw new Error("PostgreSQL TLS may only be disabled for loopback development databases.");
-  }
-
-  const ssl = sslEnabled
+function createDatabasePool(config: DatabaseConfig): Pool {
+  const ssl = config.ssl
     ? {
         rejectUnauthorized: true,
-        ...(process.env.POSTGRES_SSL_CA_FILE?.trim()
-          ? { ca: readFileSync(process.env.POSTGRES_SSL_CA_FILE.trim(), "utf8") }
-          : {}),
+        ...(config.sslCaFile ? { ca: readFileSync(config.sslCaFile, "utf8") } : {}),
       }
     : false;
-
-  pool = new Pool({
-    ...(dsn
-      ? { connectionString: dsn.replace(/^postgres:/, "postgresql:") }
+  const activePool = new Pool({
+    ...(config.connectionString
+      ? { connectionString: config.connectionString }
       : {
-          host,
-          port: Number(process.env.POSTGRES_PORT || 5432),
-          database: process.env.POSTGRES_DB || process.env.POSTGRES_DATABASE || "postgres",
-          user: process.env.POSTGRES_USER || "postgres",
-          password: process.env.POSTGRES_PASSWORD || "",
+          host: config.host,
+          port: config.port,
+          database: config.database,
+          user: config.user,
+          password: config.password,
         }),
     ssl,
-    max: Math.max(1, Number(process.env.POSTGRES_POOL_SIZE || process.env.DB_CONNECTION_POOL_SIZE || 5)),
+    max: config.poolSize,
     connectionTimeoutMillis: 10_000,
     idleTimeoutMillis: 30_000,
     statement_timeout: 30_000,
     application_name: "lemegeton-typescript-bot",
   });
-  pool.on("error", (error) => logger.error("Unexpected PostgreSQL pool error", { reason: error.message }));
-  return pool;
+  activePool.on("error", (error) => logger.error("Unexpected PostgreSQL pool error", { reason: error.message }));
+  return activePool;
 }
 
 export async function query<T extends QueryResultRow = QueryResultRow>(
@@ -665,7 +641,8 @@ const schemaStatements = [
 
 ];
 
-export async function initDatabase(): Promise<void> {
+export async function initDatabase(config: DatabaseConfig): Promise<void> {
+  if (!pool) pool = createDatabasePool(config);
   const activePool = databasePool();
   await activePool.query("SELECT 1");
   const client = await activePool.connect();
@@ -693,9 +670,15 @@ export async function initDatabase(): Promise<void> {
       logger.warn("Existing booster_roles table is incomplete; its records were not changed");
     }
 
-    const defaultGuildId = process.env.GUILD_ID?.trim() || process.env.PRIMARY_GUILD_ID?.trim() || "897814031346319382";
-    if (!/^\d{17,20}$/.test(defaultGuildId)) throw new Error("GUILD_ID / PRIMARY_GUILD_ID must be a valid Discord snowflake.");
-    await client.query("UPDATE steam_users SET guild_id = $1 WHERE guild_id IS NULL", [defaultGuildId]);
+    const missingGuildRows = await client.query<{ count: string }>(
+      "SELECT COUNT(*)::text AS count FROM steam_users WHERE guild_id IS NULL",
+    );
+    if (Number(missingGuildRows.rows[0]?.count ?? 0) > 0) {
+      if (!config.primaryGuildId) {
+        throw new Error("GUILD_ID or PRIMARY_GUILD_ID must be configured to safely assign existing Steam links that have no guild_id.");
+      }
+      await client.query("UPDATE steam_users SET guild_id = $1 WHERE guild_id IS NULL", [config.primaryGuildId]);
+    }
     await client.query("ALTER TABLE steam_users ALTER COLUMN discord_id TYPE BIGINT");
     await client.query("ALTER TABLE steam_users ALTER COLUMN guild_id TYPE BIGINT");
     await client.query("ALTER TABLE steam_users ALTER COLUMN guild_id SET NOT NULL");

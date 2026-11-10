@@ -74,3 +74,53 @@ test("rejects partial provider credentials and unsafe picker binding", () => {
   assert.throws(() => loadConfig(environment({ IGDB_CLIENT_ID: "client-id" })), /configured together/);
   assert.throws(() => loadConfig(environment({ DASHBOARD_PICKER_HOST: "0.0.0.0" })), /loopback/);
 });
+
+
+test("loads PostgreSQL settings into the typed database configuration", () => {
+  const config = loadConfig(environment());
+  assert.equal(config.database.host, "127.0.0.1");
+  assert.equal(config.database.port, 5432);
+  assert.equal(config.database.poolSize, 5);
+  assert.equal(config.database.ssl, false);
+  assert.equal(config.database.primaryGuildId, null);
+});
+
+test("parses remote PostgreSQL URLs and requires TLS outside loopback", () => {
+  const config = loadConfig(environment({
+    DATABASE_URL: "postgres://user:pass@db.example.com:6432/lemegeton",
+    POSTGRES_POOL_SIZE: "12",
+  }));
+  assert.equal(config.database.connectionString, "postgresql://user:pass@db.example.com:6432/lemegeton");
+  assert.equal(config.database.host, "db.example.com");
+  assert.equal(config.database.port, 6432);
+  assert.equal(config.database.ssl, true);
+  assert.equal(config.database.poolSize, 12);
+  assert.throws(
+    () => loadConfig(environment({ DATABASE_URL: "postgresql://user:pass@db.example.com/db", POSTGRES_SSL: "false" })),
+    /TLS may only be disabled for loopback/,
+  );
+  assert.throws(
+    () => loadConfig(environment({ ENVIRONMENT: "production", POSTGRES_SSL: "false" })),
+    /TLS cannot be disabled in production/,
+  );
+});
+
+test("validates database ports, TLS flags and the optional Steam backfill guild", () => {
+  assert.throws(() => loadConfig(environment({ POSTGRES_PORT: "70000" })), /POSTGRES_PORT must be between/);
+  assert.throws(() => loadConfig(environment({ POSTGRES_SSL: "sometimes" })), /POSTGRES_SSL must be a boolean/);
+  assert.throws(() => loadConfig(environment({ PRIMARY_GUILD_ID: "invalid" })), /GUILD_ID \/ PRIMARY_GUILD_ID/);
+  const config = loadConfig(environment({ PRIMARY_GUILD_ID: "987654321098765432" }));
+  assert.equal(config.database.primaryGuildId, "987654321098765432");
+});
+
+test("loads operator and Atlas bridge settings into typed configuration", () => {
+  const config = loadConfig(environment({
+    ADMIN_DISCORD_ID: "123456789012345679",
+    DASHBOARD_BRIDGE_SECRET: "a".repeat(40),
+    DASHBOARD_ATLAS_BRIDGE_PORT: "9000",
+  }));
+  assert.equal(config.adminDiscordId, "123456789012345679");
+  assert.equal(config.dashboardBridgeSecret, "a".repeat(40));
+  assert.equal(config.dashboardAtlasBridgePort, 9000);
+  assert.throws(() => loadConfig(environment({ ADMIN_DISCORD_ID: "bad" })), /ADMIN_DISCORD_ID/);
+});

@@ -1,5 +1,10 @@
+export interface DatabaseConfig {
+ connectionString?:string; host:string; port:number; database:string; user:string; password:string;
+ ssl:boolean; sslCaFile?:string; poolSize:number; primaryGuildId:string|null;
+}
 export interface BotConfig {
  discordToken:string; applicationId:string; anilistApiUrl:string; anilistTimeoutMs:number;
+ database:DatabaseConfig; adminDiscordId:string|null; dashboardBridgeSecret:string; dashboardAtlasBridgePort:number;
  customRolePickerEnabled:boolean; customRolePickerHost:string; customRolePickerPort:number;
  customRolesReconcileMinutes:number; customRolePickerIdleTtl:number; customRolePickerMaxTtl:number; customRolesPublicUrl:string;
  customRolesTrustProxy:boolean; customRoleIconSourceMaxBytes:number;
@@ -8,11 +13,56 @@ export interface BotConfig {
 }
 function required(env:NodeJS.ProcessEnv,key:string):string{const value=env[key]?.trim();if(!value)throw new Error(`Missing required environment variable: ${key}`);return value;}
 function positive(value:string|undefined,fallback:number,key:string):number{if(!value?.trim())return fallback;const n=Number(value);if(!Number.isSafeInteger(n)||n<1)throw new Error(`${key} must be a positive integer.`);return n;}
+function loopbackDatabaseHost(host:string):boolean {
+ const normalized=host.trim().toLowerCase().replace(/^\[|\]$/g,"");
+ return normalized==="localhost"||normalized==="127.0.0.1"||normalized==="::1";
+}
+function databaseBoolean(value:string|undefined,key:string,defaultValue:boolean):boolean {
+ if(!value?.trim())return defaultValue;
+ const normalized=value.trim().toLowerCase();
+ if(["1","true","yes","on","require","required","verify-ca","verify-full"].includes(normalized))return true;
+ if(["0","false","no","off","disable","disabled"].includes(normalized))return false;
+ throw new Error(key+" must be a boolean value.");
+}
+function databaseConfig(env:NodeJS.ProcessEnv):DatabaseConfig {
+ const rawDsn=env.DATABASE_URL?.trim()||env.POSTGRES_DSN?.trim()||env.POSTGRES_URL?.trim();
+ let parsedDsn:URL|undefined;
+ if(rawDsn){
+  try{parsedDsn=new URL(rawDsn.replace(/^postgres:/,"postgresql:"));}
+  catch{throw new Error("DATABASE_URL / POSTGRES_DSN / POSTGRES_URL must be a valid PostgreSQL connection URL.");}
+  if(!["postgresql:","postgres:"].includes(parsedDsn.protocol)||!parsedDsn.hostname)
+   throw new Error("DATABASE_URL / POSTGRES_DSN / POSTGRES_URL must use PostgreSQL and include a host.");
+ }
+ const host=parsedDsn?.hostname??env.POSTGRES_HOST?.trim()??"127.0.0.1";
+ const port=parsedDsn?.port?Number(parsedDsn.port):positive(env.POSTGRES_PORT,5432,"POSTGRES_PORT");
+ if(!Number.isInteger(port)||port<1||port>65535)throw new Error("POSTGRES_PORT must be between 1 and 65535.");
+ if(parsedDsn&&!parsedDsn.port)parsedDsn.port=String(port);
+ const environment=(env.ENVIRONMENT??"").trim().toLowerCase();
+ const ssl=databaseBoolean(env.POSTGRES_SSL,"POSTGRES_SSL",environment==="production"||!loopbackDatabaseHost(host));
+ if(!ssl&&environment==="production")throw new Error("PostgreSQL TLS cannot be disabled in production.");
+ if(!ssl&&!loopbackDatabaseHost(host))throw new Error("PostgreSQL TLS may only be disabled for loopback development databases.");
+ const primaryGuildId=env.GUILD_ID?.trim()||env.PRIMARY_GUILD_ID?.trim()||null;
+ if(primaryGuildId&&!/^\d{17,20}$/.test(primaryGuildId))throw new Error("GUILD_ID / PRIMARY_GUILD_ID must be a valid Discord server ID.");
+ return {
+  ...(parsedDsn?{connectionString:parsedDsn.toString()}:{}),
+  host,port,database:env.POSTGRES_DB?.trim()||env.POSTGRES_DATABASE?.trim()||"postgres",
+  user:env.POSTGRES_USER?.trim()||"postgres",password:env.POSTGRES_PASSWORD??"",
+  ssl,...(env.POSTGRES_SSL_CA_FILE?.trim()?{sslCaFile:env.POSTGRES_SSL_CA_FILE.trim()}:{}),
+  poolSize:positive(env.POSTGRES_POOL_SIZE??env.DB_CONNECTION_POOL_SIZE,5,"POSTGRES_POOL_SIZE"),
+  primaryGuildId,
+ };
+}
 export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
  const discordToken=required(env,"DISCORD_TOKEN");const applicationId=env.DISCORD_CLIENT_ID?.trim()||required(env,"BOT_ID");
  if(!/^\d{17,20}$/.test(applicationId))throw new Error("BOT_ID / DISCORD_CLIENT_ID must be a valid Discord application ID.");
  const botModeratorGuildId=env.BOT_MODERATOR_GUILD_ID?.trim()||null;
  if(botModeratorGuildId&&!/^\d{17,20}$/.test(botModeratorGuildId))throw new Error("BOT_MODERATOR_GUILD_ID must be a valid 17–20 digit Discord server ID.");
+ const adminDiscordId=env.ADMIN_DISCORD_ID?.trim()||null;
+ if(adminDiscordId&&!/^\d{17,20}$/.test(adminDiscordId))throw new Error("ADMIN_DISCORD_ID must be a valid Discord user ID.");
+ const database=databaseConfig(env);
+ const dashboardBridgeSecret=env.DASHBOARD_BRIDGE_SECRET?.trim()??"";
+ const dashboardAtlasBridgePort=positive(env.DASHBOARD_ATLAS_BRIDGE_PORT,8093,"DASHBOARD_ATLAS_BRIDGE_PORT");
+ if(dashboardAtlasBridgePort>65535)throw new Error("DASHBOARD_ATLAS_BRIDGE_PORT must be between 1 and 65535.");
  const anilistApiUrl=env.ANILIST_API_URL?.trim()||"https://graphql.anilist.co";const parsed=new URL(anilistApiUrl);
  const local=["localhost","127.0.0.1","[::1]"].includes(parsed.hostname);
  if(parsed.protocol!=="https:"&&!(parsed.protocol==="http:"&&local))throw new Error("ANILIST_API_URL must use HTTPS (HTTP only for loopback development).");
@@ -41,7 +91,7 @@ export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
  const logLevel=(env.LOG_LEVEL?.trim().toLowerCase()||"info") as BotConfig["logLevel"];
  if(!["debug","info","warn","error"].includes(logLevel))throw new Error("LOG_LEVEL must be debug, info, warn, or error.");
  if(Boolean(env.IGDB_CLIENT_ID?.trim())!==Boolean(env.IGDB_CLIENT_SECRET?.trim()))throw new Error("IGDB_CLIENT_ID and IGDB_CLIENT_SECRET must be configured together.");
- return {discordToken,applicationId,botModeratorGuildId,anilistApiUrl:parsed.toString(),anilistTimeoutMs:positive(env.ANILIST_API_TIMEOUT,10,"ANILIST_API_TIMEOUT")*1000,
+ return {discordToken,applicationId,botModeratorGuildId,adminDiscordId,database,dashboardBridgeSecret,dashboardAtlasBridgePort,anilistApiUrl:parsed.toString(),anilistTimeoutMs:positive(env.ANILIST_API_TIMEOUT,10,"ANILIST_API_TIMEOUT")*1000,
  ...(env.TMDB_BEARER_TOKEN?.trim()?{tmdbBearerToken:env.TMDB_BEARER_TOKEN.trim()}:{}),
  ...(env.GOOGLE_BOOKS_API_KEY?.trim()?{googleBooksApiKey:env.GOOGLE_BOOKS_API_KEY.trim()}:{}),
  ...(env.IGDB_CLIENT_ID?.trim()?{igdbClientId:env.IGDB_CLIENT_ID.trim()}:{}),
