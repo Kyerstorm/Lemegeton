@@ -11,7 +11,7 @@ function display(value: unknown, limit = 950): string {
   return text.replace(/`/g, "'").slice(0, limit) || "Unavailable";
 }
 export class LogCommand implements FeatureCommand {
-  constructor(private readonly moderatorGuildId: string | null) {}
+  constructor(private readonly moderatorGuildId: string | null, private readonly administratorId: string | null = null) {}
 
   readonly data = new SlashCommandBuilder().setName("log")
     .setDescription("Inspect a diagnostic issue reference (bot moderators only)")
@@ -25,7 +25,7 @@ export class LogCommand implements FeatureCommand {
       return;
     }
     const hash = interaction.options.getString("issue_hash", true).trim().toLowerCase();
-    if (!await isBotModerator(interaction.user.id)) {
+    if (!await isBotModerator(interaction.user.id, this.administratorId)) {
       await interaction.reply({ content: "You are not authorised to inspect diagnostic logs.", flags: MessageFlags.Ephemeral });
       return;
     }
