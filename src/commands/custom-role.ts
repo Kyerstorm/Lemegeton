@@ -1296,8 +1296,10 @@ export class CustomRoleCommand implements FeatureCommand {
       );
       await interaction.reply({ embeds: [embed], components: rows, flags: MessageFlags.Ephemeral });
     } catch (error) {
+      const issueHash = await createInteractionIssueLog(interaction, "/custom-role", error, { action: "avatar-palette" });
+      const message = "I couldn't extract a palette from your avatar.";
       await interaction.reply({
-        content: error instanceof Error ? error.message : "I couldn't extract a palette from your avatar.",
+        content: issueHash ? message + "\n\n" + issueHashNotice(issueHash) : message,
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -1401,10 +1403,13 @@ export class CustomRoleCommand implements FeatureCommand {
     let original: Buffer;
     try {
       const response = await fetch(attachment.url, { signal: AbortSignal.timeout(15_000) });
-      if (!response.ok) return { ok: false, message: "Discord could not provide that attachment. Please upload it again." };
+      if (!response.ok) {
+        const error = Object.assign(new Error("Discord rejected the custom-role image download."), { status: response.status });
+        return { ok: false, message: "Discord could not provide that attachment. Please upload it again.", error };
+      }
       original = Buffer.from(await response.arrayBuffer());
-    } catch {
-      return { ok: false, message: "I couldn't download that image from Discord. Please upload it again." };
+    } catch (error) {
+      return { ok: false, message: "I couldn't download that image from Discord. Please upload it again.", error };
     }
     const processed = await processCustomRoleIconImage(original, crop);
     const contentType = processed.sourceType === "png" ? "image/png" : "image/jpeg";

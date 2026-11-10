@@ -923,6 +923,13 @@ export class DiscoverCommand implements FeatureCommand {
       }
       await interaction.reply({content:loadingMessage("Finding matching media…"),flags:MessageFlags.Ephemeral});
       const lookups=await Promise.allSettled(entries.map(entry=>this.fetchSearch(entry.title,entry.category)));
+      const providerFailures=lookups.flatMap(result=>result.status==="rejected"?[result.reason]:[]);
+      const failedInputs=lookups.flatMap((result,index)=>result.status==="rejected"?[entries[index]?.title ?? "unknown title"]:[]);
+      const issueHash=providerFailures.length
+        ? await createInteractionIssueLog(interaction,"/discover",
+            new AggregateError(providerFailures,"One or more media comparison lookups failed."),
+            {action:"media-comparison",failedInputs})
+        : null;
       const missing=entries.flatMap((entry,index)=>{
         const result=lookups[index];
         return !result||result.status!=="fulfilled"||!result.value.length
@@ -930,7 +937,8 @@ export class DiscoverCommand implements FeatureCommand {
       });
       if(missing.length){
         await interaction.editReply({
-          content:"No usable provider result was found for: "+missing.join("; ")+". Check the title or provider configuration, then try again.",
+          content:"No usable provider result was found for: "+missing.join("; ")+". Check the title or provider configuration, then try again."
+            +(issueHash?"\n\n"+issueHashNotice(issueHash):""),
           embeds:[],components:[],
         });
         return true;
