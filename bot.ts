@@ -161,7 +161,7 @@ async function prepareGuildRetention(guild: Guild): Promise<void> {
  if(!botId)return;
  try {
   const audit=await guild.fetchAuditLogs({type:AuditLogEvent.BotAdd,limit:10});
-  const entry=audit.entries.find(item=>item.targetId===botId&&Date.now()-item.createdTimestamp<15*60_000);
+  const entry=audit.entries.find(item=>item.targetId===botId);
   if(entry?.executorId)await recordGuildInviter(guild.id,entry.executorId);
  } catch(error) {
   logger.info("Could not resolve the original bot inviter; Manage Server users can still complete retention setup",{
