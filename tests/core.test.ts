@@ -21,6 +21,7 @@ import {ApplicationIntegrationType,InteractionContextType} from "discord.js";
 import {customRoleChannelAllowed,customRoleCooldownMessage,parseCustomRoleColor,parseCustomRoleWordList,validateCustomRoleEmoji,validateCustomRoleName} from "../helpers/custom-roles/custom-roles.js";
 import {renderAtlasSnapshot} from "../helpers/media/atlas-renderer.js";
 import {filterMediaNotificationCandidates} from "../helpers/media/media-notifications.js";
+import {canConfigureGuildLeaveAction,isGuildLeaveAction} from "../helpers/runtime/guild-retention.js";
 import {parseUtcDateTime} from "../src/utility/timestamp.js";
 import {extractAniListUsername} from "../src/utility/convertlinks.js";
 import type {AniListRecentlyFinishedMedia} from "../helpers/integration/anilist.js";
@@ -110,6 +111,17 @@ test("Dashboard bridge uses exact shared-secret matching and Discord ID validati
  assert.equal(isDashboardGuildId("123456789012345678"),true);
  assert.equal(isDashboardGuildId("123"),false);
  assert.equal(isDashboardGuildId("abc123456789012345"),false);
+});
+
+test("guild leave policy accepts only its two actions and limits selection to inviter or managers",()=>{
+ assert.equal(isGuildLeaveAction("delete"),true);
+ assert.equal(isGuildLeaveAction("retain"),true);
+ assert.equal(isGuildLeaveAction(null),false);
+ assert.equal(isGuildLeaveAction("purge"),false);
+ assert.equal(canConfigureGuildLeaveAction("111111111111111111","111111111111111111",false),true);
+ assert.equal(canConfigureGuildLeaveAction("111111111111111111","222222222222222222",true),true);
+ assert.equal(canConfigureGuildLeaveAction("111111111111111111","222222222222222222",false),false);
+ assert.equal(canConfigureGuildLeaveAction(null,"222222222222222222",false),false);
 });
 
 test("Server settings expose all six configurable feature environments",()=>{
