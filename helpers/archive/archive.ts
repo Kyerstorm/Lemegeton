@@ -215,7 +215,7 @@ export async function saveArchiveChannelSetting(
 }
 
 export function isValidArchiveModeratorRoleId(roleId: string | null): boolean {
-  return roleId === null || /^\\d{17,20}$/.test(roleId);
+  return roleId === null || /^\d{17,20}$/.test(roleId);
 }
 
 export async function saveArchiveModeratorRole(
