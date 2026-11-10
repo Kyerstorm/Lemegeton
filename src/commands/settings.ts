@@ -32,6 +32,12 @@ import {
 } from "../../helpers/media/media-notifications.js";
 import { getGuildMediaRegion, setGuildMediaRegion } from "../../helpers/media/media-region.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
+import {
+  canConfigureGuildLeaveAction,
+  getGuildRetentionSettings,
+  isGuildRetentionConfigured,
+  setGuildLeaveAction,
+} from "../../helpers/runtime/guild-retention.js";
 
 type SettingsRow =
   | ActionRowBuilder<ButtonBuilder>
@@ -142,6 +148,37 @@ async function panel(guildId: string): Promise<{
   return { embeds: [embed], components };
 }
 
+async function retentionPanel(guildId: string): Promise<{
+  embeds: EmbedBuilder[];
+  components: ActionRowBuilder<ButtonBuilder>[];
+}> {
+  const settings = await getGuildRetentionSettings(guildId);
+  const current = settings.leave_action === "delete"
+    ? "Delete this server's Lemegeton data"
+    : settings.leave_action === "retain"
+      ? "Retain this server's Lemegeton data"
+      : "A choice is required";
+  const embed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle("Server data when Lemegeton leaves")
+    .setDescription("Choose what should happen to this server's stored Lemegeton data if the bot is removed. Normal bot features stay locked until a choice is saved.")
+    .addFields(
+      { name: "Current choice", value: current },
+      { name: "Who can choose", value: "The person who invited Lemegeton, or a member with Manage Server permission." },
+    );
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId("settings:retention:delete")
+      .setLabel("Delete server data")
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId("settings:retention:retain")
+      .setLabel("Retain server data")
+      .setStyle(ButtonStyle.Success),
+  );
+  return { embeds: [embed], components: [row] };
+}
+
 function canManage(
   interaction: ButtonInteraction | ChatInputCommandInteraction | ChannelSelectMenuInteraction | ModalSubmitInteraction,
 ): boolean {
@@ -160,6 +197,7 @@ export class SettingsCommand implements FeatureCommand {
           { name: "Toggle a feature", value: "toggle" },
           { name: "Media notifications", value: "notifications" },
           { name: "Change media region", value: "media-region" },
+          { name: "Data retention when the bot leaves", value: "retention" },
         ),
     )
     .addStringOption((option) =>
@@ -187,7 +225,21 @@ export class SettingsCommand implements FeatureCommand {
       return;
     }
 
-    const action = interaction.options.getString("action") ?? "view";
+    const configured = await isGuildRetentionConfigured(interaction.guildId);
+    const action = interaction.options.getString("action") ?? (configured ? "view" : "retention");
+    if (action === "retention") {
+      const settings = await getGuildRetentionSettings(interaction.guildId);
+      if (!canConfigureGuildLeaveAction(settings.invited_by, interaction.user.id, canManage(interaction))) {
+        await interaction.reply({content:"Only the person who invited Lemegeton or a member with Manage Server permission can choose this setting.",flags:MessageFlags.Ephemeral});
+        return;
+      }
+      await interaction.reply({ ...await retentionPanel(interaction.guildId), flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (!configured) {
+      await interaction.reply({content:"Choose the server data-retention setting before using other Lemegeton settings.",flags:MessageFlags.Ephemeral});
+      return;
+    }
     if (action === "media-region") {
       if (!canManage(interaction)) {
         await interaction.reply({content:"Manage Server permission is required to change the media region.",flags:MessageFlags.Ephemeral});
@@ -230,8 +282,19 @@ export class SettingsCommand implements FeatureCommand {
 
   async handleButton(interaction: ButtonInteraction): Promise<boolean> {
     const [, section, target] = interaction.customId.split(":");
-    if (section !== "toggle" && section !== "notifications" && section !== "media-region") return false;
     if (!interaction.guildId) return false;
+    if (section === "retention") {
+      if (target !== "delete" && target !== "retain") return false;
+      const settings = await getGuildRetentionSettings(interaction.guildId);
+      if (!canConfigureGuildLeaveAction(settings.invited_by, interaction.user.id, canManage(interaction))) {
+        await interaction.reply({content:"Only the person who invited Lemegeton or a member with Manage Server permission can change this setting.",flags:MessageFlags.Ephemeral});
+        return true;
+      }
+      await setGuildLeaveAction(interaction.guildId, target, interaction.user.id);
+      await interaction.update(await retentionPanel(interaction.guildId));
+      return true;
+    }
+    if (section !== "toggle" && section !== "notifications" && section !== "media-region") return false;
     if (!canManage(interaction)) {
       await interaction.reply({
         content: "Manage Server permission is required to change server settings.",
