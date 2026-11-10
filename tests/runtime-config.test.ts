@@ -32,6 +32,22 @@ test("loads and validates the configured Custom Roles reconciliation interval", 
   );
 });
 
+test("loads and bounds the Custom Roles original icon size", () => {
+  assert.equal(loadConfig(environment()).customRoleIconSourceMaxBytes, 8 * 1024 * 1024);
+  assert.equal(
+    loadConfig(environment({ CUSTOM_ROLES_ICON_SOURCE_MAX_BYTES: String(4 * 1024 * 1024) })).customRoleIconSourceMaxBytes,
+    4 * 1024 * 1024,
+  );
+  assert.equal(
+    loadConfig(environment({ CUSTOM_ROLES_ICON_SOURCE_MAX_BYTES: "1024" })).customRoleIconSourceMaxBytes,
+    256 * 1024,
+  );
+  assert.throws(
+    () => loadConfig(environment({ CUSTOM_ROLES_ICON_SOURCE_MAX_BYTES: "invalid" })),
+    /CUSTOM_ROLES_ICON_SOURCE_MAX_BYTES must be a positive integer/,
+  );
+});
+
 test("accepts a valid dedicated bot-moderator guild and paired IGDB credentials", () => {
   const config = loadConfig(environment({
     BOT_MODERATOR_GUILD_ID: "987654321098765432",
