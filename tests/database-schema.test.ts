@@ -84,9 +84,16 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     await admin.query(`
       CREATE TABLE "${schema}".custom_role_guild_settings (
         guild_id INTEGER PRIMARY KEY,
+        enabled BOOLEAN NOT NULL DEFAULT FALSE,
         anchor_role_id INTEGER,
         command_channel_id INTEGER,
-        log_channel_id INTEGER
+        log_channel_id INTEGER,
+        cooldown_seconds INTEGER NOT NULL DEFAULT 0,
+        allowed_role_ids TEXT NOT NULL DEFAULT '[]',
+        blocked_words TEXT NOT NULL DEFAULT '[]',
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        anchor_place TEXT NOT NULL DEFAULT 'below',
+        removed_default_words TEXT NOT NULL DEFAULT '[]'
       )
     `);
     await admin.query(
