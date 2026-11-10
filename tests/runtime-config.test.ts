@@ -10,6 +10,14 @@ function environment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   };
 }
 
+test("accepts the legacy CLIENT_ID application setting and prefers DISCORD_CLIENT_ID", () => {
+  assert.equal(loadConfig(environment({ CLIENT_ID: "123456789012345679" })).applicationId, "123456789012345679");
+  assert.equal(
+    loadConfig(environment({ CLIENT_ID: "123456789012345679", DISCORD_CLIENT_ID: "123456789012345680" })).applicationId,
+    "123456789012345680",
+  );
+});
+
 test("loads safe defaults for a local TypeScript bot", () => {
   const config = loadConfig(environment());
 

@@ -54,8 +54,8 @@ function databaseConfig(env:NodeJS.ProcessEnv):DatabaseConfig {
  };
 }
 export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
- const discordToken=required(env,"DISCORD_TOKEN");const applicationId=env.DISCORD_CLIENT_ID?.trim()||required(env,"BOT_ID");
- if(!/^\d{17,20}$/.test(applicationId))throw new Error("BOT_ID / DISCORD_CLIENT_ID must be a valid Discord application ID.");
+ const discordToken=required(env,"DISCORD_TOKEN");const applicationId=env.DISCORD_CLIENT_ID?.trim()||env.CLIENT_ID?.trim()||required(env,"BOT_ID");
+ if(!/^\d{17,20}$/.test(applicationId))throw new Error("BOT_ID / CLIENT_ID / DISCORD_CLIENT_ID must be a valid Discord application ID.");
  const botModeratorGuildId=env.BOT_MODERATOR_GUILD_ID?.trim()||null;
  if(botModeratorGuildId&&!/^\d{17,20}$/.test(botModeratorGuildId))throw new Error("BOT_MODERATOR_GUILD_ID must be a valid 17–20 digit Discord server ID.");
  const adminDiscordId=env.ADMIN_DISCORD_ID?.trim()||null;
