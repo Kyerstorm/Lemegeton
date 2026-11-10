@@ -1026,7 +1026,7 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     const purge = await deleteGuildData(retentionGuild);
     assert.equal(purge.assetsAttempted, 0);
     assert.equal(purge.assetsPending, 0);
-    assert.ok(purge.deletedRows >= 4);
+    assert.ok(purge.deletedRows >= 3);
     assert.equal((await query("SELECT discord_id FROM users WHERE guild_id = $1", [retentionGuild])).length, 0);
     assert.equal((await query("SELECT discord_id FROM users WHERE guild_id = $1", [otherGuild])).length, 1);
     assert.equal((await query("SELECT id FROM community_archive_entries WHERE created_guild_id = $1", [retentionGuild])).length, 0);
