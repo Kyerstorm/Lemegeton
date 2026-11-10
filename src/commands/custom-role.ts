@@ -1311,7 +1311,7 @@ export class CustomRoleCommand implements FeatureCommand {
     if (!role) return { ok: false, message: "Your saved role no longer exists. Use Create role to restore it." };
     const cooldown = customRoleCooldownMessage(record, settings.cooldown_seconds);
     if (cooldown) return { ok: false, message: cooldown };
-    const maxBytes = Math.max(256 * 1024, Number(process.env.CUSTOM_ROLES_ICON_SOURCE_MAX_BYTES || 8 * 1024 * 1024));
+    const maxBytes = loadConfig().customRoleIconSourceMaxBytes;
     if (attachment.size > maxBytes) return { ok: false, message: "That image is too large. The original upload limit is " + Math.ceil(maxBytes / (1024 * 1024)) + " MB." };
 
     let original: Buffer;
