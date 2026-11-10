@@ -242,13 +242,13 @@ client.on(Events.MessageCreate,message=>{
      interactionId:message.id,
      channelId:message.channelId,
      command:"Social link integration",
-     details:{messageId:message.id,urlCount:(message.content.match(/https?:\\/\\//gi)??[]).length},
+     details:{messageId:message.id,urlCount:(message.content.match(/https?:\/\//gi)??[]).length},
      error,
     });
    }catch(logError){
     logger.error("Could not persist social link issue reference",{messageId:message.id,reason:logError instanceof Error?logError.message:"Unknown logging error"});
    }
-   const response="The social link preview could not be created."+(reference?"\\n\\n"+issueHashNotice(reference):"");
+   const response="The social link preview could not be created."+(reference?"\n\n"+issueHashNotice(reference):"");
    await message.reply({content:response,allowedMentions:{parse:[]}}).catch(()=>undefined);
   }
  });
