@@ -186,7 +186,10 @@ export async function runMediaNotificationCycle(client: Client, aniList: AniList
     const rows = await query<MediaNotificationSettings>(
       "SELECT guild_id::text, channel_id::text, enabled, include_anime, include_manga, last_run_at FROM media_notification_settings WHERE enabled=TRUE AND channel_id IS NOT NULL",
     );
-    const active = rows.filter(row => !ranWithinDay(row.last_run_at, now.getTime()));
+    const active: MediaNotificationSettings[] = [];
+    for (const row of rows) {
+      if (!ranWithinDay(row.last_run_at, now.getTime()) && await isGuildRetentionConfigured(row.guild_id)) active.push(row);
+    }
     if (!active.length) return;
     const { after, before } = previousUtcDay(now);
     const fetchAnime = active.some(row => row.include_anime);
@@ -196,7 +199,6 @@ export async function runMediaNotificationCycle(client: Client, aniList: AniList
     const manga = fetchManga
       ? filterMediaNotificationCandidates(await aniList.recentlyFinished("MANGA", after, before), "MANGA") : [];
     for (const settings of active) {
-      if (!await isGuildRetentionConfigured(settings.guild_id)) continue;
       const guild = client.guilds.cache.get(settings.guild_id);
       if (!guild) continue;
       await deliverGuild(guild, settings, anime, manga).catch(error => logger.error("Media notification guild scan failed", {
