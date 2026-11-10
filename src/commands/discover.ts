@@ -42,6 +42,7 @@ import { renderAtlasSnapshot } from "../../helpers/media/atlas-renderer.js";
 import { logger } from "../../helpers/runtime/logger.js";
 import { loadingMessage } from "../../helpers/emoji.js";
 import { parseGridTitles, renderMediaGrid } from "../../helpers/media/media-grid.js";
+import { parseMediaComparisonEntries, type MediaComparisonCategory } from "../../helpers/media/media-comparison.js";
 import { rankCrossMediaCandidates, recommendationGenreLabels, type CrossMediaCandidate } from "../../helpers/media/cross-media-recommendations.js";
 
 
@@ -214,6 +215,15 @@ function detailsButtons(record: SearchRecord): ActionRowBuilder<ButtonBuilder>[]
   return [];
 }
 
+function compareSearchModal():ModalBuilder{
+ return new ModalBuilder().setCustomId("discover:compare-search").setTitle("Compare media titles").addComponents(
+  new ActionRowBuilder<TextInputBuilder>().addComponents(
+   new TextInputBuilder().setCustomId("entries").setLabel("2–4 entries · category | title")
+    .setPlaceholder("anime | Your Name\nbook | Dune\ngame | Hades").setStyle(TextInputStyle.Paragraph)
+    .setMinLength(10).setMaxLength(800).setRequired(true),
+  ),
+ );
+}
 function airingSearchModal():ModalBuilder{
  return new ModalBuilder().setCustomId("discover:airing-search").setTitle("Upcoming anime episodes").addComponents(
   new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("title").setLabel("Anime title (optional)").setPlaceholder("Leave blank for all anime").setStyle(TextInputStyle.Short).setMaxLength(100).setRequired(false)),
@@ -282,6 +292,7 @@ function homePanel(): { embeds: EmbedBuilder[]; components: ActionRowBuilder<But
     new ButtonBuilder().setCustomId("discover:random:manga").setLabel("Random manga").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("discover:random:book").setLabel("Random book").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("discover:random:game").setLabel("Random game").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("discover:compare").setLabel("Compare media").setStyle(ButtonStyle.Secondary),
   );
   const schedules = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("discover:airing").setLabel("Upcoming anime episodes").setStyle(ButtonStyle.Secondary),
@@ -297,6 +308,11 @@ export class DiscoverCommand implements FeatureCommand {
     entries: AniListAiring[];
     page: number;
     timeout: NodeJS.Timeout;
+  }>();
+  private readonly comparisonSessions = new Map<string, {
+    ownerId:string;
+    sides:Array<{category:MediaComparisonCategory;title:string;results:SearchRecord[];selected:number}>;
+    timeout:NodeJS.Timeout;
   }>();
   readonly data = new SlashCommandBuilder()
     .setName("discover")
@@ -489,6 +505,42 @@ export class DiscoverCommand implements FeatureCommand {
       await interaction.showModal(airingSearchModal());
       return true;
     }
+    if(action==="compare"){
+      await interaction.showModal(compareSearchModal());
+      return true;
+    }
+    if(action==="compare-submit"){
+      const session=this.comparisonSessions.get(categoryValue??"");
+      if(!session||session.ownerId!==interaction.user.id){
+        await interaction.reply({content:"That comparison session has expired or belongs to another user. Open /discover again.",flags:MessageFlags.Ephemeral});
+        return true;
+      }
+      await interaction.deferUpdate();
+      const fields=session.sides.map(side=>{
+        const record=side.results[side.selected]!;
+        const details=toEmbed(record).data.fields?.filter(field=>field.name!=="Provider")
+          .map(field=>field.name+": "+field.value).join("\n")??"No additional provider metadata was supplied.";
+        return{
+          name:(categoryLabel(side.category)+" · "+this.recordTitle(record)).slice(0,256),
+          value:("Provider: "+record.provider+"\nSource: "+this.recordUrl(record)+"\n"+details).slice(0,1024),
+          inline:true,
+        };
+      });
+      const embed=homeEmbed(
+        "Media comparison",
+        "Compare provider-reported information side by side. Missing fields are not inferred and no overall winner is calculated.",
+        fields,
+      ).setFooter({text:"AniList · Google Books · TMDB · IGDB · Steam · Source metadata only"});
+      clearTimeout(session.timeout);
+      this.comparisonSessions.delete(categoryValue??"");
+      await interaction.editReply({
+        content:"Comparison · "+session.sides.length+" titles",
+        embeds:[embed],
+        components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],
+        allowedMentions:{parse:[]},
+      });
+      return true;
+    }
     if(action==="airing-page"||action==="airing-refresh"){
       const session=this.airingSessions.get(categoryValue??"");
       if(!session||session.ownerId!==interaction.user.id){
@@ -583,6 +635,27 @@ export class DiscoverCommand implements FeatureCommand {
     if (!interaction.isStringSelectMenu()) return false;
     const [scope, action, categoryValue, region] = interaction.customId.split(":");
     if (scope !== "discover") return false;
+    if(action==="compare-select"){
+      const session=this.comparisonSessions.get(categoryValue??"");
+      const sideIndex=Number(region);
+      if(!session||session.ownerId!==interaction.user.id){
+        await interaction.reply({content:"That comparison session has expired or belongs to another user.",flags:MessageFlags.Ephemeral});
+        return true;
+      }
+      if(!Number.isSafeInteger(sideIndex)||sideIndex<0||sideIndex>=session.sides.length){
+        await interaction.reply({content:"That comparison selection is invalid.",flags:MessageFlags.Ephemeral});
+        return true;
+      }
+      const selected=Number(interaction.values[0]);
+      if(!Number.isSafeInteger(selected)||selected<0||selected>=session.sides[sideIndex]!.results.length){
+        await interaction.reply({content:"That provider result is no longer available.",flags:MessageFlags.Ephemeral});
+        return true;
+      }
+      session.sides[sideIndex]!.selected=selected;
+      await interaction.deferUpdate();
+      await interaction.editReply(this.comparisonSelectionPanel(categoryValue??"",session));
+      return true;
+    }
     if (action === "tmdb-tv-guide") {
       const selectedId=interaction.values[0]??"";
       const showId=Number(selectedId);
@@ -837,6 +910,41 @@ export class DiscoverCommand implements FeatureCommand {
 
   async handleModal(interaction: ModalSubmitInteraction): Promise<boolean> {
     const [, action, categoryValue] = interaction.customId.split(":");
+    if(action==="compare-search"){
+      let entries:ReturnType<typeof parseMediaComparisonEntries>;
+      try{
+        entries=parseMediaComparisonEntries(interaction.fields.getTextInputValue("entries"));
+      }catch(error){
+        await interaction.reply({content:error instanceof Error?error.message:"Enter two to four valid comparison entries.",flags:MessageFlags.Ephemeral});
+        return true;
+      }
+      await interaction.reply({content:loadingMessage("Finding matching media…"),flags:MessageFlags.Ephemeral});
+      const lookups=await Promise.allSettled(entries.map(entry=>this.fetchSearch(entry.title,entry.category)));
+      const missing=entries.flatMap((entry,index)=>{
+        const result=lookups[index];
+        return !result||result.status!=="fulfilled"||!result.value.length
+          ?[categoryLabel(entry.category)+" · "+entry.title]:[];
+      });
+      if(missing.length){
+        await interaction.editReply({
+          content:"No usable provider result was found for: "+missing.join("; ")+". Check the title or provider configuration, then try again.",
+          embeds:[],components:[],
+        });
+        return true;
+      }
+      const sessionId=interaction.id;
+      const sides=entries.map((entry,index)=>({
+        category:entry.category,title:entry.title,
+        results:(lookups[index] as PromiseFulfilledResult<SearchRecord[]>).value.slice(0,25),
+        selected:0,
+      }));
+      const timeout=setTimeout(()=>this.comparisonSessions.delete(sessionId),180_000);
+      timeout.unref();
+      const session={ownerId:interaction.user.id,sides,timeout};
+      this.comparisonSessions.set(sessionId,session);
+      await interaction.editReply(this.comparisonSelectionPanel(sessionId,session));
+      return true;
+    }
     if(action==="airing-search"){
       const title=interaction.fields.getTextInputValue("title").trim()||undefined;
       const seasonInput=interaction.fields.getTextInputValue("season").trim().toUpperCase();
@@ -1497,6 +1605,40 @@ export class DiscoverCommand implements FeatureCommand {
       new ButtonBuilder().setCustomId("discover:home").setLabel("Discover").setStyle(ButtonStyle.Secondary),
     );
     return {content:"Airing schedule",embeds:[embed],components:[controls],allowedMentions:{parse:[]}};
+  }
+  private comparisonSelectionPanel(sessionId:string,session:{ownerId:string;sides:Array<{category:MediaComparisonCategory;title:string;results:SearchRecord[];selected:number}>;timeout:NodeJS.Timeout}){
+    const fields=session.sides.map((side,index)=>{
+      const selected=side.results[side.selected]!;
+      return{
+        name:(index+1)+". "+categoryLabel(side.category)+" · "+side.title,
+        value:"Selected: "+this.recordTitle(selected)+"\nProvider: "+selected.provider+"\n"+this.recordUrl(selected),
+        inline:false,
+      };
+    });
+    const embed=homeEmbed(
+      "Choose comparison results",
+      "Select the exact provider result for each title, then compare. Search results remain attributed to their original source.",
+      fields,
+    );
+    const components:Array<ActionRowBuilder<StringSelectMenuBuilder|ButtonBuilder>>=[];
+    for(let index=0;index<session.sides.length;index++){
+      const side=session.sides[index]!;
+      const select=new StringSelectMenuBuilder()
+        .setCustomId("discover:compare-select:"+sessionId+":"+index)
+        .setPlaceholder("Choose "+(index+1)+". "+side.title.slice(0,65))
+        .addOptions(side.results.slice(0,25).map((record,resultIndex)=>({
+          label:this.recordTitle(record).slice(0,100),
+          description:record.provider.slice(0,100),
+          value:String(resultIndex),
+          default:resultIndex===side.selected,
+        })));
+      components.push(new ActionRowBuilder<StringSelectMenuBuilder|ButtonBuilder>().addComponents(select));
+    }
+    components.push(new ActionRowBuilder<StringSelectMenuBuilder|ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("discover:compare-submit:"+sessionId).setLabel("Compare selected titles").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("discover:home").setLabel("Cancel").setStyle(ButtonStyle.Secondary),
+    ));
+    return {content:"Select each title",embeds:[embed],components,allowedMentions:{parse:[]}};
   }
 
 }
