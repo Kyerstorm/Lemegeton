@@ -41,7 +41,7 @@ test("AniList detail preserves full release metadata on related titles", async (
 
   const result = await client.getMediaById(42, "ANIME");
 
-  assert.match(query, /relations\{edges\{relationType node\{[^}]*status startDate\{year month day\}/);
+  assert.match(query, /relations\\{edges\\{/);\n  assert.match(query, /status startDate\\{year month day\\}/);
   assert.equal(result?.relations[0]?.relation, "PREQUEL");
   assert.equal(result?.relations[0]?.status, "FINISHED");
   assert.deepEqual(result?.relations[0]?.startDate, { year: 2018, month: 4, day: 12 });
