@@ -149,11 +149,11 @@ export async function deleteGuildData(guildId: string): Promise<{
   for (const asset of assets) {
     try {
       await deleteArchiveAsset(Number(asset.id));
-      const remains = await queryOne<{ exists: boolean }>(
-        "SELECT EXISTS (SELECT 1 FROM media_assets WHERE id = $1) AS exists",
+      const queued = await queryOne<{ exists: boolean }>(
+        "SELECT EXISTS (SELECT 1 FROM media_asset_cleanup_queue WHERE asset_id = $1) AS exists",
         [asset.id],
       );
-      if (remains?.exists) assetsPending += 1;
+      if (queued?.exists) assetsPending += 1;
     } catch {
       assetsPending += 1;
     }
