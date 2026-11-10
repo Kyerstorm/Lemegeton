@@ -162,7 +162,7 @@ async function prepareGuildRetention(guild: Guild): Promise<void> {
  const botId=client.user?.id;
  if(!botId)return;
  try {
-  const audit=await guild.fetchAuditLogs({type:AuditLogEvent.BotAdd,limit:10});
+  const audit=await guild.fetchAuditLogs({type:AuditLogEvent.BotAdd,limit:100});
   const entry=audit.entries.find(item=>item.targetId===botId);
   if(entry?.executorId)await recordGuildInviter(guild.id,entry.executorId);
  } catch(error) {
