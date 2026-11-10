@@ -33,7 +33,7 @@ export class AdminLoginCommand implements FeatureCommand {
       await interaction.reply({ content: "This command is available only in the configured bot operations server.", flags: MessageFlags.Ephemeral });
       return false;
     }
-    if (!await isBotModerator(interaction.user.id)) {
+    if (!await isBotModerator(interaction.user.id, this.config.adminDiscordId)) {
       await interaction.reply({ content: "Only bot moderators can connect another member's AniList account.", flags: MessageFlags.Ephemeral });
       return false;
     }
