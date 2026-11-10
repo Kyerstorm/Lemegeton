@@ -104,7 +104,7 @@ The base source tree also contains backup, under-maintenance, test, and helper f
 
 ## Integration and environment-dependent acceptance
 
-- GitHub's branch comparison reports `lemegeton-v3` as diverged from `multi_guild`: **593 commits ahead, 86 commits behind**, merge base `e7c7c99728fc71c30a9bff65d5eed194ae8ffaf1` (checked 11 November 2026). PR #17 reports `mergeable=false` / `mergeable_state=dirty`. No synchronization or conflict resolution was attempted; do not merge or resolve conflicts automatically. The PR branch and base each contain independent history.
+- GitHub's branch comparison reports `lemegeton-v3` as diverged from `multi_guild`: **630 commits ahead, 86 commits behind**, merge base `e7c7c99728fc71c30a9bff65d5eed194ae8ffaf1` (checked 11 November 2026). PR #17 reports `mergeable=false` / `mergeable_state=dirty`. No synchronization or conflict resolution was attempted; do not merge or resolve conflicts automatically. The PR branch and base each contain independent history.
 - No live Discord test server/application credentials were available for gateway-intent, channel-permission, component-authorization, command-registration, thread and scheduled-delivery acceptance.
 - No target PostgreSQL instance or sanitized data snapshot was available, so this audit cannot verify schema application or recovery against the intended database. The Python files on `multi_guild` are source-reference code, not an assumed running or deployed service; no import from a Python runtime is presumed necessary. If there is pre-existing database data that must be retained, confirm that requirement and test its migration/restore separately.
 - Guild departure now follows the required per-guild retention choice documented above; an unset choice retains data rather than deleting it.
@@ -344,7 +344,7 @@ The TypeScript bot workflow passed on head `7198ac4` (type-check and test job). 
 
 ## Migration continuation — 11 November 2026
 
-**Code snapshot audited:** `0bad4cb4319305999986bf205dc4c26355c3faf7`  
+**Code snapshot audited:** `009eced06b8638cde995e206b48eef0a578d2f1f`  
 **PR:** #17 remains open and Draft, base `multi_guild`.  
 **Tree:** 222 tracked paths, zero Python files, 115 TypeScript/TSX files, 34 TypeScript test modules.
 
@@ -360,7 +360,7 @@ The TypeScript bot workflow passed on head `7198ac4` (type-check and test job). 
 
 ### Schema disposition
 
-The latest source/schema comparison found **38** distinct table definitions in `multi_guild` and **51** in v3, with seven identically named tables. Table names are not a coverage score: numerous legacy tables represent replaced v3 data models.
+The latest source/schema comparison found **38** distinct table definitions in `multi_guild` and **52** in v3, with seven identically named tables. Table names are not a coverage score: numerous legacy tables represent replaced v3 data models.
 
 - `media_assets` is schema-compatible between the previous PostgreSQL helper and v3; no table rewrite is needed for those existing object records.
 - `booster_roles` is widened to BIGINT when present and retained for the Custom Role takeover/import path. It is not blindly copied into `custom_role_records`.
@@ -378,10 +378,10 @@ The `.env.example` was cleaned in this migration pass: removed old generic-role/
 
 ### Latest CI evidence and remaining acceptance
 
-- TypeScript bot workflow on code head `575bbcd`: **passed**, type-check, build and all 164 tests passed: [run 42902960071](https://github.com/Kyerstorm/Lemegeton/actions/runs/42902960071).
-- Dashboard/security/backend workflow on the same head: Docker build and runtime contract **passed**; frontend and Rust backend checks had reached `cargo install cargo-audit` when last checked: [run 42895922508](https://github.com/Kyerstorm/Lemegeton/actions/runs/42895922508). Do not treat the whole workflow as green until its final conclusion is success.
+- TypeScript bot workflow on code head `009eced`: **passed**, type-check, build and all 164 tests passed: [run 42904087018](https://github.com/Kyerstorm/Lemegeton/actions/runs/42904087018).
+- Dashboard/security/backend workflow on code head `009eced`: frontend type-check, high-severity npm audit, production build/static-asset checks and Rust tests **passed**. Docker image build/runtime contract and `cargo audit` were still running at the last check: [run 42904087415](https://github.com/Kyerstorm/Lemegeton/actions/runs/42904087415). Do not treat the whole workflow as green until its final conclusion is success.
 - No live production PostgreSQL target, sanitized production backup, Discord application credentials or test guild were available. CI database fixtures prove the migration SQL against the test schema, not a production data restore.
-- **Guild departure retention:** implemented as a required per-server choice (`delete` or `retain`). `GuildCreate`/startup attempts to record the original inviter from the Bot Add audit-log entry; the inviter or any Manage Server member can choose. Until configured, slash commands, components, message-driven embeds/uploads, scheduled deliveries, the Atlas bridge, Dashboard guild routes, and the Custom Roles picker are blocked. `GuildDelete` only purges on an available-guild leave event when `delete` was selected; database deletion is transactional, S3 object deletion uses the retry queue, and the policy row is preserved across a rejoin. PostgreSQL integration and authorization unit tests cover the behavior. Live Discord audit-log permissions and S3 deletion recovery still require acceptance.
+- **Guild departure retention:** implemented as a required per-server choice (`delete` or `retain`). `GuildCreate`/startup attempts to record the original inviter from the Bot Add audit-log entry; the inviter or any Manage Server member can choose. Until configured, slash commands, components, message-driven embeds/uploads, scheduled deliveries, the Atlas bridge, Dashboard guild routes, and the Custom Roles picker are blocked. `GuildDelete` only purges on an available-guild leave event when `delete` was selected; database deletion is transactional, S3 object deletion uses the retry queue, and the policy row is preserved across a rejoin. A `deleted_at` marker makes successful cleanup idempotent; startup and periodic scans retry unfinished delete actions only for guilds no longer in the bot cache, while active guilds are excluded. PostgreSQL integration and authorization unit tests cover the behavior. Live Discord audit-log permissions and S3 deletion recovery still require acceptance.
 - **Legacy Panel storage fallback is unresolved:** the old private `panel_storage_channel_id` was a bot-managed storage destination, while v3 `upload_channel_id` is a member intake channel. They are not interchangeable. If an existing deployment depends on private Discord-channel storage, configure private S3 or approve a distinct replacement before claiming that path is migrated.
 - AniList leaderboard parity is intentionally narrower: v3 shows privacy-opted-in anime/manga entry-count rankings only, not the old chapters/episodes/completed/combined metrics. Restoring those metrics without the old per-title progress storage would need a separate product decision.
 - PR #17 remains Draft. This audit work does not merge, synchronize or alter `multi_guild`.
@@ -391,9 +391,9 @@ The `.env.example` was cleaned in this migration pass: removed old generic-role/
 - Added `guild_retention_settings` with the original inviter, the required `delete`/`retain` choice, and the actor who last changed it.
 - On join and startup, the bot attempts to resolve the Bot Add audit-log entry. The recorded inviter may choose the policy; a member with Manage Server can always choose or change it if audit-log access is unavailable or the inviter is no longer available.
 - Until the choice is stored, the bot blocks normal slash commands and components, guild message integrations, per-guild scheduled work, Atlas lookups, Dashboard guild actions, and Custom Roles picker access. `/settings` with no action opens the retention choice; other settings stay locked.
-- `deleteGuildData` discovers guild-scoped columns in the current PostgreSQL schema, removes rows transactionally while respecting foreign-key ordering, then attempts private S3 asset cleanup through the existing retry queue. The policy row is deliberately retained so a re-invited bot continues to honor the saved decision.
+- `deleteGuildData` discovers guild-scoped columns in the current PostgreSQL schema, removes rows transactionally while respecting foreign-key ordering, then attempts private S3 asset cleanup through the existing retry queue. The policy row is deliberately retained so a re-invited bot continues to honor the saved decision. `deleted_at` records successful database cleanup; failed event-time deletion is retried at startup and on the existing reconciliation interval, only when the guild is absent from the bot's cache. Failed retries do not block processing of other departed guilds.
 - The old `/server-check` behavior is folded into `/settings action:diagnostics` rather than adding another top-level command. It checks the current channel and configured v3 delivery channels for View Channel, Send Messages and Embed Links; the report is read-only and ephemeral.
 - Reading Club reminder and Media Night result workers now filter unconfigured guilds inside their PostgreSQL claim queries, so locked guilds are not marked attempted or closed before selection.
 - A transient unavailable-guild event is ignored; only an available guild departure applies the selected action. An unset or invalid action falls back to retention, never deletion.
-- Authorization tests cover the inviter and Manage Server paths. Permission-summary tests cover diagnostics output. The PostgreSQL migration fixture covers target-guild cleanup, preservation of another guild's data, retention-policy persistence, and the fact that locked guilds are not claimed by scheduled workers.
+- Authorization tests cover the inviter and Manage Server paths. Permission-summary tests cover diagnostics output. PostgreSQL integration tests cover target-guild cleanup, preservation of another guild's data, retention-policy persistence, retry recovery, active-guild exclusion, and the fact that locked guilds are not claimed by scheduled workers.
 - Live audit-log permissions, a real guild kick/rejoin test, production PostgreSQL restore, and S3 failure/retry recovery remain acceptance tasks.
