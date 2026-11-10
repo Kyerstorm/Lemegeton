@@ -27,7 +27,7 @@ import {startMediaNotificationScheduler,stopMediaNotificationScheduler} from "./
 import {configureMediaStorage,processArchiveAssetCleanup} from "./helpers/media/media-storage.js";
 import {configureCustomRoleIconSourceLimit} from "./helpers/custom-roles/custom-role-images.js";
 
-const config=loadConfig();configureLogger(config.logLevel);configureMediaStorage(config);configureCustomRoleIconSourceLimit(config.customRoleIconSourceMaxBytes);
+const config=loadConfig();configureLogger(config.logLevel);configureMediaStorage(config);configureCustomRoleIconSourceLimit(config.customRoleIconSourceMaxBytes);configureArchiveAccess(config.archiveGlobalModeratorIds);
 const client=new Client({intents:[GatewayIntentBits.Guilds,GatewayIntentBits.GuildMembers,GatewayIntentBits.GuildMessages,GatewayIntentBits.MessageContent]});
 const aniListEmbedClient=new AniListClient(config.anilistApiUrl,config.anilistTimeoutMs);
 const socialEmbedSteamClient=new SteamClient(config.steamApiKey);
