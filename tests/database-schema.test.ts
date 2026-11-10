@@ -232,6 +232,12 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
          AND column_name = 'user_ids'`,
     );
     assert.deepEqual(pendingUserIdsColumn, { data_type: "jsonb" });
+    const pendingUserIdsDefault = await queryOne<{ column_default: string }>(
+      `SELECT column_default FROM information_schema.columns
+       WHERE table_schema = current_schema() AND table_name = 'custom_role_pending_removals'
+         AND column_name = 'user_ids'`,
+    );
+    assert.deepEqual(pendingUserIdsDefault, { column_default: "'[]'::jsonb" });
     assert.deepEqual(
       await queryOne<{ user_ids: string[] }>(
         "SELECT user_ids FROM custom_role_pending_removals WHERE id = $1",
