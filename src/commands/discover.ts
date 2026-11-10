@@ -503,7 +503,7 @@ export class DiscoverCommand implements FeatureCommand {
         }catch(error){
           const reference=await createInteractionIssueLog(interaction,"/discover",error,{action:"airing-refresh"});
           const message="AniList could not refresh the airing schedule. Try again shortly.";
-          await interaction.editReply({content:reference?message+"\\n\\n"+issueHashNotice(reference):message,embeds:[],components:[]});
+          await interaction.editReply({content:reference?message+"\n\n"+issueHashNotice(reference):message,embeds:[],components:[]});
           return true;
         }
       }else{
@@ -871,7 +871,7 @@ export class DiscoverCommand implements FeatureCommand {
       }catch(error){
         const reference=await createInteractionIssueLog(interaction,"/discover",error,{action:"airing-search",filters});
         const message="AniList could not load the airing schedule. Try again shortly.";
-        await interaction.editReply({content:reference?message+"\\n\\n"+issueHashNotice(reference):message});
+        await interaction.editReply({content:reference?message+"\n\n"+issueHashNotice(reference):message});
       }
       return true;
     }
@@ -1479,8 +1479,8 @@ export class DiscoverCommand implements FeatureCommand {
     const visible=session.entries.slice(session.page*5,session.page*5+5);
     const fields=visible.map(entry=>({
       name:(cleanText(entry.title,180)+" · Episode "+entry.episode).slice(0,256),
-      value:"Your local time: <t:"+entry.airingAt+":F> · <t:"+entry.airingAt+":R>\\nUTC: "+new Date(entry.airingAt*1000).toISOString().replace("T"," ").slice(0,16)
-        +"\\n"+[entry.format,entry.status,entry.season?(entry.season+" "+(entry.seasonYear??"")):null].filter(Boolean).join(" · ").slice(0,300),
+      value:"Your local time: <t:"+entry.airingAt+":F> · <t:"+entry.airingAt+":R>\nUTC: "+new Date(entry.airingAt*1000).toISOString().replace("T"," ").slice(0,16)
+        +"\n"+[entry.format,entry.status,entry.season?(entry.season+" "+(entry.seasonYear??"")):null].filter(Boolean).join(" · ").slice(0,300),
       inline:false,
     }));
     const embed=homeEmbed(
