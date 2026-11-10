@@ -78,7 +78,7 @@ export class AdminLoginCommand implements FeatureCommand {
         });
         return;
       }
-      const profile = await linkAniListAccount(interaction.guildId, member.id, member.user.username, this.client, username);
+      const profile = await linkAniListAccount(interaction.guildId!, member.id, member.user.username, this.client, username);
       await interaction.editReply({ embeds: [successEmbed(member.displayName ?? member.user.username, profile)], components: [] });
     } catch (error) {
       await interaction.editReply(error instanceof Error ? error.message : "The AniList account could not be connected.");
