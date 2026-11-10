@@ -104,7 +104,7 @@ The base source tree also contains backup, under-maintenance, test, and helper f
 
 ## Integration and environment-dependent acceptance
 
-- GitHub's branch comparison reports `lemegeton-v3` as diverged from `multi_guild`: **590 commits ahead, 86 commits behind**, merge base `e7c7c99728fc71c30a9bff65d5eed194ae8ffaf1` (checked 11 November 2026). PR #17 reports `mergeable=false` / `mergeable_state=dirty`. No synchronization or conflict resolution was attempted; do not merge or resolve conflicts automatically. The PR branch and base each contain independent history.
+- GitHub's branch comparison reports `lemegeton-v3` as diverged from `multi_guild`: **593 commits ahead, 86 commits behind**, merge base `e7c7c99728fc71c30a9bff65d5eed194ae8ffaf1` (checked 11 November 2026). PR #17 reports `mergeable=false` / `mergeable_state=dirty`. No synchronization or conflict resolution was attempted; do not merge or resolve conflicts automatically. The PR branch and base each contain independent history.
 - No live Discord test server/application credentials were available for gateway-intent, channel-permission, component-authorization, command-registration, thread and scheduled-delivery acceptance.
 - No target PostgreSQL instance or sanitized data snapshot was available, so this audit cannot verify schema application or recovery against the intended database. The Python files on `multi_guild` are source-reference code, not an assumed running or deployed service; no import from a Python runtime is presumed necessary. If there is pre-existing database data that must be retained, confirm that requirement and test its migration/restore separately.
 - Guild departure currently retains guild-owned records. Whether a future guild removal should retain or purge those records is an owner/privacy decision; no destructive cleanup is inferred.
@@ -344,7 +344,7 @@ The TypeScript bot workflow passed on head `7198ac4` (type-check and test job). 
 
 ## Migration continuation — 11 November 2026
 
-**Current branch snapshot:** `4a3b836c7ec9359988c534662816fcf965ff9900`  
+**Current branch snapshot:** `0e06acc5f7d960b85d6f42e66b11e4fbc5c1a3fa`  
 **PR:** #17 remains open and Draft, base `multi_guild`.  
 **Tree:** 220 tracked paths, zero Python files, 113 TypeScript/TSX files, 34 TypeScript test modules.
 
