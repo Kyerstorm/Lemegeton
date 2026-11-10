@@ -63,9 +63,13 @@ async function memberOrNull(guild: Guild, userId: string): Promise<GuildMember |
   }
 }
 
+export function parseCustomRoleMassArchiveThreshold(raw: string | undefined): number {
+  const value = Number(raw ?? 10);
+  return Number.isSafeInteger(value) ? Math.max(0, value) : 10;
+}
+
 function archiveThreshold(): number {
-  const value = Number(process.env.CUSTOM_ROLES_MASS_ARCHIVE_THRESHOLD ?? 10);
-  return Number.isSafeInteger(value) && value >= 0 ? value : 10;
+  return parseCustomRoleMassArchiveThreshold(process.env.CUSTOM_ROLES_MASS_ARCHIVE_THRESHOLD);
 }
 
 function recentCount(guildId: string): number {
