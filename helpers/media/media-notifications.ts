@@ -14,6 +14,7 @@ import { logger } from "../runtime/logger.js";
 import { AniListClient, type AniListRecentlyFinishedMedia } from "../integration/anilist.js";
 import type { BotConfig } from "../runtime/config.js";
 import { query, queryOne } from "../../database.js";
+import { isGuildRetentionConfigured } from "../runtime/guild-retention.js";
 
 export type MediaNotificationKind = "ANIME" | "MANGA";
 export interface MediaNotificationSettings {
@@ -195,6 +196,7 @@ export async function runMediaNotificationCycle(client: Client, aniList: AniList
     const manga = fetchManga
       ? filterMediaNotificationCandidates(await aniList.recentlyFinished("MANGA", after, before), "MANGA") : [];
     for (const settings of active) {
+      if (!await isGuildRetentionConfigured(settings.guild_id)) continue;
       const guild = client.guilds.cache.get(settings.guild_id);
       if (!guild) continue;
       await deliverGuild(guild, settings, anime, manga).catch(error => logger.error("Media notification guild scan failed", {
