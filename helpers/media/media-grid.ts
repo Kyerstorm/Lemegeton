@@ -5,7 +5,9 @@ export interface MediaGridItem {
   image:string|null;
 }
 export type MediaGridSource =
-  | { kind: "anime" | "manga" | "character"; id: number }
+  | { kind: "anime"; id: number }
+  | { kind: "manga"; id: number }
+  | { kind: "character"; id: number }
   | { kind: "game"; slug: string };
 
 
