@@ -1066,8 +1066,8 @@ export class ArchiveCommand implements FeatureCommand {
       || member.permissions.has(PermissionsBitField.Flags.ManageGuild)
       || member.permissions.has(PermissionsBitField.Flags.ManageMessages);
     if (!canLocal && !global) {
-      const role = await queryOne<{ panel_mod_role_id: string | null }>("SELECT panel_mod_role_id FROM guild_settings WHERE guild_id = $1", [interaction.guildId]).catch(() => null);
-      if (!role?.panel_mod_role_id || !member.roles.cache.has(role.panel_mod_role_id)) {
+      const role = await queryOne<{ moderator_role_id: string | null }>("SELECT moderator_role_id FROM guild_archive_settings WHERE guild_id = $1", [interaction.guildId]).catch(() => null);
+      if (!role?.moderator_role_id || !member.roles.cache.has(role.moderator_role_id)) {
         await interaction.reply({ content: "Archive moderator permissions are required.", flags: MessageFlags.Ephemeral });
         return;
       }
