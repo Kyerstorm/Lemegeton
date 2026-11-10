@@ -26,6 +26,8 @@ function feedbackModal(): ModalBuilder {
   );
 }
 export class FeedbackCommand implements FeatureCommand {
+  constructor(private readonly feedbackChannelId: string | null = null) {}
+
   readonly data = new SlashCommandBuilder().setName("feedback").setDescription("Submit an idea or report a problem");
   async execute(interaction: ChatInputCommandInteraction): Promise<void> { await interaction.showModal(feedbackModal()); }
   async handleModal(interaction: ModalSubmitInteraction): Promise<boolean> {
@@ -59,7 +61,7 @@ export class FeedbackCommand implements FeatureCommand {
       return true;
     }
 
-    const channelId = process.env.BOT_FEEDBACK_CHANNEL_ID?.trim();
+    const channelId = this.feedbackChannelId;
     if (channelId) {
       try {
         const channel = await interaction.client.channels.fetch(channelId);
