@@ -274,11 +274,14 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
               linked_media_id, source_legacy_panel_id::text
          FROM community_archive_entries WHERE source_legacy_panel_id = 1`,
     );
-    assert.deepEqual(migratedPanel, {
+    assert.deepEqual(migratedPanel && {
+      ...migratedPanel,
+      tags: JSON.parse(migratedPanel.tags) as string[],
+    }, {
       archive_type: "panels",
       title: "Legacy Manga Panel",
       content: "Legacy caption",
-      tags: '["action","romance"]',
+      tags: ["action", "romance"],
       visibility: "server",
       linked_media_provider: "anilist",
       linked_media_id: "4242",
