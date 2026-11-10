@@ -76,14 +76,14 @@ function parseDiscordId(value: string): string | null {
 }
 
 export class BotModeratorsCommand implements FeatureCommand {
-  constructor(private readonly moderatorGuildId: string | null) {}
+  constructor(private readonly moderatorGuildId: string | null, private readonly administratorId: string | null = null) {}
 
   private async authorize(interaction: ChatInputCommandInteraction | ButtonInteraction | ModalSubmitInteraction): Promise<boolean> {
     if (!isModeratorCommandGuild(interaction.guildId, this.moderatorGuildId)) {
       await interaction.reply({ content: "This command is available only in the configured bot operations server.", flags: MessageFlags.Ephemeral });
       return false;
     }
-    if (!await isBotModerator(interaction.user.id)) {
+    if (!await isBotModerator(interaction.user.id, this.administratorId)) {
       await interaction.reply({ content: "Only existing bot moderators can manage this list.", flags: MessageFlags.Ephemeral });
       return false;
     }
@@ -152,7 +152,7 @@ export class BotModeratorsCommand implements FeatureCommand {
       return true;
     }
 
-    if (process.env.ADMIN_DISCORD_ID?.trim() === userId) {
+    if (this.administratorId === userId) {
       await interaction.reply({ content: "The configured bot administrator cannot be removed from ADMIN_DISCORD_ID.", flags: MessageFlags.Ephemeral });
       return true;
     }
