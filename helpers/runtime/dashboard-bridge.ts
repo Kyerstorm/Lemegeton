@@ -6,6 +6,7 @@ import type { FeatureCommand } from "../commands/command.js";
 import type { BotConfig } from "./config.js";
 import { FEATURE_NAMES, getFeatureSettings, isFeatureName, setFeatureEnabled, type FeatureName } from "./settings.js";
 import { query, queryOne } from "../../database.js";
+import { isGuildRetentionConfigured } from "./guild-retention.js";
 import { logger, readRecentLogs } from "./logger.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -422,6 +423,11 @@ async function handleRequest(
     return;
   }
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
+  const guildRoute = /^\/guilds\/(\d{17,20})(?:\/|$)/.exec(url.pathname);
+  if (guildRoute && !await isGuildRetentionConfigured(guildRoute[1]!)) {
+    errorResponse(response, 423, "Server data-retention setup is required before dashboard features can be used.");
+    return;
+  }
   if (request.method === "GET" && url.pathname === "/guilds") {
     jsonResponse(response, 200, await guilds(client));
     return;
