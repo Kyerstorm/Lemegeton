@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { Guild, GuildMember, Role } from "discord.js";
 import type { CustomRoleRecord, CustomRoleSettings } from "../helpers/custom-roles/custom-roles.js";
+import { legacyRoleTakeoverProblem } from "../helpers/custom-roles/custom-roles.js";
 import {
   customRoleChannelAllowed,
   customRoleCooldownMessage,
@@ -111,4 +112,27 @@ test("role cooldown reports only positive remaining time", () => {
   assert.equal(customRoleCooldownMessage(record, 60, now), null);
   assert.equal(customRoleCooldownMessage({ last_changed_at: null } as CustomRoleRecord, 300, now), null);
   assert.equal(customRoleCooldownMessage(record, 0, now), null);
+});
+
+test("legacy booster-role takeover rejects unsafe or privileged roles", () => {
+  const settings = {
+    anchor_role_id: "anchor-role",
+    allowed_role_ids: ["allowed-role"],
+  } as CustomRoleSettings;
+  const role = (id: string, overrides: Record<string, unknown> = {}) => ({
+    id,
+    managed: false,
+    position: 3,
+    permissions: { has: () => false },
+    ...overrides,
+  }) as unknown as Role;
+
+  assert.equal(legacyRoleTakeoverProblem("guild-1", role("safe-role"), settings, 5), null);
+  assert.match(legacyRoleTakeoverProblem("guild-1", role("guild-1"), settings, 5) ?? "", /@everyone/);
+  assert.match(legacyRoleTakeoverProblem("guild-1", role("managed-role", { managed: true }), settings, 5) ?? "", /managed/);
+  assert.match(legacyRoleTakeoverProblem("guild-1", role("high-role", { position: 5 }), settings, 5) ?? "", /highest role/);
+  assert.match(legacyRoleTakeoverProblem("guild-1", role("moderator-role", { permissions: { has: () => true } }), settings, 5) ?? "", /moderation or administration/);
+  assert.match(legacyRoleTakeoverProblem("guild-1", role("anchor-role"), settings, 5) ?? "", /anchor/);
+  assert.match(legacyRoleTakeoverProblem("guild-1", role("allowed-role"), settings, 5) ?? "", /eligibility role/);
+  assert.match(legacyRoleTakeoverProblem("guild-1", role("role"), settings, null) ?? "", /highest role/);
 });
