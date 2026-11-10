@@ -6,6 +6,8 @@ import { closeDatabase, initDatabase, query, queryOne } from "../database.js";
 import { getAniListAffinity, getAniListLeaderboard, getLinkedProfile, getProfilePreferences, getServerTaste, unlinkAniListAccount, unlinkSteamAccount, updateProfilePreferences } from "../helpers/runtime/profile.js";
 import type { AniListClient } from "../helpers/integration/anilist.js";
 import type { SteamClient } from "../helpers/integration/steam.js";
+import { getCustomRoleRecord, planLegacyCustomRoleImport, updateCustomRoleSettings } from "../helpers/custom-roles/custom-roles.js";
+import type { Guild } from "discord.js";
 import type { DatabaseConfig } from "../helpers/runtime/config.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
@@ -394,6 +396,147 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
         [profileUser, otherGuild],
       ),
       { steam_id: "76561198000000002" },
+    );
+
+    const legacyGuild = "987654321098765432";
+    const legacyIds = {
+      eligibleUser: "111111111111111111",
+      eligibleRole: "222222222222222222",
+      ineligibleUser: "333333333333333333",
+      ineligibleRole: "444444444444444444",
+      departedUser: "555555555555555555",
+      departedRole: "666666666666666666",
+      aboveUser: "777777777777777777",
+      aboveRole: "888888888888888888",
+      moderatorUser: "999999999999999999",
+      moderatorRole: "111111111111111112",
+      managedUser: "111111111111111113",
+      managedRole: "111111111111111114",
+      missingUser: "111111111111111115",
+      missingRole: "111111111111111116",
+      linkedUser: "111111111111111117",
+      linkedRole: "111111111111111118",
+      existingOwner: "111111111111111119",
+      existingRole: "111111111111111120",
+      importedUser: "111111111111111121",
+      importedRole: "111111111111111122",
+      duplicateFirstUser: "111111111111111123",
+      duplicateRole: "111111111111111124",
+      duplicateSecondUser: "111111111111111125",
+    };
+    await updateCustomRoleSettings(legacyGuild, { enabled: true, anchor_role_id: null });
+    const legacyRows: Array<[string, string]> = [
+      [legacyIds.eligibleUser, legacyIds.eligibleRole],
+      [legacyIds.ineligibleUser, legacyIds.ineligibleRole],
+      [legacyIds.departedUser, legacyIds.departedRole],
+      [legacyIds.aboveUser, legacyIds.aboveRole],
+      [legacyIds.moderatorUser, legacyIds.moderatorRole],
+      [legacyIds.managedUser, legacyIds.managedRole],
+      [legacyIds.missingUser, legacyIds.missingRole],
+      [legacyIds.linkedUser, legacyIds.existingRole],
+      [legacyIds.importedUser, legacyIds.importedRole],
+      [legacyIds.duplicateFirstUser, legacyIds.duplicateRole],
+      [legacyIds.duplicateSecondUser, legacyIds.duplicateRole],
+      [legacyIds.eligibleUser + "1", legacyGuild],
+    ];
+    for (const [userId, roleId] of legacyRows) {
+      await query(
+        "INSERT INTO booster_roles (discord_id, guild_id, role_id) VALUES ($1, $2, $3)",
+        [userId, legacyGuild, roleId],
+      );
+    }
+    await query(
+      `INSERT INTO custom_role_records (guild_id, user_id, role_id, status, name)
+       VALUES ($1, $2, $3, 'active', 'Linked role'), ($1, $4, $5, 'active', 'Imported role')`,
+      [legacyGuild, legacyIds.existingOwner, legacyIds.existingRole, legacyIds.importedUser, legacyIds.importedRole],
+    );
+    assert.equal(await getCustomRoleRecord(legacyGuild, legacyIds.eligibleUser), null);
+
+    type LegacyRole = {
+      id: string;
+      name: string;
+      position: number;
+      managed: boolean;
+      permissions: { has: () => boolean };
+    };
+    const roleCache = new Map<string, LegacyRole>();
+    const addLegacyRole = (
+      id: string,
+      options: { position?: number; managed?: boolean; moderation?: boolean } = {},
+    ): void => {
+      roleCache.set(id, {
+        id,
+        name: "Legacy " + id,
+        position: options.position ?? 2,
+        managed: options.managed ?? false,
+        permissions: { has: () => options.moderation ?? false },
+      });
+    };
+    for (const roleId of legacyRows.map(([, roleId]) => roleId)) {
+      if (roleId !== legacyGuild) addLegacyRole(roleId);
+    }
+    addLegacyRole(legacyIds.aboveRole, { position: 10 });
+    addLegacyRole(legacyIds.moderatorRole, { moderation: true });
+    addLegacyRole(legacyIds.managedRole, { managed: true });
+    addLegacyRole(legacyIds.existingRole);
+    addLegacyRole(legacyIds.importedRole);
+    addLegacyRole(legacyGuild);
+    const makeMember = (id: string, eligible: boolean) => ({
+      id,
+      premiumSince: eligible ? new Date() : null,
+      roles: { cache: { some: () => false } },
+    });
+    const memberCache = new Map<string, ReturnType<typeof makeMember>>([
+      [legacyIds.eligibleUser, makeMember(legacyIds.eligibleUser, true)],
+      [legacyIds.ineligibleUser, makeMember(legacyIds.ineligibleUser, false)],
+      [legacyIds.aboveUser, makeMember(legacyIds.aboveUser, true)],
+      [legacyIds.moderatorUser, makeMember(legacyIds.moderatorUser, true)],
+      [legacyIds.managedUser, makeMember(legacyIds.managedUser, true)],
+      [legacyIds.missingUser, makeMember(legacyIds.missingUser, true)],
+      [legacyIds.linkedUser, makeMember(legacyIds.linkedUser, true)],
+      [legacyIds.importedUser, makeMember(legacyIds.importedUser, true)],
+      [legacyIds.duplicateFirstUser, makeMember(legacyIds.duplicateFirstUser, true)],
+      [legacyIds.duplicateSecondUser, makeMember(legacyIds.duplicateSecondUser, true)],
+    ]);
+    const botMember = { roles: { highest: { position: 10 } } };
+    const fakeGuild = {
+      id: legacyGuild,
+      members: {
+        fetch: async () => memberCache,
+        me: botMember,
+        fetchMe: async () => botMember,
+      },
+      roles: {
+        cache: {
+          get: (roleId: string) => roleCache.get(roleId) ?? null,
+          has: (roleId: string) => roleCache.has(roleId),
+        },
+        fetch: async () => roleCache,
+      },
+    } as unknown as Guild;
+    const legacyPlan = await planLegacyCustomRoleImport(fakeGuild);
+    assert.equal(legacyPlan.total, legacyRows.length);
+    assert.deepEqual(legacyPlan.take_over.map(entry => entry.user_id).sort(), [
+      legacyIds.eligibleUser,
+      legacyIds.duplicateFirstUser,
+    ].sort());
+    assert.deepEqual(legacyPlan.not_qualifying.map(entry => entry.user_id).sort(), [
+      legacyIds.ineligibleUser,
+      legacyIds.departedUser,
+    ].sort());
+    const skippedReasons = new Map(legacyPlan.skipped.map(entry => [entry.user_id, entry.reason]));
+    assert.match(skippedReasons.get(legacyIds.aboveUser) ?? "", /bot's highest role/);
+    assert.match(skippedReasons.get(legacyIds.moderatorUser) ?? "", /moderation or administration permissions/);
+    assert.match(skippedReasons.get(legacyIds.managedUser) ?? "", /managed by Discord/);
+    assert.match(skippedReasons.get(legacyIds.missingUser) ?? "", /no longer exists/);
+    assert.match(skippedReasons.get(legacyIds.linkedUser) ?? "", /already linked/);
+    assert.equal(skippedReasons.get(legacyIds.importedUser), "Already imported.");
+    assert.match(skippedReasons.get(legacyIds.duplicateSecondUser) ?? "", /already linked/);
+    assert.match(skippedReasons.get(legacyIds.eligibleUser + "1") ?? "", /@everyone/);
+    assert.equal(await getCustomRoleRecord(legacyGuild, legacyIds.eligibleUser), null);
+    assert.equal(
+      (await query("SELECT discord_id FROM booster_roles WHERE guild_id = $1", [legacyGuild])).length,
+      legacyRows.length,
     );
     await assert.rejects(
       query(
