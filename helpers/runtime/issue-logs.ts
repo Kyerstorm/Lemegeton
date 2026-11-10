@@ -147,12 +147,14 @@ export async function createInteractionIssueLog(
   interaction: IssueInteractionContext, command: string, error: unknown, details: Record<string, unknown> = {},
 ): Promise<string | null> {
   if (!interaction.guildId) return null;
+  const message = (interaction as IssueInteractionContext & { message?: { id?: string } | null }).message;
+  const messageId = typeof message?.id === "string" ? message.id : null;
   try {
     return await createIssueLog({
       guildId: interaction.guildId, userId: interaction.user.id,
       username: interaction.user.globalName ?? interaction.user.username,
       interactionId: interaction.id, channelId: interaction.channelId, command,
-      details: { ...details, interactionId: interaction.id, guildId: interaction.guildId, channelId: interaction.channelId },
+      details: { ...details, ...(messageId ? { messageId } : {}), interactionId: interaction.id, guildId: interaction.guildId, channelId: interaction.channelId },
       error,
     });
   } catch { return null; }

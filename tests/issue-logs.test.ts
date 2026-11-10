@@ -60,10 +60,11 @@ test("/log JSON export contains the exact reference and sanitized full record co
   const record = {
     issue_hash: "a".repeat(40), guild_id: "12345678901234567", user_id: "22345678901234567",
     username: "Member", interaction_id: "32345678901234567", channel_id: "42345678901234567",
-    command_name: "/discover", details: { error: { name: "TypeError", message: "bad response" }, token: "private" },
+    command_name: "/discover", details: { error: { name: "TypeError", message: "bad response" }, token: "private", messageId: "52345678901234567" },
     created_at: new Date("2026-11-11T00:00:00.000Z"),
   } as IssueLogRecord;
   const exported = JSON.parse(serializeIssueLogRecord(record)) as Record<string, unknown>;
   assert.equal(exported.issueReference, record.issue_hash); assert.equal(exported.command, "/discover");
   assert.equal((exported.details as Record<string, unknown>).token, "[REDACTED]");
+  assert.equal((exported.details as Record<string, unknown>).messageId, "52345678901234567");
 });
