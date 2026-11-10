@@ -24,9 +24,10 @@ import {onCustomRoleMemberAdd,onCustomRoleMemberRemove,onCustomRoleMemberUpdate,
 import {startCustomRolePicker,stopCustomRolePicker} from "./helpers/custom-roles/custom-role-picker-server.js";
 import {startDashboardBridge,stopDashboardBridge} from "./helpers/runtime/dashboard-bridge.js";
 import {startMediaNotificationScheduler,stopMediaNotificationScheduler} from "./helpers/media/media-notifications.js";
-import {processArchiveAssetCleanup} from "./helpers/media/media-storage.js";
+import {configureMediaStorage,processArchiveAssetCleanup} from "./helpers/media/media-storage.js";
+import {configureCustomRoleIconSourceLimit} from "./helpers/custom-roles/custom-role-images.js";
 
-const config=loadConfig();configureLogger(config.logLevel);
+const config=loadConfig();configureLogger(config.logLevel);configureMediaStorage(config);configureCustomRoleIconSourceLimit(config.customRoleIconSourceMaxBytes);
 const client=new Client({intents:[GatewayIntentBits.Guilds,GatewayIntentBits.GuildMembers,GatewayIntentBits.GuildMessages,GatewayIntentBits.MessageContent]});
 const aniListEmbedClient=new AniListClient(config.anilistApiUrl,config.anilistTimeoutMs);
 const socialEmbedSteamClient=new SteamClient(config.steamApiKey);
