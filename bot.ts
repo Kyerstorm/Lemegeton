@@ -6,6 +6,7 @@ import {loadConfig} from "./helpers/runtime/config.js";
 import {configureLogger,logger} from "./helpers/runtime/logger.js";
 import type {FeatureCommand} from "./helpers/commands/command.js";
 import {handleArchiveUploadMessage} from "./helpers/archive/archive.js";
+import {configureArchiveAccess} from "./helpers/archive/archive-access.js";
 import {AniListClient} from "./helpers/integration/anilist.js";
 import {TmdbClient} from "./helpers/integration/tmdb.js";
 import {handleAniListLinkMessage} from "./src/integrations/anilist-embed.js";
