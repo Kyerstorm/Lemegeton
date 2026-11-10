@@ -31,6 +31,14 @@ test("loads and validates the configured Custom Roles reconciliation interval", 
     /CUSTOM_ROLES_RECONCILE_MINUTES must be a positive integer/,
   );
 });
+test("loads the Custom Roles mass-archive threshold from typed configuration", () => {
+  assert.equal(loadConfig(environment()).customRolesMassArchiveThreshold, 10);
+  assert.equal(loadConfig(environment({ CUSTOM_ROLES_MASS_ARCHIVE_THRESHOLD: "4" })).customRolesMassArchiveThreshold, 4);
+  assert.equal(loadConfig(environment({ CUSTOM_ROLES_MASS_ARCHIVE_THRESHOLD: "0" })).customRolesMassArchiveThreshold, 0);
+  assert.equal(loadConfig(environment({ CUSTOM_ROLES_MASS_ARCHIVE_THRESHOLD: "-3" })).customRolesMassArchiveThreshold, 0);
+  assert.equal(loadConfig(environment({ CUSTOM_ROLES_MASS_ARCHIVE_THRESHOLD: "invalid" })).customRolesMassArchiveThreshold, 10);
+  assert.equal(loadConfig(environment({ CUSTOM_ROLES_MASS_ARCHIVE_THRESHOLD: "" })).customRolesMassArchiveThreshold, 10);
+});
 
 test("loads and bounds the Custom Roles original icon size", () => {
   assert.equal(loadConfig(environment()).customRoleIconSourceMaxBytes, 8 * 1024 * 1024);
