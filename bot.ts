@@ -56,6 +56,7 @@ async function startAtlasBridge(): Promise<void> {
   const supplied=Buffer.from(authorization.startsWith("Bearer ")?authorization.slice(7):"");
   if(supplied.length!==expected.length||!timingSafeEqual(supplied,expected)){send(401,{error:"Unauthorized."});return;}
   const guildId=parsed.searchParams.get("guild_id")??"";
+  if(!await isGuildRetentionConfigured(guildId)){send(423,{error:"Server data-retention setup is required before Atlas can be used."});return;}
   const title=(parsed.searchParams.get("title")??"").trim();
   const category=normalizeAtlasCategory(parsed.searchParams.get("category")??"");
   const rawUrl=parsed.searchParams.get("url");
