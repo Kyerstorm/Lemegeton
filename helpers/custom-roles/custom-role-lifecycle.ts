@@ -63,14 +63,7 @@ async function memberOrNull(guild: Guild, userId: string): Promise<GuildMember |
   }
 }
 
-export function parseCustomRoleMassArchiveThreshold(raw: string | undefined): number {
-  const value = Number(raw ?? 10);
-  return Number.isSafeInteger(value) ? Math.max(0, value) : 10;
-}
-
-function archiveThreshold(): number {
-  return parseCustomRoleMassArchiveThreshold(process.env.CUSTOM_ROLES_MASS_ARCHIVE_THRESHOLD);
-}
+export { parseCustomRoleMassArchiveThreshold } from "../runtime/config.js";
 
 function recentCount(guildId: string): number {
   const cutoff = Date.now() - RECENT_WINDOW_MS;
@@ -138,31 +131,31 @@ async function archiveOne(guild: Guild, userId: string, reason: string): Promise
   });
 }
 
-async function postPending(guild: Guild, userIds: string[], reason: string): Promise<void> {
+async function postPending(guild: Guild, userIds: string[], reason: string, massArchiveThreshold: number): Promise<void> {
   await audit(
     guild,
     "Custom Roles paused " + userIds.length + " automatic removal(s) because the safety threshold (" +
-      archiveThreshold() + ") was reached. Reason: " + reason +
+      massArchiveThreshold + ") was reached. Reason: " + reason +
       ". An administrator must open /custom-role → Admin settings → Pending removal to confirm or cancel.",
   );
 }
 
-async function holdForApproval(guild: Guild, candidates: ArchiveReason[], reason: string): Promise<void> {
+async function holdForApproval(guild: Guild, candidates: ArchiveReason[], reason: string, massArchiveThreshold: number): Promise<void> {
   const existing = await getOpenCustomRolePending(guild.id);
   const ids = [...new Set(candidates.map(item => item.userId))];
   if (existing) {
     const merged = [...new Set([...existing.user_ids, ...ids])];
     if (merged.length !== existing.user_ids.length) {
       await updateCustomRolePendingUsers(existing.id, merged);
-      await postPending(guild, merged, reason);
+      await postPending(guild, merged, reason, massArchiveThreshold);
     }
     return;
   }
   const pending = await createCustomRolePending(guild.id, ids, reason);
-  await postPending(guild, pending.user_ids, reason);
+  await postPending(guild, pending.user_ids, reason, massArchiveThreshold);
 }
 
-async function archiveAutomatically(guild: Guild, reasons: ArchiveReason[]): Promise<void> {
+async function archiveAutomatically(guild: Guild, reasons: ArchiveReason[], massArchiveThreshold: number): Promise<void> {
   const settings = await getCustomRoleSettings(guild.id);
   if (!settings.enabled || !reasons.length) return;
   const pending = await getOpenCustomRolePending(guild.id);
@@ -180,13 +173,13 @@ async function archiveAutomatically(guild: Guild, reasons: ArchiveReason[]): Pro
 
   const expired = eligibleLosses.filter(item => snoozes.expired.has(item.userId));
   const ordinary = eligibleLosses.filter(item => !snoozes.expired.has(item.userId));
-  const mustAsk = Boolean(pending) || recentCount(guild.id) + ordinary.length > archiveThreshold();
+  const mustAsk = Boolean(pending) || recentCount(guild.id) + ordinary.length > massArchiveThreshold;
   const ask = [...expired, ...(mustAsk ? ordinary : [])];
   const immediate = ordinary.filter(item => !ask.some(held => held.userId === item.userId));
 
   if (ask.length) {
     await clearCustomRoleSnoozes(guild.id, ask.map(item => item.userId));
-    await holdForApproval(guild, ask, reasons.length > 1 ? "members stopped qualifying" : reasons[0]?.reason ?? "eligibility changed");
+    await holdForApproval(guild, ask, reasons.length > 1 ? "members stopped qualifying" : reasons[0]?.reason ?? "eligibility changed", massArchiveThreshold);
   }
 
   let archived = 0;
@@ -352,7 +345,7 @@ export async function restoreCustomRoleForMember(member: GuildMember): Promise<b
   return restoreSavedRole(member);
 }
 
-async function queueArchive(guild: Guild, userId: string, reason: string): Promise<void> {
+async function queueArchive(guild: Guild, userId: string, reason: string, massArchiveThreshold: number): Promise<void> {
   const queue = queues.get(guild.id) ?? new Map<string, string>();
   queue.set(userId, reason);
   queues.set(guild.id, queue);
@@ -362,7 +355,7 @@ async function queueArchive(guild: Guild, userId: string, reason: string): Promi
     const current = queues.get(guild.id);
     queues.delete(guild.id);
     if (!current?.size) return;
-    void archiveAutomatically(guild, [...current].map(([id, why]) => ({ userId: id, reason: why })))
+    void archiveAutomatically(guild, [...current].map(([id, why]) => ({ userId: id, reason: why })), massArchiveThreshold)
       .catch(error => logger.error("Custom Roles event archive batch failed", {
         guildId: guild.id, reason: error instanceof Error ? error.message : "Unknown error",
       }));
@@ -371,7 +364,7 @@ async function queueArchive(guild: Guild, userId: string, reason: string): Promi
   timers.set(guild.id, timer);
 }
 
-export async function onCustomRoleRoleDelete(role: Role): Promise<void> {
+export async function onCustomRoleRoleDelete(role: Role, massArchiveThreshold = 10): Promise<void> {
   const guild = role.guild;
   const records = await listCustomRoleRecords(guild.id);
   const tracked = records.find(record => record.role_id === role.id && record.status === "active");
@@ -390,13 +383,14 @@ export async function onCustomRoleRoleDelete(role: Role): Promise<void> {
       allowed_role_ids: settings.allowed_role_ids.filter(id => id !== role.id),
     });
     await audit(guild, "Allowed role **" + role.name + "** was deleted. Rechecking members who depended on it.");
-    await reconcileCustomRoleGuild(guild);
+    await reconcileCustomRoleGuild(guild, massArchiveThreshold);
   }
 }
 
 export async function onCustomRoleMemberUpdate(
   oldMember: GuildMember | PartialGuildMember,
   newMember: GuildMember | PartialGuildMember,
+  massArchiveThreshold = 10,
 ): Promise<void> {
   const currentMember = newMember.partial ? await newMember.fetch() : newMember;
   const settings = await getCustomRoleSettings(currentMember.guild.id);
@@ -411,17 +405,17 @@ export async function onCustomRoleMemberUpdate(
   }
   const oldEligible = customRoleEligibility(oldMember, settings);
   if (oldEligible && !newEligible) {
-    await queueArchive(currentMember.guild, currentMember.id, "stopped boosting or lost the allowed role");
+    await queueArchive(currentMember.guild, currentMember.id, "stopped boosting or lost the allowed role", massArchiveThreshold);
   } else if (!oldEligible && newEligible) {
     queues.get(currentMember.guild.id)?.delete(currentMember.id);
     await restoreSavedRole(currentMember);
   }
 }
 
-export async function onCustomRoleMemberRemove(member: Pick<GuildMember, "guild" | "id">): Promise<void> {
+export async function onCustomRoleMemberRemove(member: Pick<GuildMember, "guild" | "id">, massArchiveThreshold = 10): Promise<void> {
   const settings = await getCustomRoleSettings(member.guild.id);
   if (!settings.enabled || !await getCustomRoleRecord(member.guild.id, member.id)) return;
-  await queueArchive(member.guild, member.id, "left the server");
+  await queueArchive(member.guild, member.id, "left the server", massArchiveThreshold);
 }
 
 export async function onCustomRoleMemberAdd(member: GuildMember): Promise<void> {
@@ -435,7 +429,7 @@ export async function onCustomRoleMemberAdd(member: GuildMember): Promise<void> 
   }
 }
 
-export async function reconcileCustomRoleGuild(guild: Guild): Promise<void> {
+export async function reconcileCustomRoleGuild(guild: Guild, massArchiveThreshold = 10): Promise<void> {
   const settings = await getCustomRoleSettings(guild.id);
   if (!settings.enabled) return;
 
@@ -463,7 +457,7 @@ export async function reconcileCustomRoleGuild(guild: Guild): Promise<void> {
       reasons.push({ userId: record.user_id, reason: "no longer boosting or allowed" });
     }
   }
-  if (reasons.length) await archiveAutomatically(guild, reasons);
+  if (reasons.length) await archiveAutomatically(guild, reasons, massArchiveThreshold);
 
   for (const member of members.values()) {
     try {
