@@ -1183,7 +1183,7 @@ export class DiscoverCommand implements FeatureCommand {
               try {
                 const url = new URL(item.sourceUrl);
                 return (url.hostname === "igdb.com" || url.hostname === "www.igdb.com")
-                  && url.pathname.replace(/\\/$/, "") === "/games/" + source.slug;
+                  && url.pathname.replace(/\/$/, "") === "/games/" + source.slug;
               } catch {
                 return false;
               }
