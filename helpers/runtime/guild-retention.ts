@@ -169,6 +169,7 @@ export async function deleteGuildData(guildId: string): Promise<{
 export async function retryDepartedGuildDeletions(activeGuildIds: Iterable<string>): Promise<{
   checked: number;
   deleted: number;
+  failed: number;
 }> {
   const active = [...activeGuildIds];
   const pending = await query<{ guild_id: string }>(
@@ -181,9 +182,14 @@ export async function retryDepartedGuildDeletions(activeGuildIds: Iterable<strin
   );
 
   let deleted = 0;
+  let failed = 0;
   for (const row of pending) {
-    await deleteGuildData(row.guild_id);
-    deleted += 1;
+    try {
+      await deleteGuildData(row.guild_id);
+      deleted += 1;
+    } catch {
+      failed += 1;
+    }
   }
-  return { checked: pending.length, deleted };
+  return { checked: pending.length, deleted, failed };
 }
