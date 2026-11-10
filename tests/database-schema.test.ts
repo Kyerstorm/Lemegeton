@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { closeDatabase, initDatabase, query, queryOne } from "../database.js";
+import { getLinkedProfile, getProfilePreferences, unlinkAniListAccount, unlinkSteamAccount, updateProfilePreferences } from "../helpers/runtime/profile.js";
+import type { AniListClient } from "../helpers/integration/anilist.js";
+import type { SteamClient } from "../helpers/integration/steam.js";
 import type { DatabaseConfig } from "../helpers/runtime/config.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
@@ -265,6 +268,80 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     assert.equal(
       (await query("SELECT discord_id FROM users WHERE discord_id = $1", ["111111111111111111"])).length,
       2,
+    );
+
+    const profileUser = "111111111111111111";
+    const primaryGuild = "222222222222222222";
+    const otherGuild = "333333333333333333";
+    const primaryDefaults = await getProfilePreferences(primaryGuild, profileUser);
+    const otherDefaults = await getProfilePreferences(otherGuild, profileUser);
+    assert.equal(primaryDefaults.public_profile, false);
+    assert.equal(primaryDefaults.allow_affinity, false);
+    assert.equal(primaryDefaults.server_taste_opt_in, false);
+    assert.equal(primaryDefaults.share_leaderboard, false);
+    assert.equal(otherDefaults.public_profile, false);
+    assert.equal(await getLinkedProfile(
+      primaryGuild,
+      profileUser,
+      "same-member",
+      {} as AniListClient,
+      {} as SteamClient,
+    ), null);
+
+    const updatedPreferences = await updateProfilePreferences(primaryGuild, profileUser, {
+      public_profile: true,
+      show_anilist: false,
+      show_steam: false,
+      allow_affinity: true,
+    });
+    assert.equal(updatedPreferences.public_profile, true);
+    assert.equal(updatedPreferences.show_anilist, false);
+    assert.equal(updatedPreferences.show_steam, false);
+    assert.equal((await getProfilePreferences(otherGuild, profileUser)).public_profile, false);
+    assert.equal((await getProfilePreferences(otherGuild, profileUser)).allow_affinity, false);
+
+    await query(
+      "UPDATE users SET anilist_username = $3, anilist_id = $4 WHERE discord_id = $1 AND guild_id = $2",
+      [profileUser, primaryGuild, "primary-profile", 11],
+    );
+    await query(
+      "UPDATE users SET anilist_username = $3, anilist_id = $4 WHERE discord_id = $1 AND guild_id = $2",
+      [profileUser, otherGuild, "other-profile", 22],
+    );
+    await query(
+      `INSERT INTO steam_users (discord_id, guild_id, steam_id, vanity_name)
+       VALUES ($1, $2, $3, $4), ($1, $5, $6, $7)`,
+      [profileUser, primaryGuild, "76561198000000001", "primary-steam", otherGuild, "76561198000000002", "other-steam"],
+    );
+    assert.equal(await unlinkAniListAccount(primaryGuild, profileUser), true);
+    assert.equal(
+      (await queryOne<{ anilist_username: string | null }>(
+        "SELECT anilist_username FROM users WHERE discord_id = $1 AND guild_id = $2",
+        [profileUser, primaryGuild],
+      ))?.anilist_username,
+      null,
+    );
+    assert.equal(
+      (await queryOne<{ anilist_username: string | null }>(
+        "SELECT anilist_username FROM users WHERE discord_id = $1 AND guild_id = $2",
+        [profileUser, otherGuild],
+      ))?.anilist_username,
+      "other-profile",
+    );
+    assert.equal(await unlinkSteamAccount(primaryGuild, profileUser), true);
+    assert.equal(
+      await queryOne<{ steam_id: string }>(
+        "SELECT steam_id FROM steam_users WHERE discord_id = $1 AND guild_id = $2",
+        [profileUser, primaryGuild],
+      ),
+      null,
+    );
+    assert.deepEqual(
+      await queryOne<{ steam_id: string }>(
+        "SELECT steam_id FROM steam_users WHERE discord_id = $1 AND guild_id = $2",
+        [profileUser, otherGuild],
+      ),
+      { steam_id: "76561198000000002" },
     );
     await assert.rejects(
       query(
