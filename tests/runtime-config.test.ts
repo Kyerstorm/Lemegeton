@@ -121,14 +121,50 @@ test("validates database ports, TLS flags and the optional Steam backfill guild"
   assert.equal(config.database.primaryGuildId, "987654321098765432");
 });
 
+
+test("loads and validates private S3 settings and loopback dashboard binding", () => {
+  const defaults = loadConfig(environment());
+  assert.equal(defaults.dashboardBridgeHost, "127.0.0.1");
+  assert.equal(defaults.dashboardBridgePort, 8091);
+  assert.equal(defaults.s3Region, "us-east-1");
+  assert.equal(defaults.s3Bucket, null);
+  assert.equal(defaults.s3SignedUrlTtlSeconds, 900);
+
+  const configured = loadConfig(environment({
+    DASHBOARD_BRIDGE_HOST: "localhost",
+    S3_ENDPOINT_URL: "https://storage.example.test",
+    S3_REGION: "auto",
+    S3_ACCESS_KEY_ID: "test-access",
+    S3_SECRET_ACCESS_KEY: "test-secret",
+    S3_BUCKET: "private-archive",
+    S3_SIGNED_URL_TTL_SECONDS: "7200",
+  }));
+  assert.equal(configured.dashboardBridgeHost, "localhost");
+  assert.equal(configured.s3EndpointUrl, "https://storage.example.test");
+  assert.equal(configured.s3Region, "auto");
+  assert.equal(configured.s3AccessKeyId, "test-access");
+  assert.equal(configured.s3SecretAccessKey, "test-secret");
+  assert.equal(configured.s3Bucket, "private-archive");
+  assert.equal(configured.s3SignedUrlTtlSeconds, 3600);
+
+  assert.throws(() => loadConfig(environment({ DASHBOARD_BRIDGE_HOST: "0.0.0.0" })), /loopback/);
+  assert.throws(() => loadConfig(environment({ DASHBOARD_BRIDGE_PORT: "70000" })), /DASHBOARD_BRIDGE_PORT/);
+  assert.throws(() => loadConfig(environment({ S3_ACCESS_KEY_ID: "test-access" })), /configured together/);
+  assert.throws(() => loadConfig(environment({ S3_SIGNED_URL_TTL_SECONDS: "invalid" })), /positive integer/);
+});
+
 test("loads operator and Atlas bridge settings into typed configuration", () => {
   const config = loadConfig(environment({
     ADMIN_DISCORD_ID: "123456789012345679",
     DASHBOARD_BRIDGE_SECRET: "a".repeat(40),
+    DASHBOARD_BRIDGE_HOST: "127.0.0.2",
+    DASHBOARD_BRIDGE_PORT: "8094",
     DASHBOARD_ATLAS_BRIDGE_PORT: "9000",
   }));
   assert.equal(config.adminDiscordId, "123456789012345679");
   assert.equal(config.dashboardBridgeSecret, "a".repeat(40));
+  assert.equal(config.dashboardBridgeHost, "127.0.0.2");
+  assert.equal(config.dashboardBridgePort, 8094);
   assert.equal(config.dashboardAtlasBridgePort, 9000);
   assert.throws(() => loadConfig(environment({ ADMIN_DISCORD_ID: "bad" })), /ADMIN_DISCORD_ID/);
 });
