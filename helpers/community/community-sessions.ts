@@ -169,23 +169,23 @@ export async function upcomingProviderReleases(
   for (const airing of airings) {
     const when = new Date(airing.airingAt * 1000);
     if (when >= from && when <= to) {
-      results.push({ title: \`\${airing.title} · Episode \${airing.episode}\`, when, provider: "AniList", url: airing.url });
+      results.push({ title: `${airing.title} · Episode ${airing.episode}`, when, provider: "AniList", url: airing.url });
     }
   }
   for (const movie of movies) {
     if (!movie.releaseDate) continue;
-    const when = new Date(\`\${movie.releaseDate}T00:00:00.000Z\`);
+    const when = new Date(`${movie.releaseDate}T00:00:00.000Z`);
     if (Number.isFinite(when.getTime()) && movie.releaseDate >= fromDay && movie.releaseDate <= toDay) {
-      results.push({ title: movie.title, when, provider: \`TMDB Movies · \${region.toUpperCase()}\`, url: movie.sourceUrl });
+      results.push({ title: movie.title, when, provider: `TMDB Movies · ${region.toUpperCase()}`, url: movie.sourceUrl });
     }
   }
   for (const release of episodes) {
     const airDate = release.episode.airDate;
     if (!airDate || airDate < fromDay || airDate > toDay) continue;
-    const when = new Date(\`\${airDate}T00:00:00.000Z\`);
+    const when = new Date(`${airDate}T00:00:00.000Z`);
     if (!Number.isFinite(when.getTime())) continue;
     results.push({
-      title: \`\${release.showTitle} · S\${release.episode.seasonNumber ?? "?"} E\${release.episode.episodeNumber} · \${release.episode.name}\`,
+      title: `${release.showTitle} · S${release.episode.seasonNumber ?? "?"} E${release.episode.episodeNumber} · ${release.episode.name}`,
       when,
       provider: "TMDB TV",
       url: release.episode.sourceUrl,

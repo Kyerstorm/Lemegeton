@@ -283,7 +283,7 @@ async function processDailyDrops():Promise<void>{
      ),
      client.channels.fetch(delivery.channel_id),
     ]);
-    if(calendar.unavailableProviders.length)throw new Error(\`Release digest providers unavailable: \${calendar.unavailableProviders.join(", ")}\`);
+    if(calendar.unavailableProviders.length)throw new Error(`Release digest providers unavailable: ${calendar.unavailableProviders.join(", ")}`);
     if(!channel||!channel.isTextBased()||!("send" in channel))throw new Error("The configured release digest channel is unavailable.");
     const releases=calendar.results;
     const fields=releases.slice(0,20).map((item)=>({
