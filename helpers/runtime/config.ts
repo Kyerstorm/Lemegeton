@@ -7,7 +7,7 @@ export interface BotConfig {
  database:DatabaseConfig; adminDiscordId:string|null; dashboardBridgeSecret:string; dashboardBridgeHost:string; dashboardBridgePort:number; dashboardAtlasBridgePort:number;
  customRolePickerEnabled:boolean; customRolePickerHost:string; customRolePickerPort:number;
  customRolesReconcileMinutes:number; customRolesMassArchiveThreshold:number; customRolePickerIdleTtl:number; customRolePickerMaxTtl:number; customRolesPublicUrl:string;
- customRolesTrustProxy:boolean; customRoleIconSourceMaxBytes:number;
+ customRolesTrustProxy:boolean; customRoleIconSourceMaxBytes:number; customRolesDebugPreviewEnhancedColors:boolean; customRolesDebugPreviewRoleIcons:boolean;
  tmdbBearerToken?:string; googleBooksApiKey?:string; igdbClientId?:string; igdbClientSecret?:string;
  steamApiKey?:string; archiveUploadMaxBytes:number; s3EndpointUrl?:string; s3Region:string; s3AccessKeyId?:string; s3SecretAccessKey?:string; s3Bucket:string|null; s3SignedUrlTtlSeconds:number; logLevel:"debug"|"info"|"warn"|"error"; botModeratorGuildId:string|null;
 }
@@ -101,6 +101,10 @@ export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
  if(pickerOrigin.protocol!=="https:"&&!(pickerOrigin.protocol==="http:"&&localPickerOrigin))throw new Error("CUSTOM_ROLES_PUBLIC_URL must use HTTPS (HTTP only for loopback development).");
  const pickerPort=positive(env.DASHBOARD_PICKER_PORT,8092,"DASHBOARD_PICKER_PORT");
  if(pickerPort>65535)throw new Error("DASHBOARD_PICKER_PORT must be between 1 and 65535.");
+ const developmentMode=(env.ENVIRONMENT?.trim().toLowerCase()??"development")==="development" && env.NODE_ENV?.trim().toLowerCase()!=="production";
+ const debugEnabled=(value:string|undefined)=>["1","true","yes","on"].includes(value?.trim().toLowerCase()??"");
+ const customRolesDebugPreviewEnhancedColors=developmentMode&&debugEnabled(env.CUSTOM_ROLES_DEBUG_PREVIEW_ENHANCED_COLORS);
+ const customRolesDebugPreviewRoleIcons=developmentMode&&debugEnabled(env.CUSTOM_ROLES_DEBUG_PREVIEW_ROLE_ICONS);
  const customRolesReconcileMinutes=positive(env.CUSTOM_ROLES_RECONCILE_MINUTES,30,"CUSTOM_ROLES_RECONCILE_MINUTES");
  const customRolesMassArchiveThreshold=parseCustomRoleMassArchiveThreshold(env.CUSTOM_ROLES_MASS_ARCHIVE_THRESHOLD);
  const pickerIdleTtl=Math.max(60,positive(env.CUSTOM_ROLES_PICKER_IDLE_TTL,3600,"CUSTOM_ROLES_PICKER_IDLE_TTL"));
@@ -122,6 +126,7 @@ export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
  customRolePickerPort:pickerPort,
  customRolesReconcileMinutes,customRolesMassArchiveThreshold,customRolePickerIdleTtl:pickerIdleTtl,customRolePickerMaxTtl:pickerMaxTtl,
  customRolesPublicUrl:pickerOrigin.origin,customRolesTrustProxy:["1","true","yes","on"].includes(trustProxy),
+ customRolesDebugPreviewEnhancedColors,customRolesDebugPreviewRoleIcons,
  customRoleIconSourceMaxBytes:Math.max(256*1024,positive(env.CUSTOM_ROLES_ICON_SOURCE_MAX_BYTES,8*1024*1024,"CUSTOM_ROLES_ICON_SOURCE_MAX_BYTES")),
  logLevel};
 }
