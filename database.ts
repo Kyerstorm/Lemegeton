@@ -483,6 +483,14 @@ const schemaStatements = [
     PRIMARY KEY (session_id, user_id)
   )`,
   "CREATE INDEX IF NOT EXISTS community_game_answers_user_idx ON community_game_answers (session_id, user_id)",
+  `CREATE TABLE IF NOT EXISTS guild_retention_settings (
+    guild_id BIGINT PRIMARY KEY,
+    invited_by BIGINT,
+    leave_action VARCHAR(16) CHECK (leave_action IN ('delete','retain')),
+    updated_by BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
   `CREATE TABLE IF NOT EXISTS guild_feature_settings (
     guild_id BIGINT NOT NULL,
     feature_name VARCHAR(32) NOT NULL CHECK (feature_name IN ('discover','archive','community','play','profile','custom-role')),
