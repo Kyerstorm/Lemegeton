@@ -45,6 +45,13 @@ async function withLock<T>(guildId: string, userId: string, work: () => Promise<
     if (locks.get(key) === chain) locks.delete(key);
   }
 }
+export async function withCustomRoleLock<T>(
+  guildId: string,
+  userId: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  return withLock(guildId, userId, work);
+}
 
 function isMissing(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
