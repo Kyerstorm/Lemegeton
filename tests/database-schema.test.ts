@@ -1004,14 +1004,14 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     );
 
     const retentionGuild = "333333333333333333";
-    const otherGuild = "333333333333333334";
+    const retentionOtherGuild = "333333333333333334";
     await query(
       "INSERT INTO guild_retention_settings (guild_id, invited_by, leave_action) VALUES ($1,$2,'delete')",
       [retentionGuild, "444444444444444444"],
     );
     await query(
       "INSERT INTO users (discord_id, guild_id, username) VALUES ($1,$2,'to-delete'),($3,$4,'keep')",
-      ["555555555555555551", retentionGuild, "555555555555555552", otherGuild],
+      ["555555555555555551", retentionGuild, "555555555555555552", retentionOtherGuild],
     );
     await query(
       `INSERT INTO community_archive_entries
@@ -1021,17 +1021,17 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     );
     await query(
       "INSERT INTO community_daily_items (guild_id, format, title, content) VALUES ($1,'quote','Guild item','Guild content'),($2,'quote','Other item','Other content')",
-      [retentionGuild, otherGuild],
+      [retentionGuild, retentionOtherGuild],
     );
     const purge = await deleteGuildData(retentionGuild);
     assert.equal(purge.assetsAttempted, 0);
     assert.equal(purge.assetsPending, 0);
     assert.ok(purge.deletedRows >= 3);
     assert.equal((await query("SELECT discord_id FROM users WHERE guild_id = $1", [retentionGuild])).length, 0);
-    assert.equal((await query("SELECT discord_id FROM users WHERE guild_id = $1", [otherGuild])).length, 1);
+    assert.equal((await query("SELECT discord_id FROM users WHERE guild_id = $1", [retentionOtherGuild])).length, 1);
     assert.equal((await query("SELECT id FROM community_archive_entries WHERE created_guild_id = $1", [retentionGuild])).length, 0);
     assert.equal((await query("SELECT id FROM community_daily_items WHERE guild_id = $1", [retentionGuild])).length, 0);
-    assert.equal((await query("SELECT id FROM community_daily_items WHERE guild_id = $1", [otherGuild])).length, 1);
+    assert.equal((await query("SELECT id FROM community_daily_items WHERE guild_id = $1", [retentionOtherGuild])).length, 1);
     assert.deepEqual(
       await queryOne<{ invited_by: string; leave_action: string }>(
         "SELECT invited_by::text, leave_action FROM guild_retention_settings WHERE guild_id = $1",
