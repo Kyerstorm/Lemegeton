@@ -145,11 +145,11 @@ client.once(Events.ClientReady,ready=>{
  void startCustomRolePicker(client,config).catch(error=>logger.error("Custom Roles picker startup failed",{reason:error instanceof Error?error.message:"Unknown error"}));
  void startDashboardBridge(client,commands,config).catch(error=>logger.error("Dashboard bot bridge startup failed",{reason:error instanceof Error?error.message:"Unknown error"}));
  for(const guild of ready.guilds.cache.values()){
-  void reconcileCustomRoleGuild(guild).catch(error=>logger.error("Initial Custom Roles reconciliation failed",{guildId:guild.id,reason:error instanceof Error?error.message:"Unknown error"}));
+  void reconcileCustomRoleGuild(guild,config.customRolesMassArchiveThreshold).catch(error=>logger.error("Initial Custom Roles reconciliation failed",{guildId:guild.id,reason:error instanceof Error?error.message:"Unknown error"}));
  }
  reconciliationTimer=setInterval(()=>{
   for(const guild of client.guilds.cache.values()){
-   void reconcileCustomRoleGuild(guild).catch(error=>logger.error("Custom Roles reconciliation failed",{guildId:guild.id,reason:error instanceof Error?error.message:"Unknown error"}));
+   void reconcileCustomRoleGuild(guild,config.customRolesMassArchiveThreshold).catch(error=>logger.error("Custom Roles reconciliation failed",{guildId:guild.id,reason:error instanceof Error?error.message:"Unknown error"}));
   }
  },config.customRolesReconcileMinutes*60_000);
  reconciliationTimer.unref();
@@ -173,13 +173,13 @@ client.on(Events.Error,error=>{
  logger.error("Discord client emitted an error",{reason:error.message});
 });
 client.on(Events.GuildMemberUpdate,(oldMember,newMember)=>{
- void onCustomRoleMemberUpdate(oldMember,newMember).catch(error=>logger.error("Custom Roles member update failed",{guildId:newMember.guild.id,userId:newMember.id,reason:error instanceof Error?error.message:"Unknown error"}));
+ void onCustomRoleMemberUpdate(oldMember,newMember,config.customRolesMassArchiveThreshold).catch(error=>logger.error("Custom Roles member update failed",{guildId:newMember.guild.id,userId:newMember.id,reason:error instanceof Error?error.message:"Unknown error"}));
 });
 client.on(Events.GuildMemberRemove,member=>{
- void onCustomRoleMemberRemove(member).catch(error=>logger.error("Custom Roles member removal failed",{guildId:member.guild.id,userId:member.id,reason:error instanceof Error?error.message:"Unknown error"}));
+ void onCustomRoleMemberRemove(member,config.customRolesMassArchiveThreshold).catch(error=>logger.error("Custom Roles member removal failed",{guildId:member.guild.id,userId:member.id,reason:error instanceof Error?error.message:"Unknown error"}));
 });
 client.on(Events.GuildRoleDelete,role=>{
- void onCustomRoleRoleDelete(role).catch(error=>logger.error("Custom Roles role deletion handling failed",{guildId:role.guild.id,roleId:role.id,reason:error instanceof Error?error.message:"Unknown error"}));
+ void onCustomRoleRoleDelete(role,config.customRolesMassArchiveThreshold).catch(error=>logger.error("Custom Roles role deletion handling failed",{guildId:role.guild.id,roleId:role.id,reason:error instanceof Error?error.message:"Unknown error"}));
 });
 client.on(Events.GuildMemberAdd,member=>{
  void onCustomRoleMemberAdd(member).catch(error=>logger.error("Custom Roles member restoration failed",{guildId:member.guild.id,userId:member.id,reason:error instanceof Error?error.message:"Unknown error"}));
