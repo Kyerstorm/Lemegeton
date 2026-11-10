@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { isIP } from "node:net";
 import type { Client } from "discord.js";
 import type { BotConfig } from "../runtime/config.js";
+import { isGuildRetentionConfigured } from "../runtime/guild-retention.js";
 import { logger } from "../runtime/logger.js";
 import {
   allowPickerCall,
@@ -268,6 +269,10 @@ async function authorize(
   const guild = client.guilds.cache.get(link.guildId);
   if (!guild) {
     errorResponse(response, 503, "guild_unavailable", "The server isn't available right now. Try again soon.", link);
+    return null;
+  }
+  if (!await isGuildRetentionConfigured(guild.id)) {
+    errorResponse(response, 423, "setup_required", "Choose the server data-retention setting before using this picker.", link);
     return null;
   }
   try {
@@ -561,6 +566,7 @@ export async function createCustomRolePickerLink(
 ): Promise<{ url: string; expiresAt: number; maxExpiresAt: number }> {
   const guild = client.guilds.cache.get(guildId);
   if (!guild) throw new Error("This server isn't available right now.");
+  if (!await isGuildRetentionConfigured(guildId)) throw new Error("Choose the server data-retention setting before using this picker.");
   await resolvePickerContext(guild, userId);
   const created = createPickerLink(guildId, userId, config);
   return {
