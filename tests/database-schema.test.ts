@@ -6,7 +6,7 @@ import { closeDatabase, initDatabase, query, queryOne } from "../database.js";
 import { getAniListAffinity, getAniListLeaderboard, getLinkedProfile, getProfilePreferences, getServerTaste, unlinkAniListAccount, unlinkSteamAccount, updateProfilePreferences } from "../helpers/runtime/profile.js";
 import type { AniListClient } from "../helpers/integration/anilist.js";
 import type { SteamClient } from "../helpers/integration/steam.js";
-import { getCustomRoleRecord, planLegacyCustomRoleImport, updateCustomRoleSettings } from "../helpers/custom-roles/custom-roles.js";
+import { getCustomRoleOwnerForRole, getCustomRoleRecord, getLegacyBoosterRoleId, planLegacyCustomRoleImport, updateCustomRoleSettings } from "../helpers/custom-roles/custom-roles.js";
 import type { Guild } from "discord.js";
 import type { DatabaseConfig } from "../helpers/runtime/config.js";
 
@@ -464,7 +464,9 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
         "INSERT INTO booster_roles (discord_id, guild_id, role_id) VALUES ($1, $2, $3)",
         [userId, legacyGuild, roleId],
       );
-    }
+    }    assert.equal(await getLegacyBoosterRoleId(legacyGuild, legacyIds.eligibleUser), legacyIds.eligibleRole);
+    assert.equal(await getCustomRoleOwnerForRole(legacyGuild, legacyIds.existingRole, legacyIds.linkedUser), legacyIds.existingOwner);
+    assert.equal(await getCustomRoleOwnerForRole(legacyGuild, legacyIds.eligibleRole, legacyIds.eligibleUser), null);
     await query(
       `INSERT INTO custom_role_records (guild_id, user_id, role_id, status, name)
        VALUES ($1, $2, $3, 'active', 'Linked role'), ($1, $4, $5, 'active', 'Imported role')`,
