@@ -3,8 +3,8 @@ import {
   type Client,
   type Message,
 } from "discord.js";
-import { query, queryOne } from "../../database.js";
-import { deleteArchiveAsset, queueArchiveAssetCleanup } from "../media/media-storage.js";
+import { query, queryOne, transaction } from "../../database.js";
+import { deleteArchiveAsset } from "../media/media-storage.js";
 import { archiveUploadAllowed, storeArchiveUpload } from "../media/media-storage.js";
 import { cleanText, isValidHttpsUrl, normalizeTags } from "../security/security.js";
 import { GLOBAL_MODERATOR_IDS, isGlobalArchiveModerator } from "./archive-access.js";
@@ -515,29 +515,36 @@ export async function deleteArchiveEntry(
   canModerate: boolean,
   global = false,
 ): Promise<void> {
-  const entry = await queryOne<{
-    id: string;
-    created_by: string;
-    created_guild_id: string;
-    visibility: ArchiveVisibility;
-  }>(
-    `SELECT id, created_by, created_guild_id, visibility
-     FROM community_archive_entries
-     WHERE id = $1 AND ${global ? "visibility = 'global'" : "visibility = 'server' AND created_guild_id = $2"}`,
-    global ? [entryId] : [entryId, guildId],
-  );
-  if (!entry) throw new Error("That Archive entry was not found in this visibility scope.");
-  if (entry.created_by !== actorId && !canModerate) throw new Error("Only the original contributor or an Archive moderator can delete this entry.");
-  if (entry.visibility === "global" && !isGlobalArchiveModerator(actorId)) {
-    throw new Error("Global Archive entries can only be deleted by a configured global moderator.");
-  }
-  const assets = await query<{ asset_id: string }>(
-    "SELECT asset_id FROM community_archive_entry_assets WHERE entry_id = $1 ORDER BY position ASC",
-    [entryId],
-  );
-  // Queue assets before deleting their owning entry so a crash cannot lose the cleanup work.
-  for (const asset of assets) await queueArchiveAssetCleanup(Number(asset.asset_id));
-  await query("DELETE FROM community_archive_entries WHERE id = $1", [entryId]);
+  const assets = await transaction(async (client) => {
+    const scope = global
+      ? "id = $1 AND visibility = 'global'"
+      : "id = $1 AND visibility = 'server' AND created_guild_id = $2";
+    const selected = await client.query<{
+      id: string;
+      created_by: string;
+      created_guild_id: string;
+      visibility: ArchiveVisibility;
+    }>(
+      "SELECT id, created_by, created_guild_id, visibility FROM community_archive_entries WHERE " + scope + " FOR UPDATE",
+      global ? [entryId] : [entryId, guildId],
+    );
+    const entry = selected.rows[0];
+    if (!entry) throw new Error("That Archive entry was not found in this visibility scope.");
+    if (entry.created_by !== actorId && !canModerate) throw new Error("Only the original contributor or an Archive moderator can delete this entry.");
+    if (entry.visibility === "global" && !isGlobalArchiveModerator(actorId)) {
+      throw new Error("Global Archive entries can only be deleted by a configured global moderator.");
+    }
+    await client.query(
+      "INSERT INTO media_asset_cleanup_queue (asset_id) SELECT asset_id FROM community_archive_entry_assets WHERE entry_id = $1 ON CONFLICT (asset_id) DO NOTHING",
+      [entryId],
+    );
+    const linkedAssets = await client.query<{ asset_id: string }>(
+      "SELECT asset_id::text FROM community_archive_entry_assets WHERE entry_id = $1 ORDER BY position ASC",
+      [entryId],
+    );
+    await client.query("DELETE FROM community_archive_entries WHERE id = $1", [entryId]);
+    return linkedAssets.rows;
+  });
   for (const asset of assets) {
     try {
       await deleteArchiveAsset(Number(asset.asset_id));
@@ -546,4 +553,3 @@ export async function deleteArchiveEntry(
     }
   }
 }
-
