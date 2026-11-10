@@ -465,13 +465,13 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
         [userId, legacyGuild, roleId],
       );
     }    assert.equal(await getLegacyBoosterRoleId(legacyGuild, legacyIds.eligibleUser), legacyIds.eligibleRole);
-    assert.equal(await getCustomRoleOwnerForRole(legacyGuild, legacyIds.existingRole, legacyIds.linkedUser), legacyIds.existingOwner);
-    assert.equal(await getCustomRoleOwnerForRole(legacyGuild, legacyIds.eligibleRole, legacyIds.eligibleUser), null);
     await query(
       `INSERT INTO custom_role_records (guild_id, user_id, role_id, status, name)
        VALUES ($1, $2, $3, 'active', 'Linked role'), ($1, $4, $5, 'active', 'Imported role')`,
       [legacyGuild, legacyIds.existingOwner, legacyIds.existingRole, legacyIds.importedUser, legacyIds.importedRole],
     );
+    assert.equal(await getCustomRoleOwnerForRole(legacyGuild, legacyIds.existingRole, legacyIds.linkedUser), legacyIds.existingOwner);
+    assert.equal(await getCustomRoleOwnerForRole(legacyGuild, legacyIds.eligibleRole, legacyIds.eligibleUser), null);
     assert.equal(await getCustomRoleRecord(legacyGuild, legacyIds.eligibleUser), null);
 
     type LegacyRole = {
