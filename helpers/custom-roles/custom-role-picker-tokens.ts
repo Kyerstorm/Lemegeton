@@ -53,6 +53,9 @@ export function createPickerLink(
   const now = Date.now();
   prune(now);
   revokePickerLink(guildId, userId);
+  if (links.size >= MAX_TRACKED) {
+    throw new Error("Too many active Custom Roles picker links. Try again after an existing link expires.");
+  }
   const token = randomBytes(32).toString("base64url");
   const link: PickerLink = {
     guildId,
