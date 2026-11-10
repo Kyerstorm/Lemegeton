@@ -21,7 +21,7 @@ import {
 } from "discord.js";
 import type { FeatureCommand } from "../../helpers/commands/command.js";
 import type { BotConfig } from "../../helpers/runtime/config.js";
-import { AniListClient, type AniListMedia, type AniListMediaType, type AniListSearchFilters, type AniListCreator } from "../../helpers/providers/anilist.js";
+import { AniListClient, type AniListAiring, type AniListAiringFilters, type AniListMedia, type AniListMediaType, type AniListSearchFilters, type AniListCreator } from "../../helpers/providers/anilist.js";
 import {SteamClient,type SteamStoreGame} from "../../helpers/providers/steam.js";
 import { GoogleBooksClient, type GoogleBook } from "../../helpers/providers/google-books.js";
 import { IgdbClient, type IgdbGame } from "../../helpers/providers/igdb.js";
@@ -214,6 +214,15 @@ function detailsButtons(record: SearchRecord): ActionRowBuilder<ButtonBuilder>[]
   return [];
 }
 
+function airingSearchModal():ModalBuilder{
+ return new ModalBuilder().setCustomId("discover:airing-search").setTitle("Upcoming anime episodes").addComponents(
+  new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("title").setLabel("Anime title (optional)").setPlaceholder("Leave blank for all anime").setStyle(TextInputStyle.Short).setMaxLength(100).setRequired(false)),
+  new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("season").setLabel("Season (optional)").setPlaceholder("Winter, Spring, Summer or Fall").setStyle(TextInputStyle.Short).setMaxLength(10).setRequired(false)),
+  new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("year").setLabel("Season year (optional)").setPlaceholder("2026").setStyle(TextInputStyle.Short).setMaxLength(4).setRequired(false)),
+  new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("day").setLabel("UTC weekday (optional)").setPlaceholder("Monday through Sunday").setStyle(TextInputStyle.Short).setMaxLength(9).setRequired(false)),
+  new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("days").setLabel("Upcoming window in days").setPlaceholder("7 (maximum 14)").setStyle(TextInputStyle.Short).setMaxLength(2).setRequired(false)),
+ );
+}
 function creatorSearchModal():ModalBuilder{
  return new ModalBuilder().setCustomId("discover:creator-search").setTitle("Explore a creator").addComponents(
   new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("query").setLabel("Creator name").setPlaceholder("Writer, artist or voice actor").setStyle(TextInputStyle.Short).setMinLength(2).setMaxLength(80).setRequired(true)),
@@ -274,11 +283,21 @@ function homePanel(): { embeds: EmbedBuilder[]; components: ActionRowBuilder<But
     new ButtonBuilder().setCustomId("discover:random:book").setLabel("Random book").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("discover:random:game").setLabel("Random game").setStyle(ButtonStyle.Secondary),
   );
-  rows.push(explore, random);
+  const schedules = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("discover:airing").setLabel("Upcoming anime episodes").setStyle(ButtonStyle.Secondary),
+  );
+  rows.push(explore, random, schedules);
   return { embeds: [embed], components: rows };
 }
 
 export class DiscoverCommand implements FeatureCommand {
+  private readonly airingSessions = new Map<string, {
+    ownerId: string;
+    filters: AniListAiringFilters;
+    entries: AniListAiring[];
+    page: number;
+    timeout: NodeJS.Timeout;
+  }>();
   readonly data = new SlashCommandBuilder()
     .setName("discover")
     .setDescription("Explore media across supported metadata providers")
@@ -466,6 +485,38 @@ export class DiscoverCommand implements FeatureCommand {
 
   async handleButton(interaction: ButtonInteraction): Promise<boolean> {
     const [, action, categoryValue, maybeId] = interaction.customId.split(":");
+    if(action==="airing"){
+      await interaction.showModal(airingSearchModal());
+      return true;
+    }
+    if(action==="airing-page"||action==="airing-refresh"){
+      const session=this.airingSessions.get(categoryValue??"");
+      if(!session||session.ownerId!==interaction.user.id){
+        await interaction.reply({content:"That airing session has expired or belongs to another user. Open /discover again.",flags:MessageFlags.Ephemeral});
+        return true;
+      }
+      await interaction.deferUpdate();
+      if(action==="airing-refresh"){
+        try{
+          session.entries=await this.anilist.searchUpcomingAirings(session.filters);
+          session.page=0;
+        }catch(error){
+          const reference=await createInteractionIssueLog(interaction,"/discover",error,{action:"airing-refresh"});
+          const message="AniList could not refresh the airing schedule. Try again shortly.";
+          await interaction.editReply({content:reference?message+"\\n\\n"+issueHashNotice(reference):message,embeds:[],components:[]});
+          return true;
+        }
+      }else{
+        const page=Number(maybeId);
+        if(!Number.isSafeInteger(page)||page<0||page>=Math.max(1,Math.ceil(session.entries.length/5))){
+          await interaction.editReply({content:"That airing page is no longer available. Refresh the schedule.",embeds:[],components:[]});
+          return true;
+        }
+        session.page=page;
+      }
+      await interaction.editReply(this.airingPage(categoryValue??"",session));
+      return true;
+    }
     if(action==="creator"){
       await interaction.showModal(creatorSearchModal());
       return true;
@@ -786,6 +837,44 @@ export class DiscoverCommand implements FeatureCommand {
 
   async handleModal(interaction: ModalSubmitInteraction): Promise<boolean> {
     const [, action, categoryValue] = interaction.customId.split(":");
+    if(action==="airing-search"){
+      const title=interaction.fields.getTextInputValue("title").trim()||undefined;
+      const seasonInput=interaction.fields.getTextInputValue("season").trim().toUpperCase();
+      const yearInput=interaction.fields.getTextInputValue("year").trim();
+      const dayInput=interaction.fields.getTextInputValue("day").trim();
+      const daysInput=interaction.fields.getTextInputValue("days").trim();
+      const days=daysInput?Number(daysInput):7;
+      const year=yearInput?Number(yearInput):undefined;
+      const validDays=Number.isInteger(days)&&days>=1&&days<=14;
+      const validYear=year===undefined||(Number.isInteger(year)&&year>=1970&&year<=2100);
+      const validSeason=!seasonInput||["WINTER","SPRING","SUMMER","FALL"].includes(seasonInput);
+      const validDay=!dayInput||["MONDAY","TUESDAY","WEDNESDAY","THURSDAY","FRIDAY","SATURDAY","SUNDAY"].includes(dayInput.toUpperCase());
+      if(!validDays||!validYear||!validSeason||!validDay){
+        await interaction.reply({content:"Use a 1–14 day window, a year from 1970–2100, a valid season, and a weekday from Monday to Sunday.",flags:MessageFlags.Ephemeral});
+        return true;
+      }
+      const filters:AniListAiringFilters={
+        ...(title?{title}:{}),
+        ...(seasonInput?{season:seasonInput}:{}),
+        ...(year!==undefined?{year}:{}),
+        ...(dayInput?{day:dayInput}:{}),
+        days,
+      };
+      await interaction.reply({content:loadingMessage("Loading upcoming anime episodes…"),flags:MessageFlags.Ephemeral});
+      try{
+        const entries=await this.anilist.searchUpcomingAirings(filters);
+        const sessionId=interaction.id;
+        const timeout=setTimeout(()=>this.airingSessions.delete(sessionId),180_000);
+        timeout.unref();
+        this.airingSessions.set(sessionId,{ownerId:interaction.user.id,filters,entries,page:0,timeout});
+        await interaction.editReply(this.airingPage(sessionId,this.airingSessions.get(sessionId)!));
+      }catch(error){
+        const reference=await createInteractionIssueLog(interaction,"/discover",error,{action:"airing-search",filters});
+        const message="AniList could not load the airing schedule. Try again shortly.";
+        await interaction.editReply({content:reference?message+"\\n\\n"+issueHashNotice(reference):message});
+      }
+      return true;
+    }
     if(action==="creator-search"){
       await this.creatorAndRespond(interaction,interaction.fields.getTextInputValue("query"));
       return true;
@@ -1385,4 +1474,29 @@ export class DiscoverCommand implements FeatureCommand {
       allowedMentions: { parse: [] },
     });
   }
+  private airingPage(sessionId:string,session:{ownerId:string;filters:AniListAiringFilters;entries:AniListAiring[];page:number;timeout:NodeJS.Timeout}){
+    const totalPages=Math.max(1,Math.ceil(session.entries.length/5));
+    const visible=session.entries.slice(session.page*5,session.page*5+5);
+    const fields=visible.map(entry=>({
+      name:(cleanText(entry.title,180)+" · Episode "+entry.episode).slice(0,256),
+      value:"Your local time: <t:"+entry.airingAt+":F> · <t:"+entry.airingAt+":R>\\nUTC: "+new Date(entry.airingAt*1000).toISOString().replace("T"," ").slice(0,16)
+        +"\\n"+[entry.format,entry.status,entry.season?(entry.season+" "+(entry.seasonYear??"")):null].filter(Boolean).join(" · ").slice(0,300),
+      inline:false,
+    }));
+    const embed=homeEmbed(
+      "Upcoming anime episodes",
+      session.entries.length
+        ? "AniList schedule · "+session.entries.length+" matching episode(s). Times are provided in UTC; Discord also displays them in your local timezone."
+        : "AniList returned no upcoming episodes for these filters. Try another title, season or date window.",
+      fields,
+    ).setFooter({text:"AniList · Page "+(session.page+1)+"/"+totalPages+" · Schedule may change"});
+    const controls=new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("discover:airing-page:"+sessionId+":"+Math.max(0,session.page-1)).setLabel("Previous").setStyle(ButtonStyle.Secondary).setDisabled(session.page===0),
+      new ButtonBuilder().setCustomId("discover:airing-page:"+sessionId+":"+Math.min(totalPages-1,session.page+1)).setLabel("Next").setStyle(ButtonStyle.Secondary).setDisabled(session.page>=totalPages-1),
+      new ButtonBuilder().setCustomId("discover:airing-refresh:"+sessionId).setLabel("Refresh").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("discover:home").setLabel("Discover").setStyle(ButtonStyle.Secondary),
+    );
+    return {content:"Airing schedule",embeds:[embed],components:[controls],allowedMentions:{parse:[]}};
+  }
+
 }
