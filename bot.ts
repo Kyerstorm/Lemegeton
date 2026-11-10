@@ -7,6 +7,7 @@ import {configureLogger,logger} from "./helpers/runtime/logger.js";
 import type {FeatureCommand} from "./helpers/commands/command.js";
 import {handleArchiveUploadMessage} from "./helpers/archive/archive.js";
 import {configureArchiveAccess} from "./helpers/archive/archive-access.js";
+import {removeGuildMemberProfileData} from "./helpers/runtime/profile.js";
 import {AniListClient} from "./helpers/integration/anilist.js";
 import {TmdbClient} from "./helpers/integration/tmdb.js";
 import {handleAniListLinkMessage} from "./src/integrations/anilist-embed.js";
@@ -179,6 +180,7 @@ client.on(Events.GuildMemberUpdate,(oldMember,newMember)=>{
 });
 client.on(Events.GuildMemberRemove,member=>{
  void onCustomRoleMemberRemove(member,config.customRolesMassArchiveThreshold).catch(error=>logger.error("Custom Roles member removal failed",{guildId:member.guild.id,userId:member.id,reason:error instanceof Error?error.message:"Unknown error"}));
+ void removeGuildMemberProfileData(member.guild.id,member.id).then(()=>logger.info("Removed guild-scoped AniList/Steam links and profile preferences for departed member",{guildId:member.guild.id,userId:member.id})).catch(error=>logger.error("Could not remove departed member profile data",{guildId:member.guild.id,userId:member.id,reason:error instanceof Error?error.message:"Unknown error"}));
 });
 client.on(Events.GuildRoleDelete,role=>{
  void onCustomRoleRoleDelete(role,config.customRolesMassArchiveThreshold).catch(error=>logger.error("Custom Roles role deletion handling failed",{guildId:role.guild.id,roleId:role.id,reason:error instanceof Error?error.message:"Unknown error"}));

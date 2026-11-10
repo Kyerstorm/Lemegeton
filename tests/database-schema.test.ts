@@ -10,6 +10,7 @@ import { getCustomRoleOwnerForRole, getCustomRoleRecord, getLegacyBoosterRoleId,
 import type { Guild } from "discord.js";
 import type { DatabaseConfig } from "../helpers/runtime/config.js";
 import { getPanelOfTheDay } from "../helpers/archive/archive.js";
+import { removeGuildMemberProfileData } from "../helpers/runtime/profile.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
 
@@ -387,6 +388,38 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       null,
       "A server-only panel must not be exposed to another server",
     );
+
+    const departedUser = "777777777777777777";
+    const retainedGuild = "123456789012345678";
+    await query(
+      `INSERT INTO users (discord_id, guild_id, username)
+       VALUES ($1, $2, 'departed-member'), ($1, $3, 'departed-member')`,
+      [departedUser, "987654321098765432", retainedGuild],
+    );
+    await query(
+      `INSERT INTO steam_users (discord_id, guild_id, steam_id, vanity_name)
+       VALUES ($1, $2, '76561198000000001', 'steam-a'), ($1, $3, '76561198000000002', 'steam-b')`,
+      [departedUser, "987654321098765432", retainedGuild],
+    );
+    await query(
+      `INSERT INTO profile_preferences (guild_id, user_id)
+       VALUES ($1, $2), ($3, $2)`,
+      ["987654321098765432", departedUser, retainedGuild],
+    );
+    await query(
+      `INSERT INTO archive_user_preferences (guild_id, user_id, last_category)
+       VALUES ($1, $2, 'panels'), ($3, $2, 'quotes')`,
+      ["987654321098765432", departedUser, retainedGuild],
+    );
+    await removeGuildMemberProfileData("987654321098765432", departedUser);
+    assert.equal((await query("SELECT discord_id FROM users WHERE discord_id = $1 AND guild_id = $2", [departedUser, "987654321098765432"])).length, 0);
+    assert.equal((await query("SELECT discord_id FROM steam_users WHERE discord_id = $1 AND guild_id = $2", [departedUser, "987654321098765432"])).length, 0);
+    assert.equal((await query("SELECT user_id FROM profile_preferences WHERE user_id = $1 AND guild_id = $2", [departedUser, "987654321098765432"])).length, 0);
+    assert.equal((await query("SELECT user_id FROM archive_user_preferences WHERE user_id = $1 AND guild_id = $2", [departedUser, "987654321098765432"])).length, 0);
+    assert.equal((await query("SELECT discord_id FROM users WHERE discord_id = $1 AND guild_id = $2", [departedUser, retainedGuild])).length, 1, "Removing one guild's profile data must not affect another guild");
+    assert.equal((await query("SELECT steam_id FROM steam_users WHERE discord_id = $1 AND guild_id = $2", [departedUser, retainedGuild])).length, 1);
+    assert.equal((await query("SELECT user_id FROM profile_preferences WHERE user_id = $1 AND guild_id = $2", [departedUser, retainedGuild])).length, 1);
+    assert.equal((await query("SELECT user_id FROM archive_user_preferences WHERE user_id = $1 AND guild_id = $2", [departedUser, retainedGuild])).length, 1);
 
     const migratedPanel = await queryOne<{
       archive_type: string;

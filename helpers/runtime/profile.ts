@@ -1,4 +1,4 @@
-import { query, queryOne } from "../../database.js";
+import { query, queryOne, transaction } from "../../database.js";
 import type { AniListUserInterests, AniListUserProfile } from "../integration/anilist.js";
 import { AniListClient } from "../integration/anilist.js";
 import type { SteamProfile } from "../integration/steam.js";
@@ -40,6 +40,14 @@ function defaultPreferences(guildId: string, userId: string): ProfilePreferences
   };
 }
 
+export async function removeGuildMemberProfileData(guildId: string, userId: string): Promise<void> {
+  await transaction(async (client) => {
+    await client.query("DELETE FROM users WHERE guild_id = $1 AND discord_id = $2", [guildId, userId]);
+    await client.query("DELETE FROM steam_users WHERE guild_id = $1 AND discord_id = $2", [guildId, userId]);
+    await client.query("DELETE FROM profile_preferences WHERE guild_id = $1 AND user_id = $2", [guildId, userId]);
+    await client.query("DELETE FROM archive_user_preferences WHERE guild_id = $1 AND user_id = $2", [guildId, userId]);
+  });
+}
 export async function getProfilePreferences(guildId: string, userId: string): Promise<ProfilePreferences> {
   const row = await queryOne<ProfilePreferences>(
     "SELECT guild_id, user_id, public_profile, show_anilist, show_steam, allow_affinity, server_taste_opt_in, share_leaderboard FROM profile_preferences WHERE guild_id = $1 AND user_id = $2",
