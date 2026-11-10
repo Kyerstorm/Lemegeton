@@ -31,6 +31,7 @@ import { getGuildMediaRegion } from "../../helpers/media/media-region.js";
 import { cleanText } from "../../helpers/security/security.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
 import { findAtlasRelationships, recordAtlasRelationship, recordProviderRelationships } from "../../helpers/providers/atlas.js";
+import { aniListReleaseOrder, tmdbCollectionReleaseOrder } from "../../helpers/media/franchise-order.js";
 import {
   createMediaLinkSuggestion,
   getPendingMediaLinkSuggestion,
@@ -1434,10 +1435,14 @@ export class DiscoverCommand implements FeatureCommand {
     }
     const title = this.recordTitle(first);
     const mediaCategory = this.recordCategory(first);
+    let collectionReleaseOrder:ReturnType<typeof tmdbCollectionReleaseOrder>=null;
+    let collectionName:string|null=null;
     if(first.provider==="TMDB"&&first.category==="movie"){
       try{
         const collection=await this.tmdb.collectionForMovie(first.item.id);
         if(collection){
+          collectionName=collection.name;
+          collectionReleaseOrder=tmdbCollectionReleaseOrder(collection.items);
           const relations=collection.items
             .filter(item=>item.id!==first.item.id)
             .map(item=>({
@@ -1471,6 +1476,26 @@ export class DiscoverCommand implements FeatureCommand {
       }
     } else {
       embed.addFields({name:"No recorded connections yet",value:"This provider has not supplied related-work edges for this title, and this server has not approved any community links yet.",inline:false});
+    }
+    if(first.provider==="AniList"){
+      const order=aniListReleaseOrder(
+        {title,url:first.item.siteUrl,startDate:first.item.startDate},
+        first.item.relations,
+      );
+      if(order){
+        embed.addFields({
+          name:"AniList release order · not story chronology",
+          value:order.map((item,index)=>(index+1)+". "+(item.url?"["+item.title+"]("+item.url+")":item.title)+" · "+item.date).join("\\n").slice(0,1024),
+          inline:false,
+        });
+      }
+    }
+    if(collectionReleaseOrder){
+      embed.addFields({
+        name:("TMDB collection release order"+(collectionName?" · "+collectionName:"")+" · not story chronology").slice(0,256),
+        value:collectionReleaseOrder.map((item,index)=>(index+1)+". "+(item.url?"["+item.title+"]("+item.url+")":item.title)+" · "+item.date).join("\\n").slice(0,1024),
+        inline:false,
+      });
     }
     embed.setFooter({text:"Knowledge Atlas · Provider provenance and guild-scoped community links"});
     const files: AttachmentBuilder[] = [];
