@@ -56,14 +56,16 @@ async function startAtlasBridge(): Promise<void> {
   const supplied=Buffer.from(authorization.startsWith("Bearer ")?authorization.slice(7):"");
   if(supplied.length!==expected.length||!timingSafeEqual(supplied,expected)){send(401,{error:"Unauthorized."});return;}
   const guildId=parsed.searchParams.get("guild_id")??"";
-  if(!await isGuildRetentionConfigured(guildId)){send(423,{error:"Server data-retention setup is required before Atlas can be used."});return;}
   const title=(parsed.searchParams.get("title")??"").trim();
   const category=normalizeAtlasCategory(parsed.searchParams.get("category")??"");
   const rawUrl=parsed.searchParams.get("url");
   const safeUrl=rawUrl?safeAtlasUrl(rawUrl):null;
   if(!/^\d{17,20}$/.test(guildId)||!title||title.length>256||!category||(rawUrl&&!safeUrl)){send(400,{error:"A valid guild, title and media category are required."});return;}
-  void findAtlasRelationships(guildId,title,category,safeUrl,30).then((relationships)=>{
-   send(200,{root:{title,category,url:safeUrl},relationships});
+  void isGuildRetentionConfigured(guildId).then((configured)=>{
+   if(!configured){send(423,{error:"Server data-retention setup is required before Atlas can be used."});return;}
+   return findAtlasRelationships(guildId,title,category,safeUrl,30).then((relationships)=>{
+    send(200,{root:{title,category,url:safeUrl},relationships});
+   });
   }).catch((error)=>{
    logger.error("Knowledge Atlas lookup failed",{guildId,reason:error instanceof Error?error.message:"Unknown error"});
    send(503,{error:"The Knowledge Atlas is temporarily unavailable."});
