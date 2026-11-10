@@ -1,4 +1,4 @@
-import { PermissionFlagsBits, type Guild } from "discord.js";
+import { PermissionFlagsBits, type Guild, type Role } from "discord.js";
 import { query, queryOne } from "../../database.js";
 import { DEFAULT_PROTECTED_WORDS, customRoleEligibility, validateCustomRoleName } from "./custom-role-validation.js";
 export {
@@ -387,6 +387,50 @@ const LEGACY_MODERATION_PERMISSIONS = [
   PermissionFlagsBits.ModerateMembers,
 ] as const;
 
+export async function getLegacyBoosterRoleId(guildId: string, userId: string): Promise<string | null> {
+  try {
+    const row = await queryOne<{ role_id: string }>(
+      "SELECT role_id::text AS role_id FROM booster_roles WHERE guild_id = $1 AND discord_id = $2",
+      [guildId, userId],
+    );
+    return row?.role_id ?? null;
+  } catch (error) {
+    if ((error as { code?: string } | null)?.code === "42P01") return null;
+    throw error;
+  }
+}
+
+export async function getCustomRoleOwnerForRole(
+  guildId: string,
+  roleId: string,
+  excludedUserId: string,
+): Promise<string | null> {
+  const row = await queryOne<{ user_id: string }>(
+    "SELECT user_id::text AS user_id FROM custom_role_records WHERE guild_id = $1 AND role_id = $2 AND user_id <> $3 LIMIT 1",
+    [guildId, roleId, excludedUserId],
+  );
+  return row?.user_id ?? null;
+}
+
+export function legacyRoleTakeoverProblem(
+  guildId: string,
+  role: Pick<Role, "id" | "managed" | "position" | "permissions">,
+  settings: CustomRoleSettings,
+  botHighestRolePosition: number | null,
+): string | null {
+  if (role.id === guildId) return "The old role is @everyone.";
+  if (role.managed) return "The old role is managed by Discord or an integration.";
+  if (botHighestRolePosition === null || role.position >= botHighestRolePosition) {
+    return "The old role is at or above the bot's highest role.";
+  }
+  if (LEGACY_MODERATION_PERMISSIONS.some(permission => role.permissions.has(permission))) {
+    return "The old role has moderation or administration permissions.";
+  }
+  if (role.id === settings.anchor_role_id) return "The old role is the configured Custom Roles anchor.";
+  if (settings.allowed_role_ids.includes(role.id)) return "The old role is configured as an eligibility role.";
+  return null;
+}
+
 export async function planLegacyCustomRoleImport(guild: Guild): Promise<LegacyCustomRoleImportPlan> {
   let legacyRows: Array<{ user_id: string; role_id: string }>;
   try {
@@ -429,6 +473,9 @@ export async function planLegacyCustomRoleImport(guild: Guild): Promise<LegacyCu
       reason: null,
     };
     const current = recordsByUser.get(userId);
+    const roleProblem = role
+      ? legacyRoleTakeoverProblem(guild.id, role, settings, botMember?.roles.highest.position ?? null)
+      : null;
     if (!/^\d{17,20}$/.test(userId) || !/^\d{17,20}$/.test(roleId)) {
       entry.reason = "Legacy record has an invalid Discord ID.";
       result.skipped.push(entry);
@@ -441,23 +488,8 @@ export async function planLegacyCustomRoleImport(guild: Guild): Promise<LegacyCu
     } else if (!role) {
       entry.reason = "The old Discord role no longer exists.";
       result.skipped.push(entry);
-    } else if (role.id === guild.id) {
-      entry.reason = "The old role is @everyone.";
-      result.skipped.push(entry);
-    } else if (role.managed) {
-      entry.reason = "The old role is managed by Discord or an integration.";
-      result.skipped.push(entry);
-    } else if (!botMember || role.position >= botMember.roles.highest.position) {
-      entry.reason = "The old role is at or above the bot's highest role.";
-      result.skipped.push(entry);
-    } else if (LEGACY_MODERATION_PERMISSIONS.some(permission => role.permissions.has(permission))) {
-      entry.reason = "The old role has moderation or administration permissions.";
-      result.skipped.push(entry);
-    } else if (role.id === settings.anchor_role_id) {
-      entry.reason = "The old role is the configured Custom Roles anchor.";
-      result.skipped.push(entry);
-    } else if (settings.allowed_role_ids.includes(role.id)) {
-      entry.reason = "The old role is configured as an eligibility role.";
+    } else if (roleProblem) {
+      entry.reason = roleProblem;
       result.skipped.push(entry);
     } else if (recordedRoleIds.has(roleId) || seenRoleIds.has(roleId)) {
       entry.reason = "That Discord role is already linked to another Custom Role record.";
