@@ -4,12 +4,12 @@ export interface DatabaseConfig {
 }
 export interface BotConfig {
  discordToken:string; applicationId:string; anilistApiUrl:string; anilistTimeoutMs:number;
- database:DatabaseConfig; adminDiscordId:string|null; dashboardBridgeSecret:string; dashboardAtlasBridgePort:number;
+ database:DatabaseConfig; adminDiscordId:string|null; dashboardBridgeSecret:string; dashboardBridgeHost:string; dashboardBridgePort:number; dashboardAtlasBridgePort:number;
  customRolePickerEnabled:boolean; customRolePickerHost:string; customRolePickerPort:number;
  customRolesReconcileMinutes:number; customRolesMassArchiveThreshold:number; customRolePickerIdleTtl:number; customRolePickerMaxTtl:number; customRolesPublicUrl:string;
  customRolesTrustProxy:boolean; customRoleIconSourceMaxBytes:number;
  tmdbBearerToken?:string; googleBooksApiKey?:string; igdbClientId?:string; igdbClientSecret?:string;
- steamApiKey?:string; archiveUploadMaxBytes:number; logLevel:"debug"|"info"|"warn"|"error"; botModeratorGuildId:string|null;
+ steamApiKey?:string; archiveUploadMaxBytes:number; s3EndpointUrl?:string; s3Region:string; s3AccessKeyId?:string; s3SecretAccessKey?:string; s3Bucket:string|null; s3SignedUrlTtlSeconds:number; logLevel:"debug"|"info"|"warn"|"error"; botModeratorGuildId:string|null;
 }
 function required(env:NodeJS.ProcessEnv,key:string):string{const value=env[key]?.trim();if(!value)throw new Error(`Missing required environment variable: ${key}`);return value;}
 function positive(value:string|undefined,fallback:number,key:string):number{if(!value?.trim())return fallback;const n=Number(value);if(!Number.isSafeInteger(n)||n<1)throw new Error(`${key} must be a positive integer.`);return n;}
@@ -61,7 +61,21 @@ export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
  const adminDiscordId=env.ADMIN_DISCORD_ID?.trim()||null;
  if(adminDiscordId&&!/^\d{17,20}$/.test(adminDiscordId))throw new Error("ADMIN_DISCORD_ID must be a valid Discord user ID.");
  const database=databaseConfig(env);
+ const s3EndpointUrl=env.S3_ENDPOINT_URL?.trim()||undefined;
+ const s3Region=env.S3_REGION?.trim()||"us-east-1";
+ const s3AccessKeyId=env.S3_ACCESS_KEY_ID?.trim()||undefined;
+ const s3SecretAccessKey=env.S3_SECRET_ACCESS_KEY?.trim()||undefined;
+ if(Boolean(s3AccessKeyId)!==Boolean(s3SecretAccessKey))throw new Error("S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be configured together.");
+ const s3Bucket=env.S3_BUCKET?.trim()||null;
+ const s3SignedUrlTtlSeconds=Math.max(60,Math.min(3600,positive(env.S3_SIGNED_URL_TTL_SECONDS,900,"S3_SIGNED_URL_TTL_SECONDS")));
  const dashboardBridgeSecret=env.DASHBOARD_BRIDGE_SECRET?.trim()??"";
+ const dashboardBridgeHostRaw=env.DASHBOARD_BRIDGE_HOST?.trim()||"127.0.0.1";
+ const dashboardBridgeHost=dashboardBridgeHostRaw==="[::1]"?"::1":dashboardBridgeHostRaw;
+ const bridgeHostParts=dashboardBridgeHost.split(".");
+ const bridgeLoopbackV4=bridgeHostParts.length===4&&Number(bridgeHostParts[0])===127&&bridgeHostParts.every(part=>/^\d{1,3}$/.test(part)&&Number(part)>=0&&Number(part)<=255);
+ if(!(dashboardBridgeHost==="localhost"||dashboardBridgeHost==="::1"||bridgeLoopbackV4))throw new Error("DASHBOARD_BRIDGE_HOST must be a loopback address.");
+ const dashboardBridgePort=positive(env.DASHBOARD_BRIDGE_PORT,8091,"DASHBOARD_BRIDGE_PORT");
+ if(dashboardBridgePort>65535)throw new Error("DASHBOARD_BRIDGE_PORT must be between 1 and 65535.");
  const dashboardAtlasBridgePort=positive(env.DASHBOARD_ATLAS_BRIDGE_PORT,8093,"DASHBOARD_ATLAS_BRIDGE_PORT");
  if(dashboardAtlasBridgePort>65535)throw new Error("DASHBOARD_ATLAS_BRIDGE_PORT must be between 1 and 65535.");
  const anilistApiUrl=env.ANILIST_API_URL?.trim()||"https://graphql.anilist.co";const parsed=new URL(anilistApiUrl);
@@ -93,13 +107,14 @@ export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
  const logLevel=(env.LOG_LEVEL?.trim().toLowerCase()||"info") as BotConfig["logLevel"];
  if(!["debug","info","warn","error"].includes(logLevel))throw new Error("LOG_LEVEL must be debug, info, warn, or error.");
  if(Boolean(env.IGDB_CLIENT_ID?.trim())!==Boolean(env.IGDB_CLIENT_SECRET?.trim()))throw new Error("IGDB_CLIENT_ID and IGDB_CLIENT_SECRET must be configured together.");
- return {discordToken,applicationId,botModeratorGuildId,adminDiscordId,database,dashboardBridgeSecret,dashboardAtlasBridgePort,anilistApiUrl:parsed.toString(),anilistTimeoutMs:positive(env.ANILIST_API_TIMEOUT,10,"ANILIST_API_TIMEOUT")*1000,
+ return {discordToken,applicationId,botModeratorGuildId,adminDiscordId,database,dashboardBridgeSecret,dashboardBridgeHost,dashboardBridgePort,dashboardAtlasBridgePort,anilistApiUrl:parsed.toString(),anilistTimeoutMs:positive(env.ANILIST_API_TIMEOUT,10,"ANILIST_API_TIMEOUT")*1000,
  ...(env.TMDB_BEARER_TOKEN?.trim()?{tmdbBearerToken:env.TMDB_BEARER_TOKEN.trim()}:{}),
  ...(env.GOOGLE_BOOKS_API_KEY?.trim()?{googleBooksApiKey:env.GOOGLE_BOOKS_API_KEY.trim()}:{}),
  ...(env.IGDB_CLIENT_ID?.trim()?{igdbClientId:env.IGDB_CLIENT_ID.trim()}:{}),
  ...(env.IGDB_CLIENT_SECRET?.trim()?{igdbClientSecret:env.IGDB_CLIENT_SECRET.trim()}:{}),
  ...(env.STEAM_API_KEY?.trim()?{steamApiKey:env.STEAM_API_KEY.trim()}:{}),
  archiveUploadMaxBytes:Math.min(positive(env.ARCHIVE_UPLOAD_MAX_BYTES,20*1024*1024,"ARCHIVE_UPLOAD_MAX_BYTES"),20*1024*1024),
+ s3EndpointUrl,s3Region,...(s3AccessKeyId?{s3AccessKeyId}:{}),...(s3SecretAccessKey?{s3SecretAccessKey}:{}),s3Bucket,s3SignedUrlTtlSeconds,
  customRolePickerEnabled:["1","true","yes","on"].includes(pickerEnabled),customRolePickerHost:pickerHost,
  customRolePickerPort:pickerPort,
  customRolesReconcileMinutes,customRolesMassArchiveThreshold,customRolePickerIdleTtl:pickerIdleTtl,customRolePickerMaxTtl:pickerMaxTtl,
