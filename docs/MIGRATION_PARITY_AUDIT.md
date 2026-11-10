@@ -14,15 +14,15 @@ The Draft branch currently has **zero Python files**. That is a file-extension r
 | Snapshot | Python files | TypeScript/TSX files | TypeScript non-test files | TypeScript test files |
 |---|---:|---:|---:|---:|
 | `multi_guild` base | 167 | 0 | 0 | 0 |
-| `lemegeton-v3` Draft head at `d9b4c1b` (10 November 2026) | 0 | 110 | 78 | 32 |
+| `lemegeton-v3` Draft head at `cdcfa08` (10 November 2026) | 0 | 111 | 78 | 33 |
 
-The base's 167 Python files total approximately 3.68 MB. The current Draft head contains thirty-two TypeScript test modules; the `multi_guild` source tree contains fifty Python test modules. Module counts are not a coverage metric. The goal is to map each in-scope scenario to a focused TypeScript test or a documented reason it remains a live-service acceptance item, not to reproduce every file one-for-one.
+The base's 167 Python files total approximately 3.68 MB. The current Draft head contains thirty-three TypeScript test modules; the `multi_guild` source tree contains fifty Python test modules. Module counts are not a coverage metric. The goal is to map each in-scope scenario to a focused TypeScript test or a documented reason it remains a live-service acceptance item, not to reproduce every file one-for-one.
 
 The Draft branch already has a Node.js/TypeScript bot startup path, a TypeScript build/test pipeline, and a Rust dashboard service. The current `scripts/start.sh`, Dockerfile, Compose configuration, and TypeScript CI workflows do not invoke Python. A TypeScript startup path and passing branch CI are repository evidence only; they do not establish that any bot has been deployed.
 
 ## Focused migration follow-up — 10 November 2026
 
-The current branch tree contains 177 tracked files: zero Python files, 110 TypeScript/TSX files (78 non-test files and 32 test modules). The count is a snapshot of the branch tree, not a statement of feature completeness.
+The current branch tree contains 178 tracked files: zero Python files, 111 TypeScript/TSX files (78 non-test files and 33 test modules). The count is a snapshot of the branch tree, not a statement of feature completeness.
 
 The following verified follow-ups were made on the Draft branch after the initial audit snapshot:
 
@@ -33,6 +33,7 @@ The following verified follow-ups were made on the Draft branch after the initia
 - Custom Role picker tokens now enforce the existing in-memory capacity bound; focused tests cover token uniqueness, per-guild/member scoping, replacement, idle and absolute expiry, and separate read/write rate limits.
 - Custom Role image tests cover PNG/JPEG handling, crop bounds, source/output limits, malformed/HEIC rejection and palette extraction. Archive-threshold parsing tests preserve the documented default and zero floor.
 - `/discover` restores AniList airing filters (title, season/year, weekday and bounded date window) with pagination and owner-scoped controls; `tests/anilist-airing.test.ts` covers the provider query and validation. Mixed-media comparison accepts two to four titles across supported categories and lets the user select exact provider results; `tests/media-comparison.test.ts` covers input validation. Webnovel scraping remains excluded.
+- Google Books now has dedicated tests for query parameters, whitespace/subject validation, metadata normalization, ISBN extraction, HTTPS image URLs, malformed entries and provider failures; the subject sanitizer was corrected to collapse actual whitespace.
 - The `/discover` 3×3 grid accepts exact AniList anime/manga/character URLs and IGDB game URLs while retaining the title-input mode; it rejects unsafe, mixed and untrusted links. `tests/media-grid.test.ts` covers URL parsing, provider allowlists and media-type consistency.
 - Knowledge Atlas now includes TMDB collection membership, exact-title cross-provider matches explicitly labelled as unverified, and AniList/TMDB release order only where every required date is complete. Release order is expressly not story chronology.
 - The dashboard CI job parses .env.example using Node's native env-file parser. Duplicate S3 variables and shell-style export lines were removed from the template, and its bridge-secret example was left empty rather than presenting a reusable credential.
@@ -40,10 +41,10 @@ The following verified follow-ups were made on the Draft branch after the initia
 
 ## CI verification — 10 November 2026
 
-Latest CI snapshot: branch head `d9b4c1b6a5458ed22242129c469d059a570bc023`.
+Latest CI snapshot: code-bearing branch head `cdcfa08b998654bb19da211975f712697ef69ec6`.
 
-- [TypeScript bot checks](https://github.com/Kyerstorm/Lemegeton/actions/runs/42803020600) — **passed** (type-check and test job).
-- [Dashboard security and backend checks](https://github.com/Kyerstorm/Lemegeton/actions/runs/42803020782) — running when this audit snapshot was written; do not treat it as passed until GitHub reports success.
+- [TypeScript bot checks](https://github.com/Kyerstorm/Lemegeton/actions/runs/42803939032) — **passed** (type-check and all 146 tests).
+- [Dashboard security and backend checks](https://github.com/Kyerstorm/Lemegeton/actions/runs/42803938648) — running when this audit snapshot was written; do not treat it as passed until GitHub reports success.
 
 Even when both workflows pass, CI does not prove live Discord permissions, third-party credentials, S3 deletion recovery or target-PostgreSQL migration/restore.
 
@@ -105,7 +106,7 @@ The base source tree also contains backup, under-maintenance, test, and helper f
 
 - GitHub's branch comparison reports `lemegeton-v3` as diverged from `multi_guild`: **501 commits ahead, 86 commits behind**, merge base `e7c7c99728fc71c30a9bff65d5eed194ae8ffaf1`. PR #17 currently reports `mergeable=false` / `mergeable_state=dirty`. No synchronization or conflict resolution was attempted in this audit; resolve deliberately on the PR branch only, preserving the base branch and all work from both sides.
 - No live Discord test server/application credentials were available for gateway-intent, channel-permission, component-authorization, command-registration, thread and scheduled-delivery acceptance.
-- No target PostgreSQL instance or sanitized target schema/data snapshot was available. CI verifies Rust/TypeScript builds and tests, not real source-to-target data import, restore, or rollback.
+- No target PostgreSQL instance or sanitized data snapshot was available, so this audit cannot verify schema application or recovery against the intended database. The Python files on `multi_guild` are source-reference code, not an assumed running or deployed service; no import from a Python runtime is presumed necessary. If there is pre-existing database data that must be retained, confirm that requirement and test its migration/restore separately.
 - Guild departure currently retains guild-owned records. Whether a future guild removal should retain or purge those records is an owner/privacy decision; no destructive cleanup is inferred.
 - Interactive release-calendar previews use independent provider requests and retain successful provider results when another selected provider fails; `/community` names unavailable providers and makes clear that the remaining results are partial. Tests cover one-provider failure and the all-selected-providers-unavailable case. Scheduled release digests deliberately use stricter delivery semantics: if any selected provider is unavailable, the digest is not sent or marked complete and the delivery remains queued for retry. Verify this retry behavior against PostgreSQL and a live Discord test channel.
 
