@@ -97,6 +97,75 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     );
 
     await admin.query(`
+      CREATE TABLE "${schema}".community_media_brackets (
+        bracket_id VARCHAR(16) PRIMARY KEY,
+        guild_id BIGINT NOT NULL,
+        creator_id BIGINT NOT NULL,
+        title VARCHAR(200) NOT NULL,
+        media_type VARCHAR(32) NOT NULL,
+        candidates TEXT NOT NULL,
+        status VARCHAR(16) NOT NULL DEFAULT 'open',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await admin.query(
+      `INSERT INTO "${schema}".community_media_brackets
+        (bracket_id, guild_id, creator_id, title, media_type, candidates, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'open')`,
+      ["bracket-1", "987654321098765432", "101", "Best fantasy anime", "Anime", JSON.stringify(["Show A", "Show B", "Show C"])],
+    );
+    await admin.query(`
+      CREATE TABLE "${schema}".community_media_bracket_votes (
+        guild_id BIGINT NOT NULL,
+        bracket_id VARCHAR(16) NOT NULL,
+        user_id BIGINT NOT NULL,
+        candidate TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (guild_id, bracket_id, user_id)
+      )
+    `);
+    await admin.query(
+      `INSERT INTO "${schema}".community_media_bracket_votes (guild_id, bracket_id, user_id, candidate)
+       VALUES ($1, $2, $3, $4)`,
+      ["987654321098765432", "bracket-1", "201", "Show B"],
+    );
+
+    await admin.query(`
+      CREATE TABLE "${schema}".community_adaptation_polls (
+        poll_id VARCHAR(16) PRIMARY KEY,
+        guild_id BIGINT NOT NULL,
+        creator_id BIGINT NOT NULL,
+        title VARCHAR(200) NOT NULL,
+        media_type VARCHAR(32) NOT NULL,
+        option_a VARCHAR(200) NOT NULL,
+        option_b VARCHAR(200) NOT NULL,
+        source_url TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await admin.query(
+      `INSERT INTO "${schema}".community_adaptation_polls
+        (poll_id, guild_id, creator_id, title, media_type, option_a, option_b, source_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      ["poll-1", "987654321098765432", "102", "Which adaptation?", "Light Novel", "Anime version", "Manga version", "https://example.com/source"],
+    );
+    await admin.query(`
+      CREATE TABLE "${schema}".community_adaptation_votes (
+        guild_id BIGINT NOT NULL,
+        poll_id VARCHAR(16) NOT NULL,
+        user_id BIGINT NOT NULL,
+        choice VARCHAR(1) NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (guild_id, poll_id, user_id)
+      )
+    `);
+    await admin.query(
+      `INSERT INTO "${schema}".community_adaptation_votes (guild_id, poll_id, user_id, choice)
+       VALUES ($1, $2, $3, 'B')`,
+      ["987654321098765432", "poll-1", "202"],
+    );
+
+    await admin.query(`
       CREATE TABLE "${schema}".steam_users (
         discord_id BIGINT NOT NULL PRIMARY KEY,
         steam_id TEXT NOT NULL,
@@ -309,6 +378,39 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       2,
       "Legacy panel rows must remain untouched after import",
     );
+
+    const importedRankings = await query<{ id: string; title: string; status: string; legacy_source_key: string }>(
+      "SELECT id, title, status, legacy_source_key FROM community_rankings WHERE legacy_source_key IS NOT NULL ORDER BY legacy_source_key",
+    );
+    assert.deepEqual(importedRankings.map(item => ({ title: item.title, status: item.status, key: item.legacy_source_key })), [
+      { title: "Which adaptation?", status: "open", key: "adaptation-poll:poll-1" },
+      { title: "Best fantasy anime", status: "open", key: "media-bracket:bracket-1" },
+    ]);
+    const bracketRanking = importedRankings.find(item => item.legacy_source_key === "media-bracket:bracket-1")!;
+    const bracketCandidates = await query<{ title: string }>(
+      "SELECT title FROM community_ranking_candidates WHERE ranking_id = $1 ORDER BY id",
+      [bracketRanking.id],
+    );
+    assert.deepEqual(bracketCandidates.map(item => item.title), ["Show A", "Show B", "Show C"]);
+    const importedBracketVote = await queryOne<{ title: string; user_id: string }>(
+      `SELECT c.title, v.user_id::text FROM community_ranking_votes v
+       JOIN community_ranking_candidates c ON c.id = v.candidate_id
+       WHERE v.ranking_id = $1`,
+      [bracketRanking.id],
+    );
+    assert.deepEqual(importedBracketVote, { title: "Show B", user_id: "201" });
+    const pollRanking = importedRankings.find(item => item.legacy_source_key === "adaptation-poll:poll-1")!;
+    assert.match((await queryOne<{ description: string }>(
+      "SELECT description FROM community_rankings WHERE id = $1",
+      [pollRanking.id],
+    ))?.description ?? "", /https:\/\/example\.com\/source/);
+    const importedPollVote = await queryOne<{ title: string; user_id: string }>(
+      `SELECT c.title, v.user_id::text FROM community_ranking_votes v
+       JOIN community_ranking_candidates c ON c.id = v.candidate_id
+       WHERE v.ranking_id = $1`,
+      [pollRanking.id],
+    );
+    assert.deepEqual(importedPollVote, { title: "Manga version", user_id: "202" });
 
     const steam = await queryOne<{ guild_id: string; steam_id: string }>(
       "SELECT guild_id, steam_id FROM steam_users WHERE discord_id = $1",
@@ -737,6 +839,19 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       (await query("SELECT id FROM community_archive_entries WHERE source_legacy_panel_id IS NOT NULL")).length,
       1,
       "Legacy panel import must be idempotent",
+    );
+    assert.equal(
+      (await query("SELECT id FROM community_rankings WHERE legacy_source_key IS NOT NULL")).length,
+      2,
+      "Legacy media poll import must be idempotent",
+    );
+    assert.equal(
+      (await query("SELECT id FROM community_ranking_candidates WHERE ranking_id IN (SELECT id FROM community_rankings WHERE legacy_source_key IS NOT NULL)")).length,
+      5,
+    );
+    assert.equal(
+      (await query("SELECT ranking_id, user_id FROM community_ranking_votes WHERE ranking_id IN (SELECT id FROM community_rankings WHERE legacy_source_key IS NOT NULL)")).length,
+      2,
     );
     assert.deepEqual(
       await queryOne<{ count: string }>("SELECT COUNT(*)::text AS count FROM issue_logs"),

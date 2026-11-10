@@ -323,6 +323,8 @@ const schemaStatements = [
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     closed_at TIMESTAMPTZ
   )`,
+  "ALTER TABLE community_rankings ADD COLUMN IF NOT EXISTS legacy_source_key TEXT",
+  "CREATE UNIQUE INDEX IF NOT EXISTS community_rankings_legacy_source_idx ON community_rankings (legacy_source_key) WHERE legacy_source_key IS NOT NULL",
   "ALTER TABLE community_rankings ADD COLUMN IF NOT EXISTS kind VARCHAR(24) NOT NULL DEFAULT 'ranking' CHECK (kind IN ('ranking','media_night'))",
   "ALTER TABLE community_rankings ADD COLUMN IF NOT EXISTS allow_vote_changes BOOLEAN NOT NULL DEFAULT TRUE",
   "ALTER TABLE community_rankings ADD COLUMN IF NOT EXISTS channel_id BIGINT",
@@ -806,6 +808,157 @@ export async function initDatabase(config: DatabaseConfig): Promise<void> {
         }
       } else {
         logger.warn("Legacy panels table has an incomplete schema; records were left in place and not imported");
+      }
+    }
+
+
+    const legacyBracketTable = await client.query<{ exists: boolean }>(
+      "SELECT to_regclass('community_media_brackets') IS NOT NULL AS exists",
+    );
+    if (legacyBracketTable.rows[0]?.exists) {
+      const legacyBrackets = await client.query<{
+        bracket_id: string; guild_id: string; creator_id: string; title: string;
+        media_type: string; candidates: string; status: string; created_at: Date;
+      }>(
+        "SELECT bracket_id, guild_id, creator_id, title, media_type, candidates, status, created_at FROM community_media_brackets",
+      );
+      const hasLegacyBracketVotes = (await client.query<{ exists: boolean }>(
+        "SELECT to_regclass('community_media_bracket_votes') IS NOT NULL AS exists",
+      )).rows[0]?.exists ?? false;
+      for (const bracket of legacyBrackets.rows) {
+        let candidates: string[];
+        try {
+          const parsed: unknown = JSON.parse(bracket.candidates);
+          if (!Array.isArray(parsed) || parsed.length < 2 || parsed.length > 16
+            || parsed.some(item => typeof item !== "string" || !item.trim() || item.length > 150)) {
+            throw new Error("Invalid bracket candidates");
+          }
+          candidates = [...new Map((parsed as string[]).map(item => [item.trim().toLocaleLowerCase("en-US"), item.trim()])).values()];
+          if (candidates.length < 2) throw new Error("Bracket candidates are not distinct");
+        } catch {
+          logger.warn("Legacy media bracket was skipped because its candidate list is invalid", {
+            bracketId: bracket.bracket_id, guildId: bracket.guild_id,
+          });
+          continue;
+        }
+        const legacyKey = "media-bracket:" + bracket.bracket_id;
+        const inserted = await client.query<{ id: string }>(
+          `INSERT INTO community_rankings
+             (guild_id, creator_id, title, description, status, legacy_source_key, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (legacy_source_key) WHERE legacy_source_key IS NOT NULL DO NOTHING
+           RETURNING id`,
+          [
+            bracket.guild_id, bracket.creator_id, bracket.title.slice(0, 180),
+            "Imported media bracket · " + bracket.media_type.slice(0, 80),
+            bracket.status === "closed" ? "closed" : "open", legacyKey, bracket.created_at,
+          ],
+        );
+        const rankingId = inserted.rows[0]?.id;
+        if (!rankingId) continue;
+        for (const title of candidates) {
+          await client.query(
+            `INSERT INTO community_ranking_candidates
+               (ranking_id, title, submitted_by, status, created_at)
+             VALUES ($1, $2, $3, 'approved', $4)
+             ON CONFLICT (ranking_id, title) DO NOTHING`,
+            [rankingId, title, bracket.creator_id, bracket.created_at],
+          );
+        }
+        if (hasLegacyBracketVotes) {
+          const votes = await client.query<{
+            user_id: string; candidate: string; updated_at: Date;
+          }>(
+            "SELECT user_id, candidate, updated_at FROM community_media_bracket_votes WHERE guild_id = $1 AND bracket_id = $2",
+            [bracket.guild_id, bracket.bracket_id],
+          );
+          for (const vote of votes.rows) {
+            await client.query(
+              `INSERT INTO community_ranking_votes (ranking_id, user_id, candidate_id, updated_at)
+               SELECT $1, $2, id, $4 FROM community_ranking_candidates
+                WHERE ranking_id = $1 AND LOWER(title) = LOWER($3)
+               ON CONFLICT (ranking_id, user_id) DO NOTHING`,
+              [rankingId, vote.user_id, vote.candidate, vote.updated_at],
+            );
+          }
+        }
+      }
+    }
+
+    const legacyAdaptationTable = await client.query<{ exists: boolean }>(
+      "SELECT to_regclass('community_adaptation_polls') IS NOT NULL AS exists",
+    );
+    if (legacyAdaptationTable.rows[0]?.exists) {
+      const legacyPolls = await client.query<{
+        poll_id: string; guild_id: string; creator_id: string; title: string;
+        media_type: string; option_a: string; option_b: string; source_url: string | null; created_at: Date;
+      }>(
+        "SELECT poll_id, guild_id, creator_id, title, media_type, option_a, option_b, source_url, created_at FROM community_adaptation_polls",
+      );
+      const hasLegacyAdaptationVotes = (await client.query<{ exists: boolean }>(
+        "SELECT to_regclass('community_adaptation_votes') IS NOT NULL AS exists",
+      )).rows[0]?.exists ?? false;
+      for (const poll of legacyPolls.rows) {
+        if (!poll.option_a.trim() || !poll.option_b.trim()
+          || poll.option_a.trim().toLocaleLowerCase("en-US") === poll.option_b.trim().toLocaleLowerCase("en-US")) {
+          logger.warn("Legacy adaptation poll was skipped because its options are invalid", {
+            pollId: poll.poll_id, guildId: poll.guild_id,
+          });
+          continue;
+        }
+        let sourceLink = "";
+        if (poll.source_url) {
+          try {
+            const url = new URL(poll.source_url);
+            if (url.protocol === "https:" && url.hostname && !url.username && !url.password) {
+              sourceLink = "\nSource metadata: " + url.toString();
+            }
+          } catch {
+            // Preserve the poll but omit an invalid optional source link.
+          }
+        }
+        const legacyKey = "adaptation-poll:" + poll.poll_id;
+        const inserted = await client.query<{ id: string }>(
+          `INSERT INTO community_rankings
+             (guild_id, creator_id, title, description, status, legacy_source_key, created_at)
+           VALUES ($1, $2, $3, $4, 'open', $5, $6)
+           ON CONFLICT (legacy_source_key) WHERE legacy_source_key IS NOT NULL DO NOTHING
+           RETURNING id`,
+          [
+            poll.guild_id, poll.creator_id, poll.title.slice(0, 180),
+            "Imported adaptation poll · " + poll.media_type.slice(0, 80) + sourceLink,
+            legacyKey, poll.created_at,
+          ],
+        );
+        const rankingId = inserted.rows[0]?.id;
+        if (!rankingId) continue;
+        const options = [poll.option_a.trim(), poll.option_b.trim()];
+        for (const title of options) {
+          await client.query(
+            `INSERT INTO community_ranking_candidates
+               (ranking_id, title, submitted_by, status, created_at)
+             VALUES ($1, $2, $3, 'approved', $4)
+             ON CONFLICT (ranking_id, title) DO NOTHING`,
+            [rankingId, title.slice(0, 200), poll.creator_id, poll.created_at],
+          );
+        }
+        if (hasLegacyAdaptationVotes) {
+          const votes = await client.query<{ user_id: string; choice: string; updated_at: Date }>(
+            "SELECT user_id, choice, updated_at FROM community_adaptation_votes WHERE guild_id = $1 AND poll_id = $2",
+            [poll.guild_id, poll.poll_id],
+          );
+          for (const vote of votes.rows) {
+            const selected = vote.choice.toUpperCase() === "A" ? options[0] : vote.choice.toUpperCase() === "B" ? options[1] : null;
+            if (!selected) continue;
+            await client.query(
+              `INSERT INTO community_ranking_votes (ranking_id, user_id, candidate_id, updated_at)
+               SELECT $1, $2, id, $4 FROM community_ranking_candidates
+                WHERE ranking_id = $1 AND LOWER(title) = LOWER($3)
+               ON CONFLICT (ranking_id, user_id) DO NOTHING`,
+              [rankingId, vote.user_id, selected.slice(0, 200), vote.updated_at],
+            );
+          }
+        }
       }
     }
 
