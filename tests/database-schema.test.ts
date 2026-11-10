@@ -49,9 +49,10 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       )
     `);
     await admin.query(
-      `INSERT INTO "${schema}".guild_settings (guild_id, panel_mod_role_id, archive_scope)
-       VALUES ($1, $2, 'server')`,
-      ["987654321098765432", "222222222222222222"],
+      `INSERT INTO "${schema}".guild_settings
+        (guild_id, panel_storage_channel_id, panel_log_channel_id, panel_mod_role_id, archive_scope)
+       VALUES ($1, $2, $3, $4, 'server')`,
+      ["987654321098765432", "333333333333333333", "444444444444444444", "222222222222222222"],
     );
 
     await admin.query(`
