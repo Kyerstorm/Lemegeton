@@ -195,12 +195,18 @@ export async function claimDueMediaNightResults(): Promise<Array<{
     await client.query(
       `UPDATE community_rankings
          SET status = 'closed', closed_at = COALESCE(closed_at, NOW())
-       WHERE kind = 'media_night' AND status = 'open' AND closes_at <= NOW()`,
+       WHERE kind = 'media_night' AND status = 'open' AND closes_at <= NOW()
+         AND guild_id IN (
+           SELECT guild_id FROM guild_retention_settings WHERE leave_action IN ('delete','retain')
+         )`,
     );
     const due = await client.query<{ id: string; guild_id: string; channel_id: string; title: string }>(
       `SELECT id::text, guild_id::text, channel_id::text, title
          FROM community_rankings
         WHERE kind = 'media_night' AND status = 'closed' AND channel_id IS NOT NULL
+          AND guild_id IN (
+            SELECT guild_id FROM guild_retention_settings WHERE leave_action IN ('delete','retain')
+          )
           AND results_sent_at IS NULL
           AND (results_next_attempt_at IS NULL OR results_next_attempt_at <= NOW())
         ORDER BY closed_at ASC LIMIT 20
