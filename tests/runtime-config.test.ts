@@ -23,6 +23,32 @@ test("loads safe defaults for a local TypeScript bot", () => {
   assert.equal(config.botModeratorGuildId, null);
 });
 
+test("Custom Roles preview switches are development-only", () => {
+  const enabled = loadConfig(environment({
+    ENVIRONMENT: "development",
+    CUSTOM_ROLES_DEBUG_PREVIEW_ENHANCED_COLORS: "true",
+    CUSTOM_ROLES_DEBUG_PREVIEW_ROLE_ICONS: "yes",
+  }));
+  assert.equal(enabled.customRolesDebugPreviewEnhancedColors, true);
+  assert.equal(enabled.customRolesDebugPreviewRoleIcons, true);
+
+  const production = loadConfig(environment({
+    ENVIRONMENT: "production",
+    CUSTOM_ROLES_DEBUG_PREVIEW_ENHANCED_COLORS: "true",
+    CUSTOM_ROLES_DEBUG_PREVIEW_ROLE_ICONS: "true",
+  }));
+  assert.equal(production.customRolesDebugPreviewEnhancedColors, false);
+  assert.equal(production.customRolesDebugPreviewRoleIcons, false);
+
+  const nodeProduction = loadConfig(environment({
+    NODE_ENV: "production",
+    CUSTOM_ROLES_DEBUG_PREVIEW_ENHANCED_COLORS: "true",
+    CUSTOM_ROLES_DEBUG_PREVIEW_ROLE_ICONS: "true",
+  }));
+  assert.equal(nodeProduction.customRolesDebugPreviewEnhancedColors, false);
+  assert.equal(nodeProduction.customRolesDebugPreviewRoleIcons, false);
+});
+
 test("loads and validates the configured Custom Roles reconciliation interval", () => {
   const config = loadConfig(environment({ CUSTOM_ROLES_RECONCILE_MINUTES: "7" }));
   assert.equal(config.customRolesReconcileMinutes, 7);
