@@ -3,7 +3,7 @@ export interface DatabaseConfig {
  ssl:boolean; sslCaFile?:string; poolSize:number; primaryGuildId:string|null;
 }
 export interface BotConfig {
- discordToken:string; applicationId:string; anilistApiUrl:string; anilistTimeoutMs:number;
+ discordToken:string; applicationId:string; anilistApiUrl:string; anilistTimeoutMs:number; botFeedbackChannelId:string|null; archiveGlobalModeratorIds:string[];
  database:DatabaseConfig; adminDiscordId:string|null; dashboardBridgeSecret:string; dashboardBridgeHost:string; dashboardBridgePort:number; dashboardAtlasBridgePort:number;
  customRolePickerEnabled:boolean; customRolePickerHost:string; customRolePickerPort:number;
  customRolesReconcileMinutes:number; customRolesMassArchiveThreshold:number; customRolePickerIdleTtl:number; customRolePickerMaxTtl:number; customRolesPublicUrl:string;
@@ -59,6 +59,9 @@ export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
  const botModeratorGuildId=env.BOT_MODERATOR_GUILD_ID?.trim()||null;
  if(botModeratorGuildId&&!/^\d{17,20}$/.test(botModeratorGuildId))throw new Error("BOT_MODERATOR_GUILD_ID must be a valid 17–20 digit Discord server ID.");
  const adminDiscordId=env.ADMIN_DISCORD_ID?.trim()||null;
+ const botFeedbackChannelId=env.BOT_FEEDBACK_CHANNEL_ID?.trim()||null;
+ if(botFeedbackChannelId&&!/^\d{17,20}$/.test(botFeedbackChannelId))throw new Error("BOT_FEEDBACK_CHANNEL_ID must be a valid Discord channel ID.");
+ const archiveGlobalModeratorIds=[...new Set((env.ARCHIVE_GLOBAL_MODERATOR_IDS??"").split(",").map(id=>id.trim()).filter(id=>/^\d{17,20}$/.test(id)))];
  if(adminDiscordId&&!/^\d{17,20}$/.test(adminDiscordId))throw new Error("ADMIN_DISCORD_ID must be a valid Discord user ID.");
  const database=databaseConfig(env);
  const s3EndpointUrl=env.S3_ENDPOINT_URL?.trim()||undefined;
@@ -107,7 +110,7 @@ export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
  const logLevel=(env.LOG_LEVEL?.trim().toLowerCase()||"info") as BotConfig["logLevel"];
  if(!["debug","info","warn","error"].includes(logLevel))throw new Error("LOG_LEVEL must be debug, info, warn, or error.");
  if(Boolean(env.IGDB_CLIENT_ID?.trim())!==Boolean(env.IGDB_CLIENT_SECRET?.trim()))throw new Error("IGDB_CLIENT_ID and IGDB_CLIENT_SECRET must be configured together.");
- return {discordToken,applicationId,botModeratorGuildId,adminDiscordId,database,dashboardBridgeSecret,dashboardBridgeHost,dashboardBridgePort,dashboardAtlasBridgePort,anilistApiUrl:parsed.toString(),anilistTimeoutMs:positive(env.ANILIST_API_TIMEOUT,10,"ANILIST_API_TIMEOUT")*1000,
+ return {discordToken,applicationId,botModeratorGuildId,adminDiscordId,botFeedbackChannelId,archiveGlobalModeratorIds,database,dashboardBridgeSecret,dashboardBridgeHost,dashboardBridgePort,dashboardAtlasBridgePort,anilistApiUrl:parsed.toString(),anilistTimeoutMs:positive(env.ANILIST_API_TIMEOUT,10,"ANILIST_API_TIMEOUT")*1000,
  ...(env.TMDB_BEARER_TOKEN?.trim()?{tmdbBearerToken:env.TMDB_BEARER_TOKEN.trim()}:{}),
  ...(env.GOOGLE_BOOKS_API_KEY?.trim()?{googleBooksApiKey:env.GOOGLE_BOOKS_API_KEY.trim()}:{}),
  ...(env.IGDB_CLIENT_ID?.trim()?{igdbClientId:env.IGDB_CLIENT_ID.trim()}:{}),
