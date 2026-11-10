@@ -679,12 +679,18 @@ export async function initDatabase(config: DatabaseConfig): Promise<void> {
     const pendingUserIdsType = pendingUserIdsColumn.rows[0]?.data_type;
     if (pendingUserIdsType && pendingUserIdsType !== "jsonb") {
       await client.query(
+        "ALTER TABLE custom_role_pending_removals ALTER COLUMN user_ids DROP DEFAULT",
+      );
+      await client.query(
         `ALTER TABLE custom_role_pending_removals
          ALTER COLUMN user_ids TYPE JSONB
          USING CASE
            WHEN user_ids IS NULL OR BTRIM(user_ids::text) = '' THEN '[]'::JSONB
            ELSE user_ids::text::JSONB
          END`,
+      );
+      await client.query(
+        "ALTER TABLE custom_role_pending_removals ALTER COLUMN user_ids SET DEFAULT '[]'::JSONB",
       );
       logger.info("Existing Custom Roles pending-removal records migrated to JSONB");
     }
