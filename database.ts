@@ -649,6 +649,56 @@ export async function initDatabase(config: DatabaseConfig): Promise<void> {
     await client.query("BEGIN");
     for (const statement of schemaStatements) await client.query(statement);
 
+    await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS guild_id BIGINT");
+    const usersWithoutGuild = await client.query<{ count: string }>(
+      "SELECT COUNT(*)::text AS count FROM users WHERE guild_id IS NULL",
+    );
+    if (Number(usersWithoutGuild.rows[0]?.count ?? 0) > 0) {
+      if (!config.primaryGuildId) {
+        throw new Error("GUILD_ID or PRIMARY_GUILD_ID must be configured to safely assign existing users that have no guild_id.");
+      }
+      await client.query("UPDATE users SET guild_id = $1 WHERE guild_id IS NULL", [config.primaryGuildId]);
+    }
+    const userIdentifierColumns = await client.query<{ column_name: string; data_type: string }>(
+      `SELECT column_name, data_type FROM information_schema.columns
+       WHERE table_schema = current_schema() AND table_name = 'users'
+         AND column_name = ANY($1::text[])`,
+      [["discord_id", "guild_id", "anilist_id"]],
+    );
+    for (const column of userIdentifierColumns.rows) {
+      if (column.data_type !== "bigint") {
+        await client.query(
+          `ALTER TABLE users ALTER COLUMN ${column.column_name} TYPE BIGINT USING ${column.column_name}::BIGINT`,
+        );
+      }
+    }
+    await client.query("ALTER TABLE users ALTER COLUMN guild_id SET NOT NULL");
+
+    const userUniqueConstraints = await client.query<{ constraint_name: string }>(
+      `SELECT constraint_name FROM information_schema.table_constraints
+       WHERE table_schema = current_schema() AND table_name = 'users'
+         AND constraint_type = 'UNIQUE'`,
+    );
+    let hasGuildScopedUserKey = false;
+    for (const constraint of userUniqueConstraints.rows) {
+      const columns = await client.query<{ column_name: string; ordinal_position: number }>(
+        `SELECT column_name, ordinal_position FROM information_schema.key_column_usage
+         WHERE table_schema = current_schema() AND table_name = 'users' AND constraint_name = $1
+         ORDER BY ordinal_position`,
+        [constraint.constraint_name],
+      );
+      const key = columns.rows.map(row => row.column_name).join(",");
+      if (key === "discord_id") {
+        const safeName = constraint.constraint_name.replaceAll('"', '""');
+        await client.query(`ALTER TABLE users DROP CONSTRAINT "${safeName}"`);
+      } else if (key === "discord_id,guild_id") {
+        hasGuildScopedUserKey = true;
+      }
+    }
+    if (!hasGuildScopedUserKey) {
+      await client.query("ALTER TABLE users ADD CONSTRAINT users_discord_guild_unique UNIQUE (discord_id, guild_id)");
+    }
+
     const legacySnowflakeColumns = [
       ["bot_moderators", ["discord_id", "added_by"]],
       ["custom_role_records", ["guild_id", "user_id", "role_id", "icon_source_asset_id"]],
