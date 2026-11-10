@@ -174,6 +174,11 @@ export async function claimDueReadingReminders(): Promise<Array<{
       `SELECT guild_id,id AS nomination_id,thread_id,title,scheduled_at
          FROM community_reading_nominations
         WHERE status = 'selected' AND thread_id IS NOT NULL AND scheduled_at <= NOW()
+          AND EXISTS (
+            SELECT 1 FROM guild_retention_settings retention
+             WHERE retention.guild_id = community_reading_nominations.guild_id
+               AND retention.leave_action IN ('delete','retain')
+          )
           AND reminder_sent = FALSE
           AND (last_reminder_attempt_at IS NULL OR last_reminder_attempt_at < NOW() - INTERVAL '5 minutes')
         ORDER BY scheduled_at ASC LIMIT 20 FOR UPDATE SKIP LOCKED`,
