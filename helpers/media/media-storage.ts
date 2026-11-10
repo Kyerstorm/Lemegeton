@@ -150,15 +150,71 @@ export async function signedArchiveAssetUrl(assetId: number): Promise<string | n
   }), { expiresIn: ttl });
 }
 
+export function archiveAssetCleanupBackoffSeconds(attempt: number): number {
+  const retry = Number.isFinite(attempt) ? Math.max(1, Math.floor(attempt)) : 1;
+  return Math.min(86_400, 60 * 2 ** Math.min(retry - 1, 11));
+}
+
+export async function queueArchiveAssetCleanup(assetId: number): Promise<boolean> {
+  const asset = await queryOne<{ id: string }>("SELECT id FROM media_assets WHERE id = $1", [assetId]);
+  if (!asset) return false;
+  await query(
+    "INSERT INTO media_asset_cleanup_queue (asset_id) VALUES ($1) ON CONFLICT (asset_id) DO NOTHING",
+    [assetId],
+  );
+  return true;
+}
+
 export async function deleteArchiveAsset(assetId: number): Promise<boolean> {
   const asset = await queryOne<{ bucket_name: string; object_key: string }>(
     "SELECT bucket_name, object_key FROM media_assets WHERE id = $1",
     [assetId],
   );
   if (!asset) return false;
-  await s3Client().send(new DeleteObjectCommand({ Bucket: asset.bucket_name, Key: asset.object_key }));
-  await query("DELETE FROM media_assets WHERE id = $1", [assetId]);
-  return true;
+  await queueArchiveAssetCleanup(assetId);
+  const references = await queryOne<{ referenced: boolean }>(
+    "SELECT (EXISTS (SELECT 1 FROM community_archive_entry_assets WHERE asset_id = $1) OR EXISTS (SELECT 1 FROM community_archive_entries WHERE media_asset_id = $1)) AS referenced",
+    [assetId],
+  );
+  if (references?.referenced) {
+    await query("DELETE FROM media_asset_cleanup_queue WHERE asset_id = $1", [assetId]);
+    return false;
+  }
+  try {
+    await s3Client().send(new DeleteObjectCommand({ Bucket: asset.bucket_name, Key: asset.object_key }));
+    await query("DELETE FROM media_assets WHERE id = $1", [assetId]);
+    return true;
+  } catch (error) {
+    const queued = await queryOne<{ attempts: number }>(
+      "SELECT attempts FROM media_asset_cleanup_queue WHERE asset_id = $1",
+      [assetId],
+    ).catch(() => null);
+    const attempts = Number(queued?.attempts ?? 0) + 1;
+    await query(
+      "UPDATE media_asset_cleanup_queue SET attempts = $2, next_attempt_at = NOW() + ($3 * INTERVAL '1 second'), last_error = 'Private object deletion failed' WHERE asset_id = $1",
+      [assetId, attempts, archiveAssetCleanupBackoffSeconds(attempts)],
+    ).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function processArchiveAssetCleanup(limit = 10): Promise<{ attempted: number; failed: number }> {
+  const boundedLimit = Math.min(50, Math.max(1, Math.floor(limit)));
+  const due = await query<{ asset_id: string }>(
+    "SELECT asset_id::text FROM media_asset_cleanup_queue WHERE next_attempt_at <= NOW() ORDER BY next_attempt_at ASC LIMIT $1",
+    [boundedLimit],
+  );
+  let attempted = 0;
+  let failed = 0;
+  for (const item of due) {
+    attempted += 1;
+    try {
+      await deleteArchiveAsset(Number(item.asset_id));
+    } catch {
+      failed += 1;
+    }
+  }
+  return { attempted, failed };
 }
 
 

@@ -22,6 +22,7 @@ import {onCustomRoleMemberAdd,onCustomRoleMemberRemove,onCustomRoleMemberUpdate,
 import {startCustomRolePicker,stopCustomRolePicker} from "./helpers/custom-roles/custom-role-picker-server.js";
 import {startDashboardBridge,stopDashboardBridge} from "./helpers/runtime/dashboard-bridge.js";
 import {startMediaNotificationScheduler,stopMediaNotificationScheduler} from "./helpers/media/media-notifications.js";
+import {processArchiveAssetCleanup} from "./helpers/media/media-storage.js";
 
 const config=loadConfig();configureLogger(config.logLevel);
 const client=new Client({intents:[GatewayIntentBits.Guilds,GatewayIntentBits.GuildMembers,GatewayIntentBits.GuildMessages,GatewayIntentBits.MessageContent]});
@@ -237,6 +238,12 @@ function scheduleDailyDrops():void{
 async function processDailyDrops():Promise<void>{
  if(workerRunning||!client.isReady())return;workerRunning=true;
  try{
+  try {
+   const cleanup=await processArchiveAssetCleanup();
+   if(cleanup.failed)logger.warn("Private Archive asset cleanup will retry",{attempted:cleanup.attempted,failed:cleanup.failed});
+  } catch(error) {
+   logger.warn("Private Archive asset cleanup queue could not be checked",{reason:error instanceof Error?error.message:"Unknown error"});
+  }
   for(const schedule of await dueDailySchedules()){
    try{await prepareDailyDelivery(schedule);}
    catch(error){logger.error("Could not prepare Daily Drop",{guildId:schedule.guild_id,reason:error instanceof Error?error.message:"Unknown error"});}

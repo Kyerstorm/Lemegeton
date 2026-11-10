@@ -4,7 +4,7 @@ import {
   type Message,
 } from "discord.js";
 import { query, queryOne } from "../../database.js";
-import { deleteArchiveAsset } from "../media/media-storage.js";
+import { deleteArchiveAsset, queueArchiveAssetCleanup } from "../media/media-storage.js";
 import { archiveUploadAllowed, storeArchiveUpload } from "../media/media-storage.js";
 import { cleanText, isValidHttpsUrl, normalizeTags } from "../security/security.js";
 import { GLOBAL_MODERATOR_IDS, isGlobalArchiveModerator } from "./archive-access.js";
@@ -535,12 +535,14 @@ export async function deleteArchiveEntry(
     "SELECT asset_id FROM community_archive_entry_assets WHERE entry_id = $1 ORDER BY position ASC",
     [entryId],
   );
+  // Queue assets before deleting their owning entry so a crash cannot lose the cleanup work.
+  for (const asset of assets) await queueArchiveAssetCleanup(Number(asset.asset_id));
   await query("DELETE FROM community_archive_entries WHERE id = $1", [entryId]);
   for (const asset of assets) {
     try {
       await deleteArchiveAsset(Number(asset.asset_id));
     } catch {
-      // The entry is already removed; a failed S3 deletion is an orphan for operator cleanup.
+      // The durable cleanup queue retries failed private-object deletions.
     }
   }
 }
