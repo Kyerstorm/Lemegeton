@@ -1434,6 +1434,32 @@ export class DiscoverCommand implements FeatureCommand {
     }
     const title = this.recordTitle(first);
     const mediaCategory = this.recordCategory(first);
+    if(first.provider==="TMDB"&&first.category==="movie"){
+      try{
+        const collection=await this.tmdb.collectionForMovie(first.item.id);
+        if(collection){
+          const relations=collection.items
+            .filter(item=>item.id!==first.item.id)
+            .map(item=>({
+              title:item.title,
+              category:"MOVIE" as const,
+              url:item.sourceUrl,
+              relationshipType:"collection member",
+            }));
+          await recordProviderRelationships({
+            sourceTitle:title,
+            sourceCategory:"MOVIE",
+            sourceUrl:this.recordUrl(first),
+            sourceLabel:("TMDB collection membership · "+collection.name).slice(0,100),
+            relations,
+          });
+        }
+      }catch(error){
+        logger.warn("TMDB collection relationships could not be indexed in Atlas",{
+          reason:error instanceof Error?error.message:"Unknown error",
+        });
+      }
+    }
     const relationships = await findAtlasRelationships(interaction.guildId, title, mediaCategory, this.recordUrl(first), 20);
     const embed = toEmbed(first).setTitle(`Knowledge Atlas · ${title}`.slice(0,256))
       .setDescription("A source-attributed view of recorded relationships. Provider links are global; community links are visible only inside the server that approved them.");
