@@ -7,13 +7,29 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { query, queryOne } from "../../database.js";
+import type { BotConfig } from "../runtime/config.js";
 
-const MAX_UPLOAD_BYTES = Math.min(
-  Number.isSafeInteger(Number(process.env.ARCHIVE_UPLOAD_MAX_BYTES)) && Number(process.env.ARCHIVE_UPLOAD_MAX_BYTES) > 0
-    ? Number(process.env.ARCHIVE_UPLOAD_MAX_BYTES)
-    : 20 * 1024 * 1024,
-  20 * 1024 * 1024,
-);
+type MediaStorageConfig = Pick<BotConfig,
+  "archiveUploadMaxBytes" | "s3EndpointUrl" | "s3Region" | "s3AccessKeyId" |
+  "s3SecretAccessKey" | "s3Bucket" | "s3SignedUrlTtlSeconds"
+>;
+let runtimeConfig: MediaStorageConfig = {
+  archiveUploadMaxBytes: 20 * 1024 * 1024,
+  s3Region: "us-east-1",
+  s3Bucket: null,
+  s3SignedUrlTtlSeconds: 900,
+};
+
+export function configureMediaStorage(config: MediaStorageConfig): void {
+  runtimeConfig = config;
+  client?.destroy();
+  client = undefined;
+  signature = "";
+}
+
+export function getArchiveUploadMaxBytes(): number {
+  return runtimeConfig.archiveUploadMaxBytes;
+}
 const MIME_BY_EXTENSION: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
   ".gif": "image/gif", ".webp": "image/webp", ".avif": "image/avif",
@@ -36,10 +52,10 @@ let client: S3Client | undefined;
 let signature = "";
 
 function s3Client(): S3Client {
-  const endpoint = process.env.S3_ENDPOINT_URL?.trim();
-  const region = process.env.S3_REGION?.trim() || "us-east-1";
-  const accessKeyId = process.env.S3_ACCESS_KEY_ID?.trim();
-  const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY?.trim();
+  const endpoint = runtimeConfig.s3EndpointUrl;
+  const region = runtimeConfig.s3Region;
+  const accessKeyId = runtimeConfig.s3AccessKeyId;
+  const secretAccessKey = runtimeConfig.s3SecretAccessKey;
   if (Boolean(accessKeyId) !== Boolean(secretAccessKey)) {
     throw new Error("S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be configured together.");
   }
@@ -70,7 +86,7 @@ export function classifyArchiveUpload(category: string, upload: ArchiveUpload): 
   if (supplied && supplied !== "application/octet-stream" && supplied !== expected) {
     throw new Error("The file type does not match its filename.");
   }
-  if (upload.bytes.byteLength < 1 || upload.bytes.byteLength > MAX_UPLOAD_BYTES) {
+  if (upload.bytes.byteLength < 1 || upload.bytes.byteLength > getArchiveUploadMaxBytes()) {
     throw new Error("Archive uploads must be between 1 byte and 20 MB.");
   }
   const kind = expected.startsWith("image/") ? "image" : expected.startsWith("audio/") ? "audio" : "video";
@@ -101,7 +117,7 @@ export async function storeArchiveUpload(
   if (!configuredUploadTypes.includes(kind)) {
     throw new Error(`This server has not enabled ${kind} uploads for the Archive.`);
   }
-  const bucket = process.env.S3_BUCKET?.trim();
+  const bucket = runtimeConfig.s3Bucket ?? undefined;
   if (!bucket) {
     throw new Error("Private S3 storage is not configured. Uploads cannot be accepted safely.");
   }
@@ -143,7 +159,7 @@ export async function signedArchiveAssetUrl(assetId: number): Promise<string | n
   );
   if (!asset) return null;
   if (!asset.is_private) return null;
-  const ttl = Math.max(60, Math.min(Number(process.env.S3_SIGNED_URL_TTL_SECONDS || 900), 3600));
+  const ttl = runtimeConfig.s3SignedUrlTtlSeconds;
   return getSignedUrl(s3Client(), new GetObjectCommand({
     Bucket: asset.bucket_name,
     Key: asset.object_key,
@@ -225,7 +241,7 @@ export async function storeCustomRoleIconSource(
   contentType: "image/png" | "image/jpeg",
 ): Promise<number> {
   if (bytes.byteLength < 1) throw new Error("The role icon image is empty.");
-  const bucket = process.env.S3_BUCKET?.trim();
+  const bucket = runtimeConfig.s3Bucket ?? undefined;
   if (!bucket) throw new Error("Private S3 storage is not configured. Image role icons cannot be saved safely.");
   const extension = contentType === "image/png" ? ".png" : ".jpg";
   const key = `custom-roles/${guildId}/${randomUUID()}${extension}`;
