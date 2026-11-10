@@ -399,7 +399,7 @@ function integrations(config: BotConfig): Record<string, unknown>[] {
     { name: "IGDB", configured: Boolean(config.igdbClientId && config.igdbClientSecret), detail: "Video-game metadata and artwork" },
     { name: "TMDB", configured: Boolean(config.tmdbBearerToken), detail: "Film and television metadata" },
     { name: "Google Books", configured: Boolean(config.googleBooksApiKey), detail: "Book and edition metadata" },
-    { name: "Private S3 storage", configured: Boolean(process.env.S3_BUCKET), detail: "Private archive and role-icon assets" },
+    { name: "Private S3 storage", configured: Boolean(config.s3Bucket), detail: "Private archive and role-icon assets" },
   ];
 }
 
@@ -505,19 +505,19 @@ export async function startDashboardBridge(
   config: BotConfig,
 ): Promise<void> {
   if (server) return;
-  const secret = process.env.DASHBOARD_BRIDGE_SECRET?.trim() ?? "";
+  const secret = config.dashboardBridgeSecret;
   if (Buffer.byteLength(secret, "utf8") < 32) {
     logger.warn("Dashboard bot bridge disabled; DASHBOARD_BRIDGE_SECRET must contain at least 32 bytes.");
     return;
   }
-  const hostRaw = process.env.DASHBOARD_BRIDGE_HOST?.trim() || "127.0.0.1";
+  const hostRaw = config.dashboardBridgeHost;
   const host = hostRaw === "[::1]" ? "::1" : hostRaw;
   const hostParts = host.split(".").map(Number);
   const loopbackV4 = isIP(host) === 4 && hostParts.length === 4 && hostParts[0] === 127;
   if (!(host === "localhost" || host === "::1" || loopbackV4)) {
     throw new Error("DASHBOARD_BRIDGE_HOST must be a loopback address.");
   }
-  const port = Number(process.env.DASHBOARD_BRIDGE_PORT ?? "8091");
+  const port = config.dashboardBridgePort;
   if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("DASHBOARD_BRIDGE_PORT must be a valid TCP port.");
   startedAt = Date.now();
   hasBeenReady = client.isReady();
