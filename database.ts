@@ -649,6 +649,24 @@ export async function initDatabase(config: DatabaseConfig): Promise<void> {
     await client.query("BEGIN");
     for (const statement of schemaStatements) await client.query(statement);
 
+    const pendingUserIdsColumn = await client.query<{ data_type: string }>(
+      `SELECT data_type FROM information_schema.columns
+       WHERE table_schema = current_schema() AND table_name = 'custom_role_pending_removals'
+         AND column_name = 'user_ids'`,
+    );
+    const pendingUserIdsType = pendingUserIdsColumn.rows[0]?.data_type;
+    if (pendingUserIdsType && pendingUserIdsType !== "jsonb") {
+      await client.query(
+        `ALTER TABLE custom_role_pending_removals
+         ALTER COLUMN user_ids TYPE JSONB
+         USING CASE
+           WHEN user_ids IS NULL OR BTRIM(user_ids::text) = '' THEN '[]'::JSONB
+           ELSE user_ids::text::JSONB
+         END`,
+      );
+      logger.info("Existing Custom Roles pending-removal records migrated to JSONB");
+    }
+
     const existingRoleColumns = await client.query<{ column_name: string; data_type: string }>(
       `SELECT column_name, data_type FROM information_schema.columns
        WHERE table_schema = current_schema() AND table_name = 'booster_roles'
