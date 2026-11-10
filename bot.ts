@@ -201,10 +201,7 @@ client.once(Events.ClientReady,ready=>{
  }
  void startCustomRolePicker(client,config).catch(error=>logger.error("Custom Roles picker startup failed",{reason:error instanceof Error?error.message:"Unknown error"}));
  void startDashboardBridge(client,commands,config).catch(error=>logger.error("Dashboard bot bridge startup failed",{reason:error instanceof Error?error.message:"Unknown error"}));
- for(const guild of ready.guilds.cache.values()){
-  void reconcileCustomRoleGuild(guild,config.customRolesMassArchiveThreshold).catch(error=>logger.error("Initial Custom Roles reconciliation failed",{guildId:guild.id,reason:error instanceof Error?error.message:"Unknown error"}));
- }
- reconciliationTimer=setInterval(()=>{
+ reconciliationTimer=setInterval(async()=>{
   for(const guild of client.guilds.cache.values()){
    if(await isGuildRetentionConfigured(guild.id))void reconcileCustomRoleGuild(guild,config.customRolesMassArchiveThreshold).catch(error=>logger.error("Custom Roles reconciliation failed",{guildId:guild.id,reason:error instanceof Error?error.message:"Unknown error"}));
   }
