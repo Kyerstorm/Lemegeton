@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { upcomingProviderReleases } from "../helpers/community/community-sessions.js";
-import type { AniListClient } from "../helpers/providers/anilist.js";
-import type { TmdbClient } from "../helpers/providers/tmdb.js";
+import type { AniListClient } from "../helpers/integration/anilist.js";
+import type { TmdbClient } from "../helpers/integration/tmdb.js";
 import {
   nextReleaseOccurrence,
   normalizeReleaseCategories,

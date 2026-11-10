@@ -10,7 +10,7 @@ import { logger, readRecentLogs } from "./logger.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const PROTECTED_COMMANDS = new Set(["settings"]);
-const MODERATOR_COMMANDS = new Set(["log", "moderators", "planned"]);
+const MODERATOR_COMMANDS = new Set(["log", "moderators", "planned", "adminlogin", "convertlinks"]);
 const SECTIONS: Record<string, string> = {
   discover: "Discovery",
   archive: "Archive",

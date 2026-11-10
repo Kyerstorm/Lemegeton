@@ -1,7 +1,7 @@
 import { query, queryOne, transaction } from "../../database.js";
 import { cleanText, isValidHttpsUrl } from "../security/security.js";
 import { secureRandBelow } from "../security/crypto-random.js";
-import type { AniListMediaNightCandidate } from "../providers/anilist.js";
+import type { AniListMediaNightCandidate } from "../integration/anilist.js";
 
 export type MediaNightMood = "all" | "cozy" | "comedy" | "adventure" | "mystery" | "romance" | "drama";
 

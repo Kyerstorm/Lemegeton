@@ -1,6 +1,6 @@
 import { query, queryOne, transaction } from "../../database.js";
-import { AniListClient } from "../providers/anilist.js";
-import { TmdbClient } from "../providers/tmdb.js";
+import { AniListClient } from "../integration/anilist.js";
+import { TmdbClient } from "../integration/tmdb.js";
 import { cleanText, isValidHttpsUrl } from "../security/security.js";
 import type { CommunityActivity, CommunitySession } from "./community.js";
 

@@ -72,7 +72,7 @@ test("Knowledge Atlas normalizes media identities and rejects unsafe URLs",()=>{
  assert.equal(safeAtlasUrl("https://user:pass@example.com"),null);
 });
 test("Dashboard bridge excludes bot-operator commands from global sync and keeps standalone commands",()=>{
- const names=["discover","custom-role","settings","log","moderators","planned","help","privacy","feedback"];
+ const names=["discover","custom-role","settings","log","moderators","planned","adminlogin","convertlinks","help","privacy","feedback"];
  const commands=names.map(name=>({data:{name,toJSON:()=>({description:name})}})) as unknown as Parameters<typeof dashboardCommandRows>[0];
  const settings={discover:false,archive:true,community:true,play:true,profile:true,"custom-role":false};
  const rows=dashboardCommandRows(commands,settings);
@@ -86,7 +86,7 @@ test("Dashboard bridge excludes bot-operator commands from global sync and keeps
 });
 
 test("Dashboard global command payload cannot publish bot-operator commands",()=>{
- const names=["discover","log","moderators","planned","help","privacy","feedback"];
+ const names=["discover","log","moderators","planned","adminlogin","convertlinks","help","privacy","feedback"];
  const commands=names.map(name=>({data:{name,toJSON:()=>({name,description:name})}})) as unknown as Parameters<typeof dashboardGlobalCommandPayload>[0];
  const payload=dashboardGlobalCommandPayload(commands);
  assert.deepEqual(payload.map(command=>command.name),["discover","help","privacy","feedback"]);

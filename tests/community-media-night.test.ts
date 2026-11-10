@@ -4,7 +4,7 @@ import {
   filterMediaNightCandidates,
   sampleMediaNightCandidates,
 } from "../helpers/community/community-rankings.js";
-import type { AniListMediaNightCandidate } from "../helpers/providers/anilist.js";
+import type { AniListMediaNightCandidate } from "../helpers/integration/anilist.js";
 
 const candidates: AniListMediaNightCandidate[] = [
   {
