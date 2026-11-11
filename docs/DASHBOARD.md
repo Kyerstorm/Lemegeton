@@ -1,6 +1,6 @@
 # Lemegeton web dashboard
 
-The public control plane is a Rust/Axum service with a Next.js App Router frontend in `web/frontend/app/`. Interactive screens remain React + TypeScript components in `web/frontend/src/`; the stylesheet is authored as CSS in `web/frontend/app/globals.css`. Next.js builds a static export in `web/frontend/out/`; Rust serves the exported `index.html`, `login/index.html`, and hashed `_next/static` assets from the same origin. The root `railpack.json` supplies Node 22 for this nested package. The Rust service binds to loopback by default and refuses non-loopback binding unless `DASHBOARD_ALLOW_PUBLIC_BIND=true`; Railway/container configuration explicitly opts into the platform ingress interface. The v3 branch contains a TypeScript bot bridge and custom-role picker, but the combined Docker/Railway entry point still launches the legacy Python bot until feature parity and production cutover are complete.
+The public control plane is a Rust/Axum service with a Next.js App Router frontend in `web/frontend/app/`. Interactive screens remain React + TypeScript components in `web/frontend/src/`; the stylesheet is authored as CSS in `web/frontend/app/globals.css`. Next.js builds a static export in `web/frontend/out/`; Rust serves the exported `index.html`, `login/index.html`, and hashed `_next/static` assets from the same origin. The root `railpack.json` supplies Node 22 for this nested package. The Rust service binds to loopback by default and refuses non-loopback binding unless `DASHBOARD_ALLOW_PUBLIC_BIND=true`; Railway/container configuration explicitly opts into the platform ingress interface. The combined Docker and Railway entry point runs the compiled TypeScript bot and Rust dashboard together through `scripts/start.sh`. No Python runtime is part of the v3 launch or build path.
 
 ## Capabilities and boundaries
 
@@ -61,11 +61,12 @@ For the combined deployment entry point, build the frontend assets and release b
 - Rust unit tests: `cargo test --manifest-path web/backend/Cargo.toml`
 - Rust formatting: `cargo fmt --manifest-path web/backend/Cargo.toml -- --check`
 - TypeScript bot: `npm run typecheck && npm test`
-- Legacy Python runtime (until cutover): `python -m compileall -q bot.py cogs helpers web`
-- Bridge unit tests: `python -m unittest discover -s tests -p "test_dashboard_bridge.py"`
-- Existing custom-role web regression suite: run the project's documented `tests/custom_roles/run_all.py` entry point in a configured test environment.
+- TypeScript bot: `npm run typecheck && npm test` (the test command builds the bot before running the Node test suite).
+- Next.js frontend: `npm run typecheck --prefix web/frontend && npm run build --prefix web/frontend`.
+- Rust dashboard: `cargo test --manifest-path web/backend/Cargo.toml` and `cargo fmt --manifest-path web/backend/Cargo.toml -- --check`.
+- Docker contract: `bash -n scripts/start.sh`, `docker compose config --quiet`, and `docker build --tag lemegeton:local .`.
 
-CI runs the Rust tests, Next.js type-check/build/static-export checks, TypeScript bot type-check/tests, and the remaining legacy Python checks. The complete Discord/database-backed bot test suite still needs the repository's normal test fixture and PostgreSQL setup.
+The TypeScript workflow runs the bot tests against its PostgreSQL 16 service container. The dashboard workflow checks the frontend, Rust backend, dependency audits, and production image/runtime contract. Live Discord permissions, external provider credentials, target-database restore, and S3 failure recovery remain separate acceptance tests; no Python test suite is part of v3 CI.
 
 ## Operational notes
 
@@ -87,7 +88,7 @@ The example is designed for a single VPS instance. Sessions and OAuth states are
 
 A minimal Docker deployment is provided by `Dockerfile`, `.dockerignore`, and `docker-compose.yml`. It builds the TypeScript bundle and Rust release binary in separate build stages, runs as a non-root user, drops Linux capabilities, applies `no-new-privileges`, and publishes port 8080 only on the host loopback interface for a host-level reverse proxy. Create the bind-mounted `data`, `logs`, and `runtime-home` directories and set their ownership to UID/GID `10001` before starting it. Keep `.env` out of the image and readable only by the Docker operator.
 
-The current combined container still starts `python bot.py`, which supplies the legacy private dashboard bridge and picker. The TypeScript bridge/picker are exercised when the TypeScript bot is started directly; the container entry point must not be switched until the outstanding command/runtime migration is verified. For stronger process isolation on a VPS, prefer separate systemd services and keep both private listeners on loopback.
+The combined container uses `scripts/start.sh` to supervise the compiled TypeScript bot and Rust dashboard. The TypeScript bot serves the private Custom Roles picker assets and bridge; the Rust service reverse-proxies the picker. For stronger process isolation on a VPS, use the separate systemd services and keep both private listeners on loopback.
 
 ## Security and dependency checks
 
