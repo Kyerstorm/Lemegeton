@@ -1,14 +1,17 @@
-# Custom Roles — Build Spec
+# Historical Custom Roles Build Spec (Pre-v3)
 
-Custom booster roles for any server, built into the **Lemegeton** bot (`multi_guild` branch).
-Every server booster gets **one** personal role they can name, color (solid, gradient, holographic) and give an icon,
-from one `/custom-role` panel **or** from a private web page (the "color picker"). Admins use one
-`/custom-role-admin` panel.
-
-Read this whole file before writing code. Follow the build order in §11 and stop after each milestone so the
-human can test it in Discord.
+> **Historical reference only.** This build specification describes the earlier Python/discord.py
+> implementation on `multi_guild`, including its old commands, database helper contracts, cog paths,
+> and Python picker server. Those details are not the v3 implementation contract and must not be used
+> as current setup or coding instructions.
+>
+> For the approved v3 feature scope and migration disposition, use [Lemegeton v3](Lemegeton%20v3.md)
+> and [the migration parity audit](MIGRATION_PARITY_AUDIT.md). Verify current Custom Roles behavior
+> in `src/commands/custom-role.ts`, `helpers/custom-roles/`, `helpers/runtime/guild-retention.ts`,
+> `database.ts`, and the TypeScript tests before making changes.
 
 ---
+
 
 ## 1. Ground rules
 
