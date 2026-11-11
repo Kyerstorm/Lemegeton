@@ -199,7 +199,7 @@ Statistics are generated from tracked text and source files after changes are in
 - [Dashboard setup and architecture](docs/DASHBOARD.md)
 - [Interaction and UX guidelines](docs/UX_GUIDELINES.md)
 - [Security review](docs/SECURITY_AUDIT.md)
-- [Custom Roles specification](docs/CUSTOM_ROLES_SPEC.md)
+- [Historical Custom Roles build spec (pre-v3)](docs/CUSTOM_ROLES_SPEC.md)
 - [VPS deployment](deploy/vps/README.md)
 
 ## Contributing
