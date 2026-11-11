@@ -12,7 +12,7 @@ Start with the repository [README](../README.md) for installation and setup.
 - [Dashboard](DASHBOARD.md): Discord OAuth, Rust API, TypeScript bridge, and deployment.
 - [Security audit](SECURITY_AUDIT.md): authorization boundaries and operational checks.
 - [Issue reference format](ISSUE_REFERENCE_FORMAT.md): fixed 40-character SHA-512-derived diagnostic reference contract.
-- [Custom Roles](CUSTOM_ROLES_SPEC.md): server configuration and member controls.
+- [Historical Custom Roles build spec](CUSTOM_ROLES_SPEC.md): pre-v3 Python implementation notes; not current setup guidance.
 - [VPS deployment](../deploy/vps/README.md): Node.js bot, Rust dashboard, systemd, and Nginx.
 
 The supported runtime entry point is `scripts/start.sh`. It runs the compiled TypeScript bot from `dist/bot.js` alongside the Rust dashboard binary. The bot's source is in `bot.ts`, `src/`, and `helpers/`; tests are TypeScript under `tests/`.
