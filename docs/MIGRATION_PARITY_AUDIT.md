@@ -413,7 +413,10 @@ The `.env.example` was cleaned in this migration pass: removed old generic-role/
 | TSX files (`.tsx`) | 4 |
 | JavaScript files (`.js`) | 1 (browser Custom Roles picker asset) |
 | TypeScript test/spec modules | 35 |
-| MJS files (`.mjs`) | 1 |\n| Windows setup scripts (`.bat`) | 1 (`utils/setup.bat`) |\n| Shell launch scripts (`.sh`) | 1 (`scripts/start.sh`) |\n| Markdown documents | 20 |
+| MJS files (`.mjs`) | 1 |
+| Windows setup scripts (`.bat`) | 1 (`utils/setup.bat`) |
+| Shell launch scripts (`.sh`) | 1 (`scripts/start.sh`) |
+| Markdown documents | 20 |
 
 The `multi_guild` base tree contains 216 tracked files, including the 167 Python reference files and 50 Python test/fixture modules enumerated above. The v3 PR tree contains 181 tracked files and zero `.py` files. The 112 `.ts` and four `.tsx` files cover 81 non-test TypeScript/TSX modules plus 35 test modules. The one `.js` file is the browser-side Custom Roles picker served by `helpers/custom-roles/custom-role-picker-server.ts`; it is an intentional static asset, not a Python runtime. The one `.bat` file is `utils/setup.bat`, which installs/builds the Node.js, frontend, and Rust components. The obsolete Python `start.bat` and its 377-line guide have been removed.
 
