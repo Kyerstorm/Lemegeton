@@ -78,7 +78,7 @@ This does not remove essential permissions, reporting, review queues, audit reco
 | Background processing | Durable, idempotent jobs using the existing infrastructure where suitable |
 | Hosting | Verify the intended deployment model as part of release readiness; do not infer a live deployment from source files |
 
-The `multi_guild` source branch contains the earlier Python/discord.py bot implementation; the `lemegeton-v3` branch develops the replacement TypeScript/Discord.js runtime. The Python files are source references for reviewing selected behavior, not evidence that a Python bot is currently deployed. The dashboard source is a React + TypeScript frontend built with Vite and served by the Rust/Axum service. The frontend work replaces Vite with Next.js; it does **not** mean rewriting the Rust API or creating a second bot backend.
+The `multi_guild` source branch contains the earlier Python/discord.py bot implementation; the `lemegeton-v3` branch contains the replacement TypeScript/Discord.js runtime. The Python files are source references for reviewing selected behavior, not evidence that a Python bot is currently deployed. The v3 dashboard frontend is a Next.js App Router application using React and TypeScript, statically served by the existing Rust/Axum service. It does **not** create a second bot backend.
 
 The existing PostgreSQL schema, S3 asset registry, private/public storage rules, OAuth2 flow, bot bridge, and deployment configuration must be inspected before changes are made. Reuse them where they still meet v3 requirements. Do not introduce a parallel database, storage layer, command registry, permission model, or authentication system.
 
