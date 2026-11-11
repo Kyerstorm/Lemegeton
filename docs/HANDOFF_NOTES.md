@@ -3,9 +3,9 @@
 > **Historical reference only.** This document records setup and acceptance notes from the earlier
 > Python/discord.py implementation on `multi_guild`. Its old Python commands, dependency setup,
 > command names, environment assumptions, and test paths are not current v3 instructions.
-> The v3 bot runs TypeScript/Node.js with PostgreSQL; use [the current Custom Roles specification](CUSTOM_ROLES_SPEC.md),
-> [dashboard guide](DASHBOARD.md), and [migration parity audit](MIGRATION_PARITY_AUDIT.md) for
-> current behavior. Keep this file only as historical context and re-check every detail against
+> The v3 bot runs TypeScript/Node.js with PostgreSQL; use [Lemegeton v3](Lemegeton%20v3.md),
+> [the dashboard guide](DASHBOARD.md), and [the migration parity audit](MIGRATION_PARITY_AUDIT.md)
+> for current architecture and behavior. Keep this file only as historical context and re-check every detail against
 > the current v3 source before relying on it.
 
 
