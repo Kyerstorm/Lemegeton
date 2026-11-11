@@ -1,8 +1,13 @@
-# Custom Roles — Setup and Handoff Guide
+# Historical Custom Roles Handoff Notes (Pre-v3)
 
-Everything needed to run Custom Roles (custom booster roles) on the real server: deploying on
-Railway, first-time setup in Discord, theming the color picker, and the checks that could only be
-done on a boosted server.
+> **Historical reference only.** This document records setup and acceptance notes from the earlier
+> Python/discord.py implementation on `multi_guild`. Its old Python commands, dependency setup,
+> command names, environment assumptions, and test paths are not current v3 instructions.
+> The v3 bot runs TypeScript/Node.js with PostgreSQL; use [the current Custom Roles specification](CUSTOM_ROLES_SPEC.md),
+> [dashboard guide](DASHBOARD.md), and [migration parity audit](MIGRATION_PARITY_AUDIT.md) for
+> current behavior. Keep this file only as historical context and re-check every detail against
+> the current v3 source before relying on it.
+
 
 - What Custom Roles does and every panel button: the [Custom Roles section of the README](../README.md#-custom-roles)
 - All settings with their defaults: the `CUSTOM ROLES` block at the end of [`.env.example`](../.env.example)
