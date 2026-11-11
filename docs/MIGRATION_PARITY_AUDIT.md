@@ -273,7 +273,7 @@ tests/custom_roles/run_all.py
 tests/custom_roles/seed_test_server.py
 tests/custom_roles/test_admin_extras.py
 tests/custom_roles/test_enable_gate.py
-tests/custom_roles/test_previous_import.py
+tests/custom_roles/test_legacy_import.py
 tests/custom_roles/test_lifecycle.py
 tests/custom_roles/test_names_and_roles.py
 tests/custom_roles/test_palette_and_icons.py
@@ -431,6 +431,8 @@ The final runtime-entry-point and documentation review closed the following sour
 - Replaced the obsolete Python-first root `AGENTS.md` with current TypeScript/Node.js, PostgreSQL, Discord.js, Next.js, and Rust architecture guidance. It explicitly treats `multi_guild` as the read-only migration source when auditing PR #17.
 - Marked `docs/CUSTOM_ROLES_SPEC.md` and `docs/HANDOFF_NOTES.md` as pre-v3 historical references, and corrected their README/index labels so old `discord.py`, `requirements.txt`, and cog instructions are not presented as current v3 setup.
 - Corrected the architecture paragraph in `docs/Lemegeton v3.md`: the active dashboard frontend is Next.js App Router, not Vite.
+
+The 167-path inventory was compared programmatically with the recursive `multi_guild` tree: all 167 source paths are now listed exactly once, with no missing or extra paths. This check corrected the Custom Roles fixture name from `test_previous_import.py` to the actual `test_legacy_import.py`.
 
 All current v3 GitHub workflows were inspected. The TypeScript bot, dashboard/Rust, repository-health, and repository-stats workflows invoke Node/npm, Rust/Cargo, shell, or Docker tooling; none invokes Python. `scripts/repo-stats.mjs` contains ignore patterns for old virtual-environment folders but does not execute Python. The only remaining Python files are on the `multi_guild` source branch and remain unchanged.
 
