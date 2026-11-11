@@ -14,7 +14,7 @@ The Draft branch currently has **zero Python files**. That is a file-extension r
 | Snapshot | Python files | TypeScript/TSX files | TypeScript non-test files | TypeScript test files |
 |---|---:|---:|---:|---:|
 | `multi_guild` base | 167 | 0 | 0 | 0 |
-| `lemegeton-v3` Draft tree at `39bd866` (12 November 2026) | 0 | 116 | 81 | 35 |
+| `lemegeton-v3` Draft tree at `ae82dd2` (12 November 2026) | 0 | 116 | 81 | 35 |
 
 The `multi_guild` base contains 167 Python files (approximately 3.68 MB), including 50 Python test/fixture modules. The current v3 tree contains 35 TypeScript test modules. Module counts are not a coverage metric: every in-scope scenario must map to an implementation and focused test, or to an explicitly documented live-service acceptance item. The target is behavior-level parity, not one-for-one file translation.
 
@@ -401,7 +401,7 @@ The `.env.example` was cleaned in this migration pass: removed old generic-role/
 
 ## Final source-to-TypeScript audit snapshot — 12 November 2026
 
-**Audited tree snapshot (before this report refresh):** `39bd86607e09491b9f83ac022c5b10b62f8c9256`  
+**Audited tree snapshot (before this report refresh):** `ae82dd22ffad10c22919d14c1e3dfe38535a1627`  
 **Pull request:** #17, `lemegeton-v3` → `multi_guild`; remains open and Draft.  
 **Inventory source:** recursive Git trees for `multi_guild` and `lemegeton-v3`; both responses were complete (not truncated). The audit report refresh that follows changes documentation only.
 
@@ -429,6 +429,7 @@ The final runtime-entry-point and documentation review closed the following sour
 - Kept `web/picker.js`: it is a browser asset loaded by `web/picker.html` and served by `helpers/custom-roles/custom-role-picker-server.ts`; it is not a bot runtime or an unported Python module.
 - Corrected `docs/DASHBOARD.md` so its runtime, tests, CI, and Docker statements match `package.json`, the actual workflows, `Dockerfile`, `railway.toml`, and `scripts/start.sh`. The combined launcher runs the TypeScript bot and Rust dashboard; there are no Python checks in v3 CI.
 - Replaced the obsolete Python-first root `AGENTS.md` with current TypeScript/Node.js, PostgreSQL, Discord.js, Next.js, and Rust architecture guidance. It explicitly treats `multi_guild` as the read-only migration source when auditing PR #17.
+- Replaced the hard-coded PostgreSQL CI test-service password with a per-workflow-run value in both the service container and `TEST_DATABASE_URL`; the TypeScript workflow completed successfully with the updated configuration.
 - Marked `docs/CUSTOM_ROLES_SPEC.md` and `docs/HANDOFF_NOTES.md` as pre-v3 historical references, and corrected their README/index labels so old `discord.py`, `requirements.txt`, and cog instructions are not presented as current v3 setup.
 - Corrected the architecture paragraph in `docs/Lemegeton v3.md`: the active dashboard frontend is Next.js App Router, not Vite.
 
@@ -454,12 +455,12 @@ The subsequent code/audit follow-ups on this PR include `Atlas community links`,
 
 ### Latest code-bearing CI verification — 11 November 2026
 
-The latest relevant code-bearing CI results are for `e4f3276f5bc9c24875b88c490079cf847e82b4f1`. The later commits through `39bd866` changed documentation and removed the obsolete Python-only Windows launcher; they did not change TypeScript, Rust, or frontend runtime source. The path-filtered runtime workflows therefore have no new code-bearing run for this documentation/tooling-only follow-up:
+The TypeScript workflow was rerun on the current audited tree `ae82dd22ffad10c22919d14c1e3dfe38535a1627` after replacing the static PostgreSQL test password. The frontend/Rust and Docker workflow results remain the latest relevant checks for their unchanged runtime paths on code-bearing head `e4f3276f5bc9c24875b88c490079cf847e82b4f1`:
 
-- **TypeScript bot:** passed. Type-check succeeded; build completed; Node test runner reports **170 passed, 0 failed, 0 skipped**. [Workflow job](https://github.com/Kyerstorm/Lemegeton/actions/runs/42914837864/job/130174499218)
+- **TypeScript bot on `ae82dd2`:** passed. Type-check succeeded; build completed; Node test runner reports **170 passed, 0 failed, 0 skipped**. [Workflow job](https://github.com/Kyerstorm/Lemegeton/actions/runs/43094091814/job/130778347034)
 - **Docker build and runtime contract:** passed. Startup script and Compose validation, production image build, non-root user and image health-check assertions succeeded. [Workflow job](https://github.com/Kyerstorm/Lemegeton/actions/runs/42914837854/job/130174499540)
 - **Frontend/Rust workflow:** passed. Frontend type-check, high-severity npm audit, production build/static output checks, Rust tests, `cargo-audit` installation and `cargo audit` all succeeded. [Workflow job](https://github.com/Kyerstorm/Lemegeton/actions/runs/42914837854/job/130174499195)
-- **GitGuardian:** failed on an existing test-service credential finding in the PostgreSQL test workflow from an earlier PR commit. The reported value is a test fixture, not a production credential, but the check itself remains failed and is not represented as a pass. No production secret was added by this audit.
+- **GitGuardian:** the earlier scan failed on a `Generic Password` finding at commit `9bb3675cb4e0831dc56932208257cc748a52e761` in the PostgreSQL test service definition (`.github/workflows/typescript-bot.yml`). The value was the local disposable test database's default password, not a production credential; the current workflow now derives a distinct value from the GitHub run ID and attempt. On `ae82dd2`, GitGuardian returned **neutral** because the PR exceeded its scan-size limit and was not scanned. This is not a passing scan and does not clear the historical finding; its disposition still needs to be acknowledged/resolved in the GitGuardian workspace or by a scan that covers the full PR.
 
 ### Code-audit result and remaining acceptance gates
 
@@ -471,6 +472,6 @@ The source inventory, in-scope behavior dispositions, tracked Python removal, sh
 4. Validate live AniList, Steam, IGDB, TMDB and Google Books responses/rate limits, plus dashboard OAuth, bridge authentication and guild authorization using the deployment's configured services.
 5. Decide how any legacy deployment using `panel_storage_channel_id` should transition. It is not equivalent to v3's member-facing `upload_channel_id`; configure private S3 or approve a separate storage replacement first.
 6. Retain the documented privacy decision that the v3 AniList leaderboard is narrower than the previous personal-progress metrics. Do not silently restore chapter/episode/completion totals without a separate decision and storage/privacy design.
-7. Resolve the existing `multi_guild` / `lemegeton-v3` history divergence deliberately on the PR branch. At this snapshot GitHub reports 649 commits ahead and 86 behind (`diverged`, `mergeable=false`). No rebase, merge, or branch synchronization was attempted; `multi_guild` was not modified.
+7. Resolve the existing `multi_guild` / `lemegeton-v3` history divergence deliberately on the PR branch. At this snapshot GitHub reports 654 commits ahead and 86 behind (`diverged`, `mergeable=false`). No rebase, merge, or branch synchronization was attempted; `multi_guild` was not modified.
 
 **Disposition:** the code-level migration audit is complete for the current tracked source and approved v3 scope; the migration is not certified for production cutover. PR #17 remains Draft, no deployment was performed, and `multi_guild` was not changed.
