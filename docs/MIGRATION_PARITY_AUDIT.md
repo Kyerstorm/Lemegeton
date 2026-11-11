@@ -3,7 +3,7 @@
 **Target:** existing Draft PR #17, branch `lemegeton-v3`  
 **Base under audit:** `multi_guild`  
 **Audit basis:** current Git trees, PR diff, the v3 command modules, and targeted source inspection.  
-**Status:** source inventory completed; selected-feature parity is **not** complete or accepted. Implementation slices below are committed to the Draft branch; database, provider and Discord acceptance remains open.
+**Status:** the code-level audit is complete for the approved v3 scope. The branch inventory, command/data dispositions, runtime entry points, tests, and stale Python-era guidance have been checked. Production database, live Discord, provider, and S3 acceptance remain open; this is not deployment approval.
 
 **Deployment note:** This is a pre-release redevelopment in an existing repository branch. The Python files on `multi_guild` are source references for feature and test review; this audit does not claim that a Python bot is deployed or running. The v3 Discord bot is being developed in this PR and has not been deployed by this work.
 
@@ -14,15 +14,15 @@ The Draft branch currently has **zero Python files**. That is a file-extension r
 | Snapshot | Python files | TypeScript/TSX files | TypeScript non-test files | TypeScript test files |
 |---|---:|---:|---:|---:|
 | `multi_guild` base | 167 | 0 | 0 | 0 |
-| `lemegeton-v3` Draft head at `cdcfa08` (10 November 2026) | 0 | 111 | 78 | 33 |
+| `lemegeton-v3` Draft tree at `39bd866` (12 November 2026) | 0 | 116 | 81 | 35 |
 
-The base's 167 Python files total approximately 3.68 MB. The current Draft head contains thirty-four TypeScript test modules; the `multi_guild` source tree contains fifty Python test modules. Module counts are not a coverage metric. The goal is to map each in-scope scenario to a focused TypeScript test or a documented reason it remains a live-service acceptance item, not to reproduce every file one-for-one.
+The `multi_guild` base contains 167 Python files (approximately 3.68 MB), including 50 Python test/fixture modules. The current v3 tree contains 35 TypeScript test modules. Module counts are not a coverage metric: every in-scope scenario must map to an implementation and focused test, or to an explicitly documented live-service acceptance item. The target is behavior-level parity, not one-for-one file translation.
 
 The Draft branch already has a Node.js/TypeScript bot startup path, a TypeScript build/test pipeline, and a Rust dashboard service. The current `scripts/start.sh`, Dockerfile, Compose configuration, and TypeScript CI workflows do not invoke Python. A TypeScript startup path and passing branch CI are repository evidence only; they do not establish that any bot has been deployed.
 
 ## Focused migration follow-up — 10 November 2026
 
-The current branch tree contains 178 tracked files: zero Python files, 111 TypeScript/TSX files (78 non-test files and 33 test modules). The count is a snapshot of the branch tree, not a statement of feature completeness.
+At the 10 November 2026 snapshot, the branch tree contained 178 tracked files: zero Python files and 111 TypeScript/TSX files (78 non-test files and 33 test modules). This historical count was superseded by the 12 November inventory below and was not a statement of feature completeness.
 
 The following verified follow-ups were made on the Draft branch after the initial audit snapshot:
 
@@ -399,23 +399,37 @@ The `.env.example` was cleaned in this migration pass: removed old generic-role/
 - Live audit-log permissions, a real guild kick/rejoin test, production PostgreSQL restore, and S3 failure/retry recovery remain acceptance tasks.
 
 
-## Final source-to-TypeScript audit snapshot — 11 November 2026
+## Final source-to-TypeScript audit snapshot — 12 November 2026
 
-**Audited code head:** `e4f3276f5bc9c24875b88c490079cf847e82b4f1`  
+**Audited tree snapshot (before this report refresh):** `39bd86607e09491b9f83ac022c5b10b62f8c9256`  
 **Pull request:** #17, `lemegeton-v3` → `multi_guild`; remains open and Draft.  
-**Inventory source:** the recursive Git tree for the audited head; the tree response was complete (not truncated).
+**Inventory source:** recursive Git trees for `multi_guild` and `lemegeton-v3`; both responses were complete (not truncated). The audit report refresh that follows changes documentation only.
 
 | Inventory | Current PR tree |
 |---|---:|
-| Tracked files | 183 |
+| Tracked files | 181 |
 | Python source files (`.py`) | **0** |
 | TypeScript files (`.ts`) | 112 |
 | TSX files (`.tsx`) | 4 |
-| JavaScript files (`.js`) | 1 |
+| JavaScript files (`.js`) | 1 (browser Custom Roles picker asset) |
 | TypeScript test/spec modules | 35 |
-| Markdown documents | 21 |
+| MJS files (`.mjs`) | 1 |\n| Windows setup scripts (`.bat`) | 1 (`utils/setup.bat`) |\n| Shell launch scripts (`.sh`) | 1 (`scripts/start.sh`) |\n| Markdown documents | 20 |
 
-The 167 Python reference files and 50 Python test/fixture modules from `multi_guild` remain enumerated in the source inventory above. Their selected v3 destinations, replacement behavior, intentional retirements and unresolved acceptance items are recorded in the parity register and exclusions sections. The target is behavior-level coverage for approved v3 functionality, not a one-file-per-file translation or a matching test-module count. No Python runtime/source file remains in the v3 PR tree.
+The `multi_guild` base tree contains 216 tracked files, including the 167 Python reference files and 50 Python test/fixture modules enumerated above. The v3 PR tree contains 181 tracked files and zero `.py` files. The 112 `.ts` and four `.tsx` files cover 81 non-test TypeScript/TSX modules plus 35 test modules. The one `.js` file is the browser-side Custom Roles picker served by `helpers/custom-roles/custom-role-picker-server.ts`; it is an intentional static asset, not a Python runtime. The one `.bat` file is `utils/setup.bat`, which installs/builds the Node.js, frontend, and Rust components. The obsolete Python `start.bat` and its 377-line guide have been removed.
+
+### Migration audit follow-through — 12 November 2026
+
+The final runtime-entry-point and documentation review closed the following source-tree inconsistencies:
+
+- Removed `start.bat` because it activated a Python virtual environment, launched the deleted `bot.py`, killed all `python.exe` processes on restart, and invoked deleted `tools/*.py` maintenance/test scripts. Its obsolete 377-line companion guide, `docs/start_bat_info.md`, was removed with it.
+- Kept `utils/setup.bat`: it is the supported Windows setup helper and uses Node.js/npm and Cargo only.
+- Kept `web/picker.js`: it is a browser asset loaded by `web/picker.html` and served by `helpers/custom-roles/custom-role-picker-server.ts`; it is not a bot runtime or an unported Python module.
+- Corrected `docs/DASHBOARD.md` so its runtime, tests, CI, and Docker statements match `package.json`, the actual workflows, `Dockerfile`, `railway.toml`, and `scripts/start.sh`. The combined launcher runs the TypeScript bot and Rust dashboard; there are no Python checks in v3 CI.
+- Replaced the obsolete Python-first root `AGENTS.md` with current TypeScript/Node.js, PostgreSQL, Discord.js, Next.js, and Rust architecture guidance. It explicitly treats `multi_guild` as the read-only migration source when auditing PR #17.
+- Marked `docs/CUSTOM_ROLES_SPEC.md` and `docs/HANDOFF_NOTES.md` as pre-v3 historical references, and corrected their README/index labels so old `discord.py`, `requirements.txt`, and cog instructions are not presented as current v3 setup.
+- Corrected the architecture paragraph in `docs/Lemegeton v3.md`: the active dashboard frontend is Next.js App Router, not Vite.
+
+All current v3 GitHub workflows were inspected. The TypeScript bot, dashboard/Rust, repository-health, and repository-stats workflows invoke Node/npm, Rust/Cargo, shell, or Docker tooling; none invokes Python. `scripts/repo-stats.mjs` contains ignore patterns for old virtual-environment folders but does not execute Python. The only remaining Python files are on the `multi_guild` source branch and remain unchanged.
 
 ### Requested diagnostics and coordination commits
 
@@ -424,7 +438,7 @@ The requested commit sequence is preserved at the start of the current PR histor
 1. **`Issue Hash Log`** — `8218122a1f3daa5927f56b8cd0792894995c7c56`
 2. **`coordinating`** — `87afb6af63f3247f7d95a38f5c81c7cdc45a8447`
 
-The follow-up commits on this same PR branch are `Atlas community links`, `Command error coverage`, `Command error coverage follow-up`, and `Issue source links`.
+The subsequent code/audit follow-ups on this PR include `Atlas community links`, `Command error coverage`, `Command error coverage follow-up`, `Issue source links`, `Complete migration audit`, and the final CI verification. The 12 November migration cleanup then removed the stale Windows Python launcher and guide, aligned the dashboard and architecture docs, corrected the root agent guide, and marked the old Python Custom Roles spec/handoff as historical.
 
 - Issue references remain exactly 40 lowercase hexadecimal characters (160 bits derived from a domain-separated SHA-512 digest). Fresh cryptographic entropy and length-framed interaction, user and guild context distinguish occurrences. The database primary-key constraint and bounded collision retry remain the final uniqueness guard. No sequential counter, timestamp, UUID-shaped replacement or 128-character digest was substituted.
 - `/log` checks bot-moderator authorization and the configured operations guild, returns a bounded embed plus a full sanitized JSON attachment, preserves error code/cause/stack/context and links to the originating Discord message when the interaction originated from a message. Button/select message IDs are added by the shared recorder.
@@ -435,7 +449,7 @@ The follow-up commits on this same PR branch are `Atlas community links`, `Comma
 
 ### Current-head automated verification
 
-The workflow results below are for the audited code head above, not an earlier commit:
+The latest relevant code-bearing CI results are for `e4f3276f5bc9c24875b88c490079cf847e82b4f1`. The later commits through `39bd866` changed documentation and removed the obsolete Python-only Windows launcher; they did not change TypeScript, Rust, or frontend runtime source. The path-filtered runtime workflows therefore have no new code-bearing run for this documentation/tooling-only follow-up:
 
 - **TypeScript bot:** passed. Type-check succeeded; build completed; Node test runner reports **170 passed, 0 failed, 0 skipped**. [Workflow job](https://github.com/Kyerstorm/Lemegeton/actions/runs/42914837864/job/130174499218)
 - **Docker build and runtime contract:** passed. Startup script and Compose validation, production image build, non-root user and image health-check assertions succeeded. [Workflow job](https://github.com/Kyerstorm/Lemegeton/actions/runs/42914837854/job/130174499540)
@@ -452,6 +466,6 @@ The source inventory, in-scope behavior dispositions, tracked Python removal, sh
 4. Validate live AniList, Steam, IGDB, TMDB and Google Books responses/rate limits, plus dashboard OAuth, bridge authentication and guild authorization using the deployment's configured services.
 5. Decide how any legacy deployment using `panel_storage_channel_id` should transition. It is not equivalent to v3's member-facing `upload_channel_id`; configure private S3 or approve a separate storage replacement first.
 6. Retain the documented privacy decision that the v3 AniList leaderboard is narrower than the previous personal-progress metrics. Do not silently restore chapter/episode/completion totals without a separate decision and storage/privacy design.
-7. Resolve the existing `multi_guild` / `lemegeton-v3` history divergence deliberately on the PR branch. GitHub reports the PR as non-mergeable/dirty; neither branch has been synchronized or modified by this audit.
+7. Resolve the existing `multi_guild` / `lemegeton-v3` history divergence deliberately on the PR branch. At this snapshot GitHub reports 649 commits ahead and 86 behind (`diverged`, `mergeable=false`). No rebase, merge, or branch synchronization was attempted; `multi_guild` was not modified.
 
 **Disposition:** the code-level migration audit is complete for the current tracked source and approved v3 scope; the migration is not certified for production cutover. PR #17 remains Draft, no deployment was performed, and `multi_guild` was not changed.
