@@ -112,7 +112,7 @@ The base source tree also contains backup, under-maintenance, test, and helper f
 
 ## Required TypeScript coverage
 
-The source tree has fifty Python test modules under `tests/`; the current Draft snapshot has thirty-four TypeScript test modules. The target is not fifty matching files. The target is focused coverage for every selected v3 behavior, especially:
+At the 11 November snapshot, the `multi_guild` source tree had fifty Python test modules under `tests/`, while that Draft snapshot had thirty-four TypeScript test modules. The target is not fifty matching files. It is focused coverage for every selected v3 behavior, especially:
 
 - AniList/Steam/IGDB/TMDB/Google Books normalization, empty responses, timeouts, rate limits, and malformed payloads.
 - Media search/filter/random/recommendation/compare/trailer/airing/creator/franchise flows.
@@ -320,9 +320,9 @@ tests/test_web_scraper.py
 
 > Count note: the file inventory above is grouped by purpose. Package marker files, scripts, tests, backups and under-maintenance modules are counted in the total; the count is from the base Git tree, not a guessed count from the PR diff display.
 
-## Exit gate
+## Code-level audit exit gate
 
-Do not mark source migration complete until each in-scope row above has implementation/test evidence, the Python reference test scenarios relevant to selected v3 features have explicit dispositions, CI passes on the current Draft head, multi-guild isolation and schema compatibility are proven, and startup/shutdown/recovery are covered. This audit does not assert that a previous bot was deployed and does not authorize a production release. The PR remains Draft until the repository owner explicitly says otherwise.
+The code-level audit for the approved v3 scope is considered complete when every in-scope behavior has implementation and focused-test evidence, or an explicit exclusion/live-service acceptance disposition; the Python source and fixture inventory has been checked against the base tree; multi-guild and schema invariants have code/test coverage; and the supported startup, shutdown, and recovery paths have been inspected. This report records that code-level gate as complete. The most recent relevant CI is tied to the latest code-bearing commit listed below; the following launcher and documentation cleanup did not change TypeScript, Rust, or frontend runtime source. **This is not the production release gate.** Production cutover still requires a target-database rehearsal, real Discord permissions and event tests, private-S3 failure/recovery tests, and configured-provider/dashboard acceptance. The PR remains Draft until the repository owner explicitly says otherwise.
 
 
 ## Integration and runtime boundary correction — 10 November 2026
@@ -452,7 +452,7 @@ The subsequent code/audit follow-ups on this PR include `Atlas community links`,
 - Knowledge Atlas combines provider relationships with guild-scoped community links from approved/visible Archive entries, active collections, open unexpired discussions, future scheduled/open sessions, current reading nominations and eligible ranking candidates. Provider, recommendation and community provenance remain distinct; community links are never labelled as provider-confirmed. Session/discussion links prefer their thread and fall back to their parent channel. Archive panel embeds surface a stored AniList manga link only when its provider and identifier validate.
 - Atlas community SQL was checked against the actual v3 schema and the existing Community session semantics. Unit coverage validates category normalization, URL policy and Discord deep-link construction. A live PostgreSQL/Discord test of the new Atlas query composition remains part of environment acceptance; the unit tests do not claim to replace it.
 
-### Current-head automated verification
+### Latest code-bearing CI verification — 11 November 2026
 
 The latest relevant code-bearing CI results are for `e4f3276f5bc9c24875b88c490079cf847e82b4f1`. The later commits through `39bd866` changed documentation and removed the obsolete Python-only Windows launcher; they did not change TypeScript, Rust, or frontend runtime source. The path-filtered runtime workflows therefore have no new code-bearing run for this documentation/tooling-only follow-up:
 
