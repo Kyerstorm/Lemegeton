@@ -272,9 +272,11 @@ export async function queueArchiveAssetCleanup(assetId: number): Promise<boolean
   return true;
 }
 
-export async function deleteArchiveAsset(assetId: number): Promise<boolean> {
-  const asset = await queryOne<{ bucket_name: string; object_key: string }>(
-    "SELECT bucket_name, object_key FROM media_assets WHERE id = $1",
+export async function deleteArchiveAsset(assetId: number, client?: Client): Promise<boolean> {
+  const asset = await queryOne<{
+    provider: string; bucket_name: string; object_key: string; guild_id: string | null; namespace: string;
+  }>(
+    "SELECT provider, bucket_name, object_key, guild_id::text, namespace FROM media_assets WHERE id = $1",
     [assetId],
   );
   if (!asset) return false;
@@ -288,7 +290,40 @@ export async function deleteArchiveAsset(assetId: number): Promise<boolean> {
     return false;
   }
   try {
-    await s3Client().send(new DeleteObjectCommand({ Bucket: asset.bucket_name, Key: asset.object_key }));
+    if (asset.provider === "discord") {
+      if (!client || !asset.guild_id || asset.namespace !== `archive/${asset.guild_id}`) {
+        throw new Error("The Discord client is unavailable for legacy Archive cleanup.");
+      }
+      const [messageId, attachmentId] = asset.object_key.split("/", 2);
+      if (!/^\\d{17,20}$/.test(messageId ?? "") || !/^\\d{17,20}$/.test(attachmentId ?? "")) {
+        throw new Error("Legacy Archive asset metadata is invalid.");
+      }
+      const channel = await client.channels.fetch(asset.bucket_name).catch(error => {
+        const code = Number((error as { code?: unknown })?.code);
+        const status = Number((error as { status?: unknown })?.status);
+        if (code === 10003 || status === 404) return null;
+        throw error;
+      });
+      if (channel) {
+        if (channel.type !== ChannelType.GuildText || (channel as TextChannel).guildId !== asset.guild_id) {
+          throw new Error("Legacy Archive asset channel no longer matches its source server.");
+        }
+        const message = await (channel as TextChannel).messages.fetch(messageId).catch(error => {
+          const code = Number((error as { code?: unknown })?.code);
+          const status = Number((error as { status?: unknown })?.status);
+          if (code === 10008 || status === 404) return null;
+          throw error;
+        });
+        if (message && (message.guildId !== asset.guild_id || message.channelId !== asset.bucket_name)) {
+          throw new Error("Legacy Archive asset message ownership could not be verified.");
+        }
+        await message?.delete();
+      }
+    } else if (asset.provider === "s3") {
+      await s3Client().send(new DeleteObjectCommand({ Bucket: asset.bucket_name, Key: asset.object_key }));
+    } else {
+      throw new Error("Unsupported Archive storage provider.");
+    }
     await query("DELETE FROM media_assets WHERE id = $1", [assetId]);
     return true;
   } catch (error) {
@@ -298,14 +333,14 @@ export async function deleteArchiveAsset(assetId: number): Promise<boolean> {
     ).catch(() => null);
     const attempts = Number(queued?.attempts ?? 0) + 1;
     await query(
-      "UPDATE media_asset_cleanup_queue SET attempts = $2, next_attempt_at = NOW() + ($3 * INTERVAL '1 second'), last_error = 'Private object deletion failed' WHERE asset_id = $1",
+      "UPDATE media_asset_cleanup_queue SET attempts = $2, next_attempt_at = NOW() + ($3 * INTERVAL '1 second'), last_error = 'Private asset deletion failed' WHERE asset_id = $1",
       [assetId, attempts, archiveAssetCleanupBackoffSeconds(attempts)],
     ).catch(() => undefined);
     throw error;
   }
 }
 
-export async function processArchiveAssetCleanup(limit = 10): Promise<{ attempted: number; failed: number }> {
+export async function processArchiveAssetCleanup(limit = 10, client?: Client): Promise<{ attempted: number; failed: number }> {
   const boundedLimit = Math.min(50, Math.max(1, Math.floor(limit)));
   const due = await query<{ asset_id: string }>(
     "SELECT asset_id::text FROM media_asset_cleanup_queue WHERE next_attempt_at <= NOW() ORDER BY next_attempt_at ASC LIMIT $1",
@@ -316,7 +351,7 @@ export async function processArchiveAssetCleanup(limit = 10): Promise<{ attempte
   for (const item of due) {
     attempted += 1;
     try {
-      await deleteArchiveAsset(Number(item.asset_id));
+      await deleteArchiveAsset(Number(item.asset_id), client);
     } catch {
       failed += 1;
     }
