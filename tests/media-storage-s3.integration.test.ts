@@ -151,11 +151,11 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
     assert.deepEqual(cleanup, { attempted: 1, failed: 0 });
     assert.equal(
       await queryOne("SELECT id FROM media_assets WHERE id = $1", [assetId]),
-      undefined,
+      null,
     );
     assert.equal(
       await queryOne("SELECT asset_id FROM media_asset_cleanup_queue WHERE asset_id = $1", [assetId]),
-      undefined,
+      null,
     );
 
     const leftover = await objectClient.send(new ListObjectsV2Command({ Bucket: bucket }));
