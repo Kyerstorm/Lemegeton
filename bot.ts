@@ -359,7 +359,7 @@ async function processDailyDrops():Promise<void>{
  if(workerRunning||!client.isReady())return;workerRunning=true;
  try{
   try {
-   const cleanup=await processArchiveAssetCleanup();
+   const cleanup=await processArchiveAssetCleanup(10,client);
    if(cleanup.failed)logger.warn("Private Archive asset cleanup will retry",{attempted:cleanup.attempted,failed:cleanup.failed});
   } catch(error) {
    logger.warn("Private Archive asset cleanup queue could not be checked",{reason:error instanceof Error?error.message:"Unknown error"});
