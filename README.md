@@ -199,6 +199,10 @@ Statistics are generated from tracked text and source files after changes are in
 - [Dashboard setup and architecture](docs/DASHBOARD.md)
 - [Interaction and UX guidelines](docs/UX_GUIDELINES.md)
 - [Security review](docs/SECURITY_AUDIT.md)
+- [Terms of Service](docs/TERMS_OF_SERVICE.md)
+- [Privacy Policy](docs/PRIVACY_POLICY.md)
+- [Community Guidelines](docs/COMMUNITY_GUIDELINES.md)
+- [MIT License](docs/LICENSE)
 - [Historical Custom Roles build spec (pre-v3)](docs/CUSTOM_ROLES_SPEC.md)
 - [VPS deployment](deploy/vps/README.md)
 
