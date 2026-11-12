@@ -7,6 +7,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { query, queryOne } from "../../database.js";
+import { AttachmentBuilder, ChannelType, PermissionFlagsBits, type Client, type TextChannel } from "discord.js";
 import type { BotConfig } from "../runtime/config.js";
 
 type MediaStorageConfig = Pick<BotConfig,
@@ -106,20 +107,75 @@ export function archiveUploadAllowed(category: string, enabled: string[], upload
   }
 }
 
+export function archiveStorageProvider(legacyStorageChannelId: string | null): "discord" | "s3" {
+  return legacyStorageChannelId ? "discord" : "s3";
+}
+
+async function legacyStorageChannel(client: Client, guildId: string, channelId: string): Promise<TextChannel> {
+  if (!/^\\d{17,20}$/.test(channelId)) throw new Error("The configured legacy storage channel ID is invalid.");
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel || channel.type !== ChannelType.GuildText) {
+    throw new Error("The configured legacy Archive storage channel is unavailable. Ask a server manager to repair it; storage will not switch automatically.");
+  }
+  const textChannel = channel as TextChannel;
+  if (textChannel.guildId !== guildId) {
+    throw new Error("The configured legacy Archive storage channel belongs to a different server.");
+  }
+  const member = await textChannel.guild.members.fetchMe();
+  const botPermissions = textChannel.permissionsFor(member);
+  const publicPermissions = textChannel.permissionsFor(textChannel.guild.roles.everyone);
+  if (!botPermissions.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles])
+    || publicPermissions.has(PermissionFlagsBits.ViewChannel)) {
+    throw new Error("The configured legacy Archive storage channel must remain private and grant the bot View Channel, Send Messages and Attach Files.");
+  }
+  return textChannel;
+}
+
 export async function storeArchiveUpload(
   guildId: string,
   userId: string,
   category: string,
   upload: ArchiveUpload,
   configuredUploadTypes: string[],
+  options: { client?: Client; legacyStorageChannelId?: string | null } = {},
 ): Promise<number> {
   const { kind, contentType, extension } = classifyArchiveUpload(category, upload);
   if (!configuredUploadTypes.includes(kind)) {
     throw new Error(`This server has not enabled ${kind} uploads for the Archive.`);
   }
+  if (archiveStorageProvider(options.legacyStorageChannelId ?? null) === "discord") {
+    if (!options.client || !options.legacyStorageChannelId) {
+      throw new Error("The legacy Archive storage channel could not be resolved.");
+    }
+    const channel = await legacyStorageChannel(options.client, guildId, options.legacyStorageChannelId);
+    const message = await channel.send({
+      files: [new AttachmentBuilder(upload.bytes, { name: upload.name })],
+      allowedMentions: { parse: [] },
+    });
+    const attachment = message.attachments.first();
+    if (!attachment) {
+      await message.delete().catch(() => undefined);
+      throw new Error("Discord did not return the stored Archive attachment.");
+    }
+    const digest = createHash("sha256").update(upload.bytes).digest("hex");
+    try {
+      const inserted = await queryOne<{ id: string }>(
+        `INSERT INTO media_assets
+         (provider, namespace, bucket_name, object_key, content_type, size_bytes, sha256, is_private, uploaded_by, guild_id)
+         VALUES ('discord', $1, $2, $3, $4, $5, $6, TRUE, $7, $8) RETURNING id`,
+        [`archive/${guildId}`, channel.id, `${message.id}/${attachment.id}`, contentType, upload.bytes.byteLength, digest, userId, guildId],
+      );
+      if (!inserted) throw new Error("Legacy Archive asset registry insert returned no ID.");
+      return Number(inserted.id);
+    } catch (error) {
+      await message.delete().catch(() => undefined);
+      throw error;
+    }
+  }
+
   const bucket = runtimeConfig.s3Bucket ?? undefined;
   if (!bucket) {
-    throw new Error("Private S3 storage is not configured. Uploads cannot be accepted safely.");
+    throw new Error("Private S3 storage is not configured. Ask an administrator to configure private S3 storage before accepting new Archive uploads.");
   }
   const storage = s3Client();
   const key = `archive/${guildId}/${randomUUID()}${extension}`;
@@ -152,18 +208,53 @@ export async function storeArchiveUpload(
   }
 }
 
-export async function signedArchiveAssetUrl(assetId: number): Promise<string | null> {
-  const asset = await queryOne<{ bucket_name: string; object_key: string; is_private: boolean }>(
-    "SELECT bucket_name, object_key, is_private FROM media_assets WHERE id = $1",
+export async function resolveLegacyArchiveAttachmentUrl(
+  client: Client,
+  guildId: string,
+  channelId: string,
+  messageId: string,
+  filename?: string | null,
+): Promise<string | null> {
+  try {
+    const channel = await client.channels.fetch(channelId);
+    if (!channel || channel.type !== ChannelType.GuildText) return null;
+    const textChannel = channel as TextChannel;
+    if (textChannel.guildId !== guildId) return null;
+    const message = await textChannel.messages.fetch(messageId);
+    const attachment = (filename ? message.attachments.find(item => item.name === filename) : null)
+      ?? message.attachments.first();
+    return attachment?.url ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function signedArchiveAssetUrl(
+  assetId: number,
+  client?: Client,
+  expectedGuildId?: string,
+): Promise<string | null> {
+  const asset = await queryOne<{ provider: string; bucket_name: string; object_key: string; is_private: boolean; guild_id: string | null; namespace: string }>(
+    "SELECT provider, bucket_name, object_key, is_private, guild_id::text, namespace FROM media_assets WHERE id = $1",
     [assetId],
   );
-  if (!asset) return null;
-  if (!asset.is_private) return null;
-  const ttl = runtimeConfig.s3SignedUrlTtlSeconds;
+  if (!asset || !asset.is_private) return null;
+  if (expectedGuildId && asset.guild_id !== expectedGuildId) return null;
+  if (asset.provider === "discord") {
+    if (!client || !asset.guild_id || asset.namespace !== `archive/${asset.guild_id}`) return null;
+    const [messageId, attachmentId] = asset.object_key.split("/", 2);
+    if (!/^\\d{17,20}$/.test(messageId ?? "") || !/^\\d{17,20}$/.test(attachmentId ?? "")) return null;
+    const channel = await client.channels.fetch(asset.bucket_name).catch(() => null);
+    if (!channel || channel.type !== ChannelType.GuildText || (channel as TextChannel).guildId !== asset.guild_id) return null;
+    const message = await (channel as TextChannel).messages.fetch(messageId).catch(() => null);
+    if (!message || message.guildId !== asset.guild_id || message.channelId !== asset.bucket_name) return null;
+    return message.attachments.get(attachmentId)?.url ?? null;
+  }
+  if (asset.provider !== "s3") return null;
   return getSignedUrl(s3Client(), new GetObjectCommand({
     Bucket: asset.bucket_name,
     Key: asset.object_key,
-  }), { expiresIn: ttl });
+  }), { expiresIn: runtimeConfig.s3SignedUrlTtlSeconds });
 }
 
 export function archiveAssetCleanupBackoffSeconds(attempt: number): number {
