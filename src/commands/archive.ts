@@ -405,7 +405,7 @@ export class ArchiveCommand implements FeatureCommand {
           if (!entry) throw new Error("That Archive entry was not found in the selected visibility scope.");
           const member = await interaction.guild!.members.fetch(userId);
           const canModerate = await canModerateArchive(member, guildId, global ? "global" : "server");
-          await deleteArchiveEntry(guildId, userId, entryId, canModerate, global);
+          await deleteArchiveEntry(guildId, userId, entryId, canModerate, global, interaction.client);
           await interaction.reply({ content: `Entry #${entryId} was deleted.`, flags: MessageFlags.Ephemeral });
           return;
         }
@@ -961,7 +961,7 @@ export class ArchiveCommand implements FeatureCommand {
       const bytes = Buffer.from(await response.arrayBuffer());
       const assetId = await storeArchiveUpload(interaction.guildId!, interaction.user.id, category, {
         name: attachment.name, contentType: attachment.contentType ?? "application/octet-stream", bytes,
-      }, settings.uploadTypes);
+      }, settings.uploadTypes, { client: interaction.client, legacyStorageChannelId: settings.legacyStorageChannelId });
       await query(
         "INSERT INTO community_archive_entry_assets (entry_id, asset_id, position, uploaded_by) VALUES ($1, $2, 1, $3)",
         [entryId, assetId, interaction.user.id],
@@ -1031,7 +1031,7 @@ export class ArchiveCommand implements FeatureCommand {
       [entry.id],
     );
     for (const [index, asset] of assets.entries()) {
-      const url = await signedArchiveAssetUrl(Number(asset.asset_id)).catch(() => null);
+      const url = await signedArchiveAssetUrl(Number(asset.asset_id), interaction.client, entry.created_guild_id).catch(() => null);
       if (url && index === 0) embed.setImage(url);
       else if (url) embed.addFields({ name: `Private attachment ${index + 1}`, value: `[Open private file](${url})`, inline: true });
     }
@@ -1050,10 +1050,10 @@ export class ArchiveCommand implements FeatureCommand {
     }
     const embed = entryEmbed(entry).setFooter({ text: "Panel of the Day · Selected once per server per day · Safe, approved Archive entry" });
     let imageUrl: string | null = null;
-    if (entry.media_asset_id) imageUrl = await signedArchiveAssetUrl(Number(entry.media_asset_id)).catch(() => null);
+    if (entry.media_asset_id) imageUrl = await signedArchiveAssetUrl(Number(entry.media_asset_id), interaction.client, entry.created_guild_id).catch(() => null);
     if (!imageUrl) {
       const asset = await queryOne<{ asset_id: string }>("SELECT asset_id FROM community_archive_entry_assets WHERE entry_id = $1 ORDER BY position ASC LIMIT 1", [entry.id]);
-      if (asset) imageUrl = await signedArchiveAssetUrl(Number(asset.asset_id)).catch(() => null);
+      if (asset) imageUrl = await signedArchiveAssetUrl(Number(asset.asset_id), interaction.client, entry.created_guild_id).catch(() => null);
     }
     if (!imageUrl && entry.attachment_url?.startsWith("https://")) imageUrl = entry.attachment_url;
     if (imageUrl) embed.setImage(imageUrl);
