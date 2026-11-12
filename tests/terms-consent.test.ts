@@ -8,7 +8,7 @@ test("first-use consent prompt links all published policies",()=>{
  assert.equal(embed.color,0x62676d);
  assert.deepEqual(embed.fields?.map(field=>field.name),POLICY_LINKS.map(policy=>policy.label));
  for(const policy of POLICY_LINKS)assert.ok(embed.fields?.some(field=>field.value?.includes(policy.url)));
- assert.ok(CONSENT_POLICY_VERSIONS.terms&&CONSENT_POLICY_VERSIONS.privacy&&CONSENT_POLICY_VERSIONS.guidelines);
+ assert.deepEqual(CONSENT_POLICY_VERSIONS,{terms:"2026-11-12",privacy:"2026-11-12",guidelines:"2026-11-12"});
 });
 
 test("consent controls are user-bound and have disabled states",()=>{
