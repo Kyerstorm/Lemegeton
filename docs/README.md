@@ -11,6 +11,10 @@ Start with the repository [README](../README.md) for installation and setup.
 - [Media Discovery](MEDIA_DISCOVERY.md): supported providers, browsing, relationships, and source attribution.
 - [Dashboard](DASHBOARD.md): Discord OAuth, Rust API, TypeScript bridge, and deployment.
 - [Security audit](SECURITY_AUDIT.md): authorization boundaries and operational checks.
+- [Terms of Service](TERMS_OF_SERVICE.md): service use and moderation terms.
+- [Privacy Policy](PRIVACY_POLICY.md): data processing, storage, retention and privacy requests.
+- [Community Guidelines](COMMUNITY_GUIDELINES.md): rules for Archive and community contributions.
+- [MIT License](LICENSE): software licence.
 - [Issue reference format](ISSUE_REFERENCE_FORMAT.md): fixed 40-character SHA-512-derived diagnostic reference contract.
 - [Historical Custom Roles build spec](CUSTOM_ROLES_SPEC.md): pre-v3 Python implementation notes; not current setup guidance.
 - [VPS deployment](../deploy/vps/README.md): Node.js bot, Rust dashboard, systemd, and Nginx.
