@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { archiveAssetCleanupBackoffSeconds, classifyArchiveUpload, configureMediaStorage, getArchiveUploadMaxBytes } from "../helpers/media/media-storage.js";
+import { archiveAssetCleanupBackoffSeconds, archiveStorageProvider, classifyArchiveUpload, configureMediaStorage, getArchiveUploadMaxBytes } from "../helpers/media/media-storage.js";
 
+test("legacy-configured guilds keep Discord storage while new guilds use private S3", () => {
+  assert.equal(archiveStorageProvider("123456789012345678"), "discord");
+  assert.equal(archiveStorageProvider(null), "s3");
+});
+ 
 test("private asset cleanup uses capped exponential retry delays", () => {
   assert.equal(archiveAssetCleanupBackoffSeconds(1), 60);
   assert.equal(archiveAssetCleanupBackoffSeconds(2), 120);
