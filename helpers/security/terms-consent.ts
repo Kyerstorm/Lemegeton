@@ -3,9 +3,9 @@ import {query,queryOne} from "../../database.js";
 import {logger} from "../runtime/logger.js";
 
 export const CONSENT_POLICY_VERSIONS={
- terms:"2026-11-03",
- privacy:"2026-11-03",
- guidelines:"2026-11-03",
+ terms:"2026-11-12",
+ privacy:"2026-11-12",
+ guidelines:"2026-11-12",
 } as const;
 
 export const POLICY_LINKS=[
