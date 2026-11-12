@@ -18,7 +18,10 @@ import type { DatabaseConfig } from "../helpers/runtime/config.js";
 import {
   configureMediaStorage,
   deleteArchiveAsset,
+  deleteCustomRoleIconSource,
   processArchiveAssetCleanup,
+  readCustomRoleIconSource,
+  storeCustomRoleIconSource,
   signedArchiveAssetUrl,
   storeArchiveUpload,
 } from "../helpers/media/media-storage.js";
@@ -119,6 +122,19 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
     const downloaded = await fetch(signedUrl);
     assert.equal(downloaded.status, 200);
     assert.deepEqual(Buffer.from(await downloaded.arrayBuffer()), bytes);
+    assert.equal(await signedArchiveAssetUrl(assetId, undefined, "987654321098765433"), null);
+
+    const roleBytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 4, 5, 6]);
+    const roleAssetId = await storeCustomRoleIconSource(guildId, userId, roleBytes, "image/png");
+    assert.deepEqual(await readCustomRoleIconSource(roleAssetId, guildId), roleBytes);
+    assert.equal(await readCustomRoleIconSource(roleAssetId, "987654321098765433"), null);
+    const roleAsset = await queryOne<{ provider: string; namespace: string; is_private: boolean }>(
+      "SELECT provider, namespace, is_private FROM media_assets WHERE id = $1",
+      [roleAssetId],
+    );
+    assert.deepEqual(roleAsset, { provider: "s3", namespace: `custom-roles/${guildId}`, is_private: true });
+    assert.equal(await deleteCustomRoleIconSource(roleAssetId, guildId), true);
+    assert.equal(await readCustomRoleIconSource(roleAssetId, guildId), null);
 
     configureMediaStorage({
       ...goodConfig,
