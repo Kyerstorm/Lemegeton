@@ -72,7 +72,7 @@ import {
   saveArchiveTrail
 } from "../../helpers/archive/archive-collections.js";
 import { query, queryOne } from "../../database.js";
-import { deleteArchiveAsset, signedArchiveAssetUrl, storeArchiveUpload, classifyArchiveUpload } from "../../helpers/media/media-storage.js";
+import { deleteArchiveAsset, resolveLegacyArchiveAttachmentUrl, signedArchiveAssetUrl, storeArchiveUpload, classifyArchiveUpload } from "../../helpers/media/media-storage.js";
 import { cleanText, isGuildManager, isValidHttpsUrl, safeDisplay } from "../../helpers/security/security.js";
 import { logger } from "../../helpers/runtime/logger.js";
 
