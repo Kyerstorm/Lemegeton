@@ -1035,6 +1035,12 @@ export class ArchiveCommand implements FeatureCommand {
       if (url && index === 0) embed.setImage(url);
       else if (url) embed.addFields({ name: `Private attachment ${index + 1}`, value: `[Open private file](${url})`, inline: true });
     }
+    if (!assets.length && entry.storage_channel_id && entry.storage_message_id) {
+      const url = await resolveLegacyArchiveAttachmentUrl(
+        interaction.client, entry.created_guild_id, entry.storage_channel_id, entry.storage_message_id, entry.attachment_filename,
+      );
+      if (url) embed.setImage(url);
+    }
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(`archive:report-entry:${entry.id}`).setLabel("Report").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("archive:collections").setLabel("Collections").setStyle(ButtonStyle.Secondary),
@@ -1054,6 +1060,11 @@ export class ArchiveCommand implements FeatureCommand {
     if (!imageUrl) {
       const asset = await queryOne<{ asset_id: string }>("SELECT asset_id FROM community_archive_entry_assets WHERE entry_id = $1 ORDER BY position ASC LIMIT 1", [entry.id]);
       if (asset) imageUrl = await signedArchiveAssetUrl(Number(asset.asset_id), interaction.client, entry.created_guild_id).catch(() => null);
+    }
+    if (!imageUrl && entry.storage_channel_id && entry.storage_message_id) {
+      imageUrl = await resolveLegacyArchiveAttachmentUrl(
+        interaction.client, entry.created_guild_id, entry.storage_channel_id, entry.storage_message_id, entry.attachment_filename,
+      );
     }
     if (!imageUrl && entry.attachment_url?.startsWith("https://")) imageUrl = entry.attachment_url;
     if (imageUrl) embed.setImage(imageUrl);
