@@ -71,3 +71,19 @@ jobs:
         run: npm run typecheck
       - name: Build and run tests
         run: npm test
+      - name: Install PostgreSQL backup tools
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
+      - name: Rehearse PostgreSQL backup and restore
+        env:
+          PGPASSWORD: lemegeton-ci-${{ github.run_id }}-${{ github.run_attempt }}
+          RESTORE_DATABASE: lemegeton_restore_${{ github.run_id }}_${{ github.run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          psql "$TEST_DATABASE_URL" --set ON_ERROR_STOP=1 --command="CREATE TABLE public.ci_backup_restore_probe (id INTEGER PRIMARY KEY, value TEXT NOT NULL); INSERT INTO public.ci_backup_restore_probe VALUES (1, 'preserved');"
+          pg_dump "$TEST_DATABASE_URL" --format=custom --no-owner --no-acl --file="$RUNNER_TEMP/lemegeton-ci.dump"
+          createdb --host=127.0.0.1 --port=5432 --username=postgres "$RESTORE_DATABASE"
+          restore_url="postgresql://postgres:$PGPASSWORD@127.0.0.1:5432/$RESTORE_DATABASE"
+          pg_restore --exit-on-error --no-owner --no-acl --dbname="$restore_url" "$RUNNER_TEMP/lemegeton-ci.dump"
+          restored_value="$(psql "$restore_url" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT value FROM public.ci_backup_restore_probe WHERE id = 1")"
+          test "$restored_value" = "preserved"
+          dropdb --host=127.0.0.1 --port=5432 --username=postgres "$RESTORE_DATABASE"
