@@ -166,12 +166,14 @@ const schemaStatements = [
     enabled_categories TEXT NOT NULL DEFAULT '["panels","quotes","fanworks","moodboards","soundtracks","scenes","recommendation-board","theories"]',
     upload_types TEXT NOT NULL DEFAULT '["image"]',
     upload_channel_id BIGINT,
+    legacy_storage_channel_id BIGINT,
     moderation_channel_id BIGINT,
     moderator_role_id BIGINT,
     updated_by BIGINT,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`,
   "ALTER TABLE guild_archive_settings ADD COLUMN IF NOT EXISTS upload_channel_id BIGINT",
+  "ALTER TABLE guild_archive_settings ADD COLUMN IF NOT EXISTS legacy_storage_channel_id BIGINT",
   "ALTER TABLE guild_archive_settings ADD COLUMN IF NOT EXISTS moderation_channel_id BIGINT",
   "ALTER TABLE guild_archive_settings ADD COLUMN IF NOT EXISTS moderator_role_id BIGINT",
   `CREATE TABLE IF NOT EXISTS archive_user_preferences (
@@ -730,21 +732,23 @@ export async function initDatabase(config: DatabaseConfig): Promise<void> {
       `SELECT column_name FROM information_schema.columns
        WHERE table_schema = current_schema() AND table_name = 'guild_settings'
          AND column_name = ANY($1::text[])`,
-      [["guild_id", "panel_log_channel_id", "panel_mod_role_id", "archive_scope"]],
+      [["guild_id", "panel_storage_channel_id", "panel_log_channel_id", "panel_mod_role_id", "archive_scope"]],
     );
     const legacyGuildColumns = new Set(legacyGuildSettings.rows.map(row => row.column_name));
     if (legacyGuildColumns.has("guild_id")) {
       const legacySettingColumn = (column: string): string =>
         legacyGuildColumns.has(column) ? column : "NULL::BIGINT";
       await client.query(
-        `INSERT INTO guild_archive_settings (guild_id, moderation_channel_id, moderator_role_id)
-         SELECT guild_id, ${legacySettingColumn("panel_log_channel_id")}, ${legacySettingColumn("panel_mod_role_id")}
+        `INSERT INTO guild_archive_settings (guild_id, moderation_channel_id, moderator_role_id, legacy_storage_channel_id)
+         SELECT guild_id, ${legacySettingColumn("panel_log_channel_id")}, ${legacySettingColumn("panel_mod_role_id")}, ${legacySettingColumn("panel_storage_channel_id")}
            FROM guild_settings
           WHERE ${legacySettingColumn("panel_log_channel_id")} IS NOT NULL
              OR ${legacySettingColumn("panel_mod_role_id")} IS NOT NULL
+             OR ${legacySettingColumn("panel_storage_channel_id")} IS NOT NULL
          ON CONFLICT (guild_id) DO UPDATE SET
            moderation_channel_id = COALESCE(guild_archive_settings.moderation_channel_id, EXCLUDED.moderation_channel_id),
-           moderator_role_id = COALESCE(guild_archive_settings.moderator_role_id, EXCLUDED.moderator_role_id)`,
+           moderator_role_id = COALESCE(guild_archive_settings.moderator_role_id, EXCLUDED.moderator_role_id),
+           legacy_storage_channel_id = COALESCE(guild_archive_settings.legacy_storage_channel_id, EXCLUDED.legacy_storage_channel_id)`,
       );
     }
 
