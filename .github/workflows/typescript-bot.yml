@@ -45,8 +45,19 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      minio:
+        image: minio/minio:latest
+        env:
+          MINIO_ROOT_USER: lemegeton-ci
+          MINIO_ROOT_PASSWORD: lemegeton-minio-${{ github.run_id }}-${{ github.run_attempt }}
+        ports:
+          - 9000:9000
+        command: server /data
     env:
       TEST_DATABASE_URL: postgresql://postgres:lemegeton-ci-${{ github.run_id }}-${{ github.run_attempt }}@127.0.0.1:5432/lemegeton_test
+      S3_TEST_ENDPOINT_URL: http://127.0.0.1:9000
+      S3_TEST_ACCESS_KEY_ID: lemegeton-ci
+      S3_TEST_SECRET_ACCESS_KEY: lemegeton-minio-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
