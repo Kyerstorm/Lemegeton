@@ -243,7 +243,7 @@ export async function signedArchiveAssetUrl(
   if (asset.provider === "discord") {
     if (!client || !asset.guild_id || asset.namespace !== `archive/${asset.guild_id}`) return null;
     const [messageId, attachmentId] = asset.object_key.split("/", 2);
-    if (!/^\\d{17,20}$/.test(messageId ?? "") || !/^\\d{17,20}$/.test(attachmentId ?? "")) return null;
+    if (typeof messageId !== "string" || typeof attachmentId !== "string" || !/^\d{17,20}$/.test(messageId) || !/^\d{17,20}$/.test(attachmentId)) return null;
     const channel = await client.channels.fetch(asset.bucket_name).catch(() => null);
     if (!channel || channel.type !== ChannelType.GuildText || (channel as TextChannel).guildId !== asset.guild_id) return null;
     const message = await (channel as TextChannel).messages.fetch(messageId).catch(() => null);
@@ -295,7 +295,7 @@ export async function deleteArchiveAsset(assetId: number, client?: Client): Prom
         throw new Error("The Discord client is unavailable for legacy Archive cleanup.");
       }
       const [messageId, attachmentId] = asset.object_key.split("/", 2);
-      if (!/^\\d{17,20}$/.test(messageId ?? "") || !/^\\d{17,20}$/.test(attachmentId ?? "")) {
+      if (typeof messageId !== "string" || typeof attachmentId !== "string" || !/^\d{17,20}$/.test(messageId) || !/^\d{17,20}$/.test(attachmentId)) {
         throw new Error("Legacy Archive asset metadata is invalid.");
       }
       const channel = await client.channels.fetch(asset.bucket_name).catch(error => {
