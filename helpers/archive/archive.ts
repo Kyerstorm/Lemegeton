@@ -4,7 +4,7 @@ import {
   type Message,
 } from "discord.js";
 import { query, queryOne, transaction } from "../../database.js";
-import { deleteArchiveAsset } from "../media/media-storage.js";
+import { deleteArchiveAsset, resolveLegacyArchiveAttachmentUrl } from "../media/media-storage.js";
 import { archiveUploadAllowed, getArchiveUploadMaxBytes, storeArchiveUpload } from "../media/media-storage.js";
 import { cleanText, isValidHttpsUrl, normalizeTags } from "../security/security.js";
 import { GLOBAL_MODERATOR_IDS, isGlobalArchiveModerator } from "./archive-access.js";
@@ -56,6 +56,7 @@ export interface ArchiveSettings {
   enabledCategories: ArchiveCategory[];
   uploadTypes: string[];
   uploadChannelId: string | null;
+  legacyStorageChannelId: string | null;
   moderationChannelId: string | null;
   moderatorRoleId: string | null;
 }
@@ -100,6 +101,9 @@ export interface ArchiveEntry {
   media_asset_id: string | null;
   attachment_count?: number;
   attachment_url: string | null;
+  attachment_filename: string | null;
+  storage_message_id: string | null;
+  storage_channel_id: string | null;
   created_at: Date;
 }
 
@@ -140,13 +144,14 @@ export async function getArchiveSettings(guildId: string): Promise<ArchiveSettin
     enabled_categories: string;
     upload_types: string;
     upload_channel_id: string | null;
+    legacy_storage_channel_id: string | null;
     moderation_channel_id: string | null;
     moderator_role_id: string | null;
   }>(
-    "SELECT enabled_categories, upload_types, upload_channel_id::text, moderation_channel_id::text, moderator_role_id::text FROM guild_archive_settings WHERE guild_id = $1",
+    "SELECT enabled_categories, upload_types, upload_channel_id::text, legacy_storage_channel_id::text, moderation_channel_id::text, moderator_role_id::text FROM guild_archive_settings WHERE guild_id = $1",
     [guildId],
   );
-  if (!row) return { enabledCategories: DEFAULT_CATEGORIES, uploadTypes: ["image"], uploadChannelId: null, moderationChannelId: null, moderatorRoleId: null };
+  if (!row) return { enabledCategories: DEFAULT_CATEGORIES, uploadTypes: ["image"], uploadChannelId: null, legacyStorageChannelId: null, moderationChannelId: null, moderatorRoleId: null };
   try {
     const categories = JSON.parse(row.enabled_categories) as unknown;
     const uploads = JSON.parse(row.upload_types) as unknown;
@@ -160,12 +165,13 @@ export async function getArchiveSettings(guildId: string): Promise<ArchiveSettin
       enabledCategories: [...new Set(categories as ArchiveCategory[])],
       uploadTypes: [...new Set(uploads as string[])],
       uploadChannelId: row.upload_channel_id,
+      legacyStorageChannelId: row.legacy_storage_channel_id,
       moderationChannelId: row.moderation_channel_id,
       moderatorRoleId: row.moderator_role_id,
     };
   } catch {
     // Invalid settings fail closed instead of enabling categories/uploads by accident.
-    return { enabledCategories: [], uploadTypes: [], uploadChannelId: row.upload_channel_id, moderationChannelId: row.moderation_channel_id, moderatorRoleId: row.moderator_role_id };
+    return { enabledCategories: [], uploadTypes: [], uploadChannelId: row.upload_channel_id, legacyStorageChannelId: row.legacy_storage_channel_id, moderationChannelId: row.moderation_channel_id, moderatorRoleId: row.moderator_role_id };
   }
 }
 
@@ -420,7 +426,7 @@ export async function getOwnSubmissions(guildId: string, userId: string): Promis
   return rows.map((entry) => ({ ...entry, tags: parseTags(String((entry as unknown as { tags: string }).tags ?? "[]")) }));
 }
 
-export async function handleArchiveUploadMessage(message: Message, _client: Client): Promise<boolean> {
+export async function handleArchiveUploadMessage(message: Message, client: Client): Promise<boolean> {
   if (!message.guildId || message.author.bot || !message.attachments.size) return false;
   const settings = await getArchiveSettings(message.guildId);
   if (!settings.uploadChannelId || settings.uploadChannelId !== message.channelId) return false;
@@ -447,7 +453,7 @@ export async function handleArchiveUploadMessage(message: Message, _client: Clie
     if (!response.ok) continue;
     const bytes = Buffer.from(await response.arrayBuffer());
     if (!archiveUploadAllowed(pending.archive_type, settings.uploadTypes, { ...upload, bytes })) continue;
-    const assetId = await storeArchiveUpload(message.guildId, message.author.id, pending.archive_type, { ...upload, bytes }, settings.uploadTypes);
+    const assetId = await storeArchiveUpload(message.guildId, message.author.id, pending.archive_type, { ...upload, bytes }, settings.uploadTypes, { client, legacyStorageChannelId: settings.legacyStorageChannelId });
     const position = stored + 1;
     await query(
       `INSERT INTO community_archive_entry_assets (entry_id, asset_id, position, uploaded_by)
@@ -566,6 +572,7 @@ export async function deleteArchiveEntry(
   entryId: string,
   canModerate: boolean,
   global = false,
+  client?: Client,
 ): Promise<void> {
   const assets = await transaction(async (client) => {
     const scope = global
@@ -599,7 +606,7 @@ export async function deleteArchiveEntry(
   });
   for (const asset of assets) {
     try {
-      await deleteArchiveAsset(Number(asset.asset_id));
+      await deleteArchiveAsset(Number(asset.asset_id), client);
     } catch {
       // The durable cleanup queue retries failed private-object deletions.
     }
