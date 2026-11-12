@@ -5,6 +5,7 @@ import { Pool } from "pg";
 import {
   CreateBucketCommand,
   DeleteBucketCommand,
+  DeleteObjectCommand,
   ListObjectsV2Command,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -166,11 +167,7 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
       const leftovers = await objectClient.send(new ListObjectsV2Command({ Bucket: bucket })).catch(() => null);
       for (const item of leftovers?.Contents ?? []) {
         // Test objects are private and the bucket is unique to this run.
-        await objectClient.send({} as never).catch(() => undefined);
-        if (item.Key) {
-          const { DeleteObjectCommand } = await import("@aws-sdk/client-s3");
-          await objectClient.send(new DeleteObjectCommand({ Bucket: bucket, Key: item.Key })).catch(() => undefined);
-        }
+        if (item.Key) await objectClient.send(new DeleteObjectCommand({ Bucket: bucket, Key: item.Key })).catch(() => undefined);
       }
       await objectClient.send(new DeleteBucketCommand({ Bucket: bucket })).catch(() => undefined);
     }
