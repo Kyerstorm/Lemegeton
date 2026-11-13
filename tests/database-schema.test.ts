@@ -17,6 +17,14 @@ import { claimDueMediaNightResults } from "../helpers/community/community-rankin
 
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
 
+function testDatabaseSsl(parsedUrl: URL): boolean {
+  const mode = parsedUrl.searchParams.get("sslmode")?.toLowerCase();
+  if (mode === "disable") return false;
+  if (mode && ["require", "verify-ca", "verify-full", "prefer", "allow"].includes(mode)) return true;
+  const host = parsedUrl.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  return !["localhost", "127.0.0.1", "::1"].includes(host);
+}
+
 test("PostgreSQL initialization preserves legacy guild data and is repeatable", {
   skip: databaseUrl ? false : "TEST_DATABASE_URL is not configured",
 }, async () => {
@@ -337,7 +345,7 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       database: decodeURIComponent(parsedUrl.pathname.replace(/^\//, "")),
       user: decodeURIComponent(parsedUrl.username),
       password: decodeURIComponent(parsedUrl.password),
-      ssl: false,
+      ssl: testDatabaseSsl(parsedUrl),
       poolSize: 2,
       primaryGuildId: "987654321098765432",
     };
@@ -1138,7 +1146,7 @@ test("PostgreSQL migration rolls back when legacy user rows have no safe guild a
       database: decodeURIComponent(parsedUrl.pathname.replace(/^\//, "")),
       user: decodeURIComponent(parsedUrl.username),
       password: decodeURIComponent(parsedUrl.password),
-      ssl: false,
+      ssl: testDatabaseSsl(parsedUrl),
       poolSize: 2,
       primaryGuildId: null,
     };

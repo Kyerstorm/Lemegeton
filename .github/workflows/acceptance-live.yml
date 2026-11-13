@@ -2,6 +2,11 @@ name: Live acceptance checks
 
 on:
   workflow_dispatch:
+    inputs:
+      confirm_database:
+        description: "Type DISPOSABLE_STAGING to confirm the supplied database is a disposable staging copy."
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -43,6 +48,8 @@ jobs:
       DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
       GUILD_ID: ${{ secrets.DISCORD_TEST_GUILD_ID }}
       DISCORD_TEST_INVITER_ID: ${{ secrets.DISCORD_TEST_INVITER_ID }}
+      DISCORD_TEST_CHANNEL_ID: ${{ secrets.DISCORD_TEST_CHANNEL_ID }}
+      DISCORD_TEST_MODERATOR_GUILD_ID: ${{ secrets.DISCORD_TEST_MODERATOR_GUILD_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -53,6 +60,8 @@ jobs:
           set -Eeuo pipefail
           test -n "$DISCORD_TOKEN"
           test -n "$GUILD_ID"
+          test -n "$DISCORD_TEST_INVITER_ID"
+          test -n "$DISCORD_TEST_CHANNEL_ID"
       - run: npm install --no-audit --no-fund
       - name: Verify bot membership, permissions, audit log and deployed commands
         run: node scripts/acceptance/discord.mjs
@@ -82,6 +91,8 @@ jobs:
           test "${#DASHBOARD_BRIDGE_SECRET}" -ge 32
           case "$DASHBOARD_PUBLIC_URL" in https://*) ;; *) exit 1 ;; esac
           case "$DASHBOARD_REDIRECT_URI" in "$DASHBOARD_PUBLIC_URL"/oauth/callback) ;; *) exit 1 ;; esac
+      - name: Run OAuth, session, permission and dashboard API tests
+        run: cargo test --manifest-path web/backend/Cargo.toml
       - name: Build Rust dashboard
         run: cargo build --manifest-path web/backend/Cargo.toml --release
       - name: Start dashboard and validate live OAuth redirect
@@ -105,3 +116,98 @@ jobs:
           grep -Eiq '^location: https://discord\.com/oauth2/authorize\?' "$RUNNER_TEMP/oauth.headers"
           grep -Eiq '^set-cookie: lemegeton_oauth_state=.*HttpOnly.*SameSite=Lax.*Secure' "$RUNNER_TEMP/oauth.headers"
           grep -Eiq '^location:.*response_type=code' "$RUNNER_TEMP/oauth.headers"
+
+  postgres-staging:
+    name: Staging migration, integrity and backup/restore acceptance
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: migration-restore-${{ github.run_id }}-${{ github.run_attempt }}
+          POSTGRES_DB: lemegeton_restore
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d lemegeton_restore"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      CONFIRM_DATABASE: ${{ inputs.confirm_database }}
+      MIGRATION_ACCEPTANCE_DATABASE_URL: ${{ secrets.MIGRATION_ACCEPTANCE_DATABASE_URL }}
+      TEST_DATABASE_URL: ${{ secrets.MIGRATION_ACCEPTANCE_DATABASE_URL }}
+      RESTORE_DATABASE_URL: postgresql://postgres:migration-restore-${{ github.run_id }}-${{ github.run_attempt }}@127.0.0.1:5432/lemegeton_restore
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Require an explicitly disposable staging copy
+        run: |
+          set -Eeuo pipefail
+          test "$CONFIRM_DATABASE" = "DISPOSABLE_STAGING"
+          test -n "$MIGRATION_ACCEPTANCE_DATABASE_URL"
+          echo "Only the explicitly confirmed disposable staging database will be read; migration tests create and drop isolated schemas."
+      - run: npm install --no-audit --no-fund
+      - run: npm run build
+      - name: Execute legacy migration and rollback integration tests
+        run: node --test dist/tests/database-schema.test.js
+      - name: Dump staging database and restore into isolated PostgreSQL 16
+        run: |
+          set -Eeuo pipefail
+          docker run --rm --network host --entrypoint sh \
+            -e SOURCE_DB_URL="$MIGRATION_ACCEPTANCE_DATABASE_URL" \
+            -e RESTORE_DATABASE_URL \
+            -v "$RUNNER_TEMP:/backup" postgres:16 -ec '
+              pg_dump "$SOURCE_DB_URL" --format=custom --no-owner --no-acl --file=/backup/migration-acceptance.dump
+              pg_restore --exit-on-error --no-owner --no-acl --dbname="$RESTORE_DATABASE_URL" /backup/migration-acceptance.dump
+              psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = current_schema() ORDER BY tablename" > /backup/source-tables.txt
+              psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = current_schema() ORDER BY tablename" > /backup/restored-tables.txt
+              diff -u /backup/source-tables.txt /backup/restored-tables.txt
+              while IFS= read -r table; do
+                source_count="$(psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT count(*) FROM public.\\"$table\\"")"
+                restored_count="$(psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT count(*) FROM public.\\"$table\\"")"
+                test "$source_count" = "$restored_count"
+              done < /backup/source-tables.txt
+            '
+
+  s3-live:
+    name: Live private S3 upload, retrieval and cleanup acceptance
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: lemegeton-s3-${{ github.run_id }}-${{ github.run_attempt }}
+          POSTGRES_DB: lemegeton_s3_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d lemegeton_s3_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:lemegeton-s3-${{ github.run_id }}-${{ github.run_attempt }}@127.0.0.1:5432/lemegeton_s3_test
+      S3_TEST_ENDPOINT_URL: ${{ secrets.S3_TEST_ENDPOINT_URL }}
+      S3_TEST_ACCESS_KEY_ID: ${{ secrets.S3_TEST_ACCESS_KEY_ID }}
+      S3_TEST_SECRET_ACCESS_KEY: ${{ secrets.S3_TEST_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Require a dedicated disposable S3-compatible test account
+        run: |
+          set -Eeuo pipefail
+          test -n "$S3_TEST_ENDPOINT_URL"
+          test -n "$S3_TEST_ACCESS_KEY_ID"
+          test -n "$S3_TEST_SECRET_ACCESS_KEY"
+          case "$S3_TEST_ENDPOINT_URL" in https://*) ;; *) exit 1 ;; esac
+      - run: npm install --no-audit --no-fund
+      - run: npm run build
+      - name: Test private upload, signed download, wrong-guild denial and failed-delete recovery
+        run: node --test dist/tests/media-storage-s3.integration.test.js
