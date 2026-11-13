@@ -709,6 +709,57 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     assert.equal((await getProfilePreferences(otherGuild, profileUser)).allow_affinity, false);
 
     await query(
+      `INSERT INTO community_archive_entries
+        (archive_type, title, content, media_type, tags, created_by, created_guild_id, visibility, status)
+       VALUES
+        ('quotes', 'Visible contribution', '', 'Anime', '[]', $1, $2, 'server', 'approved'),
+        ('quotes', 'Other guild contribution', '', 'Anime', '[]', $1, $3, 'server', 'approved'),
+        ('quotes', 'Pending contribution', '', 'Anime', '[]', $1, $2, 'server', 'pending'),
+        ('quotes', 'Global contribution', '', 'Anime', '[]', $1, $2, 'global', 'approved')`,
+      [profileUser, primaryGuild, otherGuild],
+    );
+    const ownedCollection = await queryOne<{ id: string }>(
+      `INSERT INTO archive_collections (guild_id, owner_id, title, visibility)
+       VALUES ($1, $2, 'Owned collection', 'server') RETURNING id::text AS id`,
+      [primaryGuild, profileUser],
+    );
+    const sharedCollection = await queryOne<{ id: string }>(
+      `INSERT INTO archive_collections (guild_id, owner_id, title, visibility)
+       VALUES ($1, $2, 'Shared collection', 'server') RETURNING id::text AS id`,
+      [primaryGuild, "888888888888888888"],
+    );
+    assert.ok(ownedCollection && sharedCollection);
+    await query(
+      `INSERT INTO archive_collection_collaborators (collection_id, user_id, role, invited_by)
+       VALUES ($1, $2, 'editor', $3)`,
+      [sharedCollection.id, profileUser, "888888888888888888"],
+    );
+    await query(
+      `INSERT INTO archive_trails (guild_id, owner_id, title, visibility)
+       VALUES ($1, $2, 'Owned Trail', 'server')`,
+      [primaryGuild, profileUser],
+    );
+
+    const contributionProfile = await getLinkedProfile(
+      primaryGuild,
+      profileUser,
+      "same-member",
+      {} as AniListClient,
+      {} as SteamClient,
+    );
+    assert.ok(contributionProfile);
+    assert.equal(contributionProfile.contributions, 1);
+    assert.deepEqual(
+      contributionProfile.contributionShowcase.map((item) => [item.title, item.kind, item.attribution]).sort(),
+      [
+        ["Owned Trail", "trail", "owner"],
+        ["Owned collection", "collection", "owner"],
+        ["Shared collection", "collection", "editor"],
+        ["Visible contribution", "entry", "creator"],
+      ].sort(),
+    );
+
+    await query(
       "UPDATE users SET anilist_username = $3, anilist_id = $4 WHERE discord_id = $1 AND guild_id = $2",
       [profileUser, primaryGuild, "primary-profile", 11],
     );
