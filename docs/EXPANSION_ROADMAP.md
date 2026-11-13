@@ -154,11 +154,10 @@ Phase 0 code migration status does **not** mean the service is launched. Phase 8
 
 **Objective:** establish one trustworthy TypeScript v3 baseline before feature expansion.
 
-**Already present:** the v3 PR records the migration as complete for in-scope code, keeps lemegeton-v3 against multi_guild, retains standalone /help, /privacy and /feedback, and lists the separate live-service acceptance gates.
+**Verified in this audit (2026-11-13):** the `lemegeton-v3` tree contains zero Python files and compares as 733 commits ahead / 0 behind `multi_guild`. The TypeScript bot workflow passed typecheck and all 216 tests; repository health passed. Frontend typecheck/build, frontend dependency audit and Rust tests passed on the same PR head. Docker image verification and the Rust dependency audit remain separate CI gates until their jobs finish. Standalone /help, /privacy and /feedback remain separate, and PR #17 remains the only implementation target.
 
 **Remaining delivery:**
 - Keep all work on PR #17 and re-check the base/head relationship before any release decision.
-- Confirm no Python runtime or Python command implementation remains in the deployable tree.
 - Confirm each retained legacy command/workflow is either migrated, intentionally retired with a reason, or explicitly deferred.
 - Re-run the full migration test set whenever a later phase changes the database, routing or interaction contract.
 - Keep live-service acceptance separate from code parity; do not call a mocked provider test a live acceptance test.
