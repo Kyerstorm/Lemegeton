@@ -69,6 +69,10 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Type-check
         run: npm run typecheck
+      - name: Validate live acceptance scripts and workflow syntax
+        run: |
+          node --check scripts/acceptance/discord.mjs
+          ruby -e 'require "yaml"; YAML.parse_file(".github/workflows/acceptance-live.yml")'
       - name: Build and run tests
         run: npm test
       - name: Rehearse PostgreSQL 16 backup and restore
