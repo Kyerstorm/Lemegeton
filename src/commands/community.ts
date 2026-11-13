@@ -58,6 +58,20 @@ import {
 } from "../../helpers/community/community.js";
 import { query, queryOne } from "../../database.js";
 import { listArchiveSpotlights } from "../../helpers/archive/archive-curation.js";
+import {
+  addCommunitySeasonItem,
+  advanceCommunityTournament,
+  cancelCommunityTournament,
+  closeCommunitySeason,
+  createCommunitySeason,
+  createCommunityTournament,
+  getCommunitySeason,
+  getCommunityTournament,
+  listCommunitySeasons,
+  listCommunityTournaments,
+  parseTournamentCandidates,
+  voteInCommunityTournament,
+} from "../../helpers/community/community-tournaments.js";
 import { cleanText, isGuildManager, isValidHttpsUrl, safeDisplay } from "../../helpers/security/security.js";
 import {
   attachReadingDiscussion,
@@ -113,6 +127,8 @@ function communityHome(): { embeds: EmbedBuilder[]; components: ActionRowBuilder
       { name: "Release calendar", value: "Upcoming provider-dated anime airings and film releases.", inline: true },
       { name: "History", value: "Recent rankings, sessions and discussions.", inline: true },
       { name: "Spotlights", value: "Curator-selected approved Archive contributions.", inline: true },
+      { name: "Tournaments", value: "Seeded elimination brackets with locked ballots.", inline: true },
+      { name: "Seasons", value: "Collect completed server activities into a shared season.", inline: true },
     ],
   );
   const rows = [
@@ -126,6 +142,8 @@ function communityHome(): { embeds: EmbedBuilder[]; components: ActionRowBuilder
       new ButtonBuilder().setCustomId("community:calendar").setLabel("Release calendar").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("community:history").setLabel("History").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("community:spotlights").setLabel("Spotlights").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("community:tournaments").setLabel("Tournaments").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("community:seasons").setLabel("Seasons").setStyle(ButtonStyle.Secondary),
     ),
   ];
   return { embeds: [embed], components: rows };
@@ -156,6 +174,8 @@ export class CommunityCommand implements FeatureCommand {
       { name: "Disable release digests", value: "calendar-disable" },
       { name: "Community history", value: "history" },
       { name: "Archive spotlights", value: "spotlights" },
+      { name: "Tournament Centre", value: "tournaments" },
+      { name: "Community Seasons", value: "seasons" },
       { name: "Nominate a community read", value: "reading-nominate" },
       { name: "View reading nominations and vote", value: "reading-list" },
       { name: "Select the next community read", value: "reading-select" },
@@ -201,7 +221,24 @@ export class CommunityCommand implements FeatureCommand {
       { name: "Anime and TV", value: "anime,tv" }, { name: "Anime and movies", value: "anime,movies" },
       { name: "TV and movies", value: "tv,movies" },
     ))
-    .addIntegerOption((option) => option.setName("weekday").setDescription("Weekly digest day (0 Sunday – 6 Saturday)").setMinValue(0).setMaxValue(6));
+    .addIntegerOption((option) => option.setName("weekday").setDescription("Weekly digest day (0 Sunday – 6 Saturday)").setMinValue(0).setMaxValue(6))
+    .addStringOption((option) => option.setName("tournament_id").setDescription("Tournament ID").setMaxLength(24))
+    .addStringOption((option) => option.setName("tournament_candidates").setDescription("One candidate per line: Title | HTTPS source URL").setMaxLength(4_000))
+    .addStringOption((option) => option.setName("closes_at").setDescription("Tournament round close time (ISO-8601 with timezone)").setMaxLength(40))
+    .addIntegerOption((option) => option.setName("round_duration_hours").setDescription("Hours for each tournament round").setMinValue(1).setMaxValue(168))
+    .addStringOption((option) => option.setName("season_id").setDescription("Community Season ID").setMaxLength(24))
+    .addStringOption((option) => option.setName("season_item_id").setDescription("Existing activity ID to add to a season").setMaxLength(24))
+    .addStringOption((option) => option.setName("season_item_type").setDescription("Existing activity type").addChoices(
+      { name: "Approved Daily Drop", value: "daily_drop" },
+      { name: "Closed ranking", value: "ranking" },
+      { name: "Past session", value: "session" },
+      { name: "Completed tournament", value: "tournament" },
+      { name: "Archive spotlight", value: "spotlight" },
+      { name: "Archive collection", value: "collection" },
+      { name: "Archive Trail", value: "trail" },
+    ))
+    .addStringOption((option) => option.setName("season_starts_at").setDescription("Season start (ISO-8601 with timezone)").setMaxLength(40))
+    .addStringOption((option) => option.setName("season_ends_at").setDescription("Season end (ISO-8601 with timezone)").setMaxLength(40));
 
   private readonly anilist: AniListClient;
   private readonly tmdb: TmdbClient;
@@ -248,6 +285,8 @@ export class CommunityCommand implements FeatureCommand {
         case "calendar": await this.showCalendar(interaction); return;
         case "history": await this.showHistory(interaction); return;
         case "spotlights": await this.showSpotlights(interaction); return;
+        case "tournaments": await this.showTournamentCentre(interaction); return;
+        case "seasons": await this.showSeasonCentre(interaction); return;
         case "reading-nominate": await this.nominateReading(interaction); return;
         case "reading-list": await this.showReadingNominations(interaction); return;
         case "reading-select": await this.selectReading(interaction); return;
@@ -265,6 +304,19 @@ export class CommunityCommand implements FeatureCommand {
   }
 
   async handleButton(interaction: ButtonInteraction): Promise<boolean> {
+    const tournamentVote = interaction.customId.match(/^community:tournament-vote:(\d+):(\d+)$/);
+    if (tournamentVote && interaction.guildId) {
+      try {
+        await voteInCommunityTournament(interaction.guildId, interaction.user.id, tournamentVote[1]!, tournamentVote[2]!);
+        await interaction.reply({ content: "Your tournament ballot is saved and locked for this match.", flags: MessageFlags.Ephemeral });
+      } catch (error) {
+        await interaction.reply({
+          content: error instanceof Error ? error.message : "Your tournament vote could not be saved.",
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+      return true;
+    }
     const mediaNightVote = interaction.customId.match(/^community:media-night-vote:(\d+):(\d+)$/);
     if (mediaNightVote && interaction.guildId) {
       await voteForRanking(interaction.guildId, interaction.user.id, mediaNightVote[1]!, mediaNightVote[2]!);
@@ -362,6 +414,71 @@ export class CommunityCommand implements FeatureCommand {
     }
     if (action === "spotlights") {
       await this.showSpotlights(interaction);
+      return true;
+    }
+    if (action === "tournaments") {
+      await this.showTournamentCentre(interaction);
+      return true;
+    }
+    if (action === "seasons") {
+      await this.showSeasonCentre(interaction);
+      return true;
+    }
+    if (action === "tournament-create") {
+      await interaction.showModal(modal("community:tournament-create", "Create a tournament", [
+        { id: "title", label: "Tournament title", max: 180 },
+        { id: "description", label: "What are members voting on?", max: 800, paragraph: true, required: false },
+        { id: "candidates", label: "4, 8 or 16 lines: Title | HTTPS source URL", max: 4_000, paragraph: true },
+        { id: "closes", label: "First round close time (ISO-8601 with timezone)", max: 40, placeholder: "2026-12-12T19:00+00:00" },
+        { id: "duration", label: "Round duration in hours (optional)", max: 3, required: false },
+      ]));
+      return true;
+    }
+    if (action === "tournament-advance" || action === "tournament-cancel") {
+      if (!id) return false;
+      try {
+        if (action === "tournament-advance") {
+          const result = await advanceCommunityTournament(interaction.guildId, id, interaction.user.id, isGuildManager(interaction));
+          await interaction.reply({
+            content: result.status === "completed"
+              ? "Tournament completed. Champion: " + (result.winnerTitle ?? "winner unavailable") + "."
+              : "Round " + result.round + " is now open.",
+            flags: MessageFlags.Ephemeral,
+          });
+        } else {
+          await cancelCommunityTournament(interaction.guildId, id, interaction.user.id, isGuildManager(interaction));
+          await interaction.reply({ content: "Tournament cancelled.", flags: MessageFlags.Ephemeral });
+        }
+      } catch (error) {
+        await interaction.reply({ content: error instanceof Error ? error.message : "The tournament action failed.", flags: MessageFlags.Ephemeral });
+      }
+      return true;
+    }
+    if (action === "season-create") {
+      await interaction.showModal(modal("community:season-create", "Create a Community Season", [
+        { id: "title", label: "Season title", max: 160 },
+        { id: "description", label: "Season description", max: 800, paragraph: true, required: false },
+        { id: "starts", label: "Start date/time with timezone", max: 40, placeholder: "2026-12-01T00:00+00:00" },
+        { id: "ends", label: "End date/time with timezone", max: 40, placeholder: "2027-01-01T00:00+00:00" },
+      ]));
+      return true;
+    }
+    if (action === "season-add") {
+      if (!id) return false;
+      await interaction.showModal(modal("community:season-add:" + id, "Add an existing activity", [
+        { id: "item_type", label: "Type: daily_drop, ranking, session, tournament, spotlight, collection or trail", max: 24 },
+        { id: "item_id", label: "Existing record ID", max: 24 },
+      ]));
+      return true;
+    }
+    if (action === "season-close") {
+      if (!id) return false;
+      try {
+        await closeCommunitySeason(interaction.guildId, interaction.user.id, id, isGuildManager(interaction));
+        await interaction.reply({ content: "Community Season closed. Its existing activity links are preserved.", flags: MessageFlags.Ephemeral });
+      } catch (error) {
+        await interaction.reply({ content: error instanceof Error ? error.message : "The season could not be closed.", flags: MessageFlags.Ephemeral });
+      }
       return true;
     }
     if (action === "daily-configure") { await this.openDailyConfig(interaction); return true; }
@@ -504,6 +621,14 @@ export class CommunityCommand implements FeatureCommand {
     const [, action, mode] = interaction.customId.split(":");
     const id = interaction.values[0];
     if (!id) return false;
+    if (action === "tournament-select") {
+      await this.showTournament(interaction, id);
+      return true;
+    }
+    if (action === "season-select") {
+      await this.showSeason(interaction, id);
+      return true;
+    }
     if (action === "ranking-select") {
       const candidates = await query<{ id: string; title: string }>(
         "SELECT id, title FROM community_ranking_candidates WHERE ranking_id = $1 AND status = 'approved' ORDER BY created_at ASC LIMIT 25",
@@ -546,6 +671,63 @@ export class CommunityCommand implements FeatureCommand {
     const [prefix, action] = interaction.customId.split(":");
     if (prefix !== "community") return false;
     try {
+      if (action === "tournament-create") {
+        const closesText = interaction.fields.getTextInputValue("closes").trim();
+        const closesAt = new Date(closesText);
+        if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(closesText) || !Number.isFinite(closesAt.getTime())) {
+          throw new Error("The first round close time must be ISO-8601 and include a timezone offset.");
+        }
+        const durationText = interaction.fields.getTextInputValue("duration").trim();
+        const duration = durationText ? Number(durationText) : 48;
+        if (!Number.isInteger(duration) || duration < 1 || duration > 168) {
+          throw new Error("Round duration must be between 1 and 168 hours.");
+        }
+        const tournamentId = await createCommunityTournament({
+          guildId: interaction.guildId,
+          creatorId: interaction.user.id,
+          title: interaction.fields.getTextInputValue("title"),
+          description: interaction.fields.getTextInputValue("description"),
+          candidates: parseTournamentCandidates(interaction.fields.getTextInputValue("candidates")),
+          closesAt,
+          roundDurationHours: duration,
+        });
+        await interaction.reply({ content: "Tournament #" + tournamentId + " created with locked ballots and " + duration + "-hour rounds.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      if (action === "season-create") {
+        const startsText = interaction.fields.getTextInputValue("starts").trim();
+        const endsText = interaction.fields.getTextInputValue("ends").trim();
+        const startsAt = new Date(startsText);
+        const endsAt = new Date(endsText);
+        if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(startsText) || !Number.isFinite(startsAt.getTime())
+          || !/[zZ]|[+-]\d{2}:?\d{2}$/.test(endsText) || !Number.isFinite(endsAt.getTime())) {
+          throw new Error("Season start and end must be ISO-8601 date-times with timezone offsets.");
+        }
+        const seasonId = await createCommunitySeason({
+          guildId: interaction.guildId,
+          creatorId: interaction.user.id,
+          title: interaction.fields.getTextInputValue("title"),
+          description: interaction.fields.getTextInputValue("description"),
+          startsAt,
+          endsAt,
+        });
+        await interaction.reply({ content: "Community Season #" + seasonId + " created. Add completed or approved server records from its season view.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      if (action === "season-add") {
+        const seasonId = interaction.customId.split(":")[2];
+        if (!seasonId) throw new Error("The season ID was missing from this action.");
+        await addCommunitySeasonItem(
+          interaction.guildId,
+          interaction.user.id,
+          seasonId,
+          interaction.fields.getTextInputValue("item_type").trim(),
+          interaction.fields.getTextInputValue("item_id").trim(),
+          isGuildManager(interaction),
+        );
+        await interaction.reply({ content: "Added the existing record to the season. No activity data was copied.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
       if (action === "daily-configure") {
         if (!isGuildManager(interaction)) throw new Error("Manage Server permission is required to configure Daily Drop.");
         const channelValue = interaction.fields.getTextInputValue("channel");
@@ -1130,6 +1312,124 @@ export class CommunityCommand implements FeatureCommand {
       )],
       flags: MessageFlags.Ephemeral,
     });
+  }
+
+  private async showTournamentCentre(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
+    const tournaments = await listCommunityTournaments(interaction.guildId!, true);
+    const embed = homeEmbed("Tournament Centre", "Single-elimination brackets use 4, 8 or 16 media candidates, one locked ballot per member and deterministic seed tiebreaks.", tournaments.slice(0, 10).map(item => ({
+      name: "#" + item.id + " · " + safeDisplay(item.title, 150),
+      value: item.status + " · Round " + item.current_round + "/" + item.rounds_total + " · closes <t:" + Math.floor(new Date(item.closes_at).getTime() / 1000) + ":R>",
+      inline: false,
+    })));
+    const components: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>> = [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId("community:tournament-create").setLabel("Create tournament").setStyle(ButtonStyle.Primary),
+      ),
+    ];
+    if (tournaments.length) {
+      components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder().setCustomId("community:tournament-select").setPlaceholder("Open a tournament")
+          .addOptions(tournaments.slice(0, 25).map(item => ({ label: item.title.slice(0, 100), value: item.id }))),
+      ));
+    }
+    await interaction.reply({ embeds: [embed], components, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+  }
+
+  private async showTournament(
+    interaction: StringSelectMenuInteraction | ButtonInteraction,
+    tournamentId: string,
+  ): Promise<void> {
+    const tournament = await getCommunityTournament(interaction.guildId!, tournamentId);
+    if (!tournament) {
+      await interaction.reply({ content: "That tournament was not found in this server.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const fields = tournament.matches.map(match => ({
+      name: "Match " + match.match_number + " · " + (match.status === "open" ? "Voting open" : "Completed"),
+      value: "#" + match.candidate_a_seed + " [" + safeDisplay(match.candidate_a_title, 110) + "](" + match.candidate_a_url + ") · " + match.votes_a
+        + " vs #" + match.candidate_b_seed + " [" + safeDisplay(match.candidate_b_title, 110) + "](" + match.candidate_b_url + ") · " + match.votes_b
+        + (match.winner_candidate_id ? "\nWinner: " + (match.winner_candidate_id === match.candidate_a_id ? safeDisplay(match.candidate_a_title, 100) : safeDisplay(match.candidate_b_title, 100))
+          + (match.decision === "seed_tiebreak" ? " · lower-seed tiebreak" : "") : ""),
+      inline: false,
+    }));
+    const embed = homeEmbed(
+      tournament.title,
+      tournament.description + "\n\nRound " + tournament.current_round + " of " + tournament.rounds_total
+        + " · closes <t:" + Math.floor(new Date(tournament.closes_at).getTime() / 1000) + ":R>"
+        + (tournament.status === "completed" ? "\nTournament complete." : tournament.status === "cancelled" ? "\nTournament cancelled." : ""),
+      fields,
+    );
+    const components: ActionRowBuilder<ButtonBuilder>[] = [];
+    if (tournament.status === "open") {
+      const openMatches = tournament.matches.filter(match => match.status === "open");
+      for (let index = 0; index < openMatches.length; index += 2) {
+        const row = new ActionRowBuilder<ButtonBuilder>();
+        for (const match of openMatches.slice(index, index + 2)) {
+          row.addComponents(
+            new ButtonBuilder().setCustomId("community:tournament-vote:" + match.id + ":" + match.candidate_a_id)
+              .setLabel(("M" + match.match_number + " · " + match.candidate_a_title).slice(0, 80)).setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId("community:tournament-vote:" + match.id + ":" + match.candidate_b_id)
+              .setLabel(("M" + match.match_number + " · " + match.candidate_b_title).slice(0, 80)).setStyle(ButtonStyle.Secondary),
+          );
+        }
+        components.push(row);
+      }
+      components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId("community:tournament-advance:" + tournament.id).setLabel("Advance round").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId("community:tournament-cancel:" + tournament.id).setLabel("Cancel").setStyle(ButtonStyle.Danger),
+      ));
+    }
+    await interaction.reply({ embeds: [embed], components, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+  }
+
+  private async showSeasonCentre(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
+    const seasons = await listCommunitySeasons(interaction.guildId!);
+    const embed = homeEmbed("Community Seasons", "Season pages collect references to existing Daily Drops, rankings, sessions, tournaments, spotlights, collections and Trails.", seasons.slice(0, 10).map(item => ({
+      name: "#" + item.id + " · " + safeDisplay(item.title, 150),
+      value: item.status + " · " + item.item_count + " records · <t:" + Math.floor(new Date(item.starts_at).getTime() / 1000) + ":d> → <t:" + Math.floor(new Date(item.ends_at).getTime() / 1000) + ":d>",
+      inline: false,
+    })));
+    const components: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>> = [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId("community:season-create").setLabel("Create season").setStyle(ButtonStyle.Primary),
+      ),
+    ];
+    if (seasons.length) {
+      components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder().setCustomId("community:season-select").setPlaceholder("Open a season")
+          .addOptions(seasons.slice(0, 25).map(item => ({ label: item.title.slice(0, 100), value: item.id }))),
+      ));
+    }
+    await interaction.reply({ embeds: [embed], components, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+  }
+
+  private async showSeason(
+    interaction: StringSelectMenuInteraction | ButtonInteraction,
+    seasonId: string,
+  ): Promise<void> {
+    const season = await getCommunitySeason(interaction.guildId!, seasonId);
+    if (!season) {
+      await interaction.reply({ content: "That Community Season was not found in this server.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const items = season.items.slice(0, 25).map(item => ({
+      name: safeDisplay(item.item_type.replace(/_/g, " ") + " · #" + item.item_id, 200),
+      value: safeDisplay(item.title, 500),
+      inline: false,
+    }));
+    const embed = homeEmbed(
+      season.title,
+      season.description + "\n\n<t:" + Math.floor(new Date(season.starts_at).getTime() / 1000) + ":F> → <t:" + Math.floor(new Date(season.ends_at).getTime() / 1000) + ":F>\nStatus: " + season.status,
+      items,
+    );
+    const components: ActionRowBuilder<ButtonBuilder>[] = [];
+    if (season.status === "open") {
+      components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId("community:season-add:" + season.id).setLabel("Add existing record").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId("community:season-close:" + season.id).setLabel("Close season").setStyle(ButtonStyle.Secondary),
+      ));
+    }
+    await interaction.reply({ embeds: [embed], components, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
   }
 
   private async showSpotlights(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
