@@ -85,6 +85,18 @@ export class LanguageCommand implements FeatureCommand {
   }
 
   async handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
+    if (!interaction.guildId) {
+      await interaction.respond([]);
+      return;
+    }
+
+    const retention = await getGuildRetentionSettings(interaction.guildId);
+    const canManageServer = interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
+    if (!canConfigureGuildLeaveAction(retention.invited_by, interaction.user.id, canManageServer)) {
+      await interaction.respond([]);
+      return;
+    }
+
     const focused = interaction.options.getFocused();
     const choices = searchSupportedLanguages(focused)
       .map((language) => ({
