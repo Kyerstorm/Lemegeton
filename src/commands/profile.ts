@@ -526,7 +526,7 @@ export class ProfileCommand implements FeatureCommand {
         ? profile.contributionShowcase.map((item) => {
             const kind = item.kind === "entry"
               ? safeDisplay(item.media_type ?? "Archive entry", 40)
-              : item.kind === "collection" ? "Collection" : "Trail";
+              : item.kind === "collection" ? `Collection · ${item.attribution}` : "Trail";
             return `• **${safeDisplay(item.title, 110)}** · ${kind}`;
           }).join("\n").slice(0, 1024)
         : "No recent public Archive contributions.",
