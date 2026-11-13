@@ -27,6 +27,7 @@ import {onCustomRoleMemberAdd,onCustomRoleMemberRemove,onCustomRoleMemberUpdate,
 import {startCustomRolePicker,stopCustomRolePicker} from "./helpers/custom-roles/custom-role-picker-server.js";
 import {startDashboardBridge,stopDashboardBridge} from "./helpers/runtime/dashboard-bridge.js";
 import {startMediaNotificationScheduler,stopMediaNotificationScheduler} from "./helpers/media/media-notifications.js";
+import {startMusicScheduler,stopMusicScheduler} from "./helpers/integration/music.js";
 import {configureMediaStorage,processArchiveAssetCleanup} from "./helpers/media/media-storage.js";
 import {configureCustomRoleIconSourceLimit} from "./helpers/custom-roles/custom-role-images.js";
 
@@ -205,6 +206,7 @@ client.once(Events.ClientReady,ready=>{
  logger.info("Lemegeton TypeScript bot connected",{user:ready.user.tag,commands:commands.map(command=>command.data.name)});
  void reconcileDepartedGuildProfiles(ready.guilds.cache.values());
  startMediaNotificationScheduler(client,config);
+ startMusicScheduler(client,config);
  for(const guild of ready.guilds.cache.values()){
   void prepareGuildRetention(guild).then(async()=>{
    if(await isGuildRetentionConfigured(guild.id))await reconcileCustomRoleGuild(guild,config.customRolesMassArchiveThreshold);
@@ -475,6 +477,7 @@ async function shutdown(signal:NodeJS.Signals):Promise<void>{
  if(dailyWorkerTimer){clearInterval(dailyWorkerTimer);dailyWorkerTimer=undefined;}
  await dailyWorkerPromise?.catch(error=>logger.error("Daily worker shutdown failed",{reason:error instanceof Error?error.message:"Unknown error"}));
  await stopMediaNotificationScheduler();
+ await stopMusicScheduler();
  await stopCustomRolePicker().catch(error=>logger.error("Custom Roles picker shutdown failed",{reason:error instanceof Error?error.message:"Unknown error"}));
  await stopDashboardBridge().catch(error=>logger.error("Dashboard bridge shutdown failed",{reason:error instanceof Error?error.message:"Unknown error"}));
  client.destroy();

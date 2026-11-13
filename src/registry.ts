@@ -7,6 +7,7 @@ import {PlayCommand} from "./commands/play.js";
 import {ProfileCommand} from "./commands/profile.js";
 import {SettingsCommand} from "./commands/settings.js";
 import {CustomRoleCommand} from "./commands/custom-role.js";
+import {MusicCommand} from "./commands/music.js";
 import {HelpCommand} from "./standalone/help.js";
 import {PrivacyCommand} from "./standalone/privacy.js";
 import {FeedbackCommand} from "./standalone/feedback.js";
@@ -21,7 +22,7 @@ import {AdminLoginCommand} from "./standalone/admin-login.js";
 export function createCommandRegistry(config:BotConfig):FeatureCommand[]{
  const commands:FeatureCommand[]=[
   new DiscoverCommand(config),new ArchiveCommand(),new CommunityCommand(config),
-  new PlayCommand(),new ProfileCommand(config),new CustomRoleCommand(),new SettingsCommand(),
+  new PlayCommand(),new ProfileCommand(config),new CustomRoleCommand(),new SettingsCommand(),new MusicCommand(config),
   new HelpCommand(),new PrivacyCommand(),new FeedbackCommand(config.botFeedbackChannelId),new LogCommand(config.botModeratorGuildId,config.adminDiscordId),new PlannedCommand(config.botModeratorGuildId),new BotModeratorsCommand(config.botModeratorGuildId,config.adminDiscordId),new TimestampCommand(),new InviteCommand(config),new ConvertLinksCommand(config),new AdminLoginCommand(config),
  ];
  const names=new Set<string>();

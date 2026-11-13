@@ -666,6 +666,28 @@ const schemaStatements = [
     UNIQUE (guild_id, scheduled_for)
   )`,
   "CREATE INDEX IF NOT EXISTS community_release_deliveries_due_idx ON community_release_deliveries (next_attempt_at, created_at) WHERE status = 'pending'",
+  `CREATE TABLE IF NOT EXISTS music_trackers (
+    id TEXT NOT NULL,
+    guild_id BIGINT NOT NULL,
+    channel_id BIGINT NOT NULL,
+    artist_name TEXT NOT NULL,
+    providers TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    spotify_target TEXT,
+    youtube_target TEXT,
+    soundcloud_target TEXT,
+    mention_mode VARCHAR(16) NOT NULL DEFAULT 'user' CHECK (mention_mode IN ('user','role','none')),
+    mention_user_id BIGINT,
+    mention_role_id BIGINT,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_checked_at TIMESTAMPTZ,
+    seen_ids TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (guild_id, id),
+    CHECK (providers <@ ARRAY['spotify','youtube','soundcloud']::TEXT[])
+  )`,
+  "CREATE INDEX IF NOT EXISTS music_trackers_poll_idx ON music_trackers (guild_id, enabled, created_at)",
 
 ];
 

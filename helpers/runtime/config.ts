@@ -9,7 +9,7 @@ export interface BotConfig {
  customRolesReconcileMinutes:number; customRolesMassArchiveThreshold:number; customRolePickerIdleTtl:number; customRolePickerMaxTtl:number; customRolesPublicUrl:string;
  customRolesTrustProxy:boolean; customRoleIconSourceMaxBytes:number; customRolesDebugPreviewEnhancedColors:boolean; customRolesDebugPreviewRoleIcons:boolean;
  tmdbBearerToken?:string; googleBooksApiKey?:string; igdbClientId?:string; igdbClientSecret?:string;
- steamApiKey?:string; archiveUploadMaxBytes:number; s3EndpointUrl?:string; s3Region:string; s3AccessKeyId?:string; s3SecretAccessKey?:string; s3Bucket:string|null; s3SignedUrlTtlSeconds:number; logLevel:"debug"|"info"|"warn"|"error"; botModeratorGuildId:string|null;
+ steamApiKey?:string; spotifyClientId?:string; spotifyClientSecret?:string; youtubeApiKey?:string; soundcloudClientId?:string; musicPollIntervalMinutes:number; archiveUploadMaxBytes:number; s3EndpointUrl?:string; s3Region:string; s3AccessKeyId?:string; s3SecretAccessKey?:string; s3Bucket:string|null; s3SignedUrlTtlSeconds:number; logLevel:"debug"|"info"|"warn"|"error"; botModeratorGuildId:string|null;
 }
 function required(env:NodeJS.ProcessEnv,key:string):string{const value=env[key]?.trim();if(!value)throw new Error(`Missing required environment variable: ${key}`);return value;}
 function positive(value:string|undefined,fallback:number,key:string):number{if(!value?.trim())return fallback;const n=Number(value);if(!Number.isSafeInteger(n)||n<1)throw new Error(`${key} must be a positive integer.`);return n;}
@@ -114,12 +114,20 @@ export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
  const logLevel=(env.LOG_LEVEL?.trim().toLowerCase()||"info") as BotConfig["logLevel"];
  if(!["debug","info","warn","error"].includes(logLevel))throw new Error("LOG_LEVEL must be debug, info, warn, or error.");
  if(Boolean(env.IGDB_CLIENT_ID?.trim())!==Boolean(env.IGDB_CLIENT_SECRET?.trim()))throw new Error("IGDB_CLIENT_ID and IGDB_CLIENT_SECRET must be configured together.");
+ const spotifyClientId=env.SPOTIFY_CLIENT_ID?.trim()||undefined;
+ const spotifyClientSecret=env.SPOTIFY_CLIENT_SECRET?.trim()||undefined;
+ if(Boolean(spotifyClientId)!==Boolean(spotifyClientSecret))throw new Error("SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET must be configured together.");
+ const youtubeApiKey=env.YOUTUBE_API_KEY?.trim()||undefined;
+ const soundcloudClientId=env.SOUNDCLOUD_CLIENT_ID?.trim()||undefined;
+ const musicPollIntervalMinutes=positive(env.MUSIC_POLL_INTERVAL_MINUTES,10,"MUSIC_POLL_INTERVAL_MINUTES");
  return {discordToken,applicationId,botModeratorGuildId,adminDiscordId,botFeedbackChannelId,archiveGlobalModeratorIds,database,dashboardBridgeSecret,dashboardBridgeHost,dashboardBridgePort,dashboardAtlasBridgePort,anilistApiUrl:parsed.toString(),anilistTimeoutMs:positive(env.ANILIST_API_TIMEOUT,10,"ANILIST_API_TIMEOUT")*1000,
  ...(env.TMDB_BEARER_TOKEN?.trim()?{tmdbBearerToken:env.TMDB_BEARER_TOKEN.trim()}:{}),
  ...(env.GOOGLE_BOOKS_API_KEY?.trim()?{googleBooksApiKey:env.GOOGLE_BOOKS_API_KEY.trim()}:{}),
  ...(env.IGDB_CLIENT_ID?.trim()?{igdbClientId:env.IGDB_CLIENT_ID.trim()}:{}),
  ...(env.IGDB_CLIENT_SECRET?.trim()?{igdbClientSecret:env.IGDB_CLIENT_SECRET.trim()}:{}),
  ...(env.STEAM_API_KEY?.trim()?{steamApiKey:env.STEAM_API_KEY.trim()}:{}),
+ ...(spotifyClientId?{spotifyClientId}:{}),...(spotifyClientSecret?{spotifyClientSecret}:{}),
+ ...(youtubeApiKey?{youtubeApiKey}:{}),...(soundcloudClientId?{soundcloudClientId}:{}),musicPollIntervalMinutes,
  archiveUploadMaxBytes:Math.min(positive(env.ARCHIVE_UPLOAD_MAX_BYTES,20*1024*1024,"ARCHIVE_UPLOAD_MAX_BYTES"),20*1024*1024),
  s3EndpointUrl,s3Region,...(s3AccessKeyId?{s3AccessKeyId}:{}),...(s3SecretAccessKey?{s3SecretAccessKey}:{}),s3Bucket,s3SignedUrlTtlSeconds,
  customRolePickerEnabled:["1","true","yes","on"].includes(pickerEnabled),customRolePickerHost:pickerHost,
