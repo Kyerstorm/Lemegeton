@@ -736,6 +736,21 @@ const schemaStatements = [
     PRIMARY KEY (guild_id, media_type, media_id)
   )`,
   "CREATE INDEX IF NOT EXISTS media_notification_deliveries_guild_idx ON media_notification_deliveries (guild_id, delivered_at DESC)",
+  `CREATE TABLE IF NOT EXISTS guild_media_follows (
+    guild_id BIGINT NOT NULL,
+    anilist_id INTEGER NOT NULL CHECK (anilist_id > 0),
+    title VARCHAR(200) NOT NULL,
+    site_url TEXT NOT NULL,
+    cover_image TEXT,
+    next_episode INTEGER,
+    next_airing_at TIMESTAMPTZ,
+    last_notified_episode INTEGER NOT NULL DEFAULT 0,
+    followed_by BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (guild_id, anilist_id)
+  )`,
+  "CREATE INDEX IF NOT EXISTS guild_media_follows_guild_idx ON guild_media_follows (guild_id, anilist_id)",
   `CREATE TABLE IF NOT EXISTS community_release_schedules (
     guild_id BIGINT PRIMARY KEY,
     channel_id BIGINT NOT NULL,
