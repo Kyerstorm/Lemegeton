@@ -22,6 +22,7 @@ test("Google Books search normalizes volume metadata and source URLs", async () 
     assert.equal(url.searchParams.get("q"), "Dune");
     assert.equal(url.searchParams.get("maxResults"), "10");
     assert.equal(url.searchParams.get("printType"), "books");
+    assert.equal(url.searchParams.get("projection"), "full");
     assert.equal(url.searchParams.get("key"), "fixture-key");
     return new Response(JSON.stringify({
       items: [
@@ -29,15 +30,27 @@ test("Google Books search normalizes volume metadata and source URLs", async () 
           id: "dune-id",
           volumeInfo: {
             title: "Dune",
+            subtitle: "A Novel",
             authors: ["Frank Herbert", 42],
             publisher: "Ace",
             publishedDate: "1965",
             description: "A science-fiction novel.",
             pageCount: 896,
             categories: ["Fiction"],
+            mainCategory: "Fiction",
+            language: "en",
+            printType: "BOOK",
             industryIdentifiers: [
+              { type: "ISBN_10", identifier: "0441172717" },
               { type: "ISBN_13", identifier: "9780441172719" },
             ],
+            seriesInfo: {
+              shortSeriesBookTitle: "Dune",
+              bookDisplayNumber: "1",
+              volumeSeries: [{ orderNumber: 1, seriesId: "dune-series", seriesBookType: "COLLECTED_EDITION" }],
+            },
+            previewLink: "https://books.google.com/books?id=dune-id&printsec=frontcover",
+            infoLink: "https://books.google.com/books?id=dune-id",
             imageLinks: { thumbnail: "http://books.google.test/dune.jpg" },
           },
         },
@@ -50,16 +63,53 @@ test("Google Books search normalizes volume metadata and source URLs", async () 
     assert.deepEqual(book, {
       id: "dune-id",
       title: "Dune",
+      subtitle: "A Novel",
       authors: ["Frank Herbert"],
       publisher: "Ace",
       publishedDate: "1965",
       description: "A science-fiction novel.",
       pageCount: 896,
       categories: ["Fiction"],
+      mainCategory: "Fiction",
+      language: "en",
+      printType: "BOOK",
       isbn: "9780441172719",
+      isbn10: "0441172717",
+      isbn13: "9780441172719",
+      seriesBookTitle: "Dune",
+      seriesDisplayNumber: "1",
+      seriesOrder: 1,
+      seriesId: "dune-series",
+      seriesBookType: "COLLECTED_EDITION",
       sourceUrl: "https://books.google.com/books?id=dune-id",
-      image: "https://books.google.test/dune.jpg",
+      previewUrl: "https://books.google.com/books?id=dune-id&printsec=frontcover",
+      infoUrl: "https://books.google.com/books?id=dune-id",
+      image: "https://books.google.com/books/content?id=dune-id",
     });
+  });
+});
+
+test("Google Books falls back from ISBN-13 to ISBN-10 and ignores unsafe edition links", async () => {
+  await withFetch(async () => new Response(JSON.stringify({
+    items: [{
+      id: "legacy-isbn",
+      volumeInfo: {
+        title: "Legacy Edition",
+        industryIdentifiers: [{ type: "ISBN_10", identifier: "0123456789" }],
+        previewLink: "javascript:alert(1)",
+        infoLink: "https://books.google.com/books?id=legacy-isbn",
+        imageLinks: { thumbnail: "https://not-google.example/image.jpg" },
+      },
+    }],
+  }), { status: 200, headers: { "content-type": "application/json" } }), async () => {
+    const [book] = await new GoogleBooksClient().search("Legacy Edition");
+    assert.equal(book?.isbn, "0123456789");
+    assert.equal(book?.isbn10, "0123456789");
+    assert.equal(book?.isbn13, null);
+    assert.equal(book?.previewUrl, null);
+    assert.equal(book?.infoUrl, "https://books.google.com/books?id=legacy-isbn");
+    assert.equal(book?.image, null);
+    assert.equal(book?.seriesOrder, null);
   });
 });
 

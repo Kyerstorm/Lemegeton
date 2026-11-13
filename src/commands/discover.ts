@@ -130,15 +130,21 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
       .setDescription(safeDescription(item.description))
       .addFields(
         { name: "Provider", value: "Google Books", inline: true },
+        { name: "Subtitle", value: item.subtitle ?? "Unavailable", inline: false },
         { name: "Authors", value: item.authors.join(", ") || "Unavailable", inline: true },
         { name: "Publisher", value: item.publisher ?? "Unavailable", inline: true },
         { name: "Published", value: item.publishedDate ?? "Unavailable", inline: true },
+        { name: "Language / format", value: [item.language?.toUpperCase(), item.printType].filter(Boolean).join(" · ") || "Unavailable", inline: true },
         { name: "Pages", value: String(item.pageCount ?? "Unavailable"), inline: true },
-        { name: "ISBN", value: item.isbn ?? "Unavailable", inline: true },
-        { name: "Categories", value: item.categories.join(", ") || "Unavailable", inline: false },
+        { name: "ISBN-13", value: item.isbn13 ?? "Unavailable", inline: true },
+        { name: "ISBN-10", value: item.isbn10 ?? "Unavailable", inline: true },
+        { name: "Series", value: [item.seriesBookTitle, item.seriesDisplayNumber, item.seriesOrder ? "Order " + item.seriesOrder : null].filter(Boolean).join(" · ") || "Unavailable", inline: true },
+        { name: "Categories", value: item.categories.join(", ") || item.mainCategory || "Unavailable", inline: false },
       )
       .setFooter({ text: "Google Books · Source metadata" });
     if (item.image) embed.setThumbnail(item.image);
+    if (item.previewUrl) embed.addFields({ name: "Preview", value: "[Open preview](" + item.previewUrl + ")", inline: true });
+    if (item.infoUrl && item.infoUrl !== item.sourceUrl) embed.addFields({ name: "Edition details", value: "[Open Google Books record](" + item.infoUrl + ")", inline: true });
     return embed;
   }
 
