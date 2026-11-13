@@ -3,9 +3,21 @@ name: Live acceptance checks
 on:
   workflow_dispatch:
     inputs:
-      confirm_database:
-        description: "Type DISPOSABLE_STAGING to confirm the supplied database is a disposable staging copy."
+      acceptance_scope:
+        description: Select which live acceptance checks to execute.
         required: true
+        type: choice
+        options:
+          - all
+          - postgres-staging
+          - discord
+          - s3-live
+          - providers
+          - dashboard-oauth
+        default: all
+      confirm_database:
+        description: "For postgres-staging only, type DISPOSABLE_STAGING to confirm the supplied database is a disposable staging copy."
+        required: false
         type: string
 
 permissions:
@@ -13,6 +25,7 @@ permissions:
 
 jobs:
   providers:
+    if: inputs.acceptance_scope == 'all' || inputs.acceptance_scope == 'providers'
     name: Live metadata-provider acceptance
     runs-on: ubuntu-latest
     env:
@@ -42,6 +55,7 @@ jobs:
         run: node --test dist/tests/providers-live.integration.test.js
 
   discord:
+    if: inputs.acceptance_scope == 'all' || inputs.acceptance_scope == 'discord'
     name: Live Discord guild acceptance
     runs-on: ubuntu-latest
     env:
@@ -62,11 +76,13 @@ jobs:
           test -n "$GUILD_ID"
           test -n "$DISCORD_TEST_INVITER_ID"
           test -n "$DISCORD_TEST_CHANNEL_ID"
+          test -n "$DISCORD_TEST_MODERATOR_GUILD_ID"
       - run: npm install --no-audit --no-fund
       - name: Verify bot membership, permissions, audit log and deployed commands
         run: node scripts/acceptance/discord.mjs
 
   dashboard-oauth:
+    if: inputs.acceptance_scope == 'all' || inputs.acceptance_scope == 'dashboard-oauth'
     name: Live dashboard OAuth bootstrap
     runs-on: ubuntu-latest
     env:
@@ -113,11 +129,33 @@ jobs:
           test "$ready" = true
           status="$(curl --silent --output /dev/null --dump-header "$RUNNER_TEMP/oauth.headers" --write-out '%{http_code}' http://127.0.0.1:18080/oauth/start)"
           test "$status" = "303"
-          grep -Eiq '^location: https://discord\.com/oauth2/authorize\?' "$RUNNER_TEMP/oauth.headers"
+          location="$(awk 'tolower($1) == "location:" { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit }' "$RUNNER_TEMP/oauth.headers")"
+          python3 - "$location" <<'PY'
+          import os
+          import sys
+          from urllib.parse import parse_qs, urlparse
+
+          location = urlparse(sys.argv[1])
+          query = parse_qs(location.query, strict_parsing=True)
+          expected = {
+              "client_id": os.environ["DASHBOARD_CLIENT_ID"],
+              "redirect_uri": os.environ["DASHBOARD_REDIRECT_URI"],
+              "response_type": "code",
+              "scope": "identify guilds",
+          }
+          if location.scheme != "https" or location.netloc != "discord.com" or location.path != "/oauth2/authorize":
+              raise SystemExit("OAuth authorization URL did not target Discord's HTTPS authorize endpoint.")
+          for key, value in expected.items():
+              if query.get(key) != [value]:
+                  raise SystemExit(f"OAuth authorization URL has an incorrect {key} parameter.")
+          state = query.get("state", [""])[0]
+          if len(state) != 64 or not state.isalnum():
+              raise SystemExit("OAuth authorization state is not the expected 64-character token.")
+          PY
           grep -Eiq '^set-cookie: lemegeton_oauth_state=.*HttpOnly.*SameSite=Lax.*Secure' "$RUNNER_TEMP/oauth.headers"
-          grep -Eiq '^location:.*response_type=code' "$RUNNER_TEMP/oauth.headers"
 
   postgres-staging:
+    if: inputs.acceptance_scope == 'all' || inputs.acceptance_scope == 'postgres-staging'
     name: Staging migration, integrity and backup/restore acceptance
     runs-on: ubuntu-latest
     services:
@@ -167,15 +205,28 @@ jobs:
               psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = current_schema() ORDER BY tablename" > /backup/source-tables.txt
               psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = current_schema() ORDER BY tablename" > /backup/restored-tables.txt
               diff -u /backup/source-tables.txt /backup/restored-tables.txt
+              psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT table_name || '.' || column_name || ':' || data_type || ':' || is_nullable || ':' || COALESCE(column_default, '') FROM information_schema.columns WHERE table_schema = 'public' ORDER BY table_name, ordinal_position" > /backup/source-columns.txt
+              psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT table_name || '.' || column_name || ':' || data_type || ':' || is_nullable || ':' || COALESCE(column_default, '') FROM information_schema.columns WHERE table_schema = 'public' ORDER BY table_name, ordinal_position" > /backup/restored-columns.txt
+              diff -u /backup/source-columns.txt /backup/restored-columns.txt
+              psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT conrelid::regclass::text || ':' || conname || ':' || pg_get_constraintdef(oid) FROM pg_catalog.pg_constraint WHERE connamespace = 'public'::regnamespace ORDER BY conrelid::regclass::text, conname" > /backup/source-constraints.txt
+              psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT conrelid::regclass::text || ':' || conname || ':' || pg_get_constraintdef(oid) FROM pg_catalog.pg_constraint WHERE connamespace = 'public'::regnamespace ORDER BY conrelid::regclass::text, conname" > /backup/restored-constraints.txt
+              diff -u /backup/source-constraints.txt /backup/restored-constraints.txt
+              psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT tablename || ':' || indexname || ':' || indexdef FROM pg_catalog.pg_indexes WHERE schemaname = 'public' ORDER BY tablename, indexname" > /backup/source-indexes.txt
+              psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT tablename || ':' || indexname || ':' || indexdef FROM pg_catalog.pg_indexes WHERE schemaname = 'public' ORDER BY tablename, indexname" > /backup/restored-indexes.txt
+              diff -u /backup/source-indexes.txt /backup/restored-indexes.txt
               while IFS= read -r table; do
                 case "$table" in *[!a-z0-9_]*) echo "Unexpected table identifier in staging database" >&2; exit 1 ;; esac
                 source_count="$(psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT count(*) FROM public.$table")"
                 restored_count="$(psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT count(*) FROM public.$table")"
                 test "$source_count" = "$restored_count"
+                source_digest="$(psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT COALESCE(md5(string_agg(row_hash, '' ORDER BY row_hash)), md5('')) FROM (SELECT md5(to_jsonb(source_row)::text) AS row_hash FROM public.$table AS source_row) AS row_hashes")"
+                restored_digest="$(psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT COALESCE(md5(string_agg(row_hash, '' ORDER BY row_hash)), md5('')) FROM (SELECT md5(to_jsonb(restored_row)::text) AS row_hash FROM public.$table AS restored_row) AS row_hashes")"
+                test "$source_digest" = "$restored_digest"
               done < /backup/source-tables.txt
             '
 
   s3-live:
+    if: inputs.acceptance_scope == 'all' || inputs.acceptance_scope == 's3-live'
     name: Live private S3 upload, retrieval and cleanup acceptance
     runs-on: ubuntu-latest
     services:
