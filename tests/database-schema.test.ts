@@ -26,6 +26,7 @@ import { removeGuildMemberProfileData } from "../helpers/runtime/profile.js";
 import { deleteGuildData, retryDepartedGuildDeletions } from "../helpers/runtime/guild-retention.js";
 import { claimDueReadingReminders } from "../helpers/community/community-reading.js";
 import { claimDueMediaNightResults } from "../helpers/community/community-rankings.js";
+import { followAniListAnime, getGuildMediaFollows, unfollowAniListAnime } from "../helpers/media/media-notifications.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
 
@@ -516,6 +517,54 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     );
     assert.deepEqual(completion, { status: "completed", round: 2, winnerTitle: "Candidate B" });
     assert.equal((await getCommunityTournament(tournamentGuild, tournamentId))?.status, "completed");
+
+    const followGuild = "987654321098765432";
+    const followOtherGuild = "111111111111111112";
+    const followMedia = {
+      id: 91001,
+      type: "ANIME" as const,
+      title: { english: "Follow Test Anime", romaji: "Follow Test", native: null },
+      description: null,
+      siteUrl: "https://anilist.co/anime/91001",
+      coverImage: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/b91001.jpg",
+      bannerImage: null,
+      averageScore: null,
+      status: "RELEASING",
+      format: "TV",
+      startDate: null,
+      episodes: 12,
+      chapters: null,
+      volumes: null,
+      genres: [],
+      studios: [],
+      staff: [],
+      staffCredits: [],
+      characters: [],
+      tags: [],
+      popularity: null,
+      favourites: null,
+      source: null,
+      stats: { statusDistribution: [], scoreDistribution: [] },
+      recommendations: [],
+      relations: [],
+      trailer: null,
+      nextAiringEpisode: { airingAt: Math.floor(Date.now() / 1000) + 3_600, episode: 12 },
+    };
+    const followClient = {
+      getMediaById: async () => followMedia,
+    } as unknown as AniListClient;
+    const addedFollow = await followAniListAnime(followGuild, "333333333333333334", 91001, followClient);
+    assert.equal(addedFollow.title, "Follow Test Anime");
+    assert.equal(addedFollow.last_notified_episode, 11);
+    assert.equal(addedFollow.next_episode, 12);
+    assert.equal((await getGuildMediaFollows(followOtherGuild)).some(item => item.anilist_id === 91001), false);
+    await assert.rejects(
+      followAniListAnime(followGuild, "333333333333333335", 91001, followClient),
+      /already followed/i,
+    );
+    assert.equal(await unfollowAniListAnime(followOtherGuild, 91001), false);
+    assert.equal(await unfollowAniListAnime(followGuild, 91001), true);
+    assert.equal((await getGuildMediaFollows(followGuild)).some(item => item.anilist_id === 91001), false);
 
     const seasonStartsAt = new Date();
     const seasonEndsAt = new Date(seasonStartsAt.getTime() + 30 * 24 * 60 * 60 * 1000);

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { AniListClient } from "../helpers/integration/anilist.js";
+import { resolveDueFollowEpisode } from "../helpers/media/media-notifications.js";
 
 const now = new Date("2026-11-10T00:00:00.000Z");
 const start = Math.floor(now.getTime() / 1000);
@@ -110,4 +111,50 @@ test("airing filters reject invalid windows, seasons, years and weekdays", async
   await assert.rejects(client.searchUpcomingAirings({ season: "AUTUMN" }, now), /valid AniList season/);
   await assert.rejects(client.searchUpcomingAirings({ year: 2101 }, now), /1970 and 2100/);
   await assert.rejects(client.searchUpcomingAirings({ day: "Funday" }, now), /valid UTC weekday/);
+});
+
+
+test("AniList media details expose provider-supplied next airing episode metadata", async () => {
+  const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
+  const media = {
+    id: 91,
+    type: "ANIME",
+    isAdult: false,
+    title: { english: "Scheduled Anime", romaji: "Scheduled" },
+    siteUrl: "https://anilist.co/anime/91",
+    nextAiringEpisode: { airingAt: start + 7_200, episode: 14 },
+  };
+  const client = clientFor({ Media: media }, requests);
+  const result = await client.getMediaById(91, "ANIME");
+  assert.ok(result);
+  assert.equal(result.nextAiringEpisode?.episode, 14);
+  assert.equal(result.nextAiringEpisode?.airingAt, start + 7_200);
+  assert.match(requests[0]?.query ?? "", /nextAiringEpisode\{airingAt episode\}/);
+});
+
+test("episode follow scheduling waits for provider time and deduplicates sent episodes", () => {
+  const now = new Date("2026-11-13T12:00:00.000Z");
+  const follow = {
+    next_episode: 8,
+    next_airing_at: new Date(now.getTime() + 60 * 60 * 1000),
+    last_notified_episode: 7,
+  };
+  assert.equal(resolveDueFollowEpisode(follow, null, now), null);
+  assert.equal(resolveDueFollowEpisode(follow, { episode: 8, airingAt: Math.floor(now.getTime() / 1000) + 3_600 }, now), null);
+  assert.equal(resolveDueFollowEpisode(follow, null, new Date(now.getTime() + 60 * 60 * 1000)), 8);
+  assert.equal(resolveDueFollowEpisode({ ...follow, last_notified_episode: 8 }, null, new Date(now.getTime() + 60 * 60 * 1000)), null);
+});
+
+test("a changed AniList schedule does not skip the previously scheduled episode", () => {
+  const now = new Date("2026-11-13T12:00:00.000Z");
+  const follow = {
+    next_episode: 8,
+    next_airing_at: new Date(now.getTime() - 5 * 60 * 1000),
+    last_notified_episode: 7,
+  };
+  assert.equal(resolveDueFollowEpisode(
+    follow,
+    { episode: 9, airingAt: Math.floor(now.getTime() / 1000) + 3_600 },
+    now,
+  ), 8);
 });
