@@ -10,12 +10,14 @@ const token = process.env.DISCORD_TOKEN?.trim();
 const guildId = process.env.GUILD_ID?.trim();
 const expectedInviterId = process.env.DISCORD_TEST_INVITER_ID?.trim();
 const channelId = process.env.DISCORD_TEST_CHANNEL_ID?.trim();
-const moderatorGuildId = process.env.DISCORD_TEST_MODERATOR_GUILD_ID?.trim() || null;
+const moderatorGuildId = process.env.DISCORD_TEST_MODERATOR_GUILD_ID?.trim();
 
 if (!token || !/^\d{17,20}$/.test(guildId ?? "")
   || !/^\d{17,20}$/.test(expectedInviterId ?? "")
-  || !/^\d{17,20}$/.test(channelId ?? "")) {
-  throw new Error("DISCORD_TOKEN, GUILD_ID, DISCORD_TEST_INVITER_ID and DISCORD_TEST_CHANNEL_ID are required.");
+  || !/^\d{17,20}$/.test(channelId ?? "")
+  || !/^\d{17,20}$/.test(moderatorGuildId ?? "")
+  || moderatorGuildId === guildId) {
+  throw new Error("DISCORD_TOKEN, GUILD_ID, DISCORD_TEST_INVITER_ID, DISCORD_TEST_CHANNEL_ID and a separate DISCORD_TEST_MODERATOR_GUILD_ID are required.");
 }
 
 const client = new Client({
@@ -89,16 +91,28 @@ try {
     throw new Error("Missing globally deployed commands: " + missingCommands.join(", "));
   }
 
-  let moderatorCommandsVerified = 0;
-  if (moderatorGuildId) {
-    if (!/^\d{17,20}$/.test(moderatorGuildId)) throw new Error("DISCORD_TEST_MODERATOR_GUILD_ID is invalid.");
-    const moderatorGuild = await client.guilds.fetch(moderatorGuildId);
-    const guildCommands = await moderatorGuild.commands.fetch();
-    const requiredModeratorCommands = ["log", "moderators", "planned", "adminlogin", "convertlinks"];
-    const missing = requiredModeratorCommands.filter(name => !guildCommands.some(command => command.name === name));
-    if (missing.length) throw new Error("Missing moderator-server commands: " + missing.join(", "));
-    moderatorCommandsVerified = requiredModeratorCommands.length;
+  const requiredModeratorCommands = ["log", "moderators", "planned", "adminlogin", "convertlinks"];
+  const globallyExposedModeratorCommands = requiredModeratorCommands
+    .filter(name => globalCommands.some(command => command.name === name));
+  if (globallyExposedModeratorCommands.length) {
+    throw new Error("Moderator-only commands must not be globally deployed: " + globallyExposedModeratorCommands.join(", "));
   }
+
+  const publicGuildCommands = await guild.commands.fetch();
+  const leakedModeratorCommands = requiredModeratorCommands
+    .filter(name => publicGuildCommands.some(command => command.name === name));
+  if (leakedModeratorCommands.length) {
+    throw new Error("Moderator-only commands are exposed in the ordinary test guild: " + leakedModeratorCommands.join(", "));
+  }
+
+  const moderatorGuild = await client.guilds.fetch(moderatorGuildId);
+  const moderatorGuildCommands = await moderatorGuild.commands.fetch();
+  const missingModeratorCommands = requiredModeratorCommands
+    .filter(name => !moderatorGuildCommands.some(command => command.name === name));
+  if (missingModeratorCommands.length) {
+    throw new Error("Missing moderator-server commands: " + missingModeratorCommands.join(", "));
+  }
+  const moderatorCommandsVerified = requiredModeratorCommands.length;
 
   process.stdout.write(JSON.stringify({
     ok: true,
@@ -111,6 +125,7 @@ try {
     channelPermissionsVerified: channelRequirements.map(([name]) => name),
     manageRoles: true,
     globalCommandsVerified: requiredCommands.length,
+    moderatorGuildId: moderatorGuild.id,
     moderatorCommandsVerified,
   }) + "\n");
 } finally {
