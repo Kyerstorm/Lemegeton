@@ -324,8 +324,11 @@ export function sortAniListLeaderboardEntries(
       case "combined": return entry.activityScore;
     }
   };
-  const score = (entry: AniListLeaderboardEntry): number =>
-    mode === "manga" || mode === "manga_completed" ? entry.mangaMeanScore : entry.animeMeanScore;
+  const score = (entry: AniListLeaderboardEntry): number => {
+    if (mode === "manga" || mode === "manga_completed" || mode === "chapters") return entry.mangaMeanScore;
+    if (mode === "combined") return 0;
+    return entry.animeMeanScore;
+  };
   return [...entries].sort((left, right) =>
     metric(right) - metric(left) || score(right) - score(left) || left.aniListName.localeCompare(right.aniListName),
   );
