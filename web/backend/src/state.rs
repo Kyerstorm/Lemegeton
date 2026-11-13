@@ -319,6 +319,44 @@ pub fn expired_cookie(state: &AppState) -> String {
 mod tests {
     use super::*;
     use axum::http::HeaderValue;
+    async fn mock_dashboard_bridge(headers: HeaderMap) -> impl IntoResponse {
+        let authorized = headers.get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            == Some("Bearer acceptance-bridge-secret-0123456789");
+        if authorized {
+            (StatusCode::OK, Json(json!({"guilds":[{"id":"12345678901234567","name":"Acceptance guild"}]}))).into_response()
+        } else {
+            (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response()
+        }
+    }
+
+    #[tokio::test]
+    async fn rust_dashboard_bridge_authenticates_to_the_node_bridge_with_the_shared_secret() {
+        use axum::{routing::get, Router};
+
+        let app = Router::new().route("/guilds", get(mock_dashboard_bridge));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let mut config = test_state().config.as_ref().clone();
+        config.bridge_url = format!("http://{address}");
+        config.bridge_secret = "acceptance-bridge-secret-0123456789".to_string();
+        let state = AppState::new(config);
+        let result = bridge_json(&state, Method::GET, "/guilds", None).await.unwrap();
+        assert_eq!(result["guilds"][0]["id"], "12345678901234567");
+
+        let mut incorrect_config = state.config.as_ref().clone();
+        incorrect_config.bridge_secret = "incorrect-bridge-secret-0123456789".to_string();
+        let unauthorized = bridge_json(&AppState::new(incorrect_config), Method::GET, "/guilds", None)
+            .await.unwrap_err();
+        assert_eq!(unauthorized.status, StatusCode::SERVICE_UNAVAILABLE);
+
+        server.abort();
+    }
+
 
     fn test_state() -> AppState {
         AppState::new(AppConfig {
