@@ -20,16 +20,16 @@ export function safeInteractionErrorMessage(error:unknown):string{
   return emoji.hourglass + " This interaction expired before it could be completed. Reopen the feature and try again.";
  }
  if(code===50035){
-  return emoji.warningUnicode + " Some of the submitted information was invalid. Check the fields and try again.";
+  return emoji.error + " Some of the submitted information was invalid. Check the fields and try again.";
  }
  if(status===429){
   return emoji.loading + " Discord is rate-limiting this action. Please wait a moment and try again.";
  }
  if(status>=500&&status<600){
-  return emoji.warningUnicode + " Discord is temporarily unavailable. Please try again shortly.";
+  return emoji.error + " Discord is temporarily unavailable. Please try again shortly.";
  }
  if(error instanceof TypeError){
-  return emoji.warningUnicode + " The request could not be completed. Check the supplied information and try again.";
+  return emoji.error + " The request could not be completed. Check the supplied information and try again.";
  }
- return emoji.warningUnicode + " Something went wrong while running this feature. Please report it with /feedback and include the issue reference if one is shown.";
+ return emoji.error + " Something went wrong while running this feature. Please report it with /feedback and include the issue reference if one is shown.";
 }

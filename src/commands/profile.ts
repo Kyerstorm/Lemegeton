@@ -121,7 +121,7 @@ function leaderboardPage(
     `${config.description} (Page ${page + 1}/${pageCount})\n\n${session.optedIn.toLocaleString("en-US")} members opted in. Only current members of this server are included.`,
     fields.length ? fields : [{ name: "No data", value: "No opted-in AniList profiles were available.", inline: false }],
   ).setFooter({
-    text: emoji.refreshUnicode + " Leaderboard based on live AniList statistics",
+    text: emoji.refresh + " Leaderboard based on live AniList statistics",
     iconURL: "https://anilist.co/img/icons/android-chrome-512x512.png",
   });
   const controls = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -528,7 +528,7 @@ export class ProfileCommand implements FeatureCommand {
               ? safeDisplay(item.media_type ?? "Archive entry", 40)
               : item.kind === "collection" ? "Collection" : "Trail";
             return `• **${safeDisplay(item.title, 110)}** · ${kind}`;
-          }).join("\\n").slice(0, 1024)
+          }).join("\n").slice(0, 1024)
         : "No recent public Archive contributions.",
       inline: false,
     });

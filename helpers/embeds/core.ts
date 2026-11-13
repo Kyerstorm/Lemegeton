@@ -392,7 +392,7 @@ export function buildSuccessEmbed(title: string, description: string): EmbedBuil
   return statusEmbed(title, description, EMBED_COLOURS.success, emoji.check);
 }
 export function buildWarningEmbed(title: string, description: string): EmbedBuilder {
-  return statusEmbed(title, description, EMBED_COLOURS.warning, emoji.warningUnicode);
+  return statusEmbed(title, description, EMBED_COLOURS.warning, emoji.error);
 }
 export function buildInfoEmbed(title: string, description: string): EmbedBuilder {
   return statusEmbed(title, description, EMBED_COLOURS.primary, emoji.info);

@@ -76,7 +76,7 @@ export function filterMediaNotificationCandidates(
 function buildEmbed(item: AniListRecentlyFinishedMedia): EmbedBuilder {
   const embed = new EmbedBuilder()
     .setColor(item.status === "FINISHED" ? 0x57f287 : 0xed4245)
-    .setTitle((item.status === "FINISHED" ? emoji.check + " " : emoji.warningUnicode + " ") + item.title.slice(0, 250))
+    .setTitle((item.status === "FINISHED" ? emoji.check + " " : emoji.error + " ") + item.title.slice(0, 250))
     .setURL(item.url)
     .setDescription((item.description ?? "No description supplied by AniList.")
       .replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 900))

@@ -33,7 +33,7 @@ type PlannedFeature = Record<string, unknown> & {
 
 const STATUS = [
   { value: "planned", label: "Planned", emoji: emoji.copy, color: 0x5865f2 },
-  { value: "in_progress", label: "In Progress", emoji: emoji.refreshUnicode, color: 0xfee75c },
+  { value: "in_progress", label: "In Progress", emoji: emoji.refresh, color: 0xfee75c },
   { value: "testing", label: "Testing", emoji: emoji.testing, color: 0xfee75c },
   { value: "completed", label: "Completed", emoji: emoji.check, color: 0x57f287 },
   { value: "cancelled", label: "Cancelled", emoji: emoji.cross, color: 0xed4245 },
