@@ -366,12 +366,12 @@ export class ArchiveCommand implements FeatureCommand {
           const endsAtText = interaction.options.getString("ends_at");
           if (!entryId || !endsAtText) throw new Error("Provide entry_id and ends_at for the spotlight.");
           const endsAt = new Date(endsAtText);
-          if (!/[zZ]|[+-]\\d{2}:?\\d{2}$/.test(endsAtText) || !Number.isFinite(endsAt.getTime())) {
+          if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(endsAtText) || !Number.isFinite(endsAt.getTime())) {
             throw new Error("ends_at must be a valid ISO-8601 date with a timezone offset.");
           }
           const startsAtText = interaction.options.getString("starts_at");
           const startsAt = startsAtText ? new Date(startsAtText) : new Date();
-          if (startsAtText && (!/[zZ]|[+-]\\d{2}:?\\d{2}$/.test(startsAtText) || !Number.isFinite(startsAt.getTime()))) {
+          if (startsAtText && (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(startsAtText) || !Number.isFinite(startsAt.getTime()))) {
             throw new Error("starts_at must be a valid ISO-8601 date with a timezone offset.");
           }
           const member = await interaction.guild!.members.fetch(userId);
@@ -388,7 +388,7 @@ export class ArchiveCommand implements FeatureCommand {
           const embeds = spotlights.slice(0, 5).map(item => new EmbedBuilder()
             .setColor(0x5865f2)
             .setTitle(item.title.slice(0, 250))
-            .setDescription(`Entry #${item.entry_id} · ${item.archive_type} · <@!${item.created_by}>`.replace("<@!$", "<@!"))
+            .setDescription(`Entry #${item.entry_id} · ${item.archive_type} · contributed by <@${item.created_by}>`)
             .addFields(
               { name: "Curator", value: `<@${item.curator_id}>`, inline: true },
               { name: "Scope", value: item.visibility === "global" ? "Global" : "This server", inline: true },
@@ -406,7 +406,6 @@ export class ArchiveCommand implements FeatureCommand {
         case "spotlight-cancel": {
           const spotlightId = interaction.options.getString("spotlight_id");
           if (!spotlightId) throw new Error("Provide spotlight_id.");
-          const visibility = (interaction.options.getString("visibility") ?? "server") as ArchiveVisibility;
           const member = await interaction.guild!.members.fetch(userId);
           const canModerateServer = await canModerateArchive(member, guildId, "server");
           const global = isGlobalArchiveModerator(userId);

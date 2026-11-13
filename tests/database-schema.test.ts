@@ -10,6 +10,7 @@ import { getCustomRoleOwnerForRole, getCustomRoleRecord, getLegacyBoosterRoleId,
 import type { Guild } from "discord.js";
 import type { DatabaseConfig } from "../helpers/runtime/config.js";
 import { getPanelOfTheDay } from "../helpers/archive/archive.js";
+import { createArchiveSpotlight, listArchiveSpotlights, cancelArchiveSpotlight } from "../helpers/archive/archive-curation.js";
 import { removeGuildMemberProfileData } from "../helpers/runtime/profile.js";
 import { deleteGuildData, retryDepartedGuildDeletions } from "../helpers/runtime/guild-retention.js";
 import { claimDueReadingReminders } from "../helpers/community/community-reading.js";
@@ -399,6 +400,54 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       null,
       "A server-only panel must not be exposed to another server",
     );
+
+    await query(
+      `INSERT INTO community_archive_entries
+        (archive_type,title,content,media_type,tags,created_by,created_guild_id,visibility,status)
+       VALUES
+        ('quotes','Spotlight server entry','','Anime','[]',$1,$2,'server','approved'),
+        ('quotes','Spotlight global entry','','Anime','[]',$1,$2,'global','approved'),
+        ('quotes','Other guild spotlight entry','','Anime','[]',$3,$4,'server','approved')`,
+      ["101","987654321098765432","102","111111111111111112"],
+    );
+    const serverEntry = await queryOne<{ id: string }>(
+      "SELECT id::text AS id FROM community_archive_entries WHERE title = 'Spotlight server entry'",
+    );
+    const globalEntry = await queryOne<{ id: string }>(
+      "SELECT id::text AS id FROM community_archive_entries WHERE title = 'Spotlight global entry'",
+    );
+    const otherGuildEntry = await queryOne<{ id: string }>(
+      "SELECT id::text AS id FROM community_archive_entries WHERE title = 'Other guild spotlight entry'",
+    );
+    assert.ok(serverEntry && globalEntry && otherGuildEntry);
+    const spotlightEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const serverSpotlightId = await createArchiveSpotlight({
+      guildId: "987654321098765432", curatorId: "101", entryId: serverEntry.id, visibility: "server",
+      startsAt: new Date(), endsAt: spotlightEnd, note: "Server highlight",
+    });
+    const globalSpotlightId = await createArchiveSpotlight({
+      guildId: "987654321098765432", curatorId: "101", entryId: globalEntry.id, visibility: "global",
+      startsAt: new Date(), endsAt: spotlightEnd, note: "Global highlight",
+    });
+    await assert.rejects(
+      createArchiveSpotlight({
+        guildId: "987654321098765432", curatorId: "101", entryId: otherGuildEntry.id, visibility: "server",
+        startsAt: new Date(), endsAt: spotlightEnd,
+      }),
+      /approved Archive entry/i,
+    );
+    const primarySpotlights = await listArchiveSpotlights("987654321098765432");
+    const otherSpotlights = await listArchiveSpotlights("111111111111111112");
+    assert.deepEqual(primarySpotlights.map(item => item.id).sort(), [serverSpotlightId, globalSpotlightId].sort());
+    assert.deepEqual(otherSpotlights.map(item => item.id), [globalSpotlightId]);
+    await query("UPDATE community_archive_entries SET status = 'removed' WHERE id = $1", [globalEntry.id]);
+    assert.equal((await listArchiveSpotlights("111111111111111112")).length, 0, "Removed global entries disappear from every spotlight view");
+    await assert.rejects(
+      cancelArchiveSpotlight("987654321098765432", serverSpotlightId, "202", false, false),
+      /not found in your moderation scope/i,
+    );
+    await cancelArchiveSpotlight("987654321098765432", serverSpotlightId, "101", false, false);
+    assert.equal((await listArchiveSpotlights("987654321098765432")).length, 0);
 
     const departedUser = "777777777777777777";
     const retainedGuild = "123456789012345678";
