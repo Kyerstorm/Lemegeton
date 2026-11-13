@@ -495,6 +495,14 @@ const schemaStatements = [
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`,
   "ALTER TABLE guild_retention_settings ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
+  `CREATE TABLE IF NOT EXISTS guild_language_settings (
+    guild_id BIGINT PRIMARY KEY,
+    language_code VARCHAR(8) NOT NULL,
+    updated_by BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  "CREATE INDEX IF NOT EXISTS guild_language_settings_code_idx ON guild_language_settings (language_code)",
   `CREATE TABLE IF NOT EXISTS guild_feature_settings (
     guild_id BIGINT NOT NULL,
     feature_name VARCHAR(32) NOT NULL CHECK (feature_name IN ('discover','archive','community','play','profile','custom-role')),

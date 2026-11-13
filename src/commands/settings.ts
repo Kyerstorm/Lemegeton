@@ -163,7 +163,7 @@ async function retentionPanel(guildId: string): Promise<{
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
     .setTitle("Server data when Lemegeton leaves")
-    .setDescription("Choose what happens to this server's stored Lemegeton data if the bot is removed. Delete permanently removes guild-owned records and uploaded assets (with failed private-object cleanup retried); Retain keeps them for a possible rejoin. Normal bot features stay locked until a choice is saved.")
+    .setDescription("Choose what happens to this server's stored Lemegeton data if the bot is removed. Delete permanently removes guild-owned records and uploaded assets (with failed private-object cleanup retried); Retain keeps them for a possible rejoin. Normal bot features stay locked until both this choice and the required server language are saved.")
     .addFields(
       { name: "Current choice", value: current },
       { name: "Who can choose", value: "The person who invited Lemegeton, or a member with Manage Server permission." },

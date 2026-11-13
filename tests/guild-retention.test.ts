@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   canConfigureGuildLeaveAction,
   isGuildLeaveAction,
+  isGuildSetupCompleteState,
 } from "../helpers/runtime/guild-retention.js";
 
 test("the recorded inviter can configure the guild leave policy without Manage Server", () => {
@@ -41,4 +42,11 @@ test("Manage Server remains a valid fallback when the bot inviter cannot be reso
     canConfigureGuildLeaveAction(null, "222222222222222222", true),
     true,
   );
+});
+
+test("a server stays locked until both data retention and language are configured", () => {
+  assert.equal(isGuildSetupCompleteState(false, false), false);
+  assert.equal(isGuildSetupCompleteState(true, false), false);
+  assert.equal(isGuildSetupCompleteState(false, true), false);
+  assert.equal(isGuildSetupCompleteState(true, true), true);
 });

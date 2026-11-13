@@ -18,7 +18,8 @@ import {claimDueMediaNightResults,dueDailyDeliveries,dueDailySchedules,markDaily
 import {claimDueReadingReminders,markReadingReminderSent} from "./helpers/community/community-reading.js";
 import {createCommandRegistry} from "./src/registry.js";
 import {isFeatureEnabled} from "./helpers/runtime/settings.js";
-import {deleteGuildData,ensureGuildRetentionSettings,getGuildRetentionSettings,isGuildRetentionConfigured,recordGuildInviter,retryDepartedGuildDeletions} from "./helpers/runtime/guild-retention.js";
+import {deleteGuildData,ensureGuildRetentionSettings,getGuildRetentionSettings,isGuildRetentionConfigured,isGuildSetupComplete,recordGuildInviter,retryDepartedGuildDeletions} from "./helpers/runtime/guild-retention.js";
+import {isGuildLanguageConfigured} from "./helpers/runtime/languages.js";
 import {homeEmbed} from "./helpers/runtime/discord.js";
 import {handleConsentButton,initUserConsentSchema,requireCurrentConsent} from "./helpers/security/terms-consent.js";
 import {safeInteractionErrorMessage} from "./helpers/commands/command-errors.js";
@@ -62,7 +63,7 @@ async function startAtlasBridge(): Promise<void> {
   const rawUrl=parsed.searchParams.get("url");
   const safeUrl=rawUrl?safeAtlasUrl(rawUrl):null;
   if(!/^\d{17,20}$/.test(guildId)||!title||title.length>256||!category||(rawUrl&&!safeUrl)){send(400,{error:"A valid guild, title and media category are required."});return;}
-  void isGuildRetentionConfigured(guildId).then((configured)=>{
+  void isGuildSetupComplete(guildId).then((configured)=>{
    if(!configured){send(423,{error:"Server data-retention setup is required before Atlas can be used."});return;}
    return findAtlasRelationships(guildId,title,category,safeUrl,30).then((relationships)=>{
     send(200,{root:{title,category,url:safeUrl},relationships});
@@ -112,12 +113,22 @@ async function routeInteraction(interaction:Interaction):Promise<void>{
  try{
   if(interaction.isButton()&&await handleConsentButton(interaction))return;
   if(!await requireCurrentConsent(interaction))return;
-  if(interaction.guildId&&!await isGuildRetentionConfigured(interaction.guildId)){
+  const retentionConfigured=await isGuildRetentionConfigured(interaction.guildId);
+  const languageConfigured=await isGuildLanguageConfigured(interaction.guildId);
+  if(!retentionConfigured||!languageConfigured){
    const retentionCommand=interaction.isChatInputCommand()&&interaction.commandName==="settings"&&(interaction.options.getString("action")??"retention")==="retention";
    const retentionButton=interaction.isButton()&&/^settings:retention:(delete|retain)$/.test(interaction.customId);
-   if(!retentionCommand&&!retentionButton){
+   const languageCommand=interaction.isChatInputCommand()&&interaction.commandName==="language";
+   const languageAutocomplete=interaction.isAutocomplete()&&interaction.commandName==="language";
+   if(!retentionCommand&&!retentionButton&&!languageCommand&&!languageAutocomplete){
     if(interaction.isAutocomplete()){await interaction.respond([]);return;}
-    if(interaction.isRepliable())await interaction.reply({content:"Lemegeton is locked in this server until the person who invited it or a member with Manage Server permission chooses what happens to server data when the bot leaves. Run /settings and choose Data retention when the bot leaves.",flags:MessageFlags.Ephemeral});
+    const missing:string[]=[];
+    if(!retentionConfigured)missing.push("Choose what happens to this server's data when Lemegeton leaves with /settings action:retention.");
+    if(!languageConfigured)missing.push("Choose this server's language with /language.");
+    if(interaction.isRepliable())await interaction.reply({
+     content:"Lemegeton is locked until this server completes its required setup:\n\n"+missing.join("\n")+"\n\nOnly the person who invited Lemegeton or a member with Manage Server permission can complete these settings.",
+     flags:MessageFlags.Ephemeral,
+    });
     return;
    }
   }
@@ -209,7 +220,7 @@ client.once(Events.ClientReady,ready=>{
  startMusicScheduler(client,config);
  for(const guild of ready.guilds.cache.values()){
   void prepareGuildRetention(guild).then(async()=>{
-   if(await isGuildRetentionConfigured(guild.id))await reconcileCustomRoleGuild(guild,config.customRolesMassArchiveThreshold);
+   if(await isGuildSetupComplete(guild.id))await reconcileCustomRoleGuild(guild,config.customRolesMassArchiveThreshold);
   }).catch(error=>logger.error("Guild retention setup initialization failed",{guildId:guild.id,reason:error instanceof Error?error.message:"Unknown error"}));
  }
  void retryDepartedGuildDeletions(ready.guilds.cache.keys()).then(result=>{
@@ -223,7 +234,7 @@ client.once(Events.ClientReady,ready=>{
     const deletion=await retryDepartedGuildDeletions(client.guilds.cache.keys());
     if(deletion.deleted||deletion.failed)logger.info("Retried incomplete guild-leave data deletion",deletion);
     for(const guild of client.guilds.cache.values()){
-     if(await isGuildRetentionConfigured(guild.id))void reconcileCustomRoleGuild(guild,config.customRolesMassArchiveThreshold).catch(error=>logger.error("Custom Roles reconciliation failed",{guildId:guild.id,reason:error instanceof Error?error.message:"Unknown error"}));
+     if(await isGuildSetupComplete(guild.id))void reconcileCustomRoleGuild(guild,config.customRolesMassArchiveThreshold).catch(error=>logger.error("Custom Roles reconciliation failed",{guildId:guild.id,reason:error instanceof Error?error.message:"Unknown error"}));
     }
    }catch(error){
     logger.error("Guild reconciliation cycle failed",{reason:error instanceof Error?error.message:"Unknown error"});
@@ -264,12 +275,14 @@ client.on(Events.Error,error=>{
  logger.error("Discord client emitted an error",{reason:error.message});
 });
 client.on(Events.GuildMemberUpdate,async(oldMember,newMember)=>{
- if(!await isGuildRetentionConfigured(newMember.guild.id))return;
+ if(!await isGuildSetupComplete(newMember.guild.id))return;
  void onCustomRoleMemberUpdate(oldMember,newMember,config.customRolesMassArchiveThreshold).catch(error=>logger.error("Custom Roles member update failed",{guildId:newMember.guild.id,userId:newMember.id,reason:error instanceof Error?error.message:"Unknown error"}));
 });
 client.on(Events.GuildMemberRemove,async member=>{
  if(!await isGuildRetentionConfigured(member.guild.id))return;
- void onCustomRoleMemberRemove(member,config.customRolesMassArchiveThreshold).catch(error=>logger.error("Custom Roles member removal failed",{guildId:member.guild.id,userId:member.id,reason:error instanceof Error?error.message:"Unknown error"}));
+ if(await isGuildSetupComplete(member.guild.id)){
+  void onCustomRoleMemberRemove(member,config.customRolesMassArchiveThreshold).catch(error=>logger.error("Custom Roles member removal failed",{guildId:member.guild.id,userId:member.id,reason:error instanceof Error?error.message:"Unknown error"}));
+ }
  void removeGuildMemberProfileData(member.guild.id,member.id).then(()=>logger.info("Removed guild-scoped AniList/Steam links and profile preferences for departed member",{guildId:member.guild.id,userId:member.id})).catch(error=>logger.error("Could not remove departed member profile data",{guildId:member.guild.id,userId:member.id,reason:error instanceof Error?error.message:"Unknown error"}));
 });
 client.on(Events.GuildRoleDelete,async role=>{
@@ -277,12 +290,12 @@ client.on(Events.GuildRoleDelete,async role=>{
  void onCustomRoleRoleDelete(role,config.customRolesMassArchiveThreshold).catch(error=>logger.error("Custom Roles role deletion handling failed",{guildId:role.guild.id,roleId:role.id,reason:error instanceof Error?error.message:"Unknown error"}));
 });
 client.on(Events.GuildMemberAdd,async member=>{
- if(!await isGuildRetentionConfigured(member.guild.id))return;
+ if(!await isGuildSetupComplete(member.guild.id))return;
  void onCustomRoleMemberAdd(member).catch(error=>logger.error("Custom Roles member restoration failed",{guildId:member.guild.id,userId:member.id,reason:error instanceof Error?error.message:"Unknown error"}));
 });
 client.on(Events.InteractionCreate,interaction=>void routeInteraction(interaction));
 client.on(Events.MessageCreate,async message=>{
- if(message.guildId&&!await isGuildRetentionConfigured(message.guildId))return;
+ if(message.guildId&&!await isGuildSetupComplete(message.guildId))return;
  void handleArchiveUploadMessage(message,client).catch(async error=>{
   logger.error("Archive upload processing failed",{guildId:message.guildId,channelId:message.channelId,reason:error instanceof Error?error.message:"Unknown error"});
   if(!message.author.bot&&message.guildId){
@@ -367,12 +380,12 @@ async function processDailyDrops():Promise<void>{
    logger.warn("Private Archive asset cleanup queue could not be checked",{reason:error instanceof Error?error.message:"Unknown error"});
   }
   for(const schedule of await dueDailySchedules()){
-   if(!await isGuildRetentionConfigured(schedule.guild_id))continue;
+   if(!await isGuildSetupComplete(schedule.guild_id))continue;
    try{await prepareDailyDelivery(schedule);}
    catch(error){logger.error("Could not prepare Daily Drop",{guildId:schedule.guild_id,reason:error instanceof Error?error.message:"Unknown error"});}
   }
   for(const reminder of await claimDueReadingReminders()){
-   if(!await isGuildRetentionConfigured(reminder.guild_id))continue;
+   if(!await isGuildSetupComplete(reminder.guild_id))continue;
    try{
     const thread=await client.channels.fetch(reminder.thread_id);
     if(!thread||!thread.isTextBased()||!("send" in thread))throw new Error("The scheduled Reading Club thread is unavailable.");
@@ -390,7 +403,7 @@ async function processDailyDrops():Promise<void>{
    }
   }
   for(const delivery of await dueDailyDeliveries()){
-   if(!await isGuildRetentionConfigured(delivery.guild_id))continue;
+   if(!await isGuildSetupComplete(delivery.guild_id))continue;
    try{
     const channel=await client.channels.fetch(delivery.channel_id);
     if(!channel||!channel.isTextBased()||!("send" in channel)){await markDailyDelivery(delivery.id,"pending",undefined,"Configured channel is unavailable.");continue;}
@@ -399,12 +412,12 @@ async function processDailyDrops():Promise<void>{
    }catch(error){await markDailyDelivery(delivery.id,"pending",undefined,error instanceof Error?error.message:"Unknown delivery error").catch(()=>undefined);}
   }
   for(const schedule of await dueReleaseSchedules()){
-   if(!await isGuildRetentionConfigured(schedule.guild_id))continue;
+   if(!await isGuildSetupComplete(schedule.guild_id))continue;
    try{await prepareReleaseDelivery(schedule);}
    catch(error){logger.error("Could not queue a release digest",{guildId:schedule.guild_id,reason:error instanceof Error?error.message:"Unknown error"});}
   }
   for(const delivery of await dueReleaseDeliveries()){
-   if(!await isGuildRetentionConfigured(delivery.guild_id))continue;
+   if(!await isGuildSetupComplete(delivery.guild_id))continue;
    try{
     const [calendar,channel]=await Promise.all([
      upcomingProviderReleases(
@@ -439,7 +452,7 @@ async function processDailyDrops():Promise<void>{
    }
   }
   for(const session of await claimDueMediaNightResults()){
-   if(!await isGuildRetentionConfigured(session.guild_id))continue;
+   if(!await isGuildSetupComplete(session.guild_id))continue;
    try{
     const [results,channel]=await Promise.all([
      rankingResults(session.guild_id,session.id),

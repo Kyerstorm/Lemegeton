@@ -14,7 +14,7 @@ import { logger } from "../runtime/logger.js";
 import { AniListClient, type AniListRecentlyFinishedMedia } from "../integration/anilist.js";
 import type { BotConfig } from "../runtime/config.js";
 import { query, queryOne } from "../../database.js";
-import { isGuildRetentionConfigured } from "../runtime/guild-retention.js";
+import { isGuildSetupComplete } from "../runtime/guild-retention.js";
 
 export type MediaNotificationKind = "ANIME" | "MANGA";
 export interface MediaNotificationSettings {
@@ -188,7 +188,7 @@ export async function runMediaNotificationCycle(client: Client, aniList: AniList
     );
     const active: MediaNotificationSettings[] = [];
     for (const row of rows) {
-      if (!ranWithinDay(row.last_run_at, now.getTime()) && await isGuildRetentionConfigured(row.guild_id)) active.push(row);
+      if (!ranWithinDay(row.last_run_at, now.getTime()) && await isGuildSetupComplete(row.guild_id)) active.push(row);
     }
     if (!active.length) return;
     const { after, before } = previousUtcDay(now);

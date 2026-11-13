@@ -644,6 +644,7 @@ export class MusicRuntime {
     const rows = await query<MusicTrackerRow>(
       TRACKER_SELECT +
       "JOIN guild_retention_settings retention ON retention.guild_id = music_trackers.guild_id " +
+      "JOIN guild_language_settings language ON language.guild_id = music_trackers.guild_id " +
       "WHERE music_trackers.guild_id = ANY($1::bigint[]) AND music_trackers.enabled = TRUE " +
       "AND retention.leave_action IN ('delete','retain') AND retention.deleted_at IS NULL " +
       "ORDER BY music_trackers.guild_id, music_trackers.created_at",

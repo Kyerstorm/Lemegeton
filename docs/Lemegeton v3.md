@@ -167,11 +167,12 @@ The target command surface should be intentionally compact:
 | **/custom-role** | Custom Roles | Existing member custom-role panel and administrator custom-role panel, unified into one command |
 | **/settings** | Selected feature configuration and the existing control plane | Existing /dashboard, dashboard section toggles, and relevant /server-config controls for the selected v3 systems |
 | **/music** | Music artist release tracking | Artist release subscriptions across Spotify, YouTube Music, and SoundCloud, with scheduled announcements and tracker management |
+| **/language** | Required server language setup | One required autocomplete option selecting from 183 ISO 639-1 language codes; only the original bot inviter or a member with Manage Server permission may change it |
 | **/help** | Standalone command guide | Keep independently discoverable; do not absorb it into a feature command or /settings |
 | **/privacy** | Standalone privacy notice | Keep the privacy notice independently accessible; do not hide it inside /profile or /settings |
 | **/feedback** | Standalone feedback intake | Keep feedback submission independent from the eight feature environments |
 
-The eight rows above the standalone utilities are the major feature environments. **/help, /privacy, and /feedback are deliberate standalone exceptions** and must each remain independently registered top-level slash commands. Do not combine them with one another or with the eight feature commands.
+The eight feature rows above remain the major feature environments. `/language` is a separate required server-setup command with exactly one required autocomplete option. Every server must select its language as well as its data-retention policy before normal bot functionality unlocks. The original bot inviter or a member with Manage Server permission may change the server language. This stores the server's preferred locale; it does not automatically translate English-only text that has no translation catalog. **/help, /privacy, and /feedback are deliberate standalone exceptions** and must each remain independently registered top-level slash commands.
 
 #### 3.2.1 Standalone bot-moderator commands
 

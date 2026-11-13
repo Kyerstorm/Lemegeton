@@ -1,5 +1,6 @@
 import { query, queryOne, transaction } from "../../database.js";
 import { deleteArchiveAsset } from "../media/media-storage.js";
+import { isGuildLanguageConfigured } from "./languages.js";
 
 export type GuildLeaveAction = "delete" | "retain";
 
@@ -58,6 +59,18 @@ export async function isGuildRetentionConfigured(guildId: string): Promise<boole
     [guildId],
   );
   return isGuildLeaveAction(row?.leave_action);
+}
+
+export function isGuildSetupCompleteState(retentionConfigured: boolean, languageConfigured: boolean): boolean {
+  return retentionConfigured && languageConfigured;
+}
+
+export async function isGuildSetupComplete(guildId: string): Promise<boolean> {
+  const [retentionConfigured, languageConfigured] = await Promise.all([
+    isGuildRetentionConfigured(guildId),
+    isGuildLanguageConfigured(guildId),
+  ]);
+  return isGuildSetupCompleteState(retentionConfigured, languageConfigured);
 }
 
 export async function setGuildLeaveAction(
