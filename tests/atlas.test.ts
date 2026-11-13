@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   archiveMediaTypesForCategory, createAtlasDiscordUrl,
   atlasNodeIdentity, buildAtlasGraph, normalizeAtlasCategory, normalizeAtlasTitle, safeAtlasUrl,
+  type AtlasRelation,
 } from "../helpers/integration/atlas.js";
 
 test("Atlas accepts typed community nodes without conflating them with media categories", () => {
@@ -37,7 +38,7 @@ test("Atlas title, HTTPS URL and Discord deep-link normalization are bounded", (
 
 test("Atlas expands a deterministic bounded multi-hop graph and ignores cycles", async () => {
   const lookups: string[] = [];
-  const relations = (title: string) => {
+  const relations = (title: string): AtlasRelation[] => {
     if (title === "Alpha") return [
       { title: "Beta", category: "MANGA", url: "https://example.com/beta", relationType: "adaptation", source: "AniList", sourceKind: "provider" as const },
       { title: "Gamma", category: "GAME", url: "https://example.com/gamma", relationType: "related", source: "Community", sourceKind: "community" as const },
