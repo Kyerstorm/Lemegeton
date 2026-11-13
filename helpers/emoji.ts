@@ -7,6 +7,16 @@
 const refreshEmoji = "<a:refresh:1557773578655629424>";
 const errorEmoji = "<:error:1557775268146323467>";
 const approvedEmoji = "<a:approved:1559632013034659871>";
+const backEmoji = "◀️";
+const nextEmoji = "▶️";
+const chatEmoji = "💬";
+const fireEmoji = "🔥";
+const ideaEmoji = "💡";
+const animeEmoji = "📺";
+const mangaEmoji = "📖";
+const lightNovelEmoji = "📚";
+const movieEmoji = "🎬";
+const calendarEmoji = "🗓️";
 
 export const emoji = {
   // Interaction states
@@ -24,8 +34,8 @@ export const emoji = {
   completedClose: "<:completedclose:1557778427237503087>",
 
   // Navigation and controls
-  back: "◀️",
-  next: "▶️",
+  back: backEmoji,
+  next: nextEmoji,
   previous: "⬅️",
   refresh: refreshEmoji,
   swap: "<:swap:1557778022701076581>",
@@ -44,12 +54,12 @@ export const emoji = {
   settings: "⚙️",
 
   // Media categories
-  anime: "📺",
-  manga: "📖",
-  lightNovel: "📚",
+  anime: animeEmoji,
+  manga: mangaEmoji,
+  lightNovel: lightNovelEmoji,
   book: "📕",
   webNovel: "📝",
-  movie: "🎬",
+  movie: movieEmoji,
   television: "📡",
   game: "🎮",
   soundtrack: "🎵",
@@ -59,34 +69,65 @@ export const emoji = {
   // Discovery and community
   random: "🎲",
   trending: "📈",
-  popular: "🔥",
-  recommendation: "💡",
-  calendar: "🗓️",
+  popular: fireEmoji,
+  recommendation: ideaEmoji,
+  calendar: calendarEmoji,
   clock: "🕒",
   bookmark: "🔖",
   archive: "🗃️",
   collection: "🗂️",
   community: "👥",
   vote: "🗳️",
-  discussion: "💬",
-  event: "📅",
+  discussion: chatEmoji,
+  event: calendarEmoji,
   profile: "👤",
   leaderboard: "🏆",
   gift: "<:gift:1557773581994303589>",
 
-  // Additional interface symbols kept as Unicode for future replacement.
+  // Additional interface symbols
   hourglass: refreshEmoji,
-  check: "✅", cross: "❌", heart: "❤️", target: "🎯", stats: "📊", popularity: "🔥",
-  recommended: "⭐", panels: "📚", quote: "💬", fanworks: "🎨", moodboard: "🖼️",
-  scenes: "🎬", theory: "💡", globe: "🌐", mangaDiscovery: "📚", lightNovelDiscovery: "📖",
-  film: "🎞️", theatre: "🎭", microphone: "🎙️", building: "🏢",
-  rankingAnime: "🎬", rankingManga: "📖", rankingCombined: "🌟",
-  rankingChapters: "📚", rankingEpisodes: "📺", finish: "🏁",
-  goldMedal: "🥇", silverMedal: "🥈", bronzeMedal: "🥉",
-  chevronLeft: "◀️", chevronRight: "▶️",
-  bell: "🔔", activityBubble: "🗨️", crown: "👑",
-  testing: "🧪", pause: "⏸️", tools: "🔧", performance: "⚡", bug: "🐛", rocket: "🚀",
-  chevronLeftPlain: "◀", chevronRightPlain: "▶",
+  check: "✅",
+  cross: "❌",
+  heart: "❤️",
+  target: "🎯",
+  stats: "📊",
+  popularity: fireEmoji,
+  recommended: "⭐",
+  panels: "📚",
+  quote: chatEmoji,
+  fanworks: "🎨",
+  moodboard: "🖼️",
+  scenes: movieEmoji,
+  theory: ideaEmoji,
+  globe: "🌐",
+  mangaDiscovery: mangaEmoji,
+  lightNovelDiscovery: lightNovelEmoji,
+  film: movieEmoji,
+  theatre: "🎭",
+  microphone: "🎙️",
+  building: "🏢",
+  rankingAnime: animeEmoji,
+  rankingManga: mangaEmoji,
+  rankingCombined: "🌟",
+  rankingChapters: mangaEmoji,
+  rankingEpisodes: animeEmoji,
+  finish: "🏁",
+  goldMedal: "🥇",
+  silverMedal: "🥈",
+  bronzeMedal: "🥉",
+  chevronLeft: backEmoji,
+  chevronRight: nextEmoji,
+  bell: "🔔",
+  activityBubble: chatEmoji,
+  crown: "👑",
+  testing: "🧪",
+  pause: "⏸️",
+  tools: "🔧",
+  performance: "⚡",
+  bug: "🐛",
+  rocket: "🚀",
+  chevronLeftPlain: "◀",
+  chevronRightPlain: "▶",
 
   // Provider and account markers
   anilist: "<:anilist:1557779525763338330>",
