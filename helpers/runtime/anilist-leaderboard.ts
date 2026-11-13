@@ -111,7 +111,7 @@ function estimateMangaOrigins(total: number, chapters: number, anime: number, ep
     values.manhwa = Math.min(0.35, values.manhwa * 1.3);
     values.manga = Math.max(0.6, 1 - values.manhwa - values.manhua);
   }
-  return normalize(values);
+  return values;
 }
 
 function estimateAnimeOrigins(total: number, episodes: number, manga: number, chapters: number): Distribution<AnimeOrigin> {
@@ -134,7 +134,7 @@ function estimateAnimeOrigins(total: number, episodes: number, manga: number, ch
     values.chineseAnime = Math.min(0.15, values.chineseAnime * 1.3);
     values.japaneseAnime = Math.max(0.8, 1 - values.chineseAnime - values.koreanAnime);
   }
-  return normalize(values);
+  return values;
 }
 
 function estimateAnimeFormats(total: number, episodes: number, average: number): Distribution<AnimeFormat> {
@@ -208,11 +208,15 @@ function estimateMangaFormats(total: number, chapters: number, average: number):
 }
 
 function allocate<T extends string>(total: number, weights: Distribution<T>): Record<T, number> {
-  const normalized = normalize(weights);
-  return Object.fromEntries(
-    Object.entries(normalized).map(([key, value]) => [key, Math.trunc(total * Number(value))]),
-  ) as Record<T, number>;
+  const keys = Object.keys(weights) as T[];
+  return Object.fromEntries(keys.map((key) => [key, Math.trunc(total * weights[key])])) as Record<T, number>;
 }
+
+function allocateEstimatedOriginCounts<T extends string>(total: number, weights: Distribution<T>): Record<T, number> {
+  const keys = Object.keys(weights) as T[];
+  return Object.fromEntries(keys.map((key) => [key, Math.trunc(total * weights[key])])) as Record<T, number>;
+}
+
 
 function distributeByEstimatedCounts<T extends string>(total: number, counts: Record<T, number>): Record<T, number> {
   const keys = Object.keys(counts) as T[];
@@ -232,10 +236,10 @@ export function calculateOriginWeightedActivityScore(
   const animeAverage = totalEpisodes / Math.max(totalAnime, 1);
   const mangaOrigins = estimateMangaOrigins(totalManga, totalChapters, totalAnime, totalEpisodes);
   const animeOrigins = estimateAnimeOrigins(totalAnime, totalEpisodes, totalManga, totalChapters);
-  const mangaTitles = allocate(totalManga, mangaOrigins);
-  const mangaUnits = allocate(totalChapters, mangaOrigins);
-  const animeTitles = allocate(totalAnime, animeOrigins);
-  const animeUnits = allocate(totalEpisodes, animeOrigins);
+  const mangaTitles = allocateEstimatedOriginCounts(totalManga, mangaOrigins);
+  const mangaUnits = allocateEstimatedOriginCounts(totalChapters, mangaOrigins);
+  const animeTitles = allocateEstimatedOriginCounts(totalAnime, animeOrigins);
+  const animeUnits = allocateEstimatedOriginCounts(totalEpisodes, animeOrigins);
 
   // The Python model estimates format counts and unit counts independently from the same average.
   const mangaFormatTitles = allocate(totalManga, estimateMangaFormats(totalManga, 0, mangaAverage));
@@ -289,7 +293,7 @@ function completedCount(stats: AniListUserStatistics): number {
 export function buildAniListLeaderboardEntry(profile: AniListLeaderboardProfile): AniListLeaderboardEntry {
   const totalAnime = profile.anime.count;
   const totalManga = profile.manga.count;
-  const totalEpisodes = profile.anime.episodesWatched ?? 0;
+  const totalEpisodes = profile.anime.episodesWatched || profile.anime.chaptersRead || 0;
   const totalChapters = profile.manga.chaptersRead ?? 0;
   return {
     userId: profile.userId,
@@ -303,8 +307,8 @@ export function buildAniListLeaderboardEntry(profile: AniListLeaderboardProfile)
     totalChapters,
     mangaMeanScore: profile.manga.meanScore,
     mangaCompleted: completedCount(profile.manga),
-    animeAverage: totalAnime > 0 ? totalEpisodes / totalAnime : 0,
-    mangaAverage: totalManga > 0 ? totalChapters / totalManga : 0,
+    animeAverage: totalAnime > 0 ? totalEpisodes / totalAnime : totalEpisodes,
+    mangaAverage: totalManga > 0 ? totalChapters / totalManga : totalChapters,
     activityScore: calculateOriginWeightedActivityScore(totalManga, totalAnime, totalChapters, totalEpisodes),
   };
 }
@@ -324,12 +328,6 @@ export function sortAniListLeaderboardEntries(
       case "combined": return entry.activityScore;
     }
   };
-  const score = (entry: AniListLeaderboardEntry): number => {
-    if (mode === "manga" || mode === "manga_completed" || mode === "chapters") return entry.mangaMeanScore;
-    if (mode === "combined") return 0;
-    return entry.animeMeanScore;
-  };
-  return [...entries].sort((left, right) =>
-    metric(right) - metric(left) || score(right) - score(left) || left.aniListName.localeCompare(right.aniListName),
-  );
+  // Python sorted solely on the selected metric; preserve the input order for ties.
+  return [...entries].sort((left, right) => metric(right) - metric(left));
 }
