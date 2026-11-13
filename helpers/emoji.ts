@@ -4,15 +4,19 @@
  * Preserve the established Discord custom emojis where they were already used.
  * Unicode symbols are the intentional fallback for all other entries.
  */
+const refreshEmoji = "<a:refresh:1557773578655629424>";
+const errorEmoji = "<:error:1557775268146323467>";
+const approvedEmoji = "<a:approved:1559632013034659871>";
+
 export const emoji = {
   // Interaction states
-  loading: "⏳",
-  working: "<a:refresh:1557773578655629424>",
-  success: "<a:approved:1559632013034659871>",
-  approve: "<a:approved:1559632013034659871>",
+  loading: refreshEmoji,
+  working: refreshEmoji,
+  success: approvedEmoji,
+  approve: approvedEmoji,
   reject: "<a:reject:1559632010572734596>",
-  warning: "<:error:1557775268146323467>",
-  error: "<:error:1557775268146323467>",
+  warning: errorEmoji,
+  error: errorEmoji,
   info: "ℹ️",
   question: "<:question:1557775415148290048>",
   close: "<:close:1557778028686213210>",
@@ -23,7 +27,7 @@ export const emoji = {
   back: "◀️",
   next: "▶️",
   previous: "⬅️",
-  refresh: "<a:refresh:1557773578655629424>",
+  refresh: refreshEmoji,
   swap: "<:swap:1557778022701076581>",
   search: "🔎",
   filter: "🎚️",
@@ -71,7 +75,7 @@ export const emoji = {
   gift: "<:gift:1557773581994303589>",
 
   // Additional interface symbols kept as Unicode for future replacement.
-  hourglass: "⌛", warningUnicode: "⚠️", warningPlain: "⚠",
+  hourglass: refreshEmoji,
   check: "✅", cross: "❌", heart: "❤️", target: "🎯", stats: "📊", popularity: "🔥",
   recommended: "⭐", panels: "📚", quote: "💬", fanworks: "🎨", moodboard: "🖼️",
   scenes: "🎬", theory: "💡", globe: "🌐", mangaDiscovery: "📚", lightNovelDiscovery: "📖",
@@ -79,7 +83,7 @@ export const emoji = {
   rankingAnime: "🎬", rankingManga: "📖", rankingCombined: "🌟",
   rankingChapters: "📚", rankingEpisodes: "📺", finish: "🏁",
   goldMedal: "🥇", silverMedal: "🥈", bronzeMedal: "🥉",
-  refreshUnicode: "🔄", chevronLeft: "◀️", chevronRight: "▶️",
+  chevronLeft: "◀️", chevronRight: "▶️",
   bell: "🔔", activityBubble: "🗨️", crown: "👑",
   testing: "🧪", pause: "⏸️", tools: "🔧", performance: "⚡", bug: "🐛", rocket: "🚀",
   chevronLeftPlain: "◀", chevronRightPlain: "▶",
