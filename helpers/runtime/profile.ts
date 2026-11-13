@@ -1,5 +1,6 @@
 import { query, queryOne, transaction } from "../../database.js";
 import type { AniListUserInterests, AniListUserProfile } from "../integration/anilist.js";
+import { buildAniListLeaderboardEntry, sortAniListLeaderboardEntries, type AniListLeaderboardEntry, type AniListLeaderboardMode } from "./anilist-leaderboard.js";
 import { AniListClient } from "../integration/anilist.js";
 import type { SteamProfile } from "../integration/steam.js";
 import { SteamClient } from "../integration/steam.js";
@@ -272,19 +273,10 @@ export async function getAniListAffinity(
   };
 }
 
-export type AniListLeaderboardMedium = "anime" | "manga";
-export interface AniListLeaderboardEntry {
-  userId: string;
-  aniListName: string;
-  aniListUrl: string;
-  entries: number;
-  meanScore: number;
-}
-
 export async function getAniListLeaderboard(
   guildId: string,
   memberIds: ReadonlySet<string>,
-  medium: AniListLeaderboardMedium,
+  medium: AniListLeaderboardMode,
   aniList: AniListClient,
 ): Promise<{ entries: AniListLeaderboardEntry[]; optedIn: number; checked: number }> {
   const rows = await query<{ user_id: string; anilist_username: string }>(
@@ -296,33 +288,38 @@ export async function getAniListLeaderboard(
       ORDER BY u.discord_id`,
     [guildId],
   );
-  const candidates = rows.filter(row => memberIds.has(row.user_id));
-  if (candidates.length < 3) throw new Error("The AniList leaderboard is hidden until at least three current server members opt in.");
+  const candidates = rows.filter((row) => memberIds.has(row.user_id));
+  if (candidates.length < 3) {
+    throw new Error("The AniList leaderboard is hidden until at least three current server members opt in.");
+  }
 
-  const selected = candidates.slice(0, 100);
   const entries: AniListLeaderboardEntry[] = [];
-  for (let index = 0; index < selected.length; index += 4) {
-    const batch = await Promise.all(selected.slice(index, index + 4).map(async row => {
+  for (let index = 0; index < candidates.length; index += 4) {
+    const batch = await Promise.all(candidates.slice(index, index + 4).map(async (row) => {
       try {
         const profile = await aniList.getUser(row.anilist_username);
         if (!profile) return null;
-        const stats = profile[medium];
-        return {
+        return buildAniListLeaderboardEntry({
           userId: row.user_id,
           aniListName: profile.name,
           aniListUrl: profile.url,
-          entries: stats.count,
-          meanScore: stats.meanScore,
-        } satisfies AniListLeaderboardEntry;
+          anime: profile.anime,
+          manga: profile.manga,
+        });
       } catch {
         return null;
       }
     }));
     entries.push(...batch.filter((entry): entry is AniListLeaderboardEntry => entry !== null));
   }
-  if (entries.length < 3) throw new Error("The AniList leaderboard is hidden until at least three opted-in profiles can be retrieved.");
-  entries.sort((left, right) => right.entries - left.entries || right.meanScore - left.meanScore || left.aniListName.localeCompare(right.aniListName));
-  return { entries: entries.slice(0, 10), optedIn: candidates.length, checked: selected.length };
+  if (entries.length < 3) {
+    throw new Error("The AniList leaderboard is hidden until at least three opted-in profiles can be retrieved.");
+  }
+  return {
+    entries: sortAniListLeaderboardEntries(entries, medium),
+    optedIn: candidates.length,
+    checked: candidates.length,
+  };
 }
 
 export async function getServerTaste(
