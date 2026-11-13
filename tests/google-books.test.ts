@@ -51,7 +51,7 @@ test("Google Books search normalizes volume metadata and source URLs", async () 
             },
             previewLink: "https://books.google.com/books?id=dune-id&printsec=frontcover",
             infoLink: "https://books.google.com/books?id=dune-id",
-            imageLinks: { thumbnail: "http://books.google.test/dune.jpg" },
+            imageLinks: { thumbnail: "http://books.google.com/books/content?id=dune-id" },
           },
         },
         { id: "incomplete", volumeInfo: { authors: ["No title"] } },
