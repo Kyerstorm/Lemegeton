@@ -10,7 +10,7 @@ import { isGuildSetupComplete } from "./guild-retention.js";
 import { logger, readRecentLogs } from "./logger.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
-const PROTECTED_COMMANDS = new Set(["settings"]);
+const PROTECTED_COMMANDS = new Set(["settings", "language"]);
 const MODERATOR_COMMANDS = new Set(["log", "moderators", "planned", "adminlogin", "convertlinks"]);
 const SECTIONS: Record<string, string> = {
   discover: "Discovery",
@@ -92,7 +92,7 @@ export function dashboardCommandRows(commands: FeatureCommand[], settings: Await
       type: "slash",
       scope: "guild",
       aliases: [],
-      required_permissions: null,
+      required_permissions: definition.default_member_permissions ?? null,
       protected: PROTECTED_COMMANDS.has(name),
       enabled: feature ? settings[feature] : true,
     };

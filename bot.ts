@@ -2,7 +2,7 @@ import {AuditLogEvent,Client,Events,GatewayIntentBits,MessageFlags,type Guild,ty
 import { emoji } from "./helpers/emoji.js";
 import {createServer, type Server} from "node:http";
 import {timingSafeEqual} from "node:crypto";
-import {findAtlasRelationships,normalizeAtlasCategory,safeAtlasUrl} from "./helpers/integration/atlas.js";
+import {findAtlasGraph,normalizeAtlasCategory,safeAtlasUrl} from "./helpers/integration/atlas.js";
 import {loadConfig} from "./helpers/runtime/config.js";
 import {configureTranslation,translateGuildUiText} from "./helpers/integration/translation.js";
 import {configureLogger,logger} from "./helpers/runtime/logger.js";
@@ -67,8 +67,12 @@ async function startAtlasBridge(): Promise<void> {
   if(!/^\d{17,20}$/.test(guildId)||!title||title.length>256||!category||(rawUrl&&!safeUrl)){send(400,{error:"A valid guild, title and media category are required."});return;}
   void isGuildSetupComplete(guildId).then((configured)=>{
    if(!configured){send(423,{error:"Server data-retention setup is required before Atlas can be used."});return;}
-   return findAtlasRelationships(guildId,title,category,safeUrl,30).then((relationships)=>{
-    send(200,{root:{title,category,url:safeUrl},relationships});
+   return findAtlasGraph(guildId,{title,category,url:safeUrl},{maxDepth:2,maxNodes:24,perNodeLimit:8}).then((graph)=>{
+    send(200,{
+     root:{title,category,url:safeUrl},
+     relationships:graph.directRelationships,
+     graph:{rootId:graph.rootId,nodes:graph.nodes,edges:graph.edges,truncated:graph.truncated},
+    });
    });
   }).catch((error)=>{
    logger.error("Knowledge Atlas lookup failed",{guildId,reason:error instanceof Error?error.message:"Unknown error"});

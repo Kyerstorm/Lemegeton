@@ -139,13 +139,13 @@ The phase status below is an implementation audit, not a feature promise. Status
 | Phase | Current status | Evidence already present | Main remaining exit gate |
 |---|---|---|---|
 | 0 — Migration integrity | **Code migration complete** | PR #17 records TypeScript parity, Python removal, branch synchronization and the migration disposition. | Live Discord, production database/storage/provider and dashboard OAuth acceptance. |
-| 1 — Runtime, data and security | **Foundation implemented; acceptance in progress** | Config validation, guild setup gates, guild-scoped data, consent, issue logs, permission helpers, CI, backup rehearsal and diagnostics. | Target-environment permission/data/rollback tests and current-head CI. |
+| 1 — Runtime, data and security | **Foundation implemented; acceptance in progress** | Config validation, guild setup gates, guild-scoped data, consent, issue logs, permission helpers, permanently protected Manage Server-only /language command, CI, backup rehearsal and diagnostics. | Target-environment permission/data/rollback tests and current-head CI. |
 | 2 — Discovery and metadata | **In progress** | AniList, TMDB, IGDB, Steam, Google Books, comparisons, airing, trailers, creators, relations and regional availability have implementations and fixture tests. Google Books edition metadata was expanded in this implementation pass. | Provenance at field level, provider contract edge cases, and a supported webnovel metadata source. |
 | 3 — Archive and contributions | **Core workflows implemented; presentation/curation incomplete** | Submissions, moderation/reports, private asset storage, cleanup, collections, collaborators and Archive Trails exist. | Dedicated gallery, curation/spotlight workflow and end-to-end visibility tests for every share/export surface. |
 | 4 — Community and games | **Core activities implemented; competition formats incomplete** | Daily Drop, ranked voting, sessions/RSVP, spoiler discussions, release calendars/digests, quiz packs and persistent game sessions exist. | Tournament brackets, community seasons/showcases, richer puzzle/challenge modes and interaction tests. |
 | 5 — Profiles and Custom Roles | **Core privacy/linking/lifecycle implemented; showcase incomplete** | AniList/Steam linking, privacy preferences, affinity/taste, leaderboard and custom-role lifecycle/asset/picker helpers exist. | Profile contributor showcase and full live Discord hierarchy/lifecycle acceptance. |
 | 6 — Notifications and automation | **Basic scheduled delivery implemented; entity automation incomplete** | Completed/cancelled AniList notifications and guild release digests have scheduling/delivery paths. | Title/creator/franchise follows, more provider release kinds and bounded trigger workflows. |
-| 7 — Knowledge Atlas and dashboard | **Direct relationship Atlas implemented; graph exploration incomplete** | Typed provider/recommendation/community edges, guild visibility filters, direct relationship query, static image render and dashboard Atlas view exist. | Multi-hop paths, graph search/filter/clustering, path export and repeated visibility checks across the complete graph journey. |
+| 7 — Knowledge Atlas and dashboard | **Bounded two-hop exploration implemented; advanced graph work incomplete** | Typed provider/recommendation/community edges, guild visibility filters, direct relationship lookup, tested breadth-first expansion (2 hops / 24 nodes), provenance-aware dashboard graph and static image render. | Stable provider-ID canonicalization, node/edge search, relationship filters, pathfinding, clustering, rich node details and permission-equivalent graph export. |
 | 8 — Operations and launch | **Operational tooling implemented; live release gates open** | Docker/Compose, repository CI, health diagnostics, backup/restore rehearsal and a live-acceptance workflow exist. | Real credentials, production storage/database, Discord application and dashboard OAuth tests; owner-authorized release and rollback. |
 
 Phase 0 code migration status does **not** mean the service is launched. Phase 8 cannot be marked complete from local mocks or GitHub CI alone.
@@ -270,14 +270,15 @@ Phase 0 code migration status does **not** mean the service is launched. Phase 8
 
 **Objective:** make canonical media relationships explorable while preserving provenance and visibility.
 
-**Already present:** normalized media categories/titles; stored provider, recommendation and community relationship edges; guild visibility filtering; direct relationship and related community-record lookup; a static PNG snapshot renderer; a dashboard Atlas view.
+**Already present:** normalized media categories/titles; stored provider, recommendation and community relationship edges; guild visibility filtering; direct relationship and related community-record lookup; a static PNG snapshot renderer; and a dashboard Atlas view.
 
-**Current limitation:** the renderer displays a bounded set of direct connections around one selected node. It is not yet a multi-hop graph explorer, pathfinder, clustering engine or graph-export studio.
+**Completed in this implementation pass:** the dashboard Atlas bridge now performs deterministic breadth-first traversal for up to two relationship steps, capped at 24 nodes and eight queried relationships per node. Cycles and ancestor back-edges are suppressed, repeated nodes are deduplicated while alternative paths can remain visible, direct root relationships remain backward-compatible, and the guild-scoped lookup is applied again at every hop. The dashboard draws actual parent-to-node edges, labels node depth and exposes the truncation state. tests/atlas.test.ts covers cycle suppression, multi-hop discovery, node bounds and category/edition identity.
+
+**Current limitation:** canonical identities are still derived from normalized title, category and optional HTTPS URL rather than provider IDs. Pathfinding, clustering, rich node details and graph export are not implemented.
 
 **Remaining delivery:**
-- Introduce stable canonical node identities using provider ID when available and a carefully normalized title/category fallback otherwise. Preserve edition/work distinctions.
-- Add bounded multi-hop traversal with cycle detection, maximum depth/node count, deterministic ordering and pagination. Keep direct edges and derived paths distinguishable.
-- Add source-aware search and filters for category, relationship type, provider/community provenance and guild/global visibility.
+- Introduce stable canonical node identities using provider IDs where providers expose them, while retaining the normalized title/category/edition fallback. Preserve work-versus-edition distinctions.
+- Add graph search and filters for relationship type, provider/community provenance and guild/global visibility.
 - Expose edge evidence and source links. Community proposals must remain visibly different from provider-confirmed relationships and recommendations.
 - Build graph pathfinding and focused views (creator, franchise, adaptation, collection) with caps that protect query cost.
 - Re-check visibility at each traversal step and at render/export time; filtering only the root node is insufficient.
@@ -285,7 +286,7 @@ Phase 0 code migration status does **not** mean the service is launched. Phase 8
 - Complete graph export with size/node limits, source/provenance legend and the same permissions as interactive views.
 - Keep the Rust/Axum service as the dashboard authorization/API boundary; do not add a second backend.
 
-**Exit criteria:** graph traversal is bounded and deterministic; no cross-guild/private edge leaks through paths or exports; each edge shows source kind/evidence; path and export tests cover cycles, duplicates, hidden Archive entries and missing provider records.
+**Exit criteria:** graph traversal is bounded and deterministic; no cross-guild/private edge leaks through paths or exports; each edge shows source kind/evidence; traversal tests cover cycles, duplicate nodes and node limits; path/export tests cover hidden Archive entries and missing provider records.
 
 ### Phase 8 — operational hardening and launch
 
@@ -313,72 +314,7 @@ Phase 0 code migration status does **not** mean the service is launched. Phase 8
 5. **Phase 5 runs alongside Phases 3–4:** contributor/profile surfaces depend on approved public contributions, not duplicated profile storage.
 6. **Phase 8 is continuous:** every phase adds or updates its own tests, diagnostics and recovery behavior; final release acceptance remains a separate gate.
 
-A phase is not complete because its slash-command option exists. It closes only when behavior, state transitions, permissions, privacy, failure cases, tests and documentation meet its exit criteria.
-
-### Phase 0 — migration integrity and branch convergence
-
-- Resolve the existing PR's merge conflict with the current multi_guild base while preserving both branches' changes.
-- Keep the current PR head as the only implementation target; do not create another PR.
-- Complete the source-to-destination map from docs/MIGRATION_PARITY_AUDIT.md.
-- Port missing regression coverage before broad feature expansion.
-- Verify Docker, Compose, startup, database compatibility and the Rust/dashboard authorization boundary.
-- Exit only when no retained production behavior is merely assumed to be migrated.
-
-### Phase 1 — runtime, data and security foundation
-
-- Complete configuration validation, gateway lifecycle, command registration, structured logging and error routing.
-- Finish PostgreSQL schema/transaction parity, idempotent migrations, backup/recovery and guild-scoped repositories.
-- Standardize provider timeouts, retries, caching and rate-limit handling without masking permanent failures.
-- Enforce guild-only interactions where required, owner/moderator authorization, permission re-checks on components, and secrets/diagnostic redaction.
-- Finish /help, /privacy and /feedback as independent, tested command modules; retain /log access restrictions.
-
-### Phase 2 — discovery and metadata quality
-
-- Close gaps in compare, airing, trailers, TV seasons/episodes, creator credits, franchise navigation, cross-media recommendations and regional availability.
-- Complete Books & Editions and webnovel metadata only against supported sources.
-- Implement source provenance per relationship and important field.
-- Add provider fixture tests for missing data, invalid responses, timeouts, rate limits and changed schemas.
-
-### Phase 3 — Archive and contribution workflows
-
-- Complete legacy panel parity inside the unified Archive.
-- Finish asset upload/type limits, S3 privacy, attachment lifecycle, review/moderation, collections, collaborators and Archive Trails.
-- Add image gallery, soundtrack records and curation only through canonical Archive records.
-- Re-check source visibility at every browse, share, global view and export operation.
-
-### Phase 4 — Community and media games
-
-- Complete Daily Drop, rankings, sessions, discussion, event calendar and release digest workflows.
-- Add tournament brackets, community seasons and showcases using existing domain records.
-- Expand trivia, mystery media, guessing rounds, team play, puzzle modes and reviewed community quiz packs.
-- Keep event RSVP separate from personal media history; never infer member watch/read/play progress.
-
-### Phase 5 — profiles and custom roles
-
-- Finish provider connection and revocation flows, privacy defaults, opt-in affinity and aggregate taste.
-- Verify custom-role member/admin lifecycle, role hierarchy, asset safety, picker reliability and cooldowns.
-- Add contributor/profile showcase views from already public, permission-checked records.
-
-### Phase 6 — media notifications and bounded automation
-
-- Add title/creator/franchise subscriptions and more supported release kinds.
-- Implement guild digests with timezone-aware scheduling, retries and idempotent delivery.
-- Add explicit workflow rules with bounded triggers, dry-run/preview, audit trails and per-guild enablement.
-- Do not create a general reminder engine or unrelated task automation.
-
-### Phase 7 — Knowledge Atlas and dashboard
-
-- Add stable graph identities, typed relationships, relationship evidence, deduplication and graph versioning.
-- Deliver image-backed nodes only from approved provider assets or permission-checked Archive assets.
-- Add multi-hop exploration, search, path finding, filters, clustering, node details and graph export.
-- Expand Next.js views while keeping Rust/Axum as the authorization and API boundary; do not introduce a parallel backend.
-
-### Phase 8 — operational hardening and launch
-
-- Complete health/readiness checks, provider/job diagnostics, backup verification and recovery exercises.
-- Run multi-guild integration tests, interaction tests, data compatibility tests, permissions tests and container validation.
-- Verify rollback and cutover procedures with the production owner.
-- Retire any remaining legacy runtime only after measured parity and successful deployment acceptance.
+A phase is not complete because its slash-command option exists. It closes only when behavior, state transitions, permissions, privacy, failure cases, tests and documentation meet its exit criteria. The phase status board and detailed phase definitions above are the single source of truth; do not maintain a second abbreviated checklist that can drift out of sync.
 
 ## 5. 100,000-line TypeScript budget
 

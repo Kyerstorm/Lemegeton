@@ -4,7 +4,9 @@ import { createServer as createNetServer } from "node:net";
 import type { Client, Guild } from "discord.js";
 import type { FeatureCommand } from "../helpers/commands/command.js";
 import type { BotConfig } from "../helpers/runtime/config.js";
+import { LanguageCommand } from "../src/commands/language.js";
 import {
+  dashboardCommandRows,
   dashboardSecretMatches,
   isDashboardGuildId,
   startDashboardBridge,
@@ -23,6 +25,17 @@ async function availablePort(): Promise<number> {
   await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   return port;
 }
+
+test("/language is visible as protected and always enabled in dashboard command controls", () => {
+  const rows = dashboardCommandRows([new LanguageCommand()], {
+    discover: true, archive: true, community: true, play: true, profile: true, "custom-role": true,
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.name, "language");
+  assert.equal(rows[0]?.protected, true);
+  assert.equal(rows[0]?.enabled, true);
+  assert.equal(rows[0]?.required_permissions, String(1 << 5));
+});
 
 test("dashboard bridge validates guild identifiers and compares bearer secrets safely", () => {
   assert.equal(isDashboardGuildId("12345678901234567"), true);

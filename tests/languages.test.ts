@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { PermissionFlagsBits } from "discord.js";
 import { LanguageCommand } from "../src/commands/language.js";
 import {
   SUPPORTED_LANGUAGES,
@@ -34,4 +35,5 @@ test("the /language command exposes exactly one required autocomplete option", (
   assert.ok(option);
   assert.equal("autocomplete" in option && option.autocomplete, true);
   assert.equal(option.required, true);
+  assert.equal(definition.default_member_permissions, String(PermissionFlagsBits.ManageGuild));
 });

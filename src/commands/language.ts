@@ -9,10 +9,6 @@ import {
 import { query } from "../../database.js";
 import type { FeatureCommand } from "../../helpers/commands/command.js";
 import {
-  canConfigureGuildLeaveAction,
-  getGuildRetentionSettings,
-} from "../../helpers/runtime/guild-retention.js";
-import {
   getGuildLanguage,
   searchSupportedLanguages,
   setGuildLanguage,
@@ -24,6 +20,7 @@ export class LanguageCommand implements FeatureCommand {
   readonly data = new SlashCommandBuilder()
     .setName("language")
     .setDescription("Set this server's required language.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addStringOption((option) =>
       option
         .setName("language")
@@ -41,11 +38,9 @@ export class LanguageCommand implements FeatureCommand {
       return;
     }
 
-    const retention = await getGuildRetentionSettings(interaction.guildId);
-    const canManageServer = interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
-    if (!canConfigureGuildLeaveAction(retention.invited_by, interaction.user.id, canManageServer)) {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
       await interaction.reply({
-        content: "Only the person who invited Lemegeton or a member with Manage Server permission can change the server language.",
+        content: "Manage Server permission is required to change this server's language.",
         flags: MessageFlags.Ephemeral,
       });
       return;
@@ -79,7 +74,7 @@ export class LanguageCommand implements FeatureCommand {
         { name: "Language code", value: language.code, inline: true },
         { name: "Previous language", value: previous?.label ?? "Not configured", inline: true },
       )
-      .setFooter({ text: "This setting applies to the entire server. Run /language again to change it." });
+      .setFooter({ text: "This setting applies to the entire server. Members with Manage Server can change it using /language." });
 
     await interaction.editReply({ embeds: [embed] });
   }
@@ -90,9 +85,7 @@ export class LanguageCommand implements FeatureCommand {
       return;
     }
 
-    const retention = await getGuildRetentionSettings(interaction.guildId);
-    const canManageServer = interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
-    if (!canConfigureGuildLeaveAction(retention.invited_by, interaction.user.id, canManageServer)) {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
       await interaction.respond([]);
       return;
     }

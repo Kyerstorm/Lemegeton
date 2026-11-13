@@ -21,6 +21,36 @@ interface AtlasRow {
   target_title: string; target_title_key: string; target_category: string; target_url: string | null;
   relationship_type: string; source_kind: RelationshipSource; source_label: string;
 }
+export interface AtlasGraphNode {
+  id: string;
+  title: string;
+  category: MediaCategory;
+  url: string | null;
+  depth: number;
+  sourceKind?: RelationshipSource;
+  sourceLabel?: string;
+  relationType?: string;
+}
+export interface AtlasGraphEdge {
+  from: string;
+  to: string;
+  relationType: string;
+  sourceLabel: string;
+  sourceKind: RelationshipSource;
+}
+export interface AtlasGraphResult {
+  rootId: string;
+  nodes: AtlasGraphNode[];
+  edges: AtlasGraphEdge[];
+  directRelationships: AtlasRelation[];
+  truncated: boolean;
+}
+export interface AtlasGraphOptions {
+  maxDepth?: number;
+  maxNodes?: number;
+  perNodeLimit?: number;
+}
+
 const CATEGORIES = new Set<MediaCategory>(["ANIME","MANGA","LIGHT_NOVEL","WEBNOVEL","BOOK","MOVIE","TV","GAME","CREATOR","FRANCHISE","ARCHIVE_ENTRY","ARCHIVE_COLLECTION","DISCUSSION","ACTIVITY"]);
 const SOURCES = new Set<RelationshipSource>(["provider","recommendation","community"]);
 
@@ -137,6 +167,122 @@ export async function findAtlasRelationships(
     if (!seen.has(key)) { seen.add(key); result.push(relation); }
   }
   return result;
+}
+
+
+/** Stable identity for one category-aware work/edition node in a bounded graph. */
+export function atlasNodeIdentity(title: string, category: string, url?: string | null): string {
+  return JSON.stringify([normalizeAtlasCategory(category), normalizeAtlasTitle(title), safeAtlasUrl(url)]);
+}
+
+/**
+ * Expand an Atlas neighborhood using a caller-supplied, visibility-aware edge loader.
+ * Breadth-first ordering keeps results deterministic and prevents deeper nodes from
+ * displacing the root's direct connections.
+ */
+export async function buildAtlasGraph(
+  root: { title: string; category: string; url?: string | null },
+  loadRelationships: (node: AtlasGraphNode, limit: number) => Promise<AtlasRelation[]>,
+  options: AtlasGraphOptions = {},
+): Promise<AtlasGraphResult> {
+  const category = normalizeAtlasCategory(root.category);
+  const title = root.title.replace(/\s+/g, " ").trim().slice(0, 256);
+  const rootId = atlasNodeIdentity(title, root.category, root.url);
+  if (!category || !normalizeAtlasTitle(title) || rootId.startsWith("[null")) {
+    return { rootId: "", nodes: [], edges: [], directRelationships: [], truncated: false };
+  }
+
+  const maxDepth = Math.max(1, Math.min(3, Math.floor(options.maxDepth ?? 2)));
+  const maxNodes = Math.max(2, Math.min(40, Math.floor(options.maxNodes ?? 24)));
+  const perNodeLimit = Math.max(1, Math.min(16, Math.floor(options.perNodeLimit ?? 8)));
+  const rootNode: AtlasGraphNode = {
+    id: rootId, title, category, url: safeAtlasUrl(root.url), depth: 0,
+  };
+  const nodes = new Map<string, AtlasGraphNode>([[rootId, rootNode]]);
+  const parentByNode = new Map<string, string | null>([[rootId, null]]);
+  const edges: AtlasGraphEdge[] = [];
+  const edgeKeys = new Set<string>();
+  const directRelationships: AtlasRelation[] = [];
+  let frontier = [rootNode];
+  let truncated = false;
+  const isAncestor = (candidate: string, nodeId: string): boolean => {
+    let parent = parentByNode.get(nodeId) ?? null;
+    while (parent) {
+      if (parent === candidate) return true;
+      parent = parentByNode.get(parent) ?? null;
+    }
+    return false;
+  };
+
+  for (let depth = 0; depth < maxDepth && frontier.length; depth += 1) {
+    const batches = await Promise.all(frontier.map(async node => ({
+      node,
+      relationships: await loadRelationships(node, perNodeLimit + 1),
+    })));
+    const next: AtlasGraphNode[] = [];
+
+    for (const batch of batches) {
+      if (batch.relationships.length > perNodeLimit) truncated = true;
+      for (const relation of batch.relationships.slice(0, perNodeLimit)) {
+        const targetCategory = normalizeAtlasCategory(relation.category);
+        const targetTitle = relation.title.replace(/\s+/g, " ").trim().slice(0, 256);
+        if (!targetCategory || !normalizeAtlasTitle(targetTitle)) continue;
+        const targetId = atlasNodeIdentity(targetTitle, targetCategory, relation.url);
+        if (!targetId || targetId === batch.node.id) continue;
+
+        let target = nodes.get(targetId);
+        if (target && target.depth < batch.node.depth && isAncestor(targetId, batch.node.id)) continue;
+        if (!target) {
+          if (nodes.size >= maxNodes) {
+            truncated = true;
+            continue;
+          }
+          target = {
+            id: targetId,
+            title: targetTitle,
+            category: targetCategory,
+            url: safeAtlasUrl(relation.url),
+            depth: batch.node.depth + 1,
+            sourceKind: relation.sourceKind,
+            sourceLabel: relation.source,
+            relationType: relation.relationType,
+          };
+          nodes.set(targetId, target);
+          parentByNode.set(targetId, batch.node.id);
+          next.push(target);
+        }
+
+        const edgeKey = JSON.stringify([batch.node.id, targetId, relation.relationType, relation.sourceKind, relation.source]);
+        if (edgeKeys.has(edgeKey)) continue;
+        edgeKeys.add(edgeKey);
+        edges.push({
+          from: batch.node.id,
+          to: targetId,
+          relationType: relation.relationType,
+          sourceLabel: relation.source,
+          sourceKind: relation.sourceKind,
+        });
+        if (batch.node.depth === 0) directRelationships.push(relation);
+      }
+    }
+
+    frontier = next;
+  }
+
+  return { rootId, nodes: [...nodes.values()], edges, directRelationships, truncated };
+}
+
+/** Multi-hop expansion always reuses the guild-scoped relationship query at every hop. */
+export function findAtlasGraph(
+  guildId: string | null,
+  root: { title: string; category: string; url?: string | null },
+  options: AtlasGraphOptions = {},
+): Promise<AtlasGraphResult> {
+  return buildAtlasGraph(
+    root,
+    (node, limit) => findAtlasRelationships(guildId, node.title, node.category, node.url, limit),
+    options,
+  );
 }
 
 export function createAtlasDiscordUrl(guildId: string, channelId: string | null): string | null {

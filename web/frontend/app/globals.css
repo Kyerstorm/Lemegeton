@@ -373,3 +373,32 @@ body{background:radial-gradient(ellipse at 72% -18%,#171717 0%,transparent 45%),
 .atlas-graph-content{position:absolute;inset:0;transform-origin:center center;transition:transform .18s ease}
 @media(max-width:760px){.atlas-tools{align-items:stretch}.atlas-tools .filter-control{flex:1;min-width:135px}.atlas-zoom{width:100%;margin-left:0;justify-content:flex-end}}
 @media(prefers-reduced-motion:reduce){.atlas-graph-content{transition:none}}
+
+
+/* Interaction and accessibility floor for the Nothing OS control surface. */
+:where(button,a,input,select,textarea,[role="button"],[role="switch"]){-webkit-tap-highlight-color:transparent}
+.button{min-height:40px}
+.icon-button{width:40px;height:40px}
+.nav-item,.signout{min-height:44px}
+.filter-control select,.guild-control select{min-height:40px}
+.command-copy,.command-guide{min-height:40px;display:inline-flex;align-items:center}
+.eyebrow,.metric-label,.sidebar-system small,.account-copy small,.filter-control>span,.guild-control>span,.panel-index,.activity-time,.atlas-legend,.atlas-source,.atlas-provider-link,.page-footer{font-size:11px}
+.lede,.command-description,.footnote,.atlas-explainer,.empty-state,.login-copy,.login-assurances>span{font-size:12px}
+:where(button,a,input,select,textarea,[tabindex]):focus-visible{outline:2px solid #fff;outline-offset:3px}
+:where(button,a,input,select,textarea,[role="button"],[role="switch"]){scroll-margin:12px}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}
+}
+@media(max-width:760px){
+  .main{padding-left:18px;padding-right:18px}
+  .page-heading{align-items:flex-start;flex-direction:column;gap:14px}
+  .heading-actions{flex-wrap:wrap}
+  .atlas-graph{height:440px}
+  .atlas-root-node{width:120px;min-height:88px;padding:8px}
+  .atlas-node{width:clamp(104px,27%,140px);min-height:72px;padding:8px}
+}
+
+/* Keep important metadata legible across dense control panels. */
+.metric p,.text-button,.distribution-meta,.mono,.activity-copy small,.command-summary,td small,
+.status-strip,.login-foot,.command-copy,.command-guide,.atlas-connection-main small,
+.atlas-node strong,.atlas-node>span,.atlas-root-node a,.guild-control select{font-size:11px}
