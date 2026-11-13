@@ -484,3 +484,48 @@ The source inventory, in-scope behavior dispositions, tracked Python removal, sh
 7. Resolve the existing `multi_guild` / `lemegeton-v3` history divergence deliberately on the PR branch. At this snapshot GitHub reports 654 commits ahead and 86 behind (`diverged`, `mergeable=false`). No rebase, merge, or branch synchronization was attempted; `multi_guild` was not modified.
 
 **Disposition:** the code-level migration audit is complete for the current tracked source and approved v3 scope; the migration is not certified for production cutover. PR #17 remains Draft, no deployment was performed, and `multi_guild` was not changed.
+
+
+## First five release acceptance gates — 13 November 2026
+
+**Acceptance implementation head:** \`f6b2f5ae846721d810d9b6c20f4ff063b92dd2b8\`  
+**PR:** #17, \`lemegeton-v3\` → \`multi_guild\`; open and Draft.  
+**Scope:** release gates 1–5 only. No production environment or branch was modified.
+
+| Gate | Code/CI work now present | Live acceptance disposition |
+|---|---|---|
+| 1. PostgreSQL migration, integrity, rollback and backup/restore | The PostgreSQL schema suite builds isolated legacy schemas, runs initialization repeatedly, checks imported data/guild isolation and verifies rollback leaves source data intact. The normal CI workflow now uses PostgreSQL 16 client tools from the matching \`postgres:16\` image for backup/restore. The manual workflow adds a staging-copy rehearsal, public table inventory comparison and per-table row-count comparison. Staging database test connections respect remote SSL settings. | **Local CI verification passed.** The staging-copy job is manual and requires \`MIGRATION_ACCEPTANCE_DATABASE_URL\` to point to an explicitly disposable/sanitized staging copy and input \`confirm_database=DISPOSABLE_STAGING\`. It has not been run against the deployment database. |
+| 2. Discord application/guild | A read-only live acceptance script checks bot membership, \`ViewAuditLog\`, \`ManageRoles\`, the recorded inviter's Manage Server/Administrator permission, the bot-add audit entry, same-guild test-channel scope, channel/thread permissions, and globally deployed/moderator commands. | **Automated mock/CI coverage passed; live guild check not run.** Requires a dedicated test bot, guild, inviter and test channel. The script does not alter production guild settings, create/delete messages, or simulate a real bot leave/rejoin. |
+| 3. Private S3 lifecycle | The MinIO-backed CI test exercises private object upload, signed retrieval, wrong-guild denial, custom-role image storage, failed upload, failed-delete queueing, retry recovery, and object cleanup. A manual S3-compatible live acceptance job repeats the same test against a dedicated HTTPS endpoint and disposable bucket account. | **MinIO integration test passed in CI.** The real S3-compatible endpoint test has not been run. It requires a dedicated account with create/list/get/delete bucket/object permissions. |
+| 4. Metadata providers | Opt-in live tests call AniList, Google Books, Steam, IGDB and TMDB clients and validate normalized results. The manual provider job requires the configured API credentials and runs those tests with \`LEMEGETON_LIVE_PROVIDER_TESTS=1\`. | **Not live-verified.** All five tests were intentionally skipped in ordinary CI (no live-provider flag/keys). The manual provider job has not been dispatched with credentials. |
+| 5. Dashboard OAuth, bridge and guild authorization | Rust OAuth callback tests use a mock Discord API to exercise state/cookie binding, one-time OAuth state, session issuance, Manage Server/Administrator guild filtering and bot-membership intersection. Rust bridge tests now start an HTTP mock and verify that the dashboard sends the configured shared bearer secret and that a wrong secret is rejected. Node bridge integration tests reject absent/wrong secrets and accept the configured secret. The manual workflow builds the dashboard and validates the configured HTTPS Discord authorization redirect and secure OAuth-state cookie. | **Mock/in-process CI coverage passed.** The configured live OAuth app and deployed bridge are not available in this session; the manual OAuth job has not been run with the deployment's client ID/secret/redirect and bridge secret. |
+
+### Current automated verification
+
+The current code-bearing head is \`f6b2f5ae846721d810d9b6c20f4ff063b92dd2b8\`. The TypeScript workflow last ran on \`9495de9703bdf72e294bab3abc70b3900c981bd0\`; the later \`f6b2f5a\` change is Rust-only and was tested by the current Frontend/Rust workflow.
+
+- **TypeScript bot:** passed; type-check/build completed; **175 passed, 0 failed, 5 skipped** out of 180. The five skipped cases are the opt-in live-provider checks. The S3-compatible MinIO integration test was not skipped.
+  [TypeScript workflow job](https://github.com/Kyerstorm/Lemegeton/actions/runs/43446449993/job/131957034643)
+- **Frontend:** passed; Next.js type-check/production build and static output assertions succeeded. High-severity npm audit reported **0 vulnerabilities**.
+- **Rust dashboard:** passed; **21 passed, 0 failed** including the new Rust-to-bot bridge bearer-secret test.
+- **Cargo audit:** passed.
+  [Frontend/Rust workflow job](https://github.com/Kyerstorm/Lemegeton/actions/runs/43447026877/job/131959050290)
+- **Docker:** passed; production image build, Compose/startup validation, non-root user and health-check contract succeeded.
+  [Docker workflow job](https://github.com/Kyerstorm/Lemegeton/actions/runs/43447026877/job/131959050809)
+- **GitGuardian:** returned **neutral**, not success. It did not provide a passing full-PR secret scan; historical finding/scan-limit disposition remains separate.
+
+### Manual live acceptance workflow
+
+\`.github/workflows/acceptance-live.yml\` now defines five manually invoked jobs: \`postgres-staging\`, \`discord\`, \`s3-live\`, \`providers\`, and \`dashboard-oauth\`. It is intentionally not auto-run on every PR push and will fail preflight rather than silently skip missing credentials.
+
+Required GitHub Actions repository secrets:
+
+- **PostgreSQL:** \`MIGRATION_ACCEPTANCE_DATABASE_URL\` — disposable/sanitized staging clone only. Also type \`DISPOSABLE_STAGING\` into the workflow input. Never point this at production.
+- **Discord:** \`DISCORD_TOKEN\`, \`DISCORD_TEST_GUILD_ID\`, \`DISCORD_TEST_INVITER_ID\`, \`DISCORD_TEST_CHANNEL_ID\`; optionally \`DISCORD_TEST_MODERATOR_GUILD_ID\`.
+- **S3:** \`S3_TEST_ENDPOINT_URL\` (HTTPS), \`S3_TEST_ACCESS_KEY_ID\`, \`S3_TEST_SECRET_ACCESS_KEY\`. Use a disposable bucket-capable account.
+- **Providers:** \`STEAM_API_KEY\`, \`STEAM_TEST_PROFILE_ID\`, \`IGDB_CLIENT_ID\`, \`IGDB_CLIENT_SECRET\`, \`TMDB_BEARER_TOKEN\`; \`GOOGLE_BOOKS_API_KEY\` is optional.
+- **Dashboard:** \`DASHBOARD_CLIENT_ID\`, \`DASHBOARD_CLIENT_SECRET\`, \`DASHBOARD_REDIRECT_URI\`, \`DASHBOARD_PUBLIC_URL\`, \`DASHBOARD_BRIDGE_SECRET\` (at least 32 bytes).
+
+These are entered in GitHub repository Settings → Secrets and variables → Actions, then run **Actions → Live acceptance checks → Run workflow** on \`lemegeton-v3\`. Do not paste credentials into chat or commit them to the repository.
+
+**Honest release disposition:** the first five gates now have code-level checks, repeatable CI coverage and an executable manual acceptance route. The automated CI checks listed above passed. The actual deployment/staging PostgreSQL, dedicated live Discord guild, live S3 account, external metadata credentials and registered OAuth application have not been accessed or tested from this session; therefore gates 1–5 are not certified as production-live complete until the manual acceptance workflow passes with the dedicated test secrets. PR #17 remains Draft and \`multi_guild\` remains unchanged.
