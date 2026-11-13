@@ -76,6 +76,20 @@ test("missing AniList episode and chapter totals safely become zero", () => {
   assert.equal(result.activityScore, 0);
 });
 
+test("episode totals retain the legacy chaptersRead fallback", () => {
+  const result = buildAniListLeaderboardEntry(profile(
+    "fallback",
+    { count: 4, episodesWatched: 0, chaptersRead: 123 },
+  ));
+  assert.equal(result.totalEpisodes, 123);
+});
+
+test("Golden Ratio rankings fall back to raw unit totals when title count is zero", () => {
+  const noTitles = entry("no-titles", { count: 0, episodesWatched: 35 }, { count: 0, chaptersRead: 20 });
+  assert.equal(noTitles.animeAverage, 35);
+  assert.equal(noTitles.mangaAverage, 20);
+});
+
 test("all seven leaderboard modes sort by their documented measure", () => {
   const low = entry("low", { count: 10, episodesWatched: 100, statuses: [{ status: "COMPLETED", count: 2 }] },
     { count: 10, chaptersRead: 100, statuses: [{ status: "COMPLETED", count: 1 }] });
@@ -87,13 +101,22 @@ test("all seven leaderboard modes sort by their documented measure", () => {
   }
 });
 
-test("Golden Ratio rankings use per-entry averages, then mean score as a tie-breaker", () => {
+test("Golden Ratio rankings use per-entry averages and preserve order for ties", () => {
   const lowerScore = entry("alpha", { count: 10, episodesWatched: 200, meanScore: 70 });
   const higherScore = entry("beta", { count: 5, episodesWatched: 100, meanScore: 90 });
   assert.deepEqual(
     sortAniListLeaderboardEntries([lowerScore, higherScore], "anime").map((item) => item.userId),
-    ["beta", "alpha"],
+    ["alpha", "beta"],
   );
+});
+
+test("legacy weighted score preserves origin estimates even when heuristic floors exceed 100 percent", () => {
+  assert.ok(Math.abs(
+    calculateOriginWeightedActivityScore(100, 250, 12_000, 7_000) - 66_460.95573800772,
+  ) < 1e-8);
+  assert.ok(Math.abs(
+    calculateOriginWeightedActivityScore(120, 1_000, 7_000, 30_000) - 113_201.04103837225,
+  ) < 1e-8);
 });
 
 test("legacy weighted activity score is deterministic, finite, and zero for empty profiles", () => {
