@@ -96,6 +96,8 @@ export async function createCommunityTournament(input: {
   if (!Number.isFinite(input.closesAt.getTime()) || input.closesAt.getTime() <= Date.now()) {
     throw new Error("The first tournament round must close in the future.");
   }
+  const title = cleanText(input.title, 180);
+  if (!title) throw new Error("A tournament title is required.");
   const candidates = normalizeTournamentCandidates(input.candidates);
   const roundDurationHours = input.roundDurationHours ?? 48;
   if (!Number.isInteger(roundDurationHours) || roundDurationHours < 1 || roundDurationHours > 168) {
@@ -106,7 +108,7 @@ export async function createCommunityTournament(input: {
       "INSERT INTO community_tournaments " +
       "(guild_id, creator_id, title, description, rounds_total, round_duration_hours, closes_at) " +
       "VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id::text AS id",
-      [input.guildId, input.creatorId, cleanText(input.title, 180), cleanText(input.description, 1_000),
+      [input.guildId, input.creatorId, title, cleanText(input.description, 1_000),
         Math.log2(candidates.length), roundDurationHours, input.closesAt],
     );
     const tournamentId = tournament.rows[0]?.id;
@@ -314,18 +316,19 @@ export async function cancelCommunityTournament(
   actorId: string,
   isManager: boolean,
 ): Promise<void> {
-  const row = await queryOne<{ creator_id: string }>(
-    "SELECT creator_id::text FROM community_tournaments WHERE id = $1 AND guild_id = $2 AND status = 'open'",
-    [tournamentId, guildId],
-  );
-  if (!row || (row.creator_id !== actorId && !isManager)) {
-    throw new Error("Only the tournament creator or a server manager can cancel it.");
-  }
-  await query(
-    "UPDATE community_tournaments SET status = 'cancelled', closed_at = NOW() " +
-    "WHERE id = $1 AND guild_id = $2 AND status = 'open'",
-    [tournamentId, guildId],
-  );
+  return transaction(async (client) => {
+    const row = await client.query<{ creator_id: string }>(
+      "SELECT creator_id::text FROM community_tournaments WHERE id = $1 AND guild_id = $2 AND status = 'open' FOR UPDATE",
+      [tournamentId, guildId],
+    );
+    if (!row.rows[0] || (row.rows[0].creator_id !== actorId && !isManager)) {
+      throw new Error("Only the tournament creator or a server manager can cancel it.");
+    }
+    await client.query(
+      "UPDATE community_tournaments SET status = 'cancelled', closed_at = NOW() WHERE id = $1 AND guild_id = $2 AND status = 'open'",
+      [tournamentId, guildId],
+    );
+  });
 }
 
 export type CommunitySeasonItemType = "daily_drop" | "ranking" | "session" | "tournament" | "spotlight" | "collection" | "trail";
@@ -355,10 +358,12 @@ export async function createCommunitySeason(input: {
   guildId: string; creatorId: string; title: string; description: string; startsAt: Date; endsAt: Date;
 }): Promise<string> {
   validateSeasonWindow(input.startsAt, input.endsAt);
+  const title = cleanText(input.title, 160);
+  if (!title) throw new Error("A Community Season title is required.");
   const row = await queryOne<{ id: string }>(
     "INSERT INTO community_seasons (guild_id, creator_id, title, description, starts_at, ends_at) " +
     "VALUES ($1,$2,$3,$4,$5,$6) RETURNING id::text AS id",
-    [input.guildId, input.creatorId, cleanText(input.title, 160), cleanText(input.description, 1_000), input.startsAt, input.endsAt],
+    [input.guildId, input.creatorId, title, cleanText(input.description, 1_000), input.startsAt, input.endsAt],
   );
   if (!row) throw new Error("The Community Season could not be created.");
   return row.id;
@@ -387,20 +392,38 @@ const SEASON_ITEM_LOOKUPS: Record<CommunitySeasonItemType, string> = {
 };
 
 export async function addCommunitySeasonItem(
-  guildId: string, actorId: string, seasonId: string, rawType: string, itemId: string,
+  guildId: string, actorId: string, seasonId: string, rawType: string, itemId: string, isManager = false,
 ): Promise<void> {
   const itemType = normalizeSeasonItemType(rawType);
-  const season = await queryOne<{ id: string }>(
-    "SELECT id::text FROM community_seasons WHERE id = $1 AND guild_id = $2 AND status = 'open'",
+  const season = await queryOne<{ id: string; creator_id: string }>(
+    "SELECT id::text, creator_id::text FROM community_seasons WHERE id = $1 AND guild_id = $2 AND status = 'open' FOR UPDATE",
     [seasonId, guildId],
   );
-  if (!season) throw new Error("That open Community Season was not found in this server.");
+  if (!season || (season.creator_id !== actorId && !isManager)) {
+    throw new Error("Only the season creator or a server manager can add season records.");
+  }
   const item = await queryOne<{ id: string }>(SEASON_ITEM_LOOKUPS[itemType], [itemId, guildId]);
   if (!item) throw new Error("The selected season item is not a completed, approved or visible record in this server.");
   await query(
     "INSERT INTO community_season_items (season_id, item_type, item_id, added_by) " +
     "VALUES ($1,$2,$3,$4) ON CONFLICT (season_id, item_type, item_id) DO NOTHING",
     [seasonId, itemType, itemId, actorId],
+  );
+}
+
+export async function closeCommunitySeason(
+  guildId: string, actorId: string, seasonId: string, isManager: boolean,
+): Promise<void> {
+  const row = await queryOne<{ creator_id: string }>(
+    "SELECT creator_id::text FROM community_seasons WHERE id = $1 AND guild_id = $2 AND status = 'open'",
+    [seasonId, guildId],
+  );
+  if (!row || (row.creator_id !== actorId && !isManager)) {
+    throw new Error("Only the season creator or a server manager can close it.");
+  }
+  await query(
+    "UPDATE community_seasons SET status = 'completed' WHERE id = $1 AND guild_id = $2 AND status = 'open'",
+    [seasonId, guildId],
   );
 }
 
