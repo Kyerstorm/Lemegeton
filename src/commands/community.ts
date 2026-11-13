@@ -171,7 +171,6 @@ export class CommunityCommand implements FeatureCommand {
       { name: "Start Media Night", value: "media-night" },
       { name: "Preview release calendar", value: "calendar" },
       { name: "Configure release digests", value: "calendar-configure" },
-      { name: "Disable release digests", value: "calendar-disable" },
       { name: "Community history", value: "history" },
       { name: "Archive spotlights", value: "spotlights" },
       { name: "Tournament Centre", value: "tournaments" },
@@ -222,23 +221,7 @@ export class CommunityCommand implements FeatureCommand {
       { name: "TV and movies", value: "tv,movies" },
     ))
     .addIntegerOption((option) => option.setName("weekday").setDescription("Weekly digest day (0 Sunday – 6 Saturday)").setMinValue(0).setMaxValue(6))
-    .addStringOption((option) => option.setName("tournament_id").setDescription("Tournament ID").setMaxLength(24))
-    .addStringOption((option) => option.setName("tournament_candidates").setDescription("One candidate per line: Title | HTTPS source URL").setMaxLength(4_000))
-    .addStringOption((option) => option.setName("closes_at").setDescription("Tournament round close time (ISO-8601 with timezone)").setMaxLength(40))
-    .addIntegerOption((option) => option.setName("round_duration_hours").setDescription("Hours for each tournament round").setMinValue(1).setMaxValue(168))
-    .addStringOption((option) => option.setName("season_id").setDescription("Community Season ID").setMaxLength(24))
-    .addStringOption((option) => option.setName("season_item_id").setDescription("Existing activity ID to add to a season").setMaxLength(24))
-    .addStringOption((option) => option.setName("season_item_type").setDescription("Existing activity type").addChoices(
-      { name: "Approved Daily Drop", value: "daily_drop" },
-      { name: "Closed ranking", value: "ranking" },
-      { name: "Past session", value: "session" },
-      { name: "Completed tournament", value: "tournament" },
-      { name: "Archive spotlight", value: "spotlight" },
-      { name: "Archive collection", value: "collection" },
-      { name: "Archive Trail", value: "trail" },
-    ))
-    .addStringOption((option) => option.setName("season_starts_at").setDescription("Season start (ISO-8601 with timezone)").setMaxLength(40))
-    .addStringOption((option) => option.setName("season_ends_at").setDescription("Season end (ISO-8601 with timezone)").setMaxLength(40));
+;
 
   private readonly anilist: AniListClient;
   private readonly tmdb: TmdbClient;
