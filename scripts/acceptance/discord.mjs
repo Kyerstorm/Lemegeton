@@ -59,7 +59,7 @@ try {
   }
 
   const channel = await guild.channels.fetch(channelId);
-  if (!channel || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)) {
+  if (!channel || channel.guildId !== guild.id || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)) {
     throw new Error("DISCORD_TEST_CHANNEL_ID must identify a text or announcement channel in the acceptance guild.");
   }
   const channelPermissions = channel.permissionsFor(botMember);
@@ -84,7 +84,7 @@ try {
     "discover", "archive", "community", "play", "profile", "custom-role", "settings",
     "help", "privacy", "feedback",
   ];
-  const missingCommands = requiredCommands.filter(name => !globalCommands.has(name));
+  const missingCommands = requiredCommands.filter(name => !globalCommands.some(command => command.name === name));
   if (missingCommands.length) {
     throw new Error("Missing globally deployed commands: " + missingCommands.join(", "));
   }
@@ -95,7 +95,7 @@ try {
     const moderatorGuild = await client.guilds.fetch(moderatorGuildId);
     const guildCommands = await moderatorGuild.commands.fetch();
     const requiredModeratorCommands = ["log", "moderators", "planned", "adminlogin", "convertlinks"];
-    const missing = requiredModeratorCommands.filter(name => !guildCommands.has(name));
+    const missing = requiredModeratorCommands.filter(name => !guildCommands.some(command => command.name === name));
     if (missing.length) throw new Error("Missing moderator-server commands: " + missing.join(", "));
     moderatorCommandsVerified = requiredModeratorCommands.length;
   }

@@ -163,12 +163,14 @@ jobs:
             -v "$RUNNER_TEMP:/backup" postgres:16 -ec '
               pg_dump "$SOURCE_DB_URL" --format=custom --no-owner --no-acl --file=/backup/migration-acceptance.dump
               pg_restore --exit-on-error --no-owner --no-acl --dbname="$RESTORE_DATABASE_URL" /backup/migration-acceptance.dump
+              test "$(psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT current_schema()")" = "public"
               psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = current_schema() ORDER BY tablename" > /backup/source-tables.txt
               psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = current_schema() ORDER BY tablename" > /backup/restored-tables.txt
               diff -u /backup/source-tables.txt /backup/restored-tables.txt
               while IFS= read -r table; do
-                source_count="$(psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT count(*) FROM public.\\"$table\\"")"
-                restored_count="$(psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT count(*) FROM public.\\"$table\\"")"
+                case "$table" in *[!a-z0-9_]*) echo "Unexpected table identifier in staging database" >&2; exit 1 ;; esac
+                source_count="$(psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT count(*) FROM public.$table")"
+                restored_count="$(psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT count(*) FROM public.$table")"
                 test "$source_count" = "$restored_count"
               done < /backup/source-tables.txt
             '

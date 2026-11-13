@@ -29,7 +29,7 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
   skip: databaseUrl ? false : "TEST_DATABASE_URL is not configured",
 }, async () => {
   assert.ok(databaseUrl);
-  const admin = new Pool({ connectionString: databaseUrl });
+  const admin = new Pool({ connectionString: databaseUrl, ssl: testDatabaseSsl(new URL(databaseUrl)) });
   const schema = "lemegeton_migration_" + randomUUID().replaceAll("-", "");
 
   try {
@@ -1115,7 +1115,7 @@ test("PostgreSQL migration rolls back when legacy user rows have no safe guild a
   skip: databaseUrl ? false : "TEST_DATABASE_URL is not configured",
 }, async () => {
   assert.ok(databaseUrl);
-  const admin = new Pool({ connectionString: databaseUrl });
+  const admin = new Pool({ connectionString: databaseUrl, ssl: testDatabaseSsl(new URL(databaseUrl)) });
   const schema = "lemegeton_rollback_" + randomUUID().replaceAll("-", "");
 
   try {
