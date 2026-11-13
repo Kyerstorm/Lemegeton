@@ -2,7 +2,7 @@ use axum::{extract::{Query, State}, http::{header, HeaderMap, HeaderValue, Statu
 use serde_json::{json, Value};
 use crate::ui;
 use crate::state::{access_token, allow_oauth_start, cookie_value, is_owner, manageable_guilds, new_token, now_secs, session_from_headers, token_response_cookie,
-    expired_cookie, oauth_state_cookie, expired_oauth_state_cookie, ApiError, ApiResult, AppState, DashboardUser, DiscordTokenResponse, DiscordUserResponse, OAuthCallback, OAuthState, Session, DISCORD_API};
+    expired_cookie, oauth_state_cookie, expired_oauth_state_cookie, ApiError, ApiResult, AppState, DashboardUser, DiscordTokenResponse, DiscordUserResponse, OAuthCallback, OAuthState, Session};
 use subtle::ConstantTimeEq;
 
 pub async fn home(State(state): State<AppState>, headers: HeaderMap) -> Response {
@@ -62,7 +62,7 @@ pub async fn oauth_callback(State(state): State<AppState>, headers: HeaderMap, Q
     if !state_matches_browser {
         return ApiError::new(StatusCode::BAD_REQUEST, "Sign-in state expired, belongs to another browser session, or was already used. Start sign-in again.").into_response();
     }
-    let response = state.client.post(format!("{DISCORD_API}/oauth2/token")).form(&[
+    let response = state.client.post(format!("{}/oauth2/token", state.discord_api_base.trim_end_matches('/'))).form(&[
         ("client_id", state.config.client_id.as_str()), ("client_secret", state.config.client_secret.as_str()),
         ("grant_type", "authorization_code"), ("code", code.as_str()), ("redirect_uri", state.config.redirect_uri.as_str()),
     ]).send().await;
@@ -73,7 +73,7 @@ pub async fn oauth_callback(State(state): State<AppState>, headers: HeaderMap, Q
         _ => return ApiError::new(StatusCode::UNAUTHORIZED, "Discord sign-in failed. Try again.").into_response(),
     };
     let access = tokens.access_token.unwrap_or_default();
-    let response = state.client.get(format!("{DISCORD_API}/users/@me")).bearer_auth(&access).send().await;
+    let response = state.client.get(format!("{}/users/@me", state.discord_api_base.trim_end_matches('/'))).bearer_auth(&access).send().await;
     let response = match response {
         Ok(value) if value.status().is_success() => value,
         _ => return ApiError::new(StatusCode::UNAUTHORIZED, "Discord could not verify this account. Try again.").into_response(),
@@ -131,7 +131,7 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> ApiRes
     let revoke_token = session.refresh_token.as_deref().filter(|value| !value.is_empty())
         .unwrap_or(session.access_token.as_str());
     if state.config.oauth_ready() && !revoke_token.is_empty() {
-        let revoke = state.client.post(format!("{DISCORD_API}/oauth2/token/revoke"))
+        let revoke = state.client.post(format!("{}/oauth2/token/revoke", state.discord_api_base.trim_end_matches('/')))
             .form(&[
                 ("client_id", state.config.client_id.as_str()),
                 ("client_secret", state.config.client_secret.as_str()),
@@ -154,6 +154,122 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> ApiRes
 mod tests {
     use super::*;
     use std::collections::HashSet;
+    async fn mock_discord_token() -> Json<Value> {
+        Json(json!({"access_token":"mock-access-token","refresh_token":"mock-refresh-token","expires_in":3600}))
+    }
+
+    async fn mock_discord_user() -> Json<Value> {
+        Json(json!({"id":"555555555555555555","username":"acceptance-user","global_name":"Acceptance User","avatar":null}))
+    }
+
+    async fn mock_discord_user_guilds() -> Json<Value> {
+        Json(json!([
+            {"id":"111111111111111111","name":"Manage Server","permissions":"32"},
+            {"id":"222222222222222222","name":"Administrator","permissions":"8"},
+            {"id":"333333333333333333","name":"No permission","permissions":"0"},
+            {"id":"444444444444444444","name":"Bot not installed","permissions":"32"}
+        ]))
+    }
+
+    async fn mock_bot_guilds() -> Json<Value> {
+        Json(json!([
+            {"id":"111111111111111111","name":"Manage Server"},
+            {"id":"222222222222222222","name":"Administrator"},
+            {"id":"333333333333333333","name":"No permission"}
+        ]))
+    }
+
+    async fn mock_discord_server() -> (String, tokio::task::JoinHandle<()>) {
+        use axum::{routing::{get, post}, Router};
+        let app = Router::new()
+            .route("/oauth2/token", post(mock_discord_token))
+            .route("/users/@me", get(mock_discord_user))
+            .route("/users/@me/guilds", get(mock_discord_user_guilds))
+            .route("/guilds", get(mock_bot_guilds));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap(); });
+        (format!("http://{address}"), task)
+    }
+
+    #[tokio::test]
+    async fn oauth_callback_intersects_manageable_discord_guilds_with_bot_membership() {
+        use axum::http::header;
+        let (mock_url, server) = mock_discord_server().await;
+        let config = crate::state::AppConfig {
+            client_id: "acceptance-client".to_string(),
+            client_secret: "acceptance-secret".to_string(),
+            redirect_uri: "http://localhost:8080/oauth/callback".to_string(),
+            public_origin: "http://localhost:8080".to_string(),
+            bridge_url: mock_url.clone(),
+            atlas_bridge_url: mock_url.clone(),
+            bridge_secret: "acceptance-bridge-secret-with-32-bytes".to_string(),
+            picker_url: "http://127.0.0.1:8092".to_string(),
+            bind_host: "127.0.0.1".to_string(),
+            port: 8080,
+            secure_cookie: false,
+            session_ttl: 3600,
+            owner_ids: HashSet::new(),
+        };
+        let mut state = AppState::new(config);
+        state.discord_api_base = mock_url;
+        let state = state;
+
+        let start = oauth_start(State(state.clone())).await;
+        assert_eq!(start.status(), StatusCode::SEE_OTHER);
+        let location = start.headers().get(header::LOCATION).unwrap().to_str().unwrap();
+        let authorize_url = reqwest::Url::parse(location).unwrap();
+        assert_eq!(authorize_url.host_str(), Some("discord.com"));
+        assert_eq!(authorize_url.path(), "/oauth2/authorize");
+        assert_eq!(authorize_url.query_pairs().find(|(key, _)| key == "scope").unwrap().1, "identify guilds");
+        let oauth_state = authorize_url.query_pairs()
+            .find(|(key, _)| key == "state").unwrap().1.to_string();
+        let oauth_cookie = start.headers().get(header::SET_COOKIE).unwrap().to_str().unwrap()
+            .split(';').next().unwrap().to_string();
+
+        let mut callback_headers = HeaderMap::new();
+        callback_headers.insert(header::COOKIE, HeaderValue::from_str(&oauth_cookie).unwrap());
+        let callback = oauth_callback(State(state.clone()), callback_headers.clone(), Query(OAuthCallback {
+            code: Some("mock-authorization-code".to_string()),
+            state: Some(oauth_state.clone()),
+            error: None,
+        })).await;
+        assert_eq!(callback.status(), StatusCode::SEE_OTHER);
+        assert_eq!(callback.headers().get(header::LOCATION).unwrap(), "/");
+        let session_cookie = callback.headers().get(header::SET_COOKIE).unwrap().to_str().unwrap()
+            .split(';').next().unwrap();
+        let session_id = session_cookie.strip_prefix("lemegeton_session=").unwrap();
+        let mut session_headers = HeaderMap::new();
+        session_headers.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&format!("lemegeton_session={session_id}")).unwrap(),
+        );
+        let (resolved_session_id, session) = session_from_headers(&state, &session_headers).await.unwrap();
+        assert_eq!(resolved_session_id, session_id);
+        assert_eq!(session.user.id, "555555555555555555");
+
+        let guilds = manageable_guilds(&state, session_id, &session).await.unwrap();
+        assert_eq!(guilds.len(), 2);
+        assert!(guilds.iter().any(|guild| guild.id == "111111111111111111" && !guild.administrator));
+        assert!(guilds.iter().any(|guild| guild.id == "222222222222222222" && guild.administrator));
+        assert!(!guilds.iter().any(|guild| guild.id == "333333333333333333"));
+        assert!(!guilds.iter().any(|guild| guild.id == "444444444444444444"));
+
+        assert!(crate::state::authorized_guild(&state, &session_headers, "111111111111111111").await.is_ok());
+        assert!(matches!(
+            crate::state::authorized_guild(&state, &session_headers, "333333333333333333").await,
+            Err(error) if error.status == StatusCode::FORBIDDEN
+        ));
+
+        let replay = oauth_callback(State(state.clone()), callback_headers, Query(OAuthCallback {
+            code: Some("mock-authorization-code".to_string()),
+            state: Some(oauth_state),
+            error: None,
+        })).await;
+        assert_eq!(replay.status(), StatusCode::BAD_REQUEST);
+        server.abort();
+    }
+
 
     fn test_state() -> AppState {
         AppState::new(crate::state::AppConfig {

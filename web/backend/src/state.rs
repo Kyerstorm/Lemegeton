@@ -99,7 +99,8 @@ pub struct DashboardGuild { pub id: String, pub name: String, pub icon: Option<S
 pub struct OAuthState { pub expires_at: u64, pub browser_nonce: String }
 #[derive(Clone)]
 pub struct AppState {
-    pub config: Arc<AppConfig>, pub client: reqwest::Client, pub sessions: Arc<Mutex<HashMap<String, Session>>>,
+    pub config: Arc<AppConfig>, pub client: reqwest::Client, pub discord_api_base: String,
+    pub sessions: Arc<Mutex<HashMap<String, Session>>>,
     pub oauth_states: Arc<Mutex<HashMap<String, OAuthState>>>, pub oauth_start_events: Arc<Mutex<VecDeque<u64>>>,
     pub token_refresh_lock: Arc<Mutex<()>>, pub write_limits: Arc<Mutex<HashMap<String, VecDeque<u64>>>>,
     pub last_status: Arc<Mutex<Option<Value>>>,
@@ -108,7 +109,8 @@ impl AppState {
     pub fn new(config: AppConfig) -> Self {
         let client = reqwest::Client::builder().timeout(Duration::from_secs(12)).connect_timeout(Duration::from_secs(4))
             .redirect(reqwest::redirect::Policy::none()).user_agent("Lemegeton-Dashboard/2.0").build().expect("reqwest client configuration is valid");
-        Self { config: Arc::new(config), client, sessions: Arc::new(Mutex::new(HashMap::new())),
+        Self { config: Arc::new(config), client, discord_api_base: DISCORD_API.to_string(),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
             oauth_states: Arc::new(Mutex::new(HashMap::new())), oauth_start_events: Arc::new(Mutex::new(VecDeque::new())),
             token_refresh_lock: Arc::new(Mutex::new(())), write_limits: Arc::new(Mutex::new(HashMap::new())),
             last_status: Arc::new(Mutex::new(None)) }
@@ -169,7 +171,7 @@ pub async fn write_session(state: &AppState, headers: &HeaderMap) -> ApiResult<(
     Ok((id, session))
 }
 pub async fn discord_json(state: &AppState, path: &str, token: &str) -> ApiResult<Value> {
-    let response = state.client.get(format!("{DISCORD_API}{path}")).bearer_auth(token).send().await
+    let response = state.client.get(format!("{}{path}", state.discord_api_base.trim_end_matches('/'))).bearer_auth(token).send().await
         .map_err(|_| ApiError::new(StatusCode::BAD_GATEWAY, "Discord could not be reached. Please retry shortly."))?;
     if !response.status().is_success() { return Err(ApiError::new(StatusCode::UNAUTHORIZED, "Discord authorization expired. Please sign in again.")); }
     response.json::<Value>().await.map_err(|_| ApiError::new(StatusCode::BAD_GATEWAY, "Discord returned an invalid response."))
