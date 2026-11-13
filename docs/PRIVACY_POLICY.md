@@ -1,37 +1,41 @@
 # Lemegeton Privacy Policy
 
-**Effective date: November 3, 2026**
+**Effective date: November 12, 2026**
 
-This notice describes information the currently implemented Lemegeton bot may process. Features, providers, and deployment settings affect what is involved. The source code is available at [Kyerstorm/Lemegeton](https://github.com/Kyerstorm/Lemegeton).
+This notice describes information the current Lemegeton v3 implementation may process. What is involved depends on the features enabled by a server, the providers configured by the operator, and whether the optional dashboard is used. The source code is available at [Kyerstorm/Lemegeton](https://github.com/Kyerstorm/Lemegeton).
 
 ## Information processed
 
-Depending on the features used, Lemegeton may process Discord user, guild, channel, message, interaction, and role IDs; usernames and display names; avatars; member and invite metadata; command options and search terms; source links and provider identifiers; account names used for AniList or Steam linking; server configuration; moderation and audit events; community submissions, tags, reports, votes, and discussions; and feedback text or optional attachments.
+Depending on the feature, Lemegeton may process Discord user, guild, channel, message, interaction, and role IDs; usernames, display names and avatars; member data made available through Discord; command options, search terms and URLs; AniList or Steam account identifiers; server settings; archive submissions and attachments; collections, reports, votes, nominations, discussions and session records; feedback; and diagnostic issue records.
 
-The running bot is configured with Discord's Message Content and Members intents. It can receive message-content fields and member data/events that Discord makes available. Specific listeners inspect supported links and messages to provide their features. This does not mean every message is permanently archived, but it would be inaccurate to claim the bot cannot read messages it receives.
+The bot requests the Discord Guilds, Guild Members, Guild Messages and Message Content intents. Member events support features such as Custom Roles and guild-scoped account cleanup. Message events support configured Archive uploads and supported link embeds. The bot does not claim that it cannot read message content delivered through the intents it requests, but it does not permanently archive every message it receives.
 
-## Logs and records
+## Storage and retention
 
-Application logs may contain user and guild IDs, display names, command names, timestamps, exception text, and diagnostic context. Feature-specific records may include provider usernames/IDs, invite codes, submission content, moderation actions, or feedback identifiers.
+The TypeScript bot stores feature records and server settings in PostgreSQL. Archive media is stored according to the server's existing configuration: a guild with a migrated legacy private storage channel continues using that channel; a guild without a legacy storage setting uses the configured private S3-compatible storage. The Archive intake channel is a separate setting and is not used as the private storage destination. Custom Role image originals use private object storage when that feature is configured.
 
-The main application uses PostgreSQL for many feature records and server settings. The optional GPT responder uses a separate local SQLite database for per-user/per-guild conversation history. Feedback text and attachments are sent to the configured Discord feedback channel and may be discussed in a server thread. Panel and Custom Role image originals use a private S3-compatible bucket when configured; generated grids or collages may use a separately configured public bucket. The optional web dashboard keeps Discord profile/session data and OAuth tokens server-side in process memory for the session lifetime. The first-use agreement gate stores the user's Discord ID, the accepted Terms of Service, Privacy Policy, and Community Guidelines versions, and the acceptance timestamp.
+The optional dashboard uses Discord OAuth2 when enabled. Dashboard session state and OAuth tokens are held by the dashboard service rather than exposed to the browser. Operational logs and diagnostic records may contain identifiers, command names, timestamps, and bounded error context. Common credential fields and token-like values are redacted from diagnostics, but users should not submit secrets in commands, uploads, or feedback.
+
+A member leaving one guild has their guild-scoped AniList/Steam links and selected profile and Archive browsing preferences removed for that guild. Historical Archive contributions, feedback, and issue records are not automatically removed by that member cleanup. When the bot leaves a server, the server's authorised inviter or a member with Manage Server chooses whether guild data should be deleted or retained. An unset choice keeps normal functionality locked; a selected deletion is retried if an external storage deletion temporarily fails. The retention-policy record is kept so a future re-invite does not silently change the previous choice.
+
+There is no single retention period covering every database row, Discord message, log, provider record, backup, or stored file. Retention also depends on the server operator and deployment configuration. The operator should maintain backups and delete them according to their own retention policy.
 
 ## External services
 
-Commands may send relevant search terms, URLs, account names, or provider identifiers to Discord, AniList, Steam, IGDB, TMDB, Google Books, Novel Updates, Novel Phoenix, NovelFire, Novelist, configured AI/chat providers, hosting providers, database providers, or object-storage providers. Only the providers needed by the chosen feature should receive its request. Each provider operates under its own terms and privacy policy.
+Supported media features may send relevant search terms, URLs, provider identifiers, or linked account identifiers to AniList, Steam, IGDB, TMDB, and Google Books. Discord is used to deliver commands, interactions, messages, attachments, and OAuth2. Hosting, PostgreSQL, and configured private object-storage providers process information required to operate the deployment. Only the data needed for a selected feature should be sent to its provider. Each external provider controls its own service and privacy practices.
 
-## Encryption
+## Security and encryption
 
-Lemegeton is **not end-to-end encrypted (E2EE)**. The bot needs readable data to perform the feature requested, and the running service and authorised operators may access information available to that service. Supported remote database connections use TLS with certificate and hostname verification, and supported HTTPS connections protect data in transit. Encryption in transit is not E2EE. The project cannot verify the at-rest encryption or backup configuration of every deployment.
+Lemegeton is **not end-to-end encrypted (E2EE)**. The bot and authorised operators need to process data required for the requested feature. Supported external requests use HTTPS. Production PostgreSQL connections can require TLS with certificate verification. Archive objects and Custom Role image originals are stored as private objects when S3-compatible storage is used; access is provided through short-lived URLs or server-side handling. A legacy Discord storage channel must remain private and grant the bot only the permissions needed to store and retrieve its files.
 
-## Retention and requests
+These controls do not guarantee that every hosting provider, operator device, backup, or external service is configured securely. Encryption in transit is not E2EE.
 
-There is no single retention period for all logs, database records, GPT conversation history, Discord feedback messages, provider-side copies, or stored files. The main bot clears its local log files during startup, but that does not automatically erase the other records described above. Some records are removed by feature-specific cleanup or operator action; other records may remain until the relevant system or operator deletes them.
+## Privacy requests and contact
 
-There is not currently one self-service export or deletion command covering every data store. For a privacy request, contact the operator privately through the Support Server linked in the bot's help command. Do not use the feedback command for confidential requests: feedback is posted to the configured channel and may receive a public thread.
+There is not currently one self-service export or deletion command covering every data store and external provider. For a privacy request, contact the operator privately through the Support Server linked in the bot's help command. Do not use public feedback channels for confidential requests: feedback is delivered to the configured server channel and may be discussed there.
 
 ## Access, sharing, and open source
 
-The MIT licence does not make a hosted database public, and it does not give outside companies automatic access to user records. Lemegeton does not sell personal data or provide companies with blanket database access. Infrastructure vendors and external providers may process information required to deliver their services. A valid, binding legal request may require an operator or infrastructure provider to disclose data it controls; any response should be limited to what applicable law requires, and notice is provided only where legally permitted.
+Lemegeton does not sell personal data or provide third parties with blanket access to the application's database. Infrastructure vendors and external providers may process the information necessary to deliver their services. A valid legal request may require an operator or provider to disclose data it controls, subject to applicable law.
 
-You can inspect the implementation in the [public GitHub repository](https://github.com/Kyerstorm/Lemegeton). The actual behaviour of a deployment depends on its operator, enabled features, and configuration.
+The MIT licence applies to the software source code; it does not make hosted databases, private archive files, or users' submissions public. Actual processing depends on the deployment, enabled features, and its operator's configuration.

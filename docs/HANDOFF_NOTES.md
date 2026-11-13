@@ -1,8 +1,13 @@
-# Custom Roles — Setup and Handoff Guide
+# Historical Custom Roles Handoff Notes (Pre-v3)
 
-Everything needed to run Custom Roles (custom booster roles) on the real server: deploying on
-Railway, first-time setup in Discord, theming the color picker, and the checks that could only be
-done on a boosted server.
+> **Historical reference only.** This document records setup and acceptance notes from the earlier
+> Python/discord.py implementation on `multi_guild`. Its old Python commands, dependency setup,
+> command names, environment assumptions, and test paths are not current v3 instructions.
+> The v3 bot runs TypeScript/Node.js with PostgreSQL; use [Lemegeton v3](Lemegeton%20v3.md),
+> [the dashboard guide](DASHBOARD.md), and [the migration parity audit](MIGRATION_PARITY_AUDIT.md)
+> for current architecture and behavior. Keep this file only as historical context and re-check every detail against
+> the current v3 source before relying on it.
+
 
 - What Custom Roles does and every panel button: the [Custom Roles section of the README](../README.md#-custom-roles)
 - All settings with their defaults: the `CUSTOM ROLES` block at the end of [`.env.example`](../.env.example)
@@ -182,7 +187,7 @@ The old `booster_roles` table is left in place and never changed.
 
 ## 4. Theming the color picker
 
-To restyle the page, edit **only** `Web/bot/static/custom_roles/theme.css`.
+To restyle the page, edit **only** `web/static/custom_roles/theme.css`.
 
 - Every color, radius, font, spacing and size the page uses is a `--cr-*` variable in that file,
   grouped by area (page, controls, messages, preview cards, icon crop, shape, type, spacing,
@@ -393,7 +398,7 @@ First, `/custom-role-admin` → **Server features** should show ✅ for **Role i
 - The picker on phones wasn't tested live.
 
 **Issues outside Custom Roles (not fixed)**
-- The retired `cogs_test.panel` prototype was removed during command-cog consolidation; the active archive implementation is `cogs/media/community_archives.py`.
+- `cogs_test.panel` fails to load ("context menus cannot be defined inside a class").
 - The news and free-games tasks fail at startup with "Client has not been properly initialised"
   (they wait for "ready" before the bot has logged in).
 - Some other cogs query tables or columns that don't exist in PostgreSQL (`paginator_state`,

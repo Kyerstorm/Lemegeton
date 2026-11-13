@@ -1,6 +1,6 @@
 # Dashboard security review
 
-**Scope:** Rust/Axum public control plane, React/TypeScript dashboard, Discord OAuth/session handling, per-guild authorization, the Rust-to-Python bridge, custom-role picker, its image-fetch pipeline, and deployment packaging.
+**Scope:** Rust/Axum public control plane, React/TypeScript dashboard, Discord OAuth/session handling, per-guild authorization, the Rust-to-TypeScript bridge, custom-role picker, its image-fetch pipeline, and deployment packaging.
 
 **Status:** This is a source-level hardening pass with focused regression tests. It is not a guarantee of invulnerability or a substitute for a production penetration test. External OAuth, real HTTPS termination, VPS firewall state, live Discord permissions, and host-level compromise are not verifiable from repository source alone.
 
@@ -14,7 +14,7 @@
 | Medium | Repeated OAuth starts could fill the in-memory pending state map. | Global OAuth-start rate limit, bounded state table, and Nginx per-client rate limits. |
 | Medium | Concurrent requests could race a rotating Discord OAuth refresh token. | Refresh calls are serialized, the session is re-read under the lock, and fresh tokens are reused by concurrent requests. |
 | Medium | Logout invalidated only the local session. | Local session removal happens first; a bounded Discord token-revocation attempt follows. Local logout works if Discord is temporarily unreachable. |
-| Medium | The bot bridge accepted short secrets and internal listeners relied only on configuration. | Shared bridge secret must be at least 32 UTF-8 bytes; Python bridge/picker refuse non-loopback bind addresses; Rust refuses a weak bridge secret. |
+| Medium | The bot bridge accepted short secrets and internal listeners relied only on configuration. | Shared bridge secret must be at least 32 UTF-8 bytes; TypeScript bridge/picker refuse non-loopback bind addresses; Rust refuses a weak bridge secret. |
 | Medium | The Rust-to-picker proxy forwarded almost all caller-supplied request headers. | A tight allow-list passes only the bearer token, content negotiation, origin, and expected proxy client-address headers. Cookie, host, hop-by-hop, and forwarded-host values are dropped. |
 | Medium | Guild command synchronization could overlap a toggle or reset. | `/sync` takes the same per-guild lock used by toggles/resets. |
 | Medium | Dependency trees were not automatically audited. | CI adds `npm audit` and `cargo audit`, plus type checking, asset build checks, and regression tests. The workflow can be dispatched manually and runs weekly. |
@@ -40,7 +40,7 @@ Tokio's minimum version is pinned to `1.54.1`, the patched release for [RUSTSEC-
 ## Residual risks and required operational checks
 
 1. Rust sessions and OAuth state are in process memory. Restarting Rust invalidates active sessions. Multiple replicas need shared sessions and distributed rate limits.
-2. Python remains responsible for the live discord.py gateway and command tree. The public dashboard API and authorization boundary remain Rust; the Python bridge stays narrow and private.
+2. The TypeScript Node.js process owns the live Discord.js gateway, command registry, private bridge, and Custom Role picker. Rust remains the public dashboard API and authorization boundary.
 3. CI cannot verify a deployed TLS proxy, host firewall, real OAuth registration, provider uptime, secrets access control, or the live Discord permission matrix.
 4. The bot process can perform actions allowed to its Discord token. Keep the token private, use minimum Discord permissions, rotate exposed credentials, and restrict writes to source and environment files.
 5. Builds without committed lockfiles are not fully reproducible. Review dependency lockfile policy for release deployment.
