@@ -1034,11 +1034,10 @@ export class ArchiveCommand implements FeatureCommand {
     const assets = await query<{ asset_id: string; content_type: string }>(
       `SELECT m.id::text AS asset_id, m.content_type
        FROM media_assets m
-       WHERE m.id = $2
-          OR m.id IN (
-            SELECT asset_id FROM community_archive_entry_assets WHERE entry_id = $1
-          )
-       ORDER BY CASE WHEN m.id = $2 THEN 0 ELSE 1 END, m.id ASC
+       LEFT JOIN community_archive_entry_assets attached
+         ON attached.entry_id = $1 AND attached.asset_id = m.id
+       WHERE m.id = $2 OR attached.entry_id IS NOT NULL
+       ORDER BY CASE WHEN m.id = $2 THEN 0 ELSE attached.position END ASC, m.id ASC
        LIMIT 5`,
       [entry.id, entry.media_asset_id],
     );
