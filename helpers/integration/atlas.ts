@@ -191,7 +191,7 @@ export function atlasProviderIdentity(category: string, value?: string | null): 
     }
   }
   if (host === "themoviedb.org") {
-    const match = /^\/(movie|tv)\/(\d+)(?:\/|$)/i.exec(path);
+    const match = /^\/(movie|tv)\/(\d+)(?:[-/]|$)/i.exec(path);
     if (match && ((match[1]?.toLowerCase() === "movie" && normalizedCategory === "MOVIE")
       || (match[1]?.toLowerCase() === "tv" && normalizedCategory === "TV"))) {
       return JSON.stringify(["tmdb", match[1]!.toLowerCase(), normalizedCategory, match[2]]);

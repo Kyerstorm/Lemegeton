@@ -455,7 +455,7 @@ export async function getCommunitySeason(guildId: string, seasonId: string): Pro
     item_type: CommunitySeasonItemType; item_id: string; title: string; added_by: string;
   }>(
     "SELECT i.item_type, i.item_id::text, i.added_by::text, " +
-    "COALESCE(d.title, r.title, s.title, t.title, p.title, c.title, a.title) AS title " +
+    "COALESCE(d.title, r.title, s.title, t.title, pe.title, c.title, a.title) AS title " +
     "FROM community_season_items i " +
     "JOIN community_seasons season ON season.id = i.season_id " +
     "LEFT JOIN community_daily_items d ON i.item_type = 'daily_drop' AND d.id = i.item_id " +
@@ -468,11 +468,13 @@ export async function getCommunitySeason(guildId: string, seasonId: string): Pro
     "AND t.guild_id = season.guild_id AND t.status = 'completed' " +
     "LEFT JOIN community_archive_spotlights p ON i.item_type = 'spotlight' AND p.id = i.item_id " +
     "AND p.guild_id = season.guild_id AND p.visibility = 'server' AND p.status = 'published' " +
+    "LEFT JOIN community_archive_entries pe ON i.item_type = 'spotlight' AND pe.id = p.entry_id " +
+    "AND pe.status = 'approved' AND (pe.visibility = 'global' OR (pe.visibility = 'server' AND pe.created_guild_id = season.guild_id)) " +
     "LEFT JOIN archive_collections c ON i.item_type = 'collection' AND c.id = i.item_id " +
     "AND c.guild_id = season.guild_id AND c.visibility = 'server' AND c.status = 'active' " +
     "LEFT JOIN archive_trails a ON i.item_type = 'trail' AND a.id = i.item_id " +
     "AND a.guild_id = season.guild_id AND a.visibility = 'server' AND a.status = 'active' " +
-    "WHERE i.season_id = $1 AND COALESCE(d.id,r.id,s.id,t.id,p.id,c.id,a.id) IS NOT NULL " +
+    "WHERE i.season_id = $1 AND COALESCE(d.id,r.id,s.id,t.id,pe.id,c.id,a.id) IS NOT NULL " +
     "ORDER BY i.created_at ASC LIMIT 50",
     [seasonId],
   );
