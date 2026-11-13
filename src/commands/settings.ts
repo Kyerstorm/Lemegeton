@@ -19,6 +19,8 @@ import {
   type ModalSubmitInteraction,
 } from "discord.js";
 import { emoji } from "../../helpers/emoji.js";
+import { AniListClient } from "../../helpers/integration/anilist.js";
+import type { BotConfig } from "../../helpers/runtime/config.js";
 import type { FeatureCommand } from "../../helpers/commands/command.js";
 import {
   FEATURE_NAMES,
@@ -28,8 +30,11 @@ import {
   type FeatureName,
 } from "../../helpers/runtime/settings.js";
 import {
+  followAniListAnime,
+  getGuildMediaFollows,
   getMediaNotificationSettings,
   setMediaNotificationSettings,
+  unfollowAniListAnime,
 } from "../../helpers/media/media-notifications.js";
 import { getGuildMediaRegion, setGuildMediaRegion } from "../../helpers/media/media-region.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
@@ -44,7 +49,8 @@ import {
 
 type SettingsRow =
   | ActionRowBuilder<ButtonBuilder>
-  | ActionRowBuilder<ChannelSelectMenuBuilder>;
+  | ActionRowBuilder<ChannelSelectMenuBuilder>
+  | ActionRowBuilder<StringSelectMenuBuilder>;
 
 function mediaRegionModal(region: string): ModalBuilder {
   return new ModalBuilder()
@@ -263,7 +269,57 @@ function canManage(
   return interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
 }
 
+async function mediaFollowsPanel(guildId: string): Promise<{
+  embeds: EmbedBuilder[];
+  components: SettingsRow[];
+}> {
+  const [follows, notifications] = await Promise.all([
+    getGuildMediaFollows(guildId),
+    getMediaNotificationSettings(guildId),
+  ]);
+  const embed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle("Anime episode follows")
+    .setDescription([
+      "Guild-wide AniList title follows. Episode alerts use only provider-supplied airing dates.",
+      "Delivery: " + (notifications.enabled && notifications.channel_id ? "<#" + notifications.channel_id + ">" : "Disabled or no channel configured"),
+      "Chapter, creator and franchise release dates are not inferred.",
+    ].join("\n"))
+    .addFields(follows.length
+      ? follows.map(item => ({
+          name: item.title.slice(0, 240),
+          value: "AniList #" + item.anilist_id
+            + (item.next_episode ? " · next scheduled episode " + item.next_episode : " · no upcoming episode currently listed"),
+          inline: false,
+        }))
+      : [{ name: "Following", value: "No anime titles are followed by this server.", inline: false }]);
+  const components: SettingsRow[] = [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("settings:media-follows:add").setLabel("Follow AniList anime").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("settings:media-follows:open").setLabel("Refresh").setStyle(ButtonStyle.Secondary),
+    ),
+  ];
+  if (follows.length) {
+    components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder().setCustomId("settings:media-follows:remove")
+        .setPlaceholder("Select an anime to unfollow")
+        .addOptions(follows.slice(0, 25).map(item => ({
+          label: item.title.slice(0, 100),
+          description: "AniList #" + item.anilist_id,
+          value: String(item.anilist_id),
+        }))),
+    ));
+  }
+  return { embeds: [embed], components };
+}
+
 export class SettingsCommand implements FeatureCommand {
+  private readonly aniList: AniListClient;
+
+  constructor(config: BotConfig) {
+    this.aniList = new AniListClient(config.anilistApiUrl, config.anilistTimeoutMs);
+  }
+
   readonly data = new SlashCommandBuilder()
     .setName("settings")
     .setDescription("Configure this server's features, data retention, notifications and diagnostics")
@@ -274,6 +330,7 @@ export class SettingsCommand implements FeatureCommand {
           { name: "View all settings", value: "view" },
           { name: "Toggle a feature", value: "toggle" },
           { name: "Media notifications", value: "notifications" },
+          { name: "Anime episode follows", value: "media-follows" },
           { name: "Change media region", value: "media-region" },
           { name: "Data retention when the bot leaves", value: "retention" },
           { name: "Run server diagnostics", value: "diagnostics" },
@@ -317,6 +374,14 @@ export class SettingsCommand implements FeatureCommand {
     }
     if (!configured) {
       await interaction.reply({content:"Choose the server data-retention setting before using other Lemegeton settings.",flags:MessageFlags.Ephemeral});
+      return;
+    }
+    if (action === "media-follows") {
+      if (!canManage(interaction)) {
+        await interaction.reply({ content: "Manage Server permission is required to manage title follows.", flags: MessageFlags.Ephemeral });
+        return;
+      }
+      await interaction.reply({ ...await mediaFollowsPanel(interaction.guildId), flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
       return;
     }
     if (action === "diagnostics") {
@@ -390,7 +455,7 @@ export class SettingsCommand implements FeatureCommand {
       await interaction.update(await retentionPanel(interaction.guildId));
       return true;
     }
-    if (section !== "toggle" && section !== "notifications" && section !== "media-region") return false;
+    if (section !== "toggle" && section !== "notifications" && section !== "media-region" && section !== "media-follows") return false;
     if (!canManage(interaction)) {
       await interaction.reply({
         content: "Manage Server permission is required to change server settings.",
@@ -403,6 +468,22 @@ export class SettingsCommand implements FeatureCommand {
       if (target !== "open") return false;
       await interaction.showModal(mediaRegionModal(await getGuildMediaRegion(interaction.guildId)));
       return true;
+    }
+    if (section === "media-follows") {
+      if (target === "add") {
+        const followModal = new ModalBuilder().setCustomId("settings:media-follows:add").setTitle("Follow an AniList anime");
+        followModal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder().setCustomId("anilist_id").setLabel("AniList anime ID")
+            .setPlaceholder("e.g. 21").setRequired(true).setMaxLength(12),
+        ));
+        await interaction.showModal(followModal);
+        return true;
+      }
+      if (target === "open") {
+        await interaction.update(await mediaFollowsPanel(interaction.guildId));
+        return true;
+      }
+      return false;
     }
 
     if (section === "toggle") {
@@ -453,24 +534,37 @@ export class SettingsCommand implements FeatureCommand {
   }
 
   async handleModal(interaction: ModalSubmitInteraction): Promise<boolean> {
-    if (interaction.customId !== "settings:media-region") return false;
+    if (interaction.customId !== "settings:media-region" && interaction.customId !== "settings:media-follows:add") return false;
     if (!interaction.guildId) return false;
     if (!canManage(interaction as ModalSubmitInteraction)) {
-      await interaction.reply({content:"Manage Server permission is required to change the media region.",flags:MessageFlags.Ephemeral});
+      await interaction.reply({ content: "Manage Server permission is required to change server media settings.", flags: MessageFlags.Ephemeral });
       return true;
     }
     try {
+      if (interaction.customId === "settings:media-follows:add") {
+        const rawId = interaction.fields.getTextInputValue("anilist_id").trim();
+        if (!/^\d{1,12}$/.test(rawId) || Number(rawId) < 1 || !Number.isSafeInteger(Number(rawId))) {
+          throw new Error("Enter a valid positive AniList anime ID.");
+        }
+        const follow = await followAniListAnime(interaction.guildId, interaction.user.id, Number(rawId), this.aniList);
+        const notifications = await getMediaNotificationSettings(interaction.guildId);
+        const delivery = notifications.enabled && notifications.channel_id
+          ? " Episode alerts will be sent to <#" + notifications.channel_id + ">."
+          : " Configure and enable the media notification channel to receive alerts.";
+        await interaction.reply({ content: "Following " + follow.title + " for this server." + delivery, flags: MessageFlags.Ephemeral });
+        return true;
+      }
       const region = await setGuildMediaRegion(
         interaction.guildId,
         interaction.fields.getTextInputValue("region"),
         interaction.user.id,
       );
-      await interaction.reply({content:"Default media availability region saved as " + region + ".",flags:MessageFlags.Ephemeral});
+      await interaction.reply({ content: "Default media availability region saved as " + region + ".", flags: MessageFlags.Ephemeral });
       return true;
     } catch (error) {
-      const issueHash=await createInteractionIssueLog(interaction,"/settings",error,{action:"media-region-modal"});
-      const message=error instanceof Error ? error.message : "The media region could not be saved.";
-      await interaction.reply({content:issueHash?message+"\n\n"+issueHashNotice(issueHash):message,flags:MessageFlags.Ephemeral});
+      const issueHash = await createInteractionIssueLog(interaction, "/settings", error, { action: interaction.customId });
+      const message = error instanceof Error ? error.message : "The setting could not be saved.";
+      await interaction.reply({ content: issueHash ? message + "\n\n" + issueHashNotice(issueHash) : message, flags: MessageFlags.Ephemeral });
       return true;
     }
   }
@@ -478,8 +572,22 @@ export class SettingsCommand implements FeatureCommand {
   async handleSelect(
     interaction: StringSelectMenuInteraction | RoleSelectMenuInteraction | ChannelSelectMenuInteraction,
   ): Promise<boolean> {
-    if (!interaction.isChannelSelectMenu() || interaction.customId !== "settings:notifications:channel") return false;
     if (!interaction.guildId) return false;
+    if (interaction.isStringSelectMenu() && interaction.customId === "settings:media-follows:remove") {
+      if (!canManage(interaction)) {
+        await interaction.reply({ content: "Manage Server permission is required to manage title follows.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      const mediaId = Number(interaction.values[0]);
+      if (!Number.isSafeInteger(mediaId) || mediaId < 1) return false;
+      const removed = await unfollowAniListAnime(interaction.guildId, mediaId);
+      await interaction.update({
+        ...await mediaFollowsPanel(interaction.guildId),
+        content: removed ? "Anime follow removed." : "That anime was no longer followed.",
+      });
+      return true;
+    }
+    if (!interaction.isChannelSelectMenu() || interaction.customId !== "settings:notifications:channel") return false;
     if (!canManage(interaction)) {
       await interaction.reply({
         content: "Manage Server permission is required to change notification settings.",
@@ -503,4 +611,5 @@ export class SettingsCommand implements FeatureCommand {
     await interaction.update(await panel(interaction.guildId));
     return true;
   }
+
 }

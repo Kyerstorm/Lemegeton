@@ -23,7 +23,7 @@ import {AdminLoginCommand} from "./standalone/admin-login.js";
 export function createCommandRegistry(config:BotConfig):FeatureCommand[]{
  const commands:FeatureCommand[]=[
   new DiscoverCommand(config),new ArchiveCommand(),new CommunityCommand(config),
-  new PlayCommand(),new ProfileCommand(config),new CustomRoleCommand(),new SettingsCommand(),new MusicCommand(config),new LanguageCommand(),
+  new PlayCommand(),new ProfileCommand(config),new CustomRoleCommand(),new SettingsCommand(config),new MusicCommand(config),new LanguageCommand(),
   new HelpCommand(),new PrivacyCommand(),new FeedbackCommand(config.botFeedbackChannelId),new LogCommand(config.botModeratorGuildId,config.adminDiscordId),new PlannedCommand(config.botModeratorGuildId),new BotModeratorsCommand(config.botModeratorGuildId,config.adminDiscordId),new TimestampCommand(),new InviteCommand(config),new ConvertLinksCommand(config),new AdminLoginCommand(config),
  ];
  const names=new Set<string>();
