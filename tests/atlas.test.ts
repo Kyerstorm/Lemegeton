@@ -122,7 +122,7 @@ test("Atlas filtering keeps only matching category, relationship and provenance 
   assert.equal(filtered.directRelationships.length, 1);
   assert.equal(filtered.directRelationships[0]?.title, "Manga One");
   assert.deepEqual(filterAtlasRelations(graph.directRelationships, {
-    query: "ani list", relationshipType: "adaptation",
+    query: "manga one", relationshipType: "adaptation",
   }).map(item => item.title), ["Manga One"]);
 });
 
