@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   archiveMediaTypesForCategory, createAtlasDiscordUrl,
-  atlasNodeIdentity, atlasProviderIdentity, buildAtlasGraph, filterAtlasGraph, findAtlasPath,
+  atlasNodeIdentity, atlasProviderIdentity, buildAtlasGraph, filterAtlasGraph, filterAtlasRelations, findAtlasPath,
   normalizeAtlasCategory, normalizeAtlasTitle, safeAtlasUrl,
   type AtlasRelation,
 } from "../helpers/integration/atlas.js";
@@ -121,6 +121,9 @@ test("Atlas filtering keeps only matching category, relationship and provenance 
   assert.equal(filtered.edges.length, 1);
   assert.equal(filtered.directRelationships.length, 1);
   assert.equal(filtered.directRelationships[0]?.title, "Manga One");
+  assert.deepEqual(filterAtlasRelations(graph.directRelationships, {
+    query: "ani list", relationshipType: "adaptation",
+  }).map(item => item.title), ["Manga One"]);
 });
 
 test("Atlas pathfinding returns the shortest bounded path and ignores unreachable targets", async () => {

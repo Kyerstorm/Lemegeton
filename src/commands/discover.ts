@@ -30,7 +30,17 @@ import { TmdbClient, type TmdbMedia, type TmdbTvSeason } from "../../helpers/int
 import { getGuildMediaRegion } from "../../helpers/media/media-region.js";
 import { cleanText } from "../../helpers/security/security.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
-import { findAtlasCommunityLinks, findAtlasRelationships, normalizeAtlasTitle, recordAtlasRelationship, recordProviderRelationships } from "../../helpers/integration/atlas.js";
+import {
+  filterAtlasGraph,
+  filterAtlasRelations,
+  findAtlasCommunityLinks,
+  findAtlasGraph,
+  findAtlasPath,
+  findAtlasRelationships,
+  normalizeAtlasTitle,
+  recordAtlasRelationship,
+  recordProviderRelationships,
+} from "../../helpers/integration/atlas.js";
 import { aniListReleaseOrder, tmdbCollectionReleaseOrder } from "../../helpers/media/franchise-order.js";
 import {
   createMediaLinkSuggestion,
@@ -469,7 +479,16 @@ export class DiscoverCommand implements FeatureCommand {
       return;
     }
     if (view === "atlas") {
-      await this.atlasAndRespond(interaction, query, category, filters);
+      await this.atlasAndRespond(
+        interaction,
+        query,
+        category,
+        filters,
+        interaction.options.getString("target_title"),
+        interaction.options.getString("target_category"),
+        interaction.options.getString("target_url"),
+        interaction.options.getString("relationship"),
+      );
       return;
     }
     if (view === "collection") {
@@ -1438,7 +1457,16 @@ export class DiscoverCommand implements FeatureCommand {
     await this.presentResults(interaction, results, `Search results · ${categoryLabel(category)}`);
   }
 
-  private async atlasAndRespond(interaction: ChatInputCommandInteraction, query: string, category: Category, filters: DiscoverFilters = {}): Promise<void> {
+  private async atlasAndRespond(
+    interaction: ChatInputCommandInteraction,
+    query: string,
+    category: Category,
+    filters: DiscoverFilters = {},
+    targetTitle: string | null = null,
+    targetCategory: string | null = null,
+    targetUrl: string | null = null,
+    relationshipFilter: string | null = null,
+  ): Promise<void> {
     await interaction.reply({ content: loadingMessage("Loading media results…"), flags: MessageFlags.Ephemeral });
     const results = await this.fetchSearch(query, category, filters);
     await this.saveProviderEdges(results);
@@ -1506,9 +1534,50 @@ export class DiscoverCommand implements FeatureCommand {
       findAtlasRelationships(interaction.guildId, title, mediaCategory, this.recordUrl(first), 20),
       findAtlasCommunityLinks(interaction.guildId, title, mediaCategory, this.recordUrl(first), first.provider === "AniList" ? String(first.item.id) : null, 20),
     ]);
-    const relationships = [...providerRelationships, ...communityRelationships].slice(0, 20);
+    const rootUrl = this.recordUrl(first);
+    const graph = await findAtlasGraph(
+      interaction.guildId,
+      { title, category: mediaCategory, url: rootUrl },
+      { maxDepth: 3, maxNodes: 24, perNodeLimit: 8 },
+    );
+    const graphFilters = {
+      ...(targetTitle && !targetCategory ? { query: targetTitle } : {}),
+      ...(relationshipFilter ? { relationshipType: relationshipFilter } : {}),
+    };
+    const filteredGraph = filterAtlasGraph(graph, graphFilters);
+    const selectedCommunity = filterAtlasRelations(communityRelationships, graphFilters);
+    const relationships = [...filteredGraph.directRelationships, ...selectedCommunity].slice(0, 20);
+    const path = targetTitle && targetCategory
+      ? findAtlasPath(graph, { title: targetTitle, category: targetCategory, url: targetUrl })
+      : null;
     const embed = toEmbed(first).setTitle(`Knowledge Atlas · ${title}`.slice(0,256))
       .setDescription("Provider-confirmed relationships are global, recommendations are explicitly unverified, and community links remain limited to their originating server.");
+    embed.addFields({
+      name: "Connected graph",
+      value: filteredGraph.nodes.length + " nodes · " + filteredGraph.edges.length + " connections · up to 3 relationship steps"
+        + (filteredGraph.truncated ? " · additional branches omitted by graph limits" : ""),
+      inline: false,
+    });
+    if (targetTitle && targetCategory) {
+      embed.addFields({
+        name: "Shortest path · " + safeDisplay(targetTitle, 100),
+        value: path
+          ? path.edges.map((edge, index) => {
+              const from = path.nodes[index]?.title ?? "Unknown";
+              const to = path.nodes[index + 1]?.title ?? "Unknown";
+              return safeDisplay(from, 90) + " — " + safeDisplay(edge.relationType, 60) + " → " + safeDisplay(to, 90)
+                + " · " + safeDisplay(edge.sourceLabel, 60);
+            }).join("\n").slice(0, 1024)
+          : "No path was found within the bounded graph for the selected category and title.",
+        inline: false,
+      });
+    } else if (targetTitle) {
+      embed.addFields({
+        name: "Atlas filter",
+        value: "Matching " + filteredGraph.nodes.length + " nodes and " + filteredGraph.edges.length + " connections for “" + safeDisplay(targetTitle, 100) + "”.",
+        inline: false,
+      });
+    }
     if (relationships.length) {
       for (const relation of relationships.slice(0,20)) {
         const label = relation.url ? `[${relation.title.slice(0,180)}](${relation.url})` : relation.title.slice(0,180);
@@ -1540,9 +1609,22 @@ export class DiscoverCommand implements FeatureCommand {
     }
     embed.setFooter({text:"Knowledge Atlas · Provider provenance and guild-scoped community links"});
     const files: AttachmentBuilder[] = [];
-    if (relationships.length) {
+    const snapshotRelationships = filteredGraph.edges.slice(0, 8).map(edge => {
+      const node = filteredGraph.nodes.find(item => item.id === edge.to);
+      if (!node) return null;
+      return {
+        title: node.title,
+        category: node.category,
+        url: node.url,
+        relationType: edge.relationType,
+        source: edge.sourceLabel,
+        sourceKind: edge.sourceKind,
+      };
+    }).filter((item): item is NonNullable<typeof item> => item !== null);
+    const atlasImageRelationships = snapshotRelationships.length ? snapshotRelationships : relationships;
+    if (atlasImageRelationships.length) {
       try {
-        const image = await renderAtlasSnapshot(title, mediaCategory, relationships);
+        const image = await renderAtlasSnapshot(title, mediaCategory, atlasImageRelationships);
         embed.setImage("attachment://knowledge-atlas.png");
         files.push(new AttachmentBuilder(image, { name: "knowledge-atlas.png" }));
       } catch (error) {
@@ -1557,6 +1639,11 @@ export class DiscoverCommand implements FeatureCommand {
     dashboardUrl.searchParams.set("atlas_guild_id", interaction.guildId ?? "");
     const mediaUrl = this.recordUrl(first);
     if (mediaUrl) dashboardUrl.searchParams.set("atlas_url", mediaUrl);
+    if (targetTitle && targetCategory) {
+      dashboardUrl.searchParams.set("atlas_target_title", targetTitle);
+      dashboardUrl.searchParams.set("atlas_target_category", targetCategory);
+      if (targetUrl) dashboardUrl.searchParams.set("atlas_target_url", targetUrl);
+    }
     await interaction.editReply({
       embeds:[embed],
       files,

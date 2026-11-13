@@ -332,6 +332,27 @@ export interface AtlasGraphFilters {
   sourceKind?: RelationshipSource;
 }
 
+export function filterAtlasRelations(
+  relations: readonly AtlasRelation[],
+  filters: AtlasGraphFilters = {},
+): AtlasRelation[] {
+  const search = normalizeAtlasTitle(filters.query ?? "");
+  const category = filters.category ? normalizeAtlasCategory(filters.category) : null;
+  const relationship = normalizeAtlasTitle(filters.relationshipType ?? "");
+  return relations.filter(relation => {
+    if (filters.sourceKind && relation.sourceKind !== filters.sourceKind) return false;
+    if (category && relation.category !== category) return false;
+    if (relationship && !normalizeAtlasTitle(relation.relationType).includes(relationship)) return false;
+    if (search) {
+      const searchable = [relation.title, relation.category, relation.relationType, relation.source]
+        .map(value => normalizeAtlasTitle(value));
+      if (!searchable.some(value => value.includes(search))) return false;
+    }
+    return true;
+  });
+}
+
+
 export interface AtlasGraphPath {
   nodes: AtlasGraphNode[];
   edges: AtlasGraphEdge[];
@@ -366,10 +387,11 @@ export function filterAtlasGraph(graph: AtlasGraphResult, filters: AtlasGraphFil
   }
   const directEdges = new Set(matches.filter(edge => edge.from === graph.rootId).map(edge =>
     JSON.stringify([edge.to, edge.relationType, edge.sourceKind, edge.sourceLabel])));
-  const directRelationships = graph.directRelationships.filter((relation) => directEdges.has(JSON.stringify([
-    atlasNodeIdentity(relation.title, relation.category, relation.url),
-    relation.relationType, relation.sourceKind, relation.source,
-  ])));
+  const directRelationships = filterAtlasRelations(graph.directRelationships, filters).filter((relation) =>
+    directEdges.has(JSON.stringify([
+      atlasNodeIdentity(relation.title, relation.category, relation.url),
+      relation.relationType, relation.sourceKind, relation.source,
+    ])));
   return {
     ...graph,
     nodes: graph.nodes.filter(node => visibleIds.has(node.id)),
