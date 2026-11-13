@@ -17,6 +17,7 @@ import {
   type StringSelectMenuInteraction,
   type TextChannel,
 } from "discord.js";
+import { emoji } from "../../helpers/emoji.js";
 import type { FeatureCommand } from "../../helpers/commands/command.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
 import type { BotConfig } from "../../helpers/runtime/config.js";
@@ -615,7 +616,7 @@ export class CommunityCommand implements FeatureCommand {
         await interaction.reply({ content: `Community session #${sessionId} was scheduled.`, flags: MessageFlags.Ephemeral });
         const announcement = new EmbedBuilder()
           .setColor(0x5865f2)
-          .setTitle(`📅 ${interaction.fields.getTextInputValue("title")}`)
+          .setTitle(`${emoji.event} ${interaction.fields.getTextInputValue("title")}`)
           .setDescription(`${formatActivity(activity)} together · Hosted by <@${interaction.user.id}>\n${interaction.fields.getTextInputValue("description")}\n\nStarts <t:${Math.floor(scheduledAt.getTime() / 1000)}:F>\nSession ID: ${sessionId}`)
           .setFooter({ text: "RSVPs and waitlist are recorded per server." });
         const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -673,7 +674,7 @@ export class CommunityCommand implements FeatureCommand {
         const channel = interaction.channel;
         if (channel?.isTextBased() && "threads" in channel && "send" in channel) {
           const announcement = await (channel as TextChannel).send({
-            embeds: [homeEmbed(`💬 ${title}`, `${prompt}\n\n${interaction.fields.getTextInputValue("media_title") ? `Media: ${interaction.fields.getTextInputValue("media_title")}\n` : ""}${interaction.fields.getTextInputValue("spoiler") ? `Spoiler boundary: ${interaction.fields.getTextInputValue("spoiler")}\n` : ""}Please mark spoilers and avoid discussing events beyond the stated boundary.`)],
+            embeds: [homeEmbed(`${emoji.discussion} ${title}`, `${prompt}\n\n${interaction.fields.getTextInputValue("media_title") ? `Media: ${interaction.fields.getTextInputValue("media_title")}\n` : ""}${interaction.fields.getTextInputValue("spoiler") ? `Spoiler boundary: ${interaction.fields.getTextInputValue("spoiler")}\n` : ""}Please mark spoilers and avoid discussing events beyond the stated boundary.`)],
             allowedMentions: { parse: [] },
           });
           const thread = await (channel as TextChannel).threads.create({

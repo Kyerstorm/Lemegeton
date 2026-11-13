@@ -15,6 +15,7 @@ import {
   type StringSelectMenuInteraction,
   type TextChannel,
 } from "discord.js";
+import { emoji } from "../../helpers/emoji.js";
 import type { FeatureCommand } from "../../helpers/commands/command.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
 import { homeEmbed } from "../../helpers/runtime/discord.js";
@@ -359,7 +360,7 @@ export class PlayCommand implements FeatureCommand {
         );
         await interaction.reply({
           content: result.correct
-            ? `✅ Correct — round ${result.round}/${result.total}. The source is [here](${result.sourceUrl}).`
+            ? `${emoji.check} Correct — round ${result.round}/${result.total}. The source is [here](${result.sourceUrl}).`
             : `Not quite — round ${result.round}/${result.total}. The answer will be revealed when the host closes this round. [Source](${result.sourceUrl}).`,
           flags: MessageFlags.Ephemeral,
         });
@@ -483,7 +484,7 @@ export class PlayCommand implements FeatureCommand {
       throw new Error("Start the game from a text channel so the server can participate.");
     }
     const message = await (channel as TextChannel).send({
-      embeds: [questionEmbed(`🎮 ${session.title}`, question.question, question.source_url, 1, session.question_ids.length)],
+      embeds: [questionEmbed(`${emoji.game} ${session.title}`, question.question, question.source_url, 1, session.question_ids.length)],
       components: [gameButtons(session.id)],
       allowedMentions: { parse: [] },
     });
@@ -506,7 +507,7 @@ export class PlayCommand implements FeatureCommand {
     if (!sessionId || !answer) throw new Error("Provide session_id and answer_text, or use the Answer button.");
     const result = await answerGameQuestion(interaction.guildId!, sessionId, interaction.user.id, answer);
     await interaction.reply({
-      content: result.correct ? `✅ Correct. Round ${result.round}/${result.total}. [Source](${result.sourceUrl}).` : `Not quite. The round answer is revealed after the host advances. [Source](${result.sourceUrl}).`,
+      content: result.correct ? `${emoji.check} Correct. Round ${result.round}/${result.total}. [Source](${result.sourceUrl}).` : `Not quite. The round answer is revealed after the host advances. [Source](${result.sourceUrl}).`,
       flags: MessageFlags.Ephemeral,
     });
   }
@@ -557,7 +558,7 @@ export class PlayCommand implements FeatureCommand {
     }
     await interaction.update({
       embeds: [questionEmbed(
-        `🎮 ${session.title} · Previous answer: ${current?.correct_answer ?? "unavailable"}`,
+        `${emoji.game} ${session.title} · Previous answer: ${current?.correct_answer ?? "unavailable"}`,
         nextQuestion.question,
         nextQuestion.source_url,
         result.round,

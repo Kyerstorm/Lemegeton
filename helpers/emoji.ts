@@ -70,6 +70,17 @@ export const emoji = {
   leaderboard: "🏆",
   gift: "<:gift:1557773581994303589>",
 
+  // Additional interface symbols kept as Unicode for future replacement.
+  lock: "🔒", hourglass: "⌛", warningUnicode: "⚠️", warningPlain: "⚠",
+  check: "✅", cross: "❌", heart: "❤️", target: "🎯", stats: "📊", popularity: "🔥",
+  recommended: "⭐", panels: "📚", quote: "💬", fanworks: "🎨", moodboard: "🖼️",
+  scenes: "🎬", theory: "💡", globe: "🌐", mangaDiscovery: "📚", lightNovelDiscovery: "📖",
+  film: "🎞️", theatre: "🎭", microphone: "🎙️", building: "🏢",
+  rankingAnime: "🎬", rankingManga: "📖", rankingCombined: "🌟",
+  rankingChapters: "📚", rankingEpisodes: "📺", finish: "🏁",
+  goldMedal: "🥇", silverMedal: "🥈", bronzeMedal: "🥉",
+  refreshUnicode: "🔄", chevronLeft: "◀️", chevronRight: "▶️",
+
   // Provider and account markers
   anilist: "<:anilist:1557779525763338330>",
   steam: "<a:steam:1557099612135886949>",

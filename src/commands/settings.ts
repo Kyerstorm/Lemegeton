@@ -18,6 +18,7 @@ import {
   type StringSelectMenuInteraction,
   type ModalSubmitInteraction,
 } from "discord.js";
+import { emoji } from "../../helpers/emoji.js";
 import type { FeatureCommand } from "../../helpers/commands/command.js";
 import {
   FEATURE_NAMES,
@@ -245,7 +246,7 @@ async function serverDiagnostics(guildId: string, currentChannelId: string, guil
   embed.setDescription(`**Healthy:** ${healthy} · **Needs attention:** ${attention}\nChecks include this channel and configured v3 notification, Archive, Custom Roles and scheduled-delivery channels.`);
   for (const result of results) {
     embed.addFields({
-      name: (result.status === "Healthy" ? "✓ " : "⚠ ") + result.name + " · " + result.status,
+      name: (result.status === "Healthy" ? "✓ " : emoji.warningPlain + " ") + result.name + " · " + result.status,
       value: result.detail,
       inline: false,
     });

@@ -8,17 +8,18 @@ import { deleteArchiveAsset, resolveLegacyArchiveAttachmentUrl } from "../media/
 import { archiveUploadAllowed, getArchiveUploadMaxBytes, storeArchiveUpload } from "../media/media-storage.js";
 import { cleanText, isValidHttpsUrl, normalizeTags } from "../security/security.js";
 import { GLOBAL_MODERATOR_IDS, isGlobalArchiveModerator } from "./archive-access.js";
+import { emoji } from "../emoji.js";
 export { isGlobalArchiveModerator } from "./archive-access.js";
 
 export const ARCHIVE_CATEGORIES = [
-  { label: "Manga Panels", value: "panels", emoji: "📚" },
-  { label: "Quotes", value: "quotes", emoji: "💬" },
-  { label: "Fanworks", value: "fanworks", emoji: "🎨" },
-  { label: "Moodboards", value: "moodboards", emoji: "🖼️" },
-  { label: "Soundtracks", value: "soundtracks", emoji: "🎵" },
-  { label: "Scenes", value: "scenes", emoji: "🎬" },
-  { label: "Recommendations", value: "recommendation-board", emoji: "⭐" },
-  { label: "Theories", value: "theories", emoji: "💡" },
+  { label: "Manga Panels", value: "panels", emoji: emoji.panels },
+  { label: "Quotes", value: "quotes", emoji: emoji.quote },
+  { label: "Fanworks", value: "fanworks", emoji: emoji.fanworks },
+  { label: "Moodboards", value: "moodboards", emoji: emoji.moodboard },
+  { label: "Soundtracks", value: "soundtracks", emoji: emoji.soundtrack },
+  { label: "Scenes", value: "scenes", emoji: emoji.scenes },
+  { label: "Recommendations", value: "recommendation-board", emoji: emoji.recommended },
+  { label: "Theories", value: "theories", emoji: emoji.theory },
 ] as const;
 
 export const ARCHIVE_TAG_CATALOG = [

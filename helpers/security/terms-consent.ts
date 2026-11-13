@@ -1,5 +1,6 @@
 import {ActionRowBuilder,ButtonBuilder,ButtonStyle,EmbedBuilder,MessageFlags,type ButtonInteraction,type Interaction} from "discord.js";
 import {query,queryOne} from "../../database.js";
+import { emoji } from "../emoji.js";
 import {logger} from "../runtime/logger.js";
 
 export const CONSENT_POLICY_VERSIONS={
@@ -28,7 +29,7 @@ export function buildConsentComponents(ownerId:string,disabled=false):ActionRowB
   ...POLICY_LINKS.map(policy=>new ButtonBuilder().setLabel(policy.label).setStyle(ButtonStyle.Link).setURL(policy.url)),
  );
  const actions=new ActionRowBuilder<ButtonBuilder>().addComponents(
-  new ButtonBuilder().setCustomId(`terms-consent:agree:${ownerId}`).setLabel("Agree & Continue").setStyle(ButtonStyle.Primary).setEmoji("✅").setDisabled(disabled),
+  new ButtonBuilder().setCustomId(`terms-consent:agree:${ownerId}`).setLabel("Agree & Continue").setStyle(ButtonStyle.Primary).setEmoji(emoji.check).setDisabled(disabled),
   new ButtonBuilder().setCustomId(`terms-consent:decline:${ownerId}`).setLabel("Decline").setStyle(ButtonStyle.Secondary).setDisabled(disabled),
  );
  return [links,actions];

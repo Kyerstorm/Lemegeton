@@ -14,6 +14,7 @@ import {
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction,
 } from "discord.js";
+import { emoji } from "../../helpers/emoji.js";
 import type { FeatureCommand } from "../../helpers/commands/command.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
 import type { BotConfig } from "../../helpers/runtime/config.js";
@@ -52,13 +53,13 @@ const LEADERBOARD_SESSION_TTL_MS = 5 * 60 * 1000;
 const leaderboardSessions = new Map<string, LeaderboardSession>();
 
 const LEADERBOARD_PRESENTATION: Record<AniListLeaderboardMode, { title: string; description: string }> = {
-  anime: { title: "🎬 Anime Golden Ratio", description: "Users ranked by Average Episodes per Anime." },
-  manga: { title: "📖 Manga Golden Ratio", description: "Users ranked by Average Chapters per Manga." },
-  combined: { title: "🌟 Ultimate Otaku Ranking", description: "Users ranked by Origin-Weighted Activity Score. Origin and format splits are estimates derived from aggregate AniList statistics." },
-  chapters: { title: "📚 Most Chapters Read", description: "Users ranked by total chapters read." },
-  episodes: { title: "📺 Most Episodes Watched", description: "Users ranked by total episodes watched." },
-  manga_completed: { title: "🏁 Most Manga Completed", description: "Users ranked by total manga entries completed." },
-  anime_completed: { title: "🏁 Most Anime Completed", description: "Users ranked by total anime entries completed." },
+  anime: { title: `${emoji.rankingAnime} Anime Golden Ratio`, description: "Users ranked by Average Episodes per Anime." },
+  manga: { title: `${emoji.rankingManga} Manga Golden Ratio`, description: "Users ranked by Average Chapters per Manga." },
+  combined: { title: `${emoji.rankingCombined} Ultimate Otaku Ranking`, description: "Users ranked by Origin-Weighted Activity Score. Origin and format splits are estimates derived from aggregate AniList statistics." },
+  chapters: { title: `${emoji.rankingChapters} Most Chapters Read`, description: "Users ranked by total chapters read." },
+  episodes: { title: `${emoji.rankingEpisodes} Most Episodes Watched`, description: "Users ranked by total episodes watched." },
+  manga_completed: { title: `${emoji.finish} Most Manga Completed`, description: "Users ranked by total manga entries completed." },
+  anime_completed: { title: `${emoji.finish} Most Anime Completed`, description: "Users ranked by total anime entries completed." },
 };
 
 function leaderboardPage(
@@ -69,7 +70,7 @@ function leaderboardPage(
   const pageCount = Math.max(1, Math.ceil(session.entries.length / LEADERBOARD_PAGE_SIZE));
   const start = page * LEADERBOARD_PAGE_SIZE;
   const pageEntries = session.entries.slice(start, start + LEADERBOARD_PAGE_SIZE);
-  const medals = ["🥇", "🥈", "🥉"];
+  const medals = [emoji.goldMedal, emoji.silverMedal, emoji.bronzeMedal];
   const fields = pageEntries.map((entry, index) => {
     const rank = start + index + 1;
     const label = medals[rank - 1] ?? `${rank}.`;
@@ -91,9 +92,9 @@ function leaderboardPage(
         break;
       case "combined":
         value = [
-          `**📖 Manga:** ${entry.totalManga.toLocaleString("en-US")} titles, ${entry.totalChapters.toLocaleString("en-US")} chapters`,
-          `**🎬 Anime:** ${entry.totalAnime.toLocaleString("en-US")} titles, ${entry.totalEpisodes.toLocaleString("en-US")} episodes`,
-          `**🌟 Activity Score:** ${Math.trunc(entry.activityScore).toLocaleString("en-US")} points`,
+          `**${emoji.manga} Manga:** ${entry.totalManga.toLocaleString("en-US")} titles, ${entry.totalChapters.toLocaleString("en-US")} chapters`,
+          `**${emoji.movie} Anime:** ${entry.totalAnime.toLocaleString("en-US")} titles, ${entry.totalEpisodes.toLocaleString("en-US")} episodes`,
+          `**${emoji.rankingCombined} Activity Score:** ${Math.trunc(entry.activityScore).toLocaleString("en-US")} points`,
         ].join("\n");
         break;
       case "chapters":
@@ -116,24 +117,24 @@ function leaderboardPage(
     };
   });
   const embed = homeEmbed(
-    `🏆 ${config.title}`,
+    `${emoji.leaderboard} ${config.title}`,
     `${config.description} (Page ${page + 1}/${pageCount})\n\n${session.optedIn.toLocaleString("en-US")} members opted in. Only current members of this server are included.`,
     fields.length ? fields : [{ name: "No data", value: "No opted-in AniList profiles were available.", inline: false }],
   ).setFooter({
-    text: "🔄 Leaderboard based on live AniList statistics",
+    text: emoji.refreshUnicode + " Leaderboard based on live AniList statistics",
     iconURL: "https://anilist.co/img/icons/android-chrome-512x512.png",
   });
   const controls = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(`profile:leaderboard-page:${session.token}:${page - 1}`)
-      .setLabel("◀️ Previous")
-      .setEmoji("◀️")
+      .setLabel(emoji.chevronLeft + " Previous")
+      .setEmoji(emoji.chevronLeft)
       .setStyle(ButtonStyle.Primary)
       .setDisabled(page <= 0),
     new ButtonBuilder()
       .setCustomId(`profile:leaderboard-page:${session.token}:${page + 1}`)
-      .setLabel("Next ▶️")
-      .setEmoji("▶️")
+      .setLabel("Next " + emoji.chevronRight)
+      .setEmoji(emoji.chevronRight)
       .setStyle(ButtonStyle.Primary)
       .setDisabled(page >= pageCount - 1),
   );

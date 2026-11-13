@@ -1,4 +1,5 @@
 import { EmbedBuilder } from "discord.js";
+import { emoji } from "../emoji.js";
 
 export const EMBED_COLOURS = {
   primary: 0x7c5cff,
@@ -85,7 +86,7 @@ export function buildActivityEmbed(
   const authorUrl = safeUrl(author.siteUrl);
   if (authorUrl) embed.setURL(authorUrl);
   embed.setAuthor({
-    name: (activityType === "Reply" ? "💬 " : "") + text(author.name, "Unknown"),
+    name: (activityType === "Reply" ? emoji.discussion + " " : "") + text(author.name, "Unknown"),
     ...(authorUrl ? { url: authorUrl } : {}),
     ...(avatar ? { iconURL: avatar } : {}),
   });
@@ -105,14 +106,14 @@ export function buildActivityEmbed(
   } else {
     embed.setDescription(cleanBody || (activityType === "Reply" ? "*No reply text*" : "*No content*"));
   }
-  const statParts = [`❤️ ${Math.max(0, Math.floor(likes))}`];
-  if (comments > 0) statParts.push(`💬 ${Math.floor(comments)}`);
+  const statParts = [`${emoji.heart} ${Math.max(0, Math.floor(likes))}`];
+  if (comments > 0) statParts.push(`${emoji.discussion} ${Math.floor(comments)}`);
   embed.addFields({ name: "Stats", value: statParts.join(" · "), inline: true });
   for (const [index, link] of mediaLinks.slice(0, 5).entries()) {
     const url = safeUrl(link);
     if (!url) continue;
     if (index === 0 && /\.(?:png|jpe?g|gif|webp)(?:[?#].*)?$/i.test(url)) embed.setImage(url);
-    else embed.addFields({ name: "🔗 Media", value: `[Open attachment](${url})`, inline: false });
+    else embed.addFields({ name: emoji.link + " Media", value: `[Open attachment](${url})`, inline: false });
   }
   return embed.setFooter({ text: "Powered by AniList" });
 }
@@ -141,9 +142,9 @@ export function buildMediaEmbed(mediaValue: unknown): EmbedBuilder {
   const meta: string[] = [];
   if (text(media.type)) meta.push(`**Type:** ${text(media.type)}`);
   if (text(media.status)) meta.push(`**Status:** ${text(media.status).replaceAll("_", " ")}`);
-  if (number(media.episodes) !== null) meta.push(`🎬 Episodes: ${media.episodes}`);
-  if (number(media.chapters) !== null) meta.push(`📖 Chapters: ${media.chapters}`);
-  if (number(media.volumes) !== null) meta.push(`📚 Volumes: ${media.volumes}`);
+  if (number(media.episodes) !== null) meta.push(`${emoji.movie} Episodes: ${media.episodes}`);
+  if (number(media.chapters) !== null) meta.push(`${emoji.manga} Chapters: ${media.chapters}`);
+  if (number(media.volumes) !== null) meta.push(`${emoji.lightNovel} Volumes: ${media.volumes}`);
   const start = dateValue(media.startDate);
   const end = dateValue(media.endDate);
   if (start) meta.push(`**Start:** ${start}`);
@@ -156,9 +157,9 @@ export function buildMediaEmbed(mediaValue: unknown): EmbedBuilder {
     .slice(0, 8);
   if (studios.length) embed.addFields({ name: "Studio", value: studios.join(", ").slice(0, 900), inline: true });
   const stats = [
-    number(media.popularity) !== null ? `🔥 Popularity: ${media.popularity}` : null,
-    number(media.favourites) !== null ? `❤️ Favourites: ${media.favourites}` : null,
-    text(media.source) ? `🔗 Source: ${text(media.source)}` : null,
+    number(media.popularity) !== null ? `${emoji.popularity} Popularity: ${media.popularity}` : null,
+    number(media.favourites) !== null ? `${emoji.heart} Favourites: ${media.favourites}` : null,
+    text(media.source) ? `${emoji.link} Source: ${text(media.source)}` : null,
   ].filter((item): item is string => Boolean(item));
   if (stats.length) embed.addFields({ name: "Stats", value: stats.join("\n").slice(0, 900), inline: true });
   const characterValue=media.characters;
@@ -273,7 +274,7 @@ export function buildRecommendationsEmbed(mediaValue: unknown, maxItems = 5): Em
   const edges = Array.isArray(media.recommendations)
     ? media.recommendations.map(item=>({node:{mediaRecommendation:{id:record(item).id,title:{romaji:record(item).title},siteUrl:record(item).url,coverImage:{large:record(item).image}}}}))
     : list(record(media.recommendations).edges);
-  const embed = new EmbedBuilder().setColor(EMBED_COLOURS.warning).setTitle("🎯 Recommendations")
+  const embed = new EmbedBuilder().setColor(EMBED_COLOURS.warning).setTitle(emoji.target + " Recommendations")
     .setDescription("Top recommendations from AniList");
   let count = 0;
   for (const edgeValue of edges) {
@@ -324,7 +325,7 @@ export function buildUserProfileEmbed(userValue: unknown): EmbedBuilder {
   const user = record(userValue);
   const name = text(user.name, "Unknown User");
   const url = userUrl(user);
-  const embed = new EmbedBuilder().setColor(EMBED_COLOURS.primary).setTitle(`👤 ${name} • AniList Profile`.slice(0,256))
+  const embed = new EmbedBuilder().setColor(EMBED_COLOURS.primary).setTitle(`${emoji.profile} ${name} • AniList Profile`.slice(0,256))
     .setDescription(plainText(user.about, 900) || "*No profile description provided.*");
   if (url) embed.setURL(url);
   const avatar = safeUrl(user.avatar);
@@ -332,8 +333,8 @@ export function buildUserProfileEmbed(userValue: unknown): EmbedBuilder {
   if (avatar) embed.setThumbnail(avatar);
   if (banner) embed.setImage(banner);
   embed.addFields(
-    { name: "🎬 Anime Snapshot", value: userStats(user.anime, "anime"), inline: true },
-    { name: "📚 Manga Snapshot", value: userStats(user.manga, "manga"), inline: true },
+    { name: emoji.movie + " Anime Snapshot", value: userStats(user.anime, "anime"), inline: true },
+    { name: emoji.lightNovel + " Manga Snapshot", value: userStats(user.manga, "manga"), inline: true },
   );
   return embed.setFooter({ text: `AniList • User ID ${number(user.id) ?? "—"}` });
 }
@@ -341,12 +342,12 @@ export function buildUserProfileEmbed(userValue: unknown): EmbedBuilder {
 export function buildUserStatsEmbed(userValue: unknown): EmbedBuilder {
   const user = record(userValue);
   const embed = new EmbedBuilder().setColor(EMBED_COLOURS.success)
-    .setTitle(`📊 ${text(user.name, "AniList User")} • Statistics`.slice(0,256));
+    .setTitle(`${emoji.stats} ${text(user.name, "AniList User")} • Statistics`.slice(0,256));
   const url = userUrl(user);
   if (url) embed.setURL(url);
   embed.addFields(
-    { name: "🎬 Anime", value: userStats(user.anime, "anime"), inline: true },
-    { name: "📚 Manga", value: userStats(user.manga, "manga"), inline: true },
+    { name: emoji.movie + " Anime", value: userStats(user.anime, "anime"), inline: true },
+    { name: emoji.lightNovel + " Manga", value: userStats(user.manga, "manga"), inline: true },
   );
   return embed.setFooter({ text: `AniList • User ID ${number(user.id) ?? "—"}` });
 }
@@ -354,7 +355,7 @@ export function buildUserStatsEmbed(userValue: unknown): EmbedBuilder {
 export function buildUserFavoritesEmbed(userValue: unknown): EmbedBuilder {
   const user = record(userValue);
   const embed = new EmbedBuilder().setColor(EMBED_COLOURS.danger)
-    .setTitle(`❤️ ${text(user.name, "AniList User")} • Favorites`.slice(0,256))
+    .setTitle(`${emoji.heart} ${text(user.name, "AniList User")} • Favorites`.slice(0,256))
     .setDescription("The first five favourites from each category, as available through AniList.");
   const url = userUrl(user);
   if (url) embed.setURL(url);
@@ -362,8 +363,8 @@ export function buildUserFavoritesEmbed(userValue: unknown): EmbedBuilder {
   if (avatar) embed.setThumbnail(avatar);
   const favorites = record(user.favorites ?? user.favourites);
   for (const [key,label,kind] of [
-    ["anime","🎞️ Anime","media"],["manga","📖 Manga","media"],["characters","🎭 Characters","character"],
-    ["staff","🎙️ Staff","staff"],["studios","🏢 Studios","studio"],
+    ["anime",emoji.film+" Anime","media"],["manga",emoji.manga+" Manga","media"],["characters",emoji.theatre+" Characters","character"],
+    ["staff",emoji.microphone+" Staff","staff"],["studios",emoji.building+" Studios","studio"],
   ] as const) {
     const rawSection=favorites[key];
     const section=record(rawSection);
@@ -385,16 +386,16 @@ function statusEmbed(title: string, description: string, color: number, prefix: 
   return new EmbedBuilder().setColor(color).setTitle((prefix + " " + title).slice(0,256)).setDescription(description.slice(0,4_000));
 }
 export function buildErrorEmbed(title: string, description: string): EmbedBuilder {
-  return statusEmbed(title, description, EMBED_COLOURS.danger, "❌");
+  return statusEmbed(title, description, EMBED_COLOURS.danger, emoji.cross);
 }
 export function buildSuccessEmbed(title: string, description: string): EmbedBuilder {
-  return statusEmbed(title, description, EMBED_COLOURS.success, "✅");
+  return statusEmbed(title, description, EMBED_COLOURS.success, emoji.check);
 }
 export function buildWarningEmbed(title: string, description: string): EmbedBuilder {
-  return statusEmbed(title, description, EMBED_COLOURS.warning, "⚠️");
+  return statusEmbed(title, description, EMBED_COLOURS.warning, emoji.warningUnicode);
 }
 export function buildInfoEmbed(title: string, description: string): EmbedBuilder {
-  return statusEmbed(title, description, EMBED_COLOURS.primary, "ℹ️");
+  return statusEmbed(title, description, EMBED_COLOURS.primary, emoji.info);
 }
 export function buildTrendingEmbed(mediaList: unknown[], title: string, description: string): EmbedBuilder {
   const embed = new EmbedBuilder().setColor(EMBED_COLOURS.warning).setTitle(title.slice(0,256)).setDescription(description.slice(0,4_000));

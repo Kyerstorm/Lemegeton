@@ -10,6 +10,7 @@ import {
   type NewsChannel,
   type TextChannel,
 } from "discord.js";
+import { emoji } from "../emoji.js";
 import { logger } from "../runtime/logger.js";
 import { AniListClient, type AniListRecentlyFinishedMedia } from "../integration/anilist.js";
 import type { BotConfig } from "../runtime/config.js";
@@ -75,7 +76,7 @@ export function filterMediaNotificationCandidates(
 function buildEmbed(item: AniListRecentlyFinishedMedia): EmbedBuilder {
   const embed = new EmbedBuilder()
     .setColor(item.status === "FINISHED" ? 0x57f287 : 0xed4245)
-    .setTitle((item.status === "FINISHED" ? "✅ " : "⚠️ ") + item.title.slice(0, 250))
+    .setTitle((item.status === "FINISHED" ? emoji.check + " " : emoji.warningUnicode + " ") + item.title.slice(0, 250))
     .setURL(item.url)
     .setDescription((item.description ?? "No description supplied by AniList.")
       .replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 900))

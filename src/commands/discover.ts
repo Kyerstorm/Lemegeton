@@ -41,7 +41,7 @@ import {
 } from "../../helpers/media/media-link-suggestions.js";
 import { renderAtlasSnapshot } from "../../helpers/media/atlas-renderer.js";
 import { logger } from "../../helpers/runtime/logger.js";
-import { loadingMessage } from "../../helpers/emoji.js";
+import { emoji, loadingMessage } from "../../helpers/emoji.js";
 import { parseGridSourceUrls, parseGridTitles, renderMediaGrid, type MediaGridSource } from "../../helpers/media/media-grid.js";
 import { parseMediaComparisonEntries, type MediaComparisonCategory } from "../../helpers/media/media-comparison.js";
 import { rankCrossMediaCandidates, recommendationGenreLabels, type CrossMediaCandidate } from "../../helpers/media/cross-media-recommendations.js";
@@ -57,14 +57,14 @@ type SearchRecord =
   | { provider: "Steam"; category: "game"; item: SteamStoreGame };
 
 const CATEGORIES: Array<{ label: string; value: Category; emoji: string }> = [
-  { label: "All media", value: "all", emoji: "🌐" },
-  { label: "Anime", value: "anime", emoji: "📺" },
-  { label: "Manga", value: "manga", emoji: "📚" },
-  { label: "Light novels", value: "light_novel", emoji: "📖" },
-  { label: "Books", value: "book", emoji: "📕" },
-  { label: "Films", value: "movie", emoji: "🎬" },
-  { label: "Television", value: "tv", emoji: "📡" },
-  { label: "Games", value: "game", emoji: "🎮" },
+  { label: "All media", value: "all", emoji: emoji.globe },
+  { label: "Anime", value: "anime", emoji: emoji.anime },
+  { label: "Manga", value: "manga", emoji: emoji.mangaDiscovery },
+  { label: "Light novels", value: "light_novel", emoji: emoji.lightNovelDiscovery },
+  { label: "Books", value: "book", emoji: emoji.book },
+  { label: "Films", value: "movie", emoji: emoji.movie },
+  { label: "Television", value: "tv", emoji: emoji.television },
+  { label: "Games", value: "game", emoji: emoji.game },
 ];
 
 function categoryLabel(category: Category): string {
