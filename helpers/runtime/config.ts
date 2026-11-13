@@ -5,6 +5,9 @@ export interface DatabaseConfig {
 export interface TranslationConfig {
  madladUrl:string|null;
  madladApiKey?:string;
+ deeplUrl:string|null;
+ deeplApiKey?:string;
+ googleTranslateApiKey?:string;
  nllbUrl:string|null;
  nllbApiKey?:string;
  nllbNonCommercialUseConfirmed:boolean;
@@ -76,12 +79,15 @@ function optionalTranslationEndpoint(env:NodeJS.ProcessEnv,key:string):string|nu
 }
 function translationConfig(env:NodeJS.ProcessEnv):TranslationConfig{
  const madladUrl=optionalTranslationEndpoint(env,"MADLAD_TRANSLATION_URL");
+ const deeplUrl=optionalTranslationEndpoint(env,"DEEPL_TRANSLATION_URL");
  const nllbUrl=optionalTranslationEndpoint(env,"NLLB_TRANSLATION_URL");
  const libreTranslateUrl=optionalTranslationEndpoint(env,"LIBRETRANSLATE_URL");
  const nllbConfirmed=databaseBoolean(env.NLLB_NONCOMMERCIAL_USE_CONFIRMED,"NLLB_NONCOMMERCIAL_USE_CONFIRMED",false);
  const production=env.ENVIRONMENT?.trim().toLowerCase()==="production"||env.NODE_ENV?.trim().toLowerCase()==="production";
  return {
   madladUrl,...(env.MADLAD_TRANSLATION_TOKEN?.trim()?{madladApiKey:env.MADLAD_TRANSLATION_TOKEN.trim()}:{}),
+  deeplUrl,...(env.DEEPL_API_KEY?.trim()?{deeplApiKey:env.DEEPL_API_KEY.trim()}:{}),
+  ...(env.GOOGLE_TRANSLATE_API_KEY?.trim()?{googleTranslateApiKey:env.GOOGLE_TRANSLATE_API_KEY.trim()}:{}),
   nllbUrl,...(env.NLLB_TRANSLATION_TOKEN?.trim()?{nllbApiKey:env.NLLB_TRANSLATION_TOKEN.trim()}:{}),
   nllbNonCommercialUseConfirmed:nllbConfirmed&&!production,
   libreTranslateUrl,...(env.LIBRETRANSLATE_API_KEY?.trim()?{libreTranslateApiKey:env.LIBRETRANSLATE_API_KEY.trim()}:{}),

@@ -210,23 +210,29 @@ test("loads operator and Atlas bridge settings into typed configuration", () => 
 });
 
 
-test("loads the ordered self-hosted translation provider settings", () => {
+test("loads optional translation provider settings in fallback order", () => {
   const config = loadConfig(environment({
     MADLAD_TRANSLATION_URL: "https://madlad.example.test/translate",
     MADLAD_TRANSLATION_TOKEN: "madlad-token",
+    DEEPL_TRANSLATION_URL: "https://api-free.deepl.com/v2/translate",
+    DEEPL_API_KEY: "deepl-key",
     NLLB_TRANSLATION_URL: "https://nllb.example.test/translate",
     NLLB_TRANSLATION_TOKEN: "nllb-token",
     NLLB_NONCOMMERCIAL_USE_CONFIRMED: "true",
     LIBRETRANSLATE_URL: "https://translate.example.test/translate",
     LIBRETRANSLATE_API_KEY: "libre-key",
+    GOOGLE_TRANSLATE_API_KEY: "google-key",
     TRANSLATION_TIMEOUT_MS: "9000",
   }));
   assert.equal(config.translation.madladUrl, "https://madlad.example.test/translate");
   assert.equal(config.translation.madladApiKey, "madlad-token");
+  assert.equal(config.translation.deeplUrl, "https://api-free.deepl.com/v2/translate");
+  assert.equal(config.translation.deeplApiKey, "deepl-key");
   assert.equal(config.translation.nllbUrl, "https://nllb.example.test/translate");
   assert.equal(config.translation.nllbNonCommercialUseConfirmed, true);
   assert.equal(config.translation.libreTranslateUrl, "https://translate.example.test/translate");
   assert.equal(config.translation.libreTranslateApiKey, "libre-key");
+  assert.equal(config.translation.googleTranslateApiKey, "google-key");
   assert.equal(config.translation.timeoutMs, 9000);
 });
 
@@ -250,6 +256,10 @@ test("rejects insecure remote translation endpoints and malformed URLs", () => {
   assert.throws(
     () => loadConfig(environment({ NLLB_TRANSLATION_URL: "https://user:pass@nllb.example.test/translate" })),
     /NLLB_TRANSLATION_URL must not contain credentials/,
+  );
+  assert.throws(
+    () => loadConfig(environment({ DEEPL_TRANSLATION_URL: "http://api-free.deepl.com/v2/translate" })),
+    /DEEPL_TRANSLATION_URL must use HTTPS/,
   );
 });
 
