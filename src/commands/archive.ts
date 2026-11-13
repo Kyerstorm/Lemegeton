@@ -75,10 +75,14 @@ import { query, queryOne } from "../../database.js";
 import { deleteArchiveAsset, resolveLegacyArchiveAttachmentUrl, signedArchiveAssetUrl, storeArchiveUpload, classifyArchiveUpload } from "../../helpers/media/media-storage.js";
 import { cleanText, isGuildManager, isValidHttpsUrl, safeDisplay } from "../../helpers/security/security.js";
 import { logger } from "../../helpers/runtime/logger.js";
+import { createArchiveSpotlight, listArchiveSpotlights, cancelArchiveSpotlight } from "../../helpers/archive/archive-curation.js";
 
 const ACTIONS = [
   { name: "Browse approved entries", value: "browse" },
   { name: "Panel of the Day", value: "panel-of-the-day" },
+  { name: "Create Archive spotlight", value: "spotlight-create" },
+  { name: "Browse active spotlights", value: "spotlight-list" },
+  { name: "Cancel Archive spotlight", value: "spotlight-cancel" },
   { name: "Search the archive", value: "search" },
   { name: "Submit a contribution", value: "submit" },
   { name: "My submissions", value: "mine" },
@@ -307,6 +311,9 @@ export class ArchiveCommand implements FeatureCommand {
     .addStringOption((option) => option.setName("trail_id").setDescription("Archive Trail ID"))
     .addStringOption((option) => option.setName("note").setDescription("Curator annotation").setMaxLength(500))
     .addStringOption((option) => option.setName("report_id").setDescription("Archive report ID"))
+    .addStringOption((option) => option.setName("spotlight_id").setDescription("Archive spotlight ID"))
+    .addStringOption((option) => option.setName("starts_at").setDescription("Optional ISO-8601 spotlight start with timezone").setMaxLength(40))
+    .addStringOption((option) => option.setName("ends_at").setDescription("ISO-8601 spotlight end with timezone").setMaxLength(40))
     .addStringOption((option) => option.setName("member_id").setDescription("Discord member ID for collection collaboration"))
     .addStringOption((option) => option.setName("collaboration_role").setDescription("Collection collaborator permission").addChoices(
       { name: "Editor", value: "editor" },
@@ -353,6 +360,60 @@ export class ArchiveCommand implements FeatureCommand {
         }
         case "browse": await this.browse(interaction, interaction.options.getString("category") as ArchiveCategory | null); return;
         case "panel-of-the-day": await this.showPanelOfTheDay(interaction); return;
+        case "spotlight-create": {
+          const entryId = interaction.options.getString("entry_id");
+          const visibility = (interaction.options.getString("visibility") ?? "server") as ArchiveVisibility;
+          const endsAtText = interaction.options.getString("ends_at");
+          if (!entryId || !endsAtText) throw new Error("Provide entry_id and ends_at for the spotlight.");
+          const endsAt = new Date(endsAtText);
+          if (!/[zZ]|[+-]\\d{2}:?\\d{2}$/.test(endsAtText) || !Number.isFinite(endsAt.getTime())) {
+            throw new Error("ends_at must be a valid ISO-8601 date with a timezone offset.");
+          }
+          const startsAtText = interaction.options.getString("starts_at");
+          const startsAt = startsAtText ? new Date(startsAtText) : new Date();
+          if (startsAtText && (!/[zZ]|[+-]\\d{2}:?\\d{2}$/.test(startsAtText) || !Number.isFinite(startsAt.getTime()))) {
+            throw new Error("starts_at must be a valid ISO-8601 date with a timezone offset.");
+          }
+          const member = await interaction.guild!.members.fetch(userId);
+          if (!await canModerateArchive(member, guildId, visibility)) throw new Error("Archive curator/moderator permission is required for this visibility scope.");
+          const id = await createArchiveSpotlight({
+            guildId, curatorId: userId, entryId, visibility, startsAt, endsAt,
+            note: interaction.options.getString("note") ?? "",
+          });
+          await interaction.reply({ content: `Archive spotlight #${id} is scheduled until <t:${Math.floor(endsAt.getTime() / 1000)}:F>.`, flags: MessageFlags.Ephemeral });
+          return;
+        }
+        case "spotlight-list": {
+          const spotlights = await listArchiveSpotlights(guildId);
+          const embeds = spotlights.slice(0, 5).map(item => new EmbedBuilder()
+            .setColor(0x5865f2)
+            .setTitle(item.title.slice(0, 250))
+            .setDescription(`Entry #${item.entry_id} · ${item.archive_type} · <@!${item.created_by}>`.replace("<@!$", "<@!"))
+            .addFields(
+              { name: "Curator", value: `<@${item.curator_id}>`, inline: true },
+              { name: "Scope", value: item.visibility === "global" ? "Global" : "This server", inline: true },
+              { name: "Ends", value: `<t:${Math.floor(new Date(item.ends_at).getTime() / 1000)}:R>`, inline: true },
+              ...(item.note ? [{ name: "Curator note", value: safeDisplay(item.note, 500), inline: false }] : []),
+            ));
+          await interaction.reply({
+            content: spotlights.length ? "Active Archive spotlights" : "There are no active spotlights for this server.",
+            embeds,
+            flags: MessageFlags.Ephemeral,
+            allowedMentions: { parse: [] },
+          });
+          return;
+        }
+        case "spotlight-cancel": {
+          const spotlightId = interaction.options.getString("spotlight_id");
+          if (!spotlightId) throw new Error("Provide spotlight_id.");
+          const visibility = (interaction.options.getString("visibility") ?? "server") as ArchiveVisibility;
+          const member = await interaction.guild!.members.fetch(userId);
+          const canModerateServer = await canModerateArchive(member, guildId, "server");
+          const global = isGlobalArchiveModerator(userId);
+          await cancelArchiveSpotlight(guildId, spotlightId, userId, canModerateServer, global);
+          await interaction.reply({ content: "Archive spotlight cancelled.", flags: MessageFlags.Ephemeral });
+          return;
+        }
         case "search": {
           const keyword = interaction.options.getString("keyword") ?? "";
           const entries = await listArchiveEntries(guildId, interaction.options.getString("category") as ArchiveCategory | undefined, keyword, 0, 5);

@@ -57,6 +57,7 @@ import {
   voteForRanking,
 } from "../../helpers/community/community.js";
 import { query, queryOne } from "../../database.js";
+import { listArchiveSpotlights } from "../../helpers/archive/archive-curation.js";
 import { cleanText, isGuildManager, isValidHttpsUrl, safeDisplay } from "../../helpers/security/security.js";
 import {
   attachReadingDiscussion,
@@ -111,6 +112,7 @@ function communityHome(): { embeds: EmbedBuilder[]; components: ActionRowBuilder
       { name: "Media Night", value: "A short, family-aware media vote with locked choices and scheduled results.", inline: true },
       { name: "Release calendar", value: "Upcoming provider-dated anime airings and film releases.", inline: true },
       { name: "History", value: "Recent rankings, sessions and discussions.", inline: true },
+      { name: "Spotlights", value: "Curator-selected approved Archive contributions.", inline: true },
     ],
   );
   const rows = [
@@ -123,6 +125,7 @@ function communityHome(): { embeds: EmbedBuilder[]; components: ActionRowBuilder
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId("community:calendar").setLabel("Release calendar").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("community:history").setLabel("History").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("community:spotlights").setLabel("Spotlights").setStyle(ButtonStyle.Secondary),
     ),
   ];
   return { embeds: [embed], components: rows };
@@ -152,6 +155,7 @@ export class CommunityCommand implements FeatureCommand {
       { name: "Configure release digests", value: "calendar-configure" },
       { name: "Disable release digests", value: "calendar-disable" },
       { name: "Community history", value: "history" },
+      { name: "Archive spotlights", value: "spotlights" },
       { name: "Nominate a community read", value: "reading-nominate" },
       { name: "View reading nominations and vote", value: "reading-list" },
       { name: "Select the next community read", value: "reading-select" },
@@ -243,6 +247,7 @@ export class CommunityCommand implements FeatureCommand {
         case "calendar-disable": await this.disableReleaseCalendar(interaction); return;
         case "calendar": await this.showCalendar(interaction); return;
         case "history": await this.showHistory(interaction); return;
+        case "spotlights": await this.showSpotlights(interaction); return;
         case "reading-nominate": await this.nominateReading(interaction); return;
         case "reading-list": await this.showReadingNominations(interaction); return;
         case "reading-select": await this.selectReading(interaction); return;
@@ -353,6 +358,10 @@ export class CommunityCommand implements FeatureCommand {
     }
     if (action === "history") {
       await this.showHistory(interaction);
+      return true;
+    }
+    if (action === "spotlights") {
+      await this.showSpotlights(interaction);
       return true;
     }
     if (action === "daily-configure") { await this.openDailyConfig(interaction); return true; }
@@ -1120,6 +1129,26 @@ export class CommunityCommand implements FeatureCommand {
         new ButtonBuilder().setCustomId("community:calendar-disable").setLabel("Disable digests").setStyle(ButtonStyle.Secondary).setDisabled(!schedule?.enabled),
       )],
       flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  private async showSpotlights(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
+    const spotlights = await listArchiveSpotlights(interaction.guildId!);
+    const embeds = spotlights.slice(0, 8).map(item => new EmbedBuilder()
+      .setColor(0x5865f2)
+      .setTitle(safeDisplay(item.title, 250))
+      .setDescription(`Archive #${item.entry_id} · ${item.archive_type} · contributed by <@${item.created_by}>`)
+      .addFields(
+        { name: "Curator", value: `<@${item.curator_id}>`, inline: true },
+        { name: "Scope", value: item.visibility === "global" ? "Global" : "This server", inline: true },
+        { name: "Ends", value: `<t:${Math.floor(new Date(item.ends_at).getTime() / 1000)}:R>`, inline: true },
+        ...(item.note ? [{ name: "Note", value: safeDisplay(item.note, 500), inline: false }] : []),
+      ));
+    await interaction.reply({
+      content: spotlights.length ? "Curated Archive highlights" : "No Archive spotlights are active for this server.",
+      embeds,
+      flags: MessageFlags.Ephemeral,
+      allowedMentions: { parse: [] },
     });
   }
 
