@@ -11,6 +11,7 @@ import {
   TextInputStyle,
   PermissionFlagsBits,
   SlashCommandBuilder,
+  StringSelectMenuBuilder,
   type ButtonInteraction,
   type ChannelSelectMenuInteraction,
   type ChatInputCommandInteraction,
@@ -570,7 +571,7 @@ export class SettingsCommand implements FeatureCommand {
   }
 
   async handleSelect(
-    interaction: StringSelectMenuInteraction | RoleSelectMenuInteraction | ChannelSelectMenuInteraction,
+    interaction: ButtonInteraction | StringSelectMenuInteraction | RoleSelectMenuInteraction | ChannelSelectMenuInteraction,
   ): Promise<boolean> {
     if (!interaction.guildId) return false;
     if (interaction.isStringSelectMenu() && interaction.customId === "settings:media-follows:remove") {
