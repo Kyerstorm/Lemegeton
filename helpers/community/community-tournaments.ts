@@ -64,7 +64,7 @@ export function parseTournamentCandidates(value: string): TournamentCandidateInp
 }
 
 export function tournamentMatchups<T>(values: readonly T[]): Array<[T, T]> {
-  if (![4, 8, 16].includes(values.length)) throw new Error("Tournament seeding requires 4, 8 or 16 candidates.");
+  if (values.length < 2 || values.length % 2 !== 0) throw new Error("Tournament rounds require an even number of at least two candidates.");
   const result: Array<[T, T]> = [];
   for (let index = 0; index < values.length; index += 2) {
     result.push([values[index]!, values[index + 1]!]);

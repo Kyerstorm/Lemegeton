@@ -24,6 +24,7 @@ test("tournament candidates parse one title and HTTPS source per line", () => {
 test("tournament bracket seeds are paired in fixed order", () => {
   assert.deepEqual(tournamentMatchups([1,2,3,4]),[[1,2],[3,4]]);
   assert.deepEqual(tournamentMatchups([1,2,3,4,5,6,7,8]),[[1,2],[3,4],[5,6],[7,8]]);
+  assert.deepEqual(tournamentMatchups([2,3]),[[2,3]]);
 });
 
 test("tournament ties use the lower seed, including matches with no votes", () => {
