@@ -80,12 +80,12 @@ jobs:
           docker run --rm --network host --entrypoint sh \
             -e TEST_DATABASE_URL -e PGPASSWORD -e RESTORE_DATABASE \
             -v "$RUNNER_TEMP:/backup" postgres:16 -ec '
-              psql "$TEST_DATABASE_URL" --set ON_ERROR_STOP=1 --command="CREATE TABLE public.ci_backup_restore_probe (id INTEGER PRIMARY KEY, value TEXT NOT NULL); INSERT INTO public.ci_backup_restore_probe VALUES (1, $$preserved$$);"
+              psql "$TEST_DATABASE_URL" --set ON_ERROR_STOP=1 --command="CREATE TABLE public.ci_backup_restore_probe (id INTEGER PRIMARY KEY, value INTEGER NOT NULL); INSERT INTO public.ci_backup_restore_probe VALUES (1, 42);"
               pg_dump "$TEST_DATABASE_URL" --format=custom --no-owner --no-acl --file=/backup/lemegeton-ci.dump
               createdb --host=127.0.0.1 --port=5432 --username=postgres "$RESTORE_DATABASE"
               restore_url="postgresql://postgres:$PGPASSWORD@127.0.0.1:5432/$RESTORE_DATABASE"
               pg_restore --exit-on-error --no-owner --no-acl --dbname="$restore_url" /backup/lemegeton-ci.dump
               restored_value="$(psql "$restore_url" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT value FROM public.ci_backup_restore_probe WHERE id = 1")"
-              test "$restored_value" = "preserved"
+              test "$restored_value" = "42"
               dropdb --host=127.0.0.1 --port=5432 --username=postgres "$RESTORE_DATABASE"
             '
