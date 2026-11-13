@@ -18,9 +18,9 @@ export interface ProfilePreferences {
 }
 
 export interface ProfileContribution {
-  id: string;
   title: string;
   kind: "entry" | "collection" | "trail";
+  attribution: "creator" | "owner" | "editor" | "contributor";
   media_type: string | null;
 }
 
@@ -197,18 +197,23 @@ export async function getLinkedProfile(
       [guildId, userId],
     ).catch(() => null),
     query<ProfileContribution>(
-      `SELECT id::text, title, kind, media_type FROM (
-         SELECT id, title, 'entry'::text AS kind, media_type, created_at
+      `SELECT title, kind, attribution, media_type FROM (
+         SELECT title, 'entry'::text AS kind, 'creator'::text AS attribution, media_type, created_at
          FROM community_archive_entries
          WHERE created_guild_id = $1 AND created_by = $2
            AND status = 'approved' AND visibility = 'server'
          UNION ALL
-         SELECT c.id, c.title, 'collection'::text AS kind, NULL::text AS media_type, c.updated_at AS created_at
+         SELECT c.title, 'collection'::text AS kind,
+                CASE WHEN c.owner_id = $2 THEN 'owner' ELSE cc.role END AS attribution,
+                NULL::text AS media_type, c.updated_at AS created_at
          FROM archive_collections c
-         WHERE c.guild_id = $1 AND c.owner_id = $2
+         LEFT JOIN archive_collection_collaborators cc
+           ON cc.collection_id = c.id AND cc.user_id = $2
+         WHERE c.guild_id = $1 AND (c.owner_id = $2 OR cc.user_id = $2)
            AND c.status = 'active' AND c.visibility = 'server'
          UNION ALL
-         SELECT t.id, t.title, 'trail'::text AS kind, NULL::text AS media_type, t.updated_at AS created_at
+         SELECT t.title, 'trail'::text AS kind, 'owner'::text AS attribution,
+                NULL::text AS media_type, t.updated_at AS created_at
          FROM archive_trails t
          WHERE t.guild_id = $1 AND t.owner_id = $2
            AND t.status = 'active' AND t.visibility = 'server'

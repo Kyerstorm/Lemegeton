@@ -516,7 +516,7 @@ export class ProfileCommand implements FeatureCommand {
         ? "Your private profile preview. Other members can see it only after you enable Public profile."
         : "Provider data shown here is controlled by this member's profile and provider visibility settings.")
       .addFields(
-        { name: "Approved Archive contributions", value: String(profile.contributions), inline: true },
+        { name: "Approved Archive entries", value: String(profile.contributions), inline: true },
         { name: "AniList connection", value: profile.anilistUsername ? (profile.preferences.show_anilist ? (profile.anilist ? "Linked · verified" : "Linked · provider unavailable") : "Hidden by member") : "Not connected", inline: true },
         { name: "Steam connection", value: profile.steamId ? (profile.preferences.show_steam ? (profile.steam ? "Linked · verified" : "Linked · provider unavailable") : "Hidden by member") : "Not connected", inline: true },
       );

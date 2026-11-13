@@ -241,10 +241,9 @@ Phase 0 code migration status does **not** mean the service is launched. Phase 8
 
 **Already present:** guild-scoped AniList/Steam profile linking and unlinking; public-profile and sharing preferences; affinity and minimum-cohort guild taste; AniList leaderboard; custom-role creation/configuration, picker, image validation, hierarchy checks, lifecycle, restore and reconciliation.
 
-**Completed in this pass:** the profile now shows up to five recent, approved, server-visible Archive entries, active server-visible collections owned by the member, and active server-visible Trails owned by the member. Queries remain scoped to the current guild and reuse canonical Archive records. The showcase is visible only through the existing public-profile gate (or the member's private preview). It does not add personal media lists or progress tracking.
+**Completed in this pass:** the profile now shows up to five recent, approved, server-visible Archive entries, active server-visible collections owned or edited/contributed to by the member, and active server-visible Trails owned by the member. Queries remain scoped to the current guild and reuse canonical Archive records. The showcase is visible only through the existing public-profile gate (or the member's private preview). It does not add personal media lists or progress tracking.
 
 **Remaining delivery:**
-- Include collection collaborators in the contributor attribution view if the product chooses to expose editor/contributor roles publicly.
 - Re-check profile visibility and connection consent on each view; unlink must remove tokens/associations and derived access.
 - Verify custom-role assignment and recovery with real Discord role hierarchy, managed roles, member departures/rejoins, server boosts and permission changes.
 - Provide explicit user-facing states when a provider cannot supply a field or the account connection has expired.
