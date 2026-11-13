@@ -171,8 +171,48 @@ export async function findAtlasRelationships(
 
 
 /** Stable identity for one category-aware work/edition node in a bounded graph. */
+export function atlasProviderIdentity(category: string, value?: string | null): string | null {
+  const normalizedCategory = normalizeAtlasCategory(category);
+  const safeUrl = safeAtlasUrl(value);
+  if (!normalizedCategory || !safeUrl) return null;
+  let url: URL;
+  try {
+    url = new URL(safeUrl);
+  } catch {
+    return null;
+  }
+  const host = url.hostname.toLowerCase().replace(/^www\./, "");
+  const path = url.pathname;
+  if (host === "anilist.co") {
+    const match = /^\/(anime|manga)\/(\d+)(?:\/|$)/i.exec(path);
+    if (match && ((match[1]?.toLowerCase() === "anime" && normalizedCategory === "ANIME")
+      || (match[1]?.toLowerCase() === "manga" && ["MANGA", "LIGHT_NOVEL", "WEBNOVEL"].includes(normalizedCategory)))) {
+      return JSON.stringify(["anilist", match[1]!.toLowerCase(), normalizedCategory, match[2]]);
+    }
+  }
+  if (host === "themoviedb.org") {
+    const match = /^\/(movie|tv)\/(\d+)(?:\/|$)/i.exec(path);
+    if (match && ((match[1]?.toLowerCase() === "movie" && normalizedCategory === "MOVIE")
+      || (match[1]?.toLowerCase() === "tv" && normalizedCategory === "TV"))) {
+      return JSON.stringify(["tmdb", match[1]!.toLowerCase(), normalizedCategory, match[2]]);
+    }
+  }
+  if (host === "store.steampowered.com" && normalizedCategory === "GAME") {
+    const match = /^\/app\/(\d+)(?:\/|$)/i.exec(path);
+    if (match) return JSON.stringify(["steam", "app", match[1]]);
+  }
+  if (host === "books.google.com" && normalizedCategory === "BOOK" && path.startsWith("/books")) {
+    const id = url.searchParams.get("id")?.trim();
+    if (id && /^[A-Za-z0-9_-]{1,80}$/.test(id)) return JSON.stringify(["google-books", id]);
+  }
+  return null;
+}
+
 export function atlasNodeIdentity(title: string, category: string, url?: string | null): string {
-  return JSON.stringify([normalizeAtlasCategory(category), normalizeAtlasTitle(title), safeAtlasUrl(url)]);
+  const normalizedCategory = normalizeAtlasCategory(category);
+  const providerIdentity = atlasProviderIdentity(category, url);
+  if (providerIdentity) return JSON.stringify(["provider", providerIdentity]);
+  return JSON.stringify([normalizedCategory, normalizeAtlasTitle(title), safeAtlasUrl(url)]);
 }
 
 /**
@@ -283,6 +323,100 @@ export function findAtlasGraph(
     (node, limit) => findAtlasRelationships(guildId, node.title, node.category, node.url, limit),
     options,
   );
+}
+
+export interface AtlasGraphFilters {
+  query?: string;
+  category?: string;
+  relationshipType?: string;
+  sourceKind?: RelationshipSource;
+}
+
+export interface AtlasGraphPath {
+  nodes: AtlasGraphNode[];
+  edges: AtlasGraphEdge[];
+}
+
+export function filterAtlasGraph(graph: AtlasGraphResult, filters: AtlasGraphFilters = {}): AtlasGraphResult {
+  const search = normalizeAtlasTitle(filters.query ?? "");
+  const category = filters.category ? normalizeAtlasCategory(filters.category) : null;
+  const relationship = normalizeAtlasTitle(filters.relationshipType ?? "");
+  const matches = graph.edges.filter((edge) => {
+    if (filters.sourceKind && edge.sourceKind !== filters.sourceKind) return false;
+    if (category) {
+      const from = graph.nodes.find(node => node.id === edge.from);
+      const to = graph.nodes.find(node => node.id === edge.to);
+      if (from?.category !== category && to?.category !== category) return false;
+    }
+    if (relationship && !normalizeAtlasTitle(edge.relationType).includes(relationship)) return false;
+    if (search) {
+      const from = graph.nodes.find(node => node.id === edge.from);
+      const to = graph.nodes.find(node => node.id === edge.to);
+      const fields = [
+        from?.title, to?.title, edge.relationType, edge.sourceLabel,
+      ].map(value => normalizeAtlasTitle(value ?? ""));
+      if (!fields.some(value => value.includes(search))) return false;
+    }
+    return true;
+  });
+  const visibleIds = new Set<string>([graph.rootId]);
+  for (const edge of matches) {
+    visibleIds.add(edge.from);
+    visibleIds.add(edge.to);
+  }
+  const directEdges = new Set(matches.filter(edge => edge.from === graph.rootId).map(edge =>
+    JSON.stringify([edge.to, edge.relationType, edge.sourceKind, edge.sourceLabel])));
+  const directRelationships = graph.directRelationships.filter((relation) => directEdges.has(JSON.stringify([
+    atlasNodeIdentity(relation.title, relation.category, relation.url),
+    relation.relationType, relation.sourceKind, relation.source,
+  ])));
+  return {
+    ...graph,
+    nodes: graph.nodes.filter(node => visibleIds.has(node.id)),
+    edges: matches,
+    directRelationships,
+  };
+}
+
+export function findAtlasPath(
+  graph: AtlasGraphResult,
+  target: { title: string; category: string; url?: string | null },
+): AtlasGraphPath | null {
+  const category = normalizeAtlasCategory(target.category);
+  const titleKey = normalizeAtlasTitle(target.title);
+  if (!category || !titleKey || !graph.rootId) return null;
+  const targetId = target.url
+    ? atlasNodeIdentity(target.title, target.category, target.url)
+    : graph.nodes.find(node => node.category === category && normalizeAtlasTitle(node.title) === titleKey)?.id;
+  if (!targetId || targetId === graph.rootId || !graph.nodes.some(node => node.id === targetId)) return null;
+  const visited = new Set<string>([graph.rootId]);
+  const previous = new Map<string, AtlasGraphEdge>();
+  const queue = [graph.rootId];
+  while (queue.length) {
+    const current = queue.shift()!;
+    for (const edge of graph.edges.filter(item => item.from === current)) {
+      if (visited.has(edge.to)) continue;
+      visited.add(edge.to);
+      previous.set(edge.to, edge);
+      if (edge.to === targetId) {
+        const edges: AtlasGraphEdge[] = [];
+        let cursor = targetId;
+        while (cursor !== graph.rootId) {
+          const parent = previous.get(cursor);
+          if (!parent) return null;
+          edges.unshift(parent);
+          cursor = parent.from;
+        }
+        const nodeById = new Map(graph.nodes.map(node => [node.id, node]));
+        const nodes = [graph.rootId, ...edges.map(item => item.to)]
+          .map(id => nodeById.get(id))
+          .filter((node): node is AtlasGraphNode => Boolean(node));
+        return { nodes, edges };
+      }
+      queue.push(edge.to);
+    }
+  }
+  return null;
 }
 
 export function createAtlasDiscordUrl(guildId: string, channelId: string | null): string | null {
