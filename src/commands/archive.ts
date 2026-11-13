@@ -1051,20 +1051,20 @@ export class ArchiveCommand implements FeatureCommand {
       .filter((asset) => asset.url && asset !== image)
       .map((asset) => asset.url!);
 
-    if (!assets.length && entry.storage_channel_id && entry.storage_message_id) {
+    if (!image?.url && !attachmentUrls.length && entry.storage_channel_id && entry.storage_message_id) {
       const legacyUrl = await resolveLegacyArchiveAttachmentUrl(
         interaction.client, entry.created_guild_id, entry.storage_channel_id, entry.storage_message_id, entry.attachment_filename,
       ).catch(() => null);
       if (legacyUrl) {
-        if (/\\.(?:png|jpe?g|gif|webp|avif)$/i.test(entry.attachment_filename ?? "")) {
+        if (/\.(?:png|jpe?g|gif|webp|avif)$/i.test(entry.attachment_filename ?? "")) {
           return { imageUrl: legacyUrl, attachmentUrls };
         }
         attachmentUrls.push(legacyUrl);
       }
     }
 
-    if (!image?.url && !assets.length && entry.attachment_url?.startsWith("https://")) {
-      if (/\\.(?:png|jpe?g|gif|webp|avif)(?:[?#].*)?$/i.test(entry.attachment_url)) {
+    if (!image?.url && !attachmentUrls.length && entry.attachment_url?.startsWith("https://")) {
+      if (/\.(?:png|jpe?g|gif|webp|avif)(?:[?#].*)?$/i.test(entry.attachment_url)) {
         return { imageUrl: entry.attachment_url, attachmentUrls };
       }
       attachmentUrls.push(entry.attachment_url);
@@ -1083,7 +1083,7 @@ export class ArchiveCommand implements FeatureCommand {
     if (media.attachmentUrls.length) {
       embed.addFields({
         name: "Attachments",
-        value: media.attachmentUrls.map((url, index) => `[Open file ${index + 1}](${url})`).join("\\n").slice(0, 1024),
+        value: media.attachmentUrls.map((url, index) => `[Open file ${index + 1}](${url})`).join("\n").slice(0, 1024),
         inline: false,
       });
     }
