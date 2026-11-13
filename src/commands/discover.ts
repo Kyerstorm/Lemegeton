@@ -28,7 +28,7 @@ import { IgdbClient, type IgdbGame } from "../../helpers/integration/igdb.js";
 import { homeEmbed, navigationButtons } from "../../helpers/runtime/discord.js";
 import { TmdbClient, type TmdbMedia, type TmdbTvSeason } from "../../helpers/integration/tmdb.js";
 import { getGuildMediaRegion } from "../../helpers/media/media-region.js";
-import { cleanText } from "../../helpers/security/security.js";
+import { cleanText, safeDisplay } from "../../helpers/security/security.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
 import {
   filterAtlasGraph,
