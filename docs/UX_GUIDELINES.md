@@ -1,6 +1,8 @@
 # Interaction and UX Guidelines
 
-These guidelines are the product contract for every Lemegeton surface: Discord commands, components, scheduled deliveries, media presentations, the Next.js dashboard and the Rust/Axum API boundary. Apply them to new work and when touching existing flows. The goal is a coherent, low-friction media and community experience—not more panels, copy or decorative effects.
+These guidelines define the user-facing interaction and UI/UX standards for every Lemegeton surface: Discord commands, components, scheduled deliveries, media presentations and the Next.js dashboard. The goal is a coherent, low-friction media and community experience—not more panels, copy or decorative effects.
+
+**Scope:** This is a product UX standards document. It does not define repository-agent, coding-agent or contributor workflow instructions.
 
 ## 1. Product principles
 
@@ -51,7 +53,7 @@ These guidelines are the product contract for every Lemegeton surface: Discord c
 ## 4. Shared emoji and visual language
 
 - helpers/emoji.ts is the single source of bot emoji values and names. Command and helper files must import from it rather than embedding emoji values or Discord custom-emoji IDs.
-- Keep the current palette Unicode-based. Future animated/custom replacements should be made by changing the central palette only; do not scatter custom IDs across commands.
+- Preserve the established Discord custom emoji IDs already assigned in the central palette. Keep Unicode placeholders for entries without a custom emoji; replacements and aliases belong in helpers/emoji.ts only. Never scatter custom IDs across commands.
 - Keep icons consistent by meaning: success, failure, loading, warning, navigation, media category and provenance should not change semantics between commands.
 - Do not use emoji as a substitute for a button label, accessible name or explicit status text.
 - Reuse the shared embed colors and controls. Do not add decorative visual systems or per-command theme variants.

@@ -87,9 +87,9 @@ The catalogue names below are internal environments and navigation labels, not a
 | 36 | Account Connection Centre | Link, unlink, inspect and consent-manage AniList, Steam and other verified connections. |
 | 37 | Media Affinity | Opt-in comparisons with transparent signals and privacy controls. |
 | 38 | Community Taste Explorer | Aggregate, opt-in guild tastes with minimum cohort thresholds and no individual record exposure. |
-| 39 | Contributor Centre | Permission-filtered public Archive contribution attribution. |
+| 39 | Contributor Centre | **Implemented in profile:** recent approved Archive entries and active server-visible collection/Trail attribution, filtered to the current guild. |
 | 40 | Community Creations | Browse member-created, moderated Archive work from canonical records. |
-| 41 | Profile Showcase | Curated opt-in presentation without personal watch/read/play libraries or progress tracking. |
+| 41 | Profile Showcase | **Core implemented:** opt-in public profile with configured AniList/Steam summaries and recent public community work; no personal tracking. |
 
 ### Custom Roles — /custom-role
 
@@ -143,7 +143,7 @@ The phase status below is an implementation audit, not a feature promise. Status
 | 2 — Discovery and metadata | **In progress** | AniList, TMDB, IGDB, Steam, Google Books, comparisons, airing, trailers, creators, relations and regional availability have implementations and fixture tests. Google Books edition metadata was expanded in this implementation pass. | Provenance at field level, provider contract edge cases, and a supported webnovel metadata source. |
 | 3 — Archive and contributions | **Core workflows implemented; presentation/curation incomplete** | Submissions, moderation/reports, private asset storage, cleanup, collections, collaborators and Archive Trails exist. | Dedicated gallery, curation/spotlight workflow and end-to-end visibility tests for every share/export surface. |
 | 4 — Community and games | **Core activities implemented; competition formats incomplete** | Daily Drop, ranked voting, sessions/RSVP, spoiler discussions, release calendars/digests, quiz packs and persistent game sessions exist. | Tournament brackets, community seasons/showcases, richer puzzle/challenge modes and interaction tests. |
-| 5 — Profiles and Custom Roles | **Core privacy/linking/lifecycle implemented; showcase incomplete** | AniList/Steam linking, privacy preferences, affinity/taste, leaderboard and custom-role lifecycle/asset/picker helpers exist. | Profile contributor showcase and full live Discord hierarchy/lifecycle acceptance. |
+| 5 — Profiles and Custom Roles | **Profile showcase implemented; live acceptance pending** | Guild-scoped AniList/Steam linking, privacy preferences, affinity/taste, leaderboard, recent approved contributions, active collections/Trails and custom-role lifecycle helpers. | Live Discord role-hierarchy/lifecycle acceptance and visibility regression tests. |
 | 6 — Notifications and automation | **Basic scheduled delivery implemented; entity automation incomplete** | Completed/cancelled AniList notifications and guild release digests have scheduling/delivery paths. | Title/creator/franchise follows, more provider release kinds and bounded trigger workflows. |
 | 7 — Knowledge Atlas and dashboard | **Bounded two-hop exploration implemented; advanced graph work incomplete** | Typed provider/recommendation/community edges, guild visibility filters, direct relationship lookup, tested breadth-first expansion (2 hops / 24 nodes), provenance-aware dashboard graph and static image render. | Stable provider-ID canonicalization, node/edge search, relationship filters, pathfinding, clustering, rich node details and permission-equivalent graph export. |
 | 8 — Operations and launch | **Operational tooling implemented; live release gates open** | Docker/Compose, repository CI, health diagnostics, backup/restore rehearsal and a live-acceptance workflow exist. | Real credentials, production storage/database, Discord application and dashboard OAuth tests; owner-authorized release and rollback. |
@@ -241,9 +241,10 @@ Phase 0 code migration status does **not** mean the service is launched. Phase 8
 
 **Already present:** guild-scoped AniList/Steam profile linking and unlinking; public-profile and sharing preferences; affinity and minimum-cohort guild taste; AniList leaderboard; custom-role creation/configuration, picker, image validation, hierarchy checks, lifecycle, restore and reconciliation.
 
+**Completed in this pass:** the profile now shows up to five recent, approved, server-visible Archive entries, active server-visible collections owned by the member, and active server-visible Trails owned by the member. Queries remain scoped to the current guild and reuse canonical Archive records. The showcase is visible only through the existing public-profile gate (or the member's private preview). It does not add personal media lists or progress tracking.
+
 **Remaining delivery:**
-- Build the Contributor Centre from public, approved Archive entries and collection/Trail attribution.
-- Build the opt-in Profile Showcase from connected provider summaries and public contributions only. Never add watched/read/played lists, private libraries or progress.
+- Include collection collaborators in the contributor attribution view if the product chooses to expose editor/contributor roles publicly.
 - Re-check profile visibility and connection consent on each view; unlink must remove tokens/associations and derived access.
 - Verify custom-role assignment and recovery with real Discord role hierarchy, managed roles, member departures/rejoins, server boosts and permission changes.
 - Provide explicit user-facing states when a provider cannot supply a field or the account connection has expired.

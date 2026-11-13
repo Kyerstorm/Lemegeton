@@ -17,6 +17,13 @@ export interface ProfilePreferences {
   share_leaderboard: boolean;
 }
 
+export interface ProfileContribution {
+  id: string;
+  title: string;
+  kind: "entry" | "collection" | "trail";
+  media_type: string | null;
+}
+
 export interface LinkedProfile {
   discordId: string;
   anilistUsername: string | null;
@@ -26,6 +33,7 @@ export interface LinkedProfile {
   anilist: AniListUserProfile | null;
   steam: SteamProfile | null;
   contributions: number;
+  contributionShowcase: ProfileContribution[];
 }
 
 function defaultPreferences(guildId: string, userId: string): ProfilePreferences {
@@ -175,7 +183,7 @@ export async function getLinkedProfile(
       [userId, guildId],
     ),
   ]);
-  const [anilist, steamProfile, contribution] = await Promise.all([
+  const [anilist, steamProfile, contribution, contributionShowcase] = await Promise.all([
     user?.anilist_username && preferences.show_anilist
       ? aniList.getUser(user.anilist_username).catch(() => null)
       : Promise.resolve(null),
@@ -188,6 +196,27 @@ export async function getLinkedProfile(
          AND status = 'approved' AND visibility = 'server'`,
       [guildId, userId],
     ).catch(() => null),
+    query<ProfileContribution>(
+      `SELECT id::text, title, kind, media_type FROM (
+         SELECT id, title, 'entry'::text AS kind, media_type, created_at
+         FROM community_archive_entries
+         WHERE created_guild_id = $1 AND created_by = $2
+           AND status = 'approved' AND visibility = 'server'
+         UNION ALL
+         SELECT c.id, c.title, 'collection'::text AS kind, NULL::text AS media_type, c.updated_at AS created_at
+         FROM archive_collections c
+         WHERE c.guild_id = $1 AND c.owner_id = $2
+           AND c.status = 'active' AND c.visibility = 'server'
+         UNION ALL
+         SELECT t.id, t.title, 'trail'::text AS kind, NULL::text AS media_type, t.updated_at AS created_at
+         FROM archive_trails t
+         WHERE t.guild_id = $1 AND t.owner_id = $2
+           AND t.status = 'active' AND t.visibility = 'server'
+       ) AS recent_contributions
+       ORDER BY created_at DESC
+       LIMIT 5`,
+      [guildId, userId],
+    ).catch(() => []),
   ]);
   return {
     discordId: userId,
@@ -198,6 +227,7 @@ export async function getLinkedProfile(
     anilist,
     steam: steamProfile,
     contributions: Number(contribution?.count ?? 0),
+    contributionShowcase,
   };
 }
 

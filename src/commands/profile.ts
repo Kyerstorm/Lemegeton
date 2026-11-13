@@ -520,6 +520,18 @@ export class ProfileCommand implements FeatureCommand {
         { name: "AniList connection", value: profile.anilistUsername ? (profile.preferences.show_anilist ? (profile.anilist ? "Linked · verified" : "Linked · provider unavailable") : "Hidden by member") : "Not connected", inline: true },
         { name: "Steam connection", value: profile.steamId ? (profile.preferences.show_steam ? (profile.steam ? "Linked · verified" : "Linked · provider unavailable") : "Hidden by member") : "Not connected", inline: true },
       );
+    embed.addFields({
+      name: "Recent community work",
+      value: profile.contributionShowcase.length
+        ? profile.contributionShowcase.map((item) => {
+            const kind = item.kind === "entry"
+              ? safeDisplay(item.media_type ?? "Archive entry", 40)
+              : item.kind === "collection" ? "Collection" : "Trail";
+            return `• **${safeDisplay(item.title, 110)}** · ${kind}`;
+          }).join("\\n").slice(0, 1024)
+        : "No recent public Archive contributions.",
+      inline: false,
+    });
     if (profile.anilist) {
       if (profile.anilist.about) embed.addFields({ name: "About", value: profile.anilist.about.slice(0,1024), inline: false });
       embed.addFields(
