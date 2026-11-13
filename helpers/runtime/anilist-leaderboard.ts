@@ -34,14 +34,17 @@ export interface AniListLeaderboardEntry {
   activityScore: number;
 }
 
-const ORIGIN_MULTIPLIERS = {
-  manga: { chapter: 1, variety: 1, efficiency: 1 },
-  manhwa: { chapter: 1.1, variety: 1.05, efficiency: 1.1 },
-  manhua: { chapter: 0.95, variety: 0.98, efficiency: 0.95 },
-  japaneseAnime: { episode: 1, variety: 1, efficiency: 1 },
-  koreanAnime: { episode: 1.15, variety: 1.1, efficiency: 1.15 },
-  chineseAnime: { episode: 1.05, variety: 1.02, efficiency: 1.05 },
-} as const;
+const ORIGIN_MULTIPLIERS: Record<
+  "manga" | "manhwa" | "manhua" | "japaneseAnime" | "koreanAnime" | "chineseAnime",
+  { chapter: number; episode: number; variety: number; efficiency: number }
+> = {
+  manga: { chapter: 1, episode: 0, variety: 1, efficiency: 1 },
+  manhwa: { chapter: 1.1, episode: 0, variety: 1.05, efficiency: 1.1 },
+  manhua: { chapter: 0.95, episode: 0, variety: 0.98, efficiency: 0.95 },
+  japaneseAnime: { chapter: 0, episode: 1, variety: 1, efficiency: 1 },
+  koreanAnime: { chapter: 0, episode: 1.15, variety: 1.1, efficiency: 1.15 },
+  chineseAnime: { chapter: 0, episode: 1.05, variety: 1.02, efficiency: 1.05 },
+};
 
 const ANIME_FORMAT_WEIGHTS = {
   TV: { episode: 1, variety: 1, efficiency: 1 },
