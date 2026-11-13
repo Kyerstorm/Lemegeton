@@ -11,6 +11,17 @@ import type { Guild } from "discord.js";
 import type { DatabaseConfig } from "../helpers/runtime/config.js";
 import { getPanelOfTheDay } from "../helpers/archive/archive.js";
 import { createArchiveSpotlight, listArchiveSpotlights, cancelArchiveSpotlight } from "../helpers/archive/archive-curation.js";
+import {
+  addCommunitySeasonItem,
+  advanceCommunityTournament,
+  closeCommunitySeason,
+  createCommunitySeason,
+  createCommunityTournament,
+  getCommunitySeason,
+  getCommunityTournament,
+  listCommunityTournaments,
+  voteInCommunityTournament,
+} from "../helpers/community/community-tournaments.js";
 import { removeGuildMemberProfileData } from "../helpers/runtime/profile.js";
 import { deleteGuildData, retryDepartedGuildDeletions } from "../helpers/runtime/guild-retention.js";
 import { claimDueReadingReminders } from "../helpers/community/community-reading.js";
@@ -448,6 +459,95 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     );
     await cancelArchiveSpotlight("987654321098765432", serverSpotlightId, "101", false, false);
     assert.equal((await listArchiveSpotlights("987654321098765432")).length, 0);
+
+    const tournamentGuild = "987654321098765432";
+    const tournamentOtherGuild = "111111111111111112";
+    const tournamentCreator = "333333333333333331";
+    const tournamentVoter = "333333333333333332";
+    const finalVoter = "333333333333333333";
+    const firstRoundClosesAt = new Date(Date.now() + 60_000);
+    const tournamentId = await createCommunityTournament({
+      guildId: tournamentGuild,
+      creatorId: tournamentCreator,
+      title: "Integration Tournament",
+      description: "Guild-scoped integration test",
+      closesAt: firstRoundClosesAt,
+      candidates: [
+        { title: "Candidate A", sourceUrl: "https://example.com/a" },
+        { title: "Candidate B", sourceUrl: "https://example.com/b" },
+        { title: "Candidate C", sourceUrl: "https://example.com/c" },
+        { title: "Candidate D", sourceUrl: "https://example.com/d" },
+      ],
+    });
+    assert.equal((await listCommunityTournaments(tournamentOtherGuild)).some(item => item.id === tournamentId), false);
+    const firstRound = await getCommunityTournament(tournamentGuild, tournamentId);
+    assert.ok(firstRound);
+    assert.equal(firstRound.matches.length, 2);
+    const votedMatch = firstRound.matches[0]!;
+    await voteInCommunityTournament(tournamentGuild, tournamentVoter, votedMatch.id, votedMatch.candidate_b_id);
+    await voteInCommunityTournament(tournamentGuild, tournamentVoter, votedMatch.id, votedMatch.candidate_b_id);
+    await assert.rejects(
+      voteInCommunityTournament(tournamentGuild, tournamentVoter, votedMatch.id, votedMatch.candidate_a_id),
+      /ballots are locked/i,
+    );
+    await assert.rejects(
+      voteInCommunityTournament(tournamentOtherGuild, finalVoter, votedMatch.id, votedMatch.candidate_a_id),
+      /closed or no longer available/i,
+    );
+    await assert.rejects(
+      advanceCommunityTournament(tournamentGuild, tournamentId, tournamentCreator, false, new Date()),
+      /round is still open/i,
+    );
+    const secondRoundResult = await advanceCommunityTournament(
+      tournamentGuild, tournamentId, tournamentCreator, false,
+      new Date(firstRoundClosesAt.getTime() + 1_000),
+    );
+    assert.deepEqual(secondRoundResult, { status: "open", round: 2, winnerTitle: null });
+    const secondRound = await getCommunityTournament(tournamentGuild, tournamentId);
+    assert.ok(secondRound);
+    assert.equal(secondRound.matches.length, 1);
+    const finalMatch = secondRound.matches[0]!;
+    assert.equal(finalMatch.candidate_a_title, "Candidate B");
+    assert.equal(finalMatch.candidate_b_title, "Candidate C");
+    await voteInCommunityTournament(tournamentGuild, finalVoter, finalMatch.id, finalMatch.candidate_a_id);
+    const completion = await advanceCommunityTournament(
+      tournamentGuild, tournamentId, tournamentCreator, false,
+      new Date(new Date(secondRound.closes_at).getTime() + 1_000),
+    );
+    assert.deepEqual(completion, { status: "completed", round: 2, winnerTitle: "Candidate B" });
+    assert.equal((await getCommunityTournament(tournamentGuild, tournamentId))?.status, "completed");
+
+    const seasonStartsAt = new Date();
+    const seasonEndsAt = new Date(seasonStartsAt.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const seasonId = await createCommunitySeason({
+      guildId: tournamentGuild,
+      creatorId: tournamentCreator,
+      title: "Integration Season",
+      description: "References completed server activities.",
+      startsAt: seasonStartsAt,
+      endsAt: seasonEndsAt,
+    });
+    await addCommunitySeasonItem(tournamentGuild, tournamentCreator, seasonId, "tournament", tournamentId);
+    await assert.rejects(
+      addCommunitySeasonItem(tournamentGuild, finalVoter, seasonId, "tournament", tournamentId),
+      /season creator or a server manager/i,
+    );
+    await assert.rejects(
+      addCommunitySeasonItem(tournamentOtherGuild, tournamentCreator, seasonId, "tournament", tournamentId),
+      /season creator or a server manager/i,
+    );
+    const season = await getCommunitySeason(tournamentGuild, seasonId);
+    assert.ok(season);
+    assert.deepEqual(season.items.map(item => [item.item_type, item.item_id, item.title]), [
+      ["tournament", tournamentId, "Integration Tournament"],
+    ]);
+    assert.equal(await getCommunitySeason(tournamentOtherGuild, seasonId), null);
+    await assert.rejects(
+      closeCommunitySeason(tournamentGuild, finalVoter, seasonId, false),
+      /season creator or a server manager/i,
+    );
+    await closeCommunitySeason(tournamentGuild, tournamentCreator, seasonId, false);
+    assert.equal((await getCommunitySeason(tournamentGuild, seasonId))?.status, "completed");
 
     const departedUser = "777777777777777777";
     const retainedGuild = "123456789012345678";
