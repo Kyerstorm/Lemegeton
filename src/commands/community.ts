@@ -220,8 +220,7 @@ export class CommunityCommand implements FeatureCommand {
       { name: "Anime and TV", value: "anime,tv" }, { name: "Anime and movies", value: "anime,movies" },
       { name: "TV and movies", value: "tv,movies" },
     ))
-    .addIntegerOption((option) => option.setName("weekday").setDescription("Weekly digest day (0 Sunday – 6 Saturday)").setMinValue(0).setMaxValue(6))
-;
+    .addIntegerOption((option) => option.setName("weekday").setDescription("Weekly digest day (0 Sunday – 6 Saturday)").setMinValue(0).setMaxValue(6));
 
   private readonly anilist: AniListClient;
   private readonly tmdb: TmdbClient;

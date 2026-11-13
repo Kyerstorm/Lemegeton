@@ -451,7 +451,9 @@ export async function getCommunitySeason(guildId: string, seasonId: string): Pro
     [seasonId, guildId],
   );
   if (!season) return null;
-  const items = await query(
+  const items = await query<{
+    item_type: CommunitySeasonItemType; item_id: string; title: string; added_by: string;
+  }>(
     "SELECT i.item_type, i.item_id::text, i.added_by::text, " +
     "COALESCE(d.title, r.title, s.title, t.title, p.title, c.title, a.title) AS title " +
     "FROM community_season_items i " +
