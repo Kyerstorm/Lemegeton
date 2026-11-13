@@ -136,8 +136,7 @@ function estimateAnimeOrigins(total: number, episodes: number, manga: number, ch
   return normalize(values);
 }
 
-function estimateAnimeFormats(total: number, episodes: number): Distribution<AnimeFormat> {
-  const average = episodes / Math.max(total, 1);
+function estimateAnimeFormats(total: number, episodes: number, average: number): Distribution<AnimeFormat> {
   const values: Distribution<AnimeFormat> = {
     TV: 0.65, ONA: 0.12, OVA: 0.08, TV_SHORT: 0.06, MOVIE: 0.07, SPECIAL: 0.02,
   };
@@ -168,8 +167,7 @@ function estimateAnimeFormats(total: number, episodes: number): Distribution<Ani
   return normalize(values);
 }
 
-function estimateMangaFormats(total: number, chapters: number): Distribution<MangaFormat> {
-  const average = chapters / Math.max(total, 1);
+function estimateMangaFormats(total: number, chapters: number, average: number): Distribution<MangaFormat> {
   const values: Distribution<MangaFormat> = {
     MANGA: 0.75, LIGHT_NOVEL: 0.15, ONE_SHOT: 0.05, DOUJINSHI: 0.03, NOVEL: 0.02,
   };
@@ -209,9 +207,16 @@ function estimateMangaFormats(total: number, chapters: number): Distribution<Man
 }
 
 function allocate<T extends string>(total: number, weights: Distribution<T>): Record<T, number> {
-  const sum = Object.values(weights).reduce((value, item) => value + item, 0);
+  const normalized = normalize(weights);
   return Object.fromEntries(
-    Object.entries(weights).map(([key, value]) => [key, Math.trunc(total * Number(value) / Math.max(sum, 1))]),
+    Object.entries(normalized).map(([key, value]) => [key, Math.trunc(total * Number(value))]),
+  ) as Record<T, number>;
+}
+
+function distributeByEstimatedCounts<T extends string>(total: number, counts: Record<T, number>): Record<T, number> {
+  const sum = Object.values(counts).reduce((value, item) => value + item, 0);
+  return Object.fromEntries(
+    Object.entries(counts).map(([key, value]) => [key, Math.trunc(total * Number(value) / Math.max(sum, 1))]),
   ) as Record<T, number>;
 }
 
@@ -221,50 +226,54 @@ export function calculateOriginWeightedActivityScore(
   totalChapters: number,
   totalEpisodes: number,
 ): number {
+  const mangaAverage = totalChapters / Math.max(totalManga, 1);
+  const animeAverage = totalEpisodes / Math.max(totalAnime, 1);
   const mangaOrigins = estimateMangaOrigins(totalManga, totalChapters, totalAnime, totalEpisodes);
   const animeOrigins = estimateAnimeOrigins(totalAnime, totalEpisodes, totalManga, totalChapters);
-  const mangaFormats = estimateMangaFormats(totalManga, totalChapters);
-  const animeFormats = estimateAnimeFormats(totalAnime, totalEpisodes);
   const mangaTitles = allocate(totalManga, mangaOrigins);
   const mangaUnits = allocate(totalChapters, mangaOrigins);
   const animeTitles = allocate(totalAnime, animeOrigins);
   const animeUnits = allocate(totalEpisodes, animeOrigins);
-  const mangaFormatTitles = allocate(totalManga, mangaFormats);
-  const mangaFormatUnits = allocate(totalChapters, mangaFormats);
-  const animeFormatTitles = allocate(totalAnime, animeFormats);
-  const animeFormatUnits = allocate(totalEpisodes, animeFormats);
+
+  // The Python model estimates format counts and unit counts independently from the same average.
+  const mangaFormatTitles = allocate(totalManga, estimateMangaFormats(totalManga, 0, mangaAverage));
+  const mangaFormatUnits = allocate(totalChapters, estimateMangaFormats(0, totalChapters, mangaAverage));
+  const animeFormatTitles = allocate(totalAnime, estimateAnimeFormats(totalAnime, 0, animeAverage));
+  const animeFormatUnits = allocate(totalEpisodes, estimateAnimeFormats(0, totalEpisodes, animeAverage));
   let score = 0;
 
   for (const origin of Object.keys(mangaOrigins) as MangaOrigin[]) {
     const originWeight = ORIGIN_MULTIPLIERS[origin];
-    const originTitleCount = mangaTitles[origin];
-    const originUnitCount = mangaUnits[origin];
-    for (const format of Object.keys(mangaFormats) as MangaFormat[]) {
+    const originTitleCounts = distributeByEstimatedCounts(mangaTitles[origin], mangaFormatTitles);
+    const originUnitCounts = distributeByEstimatedCounts(mangaUnits[origin], mangaFormatUnits);
+    for (const format of Object.keys(mangaFormatTitles) as MangaFormat[]) {
       const formatWeight = MANGA_FORMAT_WEIGHTS[format];
-      const titleCount = Math.trunc(originTitleCount * mangaFormatTitles[format] / Math.max(totalManga, 1));
-      const unitCount = Math.trunc(originUnitCount * mangaFormatUnits[format] / Math.max(totalChapters, 1));
-      if (!unitCount) continue;
-      score += unitCount * 2.5 * originWeight.chapter * formatWeight.chapter;
-      score += titleCount * 25 * originWeight.variety * formatWeight.variety;
-      if (titleCount > 0) {
-        score += Math.min((unitCount / titleCount) * 5, 500) * originWeight.efficiency * formatWeight.efficiency;
+      const titleCount = originTitleCounts[format];
+      const unitCount = originUnitCounts[format];
+      if (unitCount > 0) {
+        score += unitCount * 2.5 * originWeight.chapter * formatWeight.chapter;
+        score += titleCount * 25 * originWeight.variety * formatWeight.variety;
+        if (titleCount > 0) {
+          score += Math.min((unitCount / titleCount) * 5, 500) * originWeight.efficiency * formatWeight.efficiency;
+        }
       }
     }
   }
 
   for (const origin of Object.keys(animeOrigins) as AnimeOrigin[]) {
     const originWeight = ORIGIN_MULTIPLIERS[origin];
-    const originTitleCount = animeTitles[origin];
-    const originUnitCount = animeUnits[origin];
-    for (const format of Object.keys(animeFormats) as AnimeFormat[]) {
+    const originTitleCounts = distributeByEstimatedCounts(animeTitles[origin], animeFormatTitles);
+    const originUnitCounts = distributeByEstimatedCounts(animeUnits[origin], animeFormatUnits);
+    for (const format of Object.keys(animeFormatTitles) as AnimeFormat[]) {
       const formatWeight = ANIME_FORMAT_WEIGHTS[format];
-      const titleCount = Math.trunc(originTitleCount * animeFormatTitles[format] / Math.max(totalAnime, 1));
-      const unitCount = Math.trunc(originUnitCount * animeFormatUnits[format] / Math.max(totalEpisodes, 1));
-      if (!unitCount) continue;
-      score += unitCount * 1.8 * originWeight.episode * formatWeight.episode;
-      score += titleCount * 20 * originWeight.variety * formatWeight.variety;
-      if (titleCount > 0) {
-        score += Math.min((unitCount / titleCount) * 8, 400) * originWeight.efficiency * formatWeight.efficiency;
+      const titleCount = originTitleCounts[format];
+      const unitCount = originUnitCounts[format];
+      if (unitCount > 0) {
+        score += unitCount * 1.8 * originWeight.episode * formatWeight.episode;
+        score += titleCount * 20 * originWeight.variety * formatWeight.variety;
+        if (titleCount > 0) {
+          score += Math.min((unitCount / titleCount) * 8, 400) * originWeight.efficiency * formatWeight.efficiency;
+        }
       }
     }
   }
