@@ -265,7 +265,7 @@ async function serverDiagnostics(guildId: string, currentChannelId: string, guil
 }
 
 function canManage(
-  interaction: ButtonInteraction | ChatInputCommandInteraction | ChannelSelectMenuInteraction | ModalSubmitInteraction,
+  interaction: ButtonInteraction | ChatInputCommandInteraction | ChannelSelectMenuInteraction | StringSelectMenuInteraction | ModalSubmitInteraction,
 ): boolean {
   return interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
 }
