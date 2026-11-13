@@ -38,6 +38,7 @@ import { queryOne } from "../../database.js";
 import { isDiscordSnowflake, safeDisplay } from "../../helpers/security/security.js";
 
 interface LeaderboardSession {
+  token: string;
   userId: string;
   guildId: string;
   mode: AniListLeaderboardMode;
@@ -80,7 +81,7 @@ function leaderboardPage(
           `**Total Episodes Watched:** ${entry.totalEpisodes.toLocaleString()}`,
           `**Average Episodes per Anime:** ${entry.animeAverage.toFixed(2)}`,
           `**Mean Score:** ${entry.animeMeanScore ? entry.animeMeanScore.toFixed(2) + "/100" : "No score"}`,
-        ].join("\\n");
+        ].join("\n");
         break;
       case "manga":
         value = [
@@ -88,14 +89,14 @@ function leaderboardPage(
           `**Total Chapters Read:** ${entry.totalChapters.toLocaleString()}`,
           `**Average Chapters per Manga:** ${entry.mangaAverage.toFixed(2)}`,
           `**Mean Score:** ${entry.mangaMeanScore ? entry.mangaMeanScore.toFixed(2) + "/100" : "No score"}`,
-        ].join("\\n");
+        ].join("\n");
         break;
       case "combined":
         value = [
           `**📖 Manga:** ${entry.totalManga.toLocaleString()} titles · ${entry.totalChapters.toLocaleString()} chapters`,
           `**🎬 Anime:** ${entry.totalAnime.toLocaleString()} titles · ${entry.totalEpisodes.toLocaleString()} episodes`,
           `**🌟 Activity Score:** ${Math.trunc(entry.activityScore).toLocaleString()} points`,
-        ].join("\\n");
+        ].join("\n");
         break;
       case "chapters":
         value = `**Total Chapters Read:** ${entry.totalChapters.toLocaleString()}`;
@@ -112,23 +113,23 @@ function leaderboardPage(
     }
     return {
       name: `${label} ${safeDisplay(entry.aniListName, 180)}`,
-      value: `${value}\\n[Open AniList profile](${entry.aniListUrl})`,
+      value: `${value}\n[Open AniList profile](${entry.aniListUrl})`,
       inline: false,
     };
   });
   const embed = homeEmbed(
     config.title,
-    `${config.description}\\n\\nPage ${page + 1}/${pageCount} · ${session.optedIn.toLocaleString()} members opted in. Only current members of this server are included.`,
+    `${config.description}\n\nPage ${page + 1}/${pageCount} · ${session.optedIn.toLocaleString()} members opted in. Only current members of this server are included.`,
     fields.length ? fields : [{ name: "No data", value: "No opted-in AniList profiles were available.", inline: false }],
   ).setFooter({ text: "AniList profile statistics · Fetched live · Five members per page" });
   const controls = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId(`profile:leaderboard-page:${session.expiresAt.toString(36)}:${page - 1}`)
+      .setCustomId(`profile:leaderboard-page:${session.token}:${page - 1}`)
       .setLabel("Previous")
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(page <= 0),
     new ButtonBuilder()
-      .setCustomId(`profile:leaderboard-page:${session.expiresAt.toString(36)}:${page + 1}`)
+      .setCustomId(`profile:leaderboard-page:${session.token}:${page + 1}`)
       .setLabel("Next")
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(page >= pageCount - 1),
@@ -346,7 +347,7 @@ export class ProfileCommand implements FeatureCommand {
     if (!interaction.guildId) return false;
     const [, action, setting, pageValue] = interaction.customId.split(":");
     if (action === "leaderboard-page" && setting && pageValue !== undefined) {
-      const session = [...leaderboardSessions.entries()].find(([, value]) => value.expiresAt.toString(36) === setting)?.[1];
+      const session = leaderboardSessions.get(setting);
       if (!session || session.expiresAt <= Date.now()) {
         await interaction.reply({ content: "This leaderboard session has expired. Open it again from /profile.", flags: MessageFlags.Ephemeral });
         return true;
@@ -615,6 +616,7 @@ export class ProfileCommand implements FeatureCommand {
       const token = interaction.id;
       const expiresAt = now + LEADERBOARD_SESSION_TTL_MS;
       const session: LeaderboardSession = {
+        token,
         userId: interaction.user.id,
         guildId: interaction.guildId!,
         mode,
@@ -624,15 +626,6 @@ export class ProfileCommand implements FeatureCommand {
       };
       leaderboardSessions.set(token, session);
       const firstPage = leaderboardPage(session, 0);
-      firstPage.components[0]!.components.forEach((component) => {
-        const data = component.toJSON();
-        const original = data.custom_id;
-        if (original) {
-          const direction = original.endsWith(":-1") ? "previous" : "next";
-          const button = firstPage.components[0]!.components.find((item) => item.customId === original);
-          if (button) button.setCustomId(`profile:leaderboard-page:${token}:${direction === "previous" ? 0 : 1}`);
-        }
-      });
       await interaction.editReply({
         embeds: firstPage.embeds,
         components: firstPage.components,
@@ -642,7 +635,7 @@ export class ProfileCommand implements FeatureCommand {
       const message = error instanceof Error ? error.message : "The AniList leaderboard is unavailable.";
       const issueHash = await createInteractionIssueLog(interaction, "/profile", error, { action: "leaderboard", mode });
       await interaction.editReply({
-        content: issueHash ? `${message}\\n\\n${issueHashNotice(issueHash)}` : message,
+        content: issueHash ? `${message}\n\n${issueHashNotice(issueHash)}` : message,
         embeds: [],
         components: [],
         allowedMentions: { parse: [] },
