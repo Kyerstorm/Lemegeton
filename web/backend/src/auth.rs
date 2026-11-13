@@ -219,11 +219,17 @@ mod tests {
         assert_eq!(start.status(), StatusCode::SEE_OTHER);
         let location = start.headers().get(header::LOCATION).unwrap().to_str().unwrap();
         let authorize_url = reqwest::Url::parse(location).unwrap();
+        assert_eq!(authorize_url.scheme(), "https");
         assert_eq!(authorize_url.host_str(), Some("discord.com"));
         assert_eq!(authorize_url.path(), "/oauth2/authorize");
+        assert_eq!(authorize_url.query_pairs().find(|(key, _)| key == "client_id").unwrap().1, "acceptance-client");
+        assert_eq!(authorize_url.query_pairs().find(|(key, _)| key == "redirect_uri").unwrap().1, "http://localhost:8080/oauth/callback");
+        assert_eq!(authorize_url.query_pairs().find(|(key, _)| key == "response_type").unwrap().1, "code");
         assert_eq!(authorize_url.query_pairs().find(|(key, _)| key == "scope").unwrap().1, "identify guilds");
         let oauth_state = authorize_url.query_pairs()
             .find(|(key, _)| key == "state").unwrap().1.to_string();
+        assert_eq!(oauth_state.len(), 64);
+        assert!(oauth_state.chars().all(|character| character.is_ascii_alphanumeric()));
         let oauth_cookie = start.headers().get(header::SET_COOKIE).unwrap().to_str().unwrap()
             .split(';').next().unwrap().to_string();
 
