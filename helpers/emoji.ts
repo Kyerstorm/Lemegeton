@@ -71,7 +71,7 @@ export const emoji = {
   gift: "<:gift:1557773581994303589>",
 
   // Additional interface symbols kept as Unicode for future replacement.
-  lock: "🔒", hourglass: "⌛", warningUnicode: "⚠️", warningPlain: "⚠",
+  hourglass: "⌛", warningUnicode: "⚠️", warningPlain: "⚠",
   check: "✅", cross: "❌", heart: "❤️", target: "🎯", stats: "📊", popularity: "🔥",
   recommended: "⭐", panels: "📚", quote: "💬", fanworks: "🎨", moodboard: "🖼️",
   scenes: "🎬", theory: "💡", globe: "🌐", mangaDiscovery: "📚", lightNovelDiscovery: "📖",
@@ -80,6 +80,9 @@ export const emoji = {
   rankingChapters: "📚", rankingEpisodes: "📺", finish: "🏁",
   goldMedal: "🥇", silverMedal: "🥈", bronzeMedal: "🥉",
   refreshUnicode: "🔄", chevronLeft: "◀️", chevronRight: "▶️",
+  bell: "🔔", activityBubble: "🗨️", crown: "👑",
+  testing: "🧪", pause: "⏸️", tools: "🔧", performance: "⚡", bug: "🐛", rocket: "🚀",
+  chevronLeftPlain: "◀", chevronRightPlain: "▶",
 
   // Provider and account markers
   anilist: "<:anilist:1557779525763338330>",

@@ -15,7 +15,7 @@ import {
   type StringSelectMenuInteraction,
 } from "discord.js";
 import type { FeatureCommand } from "../../helpers/commands/command.js";
-import { loadingMessage } from "../../helpers/emoji.js";
+import { emoji, loadingMessage } from "../../helpers/emoji.js";
 import { isBotModerator, isModeratorCommandGuild } from "../../helpers/commands/moderation.js";
 import { query, queryOne, transaction } from "../../database.js";
 
@@ -32,22 +32,22 @@ type PlannedFeature = Record<string, unknown> & {
 };
 
 const STATUS = [
-  { value: "planned", label: "Planned", emoji: "📋", color: 0x5865f2 },
-  { value: "in_progress", label: "In Progress", emoji: "🔄", color: 0xfee75c },
-  { value: "testing", label: "Testing", emoji: "🧪", color: 0xfee75c },
-  { value: "completed", label: "Completed", emoji: "✅", color: 0x57f287 },
-  { value: "cancelled", label: "Cancelled", emoji: "❌", color: 0xed4245 },
-  { value: "on_hold", label: "On Hold", emoji: "⏸️", color: 0x99aab5 },
+  { value: "planned", label: "Planned", emoji: emoji.copy, color: 0x5865f2 },
+  { value: "in_progress", label: "In Progress", emoji: emoji.refreshUnicode, color: 0xfee75c },
+  { value: "testing", label: "Testing", emoji: emoji.testing, color: 0xfee75c },
+  { value: "completed", label: "Completed", emoji: emoji.check, color: 0x57f287 },
+  { value: "cancelled", label: "Cancelled", emoji: emoji.cross, color: 0xed4245 },
+  { value: "on_hold", label: "On Hold", emoji: emoji.pause, color: 0x99aab5 },
 ] as const;
 
 const CATEGORY = [
-  { value: "Anime/Manga Features", emoji: "📺" },
-  { value: "Gaming Features", emoji: "🎮" },
-  { value: "Social Features", emoji: "👥" },
-  { value: "Server Management", emoji: "⚙️" },
-  { value: "Utilities", emoji: "🔧" },
-  { value: "Performance Improvements", emoji: "⚡" },
-  { value: "Bug Fixes", emoji: "🐛" },
+  { value: "Anime/Manga Features", emoji: emoji.anime },
+  { value: "Gaming Features", emoji: emoji.game },
+  { value: "Social Features", emoji: emoji.community },
+  { value: "Server Management", emoji: emoji.settings },
+  { value: "Utilities", emoji: emoji.tools },
+  { value: "Performance Improvements", emoji: emoji.performance },
+  { value: "Bug Fixes", emoji: emoji.bug },
 ] as const;
 
 const statusAt = (code: number) => STATUS[code - 1];
@@ -125,7 +125,7 @@ function stateEmbed(feature: PlannedFeature | null, page: number, total: number,
   ].filter(Boolean);
   const embed = new EmbedBuilder()
     .setColor(status ? (STATUS.find((item) => item.value === status)?.color ?? 0x5865f2) : 0x5865f2)
-    .setTitle("🚀 Planned Features" + (filters.length ? " · " + filters.join(" · ") : ""))
+    .setTitle(emoji.rocket + " Planned Features" + (filters.length ? " · " + filters.join(" · ") : ""))
     .setDescription("Page " + page + "/" + Math.max(1, total) + " · " + total + " features")
     .setTimestamp();
   if (!feature) {
@@ -149,11 +149,11 @@ function pageControls(page: number, total: number, status: string | null, catego
   const c = categoryCode(category);
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("planned:previous:" + s + ":" + c + ":" + page)
-      .setLabel("◀ Previous").setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
+      .setLabel(emoji.chevronLeftPlain + " Previous").setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
     new ButtonBuilder().setCustomId("planned:page").setLabel("Page " + page + "/" + Math.max(1, total))
       .setStyle(ButtonStyle.Primary).setDisabled(true),
     new ButtonBuilder().setCustomId("planned:next:" + s + ":" + c + ":" + page)
-      .setLabel("Next ▶").setStyle(ButtonStyle.Secondary).setDisabled(page >= Math.max(1, total)),
+      .setLabel("Next " + emoji.chevronRightPlain).setStyle(ButtonStyle.Secondary).setDisabled(page >= Math.max(1, total)),
   );
   const rows = [row];
   if (!canManage) return rows;

@@ -1,4 +1,5 @@
 import { EmbedBuilder, type Message } from "discord.js";
+import { emoji } from "../../helpers/emoji.js";
 import {
   AniListClient,
   type AniListEntityKind,
@@ -100,7 +101,7 @@ function firstAniListUrl(content: string): URL | null {
 function buildActivitySection(user: AniListUserProfile, activities: AniListPublicActivity[]): EmbedBuilder {
   const embed = new EmbedBuilder()
     .setColor(EMBED_COLOURS.info)
-    .setTitle("🗨️ " + user.name + " · Public Activity")
+    .setTitle(emoji.activityBubble + " " + user.name + " · Public Activity")
     .setURL(user.url)
     .setDescription("Recent public text and message activity returned by AniList. Personal list/progress activities are not displayed.")
     .setFooter({ text: "AniList · Public profile activity" });

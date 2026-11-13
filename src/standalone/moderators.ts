@@ -13,7 +13,7 @@ import {
   type ModalSubmitInteraction,
 } from "discord.js";
 import type { FeatureCommand } from "../../helpers/commands/command.js";
-import { loadingMessage } from "../../helpers/emoji.js";
+import { emoji, loadingMessage } from "../../helpers/emoji.js";
 import { isBotModerator, isModeratorCommandGuild } from "../../helpers/commands/moderation.js";
 import { query } from "../../database.js";
 
@@ -27,7 +27,7 @@ async function getModerators(): Promise<Moderator[]> {
 }
 
 function panel(rows: Moderator[]): EmbedBuilder {
-  const embed = new EmbedBuilder().setColor(0x5865f2).setTitle("👑 Bot moderators")
+  const embed = new EmbedBuilder().setColor(0x5865f2).setTitle(emoji.crown + " Bot moderators")
     .setDescription("Bot-wide moderators can inspect diagnostic records and manage trusted bot operations.")
     .setFooter({ text: rows.length + " registered bot moderator" + (rows.length === 1 ? "" : "s") });
   if (!rows.length) {

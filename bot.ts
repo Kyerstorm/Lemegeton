@@ -1,4 +1,5 @@
 import {AuditLogEvent,Client,Events,GatewayIntentBits,MessageFlags,type Guild,type Interaction,type TextChannel} from "discord.js";
+import { emoji } from "./helpers/emoji.js";
 import {createServer, type Server} from "node:http";
 import {timingSafeEqual} from "node:crypto";
 import {findAtlasRelationships,normalizeAtlasCategory,safeAtlasUrl} from "./helpers/integration/atlas.js";
@@ -392,7 +393,7 @@ async function processDailyDrops():Promise<void>{
     const thread=await client.channels.fetch(reminder.thread_id);
     if(!thread||!thread.isTextBased()||!("send" in thread))throw new Error("The scheduled Reading Club thread is unavailable.");
     await (thread as TextChannel).send({
-     content:`🔔 **Community Reading Club starts now:** ${reminder.title}. Keep plot spoilers marked with Discord spoiler tags.`,
+     content:`${emoji.bell} **Community Reading Club starts now:** ${reminder.title}. Keep plot spoilers marked with Discord spoiler tags.`,
      allowedMentions:{parse:[]},
     });
     await markReadingReminderSent(reminder.guild_id,reminder.nomination_id);
