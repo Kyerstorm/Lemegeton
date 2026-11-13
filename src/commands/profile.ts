@@ -33,8 +33,108 @@ import {
   updateProfilePreferences,
 } from "../../helpers/runtime/profile.js";
 import { homeEmbed } from "../../helpers/runtime/discord.js";
+import { type AniListLeaderboardEntry, type AniListLeaderboardMode } from "../../helpers/runtime/anilist-leaderboard.js";
 import { queryOne } from "../../database.js";
 import { isDiscordSnowflake, safeDisplay } from "../../helpers/security/security.js";
+
+interface LeaderboardSession {
+  userId: string;
+  guildId: string;
+  mode: AniListLeaderboardMode;
+  entries: AniListLeaderboardEntry[];
+  optedIn: number;
+  expiresAt: number;
+}
+
+const LEADERBOARD_PAGE_SIZE = 5;
+const LEADERBOARD_SESSION_TTL_MS = 5 * 60 * 1000;
+const leaderboardSessions = new Map<string, LeaderboardSession>();
+
+const LEADERBOARD_PRESENTATION: Record<AniListLeaderboardMode, { title: string; description: string }> = {
+  anime: { title: "🎬 Anime Golden Ratio", description: "Members ranked by average episodes watched per anime entry." },
+  manga: { title: "📖 Manga Golden Ratio", description: "Members ranked by average chapters read per manga entry." },
+  combined: { title: "🌟 Ultimate Otaku Ranking", description: "Members ranked by the legacy origin-weighted activity score. Origin and format splits are estimates derived from aggregate AniList statistics." },
+  chapters: { title: "📚 Most Chapters Read", description: "Members ranked by total chapters read, as reported by AniList." },
+  episodes: { title: "📺 Most Episodes Watched", description: "Members ranked by total episodes watched, as reported by AniList." },
+  manga_completed: { title: "🏁 Most Manga Completed", description: "Members ranked by completed manga entries on AniList." },
+  anime_completed: { title: "🏁 Most Anime Completed", description: "Members ranked by completed anime entries on AniList." },
+};
+
+function leaderboardPage(
+  session: LeaderboardSession,
+  page: number,
+): { embeds: EmbedBuilder[]; components: ActionRowBuilder<ButtonBuilder>[] } {
+  const config = LEADERBOARD_PRESENTATION[session.mode];
+  const pageCount = Math.max(1, Math.ceil(session.entries.length / LEADERBOARD_PAGE_SIZE));
+  const start = page * LEADERBOARD_PAGE_SIZE;
+  const pageEntries = session.entries.slice(start, start + LEADERBOARD_PAGE_SIZE);
+  const medals = ["🥇", "🥈", "🥉"];
+  const fields = pageEntries.map((entry, index) => {
+    const rank = start + index + 1;
+    const label = medals[rank - 1] ?? `${rank}.`;
+    let value: string;
+    switch (session.mode) {
+      case "anime":
+        value = [
+          `**Total Anime:** ${entry.totalAnime.toLocaleString()}`,
+          `**Total Episodes Watched:** ${entry.totalEpisodes.toLocaleString()}`,
+          `**Average Episodes per Anime:** ${entry.animeAverage.toFixed(2)}`,
+          `**Mean Score:** ${entry.animeMeanScore ? entry.animeMeanScore.toFixed(2) + "/100" : "No score"}`,
+        ].join("\\n");
+        break;
+      case "manga":
+        value = [
+          `**Total Manga:** ${entry.totalManga.toLocaleString()}`,
+          `**Total Chapters Read:** ${entry.totalChapters.toLocaleString()}`,
+          `**Average Chapters per Manga:** ${entry.mangaAverage.toFixed(2)}`,
+          `**Mean Score:** ${entry.mangaMeanScore ? entry.mangaMeanScore.toFixed(2) + "/100" : "No score"}`,
+        ].join("\\n");
+        break;
+      case "combined":
+        value = [
+          `**📖 Manga:** ${entry.totalManga.toLocaleString()} titles · ${entry.totalChapters.toLocaleString()} chapters`,
+          `**🎬 Anime:** ${entry.totalAnime.toLocaleString()} titles · ${entry.totalEpisodes.toLocaleString()} episodes`,
+          `**🌟 Activity Score:** ${Math.trunc(entry.activityScore).toLocaleString()} points`,
+        ].join("\\n");
+        break;
+      case "chapters":
+        value = `**Total Chapters Read:** ${entry.totalChapters.toLocaleString()}`;
+        break;
+      case "episodes":
+        value = `**Total Episodes Watched:** ${entry.totalEpisodes.toLocaleString()}`;
+        break;
+      case "manga_completed":
+        value = `**Total Completed:** ${entry.mangaCompleted.toLocaleString()}`;
+        break;
+      case "anime_completed":
+        value = `**Total Completed:** ${entry.animeCompleted.toLocaleString()}`;
+        break;
+    }
+    return {
+      name: `${label} ${safeDisplay(entry.aniListName, 180)}`,
+      value: `${value}\\n[Open AniList profile](${entry.aniListUrl})`,
+      inline: false,
+    };
+  });
+  const embed = homeEmbed(
+    config.title,
+    `${config.description}\\n\\nPage ${page + 1}/${pageCount} · ${session.optedIn.toLocaleString()} members opted in. Only current members of this server are included.`,
+    fields.length ? fields : [{ name: "No data", value: "No opted-in AniList profiles were available.", inline: false }],
+  ).setFooter({ text: "AniList profile statistics · Fetched live · Five members per page" });
+  const controls = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`profile:leaderboard-page:${session.expiresAt.toString(36)}:${page - 1}`)
+      .setLabel("Previous")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(page <= 0),
+    new ButtonBuilder()
+      .setCustomId(`profile:leaderboard-page:${session.expiresAt.toString(36)}:${page + 1}`)
+      .setLabel("Next")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(page >= pageCount - 1),
+  );
+  return { embeds: [embed], components: [controls] };
+}
 
 function profileHome(): { embeds: EmbedBuilder[]; components: ActionRowBuilder<ButtonBuilder>[] } {
   const embed = homeEmbed(
@@ -61,8 +161,15 @@ function profileHome(): { embeds: EmbedBuilder[]; components: ActionRowBuilder<B
         new ButtonBuilder().setCustomId("profile:unlink").setLabel("Manage connections").setStyle(ButtonStyle.Danger),
       ),
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId("profile:leaderboard:anime").setLabel("Anime leaderboard").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId("profile:leaderboard:manga").setLabel("Manga leaderboard").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId("profile:leaderboard:anime").setLabel("Anime Golden Ratio").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId("profile:leaderboard:manga").setLabel("Manga Golden Ratio").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId("profile:leaderboard:combined").setLabel("Combined Score").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId("profile:leaderboard:chapters").setLabel("Chapters").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId("profile:leaderboard:episodes").setLabel("Episodes").setStyle(ButtonStyle.Secondary),
+      ),
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId("profile:leaderboard:manga_completed").setLabel("Manga Completed").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId("profile:leaderboard:anime_completed").setLabel("Anime Completed").setStyle(ButtonStyle.Secondary),
       ),
     ],
   };
@@ -140,8 +247,13 @@ export class ProfileCommand implements FeatureCommand {
       { name: "Privacy settings", value: "privacy" },
       { name: "Compare interests", value: "affinity" },
       { name: "Server Taste", value: "taste" },
-      { name: "Anime leaderboard", value: "leaderboard-anime" },
-      { name: "Manga leaderboard", value: "leaderboard-manga" },
+      { name: "Anime Golden Ratio leaderboard", value: "leaderboard-anime" },
+      { name: "Manga Golden Ratio leaderboard", value: "leaderboard-manga" },
+      { name: "Combined activity ranking", value: "leaderboard-combined" },
+      { name: "Most chapters read", value: "leaderboard-chapters" },
+      { name: "Most episodes watched", value: "leaderboard-episodes" },
+      { name: "Most manga completed", value: "leaderboard-manga_completed" },
+      { name: "Most anime completed", value: "leaderboard-anime_completed" },
     ))
     .addUserOption((option) => option.setName("member").setDescription("Member whose public profile or shared interests to view"))
     .addStringOption((option) => option.setName("account").setDescription("AniList username or Steam vanity / SteamID64").setMaxLength(100));
@@ -211,6 +323,11 @@ export class ProfileCommand implements FeatureCommand {
         case "taste": await this.showTaste(interaction); return;
         case "leaderboard-anime": await this.showLeaderboard(interaction, "anime"); return;
         case "leaderboard-manga": await this.showLeaderboard(interaction, "manga"); return;
+        case "leaderboard-combined": await this.showLeaderboard(interaction, "combined"); return;
+        case "leaderboard-chapters": await this.showLeaderboard(interaction, "chapters"); return;
+        case "leaderboard-episodes": await this.showLeaderboard(interaction, "episodes"); return;
+        case "leaderboard-manga_completed": await this.showLeaderboard(interaction, "manga_completed"); return;
+        case "leaderboard-anime_completed": await this.showLeaderboard(interaction, "anime_completed"); return;
         default:
           await interaction.reply({ ...profileHome(), flags: MessageFlags.Ephemeral });
           return;
@@ -227,7 +344,26 @@ export class ProfileCommand implements FeatureCommand {
 
   async handleButton(interaction: ButtonInteraction): Promise<boolean> {
     if (!interaction.guildId) return false;
-    const [, action, setting] = interaction.customId.split(":");
+    const [, action, setting, pageValue] = interaction.customId.split(":");
+    if (action === "leaderboard-page" && setting && pageValue !== undefined) {
+      const session = [...leaderboardSessions.entries()].find(([, value]) => value.expiresAt.toString(36) === setting)?.[1];
+      if (!session || session.expiresAt <= Date.now()) {
+        await interaction.reply({ content: "This leaderboard session has expired. Open it again from /profile.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      if (session.userId !== interaction.user.id || session.guildId !== interaction.guildId) {
+        await interaction.reply({ content: "Only the member who opened this leaderboard can navigate its pages.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      const page = Number(pageValue);
+      const pageCount = Math.max(1, Math.ceil(session.entries.length / LEADERBOARD_PAGE_SIZE));
+      if (!Number.isInteger(page) || page < 0 || page >= pageCount) {
+        await interaction.reply({ content: "That leaderboard page is no longer available.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      await interaction.update(leaderboardPage(session, page));
+      return true;
+    }
     if (action === "link-anilist") {
       await interaction.showModal(linkModal("anilist"));
       return true;
@@ -461,30 +597,56 @@ export class ProfileCommand implements FeatureCommand {
 
   private async showLeaderboard(
     interaction: ButtonInteraction | ChatInputCommandInteraction,
-    medium: "anime" | "manga",
+    mode: AniListLeaderboardMode,
   ): Promise<void> {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     try {
       const members = await interaction.guild!.members.fetch();
       const result = await getAniListLeaderboard(
         interaction.guildId!,
         new Set(members.keys()),
-        medium,
+        mode,
         this.anilist,
       );
-      const rows = result.entries.map((entry, index) => {
-        const countLabel = medium === "anime" ? "entries" : "entries";
-        return `**${index + 1}.** [${safeDisplay(entry.aniListName)}](${entry.aniListUrl}) — ${entry.entries.toLocaleString()} ${countLabel} · ${entry.meanScore ? entry.meanScore.toFixed(1) + "/100" : "No mean score"}`;
+      const now = Date.now();
+      for (const [token, session] of leaderboardSessions) {
+        if (session.expiresAt <= now) leaderboardSessions.delete(token);
+      }
+      const token = interaction.id;
+      const expiresAt = now + LEADERBOARD_SESSION_TTL_MS;
+      const session: LeaderboardSession = {
+        userId: interaction.user.id,
+        guildId: interaction.guildId!,
+        mode,
+        entries: result.entries,
+        optedIn: result.optedIn,
+        expiresAt,
+      };
+      leaderboardSessions.set(token, session);
+      const firstPage = leaderboardPage(session, 0);
+      firstPage.components[0]!.components.forEach((component) => {
+        const data = component.toJSON();
+        const original = data.custom_id;
+        if (original) {
+          const direction = original.endsWith(":-1") ? "previous" : "next";
+          const button = firstPage.components[0]!.components.find((item) => item.customId === original);
+          if (button) button.setCustomId(`profile:leaderboard-page:${token}:${direction === "previous" ? 0 : 1}`);
+        }
       });
-      const embed = homeEmbed(
-        medium === "anime" ? "AniList anime leaderboard" : "AniList manga leaderboard",
-        `Guild-only summary of ${result.checked} opted-in member profiles checked. ${result.optedIn} current members have opted in. Members can withdraw at any time through /profile privacy. Rankings use only AniList-reported entry counts, with mean score as a tie-breaker.`,
-        [{ name: "Top opted-in members", value: rows.join("\n").slice(0, 3900) || "No public entries", inline: false }],
-      );
-      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+      await interaction.editReply({
+        embeds: firstPage.embeds,
+        components: firstPage.components,
+        allowedMentions: { parse: [] },
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "The AniList leaderboard is unavailable.";
-      const issueHash = await createInteractionIssueLog(interaction, "/profile", error, { action: "leaderboard" });
-      await interaction.reply({ content: issueHash ? `${message}\n\n${issueHashNotice(issueHash)}` : message, flags: MessageFlags.Ephemeral });
+      const issueHash = await createInteractionIssueLog(interaction, "/profile", error, { action: "leaderboard", mode });
+      await interaction.editReply({
+        content: issueHash ? `${message}\\n\\n${issueHashNotice(issueHash)}` : message,
+        embeds: [],
+        components: [],
+        allowedMentions: { parse: [] },
+      });
     }
   }
 
