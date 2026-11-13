@@ -43,7 +43,7 @@ function positiveNumber(value: unknown): number | null {
     : null;
 }
 
-function googleBooksUrl(value: unknown): string | null {
+function googleBooksUrl(value: unknown, upgradeGoogleImage = false): string | null {
   const raw = stringValue(value);
   if (!raw) return null;
   try {
@@ -51,6 +51,7 @@ function googleBooksUrl(value: unknown): string | null {
     const hostname = url.hostname.toLowerCase();
     const trustedHost = hostname === "google.com" || hostname.endsWith(".google.com")
       || hostname === "googleusercontent.com" || hostname.endsWith(".googleusercontent.com");
+    if (upgradeGoogleImage && url.protocol === "http:" && trustedHost) url.protocol = "https:";
     return url.protocol === "https:" && trustedHost && !url.username && !url.password
       ? url.toString()
       : null;
@@ -111,7 +112,7 @@ function normalizeVolume(value: unknown): GoogleBook | null {
     sourceUrl: "https://books.google.com/books?id=" + encodeURIComponent(id),
     previewUrl: googleBooksUrl(volume.previewLink),
     infoUrl: googleBooksUrl(volume.infoLink),
-    image: googleBooksUrl(imageLinks?.thumbnail),
+    image: googleBooksUrl(imageLinks?.thumbnail, true),
   };
 }
 
