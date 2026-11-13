@@ -208,3 +208,75 @@ test("loads operator and Atlas bridge settings into typed configuration", () => 
   assert.deepEqual(loadConfig(environment({ ARCHIVE_GLOBAL_MODERATOR_IDS: "123456789012345681,invalid,123456789012345682,123456789012345681" })).archiveGlobalModeratorIds,
     ["123456789012345681", "123456789012345682"]);
 });
+
+
+test("loads the ordered self-hosted translation provider settings", () => {
+  const config = loadConfig(environment({
+    MADLAD_TRANSLATION_URL: "https://madlad.example.test/translate",
+    MADLAD_TRANSLATION_TOKEN: "madlad-token",
+    NLLB_TRANSLATION_URL: "https://nllb.example.test/translate",
+    NLLB_TRANSLATION_TOKEN: "nllb-token",
+    NLLB_NONCOMMERCIAL_USE_CONFIRMED: "true",
+    LIBRETRANSLATE_URL: "https://translate.example.test/translate",
+    LIBRETRANSLATE_API_KEY: "libre-key",
+    TRANSLATION_TIMEOUT_MS: "9000",
+  }));
+  assert.equal(config.translation.madladUrl, "https://madlad.example.test/translate");
+  assert.equal(config.translation.madladApiKey, "madlad-token");
+  assert.equal(config.translation.nllbUrl, "https://nllb.example.test/translate");
+  assert.equal(config.translation.nllbNonCommercialUseConfirmed, true);
+  assert.equal(config.translation.libreTranslateUrl, "https://translate.example.test/translate");
+  assert.equal(config.translation.libreTranslateApiKey, "libre-key");
+  assert.equal(config.translation.timeoutMs, 9000);
+});
+
+test("keeps NLLB disabled unless non-commercial use is explicitly confirmed", () => {
+  assert.equal(loadConfig(environment({ NLLB_TRANSLATION_URL: "https://nllb.example.test/translate" })).translation.nllbNonCommercialUseConfirmed, false);
+  assert.throws(
+    () => loadConfig(environment({ NLLB_NONCOMMERCIAL_USE_CONFIRMED: "maybe" })),
+    /NLLB_NONCOMMERCIAL_USE_CONFIRMED must be a boolean/,
+  );
+});
+
+test("rejects insecure remote translation endpoints and malformed URLs", () => {
+  assert.throws(
+    () => loadConfig(environment({ MADLAD_TRANSLATION_URL: "http://madlad.example.test/translate" })),
+    /MADLAD_TRANSLATION_URL must use HTTPS/,
+  );
+  assert.throws(
+    () => loadConfig(environment({ LIBRETRANSLATE_URL: "not-a-url" })),
+    /LIBRETRANSLATE_URL must be a valid URL/,
+  );
+  assert.throws(
+    () => loadConfig(environment({ NLLB_TRANSLATION_URL: "https://user:pass@nllb.example.test/translate" })),
+    /NLLB_TRANSLATION_URL must not contain credentials/,
+  );
+});
+
+test("allows loopback translation endpoints for local development", () => {
+  const config = loadConfig(environment({
+    MADLAD_TRANSLATION_URL: "http://127.0.0.1:8001/translate",
+    LIBRETRANSLATE_URL: "http://localhost:5000/translate",
+  }));
+  assert.equal(config.translation.madladUrl, "http://127.0.0.1:8001/translate");
+  assert.equal(config.translation.libreTranslateUrl, "http://localhost:5000/translate");
+});
+
+
+test("keeps NLLB disabled in production even when non-commercial use is confirmed", () => {
+  const config = loadConfig(environment({
+    ENVIRONMENT: "production",
+    CUSTOM_ROLES_PUBLIC_URL: "https://roles.example.test",
+    NLLB_TRANSLATION_URL: "https://nllb.example.test/translate",
+    NLLB_NONCOMMERCIAL_USE_CONFIRMED: "true",
+  }));
+  assert.equal(config.translation.nllbNonCommercialUseConfirmed, false);
+
+  const nodeProduction = loadConfig(environment({
+    NODE_ENV: "production",
+    CUSTOM_ROLES_PUBLIC_URL: "https://roles.example.test",
+    NLLB_TRANSLATION_URL: "https://nllb.example.test/translate",
+    NLLB_NONCOMMERCIAL_USE_CONFIRMED: "true",
+  }));
+  assert.equal(nodeProduction.translation.nllbNonCommercialUseConfirmed, false);
+});

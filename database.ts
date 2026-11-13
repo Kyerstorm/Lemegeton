@@ -503,6 +503,15 @@ const schemaStatements = [
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`,
   "CREATE INDEX IF NOT EXISTS guild_language_settings_code_idx ON guild_language_settings (language_code)",
+  `CREATE TABLE IF NOT EXISTS translation_cache (
+    source_language VARCHAR(8) NOT NULL,
+    target_language VARCHAR(8) NOT NULL,
+    source_hash CHAR(64) NOT NULL,
+    translated_text TEXT NOT NULL,
+    provider VARCHAR(24) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (source_language, target_language, source_hash)
+  )`,
   `CREATE TABLE IF NOT EXISTS guild_feature_settings (
     guild_id BIGINT NOT NULL,
     feature_name VARCHAR(32) NOT NULL CHECK (feature_name IN ('discover','archive','community','play','profile','custom-role')),

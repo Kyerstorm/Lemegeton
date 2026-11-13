@@ -3,6 +3,7 @@ import {createServer, type Server} from "node:http";
 import {timingSafeEqual} from "node:crypto";
 import {findAtlasRelationships,normalizeAtlasCategory,safeAtlasUrl} from "./helpers/integration/atlas.js";
 import {loadConfig} from "./helpers/runtime/config.js";
+import {configureTranslation,translateGuildUiText} from "./helpers/integration/translation.js";
 import {configureLogger,logger} from "./helpers/runtime/logger.js";
 import type {FeatureCommand} from "./helpers/commands/command.js";
 import {handleArchiveUploadMessage} from "./helpers/archive/archive.js";
@@ -32,7 +33,7 @@ import {startMusicScheduler,stopMusicScheduler} from "./helpers/integration/musi
 import {configureMediaStorage,processArchiveAssetCleanup} from "./helpers/media/media-storage.js";
 import {configureCustomRoleIconSourceLimit} from "./helpers/custom-roles/custom-role-images.js";
 
-const config=loadConfig();configureLogger(config.logLevel);configureMediaStorage(config);configureCustomRoleIconSourceLimit(config.customRoleIconSourceMaxBytes);configureArchiveAccess(config.archiveGlobalModeratorIds);
+const config=loadConfig();configureLogger(config.logLevel);configureTranslation(config.translation);configureMediaStorage(config);configureCustomRoleIconSourceLimit(config.customRoleIconSourceMaxBytes);configureArchiveAccess(config.archiveGlobalModeratorIds);
 const client=new Client({intents:[GatewayIntentBits.Guilds,GatewayIntentBits.GuildMembers,GatewayIntentBits.GuildMessages,GatewayIntentBits.MessageContent]});
 const aniListEmbedClient=new AniListClient(config.anilistApiUrl,config.anilistTimeoutMs);
 const socialEmbedSteamClient=new SteamClient(config.steamApiKey);
@@ -125,25 +126,26 @@ async function routeInteraction(interaction:Interaction):Promise<void>{
     const missing:string[]=[];
     if(!retentionConfigured)missing.push("Choose what happens to this server's data when Lemegeton leaves with /settings action:retention.");
     if(!languageConfigured)missing.push("Choose this server's language with /language.");
-    if(interaction.isRepliable())await interaction.reply({
-     content:"Lemegeton is locked until this server completes its required setup:\n\n"+missing.join("\n")+"\n\nOnly the person who invited Lemegeton or a member with Manage Server permission can complete these settings.",
-     flags:MessageFlags.Ephemeral,
-    });
+    if(interaction.isRepliable()){
+     await interaction.deferReply({flags:MessageFlags.Ephemeral});
+     const setupMessage=await translateGuildUiText(interaction.guildId,"Lemegeton is locked until this server completes its required setup:\n\n"+missing.join("\n")+"\n\nOnly the person who invited Lemegeton or a member with Manage Server permission can complete these settings.");
+     await interaction.editReply({content:setupMessage});
+    }
     return;
    }
   }
   if(interaction.isButton()&&Boolean((interaction.component as {disabled?:boolean}).disabled)){
-   if(!interaction.replied&&!interaction.deferred)await interaction.reply({content:"This control is disabled and cannot be used.",flags:MessageFlags.Ephemeral});
+   if(!interaction.replied&&!interaction.deferred){await interaction.deferReply({flags:MessageFlags.Ephemeral});await interaction.editReply({content:await translateGuildUiText(interaction.guildId,"This control is disabled and cannot be used.")});}
    return;
   }
   if(interaction.isAutocomplete()){const command=commandByName.get(interaction.commandName);if(command?.handleAutocomplete){await command.handleAutocomplete(interaction);}else{await interaction.respond([]);}return;}
-  if(interaction.isChatInputCommand()){const command=commandByName.get(interaction.commandName);if(!command){await interaction.reply({content:"That feature command is not available.",flags:MessageFlags.Ephemeral});return;}if(["discover","archive","community","play","profile","custom-role"].includes(interaction.commandName)&&interaction.guildId&&interaction.commandName!=="settings"&&!await isFeatureEnabled(interaction.guildId,interaction.commandName)){await interaction.reply({content:"This feature is currently disabled by this server’s settings.",flags:MessageFlags.Ephemeral});return;}await command.execute(interaction);return;}
+  if(interaction.isChatInputCommand()){const command=commandByName.get(interaction.commandName);if(!command){await interaction.deferReply({flags:MessageFlags.Ephemeral});await interaction.editReply({content:await translateGuildUiText(interaction.guildId,"That feature command is not available.")});return;}if(["discover","archive","community","play","profile","custom-role"].includes(interaction.commandName)&&interaction.guildId&&interaction.commandName!=="settings"&&!await isFeatureEnabled(interaction.guildId,interaction.commandName)){await interaction.deferReply({flags:MessageFlags.Ephemeral});await interaction.editReply({content:await translateGuildUiText(interaction.guildId,"This feature is currently disabled by this server’s settings.")});return;}await command.execute(interaction);return;}
   if(!interaction.isButton()&&!interaction.isStringSelectMenu()&&!interaction.isRoleSelectMenu()&&!interaction.isChannelSelectMenu()&&!interaction.isModalSubmit())return;
   const prefix=interaction.customId.split(":",1)[0]??"";const command=commandByName.get(prefix);if(!command)return;
   const handled=interaction.isButton()?await(command.handleButton?.(interaction)??false)
    :(interaction.isStringSelectMenu()||interaction.isRoleSelectMenu()||interaction.isChannelSelectMenu())?await(command.handleSelect?.(interaction)??false)
    :await(command.handleModal?.(interaction)??false);
-  if(!handled&&!interaction.replied&&!interaction.deferred)await interaction.reply({content:"This control is no longer available. Reopen the feature command and try again.",flags:MessageFlags.Ephemeral});
+  if(!handled&&!interaction.replied&&!interaction.deferred){await interaction.deferReply({flags:MessageFlags.Ephemeral});await interaction.editReply({content:await translateGuildUiText(interaction.guildId,"This control is no longer available. Reopen the feature command and try again.")});}
  }catch(error){
   const message=safeInteractionErrorMessage(error);
   logger.error("Discord interaction failed",{interactionId:interaction.id,reason:message});

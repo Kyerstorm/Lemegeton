@@ -18,6 +18,7 @@ import {
   setGuildLanguage,
 } from "../../helpers/runtime/languages.js";
 import { logger } from "../../helpers/runtime/logger.js";
+import { translateUiText } from "../../helpers/integration/translation.js";
 
 export class LanguageCommand implements FeatureCommand {
   readonly data = new SlashCommandBuilder()
@@ -51,6 +52,7 @@ export class LanguageCommand implements FeatureCommand {
     }
 
     const selectedCode = interaction.options.getString("language", true);
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const previous = await getGuildLanguage(interaction.guildId);
     const language = await setGuildLanguage(interaction.guildId, selectedCode, interaction.user.id);
 
@@ -66,10 +68,12 @@ export class LanguageCommand implements FeatureCommand {
       });
     }
 
+    const title = await translateUiText("Server language saved", language.code);
+    const description = await translateUiText("Lemegeton's required server language is now **" + language.label + "**.", language.code);
     const embed = new EmbedBuilder()
       .setColor(0x57f287)
-      .setTitle("Server language saved")
-      .setDescription("Lemegeton's required server language is now **" + language.label + "**.")
+      .setTitle(title)
+      .setDescription(description)
       .addFields(
         { name: "Language", value: language.name, inline: true },
         { name: "Language code", value: language.code, inline: true },
@@ -77,7 +81,7 @@ export class LanguageCommand implements FeatureCommand {
       )
       .setFooter({ text: "This setting applies to the entire server. Run /language again to change it." });
 
-    await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+    await interaction.editReply({ embeds: [embed] });
   }
 
   async handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {

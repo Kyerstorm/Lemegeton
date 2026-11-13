@@ -2,9 +2,19 @@ export interface DatabaseConfig {
  connectionString?:string; host:string; port:number; database:string; user:string; password:string;
  ssl:boolean; sslCaFile?:string; poolSize:number; primaryGuildId:string|null;
 }
+export interface TranslationConfig {
+ madladUrl:string|null;
+ madladApiKey?:string;
+ nllbUrl:string|null;
+ nllbApiKey?:string;
+ nllbNonCommercialUseConfirmed:boolean;
+ libreTranslateUrl:string|null;
+ libreTranslateApiKey?:string;
+ timeoutMs:number;
+}
 export interface BotConfig {
  discordToken:string; applicationId:string; anilistApiUrl:string; anilistTimeoutMs:number; botFeedbackChannelId:string|null; archiveGlobalModeratorIds:string[];
- database:DatabaseConfig; adminDiscordId:string|null; dashboardBridgeSecret:string; dashboardBridgeHost:string; dashboardBridgePort:number; dashboardAtlasBridgePort:number;
+ database:DatabaseConfig; translation:TranslationConfig; adminDiscordId:string|null; dashboardBridgeSecret:string; dashboardBridgeHost:string; dashboardBridgePort:number; dashboardAtlasBridgePort:number;
  customRolePickerEnabled:boolean; customRolePickerHost:string; customRolePickerPort:number;
  customRolesReconcileMinutes:number; customRolesMassArchiveThreshold:number; customRolePickerIdleTtl:number; customRolePickerMaxTtl:number; customRolesPublicUrl:string;
  customRolesTrustProxy:boolean; customRoleIconSourceMaxBytes:number; customRolesDebugPreviewEnhancedColors:boolean; customRolesDebugPreviewRoleIcons:boolean;
@@ -53,6 +63,31 @@ function databaseConfig(env:NodeJS.ProcessEnv):DatabaseConfig {
   primaryGuildId,
  };
 }
+function optionalTranslationEndpoint(env:NodeJS.ProcessEnv,key:string):string|null{
+ const value=env[key]?.trim();
+ if(!value)return null;
+ let parsed:URL;
+ try{parsed=new URL(value);}catch{throw new Error(key+" must be a valid URL.");}
+ const hostname=parsed.hostname.replace(/^\[|\]$/g,"").toLowerCase();
+ const loopback=hostname==="localhost"||hostname==="127.0.0.1"||hostname==="::1";
+ if(parsed.protocol!=="https:"&&!(parsed.protocol==="http:"&&loopback))throw new Error(key+" must use HTTPS (HTTP is allowed only for loopback development endpoints).");
+ if(parsed.username||parsed.password||parsed.search||parsed.hash)throw new Error(key+" must not contain credentials, query parameters or fragments.");
+ return parsed.toString();
+}
+function translationConfig(env:NodeJS.ProcessEnv):TranslationConfig{
+ const madladUrl=optionalTranslationEndpoint(env,"MADLAD_TRANSLATION_URL");
+ const nllbUrl=optionalTranslationEndpoint(env,"NLLB_TRANSLATION_URL");
+ const libreTranslateUrl=optionalTranslationEndpoint(env,"LIBRETRANSLATE_URL");
+ const nllbConfirmed=databaseBoolean(env.NLLB_NONCOMMERCIAL_USE_CONFIRMED,"NLLB_NONCOMMERCIAL_USE_CONFIRMED",false);
+ const production=env.ENVIRONMENT?.trim().toLowerCase()==="production"||env.NODE_ENV?.trim().toLowerCase()==="production";
+ return {
+  madladUrl,...(env.MADLAD_TRANSLATION_TOKEN?.trim()?{madladApiKey:env.MADLAD_TRANSLATION_TOKEN.trim()}:{}),
+  nllbUrl,...(env.NLLB_TRANSLATION_TOKEN?.trim()?{nllbApiKey:env.NLLB_TRANSLATION_TOKEN.trim()}:{}),
+  nllbNonCommercialUseConfirmed:nllbConfirmed&&!production,
+  libreTranslateUrl,...(env.LIBRETRANSLATE_API_KEY?.trim()?{libreTranslateApiKey:env.LIBRETRANSLATE_API_KEY.trim()}:{}),
+  timeoutMs:Math.min(positive(env.TRANSLATION_TIMEOUT_MS,5000,"TRANSLATION_TIMEOUT_MS"),15000),
+ };
+}
 export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
  const discordToken=required(env,"DISCORD_TOKEN");const applicationId=env.DISCORD_CLIENT_ID?.trim()||env.CLIENT_ID?.trim()||required(env,"BOT_ID");
  if(!/^\d{17,20}$/.test(applicationId))throw new Error("BOT_ID / CLIENT_ID / DISCORD_CLIENT_ID must be a valid Discord application ID.");
@@ -63,7 +98,7 @@ export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
  if(botFeedbackChannelId&&!/^\d{17,20}$/.test(botFeedbackChannelId))throw new Error("BOT_FEEDBACK_CHANNEL_ID must be a valid Discord channel ID.");
  const archiveGlobalModeratorIds=[...new Set((env.ARCHIVE_GLOBAL_MODERATOR_IDS??"").split(",").map(id=>id.trim()).filter(id=>/^\d{17,20}$/.test(id)))];
  if(adminDiscordId&&!/^\d{17,20}$/.test(adminDiscordId))throw new Error("ADMIN_DISCORD_ID must be a valid Discord user ID.");
- const database=databaseConfig(env);
+ const database=databaseConfig(env);const translation=translationConfig(env);
  const s3EndpointUrl=env.S3_ENDPOINT_URL?.trim()||undefined;
  const s3Region=env.S3_REGION?.trim()||"us-east-1";
  const s3AccessKeyId=env.S3_ACCESS_KEY_ID?.trim()||undefined;
@@ -120,7 +155,7 @@ export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
  const youtubeApiKey=env.YOUTUBE_API_KEY?.trim()||undefined;
  const soundcloudClientId=env.SOUNDCLOUD_CLIENT_ID?.trim()||undefined;
  const musicPollIntervalMinutes=positive(env.MUSIC_POLL_INTERVAL_MINUTES,10,"MUSIC_POLL_INTERVAL_MINUTES");
- return {discordToken,applicationId,botModeratorGuildId,adminDiscordId,botFeedbackChannelId,archiveGlobalModeratorIds,database,dashboardBridgeSecret,dashboardBridgeHost,dashboardBridgePort,dashboardAtlasBridgePort,anilistApiUrl:parsed.toString(),anilistTimeoutMs:positive(env.ANILIST_API_TIMEOUT,10,"ANILIST_API_TIMEOUT")*1000,
+ return {discordToken,applicationId,botModeratorGuildId,adminDiscordId,botFeedbackChannelId,archiveGlobalModeratorIds,database,translation,dashboardBridgeSecret,dashboardBridgeHost,dashboardBridgePort,dashboardAtlasBridgePort,anilistApiUrl:parsed.toString(),anilistTimeoutMs:positive(env.ANILIST_API_TIMEOUT,10,"ANILIST_API_TIMEOUT")*1000,
  ...(env.TMDB_BEARER_TOKEN?.trim()?{tmdbBearerToken:env.TMDB_BEARER_TOKEN.trim()}:{}),
  ...(env.GOOGLE_BOOKS_API_KEY?.trim()?{googleBooksApiKey:env.GOOGLE_BOOKS_API_KEY.trim()}:{}),
  ...(env.IGDB_CLIENT_ID?.trim()?{igdbClientId:env.IGDB_CLIENT_ID.trim()}:{}),

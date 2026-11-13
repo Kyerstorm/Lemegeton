@@ -172,7 +172,7 @@ The target command surface should be intentionally compact:
 | **/privacy** | Standalone privacy notice | Keep the privacy notice independently accessible; do not hide it inside /profile or /settings |
 | **/feedback** | Standalone feedback intake | Keep feedback submission independent from the eight feature environments |
 
-The eight feature rows above remain the major feature environments. `/language` is a separate required server-setup command with exactly one required autocomplete option. Every server must select its language as well as its data-retention policy before normal bot functionality unlocks. The original bot inviter or a member with Manage Server permission may change the server language. This stores the server's preferred locale; it does not automatically translate English-only text that has no translation catalog. **/help, /privacy, and /feedback are deliberate standalone exceptions** and must each remain independently registered top-level slash commands.
+The eight feature rows above remain the major feature environments. `/language` is a separate required server-setup command with exactly one required autocomplete option. Every server must select its language as well as its data-retention policy before normal bot functionality unlocks. The original bot inviter or a member with Manage Server permission may change the server language. The preferred locale is used for bot-owned interface text passed through the translation helper. Member submissions, archive content, media titles, and provider descriptions must not be sent to translation providers. Command-specific UI coverage is incremental; this does not claim that every command response is already localized. **/help, /privacy, and /feedback are deliberate standalone exceptions** and must each remain independently registered top-level slash commands.
 
 #### 3.2.1 Standalone bot-moderator commands
 
@@ -1733,3 +1733,18 @@ Some environments intentionally connect to more than one command. For example, a
 11. Preserve the distinction between a provider-confirmed fact, a provider-generated recommendation, a local similarity result, and a community-submitted suggestion.
 12. The catalogue does not justify manufacturing lines. `docs/EXPANSION_ROADMAP.md` defines a 100,000-line long-range TypeScript/TSX engineering budget; count only real, tested behavior, integrations, data/domain logic and operational needs, never empty modules, duplicated code or padding.
 
+
+
+## Translation providers
+
+The optional translation chain is **MADLAD-400 first, NLLB-200 second, and LibreTranslate/Argos last**. The bot calls these services through HTTP; it does not download or execute model weights inside the TypeScript process.
+
+- **MADLAD-400-3B-MT** is the primary model. Its model weights are Apache-2.0, cover 400+ languages, and require a separately hosted inference endpoint. Translation quality varies by language and the model card notes that production use has not been fully assessed.
+- **NLLB-200** is a backup only when `NLLB_NONCOMMERCIAL_USE_CONFIRMED=true`. Its model weights are CC-BY-NC 4.0, so this setting must only be enabled for a strictly non-commercial deployment after reviewing the licence. Its model card also says the model is not released for production deployment. Do not enable it for commercial use without separate rights.
+- **LibreTranslate** is the final fallback. It is an API backed by Argos Translate, not a host for MADLAD or NLLB. Its available language pairs depend on the installed Argos packages.
+
+MADLAD and NLLB endpoints must implement the same JSON contract: `POST` with `text`, `source_language`, and `target_language`, returning `translated_text`. The adapter hosting each model is responsible for converting ISO language codes to the model's own target-language identifiers. LibreTranslate uses its native form-encoded `/translate` API. Configure endpoint URLs and any private API tokens through the environment variables in `.env.example`; remote endpoints must use HTTPS. The model services are not provisioned by the bot's Docker Compose file, and running them still requires compute and model storage.
+
+Translations are cached in PostgreSQL by source language, target language, and SHA-256 of the source UI text. Only pass bot-owned static interface strings to `translateUiText`/`translateGuildUiText`. Never pass user submissions, private member data, archive entries, media titles, or provider descriptions. A failed or unavailable provider leaves the original English string intact. NLLB is disabled by default and is forcibly disabled when either ENVIRONMENT or NODE_ENV is production.
+
+Current integration localizes the language-setup confirmation and shared interaction-gate/control messages. Other command-specific messages still need to be migrated to the helper; setting a server language alone does not yet translate every response.
