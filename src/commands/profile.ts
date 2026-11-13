@@ -52,13 +52,13 @@ const LEADERBOARD_SESSION_TTL_MS = 5 * 60 * 1000;
 const leaderboardSessions = new Map<string, LeaderboardSession>();
 
 const LEADERBOARD_PRESENTATION: Record<AniListLeaderboardMode, { title: string; description: string }> = {
-  anime: { title: "🎬 Anime Golden Ratio", description: "Members ranked by average episodes watched per anime entry." },
-  manga: { title: "📖 Manga Golden Ratio", description: "Members ranked by average chapters read per manga entry." },
-  combined: { title: "🌟 Ultimate Otaku Ranking", description: "Members ranked by the legacy origin-weighted activity score. Origin and format splits are estimates derived from aggregate AniList statistics." },
-  chapters: { title: "📚 Most Chapters Read", description: "Members ranked by total chapters read, as reported by AniList." },
-  episodes: { title: "📺 Most Episodes Watched", description: "Members ranked by total episodes watched, as reported by AniList." },
-  manga_completed: { title: "🏁 Most Manga Completed", description: "Members ranked by completed manga entries on AniList." },
-  anime_completed: { title: "🏁 Most Anime Completed", description: "Members ranked by completed anime entries on AniList." },
+  anime: { title: "🎬 Anime Golden Ratio", description: "Users ranked by Average Episodes per Anime." },
+  manga: { title: "📖 Manga Golden Ratio", description: "Users ranked by Average Chapters per Manga." },
+  combined: { title: "🌟 Ultimate Otaku Ranking", description: "Users ranked by Origin-Weighted Activity Score. Origin and format splits are estimates derived from aggregate AniList statistics." },
+  chapters: { title: "📚 Most Chapters Read", description: "Users ranked by total chapters read." },
+  episodes: { title: "📺 Most Episodes Watched", description: "Users ranked by total episodes watched." },
+  manga_completed: { title: "🏁 Most Manga Completed", description: "Users ranked by total manga entries completed." },
+  anime_completed: { title: "🏁 Most Anime Completed", description: "Users ranked by total anime entries completed." },
 };
 
 function leaderboardPage(
@@ -77,38 +77,36 @@ function leaderboardPage(
     switch (session.mode) {
       case "anime":
         value = [
-          `**Total Anime:** ${entry.totalAnime.toLocaleString()}`,
-          `**Total Episodes Watched:** ${entry.totalEpisodes.toLocaleString()}`,
+          `**Total Anime:** ${entry.totalAnime.toLocaleString("en-US")}`,
+          `**Total Episodes Watched:** ${entry.totalEpisodes.toLocaleString("en-US")}`,
           `**Average Episodes per Anime:** ${entry.animeAverage.toFixed(2)}`,
-          `**Mean Score:** ${entry.animeMeanScore ? entry.animeMeanScore.toFixed(2) + "/100" : "No score"}`,
         ].join("\n");
         break;
       case "manga":
         value = [
-          `**Total Manga:** ${entry.totalManga.toLocaleString()}`,
-          `**Total Chapters Read:** ${entry.totalChapters.toLocaleString()}`,
+          `**Total Manga:** ${entry.totalManga.toLocaleString("en-US")}`,
+          `**Total Chapters Read:** ${entry.totalChapters.toLocaleString("en-US")}`,
           `**Average Chapters per Manga:** ${entry.mangaAverage.toFixed(2)}`,
-          `**Mean Score:** ${entry.mangaMeanScore ? entry.mangaMeanScore.toFixed(2) + "/100" : "No score"}`,
         ].join("\n");
         break;
       case "combined":
         value = [
-          `**📖 Manga:** ${entry.totalManga.toLocaleString()} titles · ${entry.totalChapters.toLocaleString()} chapters`,
-          `**🎬 Anime:** ${entry.totalAnime.toLocaleString()} titles · ${entry.totalEpisodes.toLocaleString()} episodes`,
-          `**🌟 Activity Score:** ${Math.trunc(entry.activityScore).toLocaleString()} points`,
+          `**📖 Manga:** ${entry.totalManga.toLocaleString("en-US")} titles, ${entry.totalChapters.toLocaleString("en-US")} chapters`,
+          `**🎬 Anime:** ${entry.totalAnime.toLocaleString("en-US")} titles, ${entry.totalEpisodes.toLocaleString("en-US")} episodes`,
+          `**🌟 Activity Score:** ${Math.trunc(entry.activityScore).toLocaleString("en-US")} points`,
         ].join("\n");
         break;
       case "chapters":
-        value = `**Total Chapters Read:** ${entry.totalChapters.toLocaleString()}`;
+        value = `**Total Chapters Read:** ${entry.totalChapters.toLocaleString("en-US")}`;
         break;
       case "episodes":
-        value = `**Total Episodes Watched:** ${entry.totalEpisodes.toLocaleString()}`;
+        value = `**Total Episodes Watched:** ${entry.totalEpisodes.toLocaleString("en-US")}`;
         break;
       case "manga_completed":
-        value = `**Total Completed:** ${entry.mangaCompleted.toLocaleString()}`;
+        value = `**Total Completed:** ${entry.mangaCompleted.toLocaleString("en-US")}`;
         break;
       case "anime_completed":
-        value = `**Total Completed:** ${entry.animeCompleted.toLocaleString()}`;
+        value = `**Total Completed:** ${entry.animeCompleted.toLocaleString("en-US")}`;
         break;
     }
     return {
@@ -118,20 +116,25 @@ function leaderboardPage(
     };
   });
   const embed = homeEmbed(
-    config.title,
-    `${config.description}\n\nPage ${page + 1}/${pageCount} · ${session.optedIn.toLocaleString()} members opted in. Only current members of this server are included.`,
+    `🏆 ${config.title}`,
+    `${config.description} (Page ${page + 1}/${pageCount})\n\n${session.optedIn.toLocaleString("en-US")} members opted in. Only current members of this server are included.`,
     fields.length ? fields : [{ name: "No data", value: "No opted-in AniList profiles were available.", inline: false }],
-  ).setFooter({ text: "AniList profile statistics · Fetched live · Five members per page" });
+  ).setFooter({
+    text: "🔄 Leaderboard based on live AniList statistics",
+    iconURL: "https://anilist.co/img/icons/android-chrome-512x512.png",
+  });
   const controls = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(`profile:leaderboard-page:${session.token}:${page - 1}`)
-      .setLabel("Previous")
-      .setStyle(ButtonStyle.Secondary)
+      .setLabel("◀️ Previous")
+      .setEmoji("◀️")
+      .setStyle(ButtonStyle.Primary)
       .setDisabled(page <= 0),
     new ButtonBuilder()
       .setCustomId(`profile:leaderboard-page:${session.token}:${page + 1}`)
-      .setLabel("Next")
-      .setStyle(ButtonStyle.Secondary)
+      .setLabel("Next ▶️")
+      .setEmoji("▶️")
+      .setStyle(ButtonStyle.Primary)
       .setDisabled(page >= pageCount - 1),
   );
   return { embeds: [embed], components: [controls] };
@@ -522,11 +525,11 @@ export class ProfileCommand implements FeatureCommand {
         { name: "AniList", value: `[${profile.anilist.name}](${profile.anilist.url})`, inline: true },
         { name: "Anime entries", value: String(profile.anilist.anime.count), inline: true },
         { name: "Anime mean score", value: profile.anilist.anime.meanScore ? `${profile.anilist.anime.meanScore.toFixed(1)}/100` : "No score", inline: true },
-        { name: "Episodes watched (AniList)", value: profile.anilist.anime.episodesWatched === null ? "Unavailable" : profile.anilist.anime.episodesWatched.toLocaleString(), inline: true },
+        { name: "Episodes watched (AniList)", value: profile.anilist.anime.episodesWatched === null ? "Unavailable" : profile.anilist.anime.episodesWatched.toLocaleString("en-US"), inline: true },
         { name: "Manga entries", value: String(profile.anilist.manga.count), inline: true },
         { name: "Manga mean score", value: profile.anilist.manga.meanScore ? `${profile.anilist.manga.meanScore.toFixed(1)}/100` : "No score", inline: true },
-        { name: "Chapters read (AniList)", value: profile.anilist.manga.chaptersRead === null ? "Unavailable" : profile.anilist.manga.chaptersRead.toLocaleString(), inline: true },
-        { name: "Volumes read (AniList)", value: profile.anilist.manga.volumesRead === null ? "Unavailable" : profile.anilist.manga.volumesRead.toLocaleString(), inline: true },
+        { name: "Chapters read (AniList)", value: profile.anilist.manga.chaptersRead === null ? "Unavailable" : profile.anilist.manga.chaptersRead.toLocaleString("en-US"), inline: true },
+        { name: "Volumes read (AniList)", value: profile.anilist.manga.volumesRead === null ? "Unavailable" : profile.anilist.manga.volumesRead.toLocaleString("en-US"), inline: true },
         { name: "Anime formats", value: profile.anilist.anime.formats.slice(0, 5).map(item => `${item.format}: ${item.count}`).join("\n") || "Unavailable", inline: true },
         { name: "Manga formats", value: profile.anilist.manga.formats.slice(0, 5).map(item => `${item.format}: ${item.count}`).join("\n") || "Unavailable", inline: true },
         { name: "Anime genres", value: profile.anilist.anime.genres.slice(0, 5).map((item) => item.genre).join(", ") || "Unavailable", inline: false },
