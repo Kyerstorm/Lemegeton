@@ -506,8 +506,9 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     assert.deepEqual(secondRoundResult, { status: "open", round: 2, winnerTitle: null });
     const secondRound = await getCommunityTournament(tournamentGuild, tournamentId);
     assert.ok(secondRound);
-    assert.equal(secondRound.matches.length, 1);
-    const finalMatch = secondRound.matches[0]!;
+    assert.equal(secondRound.matches.length, 3, "The tournament view should preserve completed matches from earlier rounds.");
+    const finalMatch = secondRound.matches.find(match => match.status === "open")!;
+    assert.ok(finalMatch);
     assert.equal(finalMatch.candidate_a_title, "Candidate B");
     assert.equal(finalMatch.candidate_b_title, "Candidate C");
     await voteInCommunityTournament(tournamentGuild, finalVoter, finalMatch.id, finalMatch.candidate_a_id);

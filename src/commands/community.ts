@@ -1327,7 +1327,7 @@ export class CommunityCommand implements FeatureCommand {
       return;
     }
     const fields = tournament.matches.map(match => ({
-      name: "Match " + match.match_number + " · " + (match.status === "open" ? "Voting open" : "Completed"),
+      name: "Round " + match.round_number + " · Match " + match.match_number + " · " + (match.status === "open" ? "Voting open" : "Completed"),
       value: "#" + match.candidate_a_seed + " [" + safeDisplay(match.candidate_a_title, 110) + "](" + match.candidate_a_url + ") · " + match.votes_a
         + " vs #" + match.candidate_b_seed + " [" + safeDisplay(match.candidate_b_title, 110) + "](" + match.candidate_b_url + ") · " + match.votes_b
         + (match.winner_candidate_id ? "\nWinner: " + (match.winner_candidate_id === match.candidate_a_id ? safeDisplay(match.candidate_a_title, 100) : safeDisplay(match.candidate_b_title, 100))

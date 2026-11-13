@@ -14,7 +14,7 @@ import { emoji } from "../emoji.js";
 import { logger } from "../runtime/logger.js";
 import { AniListClient, type AniListRecentlyFinishedMedia } from "../integration/anilist.js";
 import type { BotConfig } from "../runtime/config.js";
-import { query, queryOne } from "../../database.js";
+import { query, queryOne, transaction } from "../../database.js";
 import { isGuildSetupComplete } from "../runtime/guild-retention.js";
 
 export type MediaNotificationKind = "ANIME" | "MANGA";
@@ -209,26 +209,31 @@ export async function followAniListAnime(
   const media = await aniList.getMediaById(mediaId, "ANIME");
   if (!media || media.type !== "ANIME") throw new Error("AniList did not return a supported anime for that ID.");
   if (!media.siteUrl.startsWith("https://anilist.co/anime/")) throw new Error("The AniList anime URL was not valid.");
-  const follows = await queryOne<{ count: string }>(
-    "SELECT COUNT(*)::text AS count FROM guild_media_follows WHERE guild_id = $1",
-    [guildId],
-  );
-  if (Number(follows?.count ?? 0) >= 25) throw new Error("This server has reached the 25-title follow limit.");
   const next = media.nextAiringEpisode ?? null;
   const lastNotified = next
     ? next.airingAt * 1000 <= now.getTime() ? next.episode : Math.max(0, next.episode - 1)
     : 0;
-  const row = await queryOne<GuildMediaFollow>(
-    "INSERT INTO guild_media_follows " +
-    "(guild_id, anilist_id, title, site_url, cover_image, next_episode, next_airing_at, last_notified_episode, followed_by) " +
-    "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) " +
-    "ON CONFLICT (guild_id, anilist_id) DO NOTHING " +
-    "RETURNING guild_id::text, anilist_id, title, site_url, cover_image, next_episode, next_airing_at, last_notified_episode, followed_by::text",
-    [guildId, media.id, aniListMediaTitle(media), media.siteUrl, media.coverImage,
-      next?.episode ?? null, next ? new Date(next.airingAt * 1000) : null, lastNotified, userId],
-  );
-  if (!row) throw new Error("This anime is already followed by this server.");
-  return row;
+  return transaction(async (client) => {
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [guildId]);
+    const follows = await client.query<{ count: string }>(
+      "SELECT COUNT(*)::text AS count FROM guild_media_follows WHERE guild_id = $1",
+      [guildId],
+    );
+    if (Number(follows.rows[0]?.count ?? 0) >= 25) {
+      throw new Error("This server has reached the 25-title follow limit.");
+    }
+    const row = await client.query<GuildMediaFollow>(
+      "INSERT INTO guild_media_follows " +
+      "(guild_id, anilist_id, title, site_url, cover_image, next_episode, next_airing_at, last_notified_episode, followed_by) " +
+      "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) " +
+      "ON CONFLICT (guild_id, anilist_id) DO NOTHING " +
+      "RETURNING guild_id::text, anilist_id, title, site_url, cover_image, next_episode, next_airing_at, last_notified_episode, followed_by::text",
+      [guildId, media.id, aniListMediaTitle(media), media.siteUrl, media.coverImage,
+        next?.episode ?? null, next ? new Date(next.airingAt * 1000) : null, lastNotified, userId],
+    );
+    if (!row.rows[0]) throw new Error("This anime is already followed by this server.");
+    return row.rows[0];
+  });
 }
 
 export async function unfollowAniListAnime(guildId: string, mediaId: number): Promise<boolean> {

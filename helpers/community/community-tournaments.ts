@@ -167,8 +167,8 @@ export async function getCommunityTournament(guildId: string, tournamentId: stri
     "JOIN community_tournament_candidates a ON a.id = m.candidate_a_id " +
     "JOIN community_tournament_candidates b ON b.id = m.candidate_b_id " +
     "LEFT JOIN community_tournament_votes v ON v.match_id = m.id " +
-    "WHERE m.tournament_id = $1 AND m.round_number = $2 " +
-    "GROUP BY m.id, a.id, b.id ORDER BY m.match_number ASC",
+    "WHERE m.tournament_id = $1 AND m.round_number <= $2 " +
+    "GROUP BY m.id, a.id, b.id ORDER BY m.round_number ASC, m.match_number ASC",
     [tournamentId, tournament.current_round],
   );
   return { ...tournament, matches };
