@@ -70,14 +70,12 @@ type AnimeFormat = keyof typeof ANIME_FORMAT_WEIGHTS;
 type MangaFormat = keyof typeof MANGA_FORMAT_WEIGHTS;
 
 function normalize<K extends string>(values: Distribution<K>): Distribution<K> {
-  const total = Object.values(values).reduce((sum, value) => sum + value, 0);
+  const keys = Object.keys(values) as K[];
+  const total = keys.reduce((sum, key) => sum + values[key], 0);
   if (total <= 0) {
-    const keys = Object.keys(values) as K[];
     return Object.fromEntries(keys.map((key) => [key, 1 / keys.length])) as Distribution<K>;
   }
-  return Object.fromEntries(
-    Object.entries(values).map(([key, value]) => [key, Number(value) / total]),
-  ) as Distribution<K>;
+  return Object.fromEntries(keys.map((key) => [key, values[key] / total])) as Distribution<K>;
 }
 
 function estimateMangaOrigins(total: number, chapters: number, anime: number, episodes: number): Distribution<MangaOrigin> {
@@ -217,9 +215,10 @@ function allocate<T extends string>(total: number, weights: Distribution<T>): Re
 }
 
 function distributeByEstimatedCounts<T extends string>(total: number, counts: Record<T, number>): Record<T, number> {
-  const sum = Object.values(counts).reduce((value, item) => value + item, 0);
+  const keys = Object.keys(counts) as T[];
+  const sum = keys.reduce((value, key) => value + counts[key], 0);
   return Object.fromEntries(
-    Object.entries(counts).map(([key, value]) => [key, Math.trunc(total * Number(value) / Math.max(sum, 1))]),
+    keys.map((key) => [key, Math.trunc(total * counts[key] / Math.max(sum, 1))]),
   ) as Record<T, number>;
 }
 
