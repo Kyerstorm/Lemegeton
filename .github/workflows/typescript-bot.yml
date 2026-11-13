@@ -72,7 +72,7 @@ jobs:
       - name: Build and run tests
         run: npm test
       - name: Install PostgreSQL backup tools
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Rehearse PostgreSQL backup and restore
         env:
           PGPASSWORD: lemegeton-ci-${{ github.run_id }}-${{ github.run_attempt }}
