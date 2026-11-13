@@ -566,6 +566,15 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     assert.equal(await unfollowAniListAnime(followGuild, 91001), true);
     assert.equal((await getGuildMediaFollows(followGuild)).some(item => item.anilist_id === 91001), false);
 
+    const seasonSpotlightId = await createArchiveSpotlight({
+      guildId: tournamentGuild,
+      curatorId: "101",
+      entryId: serverEntry.id,
+      visibility: "server",
+      startsAt: new Date(),
+      endsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      note: "Season feature",
+    });
     const seasonStartsAt = new Date();
     const seasonEndsAt = new Date(seasonStartsAt.getTime() + 30 * 24 * 60 * 60 * 1000);
     const seasonId = await createCommunitySeason({
@@ -577,6 +586,7 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       endsAt: seasonEndsAt,
     });
     await addCommunitySeasonItem(tournamentGuild, tournamentCreator, seasonId, "tournament", tournamentId);
+    await addCommunitySeasonItem(tournamentGuild, tournamentCreator, seasonId, "spotlight", seasonSpotlightId);
     await assert.rejects(
       addCommunitySeasonItem(tournamentGuild, finalVoter, seasonId, "tournament", tournamentId),
       /season creator or a server manager/i,
@@ -589,6 +599,7 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     assert.ok(season);
     assert.deepEqual(season.items.map(item => [item.item_type, item.item_id, item.title]), [
       ["tournament", tournamentId, "Integration Tournament"],
+      ["spotlight", seasonSpotlightId, "Spotlight server entry"],
     ]);
     assert.equal(await getCommunitySeason(tournamentOtherGuild, seasonId), null);
     await assert.rejects(
