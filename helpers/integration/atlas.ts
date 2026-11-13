@@ -139,8 +139,10 @@ export async function findAtlasRelationships(
             target_category,target_url,relationship_type,source_kind,source_label
        FROM media_relationship_graph
       WHERE ${visibility}
-        AND ((source_title_key = $${offset+1} AND source_category = $${offset+2} AND ($${offset+3} = '' OR source_url = $${offset+3}))
-          OR (target_title_key = $${offset+1} AND target_category = $${offset+2} AND ($${offset+3} = '' OR target_url = $${offset+3})))
+        AND ((source_category = ${offset+2} AND ((source_title_key = ${offset+1} AND (${offset+3} = '' OR source_url = ${offset+3}))
+              OR (${offset+3} <> '' AND source_url = ${offset+3})))
+          OR (target_category = ${offset+2} AND ((target_title_key = ${offset+1} AND (${offset+3} = '' OR target_url = ${offset+3}))
+              OR (${offset+3} <> '' AND target_url = ${offset+3}))))
       ORDER BY CASE source_kind WHEN 'provider' THEN 0 WHEN 'recommendation' THEN 1 ELSE 2 END,
                created_at DESC
       LIMIT $${offset+4}`,
@@ -150,8 +152,8 @@ export async function findAtlasRelationships(
   const seen = new Set<string>();
   const result: AtlasRelation[] = [];
   for (const row of rows) {
-    const outgoing = row.source_title_key === titleKey && row.source_category === normalizedCategory
-      && (!safeUrl || row.source_url === safeUrl);
+    const outgoing = row.source_category === normalizedCategory
+      && (safeUrl ? row.source_url === safeUrl : row.source_title_key === titleKey);
     const relatedTitle = outgoing ? row.target_title : row.source_title;
     const relatedCategory = normalizeAtlasCategory(outgoing ? row.target_category : row.source_category);
     if (!relatedTitle || !relatedCategory) continue;

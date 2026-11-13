@@ -1633,6 +1633,18 @@ export class DiscoverCommand implements FeatureCommand {
         });
       }
     }
+    files.push(new AttachmentBuilder(Buffer.from(JSON.stringify({
+      root: { title, category: mediaCategory, url: this.recordUrl(first) },
+      nodes: filteredGraph.nodes,
+      edges: filteredGraph.edges.slice(0, 200),
+      filters: {
+        query: targetTitle && !targetCategory ? targetTitle : null,
+        relationship: relationshipFilter,
+        pathTarget: targetTitle && targetCategory ? { title: targetTitle, category: targetCategory, url: targetUrl } : null,
+      },
+      truncated: filteredGraph.truncated,
+      generatedAt: new Date().toISOString(),
+    }, null, 2)), { name: "knowledge-atlas.json" }));
     const dashboardUrl = new URL(this.config.customRolesPublicUrl);
     dashboardUrl.searchParams.set("atlas_title", title);
     dashboardUrl.searchParams.set("atlas_category", mediaCategory.toUpperCase());
