@@ -1010,10 +1010,16 @@ export class ArchiveCommand implements FeatureCommand {
       await interaction.reply({ content: `No approved contributions found for **${title}**. You can submit an entry from the Archive home panel.`, flags: MessageFlags.Ephemeral });
       return;
     }
-    const embeds = entries.slice(0, 5).map(entryEmbed);
-    const components = [entrySelect(entries)];
+    const visibleEntries = entries.slice(0, 5);
+    const embeds = await Promise.all(visibleEntries.map(async (entry) => {
+      const embed = entryEmbed(entry);
+      const media = await this.resolveEntryMedia(interaction, entry);
+      if (media.imageUrl) embed.setThumbnail(media.imageUrl);
+      return embed;
+    }));
+    const components = [entrySelect(visibleEntries)];
     await interaction.reply({
-      content: `**${title}** · ${entries.length} shown`,
+      content: `**${title}** · ${visibleEntries.length} shown`,
       embeds,
       components,
       flags: MessageFlags.Ephemeral,
@@ -1021,25 +1027,65 @@ export class ArchiveCommand implements FeatureCommand {
     });
   }
 
+  private async resolveEntryMedia(
+    interaction: ButtonInteraction | ChatInputCommandInteraction | ModalSubmitInteraction | StringSelectMenuInteraction,
+    entry: ArchiveEntry,
+  ): Promise<{ imageUrl: string | null; attachmentUrls: string[] }> {
+    const assets = await query<{ asset_id: string; content_type: string }>(
+      `SELECT m.id::text AS asset_id, m.content_type
+       FROM media_assets m
+       WHERE m.id = $2
+          OR m.id IN (
+            SELECT asset_id FROM community_archive_entry_assets WHERE entry_id = $1
+          )
+       ORDER BY CASE WHEN m.id = $2 THEN 0 ELSE 1 END, m.id ASC
+       LIMIT 5`,
+      [entry.id, entry.media_asset_id],
+    );
+    const resolved = await Promise.all(assets.map(async (asset) => ({
+      contentType: asset.content_type.toLowerCase(),
+      url: await signedArchiveAssetUrl(Number(asset.asset_id), interaction.client, entry.created_guild_id).catch(() => null),
+    })));
+    const image = resolved.find((asset) => asset.url && asset.contentType.startsWith("image/"));
+    const attachmentUrls = resolved
+      .filter((asset) => asset.url && asset !== image)
+      .map((asset) => asset.url!);
+
+    if (!assets.length && entry.storage_channel_id && entry.storage_message_id) {
+      const legacyUrl = await resolveLegacyArchiveAttachmentUrl(
+        interaction.client, entry.created_guild_id, entry.storage_channel_id, entry.storage_message_id, entry.attachment_filename,
+      ).catch(() => null);
+      if (legacyUrl) {
+        if (/\\.(?:png|jpe?g|gif|webp|avif)$/i.test(entry.attachment_filename ?? "")) {
+          return { imageUrl: legacyUrl, attachmentUrls };
+        }
+        attachmentUrls.push(legacyUrl);
+      }
+    }
+
+    if (!image?.url && !assets.length && entry.attachment_url?.startsWith("https://")) {
+      if (/\\.(?:png|jpe?g|gif|webp|avif)(?:[?#].*)?$/i.test(entry.attachment_url)) {
+        return { imageUrl: entry.attachment_url, attachmentUrls };
+      }
+      attachmentUrls.push(entry.attachment_url);
+    }
+
+    return { imageUrl: image?.url ?? null, attachmentUrls };
+  }
+
   private async showEntry(
     interaction: ButtonInteraction | StringSelectMenuInteraction,
     entry: ArchiveEntry,
   ): Promise<void> {
     const embed = entryEmbed(entry);
-    const assets = await query<{ asset_id: string }>(
-      "SELECT asset_id FROM community_archive_entry_assets WHERE entry_id = $1 ORDER BY position ASC LIMIT 5",
-      [entry.id],
-    );
-    for (const [index, asset] of assets.entries()) {
-      const url = await signedArchiveAssetUrl(Number(asset.asset_id), interaction.client, entry.created_guild_id).catch(() => null);
-      if (url && index === 0) embed.setImage(url);
-      else if (url) embed.addFields({ name: `Private attachment ${index + 1}`, value: `[Open private file](${url})`, inline: true });
-    }
-    if (!assets.length && entry.storage_channel_id && entry.storage_message_id) {
-      const url = await resolveLegacyArchiveAttachmentUrl(
-        interaction.client, entry.created_guild_id, entry.storage_channel_id, entry.storage_message_id, entry.attachment_filename,
-      );
-      if (url) embed.setImage(url);
+    const media = await this.resolveEntryMedia(interaction, entry);
+    if (media.imageUrl) embed.setImage(media.imageUrl);
+    if (media.attachmentUrls.length) {
+      embed.addFields({
+        name: "Attachments",
+        value: media.attachmentUrls.map((url, index) => `[Open file ${index + 1}](${url})`).join("\\n").slice(0, 1024),
+        inline: false,
+      });
     }
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(`archive:report-entry:${entry.id}`).setLabel("Report").setStyle(ButtonStyle.Secondary),

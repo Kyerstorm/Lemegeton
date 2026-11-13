@@ -47,7 +47,7 @@ The catalogue names below are internal environments and navigation labels, not a
 | 11 | Archive Metropolis | Unified submit, browse, search, filter, review, edit, remove, configure and moderation workflows. |
 | 12 | Collection Studio | Mixed-media collections, ordering, attribution, collaboration and publication controls. |
 | 13 | Archive Trails | Curated paths with transitions linking panels, quotes, scenes, soundtracks, fanworks and theories. |
-| 14 | Visual Archive Gallery | Permission-preserving visual category galleries and previews. |
+| 14 | Visual Archive Gallery | **Core implemented in Archive browse:** approved category results now include permission-checked image thumbnails, with full image previews and attachment links in entry detail. |
 | 15 | Soundtrack Discovery | Soundtrack metadata, media links, creator browsing and curated soundtrack collections; no general music player. |
 | 16 | Curation Studio | Featured collections, category indexes, spotlights, trails and curator attribution. |
 | 17 | Community Spotlights | Approved older contributions, creator features and curated highlights surfaced through Community. |
@@ -141,7 +141,7 @@ The phase status below is an implementation audit, not a feature promise. Status
 | 0 — Migration integrity | **Code migration complete** | PR #17 records TypeScript parity, Python removal, branch synchronization and the migration disposition. | Live Discord, production database/storage/provider and dashboard OAuth acceptance. |
 | 1 — Runtime, data and security | **Foundation implemented; acceptance in progress** | Config validation, guild setup gates, guild-scoped data, consent, issue logs, permission helpers, permanently protected Manage Server-only /language command, CI, backup rehearsal and diagnostics. | Target-environment permission/data/rollback tests and current-head CI. |
 | 2 — Discovery and metadata | **In progress** | AniList, TMDB, IGDB, Steam, Google Books, comparisons, airing, trailers, creators, relations and regional availability have implementations and fixture tests. Google Books edition metadata was expanded in this implementation pass. | Provenance at field level, provider contract edge cases, and a supported webnovel metadata source. |
-| 3 — Archive and contributions | **Core workflows implemented; presentation/curation incomplete** | Submissions, moderation/reports, private asset storage, cleanup, collections, collaborators and Archive Trails exist. | Dedicated gallery, curation/spotlight workflow and end-to-end visibility tests for every share/export surface. |
+| 3 — Archive and contributions | **Core workflows and gallery previews implemented; curation incomplete** | Submissions, moderation/reports, private asset storage, cleanup, permission-filtered image previews, collections, collaborators and Archive Trails. | Dedicated curation/spotlight workflow and end-to-end visibility tests for every share/export surface. |
 | 4 — Community and games | **Core activities implemented; competition formats incomplete** | Daily Drop, ranked voting, sessions/RSVP, spoiler discussions, release calendars/digests, quiz packs and persistent game sessions exist. | Tournament brackets, community seasons/showcases, richer puzzle/challenge modes and interaction tests. |
 | 5 — Profiles and Custom Roles | **Profile showcase implemented; live acceptance pending** | Guild-scoped AniList/Steam linking, privacy preferences, affinity/taste, leaderboard, recent approved contributions, active collections/Trails and custom-role lifecycle helpers. | Live Discord role-hierarchy/lifecycle acceptance and visibility regression tests. |
 | 6 — Notifications and automation | **Basic scheduled delivery implemented; entity automation incomplete** | Completed/cancelled AniList notifications and guild release digests have scheduling/delivery paths. | Title/creator/franchise follows, more provider release kinds and bounded trigger workflows. |
@@ -208,8 +208,10 @@ Phase 0 code migration status does **not** mean the service is launched. Phase 8
 
 **Already present:** the unified Archive command; category-specific contribution forms; upload classification/limits; moderation queues and reports; server/global visibility rules; S3-compatible storage and cleanup retries; collections, collection collaborators, ordered Trail entries and Trail browsing.
 
+**Completed in this pass:** category browse results now show permission-checked image thumbnails from private S3 assets or supported legacy Discord attachments. Opening an entry retains the full image preview and lists other attachments as links. Asset URLs are resolved only after the Archive query has enforced guild visibility; no duplicate gallery records or public asset URLs are introduced.
+
 **Remaining delivery:**
-- Build a visual gallery view on top of approved canonical Archive entries. Do not copy records into a second gallery database.
+- Add a dedicated curation/spotlight view over approved canonical Archive entries. Do not copy records into a second gallery database.
 - Add explicit curation/spotlight records or a clear featured status, with curator attribution, publication window and guild/global scope.
 - Ensure collection and Trail reads re-check each referenced entry's current visibility and moderation status. A previously approved collection must not keep showing an entry later made private or removed.
 - Verify cross-guild references and global Archive access at each page, component, attachment and export action.
