@@ -130,6 +130,7 @@ function communityHome(): { embeds: EmbedBuilder[]; components: ActionRowBuilder
       { name: "Spotlights", value: "Curator-selected approved Archive contributions.", inline: true },
       { name: "Tournaments", value: "Seeded elimination brackets with locked ballots.", inline: true },
       { name: "Seasons", value: "Collect completed server activities into a shared season.", inline: true },
+      { name: "Showcase", value: "Explore visible collections, Trails and completed community results.", inline: true },
     ],
   );
   const rows = [
