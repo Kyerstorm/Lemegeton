@@ -33,6 +33,8 @@ import {
   reviewQuizPack,
   reviewQuizQuestion,
   startGame,
+  type GameMode,
+  type GameLeaderboardEntry,
 } from "../../helpers/runtime/games.js";
 import { query } from "../../database.js";
 import { isGuildManager, isValidHttpsUrl, safeDisplay } from "../../helpers/security/security.js";
@@ -55,6 +57,10 @@ function playHome(): { embeds: EmbedBuilder[]; components: ActionRowBuilder<Butt
         new ButtonBuilder().setCustomId("play:start").setLabel("Start a game").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId("play:packs").setLabel("Browse packs").setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId("play:review").setLabel("Review queue").setStyle(ButtonStyle.Secondary),
+      ),
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId("play:start-team").setLabel("Competitive teams").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId("play:start-coop").setLabel("Co-op game").setStyle(ButtonStyle.Success),
       ),
     ],
   };
@@ -131,6 +137,11 @@ function gameButtons(sessionId: string): ActionRowBuilder<ButtonBuilder> {
   );
 }
 
+function leaderboardLine(row: GameLeaderboardEntry, index: number): string {
+  const label = row.team_name ? `${safeDisplay(row.team_name)} (${row.member_count} members)` : `<@${row.user_id ?? "unknown"}>`;
+  return `${index + 1}. ${label} · ${row.score} points · ${row.correct} correct / ${row.answers} answered`;
+}
+
 export class PlayCommand implements FeatureCommand {
   readonly data = new SlashCommandBuilder()
     .setName("play")
@@ -164,6 +175,7 @@ export class PlayCommand implements FeatureCommand {
     .addStringOption((option) => option.setName("source_url").setDescription("HTTPS source link").setMaxLength(1_000))
     .addStringOption((option) => option.setName("media_title").setDescription("Associated media title").setMaxLength(200))
     .addIntegerOption((option) => option.setName("rounds").setDescription("Number of rounds (1–10)").setMinValue(1).setMaxValue(10))
+    .addStringOption((option) => option.setName("game_mode").setDescription("Scoring mode").addChoices({ name: "Individual", value: "individual" }, { name: "Competitive teams", value: "teams" }, { name: "Cooperative team", value: "cooperative" }))
     .addBooleanOption((option) => option.setName("approve").setDescription("Approve or reject pending content"));
 
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -204,7 +216,7 @@ export class PlayCommand implements FeatureCommand {
         case "review-pack": await this.reviewPackCommand(interaction); return;
         case "review-question": await this.reviewQuestionCommand(interaction); return;
         case "packs": await this.showPacks(interaction); return;
-        case "start": await this.start(interaction, interaction.options.getString("pack_id"), interaction.options.getInteger("rounds") ?? 5); return;
+        case "start": await this.start(interaction, interaction.options.getString("pack_id"), interaction.options.getInteger("rounds") ?? 5, (interaction.options.getString("game_mode") ?? "individual") as GameMode); return;
         case "join": await this.join(interaction, interaction.options.getString("session_id")); return;
         case "answer": await this.answerDirect(interaction); return;
         case "next": await this.advance(interaction, false); return;
@@ -242,7 +254,8 @@ export class PlayCommand implements FeatureCommand {
       await interaction.reply({ content: "Choose the pack for your new question.", components: [select], flags: MessageFlags.Ephemeral });
       return true;
     }
-    if (action === "start") {
+    if (action === "start" || action === "start-team" || action === "start-coop") {
+      const gameMode: GameMode = action === "start-team" ? "teams" : action === "start-coop" ? "cooperative" : "individual";
       const packs = await listQuizPacks(interaction.guildId, "approved");
       const available = packs.filter((pack) => pack.question_count > 0);
       if (!available.length) {
@@ -250,7 +263,7 @@ export class PlayCommand implements FeatureCommand {
         return true;
       }
       const select = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder()
-        .setCustomId("play:start-pack")
+        .setCustomId(`play:start-pack:${gameMode}`)
         .setPlaceholder("Choose a question pack")
         .addOptions(available.slice(0, 25).map((pack) => ({
           label: pack.title.slice(0, 100),
@@ -307,7 +320,7 @@ export class PlayCommand implements FeatureCommand {
 
   async handleSelect(interaction: StringSelectMenuInteraction): Promise<boolean> {
     if (!interaction.guildId) return false;
-    const [, action] = interaction.customId.split(":");
+    const [, action, gameMode] = interaction.customId.split(":");
     const selected = interaction.values[0];
     if (!selected) return false;
     if (action === "question-pack") {
@@ -315,7 +328,7 @@ export class PlayCommand implements FeatureCommand {
       return true;
     }
     if (action === "start-pack") {
-      await this.start(interaction, selected, 5);
+      await this.start(interaction, selected, 5, gameMode === "teams" || gameMode === "cooperative" ? gameMode : "individual");
       return true;
     }
     return false;
@@ -471,12 +484,13 @@ export class PlayCommand implements FeatureCommand {
     interaction: ChatInputCommandInteraction | StringSelectMenuInteraction,
     packId: string | null,
     rounds: number,
+    gameMode: GameMode = "individual",
   ): Promise<void> {
     if (!packId) {
       await interaction.reply({ content: "Choose an approved pack using the game panel or provide pack_id.", flags: MessageFlags.Ephemeral });
       return;
     }
-    const session = await startGame(interaction.guildId!, interaction.channelId, interaction.user.id, packId, rounds);
+    const session = await startGame(interaction.guildId!, interaction.channelId, interaction.user.id, packId, rounds, gameMode);
     const question = await getCurrentGameQuestion(interaction.guildId!, session.id);
     if (!question) throw new Error("The first approved question could not be loaded.");
     const channel = interaction.channel;
@@ -484,12 +498,13 @@ export class PlayCommand implements FeatureCommand {
       throw new Error("Start the game from a text channel so the server can participate.");
     }
     const message = await (channel as TextChannel).send({
-      embeds: [questionEmbed(`${emoji.game} ${session.title}`, question.question, question.source_url, 1, session.question_ids.length)],
+      embeds: [questionEmbed(`${emoji.game} ${session.title}${session.game_mode === "teams" ? " · Team battle" : session.game_mode === "cooperative" ? " · Co-op" : ""}`, question.question, question.source_url, 1, session.question_ids.length)],
       components: [gameButtons(session.id)],
       allowedMentions: { parse: [] },
     });
     await query("UPDATE community_game_sessions SET message_id = $1 WHERE id = $2 AND guild_id = $3", [message.id, session.id, interaction.guildId]);
-    await interaction.reply({ content: `Game session #${session.id} started. Share the channel message with your players.`, flags: MessageFlags.Ephemeral });
+    const notice = session.game_mode === "teams" ? " Players are balanced between Team A and Team B when they join." : session.game_mode === "cooperative" ? " Everyone contributes to the Community Team score." : "";
+    await interaction.reply({ content: `Game session #${session.id} started.${notice} Share the channel message with your players.`, flags: MessageFlags.Ephemeral });
   }
 
   private async join(
@@ -497,8 +512,8 @@ export class PlayCommand implements FeatureCommand {
     sessionId: string | null,
   ): Promise<void> {
     if (!sessionId) throw new Error("Provide session_id or use Join game on the game message.");
-    await joinGame(interaction.guildId!, sessionId, interaction.user.id);
-    await interaction.reply({ content: "You joined the game. Submit one answer for each round.", flags: MessageFlags.Ephemeral });
+    const teamName = await joinGame(interaction.guildId!, sessionId, interaction.user.id);
+    await interaction.reply({ content: teamName ? `You joined ${teamName}. Your answers contribute to the team score.` : "You joined the game. Submit one answer for each round.", flags: MessageFlags.Ephemeral });
   }
 
   private async answerDirect(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -507,7 +522,7 @@ export class PlayCommand implements FeatureCommand {
     if (!sessionId || !answer) throw new Error("Provide session_id and answer_text, or use the Answer button.");
     const result = await answerGameQuestion(interaction.guildId!, sessionId, interaction.user.id, answer);
     await interaction.reply({
-      content: result.correct ? `${emoji.check} Correct. Round ${result.round}/${result.total}. [Source](${result.sourceUrl}).` : `Not quite. The round answer is revealed after the host advances. [Source](${result.sourceUrl}).`,
+      content: result.correct ? `${emoji.check} Correct. Round ${result.round}/${result.total}.${result.teamName ? ` ${result.teamName} gains 100 points.` : ""} [Source](${result.sourceUrl}).` : `Not quite. The round answer is revealed after the host advances.${result.teamName ? ` Your answer was recorded for ${result.teamName}.` : ""} [Source](${result.sourceUrl}).`,
       flags: MessageFlags.Ephemeral,
     });
   }
@@ -520,11 +535,11 @@ export class PlayCommand implements FeatureCommand {
     if (session.host_id !== interaction.user.id) throw new Error("Only the host can advance or finish the game.");
     const current = await getCurrentGameQuestion(interaction.guildId!, sessionId);
     const result = await advanceGame(interaction.guildId!, sessionId, interaction.user.id, finish);
-    const leaderboard = result.finished ? await getGameLeaderboard(sessionId) : [];
+    const leaderboard = result.finished ? await getGameLeaderboard(interaction.guildId!, sessionId) : [];
     await interaction.reply({
       embeds: [homeEmbed(result.finished ? "Game finished" : "Round advanced", [
         current ? `Previous answer: **${safeDisplay(current.correct_answer)}**\n[Source](${current.source_url})` : "",
-        result.finished ? leaderboard.map((row, index) => `${index + 1}. <@${row.user_id}> · ${row.score} points · ${row.correct} correct`).join("\n") : `Next round: ${result.round}/${result.total}`,
+        result.finished ? leaderboard.map((row, index) => leaderboardLine(row, index)).join("\n") : `Next round: ${result.round}/${result.total}`,
       ].filter(Boolean).join("\n\n"))],
       flags: MessageFlags.Ephemeral,
     });
@@ -543,10 +558,10 @@ export class PlayCommand implements FeatureCommand {
     const current = await getCurrentGameQuestion(interaction.guildId!, sessionId);
     const result = await advanceGame(interaction.guildId!, sessionId, interaction.user.id, finish);
     if (result.finished) {
-      const leaderboard = await getGameLeaderboard(sessionId);
+      const leaderboard = await getGameLeaderboard(interaction.guildId!, sessionId);
       const embed = homeEmbed("Game finished", [
         current ? `Final answer: **${safeDisplay(current.correct_answer)}** · [Source](${current.source_url})` : "",
-        leaderboard.map((row, index) => `${index + 1}. <@${row.user_id}> · ${row.score} points · ${row.correct} correct / ${row.answers}`).join("\n") || "No answers were submitted.",
+        leaderboard.map((row, index) => leaderboardLine(row, index)).join("\n") || "No answers were submitted.",
       ].filter(Boolean).join("\n\n"));
       await interaction.update({ embeds: [embed], components: [] });
       return;
@@ -575,11 +590,11 @@ export class PlayCommand implements FeatureCommand {
   }
 
   private async showLeaderboard(interaction: ButtonInteraction | ChatInputCommandInteraction, sessionId: string): Promise<void> {
-    const rows = await getGameLeaderboard(sessionId);
+    const rows = await getGameLeaderboard(interaction.guildId!, sessionId);
     await interaction.reply({
-      embeds: [homeEmbed("Game leaderboard", "Fixed scoring: 100 points for a correct answer, zero for an incorrect answer. Ties use the number of correct answers and then stable user ID order.", rows.map((row) => ({
-        name: `<@${row.user_id}>`,
-        value: `${row.score} points · ${row.correct} correct / ${row.answers} answered`,
+      embeds: [homeEmbed(rows.some(row => row.team_name) ? "Team leaderboard" : "Game leaderboard", "Fixed scoring: 100 points for a correct answer, zero for an incorrect answer. Ties use correct answers and then stable team or player order.", rows.map((row, index) => ({
+        name: leaderboardLine(row, index).split(" · ")[0] ?? "Player",
+        value: leaderboardLine(row, index).split(" · ").slice(1).join(" · ") || "No answers yet",
         inline: false,
       })))],
       flags: MessageFlags.Ephemeral,
