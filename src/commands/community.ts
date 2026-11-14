@@ -58,6 +58,7 @@ import {
 } from "../../helpers/community/community.js";
 import { query, queryOne } from "../../database.js";
 import { listArchiveSpotlights } from "../../helpers/archive/archive-curation.js";
+import { listCommunityShowcase } from "../../helpers/community/community-showcase.js";
 import {
   addCommunitySeasonItem,
   advanceCommunityTournament,
@@ -144,6 +145,9 @@ function communityHome(): { embeds: EmbedBuilder[]; components: ActionRowBuilder
       new ButtonBuilder().setCustomId("community:spotlights").setLabel("Spotlights").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("community:tournaments").setLabel("Tournaments").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("community:seasons").setLabel("Seasons").setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("community:showcase").setLabel("Community Showcase").setStyle(ButtonStyle.Secondary),
     ),
   ];
   return { embeds: [embed], components: rows };
@@ -583,6 +587,10 @@ export class CommunityCommand implements FeatureCommand {
         .setPlaceholder("Choose a session")
         .addOptions(sessions.map((session) => ({ label: session.title.slice(0, 100), value: session.id }))));
       await interaction.reply({ content: "Choose a session to RSVP to.", components: [select], flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (action === "showcase") {
+      await this.showCommunityShowcase(interaction);
       return true;
     }
     if (action === "discussion-create") {
@@ -1434,6 +1442,37 @@ export class CommunityCommand implements FeatureCommand {
     });
   }
 
+  private async showCommunityShowcase(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
+    const entries = await listCommunityShowcase(interaction.guildId!, 15);
+    const labels = {
+      collection: "Archive collection",
+      trail: "Archive Trail",
+      ranking: "Ranking result",
+      tournament: "Tournament result",
+    } as const;
+    const fields = entries.map((entry) => {
+      const details = [
+        entry.description ? safeDisplay(entry.description, 280) : null,
+        entry.kind === "tournament" && entry.result_title
+          ? "Champion: " + safeDisplay(entry.result_title, 120)
+          : "Visible records: " + entry.item_count,
+        "Created by <@" + entry.creator_id + "> · <t:" + Math.floor(new Date(entry.created_at).getTime() / 1000) + ":d>",
+      ].filter((value): value is string => Boolean(value));
+      return {
+        name: (labels[entry.kind] + " · " + safeDisplay(entry.title, 180)).slice(0, 256),
+        value: details.join("\\n").slice(0, 1_024),
+        inline: false,
+      };
+    });
+    await interaction.reply({
+      content: entries.length
+        ? "Published Archive work and completed community results from this server."
+        : "No published collections, Trails or completed community results are available in this server yet.",
+      embeds: [homeEmbed("Community Showcase", "A current-guild view of approved collections, Trails and completed community results.", fields)],
+      flags: MessageFlags.Ephemeral,
+      allowedMentions: { parse: [] },
+    });
+  }
   private async showHistory(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
     const history = await getCommunityHistory(interaction.guildId!);
     const fields = [
