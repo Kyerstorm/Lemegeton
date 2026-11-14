@@ -54,6 +54,7 @@ import { logger } from "../../helpers/runtime/logger.js";
 import { emoji, loadingMessage } from "../../helpers/emoji.js";
 import { parseGridSourceUrls, parseGridTitles, renderMediaGrid, type MediaGridSource } from "../../helpers/media/media-grid.js";
 import { parseMediaComparisonEntries, type MediaComparisonCategory } from "../../helpers/media/media-comparison.js";
+import { formatMetadataSourceReference } from "../../helpers/media/media-provenance.js";
 import { rankCrossMediaCandidates, recommendationGenreLabels, type CrossMediaCandidate } from "../../helpers/media/cross-media-recommendations.js";
 
 
@@ -115,6 +116,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
         { name: "Genres", value: item.genres.slice(0, 8).join(" · ") || "Unavailable", inline: false },
       )
       .setFooter({ text: `AniList · Source metadata` });
+    embed.addFields({ name: "Source record", value: formatMetadataSourceReference("AniList", item.id, item.siteUrl), inline: false });
     if(item.trailer)embed.addFields({name:"Official trailer",value:`[Watch on ${item.trailer.site}](${item.trailer.url})`,inline:true});
     if (item.startDate?.year) embed.addFields({ name: "Release year", value: String(item.startDate.year), inline: true });
     if (item.studios.length) embed.addFields({ name: "Studios", value: item.studios.join(", ").slice(0, 900), inline: false });
@@ -152,6 +154,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
         { name: "Categories", value: item.categories.join(", ") || item.mainCategory || "Unavailable", inline: false },
       )
       .setFooter({ text: "Google Books · Source metadata" });
+    embed.addFields({ name: "Source record", value: formatMetadataSourceReference("Google Books", item.id, item.sourceUrl), inline: false });
     if (item.image) embed.setThumbnail(item.image);
     if (item.previewUrl) embed.addFields({ name: "Preview", value: "[Open preview](" + item.previewUrl + ")", inline: true });
     if (item.infoUrl && item.infoUrl !== item.sourceUrl) embed.addFields({ name: "Edition details", value: "[Open Google Books record](" + item.infoUrl + ")", inline: true });
@@ -173,6 +176,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
         { name: "Status", value: item.status ?? "Unavailable", inline: true },
       )
       .setFooter({ text: "TMDB · Source metadata" });
+    embed.addFields({ name: "Source record", value: formatMetadataSourceReference("TMDB", item.id, item.sourceUrl), inline: false });
     if (item.image) embed.setThumbnail(item.image);
     return embed;
   }
@@ -192,6 +196,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
         {name:"Developers",value:item.developers.join(", ")||"Unavailable",inline:true},
         {name:"Publishers",value:item.publishers.join(", ")||"Unavailable",inline:true},
       ).setFooter({text:"Steam Store · US store metadata"});
+    embed.addFields({name:"Source record",value:formatMetadataSourceReference("Steam Store",item.appId,"https://store.steampowered.com/app/"+item.appId),inline:false});
     if(item.headerImage)embed.setImage(item.headerImage);
     return embed;
   }
@@ -211,6 +216,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
       { name: "Publishers", value: item.publishers.join(", ") || "Unavailable", inline: true },
     )
     .setFooter({ text: "IGDB · Source metadata" });
+  embed.addFields({ name: "Source record", value: formatMetadataSourceReference("IGDB", item.id, item.sourceUrl), inline: false });
   if (item.image?.startsWith("https://")) embed.setThumbnail(item.image);
   return embed;
 }
