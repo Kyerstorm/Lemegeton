@@ -20,7 +20,7 @@ test("provider HTTP honors Retry-After and does not retry beyond its bounded wai
   const response = await fetchProviderResponse(async () => {
     calls += 1;
     return new Response("rate limited", { status: 429, headers: { "Retry-After": "2" } });
-  }, "https://provider.example/items", {}, { sleep: async ms => { waits.push(ms); } });
+  }, "https://provider.example/items", {}, { maxAttempts: 2, sleep: async ms => { waits.push(ms); } });
   assert.equal(response.status, 429);
   assert.equal(calls, 2);
   assert.deepEqual(waits, [2_000]);
