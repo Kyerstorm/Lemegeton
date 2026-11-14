@@ -208,35 +208,20 @@ async function serverDiagnostics(
 
   const configuredChannels = databaseHealthy
     ? await query<{ name: string; channel_id: string }>(
-      \`SELECT 'Current media notifications' AS name, channel_id::text AS channel_id
-         FROM media_notification_settings WHERE guild_id = $1 AND channel_id IS NOT NULL
-       UNION ALL
-       SELECT 'Archive uploads', upload_channel_id::text
-         FROM guild_archive_settings WHERE guild_id = $1 AND upload_channel_id IS NOT NULL
-       UNION ALL
-       SELECT 'Archive moderation', moderation_channel_id::text
-         FROM guild_archive_settings WHERE guild_id = $1 AND moderation_channel_id IS NOT NULL
-       UNION ALL
-       SELECT 'Custom Roles commands', command_channel_id::text
-         FROM custom_role_guild_settings WHERE guild_id = $1 AND command_channel_id IS NOT NULL
-       UNION ALL
-       SELECT 'Custom Roles logs', log_channel_id::text
-         FROM custom_role_guild_settings WHERE guild_id = $1 AND log_channel_id IS NOT NULL
-       UNION ALL
-       SELECT 'Daily Drop', channel_id::text
-         FROM community_daily_schedules WHERE guild_id = $1 AND enabled = TRUE
-       UNION ALL
-       SELECT 'Release digest', channel_id::text
-         FROM community_release_schedules WHERE guild_id = $1 AND enabled = TRUE
-       ORDER BY name\`,
+      "SELECT 'Current media notifications' AS name, channel_id::text AS channel_id FROM media_notification_settings WHERE guild_id = $1 AND channel_id IS NOT NULL " +
+      "UNION ALL SELECT 'Archive uploads', upload_channel_id::text FROM guild_archive_settings WHERE guild_id = $1 AND upload_channel_id IS NOT NULL " +
+      "UNION ALL SELECT 'Archive moderation', moderation_channel_id::text FROM guild_archive_settings WHERE guild_id = $1 AND moderation_channel_id IS NOT NULL " +
+      "UNION ALL SELECT 'Custom Roles commands', command_channel_id::text FROM custom_role_guild_settings WHERE guild_id = $1 AND command_channel_id IS NOT NULL " +
+      "UNION ALL SELECT 'Custom Roles logs', log_channel_id::text FROM custom_role_guild_settings WHERE guild_id = $1 AND log_channel_id IS NOT NULL " +
+      "UNION ALL SELECT 'Daily Drop', channel_id::text FROM community_daily_schedules WHERE guild_id = $1 AND enabled = TRUE " +
+      "UNION ALL SELECT 'Release digest', channel_id::text FROM community_release_schedules WHERE guild_id = $1 AND enabled = TRUE ORDER BY name",
       [guildId],
     )
     : [];
   const checks = [{ name: "Current channel", channel_id: currentChannelId }, ...configuredChannels];
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
-    .setTitle("Server Check")
-    .setFooter({ text: "Read-only diagnostics · Provider configuration is not a live connectivity test" });
+    .setTitle("Server Check");
 
   let botMember: Awaited<ReturnType<typeof guild.members.fetchMe>> | null = null;
   try {
@@ -250,13 +235,17 @@ async function serverDiagnostics(
     {
       name: "PostgreSQL",
       status: databaseHealthy ? "Healthy" : "Needs attention",
-      detail: databaseHealthy ? \`SELECT 1 succeeded in \${databaseLatency} ms.\` : "The database health query failed; configured delivery channels could not be listed.",
+      detail: databaseHealthy
+        ? "SELECT 1 succeeded in " + databaseLatency + " ms."
+        : "The database health query failed; configured delivery channels could not be listed.",
     },
     {
       name: "Discord gateway",
       status: gatewayReady ? "Healthy" : "Needs attention",
       detail: gatewayReady
-        ? guild.client.ws.ping >= 0 ? \`Gateway is ready · \${Math.round(guild.client.ws.ping)} ms ping.\` : "Gateway is ready; latency is unavailable."
+        ? guild.client.ws.ping >= 0
+          ? "Gateway is ready · " + Math.round(guild.client.ws.ping) + " ms ping."
+          : "Gateway is ready; latency is unavailable."
         : "The bot client is not in the ready state.",
     },
   ];
@@ -279,14 +268,19 @@ async function serverDiagnostics(
       results.push({
         name: check.name,
         status: missing.length ? "Needs attention" : "Healthy",
-        detail: missing.length ? "Missing bot permissions: " + missing.join(", ") + "." : "View Channel, Send Messages and Embed Links are available.",
+        detail: missing.length
+          ? "Missing bot permissions: " + missing.join(", ") + "."
+          : "View Channel, Send Messages and Embed Links are available.",
       });
     }
   }
 
   const healthy = results.filter(item => item.status === "Healthy").length;
   const attention = results.filter(item => item.status === "Needs attention").length;
-  embed.setDescription(\`**Healthy:** \${healthy} · **Needs attention:** \${attention}\nChecks include PostgreSQL, the Discord gateway, this channel and configured v3 delivery channels.\`);
+  embed.setDescription(
+    "**Healthy:** " + healthy + " · **Needs attention:** " + attention +
+    "\nChecks include PostgreSQL, the Discord gateway, this channel and configured v3 delivery channels.",
+  );
   for (const result of results) {
     embed.addFields({
       name: (result.status === "Healthy" ? "✓ " : emoji.error + " ") + result.name + " · " + result.status,
@@ -312,7 +306,7 @@ async function serverDiagnostics(
   });
   embed.addFields({
     name: "Provider and storage configuration · not live probes",
-    value: providerChecks.map(item => \`\${item.configured ? "Configured" : "Not configured"} · \${item.name} — \${item.detail}\`).join("\n").slice(0, 1024),
+    value: providerChecks.map(item => (item.configured ? "Configured" : "Not configured") + " · " + item.name + " — " + item.detail).join("\n").slice(0, 1024),
     inline: false,
   });
   embed.setFooter({ text: "Read-only diagnostics · Provider rows show configuration only; asset-object and scheduled-job health are not probed" });
