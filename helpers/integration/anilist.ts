@@ -1,4 +1,5 @@
 import { secureRandBelow } from "../security/crypto-random.js";
+import { fetchProviderResponse } from "./provider-http.js";
 export type AniListMediaType = "ANIME" | "MANGA";
 export interface AniListSearchFilters {genre?:string;yearFrom?:number;yearTo?:number;status?:string;format?:string;season?:string;seasonYear?:number;}
 function filterVariables(filters:AniListSearchFilters):Record<string,unknown>{return{...(filters.genre?{genreIn:[filters.genre]}:{}),...(filters.yearFrom?{startDateGreater:filters.yearFrom*10000+101}:{}),...(filters.yearTo?{startDateLesser:filters.yearTo*10000+1231}:{}),...(filters.status?{status:filters.status}:{}),...(filters.format?{format:filters.format}:{}),...(filters.season?{season:filters.season}:{}),...(filters.seasonYear?{seasonYear:filters.seasonYear}:{})};}
@@ -490,7 +491,7 @@ export class AniListClient {
  }
  private async searchQuery(vars:Record<string,unknown>):Promise<AniListMedia[]>{const d=await this.graphql(SEARCH,{page:1,perPage:10,...vars});const p=isObj(d.Page)?d.Page:{};return(Array.isArray(p.media)?p.media:[]).flatMap(x=>{const m=parseMedia(x);return m?[m]:[];});}
  private async graphql(query:string,variables:Record<string,unknown>):Promise<Obj>{
-  let response:Response;try{response=await this.fetcher(this.endpoint,{method:"POST",headers:{"Content-Type":"application/json",Accept:"application/json"},body:JSON.stringify({query,variables}),signal:AbortSignal.timeout(this.timeoutMs)});}catch(e){throw new AniListError(e instanceof Error&&["TimeoutError","AbortError"].includes(e.name)?"AniList request timed out.":"AniList could not be reached.");}
+  let response:Response;try{response=await fetchProviderResponse(this.fetcher,this.endpoint,{method:"POST",headers:{"Content-Type":"application/json",Accept:"application/json"},body:JSON.stringify({query,variables}),signal:AbortSignal.timeout(this.timeoutMs)},{retryPost:true});}catch(e){throw new AniListError(e instanceof Error&&["TimeoutError","AbortError"].includes(e.name)?"AniList request timed out.":"AniList could not be reached.");}
   if(!response.ok)throw new AniListError(`AniList returned HTTP ${response.status}.`,response.status);const payload:unknown=await response.json();if(!isObj(payload)||Array.isArray(payload.errors)||!isObj(payload.data))throw new AniListError("AniList returned no usable data.");return payload.data;
  }
 }
