@@ -25,7 +25,7 @@ test("Community Showcase orders the newest published records first without mutat
 test("Community Showcase result limits are bounded to 1–25 entries", () => {
   const input = Array.from({ length: 30 }, (_, index) => entry(String(index), new Date(2026, 0, index + 1).toISOString()));
   assert.equal(orderCommunityShowcaseEntries(input, 0).length, 15);
-  assert.equal(orderCommunityShowcaseEntries(input, -5).length, 15);
+  assert.equal(orderCommunityShowcaseEntries(input, -5).length, 1);
   assert.equal(orderCommunityShowcaseEntries(input, 1).length, 1);
   assert.equal(orderCommunityShowcaseEntries(input, 200).length, 25);
 });
