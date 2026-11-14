@@ -1457,7 +1457,7 @@ export class CommunityCommand implements FeatureCommand {
         entry.kind === "tournament" && entry.result_title
           ? "Champion: " + safeDisplay(entry.result_title, 120)
           : "Visible records: " + entry.item_count,
-        "Created by <@" + entry.creator_id + "> · <t:" + Math.floor(new Date(entry.created_at).getTime() / 1000) + ":d>",
+        "Created by <@" + entry.creator_id + "> · <t:" + Math.floor(entry.created_at.getTime() / 1000) + ":d>",
       ].filter((value): value is string => Boolean(value));
       return {
         name: (labels[entry.kind] + " · " + safeDisplay(entry.title, 180)).slice(0, 256),
