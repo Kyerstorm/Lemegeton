@@ -117,6 +117,25 @@ function normalizeVolume(value: unknown): GoogleBook | null {
   };
 }
 
+function normalizeIsbnIdentifier(value: string): string | null {
+  const compact = value.trim()
+    .replace(/^isbn(?:[-\s]?(?:10|13))?\s*[:#]?\s*/i, "")
+    .replace(/[\s-]/g, "")
+    .toUpperCase();
+  if (/^\d{9}[\dX]$/.test(compact)) {
+    const sum = [...compact].reduce((total, digit, index) =>
+      total + (10 - index) * (digit === "X" ? 10 : Number(digit)), 0);
+    return sum % 11 === 0 ? compact : null;
+  }
+  if (/^\d{13}$/.test(compact)) {
+    const sum = [...compact.slice(0, 12)].reduce((total, digit, index) =>
+      total + Number(digit) * (index % 2 === 0 ? 1 : 3), 0);
+    const checkDigit = (10 - (sum % 10)) % 10;
+    return Number(compact[12]) === checkDigit ? compact : null;
+  }
+  return null;
+}
+
 export class GoogleBooksClient {
   constructor(private readonly apiKey?: string) {}
 
@@ -126,6 +145,35 @@ export class GoogleBooksClient {
       throw new Error("Google Books subject must be a valid non-empty category.");
     }
     return this.search("subject:" + clean);
+  }
+
+  async getVolumeById(volumeId: string): Promise<GoogleBook | null> {
+    const id = volumeId.trim();
+    if (!/^[A-Za-z0-9_-]{6,80}$/.test(id)) {
+      throw new Error("Google Books volume IDs must contain 6–80 letters, numbers, underscores or hyphens.");
+    }
+    const url = new URL("https://www.googleapis.com/books/v1/volumes/" + encodeURIComponent(id));
+    if (this.apiKey) url.searchParams.set("key", this.apiKey);
+    const response = await fetchProviderResponse(globalThis.fetch, url, { signal: AbortSignal.timeout(10_000) });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error("Google Books returned HTTP " + response.status + " for that volume.");
+    return normalizeVolume(await response.json());
+  }
+
+  async findEdition(identifier: string): Promise<GoogleBook[]> {
+    const clean = identifier.trim();
+    const compact = clean.replace(/^isbn(?:[-\s]?(?:10|13))?\s*[:#]?\s*/i, "").replace(/[\s-]/g, "");
+    if (/^\d{9}[\dX]$|^\d{13}$/.test(compact.toUpperCase())) {
+      const isbn = normalizeIsbnIdentifier(clean);
+      if (!isbn) throw new Error("That ISBN has an invalid checksum. Check the ISBN-10 or ISBN-13 digits and try again.");
+      const matches = await this.search("isbn:" + isbn);
+      return matches.filter((book) => book.isbn10 === isbn || book.isbn13 === isbn);
+    }
+    if (/^[A-Za-z0-9_-]{6,80}$/.test(clean)) {
+      const volume = await this.getVolumeById(clean);
+      return volume ? [volume] : [];
+    }
+    throw new Error("Enter a valid ISBN-10, ISBN-13 or Google Books volume ID.");
   }
 
   async search(query: string): Promise<GoogleBook[]> {

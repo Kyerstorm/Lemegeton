@@ -387,6 +387,7 @@ export class DiscoverCommand implements FeatureCommand {
     .addIntegerOption((option) => option.setName("season_year").setDescription("Anime season year").setMinValue(1970).setMaxValue(2100))
     .addStringOption((option) => option.setName("view").setDescription("Choose a discovery view").addChoices(
       { name: "Search results", value: "search" },
+      { name: "Exact book edition lookup", value: "edition" },
       { name: "3×3 media cover grid", value: "grid" },
       { name: "Cross-media similarity", value: "similar" },
       { name: "Knowledge Atlas", value: "atlas" },
@@ -438,8 +439,8 @@ export class DiscoverCommand implements FeatureCommand {
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
     const query = interaction.options.getString("query")?.trim();
     const compareTo = interaction.options.getString("compare_to")?.trim();
-    const category = (interaction.options.getString("category") ?? "anime") as Category;
     const view = interaction.options.getString("view") ?? "search";
+    const category = (interaction.options.getString("category") ?? (view === "edition" ? "book" : "anime")) as Category;
     const filters: DiscoverFilters = {
       genre:interaction.options.getString("genre")??undefined,
       yearFrom:interaction.options.getInteger("year_from")??undefined,
@@ -494,6 +495,39 @@ export class DiscoverCommand implements FeatureCommand {
     if (!query) {
       const home = homePanel();
       await interaction.reply({ ...home, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (view === "edition") {
+      if (category !== "book") {
+        await interaction.reply({ content: "Exact edition lookup requires the Books category.", flags: MessageFlags.Ephemeral });
+        return;
+      }
+      await interaction.reply({
+        content: loadingMessage("Looking up the exact book edition…"),
+        flags: MessageFlags.Ephemeral,
+      });
+      try {
+        const editions = await this.books.findEdition(query);
+        await interaction.editReply({
+          content: editions.length
+            ? "Exact Google Books edition match · " + query.slice(0, 80)
+            : "Google Books returned no exact ISBN or volume-ID match. Try the other identifier printed on the edition.",
+          embeds: editions.slice(0, 5).map((edition) => toEmbed({
+            provider: "Google Books",
+            category: "book",
+            item: edition,
+          })),
+          components: [navigationButtons("discover", [{ id: "home", label: "Back to discovery" }])],
+          allowedMentions: { parse: [] },
+        });
+      } catch (error) {
+        await interaction.editReply({
+          content: error instanceof Error ? error.message : "The exact book edition could not be retrieved.",
+          embeds: [],
+          components: [navigationButtons("discover", [{ id: "home", label: "Back to discovery" }])],
+          allowedMentions: { parse: [] },
+        });
+      }
       return;
     }
     if(view==="creators"){
