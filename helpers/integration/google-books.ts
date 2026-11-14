@@ -1,3 +1,4 @@
+import { fetchProviderResponse } from "./provider-http.js";
 export interface GoogleBook {
   id: string;
   title: string;
@@ -138,7 +139,7 @@ export class GoogleBooksClient {
     url.searchParams.set("projection", "full");
     if (this.apiKey) url.searchParams.set("key", this.apiKey);
 
-    const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    const response = await fetchProviderResponse(globalThis.fetch, url, { signal: AbortSignal.timeout(10_000) });
     if (!response.ok) throw new Error("Google Books returned HTTP " + response.status + ".");
     const payload = object(await response.json());
     const items = Array.isArray(payload?.items) ? payload.items : [];
