@@ -1,3 +1,4 @@
+import { fetchProviderResponse } from "./provider-http.js";
 export interface SteamProfile {
   steamId: string;
   personaName: string;
@@ -72,7 +73,7 @@ export class SteamClient {
     const url = new URL("https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/");
     url.searchParams.set("key", this.apiKey);
     url.searchParams.set("vanityurl", vanity);
-    const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    const response = await fetchProviderResponse(globalThis.fetch, url, { signal: AbortSignal.timeout(10_000) });
     if (!response.ok) throw new Error(`Steam returned HTTP ${response.status} while resolving that profile.`);
     const result = record(record(await response.json())?.response);
     if (result?.success !== 1 || typeof result.steamid !== "string" || !validateSteamId(result.steamid)) {
@@ -87,7 +88,7 @@ export class SteamClient {
     const url = new URL("https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/");
     url.searchParams.set("key", this.apiKey);
     url.searchParams.set("steamids", steamId);
-    const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    const response = await fetchProviderResponse(globalThis.fetch, url, { signal: AbortSignal.timeout(10_000) });
     if (!response.ok) throw new Error(`Steam returned HTTP ${response.status}.`);
     const body = record(record(record(await response.json())?.response)?.players);
     const player = Array.isArray(body) ? record(body[0]) : null;
@@ -140,7 +141,7 @@ export class SteamClient {
     if(!Number.isSafeInteger(appId)||appId<1)throw new Error("Steam app ID is invalid.");
     const url=new URL("https://store.steampowered.com/api/appdetails");
     url.searchParams.set("appids",String(appId));url.searchParams.set("cc","us");url.searchParams.set("l","english");
-    const response=await fetch(url,{signal:AbortSignal.timeout(10_000)});
+    const response=await fetchProviderResponse(globalThis.fetch,url,{signal:AbortSignal.timeout(10_000)});
     if(!response.ok)throw new Error(`Steam Store returned HTTP ${response.status}.`);
     const body=record(await response.json());
     const result=record(body?.[String(appId)]);
@@ -153,7 +154,7 @@ export class SteamClient {
     if(clean.length<2)return[];
     const limit=Math.max(1,Math.min(5,Math.trunc(maxResults)||5));
     const url=new URL(`https://steamcommunity.com/actions/SearchApps/${encodeURIComponent(clean)}`);
-    const response=await fetch(url,{signal:AbortSignal.timeout(10_000),headers:{Accept:"application/json"}});
+    const response=await fetchProviderResponse(globalThis.fetch,url,{signal:AbortSignal.timeout(10_000),headers:{Accept:"application/json"}});
     if(!response.ok)throw new Error(`Steam search returned HTTP ${response.status}.`);
     const raw:unknown=await response.json();
     const candidates=Array.isArray(raw)?raw.slice(0,limit).flatMap(value=>{
@@ -174,7 +175,7 @@ export class SteamClient {
     } else {
       url.searchParams.set("count", "5");
     }
-    const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    const response = await fetchProviderResponse(globalThis.fetch, url, { signal: AbortSignal.timeout(10_000) });
     if (!response.ok) return null;
     return response.json();
   }
