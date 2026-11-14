@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import type { AtlasRelation, MediaCategory } from "../integration/atlas.js";
+import type { AtlasGraphPath, AtlasGraphResult, AtlasRelation, MediaCategory } from "../integration/atlas.js";
 
 const WIDTH = 1450;
 const HEIGHT = 950;
@@ -38,6 +38,117 @@ function provenanceDash(kind: AtlasRelation["sourceKind"]): string {
 
 function text(x: number, y: number, content: string, size: number, color: string, weight = 400, anchor = "start"): string {
   return `<text x="${x}" y="${y}" text-anchor="${anchor}" fill="${color}" font-family="Arial, sans-serif" font-size="${size}" font-weight="${weight}">${escapeXml(content)}</text>`;
+}
+
+
+export async function renderAtlasGraphSnapshot(
+  title: string,
+  category: MediaCategory | string,
+  graph: AtlasGraphResult,
+  path: AtlasGraphPath | null = null,
+): Promise<Buffer> {
+  const width = 1800;
+  const height = 1480;
+  const centerX = width / 2;
+  const centerY = 760;
+  const cardWidth = 184;
+  const cardHeight = 114;
+  const root = graph.nodes.find(node => node.id === graph.rootId);
+  if (!root) return renderAtlasSnapshot(title, category, graph.directRelationships);
+
+  const positions = new Map<string, { x: number; y: number }>();
+  positions.set(root.id, { x: centerX, y: centerY });
+  for (let depth = 1; depth <= 3; depth += 1) {
+    const nodes = graph.nodes
+      .filter(node => node.id !== graph.rootId && node.depth === depth)
+      .sort((left, right) => left.title.localeCompare(right.title));
+    const radius = depth === 1 ? 285 : depth === 2 ? 440 : 560;
+    const step = (Math.PI * 2) / Math.max(nodes.length, 1);
+    nodes.forEach((node, index) => {
+      const angle = -Math.PI / 2 + index * step + (depth === 2 ? step / 2 : 0);
+      positions.set(node.id, {
+        x: centerX + Math.cos(angle) * radius,
+        y: centerY + Math.sin(angle) * radius,
+      });
+    });
+  }
+
+  const pathEdgeKeys = new Set((path?.edges ?? []).map(edge =>
+    [edge.from, edge.to, edge.relationType, edge.sourceKind].join("|"),
+  ));
+  const edges = graph.edges.map(edge => {
+    const from = positions.get(edge.from);
+    const to = positions.get(edge.to);
+    if (!from || !to) return "";
+    const highlighted = pathEdgeKeys.has([edge.from, edge.to, edge.relationType, edge.sourceKind].join("|"));
+    const color = provenanceColor(edge.sourceKind);
+    return [
+      '<line x1="' + from.x.toFixed(1) + '" y1="' + from.y.toFixed(1) +
+      '" x2="' + to.x.toFixed(1) + '" y2="' + to.y.toFixed(1) +
+      '" stroke="' + (highlighted ? "#ffffff" : color) +
+      '" stroke-width="' + (highlighted ? "6" : "2") +
+      '" opacity="' + (highlighted ? "1" : ".62") + '" ' +
+      provenanceDash(edge.sourceKind) + ' />',
+    ].join("");
+  }).join("");
+
+  const cards = graph.nodes
+    .filter(node => node.id !== graph.rootId)
+    .slice(0, 40)
+    .map(node => {
+      const point = positions.get(node.id);
+      if (!point) return "";
+      const incoming = graph.edges.find(edge => edge.to === node.id);
+      const kind = node.sourceKind ?? incoming?.sourceKind ?? "provider";
+      const relationType = node.relationType ?? incoming?.relationType ?? "related";
+      const sourceLabel = node.sourceLabel ?? incoming?.sourceLabel ?? kind;
+      const color = provenanceColor(kind);
+      const left = point.x - cardWidth / 2;
+      const top = point.y - cardHeight / 2;
+      return [
+        "<g>",
+        '<rect x="' + left.toFixed(1) + '" y="' + top.toFixed(1) + '" width="' + cardWidth +
+          '" height="' + cardHeight + '" rx="13" fill="#111111" stroke="' + color + '" stroke-width="2" />',
+        '<rect x="' + (left + 13) + '" y="' + (top + 12) + '" width="4" height="' + (cardHeight - 24) +
+          '" rx="2" fill="' + color + '" />',
+        text(left + 27, top + 30, shorten(node.category.replace(/_/g, " ").toUpperCase(), 23), 10, "#999999", 600),
+        text(left + 27, top + 56, shorten(node.title, 22), 16, "#f3f3f3", 700),
+        text(left + 27, top + 80, shorten(relationType, 22), 11, "#c0c0c0", 500),
+        text(left + 27, top + 101, kind.toUpperCase() + " · " + shorten(sourceLabel, 16), 9, color, 600),
+        "</g>",
+      ].join("");
+    }).join("");
+
+  const rootCard = [
+    '<rect x="' + (centerX - 150) + '" y="' + (centerY - 80) +
+      '" width="300" height="160" rx="24" fill="#080808" stroke="#f3f3f3" stroke-width="3" />',
+    '<rect x="' + (centerX - 137) + '" y="' + (centerY - 67) +
+      '" width="274" height="134" rx="16" fill="none" stroke="#484848" stroke-width="1" />',
+    text(centerX, centerY - 23, root.category.replace(/_/g, " ").toUpperCase(), 12, "#aaaaaa", 600, "middle"),
+    text(centerX, centerY + 14, shorten(root.title, 27), 24, "#ffffff", 700, "middle"),
+    text(centerX, centerY + 45, "ROOT NODE", 10, "#888888", 600, "middle"),
+  ].join("");
+
+  const footer = graph.nodes.length + " nodes · " + graph.edges.length + " connections" +
+    (graph.truncated ? " · graph truncated at configured limit" : "") +
+    (path ? " · " + path.edges.length + "-step path highlighted" : "");
+  const svg = [
+    '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + " " + height + '">',
+    '<defs><radialGradient id="background" cx="50%" cy="48%" r="75%"><stop offset="0%" stop-color="#1b1b1b"/><stop offset="100%" stop-color="#050505"/></radialGradient></defs>',
+    '<rect width="100%" height="100%" fill="url(#background)"/>',
+    '<path d="M0 90 H' + width + '" stroke="#303030"/>',
+    text(58, 48, "LEMEGETON / KNOWLEDGE ATLAS", 12, "#a5a5a5", 600),
+    text(58, 145, shorten(title, 62), 38, "#f4f4f4", 700),
+    text(58, 178, category.replace(/_/g, " ").toUpperCase() + " · MULTI-HOP RELATIONSHIP GRAPH", 12, "#999999", 500),
+    edges,
+    rootCard,
+    cards,
+    '<path d="M58 ' + (height - 70) + " H" + (width - 58) + '" stroke="#303030"/>',
+    text(58, height - 38, footer, 11, "#999999", 500),
+    text(width - 58, height - 38, "PROVIDER · RECOMMENDATION · COMMUNITY", 10, "#777777", 500, "end"),
+    "</svg>",
+  ].join("");
+  return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
 export async function renderAtlasSnapshot(

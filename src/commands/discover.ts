@@ -49,7 +49,7 @@ import {
   MEDIA_LINK_RELATIONSHIPS,
   reviewMediaLinkSuggestion,
 } from "../../helpers/media/media-link-suggestions.js";
-import { renderAtlasSnapshot } from "../../helpers/media/atlas-renderer.js";
+import { renderAtlasGraphSnapshot } from "../../helpers/media/atlas-renderer.js";
 import { logger } from "../../helpers/runtime/logger.js";
 import { emoji, loadingMessage } from "../../helpers/emoji.js";
 import { parseGridSourceUrls, parseGridTitles, renderMediaGrid, type MediaGridSource } from "../../helpers/media/media-grid.js";
@@ -1761,22 +1761,9 @@ export class DiscoverCommand implements FeatureCommand {
     }
     embed.setFooter({text:"Knowledge Atlas · Provider provenance and guild-scoped community links"});
     const files: AttachmentBuilder[] = [];
-    const snapshotRelationships = filteredGraph.edges.slice(0, 8).map(edge => {
-      const node = filteredGraph.nodes.find(item => item.id === edge.to);
-      if (!node) return null;
-      return {
-        title: node.title,
-        category: node.category,
-        url: node.url,
-        relationType: edge.relationType,
-        source: edge.sourceLabel,
-        sourceKind: edge.sourceKind,
-      };
-    }).filter((item): item is NonNullable<typeof item> => item !== null);
-    const atlasImageRelationships = snapshotRelationships.length ? snapshotRelationships : relationships;
-    if (atlasImageRelationships.length) {
+    if (filteredGraph.nodes.length > 1 && filteredGraph.edges.length > 0) {
       try {
-        const image = await renderAtlasSnapshot(title, mediaCategory, atlasImageRelationships);
+        const image = await renderAtlasGraphSnapshot(title, mediaCategory, filteredGraph, path);
         embed.setImage("attachment://knowledge-atlas.png");
         files.push(new AttachmentBuilder(image, { name: "knowledge-atlas.png" }));
       } catch (error) {

@@ -302,7 +302,7 @@ Phase 0 code migration status does **not** mean the service is launched. Phase 8
 
 **Exit criteria:** rules are bounded and per-guild, delivery is idempotent, every event can be traced to a provider/source, retries are safe, and a moderator can inspect/disable each active rule.
 
-#Feature Diagnostics now checks Discord gateway readiness and PostgreSQL with a live `SELECT 1`, alongside configured channel permissions. AniList, TMDB, Google Books, IGDB, Steam and S3-compatible storage are listed as configuration-only checks; external connectivity, object access and scheduled-job health are not probed, so this item remains partially implemented.\n\n## Phase 7 — Knowledge Atlas and dashboard
+#Feature Diagnostics now checks Discord gateway readiness and PostgreSQL with a live `SELECT 1`, alongside configured channel permissions. AniList, TMDB, Google Books, IGDB, Steam and S3-compatible storage are listed as configuration-only checks; external connectivity, object access and scheduled-job health are not probed, so this item remains partially implemented.\n\nAtlas PNG exports now render the bounded multi-hop graph instead of only the first eight root connections, and highlight a selected shortest path. Dedicated creator/franchise map views and Archive collection-root graph exports remain outstanding, so Graph Export Studio is still partially implemented.\n\n## Phase 7 — Knowledge Atlas and dashboard
 
 **Objective:** make canonical media relationships explorable while preserving provenance and visibility.
 
