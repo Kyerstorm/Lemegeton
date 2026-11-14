@@ -1,37 +1,316 @@
 import { fetchProviderResponse } from "./provider-http.js";
-export interface IgdbGame{id:number;title:string;summary:string|null;sourceUrl:string;image:string|null;releaseDate:string|null;genres:string[];platforms:string[];developers:string[];publishers:string[]}
-const obj=(v:unknown):Record<string,unknown>|null=>typeof v==="object"&&v!==null&&!Array.isArray(v)?v as Record<string,unknown>:null;
-export class IgdbClient{private token:string|null=null;private expires=0;constructor(private readonly clientId?:string,private readonly secret?:string){}async search(query:string):Promise<IgdbGame[]>{if(!this.clientId||!this.secret)throw new Error("IGDB is not configured. Set IGDB_CLIENT_ID and IGDB_CLIENT_SECRET.");const token=await this.getToken();const clean=query.replace(/[";\\]/g," ").replace(/\s+/g," ").trim().slice(0,100);const res=await fetchProviderResponse(globalThis.fetch,"https://api.igdb.com/v4/games",{method:"POST",headers:{"Client-ID":this.clientId,Authorization:`Bearer ${token}`,"Content-Type":"text/plain"},body:`search "${clean}"; fields id,name,slug,summary,first_release_date,cover.url,genres.name,platforms.name,involved_companies.developer,involved_companies.publisher,involved_companies.company.name; limit 10;`,signal:AbortSignal.timeout(12000)},{retryPost:true});if(!res.ok)throw new Error(`IGDB returned HTTP ${res.status}.`);const rows:unknown=await res.json();return(Array.isArray(rows)?rows:[]).flatMap(raw=>{const x=obj(raw);if(!x||typeof x.id!=="number"||typeof x.name!=="string")return[];const cover=obj(x.cover);const companies=(Array.isArray(x.involved_companies)?x.involved_companies:[]).flatMap(rawCompany=>{const c=obj(rawCompany),co=obj(c?.company);return co&&typeof co.name==="string"?[{name:co.name,developer:c?.developer===true,publisher:c?.publisher===true}]:[];});const list=(v:unknown)=>Array.isArray(v)?v.flatMap(i=>obj(i)&&typeof obj(i)!.name==="string"?[String(obj(i)!.name)]:[]):[];return[{id:x.id,title:x.name,summary:typeof x.summary==="string"?x.summary:null,sourceUrl:typeof x.slug==="string"?`https://www.igdb.com/games/${x.slug}`:`https://www.igdb.com/search?type=1&q=${encodeURIComponent(x.name)}`,image:typeof cover?.url==="string"?`https:${cover.url.replace(/^https?:/,"")}`:null,releaseDate:typeof x.first_release_date==="number"?new Date(x.first_release_date*1000).toISOString().slice(0,10):null,genres:list(x.genres),platforms:list(x.platforms),developers:companies.filter(c=>c.developer).map(c=>c.name),publishers:companies.filter(c=>c.publisher).map(c=>c.name)}];});}async similarGames(gameId:number):Promise<IgdbGame[]>{
- if(!Number.isSafeInteger(gameId)||gameId<1)throw new RangeError("IGDB game ID must be a positive safe integer.");
- if(!this.clientId||!this.secret)throw new Error("IGDB is not configured. Set IGDB_CLIENT_ID and IGDB_CLIENT_SECRET.");
- const token=await this.getToken();
- const headers={"Client-ID":this.clientId,"Authorization":`Bearer ${token}`,"Content-Type":"text/plain"};
- const base=await fetchProviderResponse(globalThis.fetch,"https://api.igdb.com/v4/games",{method:"POST",headers,body:`fields similar_games; where id = ${gameId}; limit 1;`,signal:AbortSignal.timeout(12000)},{retryPost:true});
- if(!base.ok)throw new Error(`IGDB returned HTTP ${base.status} while looking up related games.`);
- const baseRows:unknown=await base.json();
- const baseGame=Array.isArray(baseRows)?obj(baseRows[0]):null;
- const ids=Array.isArray(baseGame?.similar_games)?baseGame.similar_games.filter((id):id is number=>typeof id==="number"&&Number.isSafeInteger(id)&&id>0).slice(0,10):[];
- if(!ids.length)return[];
- const response=await fetchProviderResponse(globalThis.fetch,"https://api.igdb.com/v4/games",{method:"POST",headers,body:`where id = (${ids.join(",")}); fields id,name,slug,summary,first_release_date,cover.url,genres.name,platforms.name,involved_companies.developer,involved_companies.publisher,involved_companies.company.name; limit 10;`,signal:AbortSignal.timeout(12000)},{retryPost:true});
- if(!response.ok)throw new Error(`IGDB returned HTTP ${response.status} while loading similar games.`);
- const rows:unknown=await response.json();
- return(Array.isArray(rows)?rows:[]).flatMap(raw=>{
-  const x=obj(raw);if(!x||typeof x.id!=="number"||typeof x.name!=="string")return[];
-  const cover=obj(x.cover);
-  const companies=(Array.isArray(x.involved_companies)?x.involved_companies:[]).flatMap(rawCompany=>{
-   const company=obj(rawCompany),record=obj(company?.company);
-   return record&&typeof record.name==="string"?[{name:record.name,developer:company?.developer===true,publisher:company?.publisher===true}]:[];
-  });
-  const list=(value:unknown)=>Array.isArray(value)?value.flatMap(item=>{const entry=obj(item);return typeof entry?.name==="string"?[entry.name]:[];}):[];
-  return[{
-   id:x.id,title:x.name,summary:typeof x.summary==="string"?x.summary:null,
-   sourceUrl:typeof x.slug==="string"?`https://www.igdb.com/games/${x.slug}`:`https://www.igdb.com/search?type=1&q=${encodeURIComponent(x.name)}`,
-   image:typeof cover?.url==="string"?`https:${cover.url.replace(/^https?:/,"")}`:null,
-   releaseDate:typeof x.first_release_date==="number"?new Date(x.first_release_date*1000).toISOString().slice(0,10):null,
-   genres:list(x.genres),platforms:list(x.platforms),
-   developers:companies.filter(company=>company.developer).map(company=>company.name),
-   publishers:companies.filter(company=>company.publisher).map(company=>company.name),
-  }];
- });
+
+export interface IgdbGame {
+  id: number;
+  title: string;
+  summary: string | null;
+  sourceUrl: string;
+  image: string | null;
+  releaseDate: string | null;
+  genres: string[];
+  platforms: string[];
+  developers: string[];
+  publishers: string[];
 }
-private async getToken():Promise<string>{if(this.token&&Date.now()<this.expires)return this.token;const url=new URL("https://id.twitch.tv/oauth2/token");url.searchParams.set("client_id",this.clientId!);url.searchParams.set("client_secret",this.secret!);url.searchParams.set("grant_type","client_credentials");const res=await fetch(url,{method:"POST",signal:AbortSignal.timeout(10000)});if(!res.ok)throw new Error(`IGDB authentication returned HTTP ${res.status}.`);const p=obj(await res.json());if(typeof p?.access_token!=="string"||typeof p.expires_in!=="number")throw new Error("IGDB authentication response was invalid.");this.token=p.access_token;this.expires=Date.now()+Math.max(60,p.expires_in-120)*1000;return this.token;}}
+
+export type IgdbCompanyRole = "Developer" | "Publisher" | "Porting" | "Supporting";
+
+export interface IgdbCompany {
+  id: number;
+  name: string;
+  description: string | null;
+  sourceUrl: string;
+  logo: string | null;
+  websites: string[];
+}
+
+export interface IgdbCompanyCredit {
+  gameId: number;
+  title: string;
+  sourceUrl: string;
+  releaseDate: string | null;
+  image: string | null;
+  roles: IgdbCompanyRole[];
+}
+
+export interface IgdbCompanyExplorer {
+  company: IgdbCompany;
+  credits: IgdbCompanyCredit[];
+  truncated: boolean;
+}
+
+type JsonObject = Record<string, unknown>;
+
+function object(value: unknown): JsonObject | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as JsonObject
+    : null;
+}
+
+function safeHttpsUrl(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "https:" && !url.username && !url.password ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function igdbImageUrl(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const raw = value.startsWith("//") ? "https:" + value : value;
+  try {
+    const url = new URL(raw);
+    return url.protocol === "https:" && url.hostname === "images.igdb.com" && !url.username && !url.password
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function sourceUrl(kind: "games" | "companies", slug: unknown, title: string): string {
+  if (typeof slug === "string" && /^[A-Za-z0-9-]{1,160}$/.test(slug)) {
+    return "https://www.igdb.com/" + kind + "/" + slug;
+  }
+  return "https://www.igdb.com/search?type=" + (kind === "games" ? "1" : "companies")
+    + "&q=" + encodeURIComponent(title);
+}
+
+function parseGame(value: unknown): IgdbGame | null {
+  const game = object(value);
+  if (!game || typeof game.id !== "number" || !Number.isSafeInteger(game.id) || game.id < 1
+    || typeof game.name !== "string" || !game.name.trim()) return null;
+
+  const cover = object(game.cover);
+  const companies = (Array.isArray(game.involved_companies) ? game.involved_companies : [])
+    .flatMap((raw) => {
+      const involved = object(raw);
+      const company = object(involved?.company);
+      return company && typeof company.name === "string"
+        ? [{ name: company.name, developer: involved?.developer === true, publisher: involved?.publisher === true }]
+        : [];
+    });
+  const names = (input: unknown): string[] => Array.isArray(input)
+    ? input.flatMap((entry) => {
+      const item = object(entry);
+      return typeof item?.name === "string" ? [item.name] : [];
+    })
+    : [];
+  const releaseDate = typeof game.first_release_date === "number" && Number.isFinite(game.first_release_date)
+    ? new Date(game.first_release_date * 1000).toISOString().slice(0, 10)
+    : null;
+
+  return {
+    id: game.id,
+    title: game.name.trim().slice(0, 200),
+    summary: typeof game.summary === "string" ? game.summary : null,
+    sourceUrl: sourceUrl("games", game.slug, game.name),
+    image: igdbImageUrl(cover?.url),
+    releaseDate,
+    genres: names(game.genres),
+    platforms: names(game.platforms),
+    developers: companies.filter((item) => item.developer).map((item) => item.name),
+    publishers: companies.filter((item) => item.publisher).map((item) => item.name),
+  };
+}
+
+export function parseIgdbCompany(value: unknown): IgdbCompany | null {
+  const row = object(value);
+  if (!row || typeof row.id !== "number" || !Number.isSafeInteger(row.id) || row.id < 1
+    || typeof row.name !== "string" || !row.name.trim()) return null;
+  const logo = object(row.logo);
+  const websites = Array.isArray(row.websites)
+    ? row.websites.flatMap((raw) => {
+      const website = object(raw);
+      const url = safeHttpsUrl(website?.url);
+      return url ? [url] : [];
+    }).slice(0, 5)
+    : [];
+  return {
+    id: row.id,
+    name: row.name.trim().slice(0, 180),
+    description: typeof row.description === "string" && row.description.trim()
+      ? row.description.trim().slice(0, 1_200)
+      : null,
+    sourceUrl: sourceUrl("companies", row.slug, row.name),
+    logo: igdbImageUrl(logo?.url),
+    websites,
+  };
+}
+
+export function parseIgdbCompanyCredits(value: unknown): IgdbCompanyCredit[] {
+  const rows = Array.isArray(value) ? value : [];
+  const credits = new Map<number, IgdbCompanyCredit>();
+  for (const raw of rows) {
+    const row = object(raw);
+    const game = object(row?.game);
+    if (!game || typeof game.id !== "number" || !Number.isSafeInteger(game.id) || game.id < 1
+      || typeof game.name !== "string" || !game.name.trim()) continue;
+    const roles: IgdbCompanyRole[] = [];
+    if (row?.developer === true) roles.push("Developer");
+    if (row?.publisher === true) roles.push("Publisher");
+    if (row?.porting === true) roles.push("Porting");
+    if (row?.supporting === true) roles.push("Supporting");
+    if (!roles.length) continue;
+
+    const existing = credits.get(game.id);
+    if (existing) {
+      existing.roles = [...new Set([...existing.roles, ...roles])];
+      continue;
+    }
+    const cover = object(game.cover);
+    const releaseDate = typeof game.first_release_date === "number" && Number.isFinite(game.first_release_date)
+      ? new Date(game.first_release_date * 1000).toISOString().slice(0, 10)
+      : null;
+    credits.set(game.id, {
+      gameId: game.id,
+      title: game.name.trim().slice(0, 180),
+      sourceUrl: sourceUrl("games", game.slug, game.name),
+      releaseDate,
+      image: igdbImageUrl(cover?.url),
+      roles,
+    });
+  }
+  return [...credits.values()];
+}
+
+export class IgdbClient {
+  private token: string | null = null;
+  private expires = 0;
+  private tokenRequest: Promise<string> | null = null;
+  private requestQueue: Promise<void> = Promise.resolve();
+  private lastRequestAt = 0;
+
+  constructor(
+    private readonly clientId?: string,
+    private readonly secret?: string,
+    private readonly fetcher: typeof fetch = globalThis.fetch,
+  ) {}
+
+  async search(query: string): Promise<IgdbGame[]> {
+    const clean = query.replace(/[";\\]/g, " ").replace(/\s+/g, " ").trim().slice(0, 100);
+    if (clean.length < 2) return [];
+    const rows = await this.request("games",
+      'search "' + clean + '"; fields id,name,slug,summary,first_release_date,cover.url,genres.name,platforms.name,involved_companies.developer,involved_companies.publisher,involved_companies.company.name; limit 10;'
+    );
+    return (Array.isArray(rows) ? rows : []).flatMap((raw) => {
+      const game = parseGame(raw);
+      return game ? [game] : [];
+    });
+  }
+
+  async searchCompanies(query: string): Promise<IgdbCompany[]> {
+    const clean = query.replace(/[";\\]/g, " ").replace(/\s+/g, " ").trim().slice(0, 100);
+    if (clean.length < 2) return [];
+    const rows = await this.request("companies",
+      'search "' + clean + '"; fields id,name,slug,description,country,logo.url,websites.url; limit 10;'
+    );
+    return (Array.isArray(rows) ? rows : []).flatMap((raw) => {
+      const company = parseIgdbCompany(raw);
+      return company ? [company] : [];
+    });
+  }
+
+  async getCompanyExplorer(companyId: number): Promise<IgdbCompanyExplorer | null> {
+    if (!Number.isSafeInteger(companyId) || companyId < 1) {
+      throw new RangeError("IGDB company ID must be a positive safe integer.");
+    }
+    const companyRows = await this.request("companies",
+      "where id = " + companyId + "; fields id,name,slug,description,country,logo.url,websites.url; limit 1;"
+    );
+    const company = Array.isArray(companyRows) ? parseIgdbCompany(companyRows[0]) : null;
+    if (!company) return null;
+    const creditRows = await this.request("involved_companies",
+      "where company = " + companyId + "; fields developer,publisher,porting,supporting,game.id,game.name,game.slug,game.first_release_date,game.cover.url; limit 21;"
+    );
+    const rawCredits = Array.isArray(creditRows) ? creditRows : [];
+    return {
+      company,
+      credits: parseIgdbCompanyCredits(rawCredits.slice(0, 20)),
+      truncated: rawCredits.length > 20,
+    };
+  }
+
+  async similarGames(gameId: number): Promise<IgdbGame[]> {
+    if (!Number.isSafeInteger(gameId) || gameId < 1) {
+      throw new RangeError("IGDB game ID must be a positive safe integer.");
+    }
+    const baseRows = await this.request("games",
+      "fields similar_games; where id = " + gameId + "; limit 1;"
+    );
+    const baseGame = Array.isArray(baseRows) ? object(baseRows[0]) : null;
+    const ids = Array.isArray(baseGame?.similar_games)
+      ? baseGame.similar_games.filter((id): id is number => typeof id === "number"
+        && Number.isSafeInteger(id) && id > 0).slice(0, 10)
+      : [];
+    if (!ids.length) return [];
+    const rows = await this.request("games",
+      "where id = (" + ids.join(",") + "); fields id,name,slug,summary,first_release_date,cover.url,genres.name,platforms.name,involved_companies.developer,involved_companies.publisher,involved_companies.company.name; limit 10;"
+    );
+    return (Array.isArray(rows) ? rows : []).flatMap((raw) => {
+      const game = parseGame(raw);
+      return game ? [game] : [];
+    });
+  }
+
+  private async request(endpoint: "games" | "companies" | "involved_companies", body: string): Promise<unknown> {
+    if (!this.clientId || !this.secret) {
+      throw new Error("IGDB is not configured. Set IGDB_CLIENT_ID and IGDB_CLIENT_SECRET.");
+    }
+    const token = await this.getToken();
+    const previous = this.requestQueue;
+    let release!: () => void;
+    this.requestQueue = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      const wait = Math.max(0, 250 - (Date.now() - this.lastRequestAt));
+      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+      this.lastRequestAt = Date.now();
+      const response = await fetchProviderResponse(this.fetcher,
+        "https://api.igdb.com/v4/" + endpoint,
+        {
+          method: "POST",
+          headers: { "Client-ID": this.clientId, Authorization: "Bearer " + token, "Content-Type": "text/plain" },
+          body,
+          signal: AbortSignal.timeout(12_000),
+        },
+        { retryPost: true },
+      );
+      if (!response.ok) throw new Error("IGDB returned HTTP " + response.status + ".");
+      return await response.json();
+    } finally {
+      release();
+    }
+  }
+
+  private async getToken(): Promise<string> {
+    if (this.token && Date.now() < this.expires) return this.token;
+    if (this.tokenRequest) return this.tokenRequest;
+    if (!this.clientId || !this.secret) {
+      throw new Error("IGDB is not configured. Set IGDB_CLIENT_ID and IGDB_CLIENT_SECRET.");
+    }
+    this.tokenRequest = (async () => {
+      const url = new URL("https://id.twitch.tv/oauth2/token");
+      url.searchParams.set("client_id", this.clientId!);
+      url.searchParams.set("client_secret", this.secret!);
+      url.searchParams.set("grant_type", "client_credentials");
+      const response = await this.fetcher(url, { method: "POST", signal: AbortSignal.timeout(10_000) });
+      if (!response.ok) throw new Error("IGDB authentication returned HTTP " + response.status + ".");
+      const payload = object(await response.json());
+      if (typeof payload?.access_token !== "string" || typeof payload.expires_in !== "number") {
+        throw new Error("IGDB authentication response was invalid.");
+      }
+      const token = payload.access_token;
+      this.token = token;
+      this.expires = Date.now() + Math.max(60, payload.expires_in - 120) * 1000;
+      return token;
+    })();
+    try {
+      return await this.tokenRequest;
+    } finally {
+      this.tokenRequest = null;
+    }
+  }
+}

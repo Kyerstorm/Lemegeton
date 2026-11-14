@@ -256,10 +256,34 @@ function airingSearchModal():ModalBuilder{
   new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("days").setLabel("Upcoming window in days").setPlaceholder("7 (maximum 14)").setStyle(TextInputStyle.Short).setMaxLength(2).setRequired(false)),
  );
 }
-function creatorSearchModal():ModalBuilder{
- return new ModalBuilder().setCustomId("discover:creator-search").setTitle("Explore a creator").addComponents(
-  new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("query").setLabel("Creator name").setPlaceholder("Writer, artist or voice actor").setStyle(TextInputStyle.Short).setMinLength(2).setMaxLength(80).setRequired(true)),
- );
+function creatorCategorySelect(): ActionRowBuilder<StringSelectMenuBuilder> {
+  return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("discover:creator-category")
+      .setPlaceholder("Choose a media family")
+      .addOptions(
+        { label: "Anime staff", value: "anime" },
+        { label: "Manga creators", value: "manga" },
+        { label: "Light novel creators", value: "light_novel" },
+        { label: "Book authors", value: "book" },
+        { label: "Film cast and crew", value: "movie" },
+        { label: "TV cast and crew", value: "tv" },
+        { label: "Game developers and publishers", value: "game" },
+      ),
+  );
+}
+
+function creatorSearchModal(category: Category): ModalBuilder {
+  return new ModalBuilder()
+    .setCustomId("discover:creator-search:" + category)
+    .setTitle("Explore " + categoryLabel(category) + " creators")
+    .addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("query").setLabel("Creator or company name")
+          .setPlaceholder("Enter an exact or partial name").setStyle(TextInputStyle.Short)
+          .setMinLength(2).setMaxLength(80).setRequired(true),
+      ),
+    );
 }
 
 function searchModal(category: Category): ModalBuilder {
@@ -604,7 +628,7 @@ export class DiscoverCommand implements FeatureCommand {
       return true;
     }
     if(action==="creator"){
-      await interaction.showModal(creatorSearchModal());
+      await interaction.reply({content:"Choose the media family for creator or company credits.",components:[creatorCategorySelect()],flags:MessageFlags.Ephemeral});
       return true;
     }
     if (action === "search" && CATEGORIES.some((item) => item.value === categoryValue)) {
@@ -669,6 +693,15 @@ export class DiscoverCommand implements FeatureCommand {
     if (!interaction.isStringSelectMenu()) return false;
     const [scope, action, categoryValue, region] = interaction.customId.split(":");
     if (scope !== "discover") return false;
+    if (action === "creator-category") {
+      const selectedCategory = interaction.values[0];
+      if (!selectedCategory || !CATEGORIES.some((item) => item.value === selectedCategory && item.value !== "all")) {
+        await interaction.reply({ content: "Choose a supported media family.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      await interaction.showModal(creatorSearchModal(selectedCategory as Category));
+      return true;
+    }
     if(action==="compare-select"){
       const session=this.comparisonSessions.get(categoryValue??"");
       const sideIndex=Number(region);
@@ -745,6 +778,60 @@ export class DiscoverCommand implements FeatureCommand {
       }
       const view=this.tvSeasonPage(show.name,season,0);
       await interaction.editReply({content:"TV Guide · "+show.name,embeds:[view.embed],components:view.components,allowedMentions:{parse:[]}});
+      return true;
+    }
+    if (action === "igdb-company") {
+      const rawId = interaction.values[0] ?? "";
+      const companyId = Number(rawId);
+      if (!/^\d+$/.test(rawId) || !Number.isSafeInteger(companyId) || companyId < 1) {
+        await interaction.reply({ content: "That IGDB company reference is invalid.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      await interaction.deferUpdate();
+      const result = await this.igdb.getCompanyExplorer(companyId);
+      if (!result) {
+        await interaction.editReply({
+          content: "IGDB no longer returns that company. Search again from Creator Explorer.",
+          embeds:[],
+          components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],
+        });
+        return true;
+      }
+      const works = result.credits.slice(0,10).map((credit) => {
+        const roles = credit.roles.join(" / ");
+        const release = credit.releaseDate ? " · " + credit.releaseDate : "";
+        return "[" + safeDisplay(credit.title,120) + "](" + credit.sourceUrl + ") · " + roles + release;
+      }).join("\n");
+      const fields = [
+        { name: "IGDB company", value: "#" + result.company.id + " · [Open source record](" + result.company.sourceUrl + ")", inline: true },
+        {
+          name: "Known game credits",
+          value: works || "IGDB returned no developer, publisher, porting or supporting credits for this company.",
+          inline: false,
+        },
+        ...(result.company.websites.length ? [{
+          name: "Company websites",
+          value: result.company.websites.slice(0,3).map((url,index) => "[Website " + (index+1) + "](" + url + ")").join(" · "),
+          inline: false,
+        }] : []),
+        ...(result.truncated ? [{
+          name: "Coverage",
+          value: "Showing the first 10 works from a larger IGDB credit list. Refine the company search to inspect another company record.",
+          inline: false,
+        }] : []),
+      ];
+      const embed = homeEmbed(
+        safeDisplay(result.company.name,240),
+        safeDescription(result.company.description,1_200),
+        fields,
+      ).setFooter({text:"IGDB · Company and involved-company credits"});
+      if (result.company.logo) embed.setThumbnail(result.company.logo);
+      await interaction.editReply({
+        content:"Developer and publisher workography · " + safeDisplay(result.company.name,100),
+        embeds:[embed],
+        components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],
+        allowedMentions:{parse:[]},
+      });
       return true;
     }
     if (action === "tmdb-person") {
@@ -1026,7 +1113,10 @@ export class DiscoverCommand implements FeatureCommand {
       return true;
     }
     if(action==="creator-search"){
-      await this.creatorAndRespond(interaction,interaction.fields.getTextInputValue("query"));
+      const category = CATEGORIES.some((item) => item.value === categoryValue && item.value !== "all")
+        ? categoryValue as Category
+        : "anime";
+      await this.creatorAndRespond(interaction,interaction.fields.getTextInputValue("query"),category);
       return true;
     }
     if (action !== "search" || !CATEGORIES.some((item) => item.value === categoryValue)) return false;
@@ -1174,6 +1264,28 @@ export class DiscoverCommand implements FeatureCommand {
         content:"Choose the exact person to inspect their combined movie and television credits.",
         embeds:[],
         components:[new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)],
+      });
+      return;
+    }
+    if(category==="game"){
+      const companies=await this.igdb.searchCompanies(query);
+      if(!companies.length){
+        await interaction.editReply({content:"IGDB returned no matching game development or publishing companies.",embeds:[],components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])]});
+        return;
+      }
+      const select=new StringSelectMenuBuilder()
+        .setCustomId("discover:igdb-company")
+        .setPlaceholder("Choose the exact game company")
+        .addOptions(companies.slice(0,10).map((company)=>({
+          label:company.name.slice(0,100),
+          description:"IGDB company #"+company.id,
+          value:String(company.id),
+        })));
+      await interaction.editReply({
+        content:"Choose the exact company to inspect its developer and publisher credits.",
+        embeds:[],
+        components:[new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)],
+        allowedMentions:{parse:[]},
       });
       return;
     }
