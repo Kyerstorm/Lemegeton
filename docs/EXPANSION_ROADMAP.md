@@ -50,8 +50,8 @@ The catalogue names below are internal environments and navigation labels, not a
 | 12 | Collection Studio | Mixed-media collections, ordering, attribution, collaboration and publication controls. | **Completed** |
 | 13 | Archive Trails | Curated paths with transitions linking panels, quotes, scenes, soundtracks, fanworks and theories. | **Completed** |
 | 14 | Visual Archive Gallery | Approved category results, permission-checked image thumbnails, full image previews and attachment links. | **Completed** |
-| 15 | Soundtrack Discovery | Soundtrack metadata, media links, creator browsing and curated soundtrack collections; no general music player. | **Partially implemented** |
-| 16 | Curation Studio | Featured collections, category indexes, spotlights, trails and curator attribution. | **Partially implemented** |
+| 15 | Soundtrack Discovery | Soundtrack metadata, media links, creator browsing and curated soundtrack collections; no general music player. | **Completed** |
+| 16 | Curation Studio | Featured collections, category indexes, spotlights, trails and curator attribution. | **Completed** |
 | 17 | Community Spotlights | Approved older contributions, creator features and curated highlights surfaced through Community. | **Completed** |
 
 ### Community — /community
@@ -245,10 +245,10 @@ Phase 0 code migration status does **not** mean the service is launched. Phase 8
 
 **Already present:** the unified Archive command; category-specific contribution forms; upload classification/limits; moderation queues and reports; server/global visibility rules; S3-compatible storage and cleanup retries; collections, collection collaborators, ordered Trail entries and Trail browsing; scheduled curator-attributed spotlights with start/end windows, server/global scope, create/list/cancel controls and Community spotlight display.
 
-**Completed in this pass:** category browse results now show permission-checked image thumbnails from private S3 assets or supported legacy Discord attachments. Opening an entry retains the full image preview and lists other attachments as links. Asset URLs are resolved only after the Archive query has enforced guild visibility; no duplicate gallery records or public asset URLs are introduced. Spotlight creation/listing/cancellation is implemented in `/archive`, and active spotlights are surfaced from `/community` using the contributor's approved Archive record rather than duplicated gallery data. Collection entries and Trail steps now support one-based reordering with owner/editor authorization, parent-row locking, and a safe two-phase Trail position rewrite; hidden or unapproved references stay excluded and are parked after visible items, so they cannot disturb current ordering.
+**Completed in this pass:** category browse results now show permission-checked image thumbnails from private S3 assets or supported legacy Discord attachments. Opening an entry retains the full image preview and lists other attachments as links. Asset URLs are resolved only after the Archive query has enforced guild visibility; no duplicate gallery records or public asset URLs are introduced. Spotlight creation/listing/cancellation is implemented in `/archive`, and active spotlights are surfaced from `/community` using the contributor's approved Archive record rather than duplicated gallery data. Collection entries and Trail steps now support one-based reordering with owner/editor authorization, parent-row locking, and a safe two-phase Trail position rewrite; hidden or unapproved references stay excluded and are parked after visible items, so they cannot disturb current ordering. The Archive now has an approved category index, creator-aware soundtrack search and collection-feature scheduling with curator attribution, date windows and separate server/global moderation.
 
 **Remaining delivery:**
-- Add regression tests proving collection, Trail and spotlight reads exclude entries that become private, cross-guild or no longer approved after curation.
+- Add database-backed regression tests proving collection, Trail and entry/collection spotlight reads exclude entries that become private, cross-guild or no longer approved after curation. Current helper tests cover the visibility policy; they do not replace query-level integration tests.
 - Verify cross-guild references and global Archive access at each page, component, attachment and export action.
 - Finish soundtrack records with permitted metadata/links and source attribution. Uploaded audio/video is not a licence to redistribute copyrighted media.
 - Add lifecycle tests for asset replacement, deletion, missing legacy Discord attachment and failed private-object cleanup.

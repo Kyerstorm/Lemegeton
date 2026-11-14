@@ -2,6 +2,18 @@ import { query, queryOne, transaction } from "../../database.js";
 import { cleanText } from "../security/security.js";
 import { getArchiveEntry, parseTags, type ArchiveEntry, type ArchiveVisibility } from "./archive.js";
 
+export function canCollectionShowEntry(
+  collectionVisibility: ArchiveVisibility,
+  collectionGuildId: string,
+  entryVisibility: ArchiveVisibility,
+  entryGuildId: string,
+  viewerGuildId: string,
+): boolean {
+  if (collectionVisibility === "server" && collectionGuildId !== viewerGuildId) return false;
+  if (collectionVisibility === "global") return entryVisibility === "global";
+  return entryVisibility === "global" || (entryVisibility === "server" && entryGuildId === viewerGuildId);
+}
+
 export function moveArchiveItem(items: readonly string[], entryId: string, position: number): string[] {
   if (!Number.isInteger(position) || position < 1) throw new Error("Choose a one-based position of at least 1.");
   const currentIndex = items.indexOf(entryId);
@@ -169,7 +181,8 @@ export async function listArchiveCollections(guildId: string, ownerId?: string):
      LEFT JOIN archive_collection_items ci ON ci.collection_id = c.id
      LEFT JOIN community_archive_entries e ON e.id = ci.entry_id
        AND e.status = 'approved'
-       AND (e.visibility = 'global' OR (e.visibility = 'server' AND e.created_guild_id = $1))
+       AND ((c.visibility = 'global' AND e.visibility = 'global') OR
+         (c.visibility = 'server' AND (e.visibility = 'global' OR (e.visibility = 'server' AND e.created_guild_id = $1))))
      WHERE c.status = 'active'
        AND (c.visibility = 'global' OR c.guild_id = $1)
        AND ($2::BIGINT IS NULL OR c.owner_id = $2)
@@ -188,7 +201,8 @@ export async function getCollectionItems(guildId: string, collectionId: string):
      WHERE ci.collection_id = $1 AND c.status = 'active'
        AND (c.visibility = 'global' OR c.guild_id = $2)
        AND e.status = 'approved'
-       AND (e.visibility = 'global' OR (e.visibility = 'server' AND e.created_guild_id = $2))
+       AND ((c.visibility = 'global' AND e.visibility = 'global') OR
+         (c.visibility = 'server' AND (e.visibility = 'global' OR (e.visibility = 'server' AND e.created_guild_id = $2))))
      ORDER BY ci.position ASC LIMIT 25`,
     [collectionId, guildId],
   );
@@ -258,7 +272,8 @@ export async function listArchiveTrails(guildId: string): Promise<Array<{ id: st
      LEFT JOIN archive_trail_steps s ON s.trail_id = t.id
      LEFT JOIN community_archive_entries e ON e.id = s.entry_id
        AND e.status = 'approved'
-       AND (e.visibility = 'global' OR (e.visibility = 'server' AND e.created_guild_id = $1))
+       AND ((t.visibility = 'global' AND e.visibility = 'global') OR
+         (t.visibility = 'server' AND (e.visibility = 'global' OR (e.visibility = 'server' AND e.created_guild_id = $1))))
      WHERE t.status = 'active' AND (t.visibility = 'global' OR t.guild_id = $1)
      GROUP BY t.id ORDER BY t.updated_at DESC LIMIT 15`,
     [guildId],
@@ -343,7 +358,8 @@ export async function getArchiveTrailSteps(guildId: string, trailId: string): Pr
      WHERE t.id = $1 AND t.status = 'active'
        AND (t.visibility = 'global' OR t.guild_id = $2)
        AND e.status = 'approved'
-       AND (e.visibility = 'global' OR (e.visibility = 'server' AND e.created_guild_id = $2))
+       AND ((t.visibility = 'global' AND e.visibility = 'global') OR
+         (t.visibility = 'server' AND (e.visibility = 'global' OR (e.visibility = 'server' AND e.created_guild_id = $2))))
      ORDER BY s.step_number ASC LIMIT 25`,
     [trailId, guildId],
   );

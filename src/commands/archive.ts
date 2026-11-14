@@ -77,7 +77,7 @@ import { query, queryOne } from "../../database.js";
 import { deleteArchiveAsset, resolveLegacyArchiveAttachmentUrl, signedArchiveAssetUrl, storeArchiveUpload, classifyArchiveUpload } from "../../helpers/media/media-storage.js";
 import { cleanText, isGuildManager, isValidHttpsUrl, safeDisplay } from "../../helpers/security/security.js";
 import { logger } from "../../helpers/runtime/logger.js";
-import { createArchiveSpotlight, listArchiveSpotlights, cancelArchiveSpotlight } from "../../helpers/archive/archive-curation.js";
+import { createArchiveSpotlight, listArchiveSpotlights, cancelArchiveSpotlight, createArchiveCollectionSpotlight, listArchiveCollectionSpotlights, cancelArchiveCollectionSpotlight, listArchiveCategoryIndex } from "../../helpers/archive/archive-curation.js";
 
 const ACTIONS = [
   { name: "Browse approved entries", value: "browse" },
@@ -222,6 +222,36 @@ function archivePositionModal(customId: string, title: string): ModalBuilder {
   );
 }
 
+function archiveCollectionSpotlightModal(collectionId: string, visibility: ArchiveVisibility = "server"): ModalBuilder {
+  return new ModalBuilder()
+    .setCustomId("archive:collection-feature:" + collectionId + ":" + visibility)
+    .setTitle("Feature Archive collection")
+    .addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("starts_at").setLabel("Start · ISO-8601 with timezone")
+          .setPlaceholder("2026-11-15T18:00:00Z").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(40),
+      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("ends_at").setLabel("End · ISO-8601 with timezone")
+          .setPlaceholder("2026-11-22T18:00:00Z").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(40),
+      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("note").setLabel("Curator note (optional)")
+          .setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500),
+      ),
+    );
+}
+
+function soundtrackSearchModal(): ModalBuilder {
+  return new ModalBuilder().setCustomId("archive:soundtrack-search").setTitle("Discover Archive soundtracks").addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder().setCustomId("keyword").setLabel("Soundtrack title, creator or linked work")
+        .setPlaceholder("Search title, original creator or source work")
+        .setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(100),
+    ),
+  );
+}
+
 function reportModal(entryId: string): ModalBuilder {
   return new ModalBuilder()
     .setCustomId(`archive:report:${entryId}`)
@@ -248,8 +278,8 @@ function configureModal(categories: string[], uploadTypes: string[]): ModalBuild
 function archiveHome(): { embeds: EmbedBuilder[]; components: ActionRowBuilder<ButtonBuilder>[] } {
   const embed = homeEmbed(
     "Community Archive",
-    "A server-owned library of attributed contributions. Manga panels are one category alongside quotes, fanworks, moodboards, soundtracks, scenes, recommendations and theories. Approved global entries are shown only when their contributors explicitly opted into global visibility.",
-    ARCHIVE_CATEGORIES.slice(0, 4).map((category) => ({ name: category.emoji + " " + category.label, value: "A searchable Archive category.", inline: true })),
+    "A server-owned library of attributed contributions. Browse eight categories, search creators and source works, or curate approved entries into collections and Trails. Global entries appear only when contributors explicitly opted into global visibility.",
+    ARCHIVE_CATEGORIES.map((category) => ({ name: category.emoji + " " + category.label, value: "Browse approved entries and creator-attributed work.", inline: true })),
   );
   const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("archive:browse").setLabel("Browse").setStyle(ButtonStyle.Primary),
@@ -264,7 +294,11 @@ function archiveHome(): { embeds: EmbedBuilder[]; components: ActionRowBuilder<B
     new ButtonBuilder().setCustomId("archive:review").setLabel("Review queue").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("archive:configure").setLabel("Configure").setStyle(ButtonStyle.Secondary),
   );
-  return { embeds: [embed], components: [row1, row2] };
+  const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("archive:category-index").setLabel("Category index").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("archive:soundtrack-search").setLabel("Soundtrack discovery").setStyle(ButtonStyle.Secondary),
+  );
+  return { embeds: [embed], components: [row1, row2, row3] };
 }
 
 function categorySelect(customId: string): ActionRowBuilder<StringSelectMenuBuilder> {
@@ -549,7 +583,7 @@ export class ArchiveCommand implements FeatureCommand {
           const collectionId = interaction.options.getString("collection_id");
           const memberId = interaction.options.getString("member_id");
           const role = interaction.options.getString("collaboration_role") as "editor" | "contributor" | null;
-          if (!collectionId || !memberId || !/^\\d{17,20}$/.test(memberId) || !role) throw new Error("Provide collection_id, a valid member_id and role.");
+          if (!collectionId || !memberId || !/^\d{17,20}$/.test(memberId) || !role) throw new Error("Provide collection_id, a valid member_id and role.");
           const member = await interaction.guild!.members.fetch(memberId).catch(() => null);
           if (!member) throw new Error("That member is not in this server.");
           await addCollectionCollaborator(guildId, userId, collectionId, memberId, role);
@@ -559,7 +593,7 @@ export class ArchiveCommand implements FeatureCommand {
         case "collection-remove-member": {
           const collectionId = interaction.options.getString("collection_id");
           const memberId = interaction.options.getString("member_id");
-          if (!collectionId || !memberId || !/^\\d{17,20}$/.test(memberId)) throw new Error("Provide collection_id and a valid member_id.");
+          if (!collectionId || !memberId || !/^\d{17,20}$/.test(memberId)) throw new Error("Provide collection_id and a valid member_id.");
           await removeCollectionCollaborator(guildId, userId, collectionId, memberId);
           await interaction.reply({ content: `Removed <@${memberId}> from the collection.`, flags: MessageFlags.Ephemeral });
           return;
@@ -693,6 +727,12 @@ export class ArchiveCommand implements FeatureCommand {
       case "submit":
         await interaction.reply({ content: "Choose a category for your contribution.", components: [categorySelect("archive:submit-category")], flags: MessageFlags.Ephemeral });
         return true;
+      case "category-index": await this.showCategoryIndex(interaction); return true;
+      case "soundtrack-search": await interaction.showModal(soundtrackSearchModal()); return true;
+      case "collection-feature":
+        if (!value || !/^\d+$/.test(value)) return false;
+        await interaction.showModal(archiveCollectionSpotlightModal(value, scope === "global" ? "global" : "server"));
+        return true;
       case "mine": await this.showMine(interaction); return true;
       case "collections": await this.showCollections(interaction); return true;
       case "trails": await this.showTrails(interaction); return true;
@@ -803,6 +843,23 @@ export class ArchiveCommand implements FeatureCommand {
       await this.showEntry(interaction, entry);
       return true;
     }
+    if (action === "collection-feature-cancel") {
+      const selectedId = interaction.values[0];
+      if (!selectedId || !/^\d+$/.test(selectedId)) {
+        await interaction.reply({ content: "That featured collection reference is invalid.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      const member = await interaction.guild!.members.fetch(interaction.user.id);
+      await cancelArchiveCollectionSpotlight(
+        interaction.guildId,
+        selectedId,
+        interaction.user.id,
+        await canModerateArchive(member, interaction.guildId, "server"),
+        isGlobalArchiveModerator(interaction.user.id),
+      );
+      await interaction.reply({ content: "Featured collection cancelled.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
     if (action === "collection-open") {
       await this.showCollectionItems(interaction, selected);
       return true;
@@ -819,6 +876,46 @@ export class ArchiveCommand implements FeatureCommand {
     const [prefix, action, category, visibility] = interaction.customId.split(":");
     if (prefix !== "archive") return false;
     try {
+      if (action === "soundtrack-search") {
+        const keyword = interaction.fields.getTextInputValue("keyword").trim();
+        const entries = await listArchiveEntries(interaction.guildId, "soundtracks", keyword, 0, 5);
+        await this.presentEntries(interaction, entries, "Soundtracks · " + keyword.slice(0, 80));
+        return true;
+      }
+      if (action === "collection-feature") {
+        if (!category || !/^\d+$/.test(category)) throw new Error("The collection reference is invalid.");
+        const parseDate = (value: string, field: string, required: boolean): Date | null => {
+          const raw = value.trim();
+          if (!raw) {
+            if (required) throw new Error(field + " is required.");
+            return null;
+          }
+          const date = new Date(raw);
+          if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(raw) || !Number.isFinite(date.getTime())) {
+            throw new Error(field + " must be a valid ISO-8601 date with a timezone offset.");
+          }
+          return date;
+        };
+        const endsAt = parseDate(interaction.fields.getTextInputValue("ends_at"), "ends_at", true)!;
+        const startsAt = parseDate(interaction.fields.getTextInputValue("starts_at"), "starts_at", false) ?? new Date();
+        const member = await interaction.guild!.members.fetch(interaction.user.id);
+        const id = await createArchiveCollectionSpotlight({
+          guildId: interaction.guildId,
+          curatorId: interaction.user.id,
+          collectionId: category,
+          visibility: visibility === "global" ? "global" : "server",
+          startsAt,
+          endsAt,
+          note: interaction.fields.getTextInputValue("note"),
+          canModerateServer: await canModerateArchive(member, interaction.guildId, "server"),
+          isGlobalModerator: isGlobalArchiveModerator(interaction.user.id),
+        });
+        await interaction.reply({
+          content: "Collection spotlight #" + id + " scheduled until <t:" + Math.floor(endsAt.getTime() / 1000) + ":F>.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return true;
+      }
       if (action === "collection-reorder" || action === "trail-reorder") {
         const positionText = interaction.fields.getTextInputValue("position").trim();
         const position = Number(positionText);
@@ -853,8 +950,8 @@ export class ArchiveCommand implements FeatureCommand {
           title,
           content: body,
           sourceTitle,
-          creator: category === "fanworks" ? creator : undefined,
-          mediaType: "Other",
+          creator: category === "fanworks" || category === "soundtracks" ? creator : undefined,
+          mediaType: category === "soundtracks" ? "Music" : "Other",
           sourceUrl,
           tags: tags.split(","),
           spoiler: category === "theories",
@@ -1331,23 +1428,63 @@ export class ArchiveCommand implements FeatureCommand {
     });
   }
 
+  private async showCategoryIndex(interaction: ButtonInteraction): Promise<void> {
+    if (!interaction.guildId) return;
+    const categories = await listArchiveCategoryIndex(interaction.guildId);
+    const fields = categories.map((item) => ({
+      name: categoryLabel(item.category),
+      value: item.entry_count + " approved contribution(s)",
+      inline: true,
+    }));
+    await interaction.reply({
+      embeds: [homeEmbed("Archive Category Index", "Approved records visible to this server. Counts include explicit global entries and this server's own entries.", fields)],
+      components: [categorySelect("archive:browse-category")],
+      flags: MessageFlags.Ephemeral,
+      allowedMentions: { parse: [] },
+    });
+  }
+
   private async showCollections(interaction: ButtonInteraction | ChatInputCommandInteraction): Promise<void> {
     if (!interaction.guildId) return;
-    const collections = await listArchiveCollections(interaction.guildId);
-    if (!collections.length) {
-      await interaction.reply({ content: "No collections have been curated in this server yet. Create one with /archive action:create-collection.", flags: MessageFlags.Ephemeral });
+    const [collections, featured] = await Promise.all([
+      listArchiveCollections(interaction.guildId),
+      listArchiveCollectionSpotlights(interaction.guildId),
+    ]);
+    if (!collections.length && !featured.length) {
+      await interaction.reply({ content: "No collections have been curated in this server yet. Create one with /archive action:collection-create.", flags: MessageFlags.Ephemeral });
       return;
     }
-    const embed = homeEmbed("Archive Collections", "Collections can mix all approved Archive categories. Original entry authorship remains attached to every item.", collections.slice(0, 10).map((collection) => ({
-      name: `#${collection.id} · ${safeDisplay(collection.title, 150)}`,
-      value: `${collection.entry_count} entries · ${collection.visibility} visibility\n${safeDisplay(collection.description, 180) || "No description"}`,
-      inline: false,
-    })));
-    const select = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder()
-      .setCustomId("archive:collection-open")
-      .setPlaceholder("Open a collection")
-      .addOptions(collections.slice(0, 25).map((collection) => ({ label: collection.title.slice(0, 100), value: collection.id }))));
-    await interaction.reply({ embeds: [embed], components: [select], flags: MessageFlags.Ephemeral });
+    const fields = [
+      ...featured.slice(0, 5).map((item) => ({
+        name: "Featured · " + safeDisplay(item.title, 150),
+        value: `Collection #${item.collection_id} · ${item.entry_count} approved entries\nCurator <@${item.curator_id}> · Ends <t:${Math.floor(new Date(item.ends_at).getTime() / 1000)}:R>${item.note ? "\n" + safeDisplay(item.note, 200) : ""}`,
+        inline: false,
+      })),
+      ...collections.slice(0, 10).map((collection) => ({
+        name: `#${collection.id} · ${safeDisplay(collection.title, 150)}`,
+        value: `${collection.entry_count} entries · ${collection.visibility} visibility\n${safeDisplay(collection.description, 180) || "No description"}`,
+        inline: false,
+      })),
+    ].slice(0, 15);
+    const components: Array<ActionRowBuilder<StringSelectMenuBuilder>> = [];
+    if (collections.length) {
+      components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder()
+        .setCustomId("archive:collection-open")
+        .setPlaceholder("Open a collection")
+        .addOptions(collections.slice(0, 25).map((collection) => ({ label: collection.title.slice(0, 100), value: collection.id })))));
+    }
+    if (featured.length) {
+      components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder()
+        .setCustomId("archive:collection-feature-cancel")
+        .setPlaceholder("Cancel a featured collection")
+        .addOptions(featured.slice(0, 25).map((item) => ({ label: item.title.slice(0, 80), value: item.id })))));
+    }
+    await interaction.reply({
+      embeds: [homeEmbed("Archive Collections", "Collections can mix all approved Archive categories. Featured collections show curator attribution, a bounded date window and explicit visibility.", fields)],
+      components,
+      flags: MessageFlags.Ephemeral,
+      allowedMentions: { parse: [] },
+    });
   }
 
   private async showCollectionItems(interaction: ButtonInteraction | StringSelectMenuInteraction, collectionId: string): Promise<void> {
@@ -1357,8 +1494,21 @@ export class ArchiveCommand implements FeatureCommand {
       await interaction.reply({ content: "This collection is empty or no longer has entries visible to you.", flags: MessageFlags.Ephemeral });
       return;
     }
+    const featureControls = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId("archive:collection-feature:" + collectionId + ":server")
+        .setLabel("Feature in this server")
+        .setStyle(ButtonStyle.Secondary),
+      ...(isGlobalArchiveModerator(interaction.user.id) ? [
+        new ButtonBuilder()
+          .setCustomId("archive:collection-feature:" + collectionId + ":global")
+          .setLabel("Feature globally")
+          .setStyle(ButtonStyle.Secondary),
+      ] : []),
+    );
     await interaction.reply({
       embeds: items.slice(0, 5).map(entryEmbed),
+      components: [featureControls],
       flags: MessageFlags.Ephemeral,
       allowedMentions: { parse: [] },
     });
