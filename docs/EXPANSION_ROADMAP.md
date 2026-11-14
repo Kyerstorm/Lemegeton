@@ -36,7 +36,7 @@ The catalogue names below are internal environments and navigation labels, not a
 | 3 | Creator Explorer | Reliable author, artist, illustrator, editor, translator, studio, director, developer and publisher credits/workographies. | **Partially implemented** |
 | 4 | Franchise Explorer | Canonical franchise membership, sequels, prequels, spin-offs and alternate versions with source labels. | **Partially implemented** |
 | 5 | Adaptation Explorer | Source-to-adaptation paths across supported books, novels, manga, anime, games, film and TV. | **Partially implemented** |
-| 6 | Comparison Studio | Category-specific comparisons with missing-data handling, field-level source provenance and fair normalization. | **Partially implemented** |
+| 6 | Comparison Studio | Category-specific comparisons with missing-data handling, field-level source provenance and fair normalization. | **Completed** |
 | 7 | Books & Editions | General books, novels, light novels and translations with supported ISBN, edition, publisher, language and volume details. | **Partially implemented** |
 | 8 | Availability Explorer | Verified streaming/catalogue/store availability with region and provider attribution; never infer absence from missing data. | **Partially implemented** |
 | 9 | Media Release Explorer | Supported episodes, chapters, volumes, webnovel updates, publications, films, TV and game release data. | **Partially implemented** |
@@ -47,12 +47,12 @@ The catalogue names below are internal environments and navigation labels, not a
 | # | Environment | Build target | Status |
 |---:|---|---|---|
 | 11 | Archive Metropolis | Unified submit, browse, search, filter, review, edit, remove, configure and moderation workflows. | **Completed** |
-| 12 | Collection Studio | Mixed-media collections, ordering, attribution, collaboration and publication controls. | **Partially implemented** |
-| 13 | Archive Trails | Curated paths with transitions linking panels, quotes, scenes, soundtracks, fanworks and theories. | **Partially implemented** |
+| 12 | Collection Studio | Mixed-media collections, ordering, attribution, collaboration and publication controls. | **Completed** |
+| 13 | Archive Trails | Curated paths with transitions linking panels, quotes, scenes, soundtracks, fanworks and theories. | **Completed** |
 | 14 | Visual Archive Gallery | Approved category results, permission-checked image thumbnails, full image previews and attachment links. | **Completed** |
 | 15 | Soundtrack Discovery | Soundtrack metadata, media links, creator browsing and curated soundtrack collections; no general music player. | **Partially implemented** |
 | 16 | Curation Studio | Featured collections, category indexes, spotlights, trails and curator attribution. | **Partially implemented** |
-| 17 | Community Spotlights | Approved older contributions, creator features and curated highlights surfaced through Community. | **Partially implemented** |
+| 17 | Community Spotlights | Approved older contributions, creator features and curated highlights surfaced through Community. | **Completed** |
 
 ### Community — /community
 
@@ -60,13 +60,13 @@ The catalogue names below are internal environments and navigation labels, not a
 |---:|---|---|---|
 | 18 | Community Metropolis | One home for Daily Drop, rankings, sessions, discussions, competitions, calendar and showcases. | **Completed** |
 | 19 | Daily Media Centre | Scheduled media prompts, trivia, mystery titles, quotes, polls, creator features and Archive spotlights. | **Partially implemented** |
-| 20 | Ranking Studio | Candidate submissions, voting rules, vote changes, closing, tie handling and historical results. | **Partially implemented** |
-| 21 | Tournament Centre | Brackets, elimination rounds, multi-stage voting and explicit tie/eligibility rules. | **Partially implemented** |
+| 20 | Ranking Studio | Candidate submissions, voting rules, vote changes, closing, tie handling and historical results. | **Completed** |
+| 21 | Tournament Centre | Brackets, elimination rounds, multi-stage voting and explicit tie/eligibility rules. | **Completed** |
 | 22 | Session Centre | Watch, Read, Play and Discuss events with nominations, hosts, RSVP, waitlists and event history. | **Partially implemented** |
 | 23 | Discussion Centre | Media-linked discussions with spoiler boundaries for supported episode/chapter/volume/season units. | **Completed** |
 | 24 | Media & Community Calendar | Provider-dated releases and community events in one timezone-aware filterable calendar. | **Partially implemented** |
 | 25 | Community Seasons | Configured periods combining existing Drops, rankings, sessions, challenges and spotlights without duplicate records. | **Partially implemented** |
-| 26 | Community Showcase | Visible collections, Trails, creative contributions, completed ranking results and event highlights. | **Partially implemented** |
+| 26 | Community Showcase | Visible collections, Trails, creative contributions, completed ranking results and event highlights. | **Completed** |
 
 ### Games — /play
 
@@ -87,10 +87,10 @@ The catalogue names below are internal environments and navigation labels, not a
 |---:|---|---|---|
 | 35 | Profile Metropolis | Supported Discord/provider details, contributions, visibility and profile presentation. | **Completed** |
 | 36 | Account Connection Centre | Link, unlink, inspect and consent-manage the supported AniList and Steam connections. | **Completed** |
-| 37 | Media Affinity | Opt-in comparisons with transparent signals and privacy controls. | **Partially implemented** |
+| 37 | Media Affinity | Opt-in comparisons with transparent signals and privacy controls. | **Completed** |
 | 38 | Community Taste Explorer | Aggregate, opt-in guild tastes with minimum cohort thresholds and no individual record exposure. | **Completed** |
 | 39 | Contributor Centre | Recent approved Archive entries and active server-visible collection/Trail attribution, filtered to the current guild. | **Completed** |
-| 40 | Community Creations | Browse member-created, moderated Archive work from canonical records. | **Partially implemented** |
+| 40 | Community Creations | Browse member-created, moderated Archive work from canonical records. | **Completed** |
 | 41 | Profile Showcase | Opt-in public profile with configured AniList/Steam summaries and recent public community work; no personal tracking. | **Completed** |
 
 ### Custom Roles — /custom-role
@@ -245,7 +245,7 @@ Phase 0 code migration status does **not** mean the service is launched. Phase 8
 
 **Already present:** the unified Archive command; category-specific contribution forms; upload classification/limits; moderation queues and reports; server/global visibility rules; S3-compatible storage and cleanup retries; collections, collection collaborators, ordered Trail entries and Trail browsing; scheduled curator-attributed spotlights with start/end windows, server/global scope, create/list/cancel controls and Community spotlight display.
 
-**Completed in this pass:** category browse results now show permission-checked image thumbnails from private S3 assets or supported legacy Discord attachments. Opening an entry retains the full image preview and lists other attachments as links. Asset URLs are resolved only after the Archive query has enforced guild visibility; no duplicate gallery records or public asset URLs are introduced. Spotlight creation/listing/cancellation is implemented in `/archive`, and active spotlights are surfaced from `/community` using the contributor's approved Archive record rather than duplicated gallery data.
+**Completed in this pass:** category browse results now show permission-checked image thumbnails from private S3 assets or supported legacy Discord attachments. Opening an entry retains the full image preview and lists other attachments as links. Asset URLs are resolved only after the Archive query has enforced guild visibility; no duplicate gallery records or public asset URLs are introduced. Spotlight creation/listing/cancellation is implemented in `/archive`, and active spotlights are surfaced from `/community` using the contributor's approved Archive record rather than duplicated gallery data. Collection entries and Trail steps now support one-based reordering with owner/editor authorization, parent-row locking, and a safe two-phase Trail position rewrite; hidden or unapproved references stay excluded and are parked after visible items, so they cannot disturb current ordering.
 
 **Remaining delivery:**
 - Add regression tests proving collection, Trail and spotlight reads exclude entries that become private, cross-guild or no longer approved after curation.
@@ -261,7 +261,7 @@ Phase 0 code migration status does **not** mean the service is launched. Phase 8
 
 **Already present:** scheduled Daily Drop with approved contributions; rankings with candidate review/voting/results; Watch/Read/Play/Discuss sessions with RSVP and waitlist; spoiler-aware discussions; release calendars/digests; quiz packs, question review and persistent game sessions; single-elimination 4/8/16-candidate tournaments with locked ballots, round advancement and deterministic seed tiebreaks; Community Seasons that reference existing activity records.
 
-**Completed in this pass:** `/community` now includes a Community Showcase for active collections and Trails with currently approved, visible entries, closed rankings with approved candidates, and completed tournaments with their champion. The query is scoped to the invoking guild and re-checks Archive entry approval and server/global visibility before counting or presenting linked work. Community Seasons and tournament workflows already present in the branch are recorded here as implemented rather than repeated as future work.
+**Completed in this pass:** `/community` now includes a guild-scoped Showcase for active collections and Trails, approved individual Archive contributions, closed rankings, completed tournaments, past non-cancelled sessions and closed discussions. Archive entries are re-checked for approval and server/global visibility; contribution bodies and discussion prompts are deliberately omitted so approved spoiler-bearing text is not exposed in the index. The on-demand calendar combines provider-dated AniList/TMDB releases with scheduled sessions from the invoking guild. Community Seasons and the tested single-elimination tournament lifecycle are recorded as implemented rather than repeated as future work.
 
 **Remaining delivery:**
 - Add tournament candidate withdrawal and an audit trail for bracket lifecycle actions, with clear behavior once a round closes.

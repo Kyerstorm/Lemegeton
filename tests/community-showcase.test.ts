@@ -12,6 +12,8 @@ function entry(id: string, createdAt: string): CommunityShowcaseEntry {
     created_at: new Date(createdAt),
     item_count: 1,
     result_title: null,
+    detail_label: null,
+    source_url: null,
   };
 }
 
@@ -28,4 +30,15 @@ test("Community Showcase result limits are bounded to 1–25 entries", () => {
   assert.equal(orderCommunityShowcaseEntries(input, -5).length, 1);
   assert.equal(orderCommunityShowcaseEntries(input, 1).length, 1);
   assert.equal(orderCommunityShowcaseEntries(input, 200).length, 25);
+});
+
+test("Community Showcase includes contribution and event record kinds in chronological order", () => {
+  const input: CommunityShowcaseEntry[] = [
+    { ...entry("ranking", "2026-11-01T00:00:00Z"), kind: "ranking" },
+    { ...entry("creation", "2026-11-14T00:00:00Z"), kind: "creation", result_title: "soundtracks", detail_label: "game", source_url: "https://example.com/source" },
+    { ...entry("session", "2026-11-10T00:00:00Z"), kind: "session", result_title: "watch" },
+    { ...entry("discussion", "2026-11-12T00:00:00Z"), kind: "discussion", result_title: "Media discussion" },
+  ];
+  assert.deepEqual(orderCommunityShowcaseEntries(input).map(item => item.id), ["creation", "discussion", "session", "ranking"]);
+  assert.equal(input[1]?.source_url, "https://example.com/source");
 });

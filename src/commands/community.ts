@@ -42,6 +42,8 @@ import {
   dueDailySchedules,
   formatActivity,
   upcomingProviderReleases,
+  upcomingCommunitySessions,
+  mergeCommunityCalendarEntries,
   getCommunityHistory,
   getCommunitySession,
   listUpcomingSessions,
@@ -1278,30 +1280,44 @@ export class CommunityCommand implements FeatureCommand {
     const schedule = await getReleaseSchedule(interaction.guildId!);
     const region = schedule?.region ?? "IE";
     const categories = schedule?.categories ?? ["anime", "tv", "movies"];
-    const calendar = await upcomingProviderReleases(this.anilist, this.tmdb, from, to, region, categories);
+    const [calendar, sessions] = await Promise.all([
+      upcomingProviderReleases(this.anilist, this.tmdb, from, to, region, categories),
+      upcomingCommunitySessions(interaction.guildId!, from, to),
+    ]);
+    const timeline = mergeCommunityCalendarEntries(calendar.results, sessions);
     const settings = schedule?.enabled
       ? `Digest: ${schedule.cadence} · ${schedule.local_time} ${schedule.time_zone} · ${region} · ${categories.join(", ")} · <#${schedule.channel_id}>.`
       : "Automatic digests are currently disabled. A server manager can configure them with /community action:calendar-configure.";
     const providerNotice = calendar.unavailableProviders.length
-      ? `Partial results. Unavailable providers: ${calendar.unavailableProviders.join(", ")}. Other returned results are still shown.\n\n`
+      ? `Partial provider results. Unavailable sources: ${calendar.unavailableProviders.join(", ")}. Returned sessions and other source results are still shown.\n\n`
       : "";
-    const fields = calendar.results.slice(0, 12).map((item) => ({
-      name: `${safeDisplay(item.title, 180)} · <t:${Math.floor(item.when.getTime() / 1000)}:R>`,
-      value: `[${item.provider} source](${item.url})`,
-      inline: false,
-    }));
+    const fields = timeline.slice(0, 12).map((item) => {
+      const sourceUrl = item.sourceUrl ? isValidHttpsUrl(item.sourceUrl) : null;
+      return {
+        name: `${safeDisplay(item.title, 180)} · <t:${Math.floor(item.when.getTime() / 1000)}:F> · <t:${Math.floor(item.when.getTime() / 1000)}:R>`,
+        value: item.channelId
+          ? `Community ${safeDisplay(item.source.replace("Community · ", ""), 40)} · <#${item.channelId}>${sourceUrl ? ` · [Media source](${sourceUrl})` : " · RSVP with /community"}`
+          : sourceUrl ? `[${safeDisplay(item.source, 80)} source](${sourceUrl})` : `${safeDisplay(item.source, 80)} · Source link unavailable`,
+        inline: false,
+      };
+    });
     if (!fields.length && calendar.unavailableProviders.length) {
-      fields.push({ name: "Provider data unavailable", value: `No results could be retrieved from: ${calendar.unavailableProviders.join(", ")}.`, inline: false });
+      fields.push({ name: "Provider data unavailable", value: `No release results could be retrieved from: ${calendar.unavailableProviders.join(", ")}.`, inline: false });
     } else if (!fields.length) {
-      fields.push({ name: "No releases returned", value: "No provider-dated anime airings, TV episodes or movie releases were found in the selected categories for this window.", inline: false });
+      fields.push({ name: "No events returned", value: "No provider-dated releases or scheduled community sessions were found in this 14-day window.", inline: false });
     }
     await interaction.reply({
-      embeds: [homeEmbed("Release calendar · Next 14 days", `${providerNotice}Dates come directly from AniList and TMDB. Missing provider data is not guessed.\n\n${settings}`, fields)],
+      embeds: [homeEmbed(
+        "Media & Community Calendar · Next 14 days",
+        `${providerNotice}Provider releases are dated by AniList and TMDB. Server sessions are read from this guild's schedule. Discord timestamps display in each member's local timezone.\n\n${settings}`,
+        fields,
+      )],
       components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId("community:calendar-configure").setLabel("Configure digests").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId("community:calendar-disable").setLabel("Disable digests").setStyle(ButtonStyle.Secondary).setDisabled(!schedule?.enabled),
       )],
       flags: MessageFlags.Ephemeral,
+      allowedMentions: { parse: [] },
     });
   }
 
@@ -1450,14 +1466,26 @@ export class CommunityCommand implements FeatureCommand {
       trail: "Archive Trail",
       ranking: "Ranking result",
       tournament: "Tournament result",
+      creation: "Archive contribution",
+      session: "Community session",
+      discussion: "Community discussion",
     } as const;
-    const fields = entries.map((entry) => {
+    const fields = entries.slice(0, 12).map((entry) => {
+      const sourceUrl = entry.source_url ? isValidHttpsUrl(entry.source_url) : null;
+      const kindDetail = entry.kind === "creation"
+        ? `Archive: ${safeDisplay(entry.result_title ?? "Contribution", 50)} · ${safeDisplay(entry.detail_label ?? "Other", 40)}`
+        : entry.kind === "session"
+          ? `Activity: ${safeDisplay(formatActivity(entry.result_title as "watch" | "read" | "play" | "discuss"), 40)}`
+          : entry.kind === "discussion"
+            ? "Spoiler-aware media discussion"
+            : entry.kind === "tournament" && entry.result_title
+              ? "Champion: " + safeDisplay(entry.result_title, 120)
+              : "Visible records: " + entry.item_count;
       const details = [
-        entry.description ? safeDisplay(entry.description, 280) : null,
-        entry.kind === "tournament" && entry.result_title
-          ? "Champion: " + safeDisplay(entry.result_title, 120)
-          : "Visible records: " + entry.item_count,
+        entry.description ? safeDisplay(entry.description, 220) : null,
+        kindDetail,
         "Created by <@" + entry.creator_id + "> · <t:" + Math.floor(entry.created_at.getTime() / 1000) + ":d>",
+        sourceUrl ? "[Open source](" + sourceUrl + ")" : null,
       ].filter((value): value is string => Boolean(value));
       return {
         name: (labels[entry.kind] + " · " + safeDisplay(entry.title, 180)).slice(0, 256),
@@ -1467,13 +1495,18 @@ export class CommunityCommand implements FeatureCommand {
     });
     await interaction.reply({
       content: entries.length
-        ? "Visible Archive work and completed community results from this server."
-        : "No visible collections, Trails or completed community results are available in this server yet.",
-      embeds: [homeEmbed("Community Showcase", "A current-guild view of visible collections, Trails and completed community results.", fields)],
+        ? "Approved Archive contributions, visible collections and Trails, completed results, past community sessions and closed discussions from this server."
+        : "No visible Archive work or completed community activity is available in this server yet.",
+      embeds: [homeEmbed(
+        "Community Showcase",
+        "A guild-scoped index of approved creative work, curated paths, completed results and event highlights. Spoiler-bearing contribution text is not exposed here.",
+        fields,
+      )],
       flags: MessageFlags.Ephemeral,
       allowedMentions: { parse: [] },
     });
   }
+
   private async showHistory(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
     const history = await getCommunityHistory(interaction.guildId!);
     const fields = [

@@ -60,7 +60,9 @@ import {
 } from "../../helpers/archive/archive-moderation.js";
 import {
   addEntryToCollection,
+  reorderCollectionEntry,
   addEntryToTrail,
+  reorderArchiveTrailStep,
   addCollectionCollaborator,
   removeCollectionCollaborator,
   removeEntryFromCollection,
@@ -93,13 +95,13 @@ const ACTIONS = [
   { name: "Review reports", value: "report-review" },
   { name: "Configure the archive", value: "configure" },
   { name: "Create a collection", value: "collection-create" },
-  { name: "Add to a collection", value: "collection-add" },
+  { name: "Add / reposition a collection entry", value: "collection-add" },
   { name: "Remove from a collection", value: "collection-remove" },
   { name: "Invite collection collaborator", value: "collection-invite" },
   { name: "Remove collection collaborator", value: "collection-remove-member" },
   { name: "Browse collections", value: "collection-list" },
   { name: "Create an Archive Trail", value: "trail-create" },
-  { name: "Add to a Trail", value: "trail-add" },
+  { name: "Add / reposition a Trail step", value: "trail-add" },
   { name: "Browse Archive Trails", value: "trail-list" },
   { name: "Open an Archive Trail", value: "trail-open" },
   { name: "Finish an upload", value: "finish-upload" },
@@ -203,6 +205,21 @@ function archiveUsualPrompt(category: ArchiveCategory): {
     new ButtonBuilder().setCustomId("archive:usual:no").setLabel("Something else").setStyle(ButtonStyle.Secondary),
   );
   return { embeds: [embed], components: [row] };
+}
+
+function archivePositionModal(customId: string, title: string): ModalBuilder {
+  return new ModalBuilder().setCustomId(customId).setTitle(title).addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("position")
+        .setLabel("New one-based position")
+        .setPlaceholder("1–25")
+        .setMinLength(1)
+        .setMaxLength(2)
+        .setRequired(true)
+        .setStyle(TextInputStyle.Short),
+    ),
+  );
 }
 
 function reportModal(entryId: string): ModalBuilder {
@@ -511,6 +528,11 @@ export class ArchiveCommand implements FeatureCommand {
           const collectionId = interaction.options.getString("collection_id");
           const entryId = interaction.options.getString("entry_id");
           if (!collectionId || !entryId) throw new Error("Provide collection_id and entry_id.");
+          const existing = await getCollectionItems(guildId, collectionId);
+          if (existing.some((entry) => entry.id === entryId)) {
+            await interaction.showModal(archivePositionModal("archive:collection-reorder:" + collectionId + ":" + entryId, "Reorder collection entry"));
+            return;
+          }
           await addEntryToCollection(guildId, userId, collectionId, entryId, interaction.options.getString("note") ?? "");
           await interaction.reply({ content: "Added the contribution to the collection. Its original contributor attribution is preserved.", flags: MessageFlags.Ephemeral });
           return;
@@ -558,6 +580,11 @@ export class ArchiveCommand implements FeatureCommand {
           const trailId = interaction.options.getString("trail_id");
           const entryId = interaction.options.getString("entry_id");
           if (!trailId || !entryId) throw new Error("Provide trail_id and entry_id.");
+          const existing = await getArchiveTrailSteps(guildId, trailId);
+          if (existing.some((step) => step.entry.id === entryId)) {
+            await interaction.showModal(archivePositionModal("archive:trail-reorder:" + trailId + ":" + entryId, "Reorder Archive Trail step"));
+            return;
+          }
           await addEntryToTrail(guildId, userId, trailId, entryId, interaction.options.getString("note") ?? "");
           await interaction.reply({ content: "Added the contribution to the Trail. Entry visibility will be checked again when the Trail is opened.", flags: MessageFlags.Ephemeral });
           return;
@@ -792,6 +819,22 @@ export class ArchiveCommand implements FeatureCommand {
     const [prefix, action, category, visibility] = interaction.customId.split(":");
     if (prefix !== "archive") return false;
     try {
+      if (action === "collection-reorder" || action === "trail-reorder") {
+        const positionText = interaction.fields.getTextInputValue("position").trim();
+        const position = Number(positionText);
+        if (!/^\d{1,2}$/.test(positionText) || !Number.isSafeInteger(position) || position < 1 || position > 25) {
+          throw new Error("Enter a whole-number position between 1 and 25.");
+        }
+        if (!category || !visibility) throw new Error("The reorder request is incomplete. Reopen the Archive action.");
+        if (action === "collection-reorder") {
+          await reorderCollectionEntry(interaction.guildId, interaction.user.id, category, visibility, position);
+          await interaction.reply({ content: "Collection order updated.", flags: MessageFlags.Ephemeral });
+        } else {
+          await reorderArchiveTrailStep(interaction.guildId, interaction.user.id, category, visibility, position);
+          await interaction.reply({ content: "Archive Trail order updated.", flags: MessageFlags.Ephemeral });
+        }
+        return true;
+      }
       if (action === "submit" && category && isArchiveCategory(category)) {
         const source = interaction.fields.getTextInputValue("source");
         const creator = interaction.fields.getTextInputValue("creator");

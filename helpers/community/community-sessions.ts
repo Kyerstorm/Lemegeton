@@ -126,6 +126,68 @@ export async function listUpcomingSessions(guildId: string): Promise<CommunitySe
   );
 }
 
+
+export interface UpcomingCommunitySession {
+  id: string;
+  title: string;
+  channel_id: string;
+  activity_type: CommunityActivity;
+  scheduled_at: Date;
+  media_url: string | null;
+}
+
+export interface CommunityCalendarEntry {
+  title: string;
+  when: Date;
+  source: string;
+  sourceUrl: string | null;
+  channelId: string | null;
+}
+
+export async function upcomingCommunitySessions(
+  guildId: string,
+  from: Date,
+  to: Date,
+): Promise<UpcomingCommunitySession[]> {
+  if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from.getTime() > to.getTime()) {
+    throw new Error("The community calendar window must contain valid dates in ascending order.");
+  }
+  return query<UpcomingCommunitySession>(
+    `SELECT id::text, title, channel_id::text, activity_type, scheduled_at, media_url
+     FROM community_sessions
+     WHERE guild_id = $1 AND status IN ('scheduled','open')
+       AND scheduled_at >= $2 AND scheduled_at <= $3
+     ORDER BY scheduled_at ASC LIMIT 50`,
+    [guildId, from, to],
+  );
+}
+
+export function mergeCommunityCalendarEntries(
+  providerEntries: readonly { title: string; when: Date; provider: string; url: string }[],
+  sessions: readonly UpcomingCommunitySession[],
+): CommunityCalendarEntry[] {
+  const entries: CommunityCalendarEntry[] = [
+    ...providerEntries.map((item) => ({
+      title: item.title,
+      when: item.when,
+      source: item.provider,
+      sourceUrl: item.url,
+      channelId: null,
+    })),
+    ...sessions.map((session) => ({
+      title: session.title,
+      when: session.scheduled_at,
+      source: "Community · " + formatActivity(session.activity_type),
+      sourceUrl: session.media_url,
+      channelId: session.channel_id,
+    })),
+  ];
+  return entries
+    .filter((item) => Number.isFinite(item.when.getTime()))
+    .sort((left, right) => left.when.getTime() - right.when.getTime())
+    .slice(0, 30);
+}
+
 export async function getCommunityHistory(guildId: string): Promise<{
   closedRankings: Array<{ id: string; title: string; closed_at: Date | null }>;
   pastSessions: Array<{ id: string; title: string; activity_type: string; scheduled_at: Date }>;

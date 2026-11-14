@@ -60,6 +60,8 @@ export {
   createSpoilerDiscussion,
   closeDiscussion,
   listUpcomingSessions,
+  upcomingCommunitySessions,
+  mergeCommunityCalendarEntries,
   getCommunityHistory,
   upcomingProviderReleases,
   formatActivity,
