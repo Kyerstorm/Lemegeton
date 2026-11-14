@@ -1461,15 +1461,15 @@ export class CommunityCommand implements FeatureCommand {
       ].filter((value): value is string => Boolean(value));
       return {
         name: (labels[entry.kind] + " · " + safeDisplay(entry.title, 180)).slice(0, 256),
-        value: details.join("\\n").slice(0, 1_024),
+        value: details.join("\n").slice(0, 1_024),
         inline: false,
       };
     });
     await interaction.reply({
       content: entries.length
         ? "Visible Archive work and completed community results from this server."
-        : "No published collections, Trails or completed community results are available in this server yet.",
-      embeds: [homeEmbed("Community Showcase", "A current-guild view of approved collections, Trails and completed community results.", fields)],
+        : "No visible collections, Trails or completed community results are available in this server yet.",
+      embeds: [homeEmbed("Community Showcase", "A current-guild view of visible collections, Trails and completed community results.", fields)],
       flags: MessageFlags.Ephemeral,
       allowedMentions: { parse: [] },
     });
