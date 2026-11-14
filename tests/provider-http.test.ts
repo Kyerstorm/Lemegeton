@@ -8,7 +8,7 @@ test("provider HTTP retries bounded transient responses then returns success", a
   const response = await fetchProviderResponse(async () => {
     calls += 1;
     return calls === 1 ? new Response("busy", { status: 503 }) : new Response("ok", { status: 200 });
-  }, "https://provider.example/items", {}, { sleep: async ms => { waits.push(ms); } });
+  }, "https://provider.example/items", {}, { maxAttempts: 2, sleep: async ms => { waits.push(ms); } });
   assert.equal(response.status, 200);
   assert.equal(calls, 2);
   assert.deepEqual(waits, [200]);
