@@ -208,7 +208,7 @@ async function serverDiagnostics(
 
   const configuredChannels = databaseHealthy
     ? await query<{ name: string; channel_id: string }>(
-      `SELECT 'Current media notifications' AS name, channel_id::text AS channel_id
+      \`SELECT 'Current media notifications' AS name, channel_id::text AS channel_id
          FROM media_notification_settings WHERE guild_id = $1 AND channel_id IS NOT NULL
        UNION ALL
        SELECT 'Archive uploads', upload_channel_id::text
@@ -228,7 +228,7 @@ async function serverDiagnostics(
        UNION ALL
        SELECT 'Release digest', channel_id::text
          FROM community_release_schedules WHERE guild_id = $1 AND enabled = TRUE
-       ORDER BY name`,
+       ORDER BY name\`,
       [guildId],
     )
     : [];
@@ -238,12 +238,11 @@ async function serverDiagnostics(
     .setTitle("Server Check")
     .setFooter({ text: "Read-only diagnostics · Provider configuration is not a live connectivity test" });
 
-  let botMember;
+  let botMember: Awaited<ReturnType<typeof guild.members.fetchMe>> | null = null;
   try {
     botMember = await guild.members.fetchMe();
   } catch {
-    embed.setDescription("The bot's server member could not be resolved. No channel permissions could be verified.");
-    return embed;
+    botMember = null;
   }
 
   const gatewayReady = guild.client.isReady();
@@ -251,39 +250,43 @@ async function serverDiagnostics(
     {
       name: "PostgreSQL",
       status: databaseHealthy ? "Healthy" : "Needs attention",
-      detail: databaseHealthy ? `SELECT 1 succeeded in ${databaseLatency} ms.` : "The database health query failed; configured delivery channels could not be listed.",
+      detail: databaseHealthy ? \`SELECT 1 succeeded in \${databaseLatency} ms.\` : "The database health query failed; configured delivery channels could not be listed.",
     },
     {
       name: "Discord gateway",
       status: gatewayReady ? "Healthy" : "Needs attention",
       detail: gatewayReady
-        ? guild.client.ws.ping >= 0 ? `Gateway is ready · ${Math.round(guild.client.ws.ping)} ms ping.` : "Gateway is ready; latency is unavailable."
+        ? guild.client.ws.ping >= 0 ? \`Gateway is ready · \${Math.round(guild.client.ws.ping)} ms ping.\` : "Gateway is ready; latency is unavailable."
         : "The bot client is not in the ready state.",
     },
   ];
 
-  for (const check of checks) {
-    const channel = await guild.channels.fetch(check.channel_id).catch(() => null);
-    if (!channel || channel.guildId !== guildId) {
-      results.push({ name: check.name, status: "Needs attention", detail: "The configured channel is missing or inaccessible in this server." });
-      continue;
+  if (!botMember) {
+    results.push({ name: "Bot membership", status: "Needs attention", detail: "The bot's server member could not be resolved; channel permissions could not be checked." });
+  } else {
+    for (const check of checks) {
+      const channel = await guild.channels.fetch(check.channel_id).catch(() => null);
+      if (!channel || channel.guildId !== guildId) {
+        results.push({ name: check.name, status: "Needs attention", detail: "The configured channel is missing or inaccessible in this server." });
+        continue;
+      }
+      const permissions = channel.permissionsFor(botMember);
+      const missing = missingChannelPermissions({
+        viewChannel: permissions?.has(PermissionFlagsBits.ViewChannel) ?? false,
+        sendMessages: permissions?.has(PermissionFlagsBits.SendMessages) ?? false,
+        embedLinks: permissions?.has(PermissionFlagsBits.EmbedLinks) ?? false,
+      });
+      results.push({
+        name: check.name,
+        status: missing.length ? "Needs attention" : "Healthy",
+        detail: missing.length ? "Missing bot permissions: " + missing.join(", ") + "." : "View Channel, Send Messages and Embed Links are available.",
+      });
     }
-    const permissions = channel.permissionsFor(botMember);
-    const missing = missingChannelPermissions({
-      viewChannel: permissions?.has(PermissionFlagsBits.ViewChannel) ?? false,
-      sendMessages: permissions?.has(PermissionFlagsBits.SendMessages) ?? false,
-      embedLinks: permissions?.has(PermissionFlagsBits.EmbedLinks) ?? false,
-    });
-    results.push({
-      name: check.name,
-      status: missing.length ? "Needs attention" : "Healthy",
-      detail: missing.length ? "Missing bot permissions: " + missing.join(", ") + "." : "View Channel, Send Messages and Embed Links are available.",
-    });
   }
 
   const healthy = results.filter(item => item.status === "Healthy").length;
   const attention = results.filter(item => item.status === "Needs attention").length;
-  embed.setDescription(`**Healthy:** ${healthy} · **Needs attention:** ${attention}\\nChecks include PostgreSQL, the Discord gateway, this channel and configured v3 delivery channels.`);
+  embed.setDescription(\`**Healthy:** \${healthy} · **Needs attention:** \${attention}\nChecks include PostgreSQL, the Discord gateway, this channel and configured v3 delivery channels.\`);
   for (const result of results) {
     embed.addFields({
       name: (result.status === "Healthy" ? "✓ " : emoji.error + " ") + result.name + " · " + result.status,
@@ -309,7 +312,7 @@ async function serverDiagnostics(
   });
   embed.addFields({
     name: "Provider and storage configuration · not live probes",
-    value: providerChecks.map(item => `${item.configured ? "Configured" : "Not configured"} · ${item.name} — ${item.detail}`).join("\\n").slice(0, 1024),
+    value: providerChecks.map(item => \`\${item.configured ? "Configured" : "Not configured"} · \${item.name} — \${item.detail}\`).join("\n").slice(0, 1024),
     inline: false,
   });
   embed.setFooter({ text: "Read-only diagnostics · Provider rows show configuration only; asset-object and scheduled-job health are not probed" });
