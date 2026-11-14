@@ -19,7 +19,7 @@ export function orderCommunityShowcaseEntries(
 ): CommunityShowcaseEntry[] {
   const boundedLimit = Math.max(1, Math.min(25, Math.floor(limit) || 15));
   return [...entries]
-    .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())
+    .sort((left, right) => right.created_at.getTime() - left.created_at.getTime())
     .slice(0, boundedLimit);
 }
 
