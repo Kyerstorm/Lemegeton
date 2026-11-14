@@ -25,110 +25,147 @@ The catalogue names below are internal environments and navigation labels, not a
 
 ## 2. The fifty expansion environments
 
+**Status meanings:** **Completed** means the described user-facing environment is implemented in this branch; **Partially implemented** means a useful workflow exists but one or more stated capabilities or lifecycle requirements remain; **Planned** means there is no complete user-facing implementation yet. A helper, command option or database table alone is not completion evidence.
+
 ### Discovery — /discover
 
-| # | Environment | Build target |
-|---:|---|---|
-| 1 | Discovery Metropolis | Category-aware search, provider filters, browse, random, trending, detail cards, compare and recommendations. |
-| 2 | Community Knowledge Atlas | Image-backed, permission-aware graph for works, creators, franchises, adaptations, Archive records and community edges. |
-| 3 | Creator Explorer | Reliable author, artist, illustrator, editor, translator, studio, director, developer and publisher credits/workographies. |
-| 4 | Franchise Explorer | Canonical franchise membership, sequels, prequels, spin-offs and alternate versions with source labels. |
-| 5 | Adaptation Explorer | Source-to-adaptation paths across supported books, novels, manga, anime, games, film and TV. |
-| 6 | Comparison Studio | Category-specific comparisons with missing-data handling, field-level source provenance and fair normalization. |
-| 7 | Books & Editions | General books, novels, light novels and translations with supported ISBN, edition, publisher, language and volume details. |
-| 8 | Availability Explorer | Verified streaming/catalogue/store availability with region and provider attribution; never infer absence from missing data. |
-| 9 | Media Release Explorer | Supported episodes, chapters, volumes, webnovel updates, publications, films, TV and game release data. |
-| 10 | Metadata Source Explorer | Provider IDs, data freshness where available, field provenance, missing metadata and community proposals. |
+| # | Environment | Build target | Status |
+|---:|---|---|---|
+| 1 | Discovery Metropolis | Category-aware search, provider filters, browse, random, trending, detail cards, compare and recommendations. | **Partially implemented** |
+| 2 | Community Knowledge Atlas | Image-backed, permission-aware graph for works, creators, franchises, adaptations, Archive records and community edges. | **Partially implemented** |
+| 3 | Creator Explorer | Reliable author, artist, illustrator, editor, translator, studio, director, developer and publisher credits/workographies. | **Partially implemented** |
+| 4 | Franchise Explorer | Canonical franchise membership, sequels, prequels, spin-offs and alternate versions with source labels. | **Partially implemented** |
+| 5 | Adaptation Explorer | Source-to-adaptation paths across supported books, novels, manga, anime, games, film and TV. | **Partially implemented** |
+| 6 | Comparison Studio | Category-specific comparisons with missing-data handling, field-level source provenance and fair normalization. | **Partially implemented** |
+| 7 | Books & Editions | General books, novels, light novels and translations with supported ISBN, edition, publisher, language and volume details. | **Partially implemented** |
+| 8 | Availability Explorer | Verified streaming/catalogue/store availability with region and provider attribution; never infer absence from missing data. | **Partially implemented** |
+| 9 | Media Release Explorer | Supported episodes, chapters, volumes, webnovel updates, publications, films, TV and game release data. | **Partially implemented** |
+| 10 | Metadata Source Explorer | Provider IDs, data freshness where available, field provenance, missing metadata and community proposals. | **Partially implemented** |
 
 ### Archive — /archive
 
-| # | Environment | Build target |
-|---:|---|---|
-| 11 | Archive Metropolis | Unified submit, browse, search, filter, review, edit, remove, configure and moderation workflows. |
-| 12 | Collection Studio | Mixed-media collections, ordering, attribution, collaboration and publication controls. |
-| 13 | Archive Trails | Curated paths with transitions linking panels, quotes, scenes, soundtracks, fanworks and theories. |
-| 14 | Visual Archive Gallery | **Core implemented in Archive browse:** approved category results now include permission-checked image thumbnails, with full image previews and attachment links in entry detail. |
-| 15 | Soundtrack Discovery | Soundtrack metadata, media links, creator browsing and curated soundtrack collections; no general music player. |
-| 16 | Curation Studio | Featured collections, category indexes, spotlights, trails and curator attribution. |
-| 17 | Community Spotlights | Approved older contributions, creator features and curated highlights surfaced through Community. |
+| # | Environment | Build target | Status |
+|---:|---|---|---|
+| 11 | Archive Metropolis | Unified submit, browse, search, filter, review, edit, remove, configure and moderation workflows. | **Completed** |
+| 12 | Collection Studio | Mixed-media collections, ordering, attribution, collaboration and publication controls. | **Partially implemented** |
+| 13 | Archive Trails | Curated paths with transitions linking panels, quotes, scenes, soundtracks, fanworks and theories. | **Partially implemented** |
+| 14 | Visual Archive Gallery | Approved category results, permission-checked image thumbnails, full image previews and attachment links. | **Completed** |
+| 15 | Soundtrack Discovery | Soundtrack metadata, media links, creator browsing and curated soundtrack collections; no general music player. | **Partially implemented** |
+| 16 | Curation Studio | Featured collections, category indexes, spotlights, trails and curator attribution. | **Partially implemented** |
+| 17 | Community Spotlights | Approved older contributions, creator features and curated highlights surfaced through Community. | **Partially implemented** |
 
 ### Community — /community
 
-| # | Environment | Build target |
-|---:|---|---|
-| 18 | Community Metropolis | One home for Daily Drop, rankings, sessions, discussions, competitions, calendar and showcases. |
-| 19 | Daily Media Centre | Scheduled media prompts, trivia, mystery titles, quotes, polls, creator features and Archive spotlights. |
-| 20 | Ranking Studio | Candidate submissions, voting rules, vote changes, closing, tie handling and historical results. |
-| 21 | Tournament Centre | Brackets, elimination rounds, multi-stage voting and explicit tie/eligibility rules. |
-| 22 | Session Centre | Watch, Read, Play and Discuss events with nominations, hosts, RSVP, waitlists and event history. |
-| 23 | Discussion Centre | Media-linked discussions with spoiler boundaries for supported episode/chapter/volume/season units. |
-| 24 | Media & Community Calendar | Provider-dated releases and community events in one timezone-aware filterable calendar. |
-| 25 | Community Seasons | Configured periods combining existing Drops, rankings, sessions, challenges and spotlights without duplicate records. |
-| 26 | Community Showcase | Published collections, trails, creative contributions, completed ranking results and event highlights. |
+| # | Environment | Build target | Status |
+|---:|---|---|---|
+| 18 | Community Metropolis | One home for Daily Drop, rankings, sessions, discussions, competitions, calendar and showcases. | **Completed** |
+| 19 | Daily Media Centre | Scheduled media prompts, trivia, mystery titles, quotes, polls, creator features and Archive spotlights. | **Partially implemented** |
+| 20 | Ranking Studio | Candidate submissions, voting rules, vote changes, closing, tie handling and historical results. | **Partially implemented** |
+| 21 | Tournament Centre | Brackets, elimination rounds, multi-stage voting and explicit tie/eligibility rules. | **Partially implemented** |
+| 22 | Session Centre | Watch, Read, Play and Discuss events with nominations, hosts, RSVP, waitlists and event history. | **Partially implemented** |
+| 23 | Discussion Centre | Media-linked discussions with spoiler boundaries for supported episode/chapter/volume/season units. | **Completed** |
+| 24 | Media & Community Calendar | Provider-dated releases and community events in one timezone-aware filterable calendar. | **Partially implemented** |
+| 25 | Community Seasons | Configured periods combining existing Drops, rankings, sessions, challenges and spotlights without duplicate records. | **Partially implemented** |
+| 26 | Community Showcase | Visible collections, Trails, creative contributions, completed ranking results and event highlights. | **Partially implemented** |
 
 ### Games — /play
 
-| # | Environment | Build target |
-|---:|---|---|
-| 27 | Interactive Game Metropolis | Game catalogue, solo/team entry, join/resume controls, state persistence and result presentation. |
-| 28 | Trivia Arena | Source-backed questions, difficulty, review, provenance and solo/team/hosted rounds. |
-| 29 | Mystery Media | Layered clues for hidden works, franchises, creators, adaptations and games. |
-| 30 | Guessing Arena | Title, creator, release period, franchise and other media-identification rounds. |
-| 31 | Team Games | Cooperative/competitive teams, membership, scoring and persistent round state. |
-| 32 | Challenge Centre | Themed media discovery tasks, seasonal challenges and community puzzles with published rules. |
-| 33 | Quiz Pack Studio | Community question packs, answer keys, accepted alternatives, references, review and revision history. |
-| 34 | Media Puzzle Room | Media word puzzles, relation puzzles, franchise-connection puzzles and cooperative clue chains. |
+| # | Environment | Build target | Status |
+|---:|---|---|---|
+| 27 | Interactive Game Metropolis | Game catalogue, solo/team entry, join/resume controls, state persistence and result presentation. | **Partially implemented** |
+| 28 | Trivia Arena | Source-backed questions, difficulty, review, provenance and solo/team/hosted rounds. | **Partially implemented** |
+| 29 | Mystery Media | Layered clues for hidden works, franchises, creators, adaptations and games. | **Partially implemented** |
+| 30 | Guessing Arena | Title, creator, release period, franchise and other media-identification rounds. | **Partially implemented** |
+| 31 | Team Games | Cooperative/competitive teams, membership, scoring and persistent round state. | **Planned** |
+| 32 | Challenge Centre | Themed media discovery tasks, seasonal challenges and community puzzles with published rules. | **Planned** |
+| 33 | Quiz Pack Studio | Community question packs, answer keys, accepted alternatives, references, review and revision history. | **Partially implemented** |
+| 34 | Media Puzzle Room | Media word puzzles, relation puzzles, franchise-connection puzzles and cooperative clue chains. | **Planned** |
 
 ### Profiles — /profile
 
-| # | Environment | Build target |
-|---:|---|---|
-| 35 | Profile Metropolis | Supported Discord/provider details, contributions, visibility and profile presentation. |
-| 36 | Account Connection Centre | Link, unlink, inspect and consent-manage AniList, Steam and other verified connections. |
-| 37 | Media Affinity | Opt-in comparisons with transparent signals and privacy controls. |
-| 38 | Community Taste Explorer | Aggregate, opt-in guild tastes with minimum cohort thresholds and no individual record exposure. |
-| 39 | Contributor Centre | **Implemented in profile:** recent approved Archive entries and active server-visible collection/Trail attribution, filtered to the current guild. |
-| 40 | Community Creations | Browse member-created, moderated Archive work from canonical records. |
-| 41 | Profile Showcase | **Core implemented:** opt-in public profile with configured AniList/Steam summaries and recent public community work; no personal tracking. |
+| # | Environment | Build target | Status |
+|---:|---|---|---|
+| 35 | Profile Metropolis | Supported Discord/provider details, contributions, visibility and profile presentation. | **Completed** |
+| 36 | Account Connection Centre | Link, unlink, inspect and consent-manage the supported AniList and Steam connections. | **Completed** |
+| 37 | Media Affinity | Opt-in comparisons with transparent signals and privacy controls. | **Partially implemented** |
+| 38 | Community Taste Explorer | Aggregate, opt-in guild tastes with minimum cohort thresholds and no individual record exposure. | **Completed** |
+| 39 | Contributor Centre | Recent approved Archive entries and active server-visible collection/Trail attribution, filtered to the current guild. | **Completed** |
+| 40 | Community Creations | Browse member-created, moderated Archive work from canonical records. | **Partially implemented** |
+| 41 | Profile Showcase | Opt-in public profile with configured AniList/Steam summaries and recent public community work; no personal tracking. | **Completed** |
 
 ### Custom Roles — /custom-role
 
-| # | Environment | Build target |
-|---:|---|---|
-| 42 | Custom Role Metropolis | Existing member/admin role lifecycle, selection, assignment and configuration behind one command. |
-| 43 | Role Design Studio | Supported role palettes, gradients, icons, previews and styling within Custom Roles only. |
+| # | Environment | Build target | Status |
+|---:|---|---|---|
+| 42 | Custom Role Metropolis | Existing member/admin role lifecycle, selection, assignment and configuration behind one command. | **Completed** |
+| 43 | Role Design Studio | Supported role palettes, gradients, icons, previews and styling within Custom Roles only. | **Completed** |
 
 ### Media notifications and automation — /settings, /discover, /community
 
-| # | Environment | Build target |
-|---:|---|---|
-| 44 | Media Follow Centre | Subscriptions to supported titles, creators, franchises and categories for release/metadata changes. |
-| 45 | Media Alert Centre | Episode, chapter, publication, film, TV, game and verified catalogue updates. |
-| 46 | Media Digest Studio | Daily/weekly media-only digests with category, entity, region, timezone and destination controls. |
-| 47 | Media Automation Studio | Bounded, auditable, idempotent media-triggered workflows connecting releases, calendars, discussions and Atlas projections. |
+| # | Environment | Build target | Status |
+|---:|---|---|---|
+| 44 | Media Follow Centre | Subscriptions to supported titles, creators, franchises and categories for release/metadata changes. | **Partially implemented** |
+| 45 | Media Alert Centre | Episode, chapter, publication, film, TV, game and verified catalogue updates. | **Partially implemented** |
+| 46 | Media Digest Studio | Daily/weekly media-only digests with category, entity, region, timezone and destination controls. | **Partially implemented** |
+| 47 | Media Automation Studio | Bounded, auditable, idempotent media-triggered workflows connecting releases, calendars, discussions and Atlas projections. | **Planned** |
 
 ### Atlas and operations — integrated views, not extra commands
 
-| # | Environment | Build target |
-|---:|---|---|
-| 48 | Graph Export Studio | Permission-filtered graph paths, creator/franchise maps and Archive collection graphs in useful image formats. |
-| 49 | Feature Diagnostics | Restricted checks for Discord permissions, channels, providers, assets, jobs and relevant services. |
-| 50 | Data & Backup Centre | Authorized migration status, backup verification, recovery and selected data-safety reporting. |
+| # | Environment | Build target | Status |
+|---:|---|---|---|
+| 48 | Graph Export Studio | Permission-filtered graph paths, creator/franchise maps and Archive collection graphs in useful image formats. | **Partially implemented** |
+| 49 | Feature Diagnostics | Restricted checks for Discord permissions, channels, providers, assets, jobs and relevant services. | **Partially implemented** |
+| 50 | Data & Backup Centre | Authorized migration status, backup verification, recovery and selected data-safety reporting. | **Planned** |
 
 ## 3. Media coverage strategy
 
-Media families remain distinct while reusing provider adapters only where fields and semantics genuinely overlap.
+The media model is category-aware. Shared mechanics may be reused, but provider fields, release meanings, edition identity and relationship types must remain specific to the media family. Provider coverage is evidence-driven: a category is not considered supported merely because a label, type or placeholder exists.
 
-| Family | Planned depth |
-|---|---|
-| Anime | Titles, alternate titles, formats, episodes/airings, studios, seasons, creators, adaptations and release data. Continue AniList for supported data. |
-| Manga | Manga, manhwa and manhua distinctions where provider data permits; chapters, volumes, authors, artists, serialization and adaptations. |
-| Light novels | Authors, illustrators, publishers, language, volumes, editions and adaptation links where sourced. |
-| Books and general novels | ISBNs, editions, publishers, translators, editors, publication dates, languages and series. |
-| Webnovels | Author, supported platform, chapter count/update date, publication status and print/adaptation relationships. No scraping restricted catalogues. |
-| Video games | Steam and IGDB integration, platforms, developers, publishers, release dates, genres, franchises and supported ratings. Extend existing helpers. |
-| Film and television | TMDB-backed discovery, seasons, episodes, cast/crew, runtime, release dates and franchise links where provider coverage supports them. |
-| Future integrations | Add providers only after official API access, terms, rate limits, stable IDs and credential model are verified. Letterboxd profile linking is a research item, not an assumption of unrestricted API access. |
+### 3.1 Provider coverage and current boundaries
+
+| Media family | Primary source and supported use | Current coverage and known gap |
+|---|---|---|
+| Anime | AniList GraphQL for media search/details, alternate titles, formats/status, episodes, airings, studios, staff, tags, recommendations and provider-returned relations. | Implemented for discovery, creators, trailers, airing and relations. Do not treat every returned relation as an adaptation or story-order assertion. |
+| Manga, manhwa and manhua | AniList where its record and metadata support the distinction. | Search/details, chapter and volume counts where supplied, staff and relations are available. Do not infer manhwa/manhua origin from title, language or art style when the provider does not identify it. |
+| Light novels | AniList NOVEL records plus Google Books volume records for editions that Google Books actually indexes. | Light-novel search/details and Google Books bibliographic fields are implemented. Do not assume AniList NOVEL means every work is a light novel; preserve the provider format and source label. |
+| General books and novels | Google Books public Volumes API for title, authors, publisher, publication date, description, page count, categories, language, print type, identifiers and available series/preview information. | Search and edition metadata are implemented. Google Books volume IDs identify volume records; different ISBNs/volume IDs must not be collapsed into one edition based on title similarity. Dedicated editor/translator credits and reliable edition-family reconciliation remain gaps. |
+| Webnovels | No automated provider is approved or selected in this implementation. | Do not scrape login-bound catalogues or undocumented platform endpoints. A user-supplied HTTPS source or a moderator-reviewed community relationship is not verified platform metadata and must be labelled accordingly. Add a provider only after its official API/feed, permitted use, stable IDs and update policy are confirmed. |
+| Video games | IGDB as the primary structured game metadata source; Steam as a separate account/store identity where its documented APIs and terms permit. | IGDB search and similar-game relationships expose game IDs, title, summary, first release date, genres, platforms, developers and publishers. Company workographies, ratings and more complete release/platform histories remain gaps. Steam App IDs must remain distinct from IGDB game IDs. |
+| Film and television | TMDB for movie/TV discovery, credits, people, season/episode data, videos, collections, release data and regional watch-provider records. | Search, TV season/episode guides, people credits, video links, collections and regional streaming/rent/buy/free/ad availability are implemented. Regional provider availability is not a release date; missing regional records are unknown, not proof that a title is unavailable. Movie runtime and broader release-certificate coverage remain gaps. |
+| Future integrations | Only an official, documented API or feed whose access and intended use are allowed for this application. | Letterboxd remains conditional on written/API access approval for the intended feature. No Letterboxd scraping or unofficial client is a fallback. Open Library is not approved as Lemegeton's metadata backend. |
+
+### 3.2 Provider selection and terms
+
+- **AniList:** the official [API documentation](https://docs.anilist.co/), [Terms of Use](https://github.com/AniList/docs/blob/master/docs/guide/terms-of-use.md), and [rate-limit guide](https://github.com/AniList/docs/blob/master/docs/guide/rate-limiting.md) govern every request. The current rate-limit guide warns that the API is temporarily degraded to 30 requests per minute, while its normal documented limit is 90. Read the rate-limit response headers and live provider notice; never hard-code the normal limit as a guaranteed allowance. The terms prohibit API backup/storage and mass collection/hoarding, and restrict competing non-complementary services. Keep access query-driven and limited to the Discord discovery/community purpose, do not build a mirrored AniList dataset, and obtain provider confirmation before broad commercial/production scaling if the complementary-service boundary is unclear. Revenue above the provider's stated threshold requires a commercial licence.
+- **TMDB:** use its [official API documentation](https://developer.themoviedb.org/docs), [rate-limit guidance](https://developer.themoviedb.org/docs/rate-limiting) and [API terms](https://www.themoviedb.org/documentation/api/terms-of-use). Attribute TMDB content in user-facing results. Its current terms limit cached TMDB information to no more than six months. The rate-limit page says the former fixed limit was removed, notes an approximate upper range and requires clients to respect 429 responses; treat those values as changeable rather than as a request budget.
+- **IGDB:** use the [official IGDB API documentation](https://api-docs.igdb.com/). It uses Twitch application credentials and POST query bodies. The documented limit is four requests per second and at most eight open requests; respect 429 responses, keep concurrency bounded and apply a provider-aware request queue. IGDB game, company, involved-company, platform, genre, franchise and release-date records are separate entities; record the relationship type instead of flattening them into free-form credits.
+- **Google Books:** use the [Volumes reference](https://developers.google.com/books/docs/v1/reference/volumes) and [official API guide](https://developers.google.com/books/docs/v1/using). Public volume search and lookup are read-only. Preserve the returned volume ID and ISBN-10/ISBN-13 values independently; do not turn an absent ISBN, series field or translator into an inferred value. Observe the project's configured API quota and surface quota failures as provider-unavailable states.
+- **Steam:** use the [Steam Web API documentation](https://steamcommunity.com/dev) and [Steam Web API Terms of Use](https://steamcommunity.com/dev/apiterms) for documented endpoints. Access requires an API key and a registered application. The current Store search and appdetails adapter paths are not listed in the public Web API reference, so treat their response shape and availability as best-effort storefront behavior, not a guaranteed documented contract. Do not make them the canonical game metadata source; IGDB remains the structured game source. Verify the application's registration and permitted use before relying on Steam data in a release.
+- **Letterboxd:** its [API access policy](https://letterboxd.com/api-beta/) says access is request-only and not guaranteed; its [API docs](https://api-docs.letterboxd.com/) distinguish public client-credentials access from member-authorized operations. The current access policy excludes several categories of private, personal, analysis and recommendation projects. Do not implement profile linking or scrape public profile pages unless the project has explicit access and the intended use is accepted by Letterboxd.
+- **Open Library:** its [API usage guidelines](https://openlibrary.org/developers/api#usage) state the API is not intended to be a data backend for third-party services. Do not use it as a bulk or fallback catalogue for this bot. Revisit only if Open Library confirms a human-initiated lookup use case for this application in writing.
+- **Webnovel platforms:** no official, sufficiently documented provider has been verified for this project. No endpoint guessing, login scraping, page crawling or unofficial mirrors. Keep community-supplied links visibly community-sourced until an approved provider is available.
+
+### 3.3 Stable identity, editions and relationship semantics
+
+- Keep provider identity namespaced by provider, entity kind and stable provider ID. Examples include `anilist:anime:<id>`, `anilist:manga:<id>`, `google-books:volume:<id>`, `tmdb:movie:<id>`, `tmdb:tv:<id>`, `igdb:game:<id>` and `steam:app:<id>`. The same numeric ID from different providers or entity families is never interchangeable.
+- Store the provider's canonical HTTPS URL with the provider ID. A title or fuzzy match is a search candidate, not a canonical identity. Only create cross-provider identity links when an explicit external ID or reviewed evidence supports them.
+- Treat a Google Books volume as an edition/volume record. Keep ISBN-10, ISBN-13, language, publisher and publication date as distinct fields; different editions and translations must not be merged solely because their titles/authors resemble one another.
+- Keep the following relationship sources distinct: provider-confirmed relationships, provider recommendations, locally ranked similarity, and moderator-approved community proposals. Community approval means community-verified in that guild, not provider-confirmed fact.
+- Relationship labels must be precise. A franchise membership is not automatically an adaptation; a publication or release order is not automatically story chronology; platform availability is not platform exclusivity; a TV season/episode is not a film sequel.
+- Where a provider lacks a field, use an explicit unavailable/unknown state. Never synthesize a date, rating, author, translator, edition, chapter count, creator credit, streaming provider or adaptation relationship.
+
+### 3.4 Freshness, rate limits and failure behavior
+
+- Provider requests are on-demand unless a documented schedule is needed for an enabled alert/digest. Do not mass-crawl or build a shadow catalogue. Cache only what each provider's current terms permit, with provider-specific retention rather than one shared TTL.
+- Respect 429 responses, Retry-After, provider request budgets and concurrency ceilings. The existing bounded transient-response retry helper is a fallback for transient HTTP status codes, not a replacement for per-provider rate limiting or quota scheduling. Do not automatically retry authentication exchanges, mutations or malformed payloads.
+- Preserve the difference between not found, provider not configured, provider rate-limited, malformed response, timeout and missing optional metadata. A failed provider must not erase results from another provider; label partial results and the unavailable source.
+- Record retrieval time when available and use a provider-supplied update timestamp only when that provider actually returns one. Do not present a retrieval timestamp as the media's publication/release date or claim data is live when it is cached.
+- Keep credentials server-side, scoped to the relevant provider and environment. Do not expose API keys in embeds, URLs shared with Discord, logs, client code or exported graph data.
+- Provider attribution, source IDs and source links must remain visible on detail/comparison surfaces and survive Atlas/export projections. Exports must retain the same visibility filters as the view from which they were produced.
+
+### 3.5 Provider onboarding gate
+
+Before adding or expanding a provider, document and test: official API/feed and endpoint schema; the intended Lemegeton use against the current terms; authentication and credential ownership; stable IDs and entity distinctions; rate limits, concurrency and 429 behavior; permitted caching/retention and attribution; supported locales/regions; deletion/update semantics; and fixtures for missing, malformed and changed payloads. If any of those are unknown, the integration remains conditional or planned and must not be advertised as operational.
 
 ## 4. Dependency-aware implementation phases
 
