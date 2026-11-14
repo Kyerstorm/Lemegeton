@@ -1,3 +1,4 @@
+import { fetchProviderResponse } from "./provider-http.js";
 export type TmdbCategory = "movie" | "tv";
 
 export interface TmdbMedia {
@@ -531,7 +532,7 @@ export class TmdbClient {
     const url = new URL(`https://api.themoviedb.org/3${path}`);
     url.searchParams.set("language", "en-US");
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
-    const response = await this.fetcher(url, {
+    const response = await fetchProviderResponse(this.fetcher, url, {
       headers: { Authorization: `Bearer ${this.token}`, Accept: "application/json" },
       signal: AbortSignal.timeout(12_000),
     });
