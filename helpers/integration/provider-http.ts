@@ -38,6 +38,7 @@ export async function fetchProviderResponse(
     const serverDelay = retryAfterMilliseconds(response);
     if (serverDelay !== null && serverDelay > maxRetryDelayMs) return response;
     const backoff = Math.min(200 * 2 ** (attempt - 1), maxRetryDelayMs);
+    try { await response.body?.cancel(); } catch { /* The retry decision does not depend on the response body. */ }
     await sleep(serverDelay ?? backoff);
   }
 
