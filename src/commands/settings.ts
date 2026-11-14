@@ -40,7 +40,7 @@ import {
 import { getGuildMediaRegion, setGuildMediaRegion } from "../../helpers/media/media-region.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
 import { query } from "../../database.js";
-import { missingChannelPermissions } from "../../helpers/runtime/server-diagnostics.js";
+import { missingChannelPermissions, providerConfigurationChecks } from "../../helpers/runtime/server-diagnostics.js";
 import {
   canConfigureGuildLeaveAction,
   getGuildRetentionSettings,
@@ -189,36 +189,54 @@ async function retentionPanel(guildId: string): Promise<{
   return { embeds: [embed], components: [row] };
 }
 
-async function serverDiagnostics(guildId: string, currentChannelId: string, guild: NonNullable<ChatInputCommandInteraction["guild"]>): Promise<EmbedBuilder> {
-  const rows = await query<{ name: string; channel_id: string }>(
-    `SELECT 'Current media notifications' AS name, channel_id::text AS channel_id
-       FROM media_notification_settings WHERE guild_id = $1 AND channel_id IS NOT NULL
-     UNION ALL
-     SELECT 'Archive uploads', upload_channel_id::text
-       FROM guild_archive_settings WHERE guild_id = $1 AND upload_channel_id IS NOT NULL
-     UNION ALL
-     SELECT 'Archive moderation', moderation_channel_id::text
-       FROM guild_archive_settings WHERE guild_id = $1 AND moderation_channel_id IS NOT NULL
-     UNION ALL
-     SELECT 'Custom Roles commands', command_channel_id::text
-       FROM custom_role_guild_settings WHERE guild_id = $1 AND command_channel_id IS NOT NULL
-     UNION ALL
-     SELECT 'Custom Roles logs', log_channel_id::text
-       FROM custom_role_guild_settings WHERE guild_id = $1 AND log_channel_id IS NOT NULL
-     UNION ALL
-     SELECT 'Daily Drop', channel_id::text
-       FROM community_daily_schedules WHERE guild_id = $1 AND enabled = TRUE
-     UNION ALL
-     SELECT 'Release digest', channel_id::text
-       FROM community_release_schedules WHERE guild_id = $1 AND enabled = TRUE
-     ORDER BY name`,
-    [guildId],
-  );
-  const checks = [{ name: "Current channel", channel_id: currentChannelId }, ...rows];
+async function serverDiagnostics(
+  guildId: string,
+  currentChannelId: string,
+  guild: NonNullable<ChatInputCommandInteraction["guild"]>,
+  config: BotConfig,
+): Promise<EmbedBuilder> {
+  let databaseHealthy = false;
+  let databaseLatency: number | null = null;
+  const databaseStartedAt = Date.now();
+  try {
+    await query("SELECT 1 AS healthy");
+    databaseHealthy = true;
+    databaseLatency = Math.max(0, Date.now() - databaseStartedAt);
+  } catch {
+    databaseHealthy = false;
+  }
+
+  const configuredChannels = databaseHealthy
+    ? await query<{ name: string; channel_id: string }>(
+      `SELECT 'Current media notifications' AS name, channel_id::text AS channel_id
+         FROM media_notification_settings WHERE guild_id = $1 AND channel_id IS NOT NULL
+       UNION ALL
+       SELECT 'Archive uploads', upload_channel_id::text
+         FROM guild_archive_settings WHERE guild_id = $1 AND upload_channel_id IS NOT NULL
+       UNION ALL
+       SELECT 'Archive moderation', moderation_channel_id::text
+         FROM guild_archive_settings WHERE guild_id = $1 AND moderation_channel_id IS NOT NULL
+       UNION ALL
+       SELECT 'Custom Roles commands', command_channel_id::text
+         FROM custom_role_guild_settings WHERE guild_id = $1 AND command_channel_id IS NOT NULL
+       UNION ALL
+       SELECT 'Custom Roles logs', log_channel_id::text
+         FROM custom_role_guild_settings WHERE guild_id = $1 AND log_channel_id IS NOT NULL
+       UNION ALL
+       SELECT 'Daily Drop', channel_id::text
+         FROM community_daily_schedules WHERE guild_id = $1 AND enabled = TRUE
+       UNION ALL
+       SELECT 'Release digest', channel_id::text
+         FROM community_release_schedules WHERE guild_id = $1 AND enabled = TRUE
+       ORDER BY name`,
+      [guildId],
+    )
+    : [];
+  const checks = [{ name: "Current channel", channel_id: currentChannelId }, ...configuredChannels];
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
     .setTitle("Server Check")
-    .setFooter({ text: "Read-only diagnostics · No server settings were changed" });
+    .setFooter({ text: "Read-only diagnostics · Provider configuration is not a live connectivity test" });
 
   let botMember;
   try {
@@ -228,7 +246,22 @@ async function serverDiagnostics(guildId: string, currentChannelId: string, guil
     return embed;
   }
 
-  const results: Array<{ name: string; status: string; detail: string }> = [];
+  const gatewayReady = guild.client.isReady();
+  const results: Array<{ name: string; status: string; detail: string }> = [
+    {
+      name: "PostgreSQL",
+      status: databaseHealthy ? "Healthy" : "Needs attention",
+      detail: databaseHealthy ? `SELECT 1 succeeded in ${databaseLatency} ms.` : "The database health query failed; configured delivery channels could not be listed.",
+    },
+    {
+      name: "Discord gateway",
+      status: gatewayReady ? "Healthy" : "Needs attention",
+      detail: gatewayReady
+        ? guild.client.ws.ping >= 0 ? `Gateway is ready · ${Math.round(guild.client.ws.ping)} ms ping.` : "Gateway is ready; latency is unavailable."
+        : "The bot client is not in the ready state.",
+    },
+  ];
+
   for (const check of checks) {
     const channel = await guild.channels.fetch(check.channel_id).catch(() => null);
     if (!channel || channel.guildId !== guildId) {
@@ -250,7 +283,7 @@ async function serverDiagnostics(guildId: string, currentChannelId: string, guil
 
   const healthy = results.filter(item => item.status === "Healthy").length;
   const attention = results.filter(item => item.status === "Needs attention").length;
-  embed.setDescription(`**Healthy:** ${healthy} · **Needs attention:** ${attention}\nChecks include this channel and configured v3 notification, Archive, Custom Roles and scheduled-delivery channels.`);
+  embed.setDescription(`**Healthy:** ${healthy} · **Needs attention:** ${attention}\\nChecks include PostgreSQL, the Discord gateway, this channel and configured v3 delivery channels.`);
   for (const result of results) {
     embed.addFields({
       name: (result.status === "Healthy" ? "✓ " : emoji.error + " ") + result.name + " · " + result.status,
@@ -258,9 +291,28 @@ async function serverDiagnostics(guildId: string, currentChannelId: string, guil
       inline: false,
     });
   }
-  if (rows.length === 0) {
-    embed.addFields({ name: "Optional channels", value: "No additional delivery channels are configured.", inline: false });
+  if (configuredChannels.length === 0) {
+    embed.addFields({
+      name: "Optional channels",
+      value: databaseHealthy ? "No additional delivery channels are configured." : "Database unavailable; configured delivery channels could not be listed.",
+      inline: false,
+    });
   }
+
+  const providerChecks = providerConfigurationChecks({
+    aniListEndpointConfigured: Boolean(config.anilistApiUrl),
+    tmdbCredentialsConfigured: Boolean(config.tmdbBearerToken),
+    googleBooksKeyConfigured: Boolean(config.googleBooksApiKey),
+    igdbCredentialsConfigured: Boolean(config.igdbClientId && config.igdbClientSecret),
+    steamKeyConfigured: Boolean(config.steamApiKey),
+    objectStorageConfigured: Boolean(config.s3EndpointUrl && config.s3Bucket && config.s3AccessKeyId && config.s3SecretAccessKey),
+  });
+  embed.addFields({
+    name: "Provider and storage configuration · not live probes",
+    value: providerChecks.map(item => `${item.configured ? "Configured" : "Not configured"} · ${item.name} — ${item.detail}`).join("\\n").slice(0, 1024),
+    inline: false,
+  });
+  embed.setFooter({ text: "Read-only diagnostics · Provider rows show configuration only; asset-object and scheduled-job health are not probed" });
   return embed;
 }
 
@@ -316,8 +368,10 @@ async function mediaFollowsPanel(guildId: string): Promise<{
 
 export class SettingsCommand implements FeatureCommand {
   private readonly aniList: AniListClient;
+  private readonly config: BotConfig;
 
   constructor(config: BotConfig) {
+    this.config = config;
     this.aniList = new AniListClient(config.anilistApiUrl, config.anilistTimeoutMs);
   }
 
@@ -393,7 +447,7 @@ export class SettingsCommand implements FeatureCommand {
       await interaction.deferReply({flags:MessageFlags.Ephemeral});
       try {
         const guild = interaction.guild ?? await interaction.client.guilds.fetch(interaction.guildId);
-        const embed = await serverDiagnostics(interaction.guildId, interaction.channelId, guild);
+        const embed = await serverDiagnostics(interaction.guildId, interaction.channelId, guild, this.config);
         await interaction.editReply({embeds:[embed]});
       } catch (error) {
         const issueHash = await createInteractionIssueLog(interaction, "/settings", error, { action: "diagnostics" });
