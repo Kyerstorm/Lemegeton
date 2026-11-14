@@ -1467,7 +1467,7 @@ export class CommunityCommand implements FeatureCommand {
     });
     await interaction.reply({
       content: entries.length
-        ? "Published Archive work and completed community results from this server."
+        ? "Visible Archive work and completed community results from this server."
         : "No published collections, Trails or completed community results are available in this server yet.",
       embeds: [homeEmbed("Community Showcase", "A current-guild view of approved collections, Trails and completed community results.", fields)],
       flags: MessageFlags.Ephemeral,
