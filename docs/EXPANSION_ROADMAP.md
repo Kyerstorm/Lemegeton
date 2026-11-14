@@ -302,7 +302,7 @@ Phase 0 code migration status does **not** mean the service is launched. Phase 8
 
 **Exit criteria:** rules are bounded and per-guild, delivery is idempotent, every event can be traced to a provider/source, retries are safe, and a moderator can inspect/disable each active rule.
 
-#Feature Diagnostics now checks Discord gateway readiness and PostgreSQL with a live `SELECT 1`, alongside configured channel permissions. AniList, TMDB, Google Books, IGDB, Steam and S3-compatible storage are listed as configuration-only checks; external connectivity, object access and scheduled-job health are not probed, so this item remains partially implemented.\n\nAtlas PNG exports now render the bounded multi-hop graph instead of only the first eight root connections, and highlight a selected shortest path. Dedicated creator/franchise map views and Archive collection-root graph exports remain outstanding, so Graph Export Studio is still partially implemented.\n\n## Phase 7 — Knowledge Atlas and dashboard
+## Phase 7 — Knowledge Atlas and dashboard
 
 **Objective:** make canonical media relationships explorable while preserving provenance and visibility.
 
@@ -310,13 +310,15 @@ Phase 0 code migration status does **not** mean the service is launched. Phase 8
 
 **Completed in this implementation pass:** the dashboard Atlas bridge now performs deterministic breadth-first traversal for up to two relationship steps, capped at 24 nodes and eight queried relationships per node. Cycles and ancestor back-edges are suppressed, repeated nodes are deduplicated while alternative paths can remain visible, direct root relationships remain backward-compatible, and the guild-scoped lookup is applied again at every hop. The dashboard draws actual parent-to-node edges, labels node depth and exposes the truncation state. tests/atlas.test.ts covers cycle suppression, multi-hop discovery, node bounds and category/edition identity.
 
-**Current limitation:** canonical identities are still derived from normalized title, category and optional HTTPS URL rather than provider IDs. Pathfinding, clustering, rich node details and graph export are not implemented.
+**Bot export added in this pass:** `/discover` now renders the bounded multi-hop graph rather than only the first eight direct connections, and highlights a selected shortest path. PNG and JSON exports retain provenance labels and guild-scoped community-edge filtering.
+
+**Current limitation:** canonical identities are still derived from normalized title, category and optional HTTPS URL rather than provider IDs. The Discord Atlas now exports bounded multi-hop PNG/JSON graphs and highlights selected shortest paths; provider-ID canonicalization, clustering, rich node details and focused creator/franchise/adaptation/Archive collection views remain outstanding.
 
 **Remaining delivery:**
 - Introduce stable canonical node identities using provider IDs where providers expose them, while retaining the normalized title/category/edition fallback. Preserve work-versus-edition distinctions.
 - Add graph search and filters for relationship type, provider/community provenance and guild/global visibility.
 - Expose edge evidence and source links. Community proposals must remain visibly different from provider-confirmed relationships and recommendations.
-- Build graph pathfinding and focused views (creator, franchise, adaptation, collection) with caps that protect query cost.
+- Add focused creator, franchise, adaptation and Archive collection views, reusing the bounded graph traversal and path helpers.
 - Re-check visibility at each traversal step and at render/export time; filtering only the root node is insufficient.
 - Add image-backed node thumbnails only from approved provider URLs or permission-checked Archive assets.
 - Complete graph export with size/node limits, source/provenance legend and the same permissions as interactive views.
@@ -329,6 +331,8 @@ Phase 0 code migration status does **not** mean the service is launched. Phase 8
 **Objective:** prove the service can be deployed, observed, restored and rolled back safely.
 
 **Already present:** TypeScript and dashboard/Rust workflows, repository-health workflow, production Dockerfile and Compose validation, startup checks, server diagnostics, PostgreSQL backup/restore rehearsal and a separate live-acceptance workflow.
+
+**Diagnostics added in this pass:** `/settings` now probes PostgreSQL with a live `SELECT 1` and reports Discord gateway readiness/latency, configured delivery-channel permissions, and provider/object-storage configuration. Provider connectivity, object-level asset access and scheduled-job health are deliberately not labelled healthy because those live probes are not implemented.
 
 **Remaining delivery:**
 - Complete production-image build, container runtime contract, non-root/health-check validation and Rust dependency audit on the final PR head.
