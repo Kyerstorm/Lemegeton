@@ -413,10 +413,10 @@ async function processDailyDrops():Promise<void>{
    if(!await isGuildSetupComplete(delivery.guild_id))continue;
    try{
     const channel=await client.channels.fetch(delivery.channel_id);
-    if(!channel||!channel.isTextBased()||!("send" in channel)){await markDailyDelivery(delivery.id,"pending",undefined,"Configured channel is unavailable.");continue;}
+    if(!channel||!channel.isTextBased()||!("send" in channel)){await markDailyDelivery(delivery.id,delivery.claim_token,"pending",undefined,"Configured channel is unavailable.");continue;}
     const message=await(channel as TextChannel).send({embeds:[homeEmbed(`Daily Drop · ${delivery.title}`,delivery.content,delivery.source_url?[{name:"Source",value:`[Open original source](${delivery.source_url})`}]:[])],allowedMentions:{parse:[]}});
-    await markDailyDelivery(delivery.id,"sent",message.id);
-   }catch(error){await markDailyDelivery(delivery.id,"pending",undefined,error instanceof Error?error.message:"Unknown delivery error").catch(()=>undefined);}
+    await markDailyDelivery(delivery.id,delivery.claim_token,"sent",message.id);
+   }catch(error){await markDailyDelivery(delivery.id,delivery.claim_token,"pending",undefined,error instanceof Error?error.message:"Unknown delivery error").catch(()=>undefined);}
   }
   for(const schedule of await dueReleaseSchedules()){
    if(!await isGuildSetupComplete(schedule.guild_id))continue;
@@ -452,9 +452,9 @@ async function processDailyDrops():Promise<void>{
      embeds:[homeEmbed("Lemegeton · Release digest",description,fields)],
      allowedMentions:{parse:[]},
     });
-    await markReleaseDelivery(delivery.id,"sent",message.id);
+    await markReleaseDelivery(delivery.id,delivery.claim_token,"sent",message.id);
    }catch(error){
-    await markReleaseDelivery(delivery.id,"pending",undefined,error instanceof Error?error.message:"Unknown delivery error").catch(()=>undefined);
+    await markReleaseDelivery(delivery.id,delivery.claim_token,"pending",undefined,error instanceof Error?error.message:"Unknown delivery error").catch(()=>undefined);
     logger.warn("Release digest delivery failed and was queued for retry",{guildId:delivery.guild_id,deliveryId:delivery.id,reason:error instanceof Error?error.message:"Unknown error"});
    }
   }

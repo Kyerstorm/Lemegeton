@@ -286,6 +286,8 @@ Phase 0 code migration status does **not** mean the service is launched. Phase 8
 
 **Exit criteria:** every public field has a visibility rule; unlink and privacy changes take effect immediately; aggregate data respects minimum-cohort thresholds; role operations survive restart/reconciliation and never assign above the bot's role.
 
+Daily Drop and scheduled release digests now use atomic database claims, expiring processing leases and claim ownership tokens. Stale workers cannot complete another worker's claim, expired claims recover after restarts, and failed deliveries stop retrying after eight attempts. Both queues share the same bounded retry policy. Broader provider coverage and follow targets remain outstanding.
+
 ### Phase 6 — media notifications and bounded automation
 
 **Objective:** notify users/guilds about selected media changes and connect approved media workflows without becoming a generic reminder service.

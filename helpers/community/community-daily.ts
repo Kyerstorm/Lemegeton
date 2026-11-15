@@ -1,6 +1,7 @@
 import type { PoolClient } from "pg";
 import { query, queryOne, transaction } from "../../database.js";
 import { cleanText, isValidHttpsUrl } from "../security/security.js";
+import { resolveDeliveryRetry } from "./delivery-retries.js";
 import type { DailyFormat, DailySchedule } from "./community.js";
 
 const DAILY_FORMATS = new Set<DailyFormat>(["question", "quote", "trivia", "recommendation", "archive_spotlight", "mystery"]);
@@ -209,30 +210,49 @@ export async function prepareDailyDelivery(schedule: DailySchedule): Promise<{ d
 }
 
 export async function dueDailyDeliveries(): Promise<Array<{
-  id: string; guild_id: string; channel_id: string; item_id: string; title: string; content: string; source_url: string | null;
+  id: string; guild_id: string; channel_id: string; item_id: string; title: string; content: string; source_url: string | null; claim_token: string;
 }>> {
-  return query(
-    `SELECT d.id, d.guild_id, d.channel_id, d.item_id, i.title, i.content, i.source_url
-     FROM community_daily_deliveries d
-     JOIN community_daily_items i ON i.id = d.item_id
-     WHERE d.status = 'pending' AND d.next_attempt_at <= NOW()
-     ORDER BY d.created_at ASC LIMIT 20`,
+  return query<{ id: string; guild_id: string; channel_id: string; item_id: string; title: string; content: string; source_url: string | null; claim_token: string }>(
+    `WITH due AS (
+       SELECT id FROM community_daily_deliveries
+       WHERE (status = 'pending' AND next_attempt_at <= NOW())
+          OR (status = 'processing' AND claim_until <= NOW())
+       ORDER BY created_at ASC LIMIT 20 FOR UPDATE SKIP LOCKED
+     ),
+     claimed AS (
+       UPDATE community_daily_deliveries d
+       SET status = 'processing', claim_until = NOW() + INTERVAL '15 minutes',
+           claim_token = md5(random()::text || clock_timestamp()::text || d.id::text)
+       FROM due WHERE d.id = due.id
+       RETURNING d.id, d.guild_id, d.channel_id, d.item_id, d.claim_token
+     )
+     SELECT c.id::text, c.guild_id::text, c.channel_id::text, c.item_id::text,
+            i.title, i.content, i.source_url, c.claim_token
+     FROM claimed c JOIN community_daily_items i ON i.id = c.item_id
+     ORDER BY c.id ASC`,
   );
 }
 
 export async function markDailyDelivery(
-  deliveryId: string,
-  status: "sent" | "pending",
-  messageId?: string,
-  error?: string,
-): Promise<void> {
-  await query(
-    `UPDATE community_daily_deliveries
-     SET status = $1, message_id = COALESCE($2, message_id),
-         attempts = attempts + 1,
-         last_error = $3,
-         next_attempt_at = CASE WHEN $1 = 'pending' THEN NOW() + LEAST(attempts + 1, 10) * INTERVAL '1 minute' ELSE next_attempt_at END
-     WHERE id = $4 AND status = 'pending'`,
-    [status, messageId ?? null, error ? cleanText(error, 500) : null, deliveryId],
-  );
+  deliveryId: string, claimToken: string, status: "sent" | "pending", messageId?: string, error?: string,
+): Promise<"sent" | "pending" | "failed" | null> {
+  return transaction(async client => {
+    const current = await client.query<{ attempts: number }>(
+      "SELECT attempts FROM community_daily_deliveries WHERE id = $1 AND status = 'processing' AND claim_token = $2 FOR UPDATE",
+      [deliveryId, claimToken],
+    );
+    const row = current.rows[0];
+    if (!row) return null;
+    const retry = status === "sent" ? null : resolveDeliveryRetry(Number(row.attempts), 1);
+    const nextStatus = status === "sent" ? "sent" : retry!.status;
+    await client.query(
+      `UPDATE community_daily_deliveries
+       SET status = $1, message_id = COALESCE($2, message_id), attempts = attempts + 1,
+           last_error = $3, claim_until = NULL, claim_token = NULL,
+           next_attempt_at = CASE WHEN $1 = 'pending' THEN NOW() + $4 * INTERVAL '1 minute' ELSE next_attempt_at END
+       WHERE id = $5 AND status = 'processing' AND claim_token = $6`,
+      [nextStatus, messageId ?? null, error ? cleanText(error, 500) : null, retry?.delayMinutes ?? 0, deliveryId, claimToken],
+    );
+    return nextStatus;
+  });
 }
