@@ -435,7 +435,7 @@ async function deliverQueuedAnimeFollowAlerts(client: Client, now: Date): Promis
   }
 }
 
-let timer: ReturnType<typeof setInterval> | null = null;let timer: ReturnType<typeof setInterval> | null = null;
+let timer: ReturnType<typeof setInterval> | null = null;
 let running = false;
 let stopping = false;
 let cycleFinished: Promise<void> | null = null;
