@@ -16,6 +16,7 @@ import { AniListClient, type AniListRecentlyFinishedMedia } from "../integration
 import type { BotConfig } from "../runtime/config.js";
 import { query, queryOne, transaction } from "../../database.js";
 import { isGuildSetupComplete } from "../runtime/guild-retention.js";
+import { resolveDeliveryRetry } from "../community/delivery-retries.js";
 
 export type MediaNotificationKind = "ANIME" | "MANGA";
 export interface MediaNotificationSettings {
@@ -265,28 +266,19 @@ export function resolveDueFollowEpisode(
 }
 
 async function deliverDueAnimeFollows(client: Client, aniList: AniListClient, now: Date): Promise<void> {
-  const follows = await query<GuildMediaFollow & { channel_id: string }>(
+  const follows = await query<GuildMediaFollow>(
     "SELECT f.guild_id::text, f.anilist_id, f.title, f.site_url, f.cover_image, " +
-    "f.next_episode, f.next_airing_at, f.last_notified_episode, f.followed_by::text, s.channel_id::text " +
+    "f.next_episode, f.next_airing_at, f.last_notified_episode, f.followed_by::text " +
     "FROM guild_media_follows f JOIN media_notification_settings s ON s.guild_id = f.guild_id " +
     "WHERE s.enabled = TRUE AND s.include_anime = TRUE AND s.channel_id IS NOT NULL " +
-    "ORDER BY f.guild_id, f.title LIMIT 100",
+    "ORDER BY f.updated_at ASC, f.guild_id, f.anilist_id LIMIT 100",
   );
-  const channelCache = new Map<string, NotificationChannel | null>();
   for (const follow of follows) {
     if (!await isGuildSetupComplete(follow.guild_id)) continue;
-    const guild = client.guilds.cache.get(follow.guild_id);
-    if (!guild) continue;
-    const cacheKey = follow.guild_id + ":" + follow.channel_id;
-    let channel = channelCache.get(cacheKey);
-    if (channel === undefined) {
-      channel = await getNotificationChannel(guild, follow.channel_id);
-      channelCache.set(cacheKey, channel);
-    }
-    if (!channel) continue;
+    if (!client.guilds.cache.has(follow.guild_id)) continue;
     try {
       const media = await aniList.getMediaById(Number(follow.anilist_id), "ANIME");
-      if (!media || media.type !== "ANIME") continue;
+      if (!media || media.type !== "ANIME" || !media.siteUrl.startsWith("https://anilist.co/anime/")) continue;
       const latest = media.nextAiringEpisode ?? null;
       const dueEpisode = resolveDueFollowEpisode(follow, latest, now);
       let nextEpisode = latest?.episode ?? follow.next_episode;
@@ -295,45 +287,147 @@ async function deliverDueAnimeFollows(client: Client, aniList: AniListClient, no
         nextEpisode = null;
         nextAiringAt = null;
       }
-      if (dueEpisode !== null) {
-        const embed = new EmbedBuilder()
-          .setColor(0x5865f2)
-          .setTitle(aniListMediaTitle(media).slice(0, 240))
-          .setURL(media.siteUrl)
-          .setDescription("Episode " + dueEpisode + " has reached its AniList scheduled airing time.")
-          .addFields(
-            { name: "Episode", value: String(dueEpisode), inline: true },
-            { name: "Schedule", value: "Provider-dated airing", inline: true },
-          )
-          .setFooter({ text: "AniList · Server title follow" })
-          .setTimestamp(now);
-        if (media.coverImage) embed.setThumbnail(media.coverImage);
-        await channel.send({
-          embeds: [embed],
-          components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-            new ButtonBuilder().setLabel("View on AniList").setStyle(ButtonStyle.Link).setURL(media.siteUrl),
-          )],
-          allowedMentions: { parse: [] },
-        });
-        await query(
-          "UPDATE guild_media_follows SET title = $1, site_url = $2, cover_image = $3, " +
-          "next_episode = $4, next_airing_at = $5, last_notified_episode = GREATEST(last_notified_episode, $6), " +
-          "updated_at = NOW() WHERE guild_id = $7 AND anilist_id = $8",
-          [aniListMediaTitle(media), media.siteUrl, media.coverImage, nextEpisode, nextAiringAt,
-            dueEpisode, follow.guild_id, follow.anilist_id],
-        );
-      } else if (latest || nextEpisode === null) {
-        await query(
+      await transaction(async transactionClient => {
+        if (dueEpisode !== null) {
+          const scheduledFor = follow.next_airing_at
+            ? new Date(follow.next_airing_at)
+            : latest ? new Date(latest.airingAt * 1000) : now;
+          await transactionClient.query(
+            `INSERT INTO guild_media_follow_deliveries
+             (guild_id, anilist_id, episode_number, scheduled_for, title, site_url, cover_image)
+             VALUES ($1,$2,$3,$4,$5,$6,$7)
+             ON CONFLICT (guild_id, anilist_id, episode_number) DO NOTHING`,
+            [follow.guild_id, follow.anilist_id, dueEpisode, scheduledFor, aniListMediaTitle(media), media.siteUrl, media.coverImage],
+          );
+        }
+        await transactionClient.query(
           "UPDATE guild_media_follows SET title = $1, site_url = $2, cover_image = $3, " +
           "next_episode = $4, next_airing_at = $5, updated_at = NOW() " +
           "WHERE guild_id = $6 AND anilist_id = $7",
-          [aniListMediaTitle(media), media.siteUrl, media.coverImage, nextEpisode, nextAiringAt,
-            follow.guild_id, follow.anilist_id],
+          [aniListMediaTitle(media), media.siteUrl, media.coverImage, nextEpisode, nextAiringAt, follow.guild_id, follow.anilist_id],
         );
-      }
+      });
     } catch (error) {
-      logger.warn("AniList title follow could not be checked or delivered", {
+      logger.warn("AniList title follow could not be checked or queued", {
         guildId: follow.guild_id, mediaId: follow.anilist_id,
+        reason: error instanceof Error ? error.message : "Unknown error",
+      });
+      await query("UPDATE guild_media_follows SET updated_at = NOW() WHERE guild_id = $1 AND anilist_id = $2",
+        [follow.guild_id, follow.anilist_id]).catch(() => undefined);
+    }
+    await new Promise(resolveDelay => setTimeout(resolveDelay, 300));
+  }
+}
+
+interface DueAnimeFollowDelivery {
+  id: string;
+  guild_id: string;
+  anilist_id: number;
+  episode_number: number;
+  title: string;
+  site_url: string;
+  cover_image: string | null;
+  channel_id: string;
+  claim_token: string;
+}
+
+async function dueAnimeFollowDeliveries(): Promise<DueAnimeFollowDelivery[]> {
+  return query<DueAnimeFollowDelivery>(
+    `WITH due AS (
+       SELECT d.id FROM guild_media_follow_deliveries d
+       WHERE ((d.status = 'pending' AND d.next_attempt_at <= NOW())
+          OR (d.status = 'processing' AND d.claim_until <= NOW()))
+         AND EXISTS (
+           SELECT 1 FROM guild_media_follows f
+           JOIN media_notification_settings s ON s.guild_id = f.guild_id
+           WHERE f.guild_id = d.guild_id AND f.anilist_id = d.anilist_id
+             AND s.enabled = TRUE AND s.include_anime = TRUE AND s.channel_id IS NOT NULL
+         )
+       ORDER BY d.created_at ASC LIMIT 100 FOR UPDATE SKIP LOCKED
+     ),
+     claimed AS (
+       UPDATE guild_media_follow_deliveries d
+       SET status = 'processing', claim_until = NOW() + INTERVAL '15 minutes',
+           claim_token = md5(random()::text || clock_timestamp()::text || d.id::text)
+       FROM due WHERE d.id = due.id
+       RETURNING d.id, d.guild_id, d.anilist_id, d.episode_number, d.title, d.site_url, d.cover_image, d.claim_token
+     )
+     SELECT c.id::text, c.guild_id::text, c.anilist_id, c.episode_number, c.title, c.site_url, c.cover_image,
+            s.channel_id::text, c.claim_token
+     FROM claimed c
+     JOIN media_notification_settings s ON s.guild_id = c.guild_id AND s.enabled = TRUE AND s.include_anime = TRUE
+     JOIN guild_media_follows f ON f.guild_id = c.guild_id AND f.anilist_id = c.anilist_id
+     ORDER BY c.id ASC`,
+  );
+}
+
+async function markAnimeFollowDelivery(
+  deliveryId: string, claimToken: string, status: "sent" | "pending", messageId?: string, error?: string,
+): Promise<"sent" | "pending" | "failed" | null> {
+  return transaction(async client => {
+    const current = await client.query<{ guild_id: string; anilist_id: number; episode_number: number; attempts: number }>(
+      "SELECT guild_id::text, anilist_id, episode_number, attempts FROM guild_media_follow_deliveries " +
+      "WHERE id = $1 AND status = 'processing' AND claim_token = $2 FOR UPDATE",
+      [deliveryId, claimToken],
+    );
+    const row = current.rows[0];
+    if (!row) return null;
+    const retry = status === "sent" ? null : resolveDeliveryRetry(Number(row.attempts), 1);
+    const nextStatus = status === "sent" ? "sent" : retry!.status;
+    await client.query(
+      `UPDATE guild_media_follow_deliveries
+       SET status = $1, message_id = COALESCE($2, message_id), attempts = attempts + 1,
+           last_error = $3, claim_until = NULL, claim_token = NULL,
+           next_attempt_at = CASE WHEN $1 = 'pending' THEN NOW() + $4 * INTERVAL '1 minute' ELSE next_attempt_at END
+       WHERE id = $5 AND status = 'processing' AND claim_token = $6`,
+      [nextStatus, messageId ?? null, error ? error.slice(0, 500) : null, retry?.delayMinutes ?? 0, deliveryId, claimToken],
+    );
+    if (nextStatus === "sent") {
+      await client.query(
+        "UPDATE guild_media_follows SET last_notified_episode = GREATEST(last_notified_episode, $1), updated_at = NOW() " +
+        "WHERE guild_id = $2 AND anilist_id = $3",
+        [row.episode_number, row.guild_id, row.anilist_id],
+      );
+    }
+    return nextStatus;
+  });
+}
+
+async function deliverQueuedAnimeFollowAlerts(client: Client, now: Date): Promise<void> {
+  const deliveries = await dueAnimeFollowDeliveries();
+  for (const delivery of deliveries) {
+    if (!await isGuildSetupComplete(delivery.guild_id)) continue;
+    const guild = client.guilds.cache.get(delivery.guild_id);
+    const channel = guild ? await getNotificationChannel(guild, delivery.channel_id) : null;
+    if (!channel) {
+      await markAnimeFollowDelivery(delivery.id, delivery.claim_token, "pending", undefined, "Configured media notification channel is unavailable.").catch(() => undefined);
+      continue;
+    }
+    try {
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle(delivery.title.slice(0, 240))
+        .setURL(delivery.site_url)
+        .setDescription("Episode " + delivery.episode_number + " has reached its AniList scheduled airing time.")
+        .addFields(
+          { name: "Episode", value: String(delivery.episode_number), inline: true },
+          { name: "Schedule", value: "Provider-dated airing", inline: true },
+        )
+        .setFooter({ text: "AniList · Server title follow" })
+        .setTimestamp(now);
+      if (delivery.cover_image) embed.setThumbnail(delivery.cover_image);
+      const message = await channel.send({
+        embeds: [embed],
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setLabel("View on AniList").setStyle(ButtonStyle.Link).setURL(delivery.site_url),
+        )],
+        allowedMentions: { parse: [] },
+      });
+      await markAnimeFollowDelivery(delivery.id, delivery.claim_token, "sent", message.id);
+    } catch (error) {
+      await markAnimeFollowDelivery(delivery.id, delivery.claim_token, "pending", undefined, error instanceof Error ? error.message : "Unknown delivery error").catch(() => undefined);
+      logger.warn("AniList episode alert delivery failed", {
+        guildId: delivery.guild_id, mediaId: delivery.anilist_id, episode: delivery.episode_number,
         reason: error instanceof Error ? error.message : "Unknown error",
       });
     }
@@ -341,7 +435,7 @@ async function deliverDueAnimeFollows(client: Client, aniList: AniListClient, no
   }
 }
 
-let timer: ReturnType<typeof setInterval> | null = null;
+let timer: ReturnType<typeof setInterval> | null = null;let timer: ReturnType<typeof setInterval> | null = null;
 let running = false;
 let stopping = false;
 let cycleFinished: Promise<void> | null = null;
@@ -381,6 +475,9 @@ export async function runMediaNotificationCycle(client: Client, aniList: AniList
       logger.error("Media completion notification scan failed", { reason: error instanceof Error ? error.message : "Unknown error" });
     }
     await deliverDueAnimeFollows(client, aniList, now).catch(error => logger.error("AniList title follow scan failed", {
+      reason: error instanceof Error ? error.message : "Unknown error",
+    }));
+    await deliverQueuedAnimeFollowAlerts(client, now).catch(error => logger.error("AniList episode alert outbox failed", {
       reason: error instanceof Error ? error.message : "Unknown error",
     }));
   } finally {
