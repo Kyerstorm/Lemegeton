@@ -225,9 +225,8 @@ export class PlayCommand implements FeatureCommand {
           }
           const id = await addQuizQuestion(
             interaction.guildId, packId, interaction.user.id, question, answer,
-            (interaction.options.getString("accepted_answers") ?? "").split(","),
-            source, interaction.options.getString("media_title") ?? undefined,
             (interaction.options.getString("accepted_answers") ?? "").split(",").map(value => value.trim()).filter(Boolean),
+            source, interaction.options.getString("media_title") ?? undefined,
             [], interaction.options.getString("difficulty") ?? "standard",
             (interaction.options.getString("clues") ?? "").split(/\r?\n|\|/).map(value => value.trim()).filter(Boolean),
           );

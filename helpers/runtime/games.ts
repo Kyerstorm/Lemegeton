@@ -131,6 +131,115 @@ export async function addQuizQuestion(guildId: string, packId: string, contribut
   if (!row) throw new Error("The question could not be saved.");
   return row.id;
 }
+
+export async function getQuizQuestionForEditing(
+  guildId: string,
+  questionId: string,
+  actorId: string,
+  canManage: boolean,
+): Promise<EditableQuizQuestion> {
+  const question = await queryOne<EditableQuizQuestion>(
+    `SELECT q.id::text AS id, q.contributor_id::text AS contributor_id, q.question,
+            q.correct_answer, q.accepted_answers, q.source_url, q.difficulty, q.revision
+       FROM community_quiz_questions q
+       JOIN community_quiz_packs p ON p.id = q.pack_id
+      WHERE q.id = $1 AND p.guild_id = $2`,
+    [questionId, guildId],
+  );
+  if (!question || (!canManage && question.contributor_id !== actorId)) {
+    throw new Error("Only the original contributor or a server manager can edit this question.");
+  }
+  return question;
+}
+
+export async function editQuizQuestion(
+  guildId: string,
+  questionId: string,
+  actorId: string,
+  canManage: boolean,
+  questionText: string,
+  answer: string,
+  acceptedAnswers: string[],
+  sourceUrl: string,
+  difficulty: string,
+): Promise<number> {
+  const cleanQuestion = cleanText(questionText, 500);
+  const cleanAnswer = cleanText(answer, 200);
+  if (!cleanQuestion || !cleanAnswer) throw new Error("A question and correct answer are required.");
+  const source = isValidHttpsUrl(sourceUrl, true);
+  if (!source) throw new Error("A valid HTTPS source is required.");
+  const cleanDifficulty = normalizeQuizDifficulty(difficulty);
+  const accepted = [...new Set([cleanAnswer, ...acceptedAnswers.map(item => cleanText(item, 200))].filter(Boolean))].slice(0, 10);
+
+  return transaction(async client => {
+    const result = await client.query<EditableQuizQuestion>(
+      `SELECT q.id::text AS id, q.contributor_id::text AS contributor_id, q.question,
+              q.correct_answer, q.accepted_answers, q.source_url, q.difficulty, q.revision
+         FROM community_quiz_questions q
+         JOIN community_quiz_packs p ON p.id = q.pack_id
+        WHERE q.id = $1 AND p.guild_id = $2
+        FOR UPDATE OF q`,
+      [questionId, guildId],
+    );
+    const current = result.rows[0];
+    if (!current || (!canManage && current.contributor_id !== actorId)) {
+      throw new Error("Only the original contributor or a server manager can edit this question.");
+    }
+    const active = await client.query(
+      "SELECT 1 FROM community_game_sessions WHERE guild_id = $1 AND status = 'active' AND $2::BIGINT = ANY(question_ids) LIMIT 1",
+      [guildId, questionId],
+    );
+    if (active.rowCount) {
+      throw new Error("This question is part of an active game and cannot be edited until the game finishes.");
+    }
+    await client.query(
+      `INSERT INTO community_quiz_question_revisions (question_id, revision, snapshot, changed_by)
+       VALUES ($1, $2, jsonb_build_object(
+         'question', $3, 'correct_answer', $4, 'accepted_answers', $5::TEXT[],
+         'source_url', $6, 'difficulty', $7
+       ), $8)`,
+      [questionId, current.revision, current.question, current.correct_answer, current.accepted_answers, current.source_url, current.difficulty, actorId],
+    );
+    const updated = await client.query<{ revision: number }>(
+      `UPDATE community_quiz_questions
+       SET question = $1, correct_answer = $2, accepted_answers = $3,
+           source_url = $4, difficulty = $5, revision = revision + 1,
+           status = 'pending', reviewed_by = NULL
+       WHERE id = $6 RETURNING revision`,
+      [cleanQuestion, cleanAnswer, accepted, source, cleanDifficulty, questionId],
+    );
+    const revision = updated.rows[0]?.revision;
+    if (!revision) throw new Error("The question revision could not be saved.");
+    return revision;
+  });
+}
+
+export async function getQuizQuestionRevisionHistory(
+  guildId: string,
+  questionId: string,
+  actorId: string,
+  canManage: boolean,
+): Promise<{ currentRevision: number; revisions: QuizQuestionRevision[] }> {
+  const current = await queryOne<{ contributor_id: string; revision: number }>(
+    `SELECT q.contributor_id::text AS contributor_id, q.revision
+       FROM community_quiz_questions q
+       JOIN community_quiz_packs p ON p.id = q.pack_id
+      WHERE q.id = $1 AND p.guild_id = $2`,
+    [questionId, guildId],
+  );
+  if (!current || (!canManage && current.contributor_id !== actorId)) {
+    throw new Error("Only the original contributor or a server manager can view this question's history.");
+  }
+  const revisions = await query<QuizQuestionRevision>(
+    `SELECT revision, snapshot, changed_by::text AS changed_by, changed_at::text AS changed_at
+       FROM community_quiz_question_revisions
+      WHERE question_id = $1
+      ORDER BY revision DESC LIMIT 10`,
+    [questionId],
+  );
+  return { currentRevision: current.revision, revisions };
+}
+
 export async function reviewQuizPack(guildId: string, packId: string, approve: boolean): Promise<void> {
   const row = await queryOne<{ id: string }>(
     "UPDATE community_quiz_packs SET status = $1 WHERE id = $2 AND guild_id = $3 AND status = 'pending' RETURNING id",
