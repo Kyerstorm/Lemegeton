@@ -30,6 +30,7 @@ import {
   editQuizQuestion,
   getGameLeaderboard,
   getGameSession,
+  revealGameClue,
   joinGame,
   listQuizPacks,
   pendingQuizQuestions,
@@ -87,7 +88,7 @@ function packModal(): ModalBuilder {
     );
 }
 
-function questionModal(packId = ""): ModalBuilder {
+function questionModal(packId = "", packMode = "trivia"): ModalBuilder {
   const rows: ActionRowBuilder<TextInputBuilder>[] = [];
   if (!packId) rows.push(new ActionRowBuilder<TextInputBuilder>().addComponents(
     new TextInputBuilder().setCustomId("pack_id").setLabel("Question pack ID").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(20),
@@ -95,15 +96,12 @@ function questionModal(packId = ""): ModalBuilder {
   rows.push(
     new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("question").setLabel("Question (no long copyrighted passages)").setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500)),
     new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("answer").setLabel("Correct answer").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(200)),
-  );
-  if (packId) rows.push(new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("accepted").setLabel("Alternative accepted answers").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(500)));
-  rows.push(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("accepted").setLabel(packMode === "trivia" ? "Alternative accepted answers" : "Layered clues (category: clue, one per line)").setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500)),
     new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("source").setLabel("HTTPS source link").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(400)),
-    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("difficulty").setLabel("Difficulty: easy, standard, hard or expert").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(12).setValue("standard")),
   );
+  if (packId) rows.push(new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("difficulty").setLabel("Difficulty: easy, standard, hard or expert").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(12).setValue("standard")));
   return new ModalBuilder().setCustomId(`play:add-question:${packId || "select"}`).setTitle("Contribute a source-backed question").addComponents(...rows);
 }
-
 function editQuestionModal(question: EditableQuizQuestion): ModalBuilder {
   const accepted = question.accepted_answers.filter(value => value !== question.correct_answer).join(", ");
   const acceptedInput = new TextInputBuilder().setCustomId("accepted").setLabel("Alternative accepted answers").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(500);
@@ -138,16 +136,19 @@ function questionEmbed(title: string, question: string, sourceUrl: string, round
     .setFooter({ text: "Answers are private until submitted · One answer per player per round" });
 }
 
-function gameButtons(sessionId: string): ActionRowBuilder<ButtonBuilder> {
-  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+function gameButtons(sessionId: string, packMode: string = "trivia"): ActionRowBuilder<ButtonBuilder>[] {
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`play:join:${sessionId}`).setLabel("Join game").setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`play:answer:${sessionId}`).setLabel("Answer").setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(`play:next:${sessionId}`).setLabel("Next round").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`play:leaderboard:${sessionId}`).setLabel("Leaderboard").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`play:finish:${sessionId}`).setLabel("Finish").setStyle(ButtonStyle.Danger),
-  );
+  )];
+  if (packMode !== "trivia") rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`play:clue:${sessionId}`).setLabel("Reveal next clue").setStyle(ButtonStyle.Secondary),
+  ));
+  return rows;
 }
-
 function leaderboardLine(row: GameLeaderboardEntry, index: number): string {
   const label = row.team_name ? `${safeDisplay(row.team_name)} (${row.member_count} members)` : `<@${row.user_id ?? "unknown"}>`;
   return `${index + 1}. ${label} · ${row.score} points · ${row.correct} correct / ${row.answers} answered`;
@@ -189,6 +190,7 @@ export class PlayCommand implements FeatureCommand {
     .addStringOption((option) => option.setName("accepted_answers").setDescription("Accepted alternatives").setMaxLength(500))
     .addStringOption((option) => option.setName("source_url").setDescription("HTTPS source link").setMaxLength(1_000))
     .addStringOption((option) => option.setName("media_title").setDescription("Associated media title").setMaxLength(200))
+    .addStringOption((option) => option.setName("clues").setDescription("Layered clues (category: clue, one per line)").setMaxLength(1_000))
     .addIntegerOption((option) => option.setName("rounds").setDescription("Number of rounds (1–10)").setMinValue(1).setMaxValue(10))
     .addStringOption((option) => option.setName("game_mode").setDescription("Scoring mode").addChoices({ name: "Individual", value: "individual" }, { name: "Competitive teams", value: "teams" }, { name: "Cooperative team", value: "cooperative" }))
     .addBooleanOption((option) => option.setName("approve").setDescription("Approve or reject pending content"));
@@ -217,13 +219,17 @@ export class PlayCommand implements FeatureCommand {
           const answer = interaction.options.getString("correct_answer");
           const source = interaction.options.getString("source_url");
           if (!packId || !question || !answer || !source) {
-            await interaction.showModal(questionModal(packId ?? ""));
+            const modes = packId ? await query<{ mode: string }>("SELECT mode FROM community_quiz_packs WHERE id = $1 AND guild_id = $2", [packId, interaction.guildId]) : [];
+            await interaction.showModal(questionModal(packId ?? "", modes[0]?.mode ?? "trivia"));
             return;
           }
           const id = await addQuizQuestion(
             interaction.guildId, packId, interaction.user.id, question, answer,
             (interaction.options.getString("accepted_answers") ?? "").split(","),
-            source, interaction.options.getString("media_title") ?? undefined, [], interaction.options.getString("difficulty") ?? "standard",
+            source, interaction.options.getString("media_title") ?? undefined,
+            (interaction.options.getString("accepted_answers") ?? "").split(",").map(value => value.trim()).filter(Boolean),
+            [], interaction.options.getString("difficulty") ?? "standard",
+            (interaction.options.getString("clues") ?? "").split(/\r?\n|\|/).map(value => value.trim()).filter(Boolean),
           );
           await interaction.reply({ content: `Question #${id} has been submitted for review. Source attribution is saved with it.`, flags: MessageFlags.Ephemeral });
           return;
@@ -284,7 +290,7 @@ export class PlayCommand implements FeatureCommand {
       const select = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder()
         .setCustomId("play:question-pack")
         .setPlaceholder("Choose a question pack")
-        .addOptions(packs.slice(0, 25).map((pack) => ({ label: pack.title.slice(0, 100), value: pack.id }))));
+        .addOptions(packs.slice(0, 25).map((pack) => ({ label: pack.title.slice(0, 100), value: `${pack.id}:${pack.mode}` }))));
       await interaction.reply({ content: "Choose the pack for your new question.", components: [select], flags: MessageFlags.Ephemeral });
       return true;
     }
@@ -327,6 +333,30 @@ export class PlayCommand implements FeatureCommand {
       await this.advanceFromButton(interaction, sessionId, action === "finish");
       return true;
     }
+    if (action === "clue" && sessionId) {
+      const session = await getGameSession(interaction.guildId, sessionId);
+      if (!session) {
+        await interaction.reply({ content: "That game session no longer exists.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      const currentEmbed = interaction.message.embeds[0];
+      if (!currentEmbed) {
+        await interaction.reply({ content: "The current game question could not be loaded.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      try {
+        const revealed = await revealGameClue(interaction.guildId, sessionId, interaction.user.id);
+        const embed = EmbedBuilder.from(currentEmbed).addFields({
+          name: "Clue " + revealed.number + " / " + revealed.total + " · " + revealed.clue.category.toUpperCase(),
+          value: safeDisplay(revealed.clue.text, 200),
+          inline: false,
+        });
+        await interaction.update({ embeds: [embed], components: gameButtons(sessionId, session.pack_mode) });
+      } catch (error) {
+        await interaction.reply({ content: error instanceof Error ? error.message : "The next clue could not be revealed.", flags: MessageFlags.Ephemeral });
+      }
+      return true;
+    }
     if (action === "leaderboard" && sessionId) {
       await this.showLeaderboard(interaction, sessionId);
       return true;
@@ -358,7 +388,8 @@ export class PlayCommand implements FeatureCommand {
     const selected = interaction.values[0];
     if (!selected) return false;
     if (action === "question-pack") {
-      await interaction.showModal(questionModal(selected));
+      const [packId, packMode] = selected.split(":");
+      await interaction.showModal(questionModal(packId, packMode ?? "trivia"));
       return true;
     }
     if (action === "start-pack") {
@@ -386,10 +417,10 @@ export class PlayCommand implements FeatureCommand {
         const packId = sessionId === "select" ? interaction.fields.getTextInputValue("pack_id").trim() : sessionId;
         const source = interaction.fields.getTextInputValue("source");
         if (!isValidHttpsUrl(source, true)) throw new Error("A valid HTTPS source is required.");
-        const accepted = sessionId === "select" ? [] : interaction.fields.getTextInputValue("accepted").split(",");
+        const accepted = interaction.fields.getTextInputValue("accepted").split(/\r?\n|\|/).map(value => value.trim()).filter(Boolean);
         const id = await addQuizQuestion(interaction.guildId, packId, interaction.user.id,
           interaction.fields.getTextInputValue("question"), interaction.fields.getTextInputValue("answer"),
-          accepted, source, undefined, [], interaction.fields.getTextInputValue("difficulty"));
+          accepted, source, undefined, [], sessionId === "select" ? "standard" : interaction.fields.getTextInputValue("difficulty"));
         await interaction.reply({ content: `Question #${id} was submitted for review.`, flags: MessageFlags.Ephemeral });
         return true;
       }
@@ -535,7 +566,7 @@ export class PlayCommand implements FeatureCommand {
     }
     const message = await (channel as TextChannel).send({
       embeds: [questionEmbed(`${emoji.game} ${session.title}${session.game_mode === "teams" ? " · Team battle" : session.game_mode === "cooperative" ? " · Co-op" : ""}`, question.question, question.source_url, 1, session.question_ids.length, question.difficulty)],
-      components: [gameButtons(session.id)],
+      components: gameButtons(session.id, session.pack_mode),
       allowedMentions: { parse: [] },
     });
     await query("UPDATE community_game_sessions SET message_id = $1 WHERE id = $2 AND guild_id = $3", [message.id, session.id, interaction.guildId]);
@@ -616,7 +647,7 @@ export class PlayCommand implements FeatureCommand {
         result.total,
         nextQuestion.difficulty,
       )],
-      components: [gameButtons(sessionId)],
+      components: gameButtons(sessionId, session.pack_mode),
     });
   }
 
