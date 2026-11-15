@@ -255,6 +255,8 @@ Phase 0 code migration status does **not** mean the service is launched. Phase 8
 
 **Exit criteria:** upload, review, browse, collection and Trail workflows pass permission tests; removed/private entries disappear from every derived view; global content requires configured permissions and contributor visibility choice; storage cleanup is recoverable.
 
+Quiz Pack Studio now stores four difficulty levels, allows the original contributor or a server manager to revise a question, preserves the previous version in an immutable snapshot, blocks edits while a question is used in an active game, and sends edits back through moderator review. `/play` displays difficulty and exposes revision history to authorized contributors/managers. Pack-level curation and bulk review remain outstanding.
+
 ### Phase 4 — Community and media games
 
 **Objective:** deliver repeatable guild activities with clear ownership, durable state and fair results.

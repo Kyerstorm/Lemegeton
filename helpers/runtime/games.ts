@@ -2,6 +2,7 @@ import type { PoolClient } from "pg";
 import { query, queryOne, transaction } from "../../database.js";
 import { cleanText, isValidHttpsUrl } from "../security/security.js";
 
+export type QuizDifficulty = "easy" | "standard" | "hard" | "expert";
 export interface QuizQuestion {
   id: string;
   question: string;
@@ -10,7 +11,10 @@ export interface QuizQuestion {
   options: string[];
   source_url: string;
   media_title: string | null;
+  difficulty: QuizDifficulty;
 }
+export interface EditableQuizQuestion { id: string; contributor_id: string; question: string; correct_answer: string; accepted_answers: string[]; source_url: string; difficulty: QuizDifficulty; revision: number; }
+export interface QuizQuestionRevision { revision: number; snapshot: { question: string; correct_answer: string; accepted_answers: string[]; source_url: string; difficulty: QuizDifficulty }; changed_by: string; changed_at: string; }
 export type GameMode = "individual" | "teams" | "cooperative";
 export interface GameSession {
   id: string;
@@ -33,6 +37,11 @@ export interface GameLeaderboardEntry {
   score: number;
   correct: number;
   answers: number;
+}
+export function normalizeQuizDifficulty(value: string): QuizDifficulty {
+  const valueNormalized = value.trim().toLowerCase();
+  if (valueNormalized === "easy" || valueNormalized === "standard" || valueNormalized === "hard" || valueNormalized === "expert") return valueNormalized;
+  throw new Error("Choose easy, standard, hard or expert difficulty.");
 }
 function normalizeAnswer(value: string): string {
   return cleanText(value, 200).toLocaleLowerCase("en").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
@@ -82,23 +91,84 @@ export async function createQuizPack(guildId: string, creatorId: string, title: 
   if (!row) throw new Error("The quiz pack could not be saved.");
   return row.id;
 }
-export async function addQuizQuestion(guildId: string, packId: string, contributorId: string, question: string, answer: string, acceptedAnswers: string[], sourceUrl: string, mediaTitle?: string, options: string[] = []): Promise<string> {
+export async function addQuizQuestion(guildId: string, packId: string, contributorId: string, question: string, answer: string, acceptedAnswers: string[], sourceUrl: string, mediaTitle?: string, options: string[] = [], difficulty = "standard"): Promise<string> {
   const pack = await queryOne<{ id: string; status: string }>("SELECT id, status FROM community_quiz_packs WHERE id = $1 AND guild_id = $2", [packId, guildId]);
   if (!pack || pack.status === "rejected") throw new Error("That quiz pack was not found or was rejected.");
-  const cleanQuestion = cleanText(question, 500);
-  const cleanAnswer = cleanText(answer, 200);
+  const cleanQuestion = cleanText(question, 500), cleanAnswer = cleanText(answer, 200);
   if (!cleanQuestion || !cleanAnswer) throw new Error("A question and correct answer are required.");
-  const source = isValidHttpsUrl(sourceUrl, true)!;
-  const accepted = [...new Set([cleanAnswer, ...acceptedAnswers.map((item) => cleanText(item, 200))].filter(Boolean))].slice(0, 10);
-  if (options.length > 4 || options.some((item) => !cleanText(item, 150))) throw new Error("A multiple-choice question can have up to four non-empty options.");
+  const source = isValidHttpsUrl(sourceUrl, true);
+  if (!source) throw new Error("A valid HTTPS source is required.");
+  const cleanDifficulty = normalizeQuizDifficulty(difficulty);
+  const accepted = [...new Set([cleanAnswer, ...acceptedAnswers.map(item => cleanText(item, 200))].filter(Boolean))].slice(0, 10);
+  const cleanOptions = options.map(item => cleanText(item, 150)).filter(Boolean);
+  if (cleanOptions.length > 4 || options.length !== cleanOptions.length) throw new Error("A multiple-choice question can have up to four non-empty options.");
   const row = await queryOne<{ id: string }>(
-    `INSERT INTO community_quiz_questions
-     (pack_id, contributor_id, media_title, question, correct_answer, accepted_answers, options, source_url, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7::JSONB, $8, 'pending') RETURNING id`,
-    [packId, contributorId, mediaTitle ? cleanText(mediaTitle, 200) : null, cleanQuestion, cleanAnswer, accepted, JSON.stringify(options.map((item) => cleanText(item, 150))), source],
+    `INSERT INTO community_quiz_questions (pack_id, contributor_id, media_title, question, correct_answer, accepted_answers, options, source_url, difficulty, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7::JSONB,$8,$9,'pending') RETURNING id`,
+    [packId, contributorId, mediaTitle ? cleanText(mediaTitle, 200) : null, cleanQuestion, cleanAnswer, accepted, JSON.stringify(cleanOptions), source, cleanDifficulty],
   );
   if (!row) throw new Error("The question could not be saved.");
   return row.id;
+}
+
+export async function getQuizQuestionForEditing(guildId: string, questionId: string, actorId: string, canManage: boolean): Promise<EditableQuizQuestion> {
+  const question = await queryOne<EditableQuizQuestion>(
+    `SELECT q.id::text AS id, q.contributor_id::text AS contributor_id, q.question, q.correct_answer, q.accepted_answers, q.source_url, q.difficulty, q.revision
+       FROM community_quiz_questions q JOIN community_quiz_packs p ON p.id = q.pack_id
+      WHERE q.id = $1 AND p.guild_id = $2`,
+    [questionId, guildId],
+  );
+  if (!question || (!canManage && question.contributor_id !== actorId)) throw new Error("Only the original contributor or a server manager can edit this question.");
+  return question;
+}
+
+export async function editQuizQuestion(guildId: string, questionId: string, actorId: string, canManage: boolean, questionText: string, answer: string, acceptedAnswers: string[], sourceUrl: string, difficulty: string): Promise<number> {
+  const cleanQuestion = cleanText(questionText, 500), cleanAnswer = cleanText(answer, 200);
+  if (!cleanQuestion || !cleanAnswer) throw new Error("A question and correct answer are required.");
+  const source = isValidHttpsUrl(sourceUrl, true);
+  if (!source) throw new Error("A valid HTTPS source is required.");
+  const cleanDifficulty = normalizeQuizDifficulty(difficulty);
+  const accepted = [...new Set([cleanAnswer, ...acceptedAnswers.map(item => cleanText(item, 200))].filter(Boolean))].slice(0, 10);
+  return transaction(async client => {
+    const result = await client.query<EditableQuizQuestion>(
+      `SELECT q.id::text AS id, q.contributor_id::text AS contributor_id, q.question, q.correct_answer, q.accepted_answers, q.source_url, q.difficulty, q.revision
+         FROM community_quiz_questions q JOIN community_quiz_packs p ON p.id = q.pack_id
+        WHERE q.id = $1 AND p.guild_id = $2 FOR UPDATE OF q`,
+      [questionId, guildId],
+    );
+    const current = result.rows[0];
+    if (!current || (!canManage && current.contributor_id !== actorId)) throw new Error("Only the original contributor or a server manager can edit this question.");
+    const active = await client.query("SELECT 1 FROM community_game_sessions WHERE guild_id = $1 AND status = 'active' AND $2::BIGINT = ANY(question_ids) LIMIT 1", [guildId, questionId]);
+    if (active.rowCount) throw new Error("This question is part of an active game and cannot be edited until the game finishes.");
+    await client.query(
+      `INSERT INTO community_quiz_question_revisions (question_id, revision, snapshot, changed_by)
+       VALUES ($1,$2,jsonb_build_object('question',$3,'correct_answer',$4,'accepted_answers',$5::TEXT[],'source_url',$6,'difficulty',$7),$8)`,
+      [questionId, current.revision, current.question, current.correct_answer, current.accepted_answers, current.source_url, current.difficulty, actorId],
+    );
+    const updated = await client.query<{ revision: number }>(
+      `UPDATE community_quiz_questions SET question=$1, correct_answer=$2, accepted_answers=$3, source_url=$4, difficulty=$5, revision=revision+1, status='pending', reviewed_by=NULL
+        WHERE id=$6 RETURNING revision`,
+      [cleanQuestion, cleanAnswer, accepted, source, cleanDifficulty, questionId],
+    );
+    const revision = updated.rows[0]?.revision;
+    if (!revision) throw new Error("The question revision could not be saved.");
+    return revision;
+  });
+}
+
+export async function getQuizQuestionRevisionHistory(guildId: string, questionId: string, actorId: string, canManage: boolean): Promise<{ currentRevision: number; revisions: QuizQuestionRevision[] }> {
+  const current = await queryOne<{ contributor_id: string; revision: number }>(
+    `SELECT q.contributor_id::text AS contributor_id, q.revision FROM community_quiz_questions q
+      JOIN community_quiz_packs p ON p.id = q.pack_id WHERE q.id = $1 AND p.guild_id = $2`,
+    [questionId, guildId],
+  );
+  if (!current || (!canManage && current.contributor_id !== actorId)) throw new Error("Only the original contributor or a server manager can view this question's history.");
+  const revisions = await query<QuizQuestionRevision>(
+    `SELECT revision, snapshot, changed_by::text AS changed_by, changed_at::text AS changed_at
+       FROM community_quiz_question_revisions WHERE question_id = $1 ORDER BY revision DESC LIMIT 10`,
+    [questionId],
+  );
+  return { currentRevision: current.revision, revisions };
 }
 export async function reviewQuizPack(guildId: string, packId: string, approve: boolean): Promise<void> {
   const row = await queryOne<{ id: string }>(
@@ -181,7 +251,7 @@ export async function getGameSession(guildId: string, sessionId: string): Promis
 }
 export async function getCurrentGameQuestion(guildId: string, sessionId: string): Promise<QuizQuestion | null> {
   return queryOne<QuizQuestion>(
-    `SELECT q.id, q.question, q.correct_answer, q.accepted_answers, q.options, q.source_url, q.media_title
+    `SELECT q.id, q.question, q.correct_answer, q.accepted_answers, q.options, q.source_url, q.media_title, q.difficulty
      FROM community_game_sessions s JOIN community_quiz_questions q ON q.id = s.question_ids[s.current_round + 1]
      WHERE s.id = $1 AND s.guild_id = $2 AND s.status = 'active'`,
     [sessionId, guildId],

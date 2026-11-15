@@ -25,6 +25,9 @@ import {
   answerGameQuestion,
   createQuizPack,
   getCurrentGameQuestion,
+  getQuizQuestionForEditing,
+  getQuizQuestionRevisionHistory,
+  editQuizQuestion,
   getGameLeaderboard,
   getGameSession,
   joinGame,
@@ -35,6 +38,7 @@ import {
   startGame,
   type GameMode,
   type GameLeaderboardEntry,
+  type EditableQuizQuestion,
 } from "../../helpers/runtime/games.js";
 import { query } from "../../database.js";
 import { isGuildManager, isValidHttpsUrl, safeDisplay } from "../../helpers/security/security.js";
@@ -84,28 +88,34 @@ function packModal(): ModalBuilder {
 }
 
 function questionModal(packId = ""): ModalBuilder {
-  return new ModalBuilder()
-    .setCustomId(`play:add-question:${packId || "select"}`)
-    .setTitle("Contribute a source-backed question")
-    .addComponents(
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        (() => { const field = new TextInputBuilder().setCustomId("pack_id").setLabel("Question pack ID").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(20); if (packId) field.setValue(packId); return field; })(),
-      ),
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId("question").setLabel("Question (no long copyrighted passages)").setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500),
-      ),
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId("answer").setLabel("Correct answer").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(200),
-      ),
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId("accepted").setLabel("Alternative accepted answers (comma separated)").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(500),
-      ),
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId("source").setLabel("HTTPS source link").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(400),
-      ),
-    );
+  const rows: ActionRowBuilder<TextInputBuilder>[] = [];
+  if (!packId) rows.push(new ActionRowBuilder<TextInputBuilder>().addComponents(
+    new TextInputBuilder().setCustomId("pack_id").setLabel("Question pack ID").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(20),
+  ));
+  rows.push(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("question").setLabel("Question (no long copyrighted passages)").setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500)),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("answer").setLabel("Correct answer").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(200)),
+  );
+  if (packId) rows.push(new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("accepted").setLabel("Alternative accepted answers").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(500)));
+  rows.push(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("source").setLabel("HTTPS source link").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(400)),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("difficulty").setLabel("Difficulty: easy, standard, hard or expert").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(12).setValue("standard")),
+  );
+  return new ModalBuilder().setCustomId(`play:add-question:${packId || "select"}`).setTitle("Contribute a source-backed question").addComponents(...rows);
 }
 
+function editQuestionModal(question: EditableQuizQuestion): ModalBuilder {
+  const accepted = question.accepted_answers.filter(value => value !== question.correct_answer).join(", ");
+  const acceptedInput = new TextInputBuilder().setCustomId("accepted").setLabel("Alternative accepted answers").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(500);
+  if (accepted) acceptedInput.setValue(accepted.slice(0, 500));
+  return new ModalBuilder().setCustomId(`play:edit-question:${question.id}`).setTitle("Revise question").addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("question").setLabel("Question").setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500).setValue(question.question.slice(0, 500))),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("answer").setLabel("Correct answer").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(200).setValue(question.correct_answer.slice(0, 200))),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(acceptedInput),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("source").setLabel("HTTPS source link").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(400).setValue(question.source_url.slice(0, 400))),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("difficulty").setLabel("Difficulty: easy, standard, hard or expert").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(12).setValue(question.difficulty)),
+  );
+}
 function answerModal(sessionId: string): ModalBuilder {
   return new ModalBuilder()
     .setCustomId(`play:answer:${sessionId}`)
@@ -115,7 +125,7 @@ function answerModal(sessionId: string): ModalBuilder {
     ));
 }
 
-function questionEmbed(title: string, question: string, sourceUrl: string, round: number, total: number): EmbedBuilder {
+function questionEmbed(title: string, question: string, sourceUrl: string, round: number, total: number, difficulty = "standard"): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(0x5865f2)
     .setTitle(title)
@@ -123,6 +133,7 @@ function questionEmbed(title: string, question: string, sourceUrl: string, round
     .addFields(
       { name: "Round", value: `${round} / ${total}`, inline: true },
       { name: "Source", value: `[Open provider source](${sourceUrl})`, inline: true },
+      { name: "Difficulty", value: difficulty.toUpperCase(), inline: true },
     )
     .setFooter({ text: "Answers are private until submitted · One answer per player per round" });
 }
@@ -158,9 +169,13 @@ export class PlayCommand implements FeatureCommand {
       { name: "Next round", value: "next" },
       { name: "Finish game", value: "finish" },
       { name: "Leaderboard", value: "leaderboard" },
+      { name: "Edit question", value: "edit-question" },
+      { name: "Question history", value: "question-history" },
     ))
     .addStringOption((option) => option.setName("pack_id").setDescription("Question pack ID"))
     .addStringOption((option) => option.setName("session_id").setDescription("Game session ID"))
+    .addStringOption((option) => option.setName("question_id").setDescription("Question ID for edit or history"))
+    .addStringOption((option) => option.setName("difficulty").setDescription("Question difficulty").addChoices({ name: "Easy", value: "easy" }, { name: "Standard", value: "standard" }, { name: "Hard", value: "hard" }, { name: "Expert", value: "expert" }))
     .addStringOption((option) => option.setName("title").setDescription("Pack title").setMaxLength(160))
     .addStringOption((option) => option.setName("description").setDescription("Pack description").setMaxLength(800))
     .addStringOption((option) => option.setName("mode").setDescription("Question mode").addChoices(
@@ -208,13 +223,32 @@ export class PlayCommand implements FeatureCommand {
           const id = await addQuizQuestion(
             interaction.guildId, packId, interaction.user.id, question, answer,
             (interaction.options.getString("accepted_answers") ?? "").split(","),
-            source, interaction.options.getString("media_title") ?? undefined,
+            source, interaction.options.getString("media_title") ?? undefined, [], interaction.options.getString("difficulty") ?? "standard",
           );
           await interaction.reply({ content: `Question #${id} has been submitted for review. Source attribution is saved with it.`, flags: MessageFlags.Ephemeral });
           return;
         }
         case "review-pack": await this.reviewPackCommand(interaction); return;
         case "review-question": await this.reviewQuestionCommand(interaction); return;
+        case "edit-question": {
+          const questionId = interaction.options.getString("question_id");
+          if (!questionId) throw new Error("Provide question_id to edit a question.");
+          const question = await getQuizQuestionForEditing(interaction.guildId, questionId, interaction.user.id, isGuildManager(interaction));
+          await interaction.showModal(editQuestionModal(question));
+          return;
+        }
+        case "question-history": {
+          const questionId = interaction.options.getString("question_id");
+          if (!questionId) throw new Error("Provide question_id to view its history.");
+          const history = await getQuizQuestionRevisionHistory(interaction.guildId, questionId, interaction.user.id, isGuildManager(interaction));
+          const fields = history.revisions.slice(0, 8).map(revision => ({
+            name: "Revision " + revision.revision + " · <t:" + Math.floor(new Date(revision.changed_at).getTime() / 1000) + ":R>",
+            value: "**Question:** " + safeDisplay(revision.snapshot.question, 160) + "\n**Answer:** " + safeDisplay(revision.snapshot.correct_answer, 100) + "\n**Difficulty:** " + revision.snapshot.difficulty.toUpperCase(),
+            inline: false,
+          }));
+          await interaction.reply({ embeds: [homeEmbed("Question revision history", "Current revision: " + history.currentRevision, fields.length ? fields : [{ name: "History", value: "No previous revisions.", inline: false }])], flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+          return;
+        }
         case "packs": await this.showPacks(interaction); return;
         case "start": await this.start(interaction, interaction.options.getString("pack_id"), interaction.options.getInteger("rounds") ?? 5, (interaction.options.getString("game_mode") ?? "individual") as GameMode); return;
         case "join": await this.join(interaction, interaction.options.getString("session_id")); return;
@@ -349,22 +383,24 @@ export class PlayCommand implements FeatureCommand {
         return true;
       }
       if (action === "add-question" && sessionId) {
-        const packId = interaction.fields.getTextInputValue("pack_id").trim();
+        const packId = sessionId === "select" ? interaction.fields.getTextInputValue("pack_id").trim() : sessionId;
         const source = interaction.fields.getTextInputValue("source");
         if (!isValidHttpsUrl(source, true)) throw new Error("A valid HTTPS source is required.");
-        const id = await addQuizQuestion(
-          interaction.guildId,
-          packId,
-          interaction.user.id,
-          interaction.fields.getTextInputValue("question"),
-          interaction.fields.getTextInputValue("answer"),
-          interaction.fields.getTextInputValue("accepted").split(","),
-          source,
-        );
+        const accepted = sessionId === "select" ? [] : interaction.fields.getTextInputValue("accepted").split(",");
+        const id = await addQuizQuestion(interaction.guildId, packId, interaction.user.id,
+          interaction.fields.getTextInputValue("question"), interaction.fields.getTextInputValue("answer"),
+          accepted, source, undefined, [], interaction.fields.getTextInputValue("difficulty"));
         await interaction.reply({ content: `Question #${id} was submitted for review.`, flags: MessageFlags.Ephemeral });
         return true;
       }
-      if (action === "answer" && sessionId) {
+      if (action === "edit-question" && sessionId) {
+        const revision = await editQuizQuestion(interaction.guildId, sessionId, interaction.user.id, isGuildManager(interaction),
+          interaction.fields.getTextInputValue("question"), interaction.fields.getTextInputValue("answer"),
+          interaction.fields.getTextInputValue("accepted").split(","), interaction.fields.getTextInputValue("source"),
+          interaction.fields.getTextInputValue("difficulty"));
+        await interaction.reply({ content: `Question #${sessionId} was saved as revision ${revision} and returned to moderator review.`, flags: MessageFlags.Ephemeral });
+        return true;
+      }      if (action === "answer" && sessionId) {
         const result = await answerGameQuestion(
           interaction.guildId,
           sessionId,
@@ -498,7 +534,7 @@ export class PlayCommand implements FeatureCommand {
       throw new Error("Start the game from a text channel so the server can participate.");
     }
     const message = await (channel as TextChannel).send({
-      embeds: [questionEmbed(`${emoji.game} ${session.title}${session.game_mode === "teams" ? " · Team battle" : session.game_mode === "cooperative" ? " · Co-op" : ""}`, question.question, question.source_url, 1, session.question_ids.length)],
+      embeds: [questionEmbed(`${emoji.game} ${session.title}${session.game_mode === "teams" ? " · Team battle" : session.game_mode === "cooperative" ? " · Co-op" : ""}`, question.question, question.source_url, 1, session.question_ids.length, question.difficulty)],
       components: [gameButtons(session.id)],
       allowedMentions: { parse: [] },
     });
@@ -578,6 +614,7 @@ export class PlayCommand implements FeatureCommand {
         nextQuestion.source_url,
         result.round,
         result.total,
+        nextQuestion.difficulty,
       )],
       components: [gameButtons(sessionId)],
     });
