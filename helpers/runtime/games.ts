@@ -19,6 +19,15 @@ export interface QuizQuestion {
   pack_mode: QuizPackMode;
 }
 export interface EditableQuizQuestion { id: string; contributor_id: string; question: string; correct_answer: string; accepted_answers: string[]; source_url: string; difficulty: QuizDifficulty; revision: number; }
+export interface QuizPackSummary {
+  id: string; creator_id: string; title: string; description: string; mode: QuizPackMode;
+  status: string; question_count: number; pending_count: number;
+}
+export interface ActiveGameSession {
+  id: string; channel_id: string; message_id: string | null; host_id: string; title: string;
+  mode: QuizPackMode; game_mode: GameMode; current_round: number; question_count: number;
+  participant_count: number; created_at: Date | string;
+}
 export interface QuizQuestionRevision { revision: number; snapshot: { question: string; correct_answer: string; accepted_answers: string[]; source_url: string; difficulty: QuizDifficulty }; changed_by: string; changed_at: string; }
 export type GameMode = "individual" | "teams" | "cooperative";
 export interface GameSession {
@@ -65,6 +74,26 @@ export function normalizeQuizDifficulty(value: string): QuizDifficulty {
 function normalizeAnswer(value: string): string {
   return cleanText(value, 200).toLocaleLowerCase("en").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
+export function normalizeMultipleChoiceOptions(correctAnswer: string, values: readonly string[]): string[] {
+  if (!values.length) return [];
+  const options = values.map(value => cleanText(value, 150));
+  if (options.length < 2 || options.length > 4 || options.some(value => !value)) {
+    throw new Error("Multiple-choice trivia needs two to four non-empty choices.");
+  }
+  const keys = options.map(normalizeAnswer);
+  if (new Set(keys).size !== keys.length) throw new Error("Multiple-choice options must be distinct.");
+  if (!keys.includes(normalizeAnswer(correctAnswer))) {
+    throw new Error("The correct answer must be included in the multiple-choice options.");
+  }
+  return options;
+}
+export function resolveQuizAnswer(
+  answer: string, correctAnswer: string, acceptedAnswers: readonly string[] = [], options: readonly string[] = [],
+): boolean {
+  const trimmed = answer.trim();
+  const candidate = /^[1-4]$/.test(trimmed) ? options[Number(trimmed) - 1] ?? trimmed : trimmed;
+  return [correctAnswer, ...acceptedAnswers].some(value => normalizeAnswer(value) === normalizeAnswer(candidate));
+}
 export function chooseBalancedTeam<T extends { id: string; member_count: number; team_number: number }>(teams: readonly T[]): T | null {
   return [...teams].sort((a, b) => a.member_count - b.member_count || a.team_number - b.team_number)[0] ?? null;
 }
@@ -103,6 +132,28 @@ export function normalizeQuizPackMode(value: string): QuizPackMode {
   if (value === "trivia" || value === "guessing" || value === "mystery" || value === "challenge" || value === "puzzle") return value;
   throw new Error("Choose trivia, guessing, mystery, challenge or puzzle.");
 }
+export function validateQuizQuestionClues(mode: QuizPackMode, clues: readonly MediaClue[]): void {
+  if (mode === "trivia") {
+    if (clues.length) throw new Error("Trivia questions use an answer prompt, not layered media clues.");
+    return;
+  }
+  if (mode === "guessing") {
+    if (!clues.length) throw new Error("Guessing questions need at least one category-labelled identification clue.");
+    return;
+  }
+  if (mode === "mystery") {
+    if (clues.length < 2 || new Set(clues.map(clue => clue.category)).size < 2) {
+      throw new Error("Mystery questions need at least two clues from different categories.");
+    }
+    return;
+  }
+  if (!clues.length) throw new Error("This media game mode needs at least one category-labelled clue.");
+  if (mode === "puzzle" && !clues.some(clue =>
+    ["word", "connection", "relationship", "chronology", "franchise", "adaptation"].includes(clue.category),
+  )) {
+    throw new Error("Puzzle packs need at least one word, connection, relationship, chronology, franchise or adaptation clue.");
+  }
+}
 export async function createQuizPack(guildId: string, creatorId: string, title: string, description: string, mode: QuizPackMode = "trivia"): Promise<string> {
   mode = normalizeQuizPackMode(mode);
   const cleanTitle = cleanText(title, 160);
@@ -124,13 +175,10 @@ export async function addQuizQuestion(guildId: string, packId: string, contribut
   if (!source) throw new Error("A valid HTTPS source is required.");
   const cleanDifficulty = normalizeQuizDifficulty(difficulty);
   const clues = pack.mode === "trivia" ? [] : normalizeMediaClues(clueEntries.length ? clueEntries : acceptedAnswers);
-  if (pack.mode !== "trivia" && clues.length === 0) throw new Error("Guessing, Mystery, Challenge and Puzzle questions need at least one category-labelled clue.");
-  if (pack.mode === "puzzle" && !clues.some(clue => ["word", "connection", "relationship", "chronology", "franchise", "adaptation"].includes(clue.category))) {
-    throw new Error("Puzzle packs need at least one word, connection, relationship, chronology, franchise or adaptation clue.");
-  }
+  validateQuizQuestionClues(pack.mode, clues);
   const accepted = pack.mode === "trivia" ? [...new Set([cleanAnswer, ...acceptedAnswers.map(item => cleanText(item, 200))].filter(Boolean))].slice(0, 10) : [cleanAnswer];
-  const cleanOptions = options.map(item => cleanText(item, 150)).filter(Boolean);
-  if (cleanOptions.length > 4 || options.length !== cleanOptions.length) throw new Error("A multiple-choice question can have up to four non-empty options.");
+  if (pack.mode !== "trivia" && options.length) throw new Error("Multiple-choice options are supported for Trivia packs only.");
+  const cleanOptions = normalizeMultipleChoiceOptions(cleanAnswer, options);
   const row = await queryOne<{ id: string }>(
     `INSERT INTO community_quiz_questions (pack_id, contributor_id, media_title, question, correct_answer, accepted_answers, options, source_url, difficulty, clues, status)
      VALUES ($1,$2,$3,$4,$5,$6,$7::JSONB,$8,$9,$10::JSONB,'pending') RETURNING id`,
@@ -248,6 +296,44 @@ export async function getQuizQuestionRevisionHistory(
   return { currentRevision: current.revision, revisions };
 }
 
+export async function updateQuizPack(
+  guildId: string, packId: string, actorId: string, canManage: boolean, title: string, description: string,
+): Promise<void> {
+  const cleanTitle = cleanText(title, 160);
+  if (!cleanTitle) throw new Error("A question pack title is required.");
+  const row = await queryOne<{ id: string }>(
+    `UPDATE community_quiz_packs SET title=$1,description=$2
+      WHERE id=$3 AND guild_id=$4 AND status IN ('pending','approved') AND (creator_id=$5 OR $6::boolean)
+      RETURNING id::text AS id`,
+    [cleanTitle, cleanText(description, 1_000), packId, guildId, actorId, canManage],
+  );
+  if (!row) throw new Error("That editable pack was not found, or you do not own it.");
+}
+export async function bulkReviewQuizQuestions(
+  guildId: string, reviewerId: string, actions: readonly { id: string; approve: boolean }[],
+): Promise<number> {
+  if (!actions.length || actions.length > 12) throw new Error("Choose between one and twelve questions for bulk review.");
+  const ids = actions.map(action => action.id);
+  if (ids.some(id => !/^\d{1,20}$/.test(id)) || new Set(ids).size !== ids.length) {
+    throw new Error("Bulk review contains an invalid or duplicate question.");
+  }
+  return transaction(async client => {
+    let reviewed = 0;
+    for (const action of actions) {
+      const result = await client.query(
+        `UPDATE community_quiz_questions q SET status=$1,reviewed_by=$2
+          FROM community_quiz_packs p
+          WHERE q.pack_id=p.id AND p.guild_id=$3 AND p.status='approved'
+            AND q.id=$4 AND q.status='pending'
+          RETURNING q.id`,
+        [action.approve ? "approved" : "rejected", reviewerId, guildId, action.id],
+      );
+      if (result.rowCount !== 1) throw new Error("A selected question is no longer pending in an approved server pack. No questions were changed.");
+      reviewed += 1;
+    }
+    return reviewed;
+  });
+}
 export async function reviewQuizPack(guildId: string, packId: string, approve: boolean): Promise<void> {
   const row = await queryOne<{ id: string }>(
     "UPDATE community_quiz_packs SET status = $1 WHERE id = $2 AND guild_id = $3 AND status = 'pending' RETURNING id",
@@ -264,26 +350,31 @@ export async function reviewQuizQuestion(guildId: string, questionId: string, re
   );
   if (!row) throw new Error("That pending question was not found in an approved pack in this server.");
 }
-export async function listQuizPacks(guildId: string, status = "approved"): Promise<Array<{ id: string; title: string; description: string; mode: string; question_count: number }>> {
-  return query(
-    `SELECT p.id, p.title, p.description, p.mode, COUNT(q.id)::INT AS question_count
-     FROM community_quiz_packs p LEFT JOIN community_quiz_questions q ON q.pack_id = p.id AND q.status = 'approved' AND (p.mode = 'trivia' OR jsonb_array_length(q.clues) > 0)
-     WHERE p.guild_id = $1 AND p.status = $2 GROUP BY p.id ORDER BY p.created_at DESC LIMIT 20`,
+export async function listQuizPacks(guildId: string, status = "approved"): Promise<QuizPackSummary[]> {
+  if (!["all", "pending", "approved", "rejected"].includes(status)) throw new Error("Choose all, pending, approved or rejected pack status.");
+  return query<QuizPackSummary>(
+    `SELECT p.id::text AS id,p.creator_id::text AS creator_id,p.title,p.description,p.mode,p.status,
+            COUNT(q.id) FILTER (WHERE q.status='approved' AND (p.mode='trivia' OR jsonb_array_length(q.clues)>0))::INT AS question_count,
+            COUNT(q.id) FILTER (WHERE q.status='pending')::INT AS pending_count
+       FROM community_quiz_packs p LEFT JOIN community_quiz_questions q ON q.pack_id=p.id
+      WHERE p.guild_id=$1 AND ($2='all' OR p.status=$2)
+      GROUP BY p.id ORDER BY p.created_at DESC LIMIT 25`,
     [guildId, status],
   );
 }
-export async function pendingQuizQuestions(guildId: string): Promise<Array<{ id: string; pack_id: string; title: string; question: string; source_url: string }>> {
+export async function pendingQuizQuestions(guildId: string): Promise<Array<{ id: string; pack_id: string; title: string; question: string; source_url: string; difficulty: QuizDifficulty; mode: QuizPackMode }>> {
   return query(
-    `SELECT q.id, q.pack_id, p.title, q.question, q.source_url
-     FROM community_quiz_questions q JOIN community_quiz_packs p ON p.id = q.pack_id
-     WHERE p.guild_id = $1 AND p.status = 'approved' AND q.status = 'pending'
-     ORDER BY q.created_at ASC LIMIT 15`,
+    `SELECT q.id::text AS id,q.pack_id::text AS pack_id,p.title,q.question,q.source_url,q.difficulty,p.mode
+       FROM community_quiz_questions q JOIN community_quiz_packs p ON p.id=q.pack_id
+      WHERE p.guild_id=$1 AND p.status='approved' AND q.status='pending'
+      ORDER BY q.created_at ASC LIMIT 12`,
     [guildId],
   );
 }
 export async function startGame(guildId: string, channelId: string, hostId: string, packId: string, rounds = 5, gameMode: GameMode = "individual"): Promise<GameSession> {
   if (!["individual", "teams", "cooperative"].includes(gameMode)) throw new Error("Choose individual, teams or cooperative game mode.");
-  const count = Math.min(10, Math.max(1, Math.floor(rounds)));
+  if (!Number.isFinite(rounds) || !Number.isInteger(rounds) || rounds < 1 || rounds > 10) throw new Error("A game must contain between one and ten rounds.");
+  const count = rounds;
   return transaction(async (client: PoolClient) => {
     const packResult = await client.query("SELECT id, title, status, mode FROM community_quiz_packs WHERE id = $1 AND guild_id = $2", [packId, guildId]);
     const pack = packResult.rows[0] as { id: string; title: string; status: string; mode: QuizPackMode } | undefined;
@@ -320,6 +411,29 @@ export async function joinGame(guildId: string, sessionId: string, userId: strin
     return ensureGameParticipant(client, sessionId, userId, session.game_mode);
   });
 }
+export async function listActiveGameSessions(guildId: string): Promise<ActiveGameSession[]> {
+  return query<ActiveGameSession>(
+    `SELECT s.id::text AS id,s.channel_id::text AS channel_id,s.message_id::text AS message_id,
+            s.host_id::text AS host_id,p.title,p.mode,s.game_mode,s.current_round,
+            cardinality(s.question_ids)::INT AS question_count,
+            COUNT(DISTINCT participant.user_id)::INT AS participant_count,s.created_at
+       FROM community_game_sessions s JOIN community_quiz_packs p ON p.id=s.pack_id
+       LEFT JOIN community_game_participants participant ON participant.session_id=s.id
+      WHERE s.guild_id=$1 AND s.status='active' AND p.guild_id=$1
+      GROUP BY s.id,p.title,p.mode
+      ORDER BY s.created_at DESC LIMIT 20`,
+    [guildId],
+  );
+}
+export async function cancelGameSession(guildId: string, sessionId: string, hostId: string): Promise<boolean> {
+  const row = await queryOne<{ id: string }>(
+    `UPDATE community_game_sessions SET status='cancelled',finished_at=NOW()
+      WHERE id=$1 AND guild_id=$2 AND host_id=$3 AND status='active'
+      RETURNING id::text AS id`,
+    [sessionId,guildId,hostId],
+  );
+  return Boolean(row);
+}
 export async function getGameSession(guildId: string, sessionId: string): Promise<GameSession | null> {
   return queryOne<GameSession & { title: string }>(
     `SELECT s.*, p.title, p.mode AS pack_mode FROM community_game_sessions s JOIN community_quiz_packs p ON p.id = s.pack_id
@@ -344,12 +458,12 @@ export async function answerGameQuestion(guildId: string, sessionId: string, use
     const questionId = session.question_ids[session.current_round];
     if (!questionId) throw new Error("The current round has no question.");
     const teamName = await ensureGameParticipant(client, sessionId, userId, session.game_mode);
-    const questionResult = await client.query("SELECT correct_answer, accepted_answers, source_url FROM community_quiz_questions WHERE id = $1 AND status = 'approved'", [questionId]);
-    const question = questionResult.rows[0] as { correct_answer: string; accepted_answers: string[]; source_url: string } | undefined;
+    const questionResult = await client.query("SELECT correct_answer, accepted_answers, options, source_url FROM community_quiz_questions WHERE id = $1 AND status = 'approved'", [questionId]);
+    const question = questionResult.rows[0] as { correct_answer: string; accepted_answers: string[]; options: string[]; source_url: string } | undefined;
     if (!question) throw new Error("The current question is no longer available.");
     const existing = await client.query("SELECT 1 FROM community_game_answers WHERE session_id = $1 AND round_number = $2 AND user_id = $3", [sessionId, session.current_round, userId]);
     if (existing.rowCount) throw new Error("You have already answered this round.");
-    const correct = [question.correct_answer, ...(question.accepted_answers ?? [])].some(value => normalizeAnswer(value) === normalizeAnswer(answer));
+    const correct = resolveQuizAnswer(answer, question.correct_answer, question.accepted_answers ?? [], question.options ?? []);
     await client.query("INSERT INTO community_game_answers (session_id, round_number, question_id, user_id, answer, is_correct) VALUES ($1, $2, $3, $4, $5, $6)", [sessionId, session.current_round, questionId, userId, cleanText(answer, 200), correct]);
     return { correct, round: session.current_round + 1, total: session.question_ids.length, sourceUrl: question.source_url, finished: false, teamName };
   });
