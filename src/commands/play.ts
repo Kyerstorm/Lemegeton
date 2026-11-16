@@ -828,12 +828,18 @@ export class PlayCommand implements FeatureCommand {
       await interaction.reply({ content: "Choose an approved pack using the game panel or provide pack_id.", flags: MessageFlags.Ephemeral });
       return;
     }
-    const session = await startGame(interaction.guildId!, interaction.channelId, interaction.user.id, packId, rounds, gameMode);
-    const question = await getCurrentGameQuestion(interaction.guildId!, session.id);
-    if (!question) throw new Error("The first approved question could not be loaded.");
     const channel = interaction.channel;
     if (!channel?.isTextBased() || !("send" in channel)) {
       throw new Error("Start the game from a text channel so the server can participate.");
+    }
+    const session = await startGame(interaction.guildId!, interaction.channelId, interaction.user.id, packId, rounds, gameMode);
+    let question: Awaited<ReturnType<typeof getCurrentGameQuestion>>;
+    try {
+      question = await getCurrentGameQuestion(interaction.guildId!, session.id);
+      if (!question) throw new Error("The first approved question could not be loaded.");
+    } catch (error) {
+      await cancelGameSession(interaction.guildId!, session.id, interaction.user.id).catch(() => false);
+      throw error;
     }
     let message: Awaited<ReturnType<TextChannel["send"]>>;
     try {
