@@ -1696,9 +1696,12 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
       return { provider: record.provider, category: record.category, id: item.id, url: item.sourceUrl,
         fields: { description:item.summary, releaseDate:item.releaseDate, creators:[...item.developers,...item.publishers], genres:item.genres, image:item.image, rating:item.rating, aggregatedRating:item.aggregatedRating } };
     }
-    const item = record.item;
-    return { provider: record.provider, category: record.category, id: item.appId, url:this.recordUrl(record),
-      fields: { description:item.shortDescription, releaseDate:item.releaseDate, creators:[...item.developers,...item.publishers], genres:item.genres, image:item.headerImage } };
+    if (record.provider === "Steam") {
+      const item = record.item;
+      return { provider: record.provider, category: record.category, id: item.appId, url:this.recordUrl(record),
+        fields: { description:item.shortDescription, releaseDate:item.releaseDate, creators:[...item.developers,...item.publishers], genres:item.genres, image:item.headerImage } };
+    }
+    throw new Error("Unsupported metadata source provider.");
   }
 
   private async metadataSourcesAndRespond(
