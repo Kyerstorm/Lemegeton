@@ -23,6 +23,8 @@ import {
   addQuizQuestion,
   advanceGame,
   answerGameQuestion,
+  bulkReviewQuizQuestions,
+  cancelGameSession,
   createQuizPack,
   getCurrentGameQuestion,
   getQuizQuestionForEditing,
@@ -30,6 +32,7 @@ import {
   editQuizQuestion,
   getGameLeaderboard,
   getGameSession,
+  listActiveGameSessions,
   revealGameClue,
   joinGame,
   listQuizPacks,
@@ -37,9 +40,11 @@ import {
   reviewQuizPack,
   reviewQuizQuestion,
   startGame,
+  updateQuizPack,
   type GameMode,
   type GameLeaderboardEntry,
   type EditableQuizQuestion,
+  type QuizPackSummary,
 } from "../../helpers/runtime/games.js";
 import { query } from "../../database.js";
 import { isGuildManager, isValidHttpsUrl, safeDisplay } from "../../helpers/security/security.js";
@@ -63,10 +68,13 @@ function playHome(): { embeds: EmbedBuilder[]; components: ActionRowBuilder<Butt
         new ButtonBuilder().setCustomId("play:start").setLabel("Start a game").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId("play:packs").setLabel("Browse packs").setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId("play:review").setLabel("Review queue").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId("play:manage-packs").setLabel("Manage packs").setStyle(ButtonStyle.Secondary),
       ),
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId("play:start-team").setLabel("Competitive teams").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId("play:start-coop").setLabel("Co-op game").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId("play:catalogue").setLabel("Game catalogue").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId("play:active-sessions").setLabel("Active sessions").setStyle(ButtonStyle.Secondary),
       ),
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId("play:challenges").setLabel("Challenge Centre").setStyle(ButtonStyle.Secondary),
@@ -89,6 +97,22 @@ function packModal(): ModalBuilder {
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder().setCustomId("mode").setLabel("Mode: trivia, guessing, mystery, challenge or puzzle").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(24).setValue("trivia"),
+      ),
+    );
+}
+
+function packEditModal(pack: QuizPackSummary): ModalBuilder {
+  return new ModalBuilder()
+    .setCustomId("play:edit-pack:" + pack.id)
+    .setTitle("Curate question pack")
+    .addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("title").setLabel("Pack title").setStyle(TextInputStyle.Short)
+          .setRequired(true).setMaxLength(160).setValue(pack.title.slice(0, 160)),
+      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("description").setLabel("Pack description").setStyle(TextInputStyle.Paragraph)
+          .setRequired(false).setMaxLength(1_000).setValue(pack.description.slice(0, 1_000)),
       ),
     );
 }
@@ -124,21 +148,42 @@ function answerModal(sessionId: string): ModalBuilder {
     .setCustomId(`play:answer:${sessionId}`)
     .setTitle("Submit your answer")
     .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder().setCustomId("answer").setLabel("Your answer").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(200),
+      new TextInputBuilder().setCustomId("answer").setLabel("Your answer or choice number (1–4)").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(200),
     ));
 }
 
-function questionEmbed(title: string, question: string, sourceUrl: string, round: number, total: number, difficulty = "standard"): EmbedBuilder {
+function questionEmbed(
+  title: string,
+  question: string,
+  sourceUrl: string,
+  round: number,
+  total: number,
+  difficulty = "standard",
+  options: string[] = [],
+  mode = "trivia",
+): EmbedBuilder {
+  const fields = [
+    { name: "Round", value: `${round} / ${total}`, inline: true },
+    { name: "Source", value: `[Open provider source](${sourceUrl})`, inline: true },
+    { name: "Difficulty", value: difficulty.toUpperCase(), inline: true },
+    ...(options.length ? [{
+      name: "Choices",
+      value: options.map((option, index) => `${index + 1}. ${safeDisplay(option, 140)}`).join("\n").slice(0, 1_000),
+      inline: false,
+    }] : []),
+  ];
   return new EmbedBuilder()
     .setColor(0x5865f2)
     .setTitle(title)
     .setDescription(question)
-    .addFields(
-      { name: "Round", value: `${round} / ${total}`, inline: true },
-      { name: "Source", value: `[Open provider source](${sourceUrl})`, inline: true },
-      { name: "Difficulty", value: difficulty.toUpperCase(), inline: true },
-    )
-    .setFooter({ text: "Answers are private until submitted · One answer per player per round" });
+    .addFields(fields)
+    .setFooter({
+      text: mode === "mystery"
+        ? "Mystery round · Category-labelled clue layers · Answers are private"
+        : mode === "guessing"
+          ? "Guessing round · Identify the hidden media from clues · Answers are private"
+          : "Answers are private until submitted · One answer per player per round",
+    });
 }
 
 function gameButtons(sessionId: string, packMode: string = "trivia"): ActionRowBuilder<ButtonBuilder>[] {
@@ -179,6 +224,10 @@ export class PlayCommand implements FeatureCommand {
       { name: "Leaderboard", value: "leaderboard" },
       { name: "Edit question", value: "edit-question" },
       { name: "Question history", value: "question-history" },
+      { name: "Game catalogue", value: "catalogue" },
+      { name: "Active game sessions", value: "active-sessions" },
+      { name: "Resume game session", value: "resume" },
+      { name: "Manage question packs", value: "manage-packs" },
     ))
     .addStringOption((option) => option.setName("pack_id").setDescription("Question pack ID"))
     .addStringOption((option) => option.setName("session_id").setDescription("Game session ID"))
@@ -197,6 +246,7 @@ export class PlayCommand implements FeatureCommand {
     .addStringOption((option) => option.setName("answer_text").setDescription("Your answer").setMaxLength(200))
     .addStringOption((option) => option.setName("correct_answer").setDescription("Correct answer").setMaxLength(200))
     .addStringOption((option) => option.setName("accepted_answers").setDescription("Accepted alternatives").setMaxLength(500))
+    .addStringOption((option) => option.setName("choices").setDescription("Two to four multiple-choice options, separated by |").setMaxLength(600))
     .addStringOption((option) => option.setName("source_url").setDescription("HTTPS source link").setMaxLength(1_000))
     .addStringOption((option) => option.setName("media_title").setDescription("Associated media title").setMaxLength(200))
     .addStringOption((option) => option.setName("clues").setDescription("Layered clues (category: clue, one per line)").setMaxLength(1_000))
@@ -236,7 +286,8 @@ export class PlayCommand implements FeatureCommand {
             interaction.guildId, packId, interaction.user.id, question, answer,
             (interaction.options.getString("accepted_answers") ?? "").split(",").map(value => value.trim()).filter(Boolean),
             source, interaction.options.getString("media_title") ?? undefined,
-            [], interaction.options.getString("difficulty") ?? "standard",
+            (interaction.options.getString("choices") ?? "").split(/\r?\n|\|/).map(value => value.trim()).filter(Boolean),
+            interaction.options.getString("difficulty") ?? "standard",
             (interaction.options.getString("clues") ?? "").split(/\r?\n|\|/).map(value => value.trim()).filter(Boolean),
           );
           await interaction.reply({ content: `Question #${id} has been submitted for review. Source attribution is saved with it.`, flags: MessageFlags.Ephemeral });
@@ -264,6 +315,10 @@ export class PlayCommand implements FeatureCommand {
           return;
         }
         case "packs": await this.showPacks(interaction); return;
+        case "catalogue": await this.showCatalogue(interaction); return;
+        case "active-sessions": await this.showActiveSessions(interaction); return;
+        case "resume": await this.resumeSession(interaction, interaction.options.getString("session_id")); return;
+        case "manage-packs": await this.managePacks(interaction); return;
         case "challenge-centre": await this.showPacks(interaction, "challenge"); return;
         case "puzzle-room": await this.showPacks(interaction, "puzzle"); return;
         case "start": await this.start(interaction, interaction.options.getString("pack_id"), interaction.options.getInteger("rounds") ?? 5, (interaction.options.getString("game_mode") ?? "individual") as GameMode); return;
@@ -327,6 +382,18 @@ export class PlayCommand implements FeatureCommand {
       await this.showPacks(interaction);
       return true;
     }
+    if (action === "catalogue") {
+      await this.showCatalogue(interaction);
+      return true;
+    }
+    if (action === "active-sessions") {
+      await this.showActiveSessions(interaction);
+      return true;
+    }
+    if (action === "manage-packs") {
+      await this.managePacks(interaction);
+      return true;
+    }
     if (action === "challenges") {
       await this.showPacks(interaction, "challenge");
       return true;
@@ -341,6 +408,19 @@ export class PlayCommand implements FeatureCommand {
     }
     if (action === "join" && sessionId) {
       await this.join(interaction, sessionId);
+      return true;
+    }
+    if (action === "resume-session" && sessionId) {
+      await this.resumeSession(interaction, sessionId);
+      return true;
+    }
+    if (action === "edit-pack" && sessionId) {
+      const pack = (await listQuizPacks(interaction.guildId, "all")).find(item => item.id === sessionId);
+      if (!pack || (pack.creator_id !== interaction.user.id && !isGuildManager(interaction))) {
+        await interaction.reply({ content: "Only the pack contributor or a server manager can curate this pack.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      await interaction.showModal(packEditModal(pack));
       return true;
     }
     if (action === "answer" && sessionId) {
@@ -414,6 +494,33 @@ export class PlayCommand implements FeatureCommand {
       await this.start(interaction, selected, 5, gameMode === "teams" || gameMode === "cooperative" ? gameMode : "individual");
       return true;
     }
+    if (action === "resume-session") {
+      await this.resumeSession(interaction, selected);
+      return true;
+    }
+    if (action === "edit-pack") {
+      const pack = (await listQuizPacks(interaction.guildId, "all")).find(item => item.id === selected);
+      if (!pack || (pack.creator_id !== interaction.user.id && !isGuildManager(interaction))) {
+        await interaction.reply({ content: "Only the pack contributor or a server manager can curate this pack.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      await interaction.showModal(packEditModal(pack));
+      return true;
+    }
+    if (action === "bulk-question-review") {
+      if (!isGuildManager(interaction)) {
+        await interaction.reply({ content: "Manage Server permission is required to review question submissions.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      const decisions = interaction.values.map(value => {
+        const match = /^(approve|reject):(\d{1,20})$/.exec(value);
+        if (!match) throw new Error("The bulk review selection is invalid.");
+        return { id: match[2]!, approve: match[1] === "approve" };
+      });
+      const reviewed = await bulkReviewQuizQuestions(interaction.guildId, interaction.user.id, decisions);
+      await interaction.reply({ content: `Bulk review completed for ${reviewed} question(s).`, flags: MessageFlags.Ephemeral });
+      return true;
+    }
     return false;
   }
 
@@ -429,6 +536,18 @@ export class PlayCommand implements FeatureCommand {
           interaction.fields.getTextInputValue("description"),
           interaction.fields.getTextInputValue("mode"),
         );
+        return true;
+      }
+      if (action === "edit-pack" && sessionId) {
+        await updateQuizPack(
+          interaction.guildId,
+          sessionId,
+          interaction.user.id,
+          isGuildManager(interaction),
+          interaction.fields.getTextInputValue("title"),
+          interaction.fields.getTextInputValue("description"),
+        );
+        await interaction.reply({ content: `Question pack #${sessionId} was updated.`, flags: MessageFlags.Ephemeral });
         return true;
       }
       if (action === "add-question" && sessionId) {
@@ -493,7 +612,115 @@ export class PlayCommand implements FeatureCommand {
     await interaction.reply({ content: `Question pack #${id} is pending moderator review. Once approved, add source-backed questions to it.`, flags: MessageFlags.Ephemeral });
   }
 
-  private async showPacks(interaction: ChatInputCommandInteraction | ButtonInteraction, mode?: QuizPackMode): Promise<void> {
+  private async showCatalogue(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
+    const packs = await listQuizPacks(interaction.guildId!, "approved");
+    const modes: QuizPackMode[] = ["trivia", "guessing", "mystery", "challenge", "puzzle"];
+    const labels: Record<QuizPackMode, string> = {
+      trivia: "Trivia · source-backed questions and answers",
+      guessing: "Guessing · identify a hidden title or media entity from clues",
+      mystery: "Mystery · layered evidence from multiple media categories",
+      challenge: "Challenge · themed media tasks",
+      puzzle: "Puzzle · word, relationship and chronology problems",
+    };
+    const fields = modes.map(mode => {
+      const matching = packs.filter(pack => pack.mode === mode);
+      return {
+        name: labels[mode],
+        value: matching.length ? matching.slice(0, 5).map(pack => `#${pack.id} · ${safeDisplay(pack.title)} · ${pack.question_count} ready`).join("\n") : "No approved packs yet",
+        inline: false,
+      };
+    });
+    await interaction.reply({
+      embeds: [homeEmbed("Game Catalogue", "Choose a mode, browse its approved packs, then launch a solo, competitive-team or cooperative session.", fields)],
+      flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] },
+    });
+  }
+
+  private async showActiveSessions(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
+    const sessions = await listActiveGameSessions(interaction.guildId!);
+    if (!sessions.length) {
+      await interaction.reply({ content: "There are no active game sessions in this server.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const select = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder().setCustomId("play:resume-session").setPlaceholder("Choose a session to resume")
+        .addOptions(sessions.slice(0, 25).map(session => ({
+          label: `#${session.id} · ${session.title}`.slice(0, 100),
+          description: `${session.mode.toUpperCase()} · Round ${session.current_round + 1}/${session.question_count} · ${session.participant_count} players`.slice(0, 100),
+          value: session.id,
+        }))),
+    );
+    await interaction.reply({
+      embeds: [homeEmbed("Active Game Sessions", "Sessions are guild-scoped and persist across bot restarts. Only the host can restore the public game message.", sessions.slice(0, 10).map(session => ({
+        name: `#${session.id} · ${safeDisplay(session.title)}`,
+        value: `${session.mode.toUpperCase()} · ${session.game_mode} · Round ${session.current_round + 1}/${session.question_count} · <#${session.channel_id}> · <@${session.host_id}>`,
+        inline: false,
+      })))],
+      components: [select], flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] },
+    });
+  }
+
+  private async resumeSession(
+    interaction: ChatInputCommandInteraction | ButtonInteraction | StringSelectMenuInteraction,
+    sessionId: string | null,
+  ): Promise<void> {
+    if (!sessionId) throw new Error("Choose an active session to resume.");
+    const session = await getGameSession(interaction.guildId!, sessionId);
+    if (!session || session.status !== "active") throw new Error("That active game was not found in this server.");
+    if (session.host_id !== interaction.user.id) throw new Error("Only the game host can resume the public game session.");
+    const guild = interaction.guild ?? await interaction.client.guilds.fetch(interaction.guildId!);
+    const channel = await guild.channels.fetch(session.channel_id).catch(() => null);
+    if (!channel || !channel.isTextBased() || !("send" in channel) || !("messages" in channel)
+      || ("guildId" in channel && channel.guildId !== interaction.guildId)) {
+      throw new Error("The game's original server channel is unavailable.");
+    }
+    const question = await getCurrentGameQuestion(interaction.guildId!, session.id);
+    if (!question) throw new Error("The current approved game question is no longer available.");
+    const payload = {
+      embeds: [questionEmbed(
+        `${emoji.game} ${session.title}${session.game_mode === "teams" ? " · Team battle" : session.game_mode === "cooperative" ? " · Co-op" : ""}`,
+        question.question, question.source_url, session.current_round + 1, session.question_ids.length,
+        question.difficulty, question.options ?? [], session.pack_mode,
+      )],
+      components: gameButtons(session.id, session.pack_mode),
+      allowedMentions: { parse: [] },
+    };
+    const textChannel = channel as TextChannel;
+    const message = session.message_id ? await textChannel.messages.fetch(session.message_id).catch(() => null) : null;
+    if (message) await message.edit(payload);
+    else {
+      const replacement = await textChannel.send(payload);
+      await query("UPDATE community_game_sessions SET message_id=$1 WHERE id=$2 AND guild_id=$3 AND status='active'", [replacement.id, session.id, interaction.guildId]);
+    }
+    await interaction.reply({ content: `Game session #${session.id} was restored in <#${session.channel_id}>.`, flags: MessageFlags.Ephemeral });
+  }
+
+  private async managePacks(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
+    const packs = (await listQuizPacks(interaction.guildId!, "all"))
+      .filter(pack => pack.status !== "rejected" && (pack.creator_id === interaction.user.id || isGuildManager(interaction)));
+    if (!packs.length) {
+      await interaction.reply({ content: "You have no editable question packs in this server.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const select = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder().setCustomId("play:edit-pack").setPlaceholder("Choose a pack to curate")
+        .addOptions(packs.slice(0, 25).map(pack => ({
+          label: pack.title.slice(0, 100),
+          description: pack.mode.toUpperCase() + " · " + pack.status + " · " + pack.question_count + " approved",
+          value: pack.id,
+        }))),
+    );
+    await interaction.reply({
+      embeds: [homeEmbed("Quiz Pack Studio", "Edit the title and description of packs you contributed. Server managers can curate any pending or approved pack.", packs.slice(0, 10).map(pack => ({
+        name: `#${pack.id} · ${safeDisplay(pack.title)}`,
+        value: `${pack.mode.toUpperCase()} · ${pack.status} · ${pack.question_count} approved · ${pack.pending_count} pending\n${safeDisplay(pack.description, 160) || "No description"}`,
+        inline: false,
+      })))],
+      components: [select], flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] },
+    });
+  }
+
+  private async showPacks(interaction: ChatInputCommandInteraction | ButtonInteraction, mode?: QuizPackMode): Promise<void>
     const allPacks = await listQuizPacks(interaction.guildId!, "approved");
     const packs = mode ? allPacks.filter(pack => pack.mode === mode) : allPacks;
     if (!packs.length) {
@@ -526,7 +753,7 @@ export class PlayCommand implements FeatureCommand {
     ]);
     const firstPack = packs[0];
     const firstQuestion = questions[0];
-    const components: ActionRowBuilder<ButtonBuilder>[] = [];
+    const components: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>> = [];
     if (firstPack) {
       components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId(`play:approve-pack:${firstPack.id}`).setLabel(`Approve pack #${firstPack.id}`).setStyle(ButtonStyle.Success),
@@ -541,13 +768,35 @@ export class PlayCommand implements FeatureCommand {
     }
     const fields = [
       ...packs.map((pack) => ({ name: `Pack #${pack.id} · ${safeDisplay(pack.title)}`, value: safeDisplay(pack.description, 150), inline: false })),
-      ...questions.map((question) => ({ name: `Question #${question.id} · ${safeDisplay(question.title)}`, value: `${safeDisplay(question.question, 250)}\n[Source](${question.source_url})`, inline: false })),
+      ...questions.map((question) => ({ name: `Question #${question.id} · ${safeDisplay(question.title)}`, value: `${safeDisplay(question.question, 250)}\n${question.mode.toUpperCase()} · ${question.difficulty.toUpperCase()} · [Source](${question.source_url})`, inline: false })),
     ];
+    if (questions.length) {
+      const decisions = questions.flatMap(question => [
+        { label: "Approve · " + safeDisplay(question.title, 75), description: "#" + question.id + " · " + question.mode, value: "approve:" + question.id },
+        { label: "Reject · " + safeDisplay(question.title, 75), description: "#" + question.id + " · " + question.mode, value: "reject:" + question.id },
+      ]).slice(0, 24);
+      components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder().setCustomId("play:bulk-question-review")
+          .setPlaceholder("Select one or more question review decisions")
+          .setMinValues(1).setMaxValues(decisions.length).addOptions(decisions),
+      ));
+    }
+    const editable = (await listQuizPacks(interaction.guildId, "all"))
+      .filter(pack => pack.status !== "rejected" && (pack.creator_id === interaction.user.id || isGuildManager(interaction)));
+    if (editable.length) {
+      components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder().setCustomId("play:edit-pack")
+          .setPlaceholder("Curate a pack's title and description")
+          .addOptions(editable.slice(0, 25).map(pack => ({
+            label: pack.title.slice(0, 100),
+            description: pack.mode.toUpperCase() + " · " + pack.status + " · " + pack.question_count + " approved",
+            value: pack.id,
+          }))),
+      ));
+    }
     await interaction.reply({
-      embeds: [homeEmbed("Game review queue", fields.length ? "Source-backed submissions awaiting review." : "There are no pending game submissions.", fields)],
-      components,
-      flags: MessageFlags.Ephemeral,
-      allowedMentions: { parse: [] },
+      embeds: [homeEmbed("Game review queue", fields.length ? "Review packs and make up to twelve source-backed question decisions at once. Bulk question decisions are applied atomically." : "There are no pending game submissions.", fields)],
+      components, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] },
     });
   }
 
@@ -586,12 +835,22 @@ export class PlayCommand implements FeatureCommand {
     if (!channel?.isTextBased() || !("send" in channel)) {
       throw new Error("Start the game from a text channel so the server can participate.");
     }
-    const message = await (channel as TextChannel).send({
-      embeds: [questionEmbed(`${emoji.game} ${session.title}${session.game_mode === "teams" ? " · Team battle" : session.game_mode === "cooperative" ? " · Co-op" : ""}`, question.question, question.source_url, 1, session.question_ids.length, question.difficulty)],
-      components: gameButtons(session.id, session.pack_mode),
-      allowedMentions: { parse: [] },
-    });
-    await query("UPDATE community_game_sessions SET message_id = $1 WHERE id = $2 AND guild_id = $3", [message.id, session.id, interaction.guildId]);
+    let message: Awaited<ReturnType<TextChannel["send"]>>;
+    try {
+      message = await (channel as TextChannel).send({
+        embeds: [questionEmbed(
+          `${emoji.game} ${session.title}${session.game_mode === "teams" ? " · Team battle" : session.game_mode === "cooperative" ? " · Co-op" : ""}`,
+          question.question, question.source_url, 1, session.question_ids.length, question.difficulty,
+          question.options ?? [], session.pack_mode,
+        )],
+        components: gameButtons(session.id, session.pack_mode),
+        allowedMentions: { parse: [] },
+      });
+      await query("UPDATE community_game_sessions SET message_id = $1 WHERE id = $2 AND guild_id = $3", [message.id, session.id, interaction.guildId]);
+    } catch (error) {
+      await cancelGameSession(interaction.guildId!, session.id, interaction.user.id).catch(() => false);
+      throw error;
+    }
     const notice = session.game_mode === "teams" ? " Players are balanced between Team A and Team B when they join." : session.game_mode === "cooperative" ? " Everyone contributes to the Community Team score." : "";
     await interaction.reply({ content: `Game session #${session.id} started.${notice} Share the channel message with your players.`, flags: MessageFlags.Ephemeral });
   }
@@ -668,6 +927,8 @@ export class PlayCommand implements FeatureCommand {
         result.round,
         result.total,
         nextQuestion.difficulty,
+        nextQuestion.options ?? [],
+        session.pack_mode,
       )],
       components: gameButtons(sessionId, session.pack_mode),
     });
