@@ -1,5 +1,6 @@
 import {
   ActionRowBuilder,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
   ChannelSelectMenuBuilder,
@@ -78,6 +79,7 @@ import { deleteArchiveAsset, resolveLegacyArchiveAttachmentUrl, signedArchiveAss
 import { cleanText, isGuildManager, isValidHttpsUrl, safeDisplay } from "../../helpers/security/security.js";
 import { logger } from "../../helpers/runtime/logger.js";
 import { createArchiveSpotlight, listArchiveSpotlights, cancelArchiveSpotlight, createArchiveCollectionSpotlight, listArchiveCollectionSpotlights, cancelArchiveCollectionSpotlight, listArchiveCategoryIndex } from "../../helpers/archive/archive-curation.js";
+import { renderAtlasGraphSnapshot, renderAtlasGraphSvgSnapshot } from "../../helpers/media/atlas-renderer.js";
 
 const ACTIONS = [
   { name: "Browse approved entries", value: "browse" },
@@ -1489,11 +1491,42 @@ export class ArchiveCommand implements FeatureCommand {
 
   private async showCollectionItems(interaction: ButtonInteraction | StringSelectMenuInteraction, collectionId: string): Promise<void> {
     if (!interaction.guildId) return;
-    const items = await getCollectionItems(interaction.guildId, collectionId);
-    if (!items.length) {
+    const [collections, items] = await Promise.all([
+      listArchiveCollections(interaction.guildId),
+      getCollectionItems(interaction.guildId, collectionId),
+    ]);
+    const collection = collections.find(item => item.id === collectionId);
+    if (!collection || !items.length) {
       await interaction.reply({ content: "This collection is empty or no longer has entries visible to you.", flags: MessageFlags.Ephemeral });
       return;
     }
+    const rootId = "archive-collection:" + collection.id;
+    const nodes = items.slice(0,25).map(entry => ({
+      id: "archive-entry:" + entry.id, title: entry.title,
+      category: "ARCHIVE_ENTRY" as const, url: entry.source_url, depth: 1,
+      sourceKind: "community" as const, sourceLabel: "Community Archive", relationType: "Contains",
+    }));
+    const graph = {
+      rootId,
+      nodes: [{ id: rootId, title: collection.title, category: "ARCHIVE_COLLECTION" as const, url: null, depth: 0 }, ...nodes],
+      edges: nodes.map(node => ({
+        from: rootId, to: node.id, relationType: "Contains",
+        sourceLabel: "Community Archive collection", sourceKind: "community" as const,
+      })),
+      directRelationships: nodes.map(node => ({
+        title: node.title, category: "ARCHIVE_ENTRY" as const, url: node.url,
+        relationType: "Contains", source: "Community Archive collection", sourceKind: "community" as const,
+      })),
+      truncated: items.length > 25,
+    };
+    const [png, svg] = await Promise.all([
+      renderAtlasGraphSnapshot(collection.title, "ARCHIVE_COLLECTION", graph),
+      renderAtlasGraphSvgSnapshot(collection.title, "ARCHIVE_COLLECTION", graph),
+    ]);
+    const graphJson = Buffer.from(JSON.stringify({
+      root: graph.nodes[0], nodes: graph.nodes, edges: graph.edges,
+      truncated: graph.truncated, generatedAt: new Date().toISOString(),
+    }, null, 2));
     const featureControls = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId("archive:collection-feature:" + collectionId + ":server")
@@ -1506,8 +1539,18 @@ export class ArchiveCommand implements FeatureCommand {
           .setStyle(ButtonStyle.Secondary),
       ] : []),
     );
+    const collectionEmbed = homeEmbed(
+      "Collection Knowledge Map · " + safeDisplay(collection.title, 170),
+      collection.description || "Permission-filtered approved entries in this Archive collection.",
+      [{ name: "Graph", value: graph.nodes.length + " nodes · " + graph.edges.length + " collection links" + (graph.truncated ? " · showing first 25 visible entries" : ""), inline: false }],
+    ).setImage("attachment://archive-collection-atlas.png");
     await interaction.reply({
-      embeds: items.slice(0, 5).map(entryEmbed),
+      embeds: [collectionEmbed, ...items.slice(0, 4).map(entryEmbed)],
+      files: [
+        new AttachmentBuilder(png, { name: "archive-collection-atlas.png" }),
+        new AttachmentBuilder(svg, { name: "archive-collection-atlas.svg" }),
+        new AttachmentBuilder(graphJson, { name: "archive-collection-atlas.json" }),
+      ],
       components: [featureControls],
       flags: MessageFlags.Ephemeral,
       allowedMentions: { parse: [] },

@@ -32,3 +32,10 @@ test("Atlas graph export handles a truncated graph without a path", async () => 
   const image = await renderAtlasGraphSnapshot("Root Media", "ANIME", { ...graph, truncated: true }, null);
   assert.deepEqual([...image.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
 });
+
+test("Atlas graph export also produces a reusable vector SVG", async () => {
+  const { renderAtlasGraphSvgSnapshot } = await import("../helpers/media/atlas-renderer.js");
+  const svg = await renderAtlasGraphSvgSnapshot("Root Media", "ANIME", graph, path);
+  assert.match(svg.toString("utf8"), /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
+  assert.match(svg.toString("utf8"), /Root Media/);
+});

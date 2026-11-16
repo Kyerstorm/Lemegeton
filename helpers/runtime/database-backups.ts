@@ -1,13 +1,14 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream, createWriteStream } from "node:fs";
+import { createReadStream, createWriteStream, readFileSync } from "node:fs";
+import { Client } from "pg";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import type { BotConfig } from "./config.js";
+import type { BotConfig, DatabaseConfig } from "./config.js";
 import { query, queryOne } from "../../database.js";
 
 export interface DatabaseBackupRecord {
@@ -19,6 +20,9 @@ export interface DatabaseBackupRecord {
   verification_error: string | null;
   created_at: Date;
   verified_at: Date | null;
+  rehearsal_status: "not_run" | "passed" | "failed";
+  rehearsal_error: string | null;
+  rehearsal_at: Date | null;
 }
 
 export function databaseBackupObjectKey(id: string, createdAt: Date): string {
@@ -32,10 +36,18 @@ export function databaseBackupObjectKey(id: string, createdAt: Date): string {
   return "database-backups/" + year + "/" + month + "/" + id + ".dump";
 }
 
+export function databaseRehearsalName(id: string): string {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+    throw new Error("A valid backup UUID is required for a restore rehearsal.");
+  }
+  return "lemegeton_rehearsal_" + randomUUID().replace(/-/g, "");
+}
+
 export async function listDatabaseBackups(limit = 5): Promise<DatabaseBackupRecord[]> {
   const boundedLimit = Math.max(1, Math.min(20, Math.floor(limit) || 5));
   return query<DatabaseBackupRecord>(
-    "SELECT id::text, object_key, sha256, size_bytes::text, status, verification_error, created_at, verified_at " +
+    "SELECT id::text, object_key, sha256, size_bytes::text, status, verification_error, created_at, verified_at, " +
+    "rehearsal_status, rehearsal_error, rehearsal_at " +
     "FROM bot_database_backups ORDER BY created_at DESC LIMIT $1",
     [boundedLimit],
   );
@@ -132,8 +144,8 @@ async function updateBackupStatus(
 
 async function getBackup(id: string): Promise<DatabaseBackupRecord> {
   const row = await queryOne<DatabaseBackupRecord>(
-    "SELECT id::text, object_key, sha256, size_bytes::text, status, verification_error, created_at, verified_at " +
-    "FROM bot_database_backups WHERE id = $1",
+    "SELECT id::text, object_key, sha256, size_bytes::text, status, verification_error, created_at, verified_at, " +
+    "rehearsal_status, rehearsal_error, rehearsal_at FROM bot_database_backups WHERE id = $1",
     [id],
   );
   if (!row) throw new Error("That database backup was not found.");
@@ -204,4 +216,127 @@ export async function verifyDatabaseBackup(id: string, config: BotConfig): Promi
     client?.destroy();
     await rm(directory, { recursive: true, force: true });
   }
+}
+
+
+function pgClient(config: DatabaseConfig, databaseName?: string): Client {
+  let connectionString = config.connectionString;
+  if (connectionString && databaseName) {
+    const parsed = new URL(connectionString);
+    parsed.pathname = "/" + encodeURIComponent(databaseName);
+    connectionString = parsed.toString();
+  }
+  return new Client({
+    ...(connectionString
+      ? { connectionString }
+      : { host: config.host, port: config.port, database: databaseName ?? config.database, user: config.user, password: config.password }),
+    ssl: config.ssl
+      ? { rejectUnauthorized: true, ...(config.sslCaFile ? { ca: readFileSync(config.sslCaFile, "utf8") } : {}) }
+      : false,
+    connectionTimeoutMillis: 10_000,
+    query_timeout: 30_000,
+    application_name: "lemegeton-backup-rehearsal",
+  });
+}
+
+function restoreProcessConfig(database: DatabaseConfig, databaseName: string): { args: string[]; env: NodeJS.ProcessEnv } {
+  let username = database.user;
+  let password = database.password;
+  if (database.connectionString) {
+    const dsn = new URL(database.connectionString);
+    username = decodeURIComponent(dsn.username || username);
+    password = decodeURIComponent(dsn.password || password);
+  }
+  return {
+    args: [
+      "--exit-on-error", "--single-transaction", "--no-owner", "--no-privileges",
+      "--host", database.host, "--port", String(database.port),
+      "--username", username, "--dbname", databaseName,
+    ],
+    env: {
+      ...process.env, PGPASSWORD: password,
+      PGSSLMODE: database.ssl ? "require" : "disable",
+      ...(database.sslCaFile ? { PGSSLROOTCERT: database.sslCaFile } : {}),
+    },
+  };
+}
+
+async function updateRehearsalStatus(id: string, status: "passed" | "failed", error?: string): Promise<void> {
+  await query(
+    "UPDATE bot_database_backups SET rehearsal_status = $2, rehearsal_error = $3, rehearsal_at = NOW() WHERE id = $1",
+    [id, status, error?.slice(0, 2_000) ?? null],
+  );
+}
+
+/** Restores only to a uniquely named temporary database on the separately configured rehearsal cluster. */
+export async function rehearseDatabaseBackup(
+  id: string,
+  config: BotConfig,
+): Promise<{ backupId: string; databaseName: string; tableCount: number }> {
+  const target = config.backupRehearsalDatabase;
+  if (!target) throw new Error("Set BACKUP_REHEARSAL_DATABASE_URL to a separate PostgreSQL host or port before running a restore rehearsal.");
+  const backup = await getBackup(id);
+  if (backup.status !== "verified") throw new Error("Only a verified backup can be used for a restore rehearsal.");
+  const temporaryDatabase = databaseRehearsalName(backup.id);
+  const directory = await mkdtemp(join(tmpdir(), "lemegeton-restore-rehearsal-"));
+  const archivePath = join(directory, backup.id + ".dump");
+  const size = Number(backup.size_bytes);
+  let storage: S3Client | undefined;
+  let admin: Client | undefined;
+  let restored: Client | undefined;
+  let failure: string | undefined;
+  let tableCount = 0;
+
+  try {
+    if (!Number.isSafeInteger(size) || size < 1) throw new Error("Backup size metadata is invalid.");
+    storage = storageClient(config);
+    const head = await storage.send(new HeadObjectCommand({ Bucket: config.s3Bucket!, Key: backup.object_key }));
+    if (head.ContentLength !== size) throw new Error("The stored S3 object size does not match backup metadata.");
+    await downloadObject(storage, config, backup.object_key, archivePath);
+    await verifyArchive(archivePath, backup.sha256, size);
+
+    admin = pgClient(target);
+    await admin.connect();
+    await admin.query("CREATE DATABASE \"" + temporaryDatabase + "\"");
+
+    const restore = restoreProcessConfig(target, temporaryDatabase);
+    await runProcess("pg_restore", [...restore.args, archivePath], restore.env);
+
+    restored = pgClient(target, temporaryDatabase);
+    await restored.connect();
+    const validation = await restored.query<{ table_count: number; core_table: string | null }>(
+      "SELECT COUNT(*)::INT AS table_count, " +
+      "(SELECT to_regclass('public.guild_retention_settings')::text) AS core_table " +
+      "FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'",
+    );
+    tableCount = validation.rows[0]?.table_count ?? 0;
+    if (tableCount < 1 || !validation.rows[0]?.core_table) {
+      throw new Error("The restored archive is missing the expected Lemegeton core schema.");
+    }
+  } catch (error) {
+    failure = error instanceof Error ? error.message : "Unknown restore rehearsal failure.";
+  } finally {
+    if (restored) await restored.end().catch(error => {
+      failure = [failure, "Could not close the temporary restore connection: " + (error instanceof Error ? error.message : "unknown error")].filter(Boolean).join(" ");
+    });
+    if (admin) {
+      await admin.query("DROP DATABASE IF EXISTS \"" + temporaryDatabase + "\"").catch(error => {
+        failure = [failure, "Temporary rehearsal database cleanup failed: " + (error instanceof Error ? error.message : "unknown error")].filter(Boolean).join(" ");
+      });
+    }
+    if (admin) await admin.end().catch(error => {
+      failure = [failure, "Could not close the rehearsal admin connection: " + (error instanceof Error ? error.message : "unknown error")].filter(Boolean).join(" ");
+    });
+    storage?.destroy();
+    await rm(directory, { recursive: true, force: true }).catch(error => {
+      failure = [failure, "Temporary restore files could not be removed: " + (error instanceof Error ? error.message : "unknown error")].filter(Boolean).join(" ");
+    });
+  }
+
+  if (failure) {
+    await updateRehearsalStatus(backup.id, "failed", failure).catch(() => undefined);
+    throw new Error(failure);
+  }
+  await updateRehearsalStatus(backup.id, "passed");
+  return { backupId: backup.id, databaseName: temporaryDatabase, tableCount };
 }

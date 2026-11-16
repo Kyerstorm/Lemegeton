@@ -38,6 +38,8 @@ import {
   findAtlasPath,
   findAtlasRelationships,
   normalizeAtlasTitle,
+  type AtlasGraphPath,
+  type AtlasGraphResult,
   recordAtlasRelationship,
   recordProviderRelationships,
 } from "../../helpers/integration/atlas.js";
@@ -49,7 +51,7 @@ import {
   MEDIA_LINK_RELATIONSHIPS,
   reviewMediaLinkSuggestion,
 } from "../../helpers/media/media-link-suggestions.js";
-import { renderAtlasGraphSnapshot } from "../../helpers/media/atlas-renderer.js";
+import { renderAtlasGraphSnapshot, renderAtlasGraphSvgSnapshot } from "../../helpers/media/atlas-renderer.js";
 import { logger } from "../../helpers/runtime/logger.js";
 import { emoji, loadingMessage } from "../../helpers/emoji.js";
 import { parseGridSourceUrls, parseGridTitles, renderMediaGrid, type MediaGridSource } from "../../helpers/media/media-grid.js";
@@ -59,6 +61,34 @@ import { auditMetadataSource, type MetadataSourceAuditInput } from "../../helper
 import { upcomingProviderReleases } from "../../helpers/community/community-sessions.js";
 import { rankCrossMediaCandidates, recommendationGenreLabels, type CrossMediaCandidate } from "../../helpers/media/cross-media-recommendations.js";
 
+
+
+async function atlasExportFiles(
+  title: string,
+  category: string,
+  graph: AtlasGraphResult,
+  fileBaseName: string,
+  path: AtlasGraphPath | null = null,
+): Promise<{ files: AttachmentBuilder[]; image: string }> {
+  const [png, svg] = await Promise.all([
+    renderAtlasGraphSnapshot(title, category, graph, path),
+    renderAtlasGraphSvgSnapshot(title, category, graph, path),
+  ]);
+  const root = graph.nodes.find(node => node.id === graph.rootId) ?? null;
+  const payload = Buffer.from(JSON.stringify({
+    root, nodes: graph.nodes, edges: graph.edges,
+    truncated: graph.truncated, highlightedPath: path?.edges ?? [],
+    generatedAt: new Date().toISOString(),
+  }, null, 2));
+  return {
+    files: [
+      new AttachmentBuilder(png, { name: fileBaseName + ".png" }),
+      new AttachmentBuilder(svg, { name: fileBaseName + ".svg" }),
+      new AttachmentBuilder(payload, { name: fileBaseName + ".json" }),
+    ],
+    image: "attachment://" + fileBaseName + ".png",
+  };
+}
 
 type Category = "all" | "anime" | "manga" | "light_novel" | "book" | "movie" | "tv" | "game";
 type DiscoverFilters = AniListSearchFilters;
@@ -814,6 +844,43 @@ export class DiscoverCommand implements FeatureCommand {
     if (!interaction.isStringSelectMenu()) return false;
     const [scope, action, categoryValue, region] = interaction.customId.split(":");
     if (scope !== "discover") return false;
+    if (action === "creator-map") {
+      const selectedName = interaction.values[0]?.trim();
+      if (!selectedName || !interaction.guildId) {
+        await interaction.reply({ content: "That creator selection is invalid.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      await interaction.deferUpdate();
+      const creators = await this.anilist.searchCreators(selectedName);
+      const creator = creators.find(item => normalizeAtlasTitle(item.name) === normalizeAtlasTitle(selectedName));
+      if (!creator) {
+        await interaction.editReply({ content: "AniList no longer returns that creator record.", embeds: [], components: [navigationButtons("discover",[{id:"home",label:"Back to discovery"}])] });
+        return true;
+      }
+      await recordProviderRelationships({
+        sourceTitle: creator.name, sourceCategory: "CREATOR", sourceUrl: creator.url,
+        sourceImageUrl: creator.image, sourceLabel: "AniList staff and creator credits",
+        relations: creator.media.map(item => ({
+          title: item.title, category: item.type === "ANIME" ? "ANIME" : "MANGA",
+          url: item.url, imageUrl: item.image, relationshipType: item.role,
+        })),
+      });
+      const graph = await findAtlasGraph(interaction.guildId, {
+        title: creator.name, category: "CREATOR", url: creator.url, imageUrl: creator.image,
+      }, { maxDepth: 3, maxNodes: 32, perNodeLimit: 12 });
+      const exported = await atlasExportFiles(creator.name, "CREATOR", graph, "creator-atlas");
+      const embed = homeEmbed("Creator Knowledge Map", creator.name, [
+        { name: "Connected graph", value: graph.nodes.length + " nodes · " + graph.edges.length + " credit connections" + (graph.truncated ? " · more results omitted by graph limits" : ""), inline: false },
+        { name: "Sources", value: "AniList creator credits · provider-attributed relationships", inline: false },
+      ]).setImage(exported.image).setURL(creator.url);
+      if (creator.image) embed.setThumbnail(creator.image);
+      await interaction.editReply({
+        content: "Creator Atlas · " + creator.name.slice(0,80), embeds: [embed], files: exported.files,
+        components: [navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],
+        allowedMentions: { parse: [] },
+      });
+      return true;
+    }
     if (action === "creator-category") {
       const selectedCategory = interaction.values[0];
       if (!selectedCategory || !CATEGORIES.some((item) => item.value === selectedCategory && item.value !== "all")) {
@@ -931,6 +998,10 @@ export class DiscoverCommand implements FeatureCommand {
         const release = credit.releaseDate ? " · " + credit.releaseDate : "";
         return "[" + safeDisplay(credit.title,120) + "](" + credit.sourceUrl + ") · " + roles + release;
       }).join("\n");
+      const graph = await findAtlasGraph(interaction.guildId, {
+        title: result.company.name, category: "CREATOR", url: result.company.sourceUrl, imageUrl: result.company.logo,
+      }, { maxDepth: 3, maxNodes: 32, perNodeLimit: 12 });
+      const exported = await atlasExportFiles(result.company.name, "CREATOR", graph, "developer-atlas");
       const fields = [
         { name: "IGDB company", value: "#" + result.company.id + " · [Open source record](" + result.company.sourceUrl + ")", inline: true },
         {
@@ -957,7 +1028,8 @@ export class DiscoverCommand implements FeatureCommand {
       if (result.company.logo) embed.setThumbnail(result.company.logo);
       await interaction.editReply({
         content:"Developer and publisher workography · " + safeDisplay(result.company.name,100),
-        embeds:[embed],
+        embeds:[embed.setImage(exported.image)],
+        files: exported.files,
         components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],
         allowedMentions:{parse:[]},
       });
@@ -985,6 +1057,12 @@ export class DiscoverCommand implements FeatureCommand {
           url:credit.sourceUrl,imageUrl:credit.image,relationshipType:credit.role??"cast or crew credit",
         })),
       });
+      const graph = await findAtlasGraph(interaction.guildId, {
+        title: personName, category: "CREATOR",
+        url: person?.sourceUrl ?? "https://www.themoviedb.org/person/" + personId,
+        imageUrl: person?.image,
+      }, { maxDepth: 3, maxNodes: 32, perNodeLimit: 12 });
+      const exported = await atlasExportFiles(personName, "CREATOR", graph, "tmdb-person-atlas");
       const description = credits.length
         ? credits.map((credit) => {
           const role = credit.role ? " · "+cleanText(credit.role,100) : "";
@@ -994,7 +1072,7 @@ export class DiscoverCommand implements FeatureCommand {
         : "TMDB did not return combined movie or television credits for this person.";
       const embed = homeEmbed("Credits · "+personName,description).setURL("https://www.themoviedb.org/person/"+personId)
         .setFooter({text:"TMDB · Cast and crew credits deduplicated by work"});
-      await interaction.editReply({content:"Person Credits · "+personName,embeds:[embed],components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],allowedMentions:{parse:[]}});
+      await interaction.editReply({content:"Person Credits · "+personName,embeds:[embed.setImage(exported.image)],files:exported.files,components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],allowedMentions:{parse:[]}});
       return true;
     }
     if (action === "tmdb-collection") {
@@ -1499,9 +1577,19 @@ export class DiscoverCommand implements FeatureCommand {
         ].filter(Boolean).join("\n"),
         [{name:"Google Books",value:"[Open edition]("+book.sourceUrl+")",inline:false}],
       ).setFooter({text:"Google Books · Author-attributed editions"}));
+      const graph = await findAtlasGraph(interaction.guildId, {
+        title: query.trim(), category: "CREATOR", url: authorUrl,
+      }, { maxDepth: 2, maxNodes: 24, perNodeLimit: 8 });
+      const files = graph.nodes.length > 1 ? await atlasExportFiles(query.trim(), "CREATOR", graph, "author-atlas") : null;
+      const graphEmbed = files
+        ? new EmbedBuilder().setColor(0x5865f2).setTitle("Author Knowledge Map")
+          .setDescription(graph.nodes.length + " nodes · " + graph.edges.length + " attributed-work connections")
+          .setImage(files.image)
+        : null;
       await interaction.editReply({
         content:embeds.length?"Author works · "+query.trim().slice(0,80):"Google Books returned no works attributed to that author.",
-        embeds,
+        embeds: [...embeds, ...(graphEmbed ? [graphEmbed] : [])].slice(0,10),
+        files: files?.files ?? [],
         components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],
         allowedMentions:{parse:[]},
       });
@@ -1569,7 +1657,22 @@ export class DiscoverCommand implements FeatureCommand {
       if(creator.image)embed.setThumbnail(creator.image);
       return embed;
     });
-    await interaction.editReply({content:`Creator Explorer · ${query.trim().slice(0,80)}`,embeds,components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],allowedMentions:{parse:[]}});
+    const creatorOptions = creators.slice(0,10)
+      .filter((creator,index,list) => list.findIndex(item => item.name === creator.name) === index)
+      .map(creator => ({
+        label: creator.name.slice(0,100),
+        description: creator.occupations.slice(0,2).join(" · ").slice(0,100) || "AniList creator record",
+        value: creator.name.slice(0,100),
+      }));
+    const components: Array<ActionRowBuilder<StringSelectMenuBuilder | ButtonBuilder>> = [];
+    if (creatorOptions.length) {
+      components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder().setCustomId("discover:creator-map")
+          .setPlaceholder("Export a creator relationship map").addOptions(creatorOptions),
+      ));
+    }
+    components.push(navigationButtons("discover",[{id:"home",label:"Back to discovery"}]));
+    await interaction.editReply({content:`Creator Explorer · ${query.trim().slice(0,80)}`,embeds,components,allowedMentions:{parse:[]}});
   }
 
   private async mediaGridAndRespond(
@@ -1998,30 +2101,18 @@ export class DiscoverCommand implements FeatureCommand {
       });
     }
     embed.setFooter({text:"Knowledge Atlas · Provider provenance and guild-scoped community links"});
-    const files: AttachmentBuilder[] = [];
+    let files: AttachmentBuilder[] = [];
     if (filteredGraph.nodes.length > 1 && filteredGraph.edges.length > 0) {
       try {
-        const image = await renderAtlasGraphSnapshot(title, mediaCategory, filteredGraph, path);
-        embed.setImage("attachment://knowledge-atlas.png");
-        files.push(new AttachmentBuilder(image, { name: "knowledge-atlas.png" }));
+        const exported = await atlasExportFiles(title, mediaCategory, filteredGraph, "knowledge-atlas", path);
+        embed.setImage(exported.image);
+        files = exported.files;
       } catch (error) {
-        logger.warn("Knowledge Atlas graph snapshot could not be rendered", {
+        logger.warn("Knowledge Atlas graph export could not be rendered", {
           reason: error instanceof Error ? error.message : "Unknown error",
         });
       }
     }
-    files.push(new AttachmentBuilder(Buffer.from(JSON.stringify({
-      root: { title, category: mediaCategory, url: this.recordUrl(first) },
-      nodes: filteredGraph.nodes,
-      edges: filteredGraph.edges.slice(0, 200),
-      filters: {
-        query: targetTitle && !targetCategory ? targetTitle : null,
-        relationship: relationshipFilter,
-        pathTarget: targetTitle && targetCategory ? { title: targetTitle, category: targetCategory, url: targetUrl } : null,
-      },
-      truncated: filteredGraph.truncated,
-      generatedAt: new Date().toISOString(),
-    }, null, 2)), { name: "knowledge-atlas.json" }));
     const dashboardUrl = new URL(this.config.customRolesPublicUrl);
     dashboardUrl.searchParams.set("atlas_title", title);
     dashboardUrl.searchParams.set("atlas_category", mediaCategory.toUpperCase());

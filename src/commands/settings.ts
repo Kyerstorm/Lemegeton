@@ -44,7 +44,8 @@ import {
 import { getGuildMediaRegion, setGuildMediaRegion } from "../../helpers/media/media-region.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
 import { query } from "../../database.js";
-import { missingChannelPermissions, providerConfigurationChecks } from "../../helpers/runtime/server-diagnostics.js";
+import { HeadBucketCommand, S3Client } from "@aws-sdk/client-s3";
+import { jobQueueChecks, missingChannelPermissions, providerConfigurationChecks } from "../../helpers/runtime/server-diagnostics.js";
 import {
   canConfigureGuildLeaveAction,
   getGuildRetentionSettings,
@@ -52,7 +53,7 @@ import {
   setGuildLeaveAction,
 } from "../../helpers/runtime/guild-retention.js";
 import { isBotModerator, isModeratorCommandGuild } from "../../helpers/commands/moderation.js";
-import { createDatabaseBackup, listDatabaseBackups, verifyDatabaseBackup } from "../../helpers/runtime/database-backups.js";
+import { createDatabaseBackup, listDatabaseBackups, rehearseDatabaseBackup, verifyDatabaseBackup } from "../../helpers/runtime/database-backups.js";
 import { listMediaAutomationRules, saveMediaAutomationRule, toggleMediaAutomationRule } from "../../helpers/community/community-automation.js";
 import {
   disableReleaseSchedule,
@@ -252,26 +253,34 @@ async function mediaAutomationPanel(guildId: string): Promise<{
   };
 }
 
-async function databaseBackupPanel(): Promise<{
+async function databaseBackupPanel(config: BotConfig): Promise<{
   embeds: EmbedBuilder[];
   components: SettingsRow[];
 }> {
   const backups = await listDatabaseBackups(5);
   const latest = backups[0];
+  const latestVerified = backups.find(backup => backup.status === "verified");
   const fields = backups.map(backup => ({
     name: backup.id,
     value: backup.status.toUpperCase() + " · " + backup.size_bytes + " bytes · " +
       "<t:" + Math.floor(new Date(backup.created_at).getTime() / 1000) + ":R>" +
-      (backup.verification_error ? " · " + backup.verification_error.slice(0, 180) : ""),
+      " · Restore rehearsal: " + backup.rehearsal_status.toUpperCase() +
+      (backup.rehearsal_at ? " · <t:" + Math.floor(new Date(backup.rehearsal_at).getTime() / 1000) + ":R>" : "") +
+      (backup.rehearsal_error ? " · " + backup.rehearsal_error.slice(0, 140) : "") +
+      (backup.verification_error ? " · " + backup.verification_error.slice(0, 140) : ""),
     inline: false,
   }));
   const controls = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("settings:backups:create").setLabel("Create backup").setStyle(ButtonStyle.Primary),
     ...(latest ? [new ButtonBuilder().setCustomId("settings:backups:verify:" + latest.id).setLabel("Verify latest").setStyle(ButtonStyle.Secondary)] : []),
+    ...(config.backupRehearsalDatabase && latestVerified
+      ? [new ButtonBuilder().setCustomId("settings:backups:rehearse:" + latestVerified.id).setLabel("Rehearse latest verified").setStyle(ButtonStyle.Success)]
+      : []),
   );
   return {
     embeds: [homeEmbed("Data & Backup Centre",
-      "Backups are written to the configured private S3 bucket. Verification checks the object digest and PostgreSQL archive catalogue; this panel does not restore over a live database.",
+      "Backups are stored in the configured private S3 bucket. Restore rehearsal requires a separate PostgreSQL endpoint and restores into a temporary database that is dropped after validation." +
+      (config.backupRehearsalDatabase ? "" : " Set BACKUP_REHEARSAL_DATABASE_URL to a different host or port to enable the rehearsal action."),
       fields.length ? fields : [{ name: "Backup history", value: "No backups have been created." , inline: false }])],
     components: [controls],
   };
@@ -438,6 +447,120 @@ async function retentionPanel(guildId: string): Promise<{
   return { embeds: [embed], components: [row] };
 }
 
+
+async function probeProviderEndpoint(
+  name: string,
+  url: string,
+  init?: RequestInit,
+): Promise<{ name: string; status: string; detail: string }> {
+  try {
+    const response = await fetch(url, { ...init, signal: AbortSignal.timeout(4_500) });
+    await response.body?.cancel().catch(() => undefined);
+    return {
+      name,
+      status: response.ok ? "Healthy" : "Needs attention",
+      detail: response.ok ? "Provider responded with HTTP " + response.status + "." : "Provider returned HTTP " + response.status + ".",
+    };
+  } catch {
+    return { name, status: "Needs attention", detail: "Provider did not respond within 4.5 seconds." };
+  }
+}
+
+async function probeIgdb(config: BotConfig): Promise<{ name: string; status: string; detail: string }> {
+  if (!config.igdbClientId || !config.igdbClientSecret) {
+    return { name: "IGDB", status: "Not configured", detail: "Client credentials are incomplete; live probe skipped." };
+  }
+  try {
+    const tokenUrl = new URL("https://id.twitch.tv/oauth2/token");
+    tokenUrl.searchParams.set("client_id", config.igdbClientId);
+    tokenUrl.searchParams.set("client_secret", config.igdbClientSecret);
+    tokenUrl.searchParams.set("grant_type", "client_credentials");
+    const tokenResponse = await fetch(tokenUrl, { method: "POST", signal: AbortSignal.timeout(4_500) });
+    if (!tokenResponse.ok) return { name: "IGDB", status: "Needs attention", detail: "Twitch authentication returned HTTP " + tokenResponse.status + "." };
+    const token = await tokenResponse.json() as { access_token?: unknown };
+    if (typeof token.access_token !== "string" || !token.access_token) {
+      return { name: "IGDB", status: "Needs attention", detail: "Twitch did not return an application access token." };
+    }
+    const response = await fetch("https://api.igdb.com/v4/games", {
+      method: "POST",
+      headers: {
+        "Client-ID": config.igdbClientId,
+        authorization: "Bearer " + token.access_token,
+        "content-type": "text/plain",
+      },
+      body: "fields id; limit 1;",
+      signal: AbortSignal.timeout(4_500),
+    });
+    await response.body?.cancel().catch(() => undefined);
+    return {
+      name: "IGDB",
+      status: response.ok ? "Healthy" : "Needs attention",
+      detail: response.ok ? "OAuth and games catalogue request succeeded." : "IGDB returned HTTP " + response.status + ".",
+    };
+  } catch {
+    return { name: "IGDB", status: "Needs attention", detail: "Twitch or IGDB did not respond within the probe limit." };
+  }
+}
+
+async function liveProviderChecks(config: BotConfig): Promise<Array<{ name: string; status: string; detail: string }>> {
+  const checks: Promise<{ name: string; status: string; detail: string }>[] = [
+    probeProviderEndpoint("AniList", config.anilistApiUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query: "query Diagnostics { Media(id: 1) { id } }" }),
+    }),
+    probeIgdb(config),
+  ];
+  if (config.tmdbBearerToken) {
+    checks.push(probeProviderEndpoint("TMDB", "https://api.themoviedb.org/3/configuration", {
+      headers: { authorization: "Bearer " + config.tmdbBearerToken, accept: "application/json" },
+    }));
+  } else {
+    checks.push(Promise.resolve({ name: "TMDB", status: "Not configured", detail: "No bearer credentials; live probe skipped." }));
+  }
+  if (config.googleBooksApiKey) {
+    const url = new URL("https://www.googleapis.com/books/v1/volumes");
+    url.searchParams.set("q", "subject:fiction");
+    url.searchParams.set("maxResults", "1");
+    url.searchParams.set("key", config.googleBooksApiKey);
+    checks.push(probeProviderEndpoint("Google Books", url.toString()));
+  } else {
+    checks.push(Promise.resolve({ name: "Google Books", status: "Not configured", detail: "No API key; live probe skipped." }));
+  }
+  if (config.steamApiKey) {
+    const url = new URL("https://api.steampowered.com/ISteamWebAPIUtil/GetSupportedAPIList/v1/");
+    url.searchParams.set("key", config.steamApiKey);
+    checks.push(probeProviderEndpoint("Steam", url.toString()));
+  } else {
+    checks.push(Promise.resolve({ name: "Steam", status: "Not configured", detail: "No API key; live probe skipped." }));
+  }
+  return Promise.all(checks);
+}
+
+async function probeAssetBucket(config: BotConfig): Promise<{ name: string; status: string; detail: string }> {
+  if (!config.s3Bucket) {
+    return { name: "Private asset bucket", status: "Not configured", detail: "No S3 bucket is configured." };
+  }
+  let client: S3Client | undefined;
+  try {
+    client = new S3Client({
+      region: config.s3Region,
+      ...(config.s3EndpointUrl ? { endpoint: config.s3EndpointUrl, forcePathStyle: true } : {}),
+      ...(config.s3AccessKeyId && config.s3SecretAccessKey
+        ? { credentials: { accessKeyId: config.s3AccessKeyId, secretAccessKey: config.s3SecretAccessKey } }
+        : {}),
+    });
+    await client.send(new HeadBucketCommand({ Bucket: config.s3Bucket }), {
+      abortSignal: AbortSignal.timeout(4_500),
+    });
+    return { name: "Private asset bucket", status: "Healthy", detail: "The configured bucket accepted a metadata access check." };
+  } catch {
+    return { name: "Private asset bucket", status: "Needs attention", detail: "The configured bucket could not be accessed. Check its endpoint and IAM/bucket permissions." };
+  } finally {
+    client?.destroy();
+  }
+}
+
 async function serverDiagnostics(
   guildId: string,
   currentChannelId: string,
@@ -524,15 +647,67 @@ async function serverDiagnostics(
     }
   }
 
+  const queueSnapshots = databaseHealthy ? await query<{
+    name: string;
+    due_count: number;
+    failed_count: number;
+    stale_count: number;
+  }>(
+    "SELECT 'Daily Drop deliveries'::text AS name, " +
+    "COUNT(*) FILTER (WHERE status = 'pending' AND next_attempt_at <= NOW())::INT AS due_count, " +
+    "COUNT(*) FILTER (WHERE status = 'failed')::INT AS failed_count, " +
+    "COUNT(*) FILTER (WHERE status = 'processing' AND claim_until < NOW())::INT AS stale_count " +
+    "FROM community_daily_deliveries WHERE guild_id = $1 " +
+    "UNION ALL SELECT 'Release digest deliveries', " +
+    "COUNT(*) FILTER (WHERE status = 'pending' AND next_attempt_at <= NOW())::INT, " +
+    "COUNT(*) FILTER (WHERE status = 'failed')::INT, " +
+    "COUNT(*) FILTER (WHERE status = 'processing' AND claim_until < NOW())::INT " +
+    "FROM community_release_deliveries WHERE guild_id = $1 " +
+    "UNION ALL SELECT 'Anime episode follow deliveries', " +
+    "COUNT(*) FILTER (WHERE status = 'pending' AND next_attempt_at <= NOW())::INT, " +
+    "COUNT(*) FILTER (WHERE status = 'failed')::INT, " +
+    "COUNT(*) FILTER (WHERE status = 'processing' AND claim_until < NOW())::INT " +
+    "FROM guild_media_follow_deliveries WHERE guild_id = $1 " +
+    "UNION ALL SELECT 'Media follow deliveries', " +
+    "COUNT(*) FILTER (WHERE status = 'pending' AND next_attempt_at <= NOW())::INT, " +
+    "COUNT(*) FILTER (WHERE status = 'failed')::INT, " +
+    "COUNT(*) FILTER (WHERE status = 'processing' AND claim_until < NOW())::INT " +
+    "FROM media_follow_deliveries WHERE guild_id = $1 " +
+    "UNION ALL SELECT 'Release notification deliveries', " +
+    "COUNT(*) FILTER (WHERE status = 'pending' AND next_attempt_at <= NOW())::INT, " +
+    "COUNT(*) FILTER (WHERE status = 'failed')::INT, " +
+    "COUNT(*) FILTER (WHERE status = 'processing' AND claim_until < NOW())::INT " +
+    "FROM media_release_notification_deliveries WHERE guild_id = $1 " +
+    "UNION ALL SELECT 'Media automation deliveries', " +
+    "COUNT(*) FILTER (WHERE status = 'pending' AND next_attempt_at <= NOW())::INT, " +
+    "COUNT(*) FILTER (WHERE status = 'failed')::INT, " +
+    "COUNT(*) FILTER (WHERE status = 'processing' AND claim_until < NOW())::INT " +
+    "FROM community_media_automation_deliveries WHERE guild_id = $1 " +
+    "UNION ALL SELECT 'Private asset cleanup'::text, " +
+    "COUNT(*) FILTER (WHERE q.next_attempt_at <= NOW())::INT, " +
+    "COUNT(*) FILTER (WHERE q.last_error IS NOT NULL)::INT, 0::INT " +
+    "FROM media_asset_cleanup_queue q JOIN media_assets a ON a.id = q.asset_id WHERE a.guild_id = $1",
+    [guildId],
+  ) : [];
+  results.push(...jobQueueChecks(queueSnapshots));
+  const [storageProbe, liveProviders] = await Promise.all([
+    probeAssetBucket(config),
+    liveProviderChecks(config),
+  ]);
+  results.push(storageProbe, ...liveProviders);
+
   const healthy = results.filter(item => item.status === "Healthy").length;
+  const backlog = results.filter(item => item.status === "Backlog").length;
   const attention = results.filter(item => item.status === "Needs attention").length;
+  const unconfigured = results.filter(item => item.status === "Not configured").length;
   embed.setDescription(
-    "**Healthy:** " + healthy + " · **Needs attention:** " + attention +
-    "\nChecks include PostgreSQL, the Discord gateway, this channel and configured v3 delivery channels.",
+    "**Healthy:** " + healthy + " · **Backlog:** " + backlog + " · **Needs attention:** " + attention +
+    (unconfigured ? " · **Not configured:** " + unconfigured : "") +
+    "\nChecks include PostgreSQL, Discord permissions, provider APIs, private storage and guild-scoped delivery queues.",
   );
   for (const result of results) {
     embed.addFields({
-      name: (result.status === "Healthy" ? "✓ " : emoji.error + " ") + result.name + " · " + result.status,
+      name: (result.status === "Healthy" ? "✓ " : result.status === "Backlog" ? "… " : result.status === "Not configured" ? "— " : emoji.error + " ") + result.name + " · " + result.status,
       value: result.detail,
       inline: false,
     });
@@ -551,14 +726,21 @@ async function serverDiagnostics(
     googleBooksKeyConfigured: Boolean(config.googleBooksApiKey),
     igdbCredentialsConfigured: Boolean(config.igdbClientId && config.igdbClientSecret),
     steamKeyConfigured: Boolean(config.steamApiKey),
-    objectStorageConfigured: Boolean(config.s3EndpointUrl && config.s3Bucket && config.s3AccessKeyId && config.s3SecretAccessKey),
+    objectStorageConfigured: Boolean(config.s3Bucket),
   });
-  embed.addFields({
-    name: "Provider and storage configuration · not live probes",
-    value: providerChecks.map(item => (item.configured ? "Configured" : "Not configured") + " · " + item.name + " — " + item.detail).join("\n").slice(0, 1024),
-    inline: false,
-  });
-  embed.setFooter({ text: "Read-only diagnostics · Provider rows show configuration only; asset-object and scheduled-job health are not probed" });
+  embed.addFields(
+    {
+      name: "Provider configuration",
+      value: providerChecks.map(item => (item.configured ? "Configured" : "Not configured") + " · " + item.name + " — " + item.detail).join("\n").slice(0, 1024),
+      inline: false,
+    },
+    {
+      name: "Live provider probes",
+      value: liveProviders.map(item => item.status + " · " + item.name + " — " + item.detail).join("\n").slice(0, 1024),
+      inline: false,
+    },
+  );
+  embed.setFooter({ text: "Read-only diagnostics · Provider probes are time-bounded; delivery counts are scoped to this server." });
   return embed;
 }
 
@@ -696,7 +878,7 @@ export class SettingsCommand implements FeatureCommand {
         await interaction.reply({ content: "The Data & Backup Centre is restricted to configured bot moderators in the operations server.", flags: MessageFlags.Ephemeral });
         return;
       }
-      await interaction.reply({ ...await databaseBackupPanel(), flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+      await interaction.reply({ ...await databaseBackupPanel(this.config), flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
       return;
     }
     if (action === "retention") {
@@ -819,6 +1001,17 @@ export class SettingsCommand implements FeatureCommand {
           await interaction.editReply("Backup " + backup.id + " passed digest and PostgreSQL archive-catalogue verification.");
         } catch (error) {
           await interaction.editReply(error instanceof Error ? error.message : "The database backup could not be verified.");
+        }
+        return true;
+      }
+      if (target === "rehearse" && recordId) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        try {
+          const result = await rehearseDatabaseBackup(recordId, this.config);
+          await interaction.editReply("Backup " + result.backupId + " restored and validated in temporary database " +
+            result.databaseName + " (" + result.tableCount + " application tables). The temporary database was dropped.");
+        } catch (error) {
+          await interaction.editReply(error instanceof Error ? error.message : "The database restore rehearsal failed.");
         }
         return true;
       }

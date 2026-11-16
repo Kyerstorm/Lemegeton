@@ -1009,6 +1009,9 @@ const schemaStatements = [
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     verified_at TIMESTAMPTZ
   )`,
+  "ALTER TABLE bot_database_backups ADD COLUMN IF NOT EXISTS rehearsal_status VARCHAR(16) NOT NULL DEFAULT 'not_run' CHECK (rehearsal_status IN ('not_run','passed','failed'))",
+  "ALTER TABLE bot_database_backups ADD COLUMN IF NOT EXISTS rehearsal_error TEXT",
+  "ALTER TABLE bot_database_backups ADD COLUMN IF NOT EXISTS rehearsal_at TIMESTAMPTZ",
   "CREATE INDEX IF NOT EXISTS bot_database_backups_created_idx ON bot_database_backups (created_at DESC)",
   `CREATE TABLE IF NOT EXISTS music_trackers (
     id TEXT NOT NULL,

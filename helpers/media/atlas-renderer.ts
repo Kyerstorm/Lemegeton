@@ -79,7 +79,7 @@ async function atlasImageData(value: string | null | undefined): Promise<string 
 }
 
 
-export async function renderAtlasGraphSnapshot(
+export async function renderAtlasGraphSvgSnapshot(
   title: string,
   category: MediaCategory | string,
   graph: AtlasGraphResult,
@@ -92,7 +92,15 @@ export async function renderAtlasGraphSnapshot(
   const cardWidth = 184;
   const cardHeight = 114;
   const root = graph.nodes.find(node => node.id === graph.rootId);
-  if (!root) return renderAtlasSnapshot(title, category, graph.directRelationships);
+  if (!root) {
+    const fallback = '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400">' +
+      '<rect width="100%" height="100%" fill="#080808"/>' +
+      text(48, 100, "LEMEGETON / KNOWLEDGE ATLAS", 14, "#999999", 600) +
+      text(48, 190, shorten(title, 60), 36, "#ffffff", 700) +
+      text(48, 232, category.replace(/_/g, " ").toUpperCase() + " · NO ROOT NODE", 13, "#999999", 500) +
+      '</svg>';
+    return Buffer.from(fallback);
+  }
   const imageNodes = graph.nodes.slice(0, 25);
   const imageEntries = await Promise.all(imageNodes.map(async node =>
     [node.id, await atlasImageData(node.imageUrl)] as const,
@@ -197,7 +205,17 @@ export async function renderAtlasGraphSnapshot(
     text(width - 58, height - 38, "PROVIDER · RECOMMENDATION · COMMUNITY", 10, "#777777", 500, "end"),
     "</svg>",
   ].join("");
-  return sharp(Buffer.from(svg)).png().toBuffer();
+  return Buffer.from(svg);
+}
+
+export async function renderAtlasGraphSnapshot(
+  title: string,
+  category: MediaCategory | string,
+  graph: AtlasGraphResult,
+  path: AtlasGraphPath | null = null,
+): Promise<Buffer> {
+  const svg = await renderAtlasGraphSvgSnapshot(title, category, graph, path);
+  return sharp(svg).png().toBuffer();
 }
 
 export async function renderAtlasSnapshot(

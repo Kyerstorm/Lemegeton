@@ -113,9 +113,9 @@ The catalogue names below are internal environments and navigation labels, not a
 
 | # | Environment | Build target | Status |
 |---:|---|---|---|
-| 48 | Graph Export Studio | Permission-filtered graph paths, creator/franchise maps and Archive collection graphs in useful image formats. | **Partially implemented** |
-| 49 | Feature Diagnostics | Restricted checks for Discord permissions, channels, providers, assets, jobs and relevant services. | **Partially implemented** |
-| 50 | Data & Backup Centre | Restricted private-S3 database backups, object digest verification and PostgreSQL archive-catalogue checks; isolated recovery rehearsal remains outstanding. | **Partially implemented** |
+| 48 | Graph Export Studio | Permission-filtered graph paths, creator/franchise and Archive collection maps exported as PNG, SVG and JSON. | **Completed** |
+| 49 | Feature Diagnostics | Restricted channel and permission checks, live provider probes, private asset-bucket access and guild-scoped delivery-queue health. | **Completed** |
+| 50 | Data & Backup Centre | Restricted private-S3 backups, digest and archive verification, plus an isolated PostgreSQL restore rehearsal using a separately configured target cluster. | **Completed** |
 
 ## 3. Media coverage strategy
 

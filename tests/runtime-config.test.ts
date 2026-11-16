@@ -290,3 +290,23 @@ test("keeps NLLB disabled in production even when non-commercial use is confirme
   }));
   assert.equal(nodeProduction.translation.nllbNonCommercialUseConfirmed, false);
 });
+
+test("accepts an isolated restore endpoint without changing primary database configuration", () => {
+  const config = loadConfig(environment({
+    DATABASE_URL: "postgresql://live:secret@db-live.example.test:5432/lemegeton",
+    BACKUP_REHEARSAL_DATABASE_URL: "postgresql://restore:secret@db-restore.example.test:5433/postgres",
+  }));
+  assert.equal(config.backupRehearsalDatabase?.host, "db-restore.example.test");
+  assert.equal(config.backupRehearsalDatabase?.port, 5433);
+  assert.equal(new URL(config.backupRehearsalDatabase!.connectionString!).pathname, "/postgres");
+  assert.equal(loadConfig(environment({
+    BACKUP_REHEARSAL_DATABASE_URL: "postgresql://restore:secret@127.0.0.1:5433/postgres",
+  })).backupRehearsalDatabase?.port, 5433);
+});
+
+test("rejects a restore rehearsal endpoint that uses the live database host and port", () => {
+  assert.throws(() => loadConfig(environment({
+    DATABASE_URL: "postgresql://live:secret@db.example.test:5432/lemegeton",
+    BACKUP_REHEARSAL_DATABASE_URL: "postgresql://restore:secret@db.example.test:5432/postgres",
+  })), /different PostgreSQL host or port/);
+});

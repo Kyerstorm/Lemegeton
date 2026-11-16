@@ -13,6 +13,17 @@ export function missingChannelPermissions(snapshot: ChannelPermissionSnapshot): 
 }
 
 
+export interface JobQueueSnapshot { name: string; due_count: number; failed_count: number; stale_count: number; }
+export interface JobQueueCheck { name: string; status: "Healthy" | "Backlog" | "Needs attention"; detail: string; }
+export function jobQueueChecks(snapshots: readonly JobQueueSnapshot[]): JobQueueCheck[] {
+  return snapshots.map(snapshot => {
+    const due = Math.max(0, Number(snapshot.due_count) || 0);
+    const failed = Math.max(0, Number(snapshot.failed_count) || 0);
+    const stale = Math.max(0, Number(snapshot.stale_count) || 0);
+    const status = failed > 0 || stale > 0 ? "Needs attention" : due > 0 ? "Backlog" : "Healthy";
+    return { name: snapshot.name, status, detail: [due + " due", failed + " failed", stale + " expired claims"].join(" · ") + "." };
+  });
+}
 export interface ProviderConfigurationSnapshot {
   aniListEndpointConfigured: boolean;
   tmdbCredentialsConfigured: boolean;
@@ -35,6 +46,6 @@ export function providerConfigurationChecks(snapshot: ProviderConfigurationSnaps
     { name: "Google Books", configured: snapshot.googleBooksKeyConfigured, detail: snapshot.googleBooksKeyConfigured ? "API key is configured." : "API key is not configured." },
     { name: "IGDB", configured: snapshot.igdbCredentialsConfigured, detail: snapshot.igdbCredentialsConfigured ? "Client credentials are configured." : "Client credentials are incomplete or missing." },
     { name: "Steam", configured: snapshot.steamKeyConfigured, detail: snapshot.steamKeyConfigured ? "API key is configured." : "API key is not configured." },
-    { name: "S3-compatible asset storage", configured: snapshot.objectStorageConfigured, detail: snapshot.objectStorageConfigured ? "Endpoint, bucket and credentials are configured." : "Complete endpoint, bucket and credential configuration is not present." },
+    { name: "S3-compatible asset storage", configured: snapshot.objectStorageConfigured, detail: snapshot.objectStorageConfigured ? "A storage bucket is configured; custom endpoints are optional for AWS S3." : "No storage bucket is configured." },
   ];
 }

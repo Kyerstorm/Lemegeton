@@ -17,7 +17,7 @@ export interface TranslationConfig {
 }
 export interface BotConfig {
  discordToken:string; applicationId:string; anilistApiUrl:string; anilistTimeoutMs:number; botFeedbackChannelId:string|null; archiveGlobalModeratorIds:string[];
- database:DatabaseConfig; translation:TranslationConfig; adminDiscordId:string|null; dashboardBridgeSecret:string; dashboardBridgeHost:string; dashboardBridgePort:number; dashboardAtlasBridgePort:number;
+ database:DatabaseConfig; backupRehearsalDatabase?:DatabaseConfig; translation:TranslationConfig; adminDiscordId:string|null; dashboardBridgeSecret:string; dashboardBridgeHost:string; dashboardBridgePort:number; dashboardAtlasBridgePort:number;
  customRolePickerEnabled:boolean; customRolePickerHost:string; customRolePickerPort:number;
  customRolesReconcileMinutes:number; customRolesMassArchiveThreshold:number; customRolePickerIdleTtl:number; customRolePickerMaxTtl:number; customRolesPublicUrl:string;
  customRolesTrustProxy:boolean; customRoleIconSourceMaxBytes:number; customRolesDebugPreviewEnhancedColors:boolean; customRolesDebugPreviewRoleIcons:boolean;
@@ -66,6 +66,16 @@ function databaseConfig(env:NodeJS.ProcessEnv):DatabaseConfig {
   primaryGuildId,
  };
 }
+function backupRehearsalDatabaseConfig(env:NodeJS.ProcessEnv, primary:DatabaseConfig):DatabaseConfig|undefined {
+ const raw=env.BACKUP_REHEARSAL_DATABASE_URL?.trim();
+ if(!raw)return undefined;
+ const backup=databaseConfig({...env,DATABASE_URL:raw,POSTGRES_DSN:undefined,POSTGRES_URL:undefined});
+ const host=(value:string)=>value.trim().toLowerCase();
+ if(host(primary.host)===host(backup.host)&&primary.port===backup.port) {
+  throw new Error("BACKUP_REHEARSAL_DATABASE_URL must use a different PostgreSQL host or port from the live DATABASE_URL.");
+ }
+ return backup;
+}
 function optionalTranslationEndpoint(env:NodeJS.ProcessEnv,key:string):string|null{
  const value=env[key]?.trim();
  if(!value)return null;
@@ -104,7 +114,9 @@ export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
  if(botFeedbackChannelId&&!/^\d{17,20}$/.test(botFeedbackChannelId))throw new Error("BOT_FEEDBACK_CHANNEL_ID must be a valid Discord channel ID.");
  const archiveGlobalModeratorIds=[...new Set((env.ARCHIVE_GLOBAL_MODERATOR_IDS??"").split(",").map(id=>id.trim()).filter(id=>/^\d{17,20}$/.test(id)))];
  if(adminDiscordId&&!/^\d{17,20}$/.test(adminDiscordId))throw new Error("ADMIN_DISCORD_ID must be a valid Discord user ID.");
- const database=databaseConfig(env);const translation=translationConfig(env);
+ const database=databaseConfig(env);
+ const backupRehearsalDatabase=backupRehearsalDatabaseConfig(env,database);
+ const translation=translationConfig(env);
  const s3EndpointUrl=env.S3_ENDPOINT_URL?.trim()||undefined;
  const s3Region=env.S3_REGION?.trim()||"us-east-1";
  const s3AccessKeyId=env.S3_ACCESS_KEY_ID?.trim()||undefined;
@@ -161,7 +173,7 @@ export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
  const youtubeApiKey=env.YOUTUBE_API_KEY?.trim()||undefined;
  const soundcloudClientId=env.SOUNDCLOUD_CLIENT_ID?.trim()||undefined;
  const musicPollIntervalMinutes=positive(env.MUSIC_POLL_INTERVAL_MINUTES,10,"MUSIC_POLL_INTERVAL_MINUTES");
- return {discordToken,applicationId,botModeratorGuildId,adminDiscordId,botFeedbackChannelId,archiveGlobalModeratorIds,database,translation,dashboardBridgeSecret,dashboardBridgeHost,dashboardBridgePort,dashboardAtlasBridgePort,anilistApiUrl:parsed.toString(),anilistTimeoutMs:positive(env.ANILIST_API_TIMEOUT,10,"ANILIST_API_TIMEOUT")*1000,
+ return {discordToken,applicationId,botModeratorGuildId,adminDiscordId,botFeedbackChannelId,archiveGlobalModeratorIds,database,...(backupRehearsalDatabase?{backupRehearsalDatabase}:{}),translation,dashboardBridgeSecret,dashboardBridgeHost,dashboardBridgePort,dashboardAtlasBridgePort,anilistApiUrl:parsed.toString(),anilistTimeoutMs:positive(env.ANILIST_API_TIMEOUT,10,"ANILIST_API_TIMEOUT")*1000,
  ...(env.TMDB_BEARER_TOKEN?.trim()?{tmdbBearerToken:env.TMDB_BEARER_TOKEN.trim()}:{}),
  ...(env.GOOGLE_BOOKS_API_KEY?.trim()?{googleBooksApiKey:env.GOOGLE_BOOKS_API_KEY.trim()}:{}),
  ...(env.IGDB_CLIENT_ID?.trim()?{igdbClientId:env.IGDB_CLIENT_ID.trim()}:{}),
