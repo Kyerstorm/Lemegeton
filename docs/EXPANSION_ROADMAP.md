@@ -104,8 +104,8 @@ The catalogue names below are internal environments and navigation labels, not a
 
 | # | Environment | Build target | Status |
 |---:|---|---|---|
-| 44 | Media Follow Centre | Subscriptions to supported titles, creators, franchises and categories for release/metadata changes. | **Partially implemented** |
-| 45 | Media Alert Centre | Episode, chapter, publication, film, TV, game and verified catalogue updates. | **Partially implemented** |
+| 44 | Media Follow Centre | Guild-scoped subscriptions to AniList titles, creators, franchise relationships and genres, with change snapshots and delivery. | **Completed** |
+| 45 | Media Alert Centre | Provider-dated anime, film, TV and game alerts, plus metadata-change alerts for followed manga and other AniList targets. Book publication schedules remain provider-limited. | **Partially implemented** |
 | 46 | Media Digest Studio | Daily/weekly media-only digests with category, entity, region, timezone and destination controls. | **Partially implemented** |
 | 47 | Media Automation Studio | Hourly provider-dated release rules with per-rule idempotency, safe announcements, optional spoiler-aware discussions and guild-scoped Atlas links. | **Completed** |
 

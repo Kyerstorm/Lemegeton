@@ -52,6 +52,18 @@ Run **/release-calendar** to open one interactive menu for the seven-day preview
 
 Currently supported sources are AniList airing schedules for anime, TMDB upcoming movie dates (using the configured region), and TMDB TV next-episode dates. The feed has a short in-memory cache and bounded request timeouts, and each entry names its source. Adult-flagged anime is excluded. The calendar does not claim to contain manga chapter or novel volume announcements because the configured providers do not expose a dependable, unified release schedule for those categories.
 
+## Media Follow and Alert Centres
+
+Use **/settings → Media Follow Centre** to manage guild-wide AniList follows. The existing anime episode follow remains available. The additional follow action supports:
+- **Title**: an AniList anime or manga ID; monitors provider metadata such as status, episode/chapter/volume counts, dates, genres and scheduled anime episode metadata.
+- **Creator**: an AniList STAFF or STUDIO ID; monitors credited works and provider-reported roles/active years.
+- **Franchise**: an AniList anime or manga ID; monitors the provider-declared relation list without inferring story chronology.
+- **Category**: an AniList genre plus ANIME or MANGA; watches the bounded set of matching catalogue results returned by AniList.
+
+Manage Server permission is required. Subscriptions are scoped to the current guild, limited to 25 additional targets per server, and checked by the existing 15-minute media worker. Metadata changes are sent to the configured media notification channel. The server’s Anime/Manga notification toggles also control the corresponding title, franchise and genre follow checks; creator follows are checked while media notifications are enabled.
+
+The **Media notifications** settings also include Films, TV and Games toggles. Those alerts use provider-reported release dates from TMDB and IGDB, plus AniList airing schedules for anime. The scanner checks a short due window and deduplicates by guild and provider event. Availability depends on the relevant provider credentials and returned data. Book publication dates and general manga chapter schedules remain unavailable unless a configured provider supplies a reliable date.
+
 ## Reading Hub
 
 Reading Club data is stored per guild. **/reading** is the single entry point for nominations, voting, selecting the next community read, scheduling a spoiler-aware discussion, and exploring reading order.

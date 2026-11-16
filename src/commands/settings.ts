@@ -33,6 +33,9 @@ import {
 } from "../../helpers/runtime/settings.js";
 import {
   followAniListAnime,
+  followAniListSubscription,
+  getGuildMediaFollowSubscriptions,
+  removeMediaFollowSubscription,
   getGuildMediaFollows,
   getMediaNotificationSettings,
   setMediaNotificationSettings,
@@ -179,7 +182,8 @@ async function panel(guildId: string): Promise<{
           `Status: ${notifications.enabled ? "Enabled" : "Disabled"}`,
           `Channel: ${channelLabel}`,
           `Anime: ${notifications.include_anime ? "On" : "Off"} · Manga: ${notifications.include_manga ? "On" : "Off"}`,
-          "Scans AniList for recently finished or cancelled anime and manga.",
+          `Films: ${notifications.include_movies ? "On" : "Off"} · TV: ${notifications.include_tv ? "On" : "Off"} · Games: ${notifications.include_games ? "On" : "Off"}`,
+          "Scans AniList completions and provider-dated anime, film, TV and game releases.",
         ].join("\n"),
         inline: false,
       },
@@ -222,6 +226,20 @@ async function panel(guildId: string): Promise<{
         .setCustomId("settings:media-region:open")
         .setLabel("Region · " + mediaRegion)
         .setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId("settings:notifications:movies")
+        .setLabel(`Films ${notifications.include_movies ? "On" : "Off"}`)
+        .setStyle(notifications.include_movies ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId("settings:notifications:tv")
+        .setLabel(`TV ${notifications.include_tv ? "On" : "Off"}`)
+        .setStyle(notifications.include_tv ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId("settings:notifications:games")
+        .setLabel(`Games ${notifications.include_games ? "On" : "Off"}`)
+        .setStyle(notifications.include_games ? ButtonStyle.Primary : ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
       new ChannelSelectMenuBuilder()
@@ -398,40 +416,63 @@ async function mediaFollowsPanel(guildId: string): Promise<{
   embeds: EmbedBuilder[];
   components: SettingsRow[];
 }> {
-  const [follows, notifications] = await Promise.all([
+  const [follows, subscriptions, notifications] = await Promise.all([
     getGuildMediaFollows(guildId),
+    getGuildMediaFollowSubscriptions(guildId),
     getMediaNotificationSettings(guildId),
   ]);
+  const legacySummary = follows.length
+    ? [{
+        name: "Anime episode follows · " + follows.length,
+        value: follows.slice(0, 10).map(item => item.title.slice(0, 90) + " · AniList #" + item.anilist_id).join("\n")
+          + (follows.length > 10 ? "\n+" + (follows.length - 10) + " more" : ""),
+        inline: false,
+      }]
+    : [];
+  const fields = [
+    ...legacySummary,
+    ...subscriptions.map(item => ({
+      name: item.title.slice(0, 240),
+      value: item.follow_type.toUpperCase() + " · " + item.target_kind + " · AniList " + item.target_id,
+      inline: false,
+    })),
+  ].slice(0, 25);
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
-    .setTitle("Anime episode follows")
+    .setTitle("Media Follow Centre")
     .setDescription([
-      "Guild-wide AniList title follows. Episode alerts use only provider-supplied airing dates.",
+      "Follow AniList titles, creators, franchise relationships and genres for verified metadata changes.",
+      "Anime episode schedules remain available through the legacy title-follow flow.",
       "Delivery: " + (notifications.enabled && notifications.channel_id ? "<#" + notifications.channel_id + ">" : "Disabled or no channel configured"),
-      "Chapter, creator and franchise release dates are not inferred.",
+      "Genre follows monitor AniList's bounded matching catalogue results; missing provider data is not inferred.",
     ].join("\n"))
-    .addFields(follows.length
-      ? follows.map(item => ({
-          name: item.title.slice(0, 240),
-          value: "AniList #" + item.anilist_id
-            + (item.next_episode ? " · next scheduled episode " + item.next_episode : " · no upcoming episode currently listed"),
-          inline: false,
-        }))
-      : [{ name: "Following", value: "No anime titles are followed by this server.", inline: false }]);
+    .addFields(fields.length ? fields : [{ name: "Following", value: "This server has no media follows yet.", inline: false }]);
   const components: SettingsRow[] = [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId("settings:media-follows:add").setLabel("Follow AniList anime").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("settings:media-follows:add").setLabel("Follow anime episodes").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("settings:media-follows:subscriptions").setLabel("Follow media / creator / genre").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId("settings:media-follows:open").setLabel("Refresh").setStyle(ButtonStyle.Secondary),
     ),
   ];
   if (follows.length) {
     components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder().setCustomId("settings:media-follows:remove")
-        .setPlaceholder("Select an anime to unfollow")
+        .setPlaceholder("Select an anime episode follow to remove")
         .addOptions(follows.slice(0, 25).map(item => ({
           label: item.title.slice(0, 100),
           description: "AniList #" + item.anilist_id,
           value: String(item.anilist_id),
+        }))),
+    ));
+  }
+  if (subscriptions.length) {
+    components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder().setCustomId("settings:media-subscriptions:remove")
+        .setPlaceholder("Select a metadata follow to remove")
+        .addOptions(subscriptions.slice(0, 25).map(item => ({
+          label: item.title.slice(0, 100),
+          description: item.follow_type.toUpperCase() + " · " + item.target_kind,
+          value: item.id,
         }))),
     ));
   }
@@ -457,7 +498,7 @@ export class SettingsCommand implements FeatureCommand {
           { name: "View all settings", value: "view" },
           { name: "Toggle a feature", value: "toggle" },
           { name: "Media notifications", value: "notifications" },
-          { name: "Anime episode follows", value: "media-follows" },
+          { name: "Media Follow Centre", value: "media-follows" },
           { name: "Change media region", value: "media-region" },
           { name: "Data retention when the bot leaves", value: "retention" },
           { name: "Media Automation Studio", value: "automation" },
@@ -659,6 +700,25 @@ export class SettingsCommand implements FeatureCommand {
       return true;
     }
     if (section === "media-follows") {
+      if (target === "subscriptions") {
+        const followModal = new ModalBuilder().setCustomId("settings:media-subscriptions:add").setTitle("Add a media follow");
+        followModal.addComponents(
+          new ActionRowBuilder<TextInputBuilder>().addComponents(
+            new TextInputBuilder().setCustomId("follow_type").setLabel("Type: title, creator, franchise or category")
+              .setPlaceholder("title").setRequired(true).setMaxLength(16),
+          ),
+          new ActionRowBuilder<TextInputBuilder>().addComponents(
+            new TextInputBuilder().setCustomId("target_kind").setLabel("AniList type: ANIME, MANGA, STAFF or STUDIO")
+              .setPlaceholder("ANIME").setRequired(true).setMaxLength(8),
+          ),
+          new ActionRowBuilder<TextInputBuilder>().addComponents(
+            new TextInputBuilder().setCustomId("target").setLabel("AniList ID or genre name")
+              .setPlaceholder("e.g. 21 or Fantasy").setRequired(true).setMaxLength(80),
+          ),
+        );
+        await interaction.showModal(followModal);
+        return true;
+      }
       if (target === "add") {
         const followModal = new ModalBuilder().setCustomId("settings:media-follows:add").setTitle("Follow an AniList anime");
         followModal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
@@ -709,6 +769,12 @@ export class SettingsCommand implements FeatureCommand {
         { include_manga: !current.include_manga },
         interaction.user.id,
       );
+    } else if (target === "movies") {
+      await setMediaNotificationSettings(interaction.guildId, { include_movies: !current.include_movies }, interaction.user.id);
+    } else if (target === "tv") {
+      await setMediaNotificationSettings(interaction.guildId, { include_tv: !current.include_tv }, interaction.user.id);
+    } else if (target === "games") {
+      await setMediaNotificationSettings(interaction.guildId, { include_games: !current.include_games }, interaction.user.id);
     } else if (target === "clear-channel") {
       await setMediaNotificationSettings(
         interaction.guildId,
@@ -723,7 +789,7 @@ export class SettingsCommand implements FeatureCommand {
   }
 
   async handleModal(interaction: ModalSubmitInteraction): Promise<boolean> {
-    if (interaction.customId !== "settings:media-region" && interaction.customId !== "settings:media-follows:add" && interaction.customId !== "settings:automation:add") return false;
+    if (interaction.customId !== "settings:media-region" && interaction.customId !== "settings:media-follows:add" && interaction.customId !== "settings:media-subscriptions:add" && interaction.customId !== "settings:automation:add") return false;
     if (!interaction.guildId) return false;
     if (!canManage(interaction as ModalSubmitInteraction)) {
       await interaction.reply({ content: "Manage Server permission is required to change server media settings.", flags: MessageFlags.Ephemeral });
@@ -748,6 +814,21 @@ export class SettingsCommand implements FeatureCommand {
           action: interaction.fields.getTextInputValue("action"),
         });
         await interaction.reply({ content: "Media automation rule saved and enabled. Its first provider check is queued.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      if (interaction.customId === "settings:media-subscriptions:add") {
+        const subscription = await followAniListSubscription(
+          interaction.guildId,
+          interaction.user.id,
+          interaction.fields.getTextInputValue("follow_type"),
+          interaction.fields.getTextInputValue("target_kind"),
+          interaction.fields.getTextInputValue("target"),
+          this.aniList,
+        );
+        await interaction.reply({
+          content: "Following " + subscription.title + " for this server. Metadata checks use AniList's verified catalogue records.",
+          flags: MessageFlags.Ephemeral,
+        });
         return true;
       }
       if (interaction.customId === "settings:media-follows:add") {
@@ -791,6 +872,20 @@ export class SettingsCommand implements FeatureCommand {
       if (!ruleId || !/^\d+$/.test(ruleId)) return false;
       const enabled = await toggleMediaAutomationRule(interaction.guildId, ruleId);
       await interaction.update({ ...await mediaAutomationPanel(interaction.guildId), content: enabled ? "Automation rule resumed." : "Automation rule paused." });
+      return true;
+    }
+    if (interaction.isStringSelectMenu() && interaction.customId === "settings:media-subscriptions:remove") {
+      if (!canManage(interaction)) {
+        await interaction.reply({ content: "Manage Server permission is required to manage media follows.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      const subscriptionId = interaction.values[0];
+      if (!subscriptionId || !/^\\d+$/.test(subscriptionId)) return false;
+      const removed = await removeMediaFollowSubscription(interaction.guildId, subscriptionId);
+      await interaction.update({
+        ...await mediaFollowsPanel(interaction.guildId),
+        content: removed ? "Media metadata follow removed." : "That media follow was no longer present.",
+      });
       return true;
     }
     if (interaction.isStringSelectMenu() && interaction.customId === "settings:media-follows:remove") {
