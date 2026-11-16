@@ -165,3 +165,11 @@ test("Atlas relationship aliases distinguish franchise links from adaptation pat
   assert.deepEqual(filterAtlasRelations(graph.directRelationships, { relationshipType: "adaptation" }).map(item => item.title),
     ["Source novel"]);
 });
+
+test("Atlas image URL validation accepts only HTTPS metadata-provider assets", async () => {
+  const { safeAtlasImageUrl } = await import("../helpers/integration/atlas.js");
+  assert.equal(safeAtlasImageUrl("https://image.tmdb.org/t/p/w500/poster.jpg"), "https://image.tmdb.org/t/p/w500/poster.jpg");
+  assert.equal(safeAtlasImageUrl("https://images.igdb.com/igdb/image/upload/t_cover_big/game.jpg"), "https://images.igdb.com/igdb/image/upload/t_cover_big/game.jpg");
+  assert.equal(safeAtlasImageUrl("https://evil.example/poster.jpg"), null);
+  assert.equal(safeAtlasImageUrl("http://image.tmdb.org/poster.jpg"), null);
+});

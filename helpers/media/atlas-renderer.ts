@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import type { AtlasGraphPath, AtlasGraphResult, AtlasRelation, MediaCategory } from "../integration/atlas.js";
+import { safeAtlasImageUrl, type AtlasGraphPath, type AtlasGraphResult, type AtlasRelation, type MediaCategory } from "../integration/atlas.js";
 
 const WIDTH = 1450;
 const HEIGHT = 950;
@@ -40,6 +40,44 @@ function text(x: number, y: number, content: string, size: number, color: string
   return `<text x="${x}" y="${y}" text-anchor="${anchor}" fill="${color}" font-family="Arial, sans-serif" font-size="${size}" font-weight="${weight}">${escapeXml(content)}</text>`;
 }
 
+async function atlasImageData(value: string | null | undefined): Promise<string | null> {
+  const url = safeAtlasImageUrl(value);
+  if (!url) return null;
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(4_000), redirect: "error" });
+    if (!response.ok || !response.body) return null;
+    const type = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+    if (!type || !["image/jpeg", "image/png", "image/webp", "image/avif"].includes(type)) return null;
+    const declaredSize = Number(response.headers.get("content-length") ?? 0);
+    if (declaredSize > 1_200_000) return null;
+    const reader = response.body.getReader();
+    const chunks: Buffer[] = [];
+    let total = 0;
+    try {
+      while (true) {
+        const part = await reader.read();
+        if (part.done) break;
+        total += part.value.byteLength;
+        if (total > 1_200_000) {
+          await reader.cancel();
+          return null;
+        }
+        chunks.push(Buffer.from(part.value));
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    if (!total) return null;
+    const thumbnail = await sharp(Buffer.concat(chunks, total), { limitInputPixels: 12_000_000 })
+      .resize(160, 112, { fit: "cover", withoutEnlargement: true })
+      .jpeg({ quality: 72, mozjpeg: true })
+      .toBuffer();
+    return "data:image/jpeg;base64," + thumbnail.toString("base64");
+  } catch {
+    return null;
+  }
+}
+
 
 export async function renderAtlasGraphSnapshot(
   title: string,
@@ -55,6 +93,11 @@ export async function renderAtlasGraphSnapshot(
   const cardHeight = 114;
   const root = graph.nodes.find(node => node.id === graph.rootId);
   if (!root) return renderAtlasSnapshot(title, category, graph.directRelationships);
+  const imageNodes = graph.nodes.slice(0, 25);
+  const imageEntries = await Promise.all(imageNodes.map(async node =>
+    [node.id, await atlasImageData(node.imageUrl)] as const,
+  ));
+  const images = new Map(imageEntries);
 
   const positions = new Map<string, { x: number; y: number }>();
   positions.set(root.id, { x: centerX, y: centerY });
@@ -111,10 +154,13 @@ export async function renderAtlasGraphSnapshot(
           '" height="' + cardHeight + '" rx="13" fill="#111111" stroke="' + color + '" stroke-width="2" />',
         '<rect x="' + (left + 13) + '" y="' + (top + 12) + '" width="4" height="' + (cardHeight - 24) +
           '" rx="2" fill="' + color + '" />',
-        text(left + 27, top + 30, shorten(node.category.replace(/_/g, " ").toUpperCase(), 23), 10, "#999999", 600),
-        text(left + 27, top + 56, shorten(node.title, 22), 16, "#f3f3f3", 700),
-        text(left + 27, top + 80, shorten(relationType, 22), 11, "#c0c0c0", 500),
-        text(left + 27, top + 101, kind.toUpperCase() + " · " + shorten(sourceLabel, 16), 9, color, 600),
+        ...(images.get(node.id) ? [
+          '<image href="' + images.get(node.id) + '" x="' + (left + 12) + '" y="' + (top + 18) + '" width="48" height="66" preserveAspectRatio="xMidYMid slice" />',
+        ] : []),
+        text(left + (images.get(node.id) ? 72 : 27), top + 30, shorten(node.category.replace(/_/g, " ").toUpperCase(), 18), 9, "#999999", 600),
+        text(left + (images.get(node.id) ? 72 : 27), top + 55, shorten(node.title, images.get(node.id) ? 12 : 22), 14, "#f3f3f3", 700),
+        text(left + (images.get(node.id) ? 72 : 27), top + 79, shorten(relationType, images.get(node.id) ? 14 : 22), 10, "#c0c0c0", 500),
+        text(left + 27, top + 102, kind.toUpperCase() + " · " + shorten(sourceLabel, 16), 8, color, 600),
         "</g>",
       ].join("");
     }).join("");
@@ -124,9 +170,12 @@ export async function renderAtlasGraphSnapshot(
       '" width="300" height="160" rx="24" fill="#080808" stroke="#f3f3f3" stroke-width="3" />',
     '<rect x="' + (centerX - 137) + '" y="' + (centerY - 67) +
       '" width="274" height="134" rx="16" fill="none" stroke="#484848" stroke-width="1" />',
-    text(centerX, centerY - 23, root.category.replace(/_/g, " ").toUpperCase(), 12, "#aaaaaa", 600, "middle"),
-    text(centerX, centerY + 14, shorten(root.title, 27), 24, "#ffffff", 700, "middle"),
-    text(centerX, centerY + 45, "ROOT NODE", 10, "#888888", 600, "middle"),
+    ...(images.get(root.id) ? [
+      '<image href="' + images.get(root.id) + '" x="' + (centerX - 38) + '" y="' + (centerY - 66) + '" width="76" height="58" preserveAspectRatio="xMidYMid slice" />',
+    ] : []),
+    text(centerX, centerY + (images.get(root.id) ? 16 : -23), root.category.replace(/_/g, " ").toUpperCase(), 11, "#aaaaaa", 600, "middle"),
+    text(centerX, centerY + (images.get(root.id) ? 42 : 14), shorten(root.title, 27), 22, "#ffffff", 700, "middle"),
+    text(centerX, centerY + (images.get(root.id) ? 64 : 45), "ROOT NODE", 9, "#888888", 600, "middle"),
   ].join("");
 
   const footer = graph.nodes.length + " nodes · " + graph.edges.length + " connections" +

@@ -49,6 +49,7 @@ export interface TmdbPersonCredit {
   releaseDate: string | null;
   role: string | null;
   sourceUrl: string;
+  image: string | null;
   popularity: number;
 }
 
@@ -231,6 +232,9 @@ export function normalizeTmdbPersonCredits(value: unknown): TmdbPersonCredit[] {
       releaseDate: typeof dateValue === "string" && dateValue ? dateValue : null,
       role,
       sourceUrl: `https://www.themoviedb.org/${category}/${item.id}`,
+      image: typeof item.poster_path === "string" && item.poster_path.startsWith("/")
+        ? "https://image.tmdb.org/t/p/w500" + item.poster_path
+        : null,
       popularity,
     };
     const key = `${category}:${item.id}`;

@@ -12,3 +12,20 @@ test("AniList creator parser rejects untrusted profile and media URLs",()=>{
  const creator=parseCreator({id:1,name:{full:"Creator"},siteUrl:"https://anilist.co/staff/1",staffMedia:{edges:[{staffRole:"Writer",node:{id:2,type:"ANIME",siteUrl:"https://example.com/anime/2",title:{romaji:"Bad"}}}]}});
  assert.deepEqual(creator?.media,[]);
 });
+
+test("AniList creator workographies retain provider cover images", () => {
+  const creator = parseCreator({
+    id: 43,
+    name: { full: "Illustrator" },
+    siteUrl: "https://anilist.co/staff/43",
+    staffMedia: { edges: [{
+      staffRole: "Illustrator",
+      node: {
+        id: 12, type: "MANGA", siteUrl: "https://anilist.co/manga/12",
+        title: { english: "Illustrated Work" },
+        coverImage: { large: "https://s4.anilist.co/file/anilistcdn/manga/cover/12.jpg" },
+      },
+    }] },
+  });
+  assert.equal(creator?.media[0]?.image, "https://s4.anilist.co/file/anilistcdn/manga/cover/12.jpg");
+});

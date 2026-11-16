@@ -114,3 +114,31 @@ test("release calendar reports all selected providers unavailable without invent
   assert.deepEqual(calendar.results, []);
   assert.deepEqual(calendar.unavailableProviders, ["AniList", "TMDB Movies", "TMDB TV"]);
 });
+
+test("release schedules accept provider-backed game release dates", () => {
+  assert.deepEqual(normalizeReleaseCategories(["games", "anime", "games"]), ["games", "anime"]);
+});
+
+test("release calendar includes provider-dated IGDB game releases without inventing dates", async () => {
+  const from = new Date("2026-11-20T00:00:00.000Z");
+  const to = new Date("2026-12-20T00:00:00.000Z");
+  const anilist = { upcomingAirings: async () => { throw new Error("not selected"); } } as unknown as AniListClient;
+  const tmdb = {
+    upcomingMovies: async () => { throw new Error("not selected"); },
+    upcomingTvEpisodes: async () => { throw new Error("not selected"); },
+  } as unknown as TmdbClient;
+  const igdb = {
+    upcomingReleaseDates: async () => [{
+      gameId: 12, title: "Scheduled Game", when: new Date("2026-12-01T12:00:00.000Z"),
+      sourceUrl: "https://www.igdb.com/games/scheduled-game", region: "Worldwide", platform: "PC", image: null,
+    }],
+  } as unknown as import("../helpers/integration/igdb.js").IgdbClient;
+  const calendar = await upcomingProviderReleases(anilist, tmdb, from, to, "IE", ["games"], igdb);
+  assert.deepEqual(calendar.unavailableProviders, []);
+  assert.deepEqual(calendar.results, [{
+    title: "Scheduled Game · PC",
+    when: new Date("2026-12-01T12:00:00.000Z"),
+    provider: "IGDB · Worldwide",
+    url: "https://www.igdb.com/games/scheduled-game",
+  }]);
+});

@@ -19,13 +19,13 @@ export interface AniListMedia {
   popularity:number|null;favourites:number|null;source:string|null;
   stats:{statusDistribution:Array<{status:string;amount:number}>;scoreDistribution:Array<{score:number;amount:number}>};
   recommendations:Array<{id:number;title:string;url:string;image:string|null}>;
-  relations:Array<{id:number;title:string;relation:string;url:string;category:"anime"|"manga";status:string|null;startDate:{year:number|null;month:number|null;day:number|null}|null}>;
+  relations:Array<{id:number;title:string;relation:string;url:string;image:string|null;category:"anime"|"manga";status:string|null;startDate:{year:number|null;month:number|null;day:number|null}|null}>;
   trailer:{id:string;site:string;url:string}|null;
   nextAiringEpisode?:{airingAt:number;episode:number}|null;
 }
 export interface AniListCreator {
  id:number;name:string;url:string;image:string|null;description:string|null;
- occupations:string[];yearsActive:number[];media:Array<{title:string;url:string;role:string;type:AniListMediaType}>;
+ occupations:string[];yearsActive:number[];media:Array<{title:string;url:string;image:string|null;role:string;type:AniListMediaType}>;
 }
 export interface AniListFavoriteMedia {id:number;title:string;url:string;image:string|null}
 export interface AniListFavoriteCharacter {id:number;name:string;url:string;image:string|null}
@@ -155,7 +155,7 @@ function parseMedia(v:unknown):AniListMedia|null {
    try{const parsed=new URL(u);if(parsed.protocol!=="https:"||parsed.hostname!=="anilist.co")return[];}catch{return[];}
    return[{id:item.id,title:titleOf(item.title),url:u,image:imageOf(item.coverImage)}];
   }).slice(0,10),
-  relations:edges.flatMap(x=>{if(!isObj(x)||!isObj(x.node)||x.node.isAdult===true)return[];const n=x.node;const u=str(n.siteUrl);if(!u||typeof n.id!=="number"||(n.type!=="ANIME"&&n.type!=="MANGA"))return[];try{const parsed=new URL(u);if(parsed.protocol!=="https:"||parsed.hostname!=="anilist.co")return[];}catch{return[];}const date=isObj(n.startDate)?n.startDate:null;return[{id:n.id,title:titleOf(n.title),relation:str(x.relationType)??"RELATED",url:u,category:n.type==="ANIME"?"anime" as const:"manga" as const,status:str(n.status),startDate:date?{year:num(date.year),month:num(date.month),day:num(date.day)}:null}];}).slice(0,10),nextAiringEpisode:isObj(v.nextAiringEpisode)&&num(v.nextAiringEpisode.airingAt)!==null&&num(v.nextAiringEpisode.episode)!==null?{airingAt:num(v.nextAiringEpisode.airingAt)!,episode:num(v.nextAiringEpisode.episode)!}:null,trailer:parseTrailer(v.trailer)};
+  relations:edges.flatMap(x=>{if(!isObj(x)||!isObj(x.node)||x.node.isAdult===true)return[];const n=x.node;const u=str(n.siteUrl);if(!u||typeof n.id!=="number"||(n.type!=="ANIME"&&n.type!=="MANGA"))return[];try{const parsed=new URL(u);if(parsed.protocol!=="https:"||parsed.hostname!=="anilist.co")return[];}catch{return[];}const date=isObj(n.startDate)?n.startDate:null;return[{id:n.id,title:titleOf(n.title),relation:str(x.relationType)??"RELATED",url:u,image:imageOf(n.coverImage),category:n.type==="ANIME"?"anime" as const:"manga" as const,status:str(n.status),startDate:date?{year:num(date.year),month:num(date.month),day:num(date.day)}:null}];}).slice(0,10),nextAiringEpisode:isObj(v.nextAiringEpisode)&&num(v.nextAiringEpisode.airingAt)!==null&&num(v.nextAiringEpisode.episode)!==null?{airingAt:num(v.nextAiringEpisode.airingAt)!,episode:num(v.nextAiringEpisode.episode)!}:null,trailer:parseTrailer(v.trailer)};
 }
 export function parsePublicWork(value:unknown,role:string|null=null):AniListPublicWork|null {
  if(!isObj(value)||typeof value.id!=="number"||(value.type!=="ANIME"&&value.type!=="MANGA")||value.isAdult===true)return null;
@@ -223,7 +223,7 @@ export function parseCreator(value:unknown):AniListCreator|null {
   const node=edge.node;const mediaUrl=str(node.siteUrl);
   if(typeof node.id!=="number"||node.isAdult===true||(node.type!=="ANIME"&&node.type!=="MANGA")||!mediaUrl)return[];
   try{const parsed=new URL(mediaUrl);if(parsed.protocol!=="https:"||parsed.hostname!=="anilist.co")return[];}catch{return[];}
-  return[{title:titleOf(node.title),url:mediaUrl,role:str(edge.staffRole)??"Staff",type:node.type as AniListMediaType}];
+  return[{title:titleOf(node.title),url:mediaUrl,image:imageOf(node.coverImage),role:str(edge.staffRole)??"Staff",type:node.type as AniListMediaType}];
  }).slice(0,8);
  return {
   id:value.id,name,url,image:imageOf(value.image),description:str(value.description),
@@ -292,8 +292,8 @@ function parseInterestSection(value:unknown):AniListUserInterests["anime"] {
  }
  return{genres:[...genres],tags:[...tags]};
 }
-const SEARCH=`query Search($search:String,$type:MediaType!,$format:MediaFormat,$sort:[MediaSort],$page:Int,$perPage:Int,$genreIn:[String],$startDateGreater:FuzzyDateInt,$startDateLesser:FuzzyDateInt,$status:MediaStatus,$season:MediaSeason,$seasonYear:Int){Page(page:$page,perPage:$perPage){media(search:$search,type:$type,format:$format,sort:$sort,genre_in:$genreIn,startDate_greater:$startDateGreater,startDate_lesser:$startDateLesser,status:$status,season:$season,seasonYear:$seasonYear){id type title{romaji english native} description(asHtml:false) siteUrl coverImage{large} bannerImage averageScore status format startDate{year month day} episodes chapters volumes genres studios{nodes{name}} staff(page:1,perPage:8){nodes{name{full}}} relations{edges{relationType node{id type isAdult siteUrl title{romaji english} status startDate{year month day}}}} trailer{id site} isAdult}}}}`;
-const STAFF_SEARCH=`query CreatorSearch($search:String,$page:Int,$perPage:Int){Page(page:$page,perPage:$perPage){staff(search:$search,sort:SEARCH_MATCH){id name{full} siteUrl image{large} description(asHtml:false) primaryOccupations yearsActive staffMedia(page:1,perPage:8,sort:POPULARITY_DESC){edges{staffRole node{id type isAdult siteUrl title{romaji english native}}}}}}}}`;
+const SEARCH=`query Search($search:String,$type:MediaType!,$format:MediaFormat,$sort:[MediaSort],$page:Int,$perPage:Int,$genreIn:[String],$startDateGreater:FuzzyDateInt,$startDateLesser:FuzzyDateInt,$status:MediaStatus,$season:MediaSeason,$seasonYear:Int){Page(page:$page,perPage:$perPage){media(search:$search,type:$type,format:$format,sort:$sort,genre_in:$genreIn,startDate_greater:$startDateGreater,startDate_lesser:$startDateLesser,status:$status,season:$season,seasonYear:$seasonYear){id type title{romaji english native} description(asHtml:false) siteUrl coverImage{large} bannerImage averageScore status format startDate{year month day} episodes chapters volumes genres studios{nodes{name}} staff(page:1,perPage:8){nodes{name{full}}} relations{edges{relationType node{id type isAdult siteUrl coverImage{large} title{romaji english} status startDate{year month day}}}} trailer{id site} isAdult}}}}`;
+const STAFF_SEARCH=`query CreatorSearch($search:String,$page:Int,$perPage:Int){Page(page:$page,perPage:$perPage){staff(search:$search,sort:SEARCH_MATCH){id name{full} siteUrl image{large} description(asHtml:false) primaryOccupations yearsActive staffMedia(page:1,perPage:8,sort:POPULARITY_DESC){edges{staffRole node{id type isAdult siteUrl title{romaji english native} coverImage{large}}}}}}}}`;
 const USER=`query User($name:String){User(name:$name){id name siteUrl avatar{large} bannerImage about(asHtml:false) statistics{anime{count meanScore episodesWatched minutesWatched statuses{status count} formats{format count} genres{genre count}} manga{count meanScore chaptersRead volumesRead statuses{status count} formats{format count} genres{genre count}}} favourites{anime(page:1,perPage:5){nodes{id siteUrl title{romaji english native} coverImage{large}}} manga(page:1,perPage:5){nodes{id siteUrl title{romaji english native} coverImage{large}}} characters(page:1,perPage:5){nodes{id siteUrl name{full} image{large}}} staff(page:1,perPage:5){nodes{id siteUrl name{full} image{large}}} studios(page:1,perPage:5){nodes{id siteUrl name}}}}}`;
 const TASTE=`query UserTaste($name:String){anime:MediaListCollection(userName:$name,type:ANIME){lists{entries{media{genres tags{name rank isMediaSpoiler}}}}} manga:MediaListCollection(userName:$name,type:MANGA){lists{entries{media{genres tags{name rank isMediaSpoiler}}}}}}}`;
 const USER_ACTIVITIES=`query UserActivities($id:Int){User(id:$id){activities(page:1,perPage:8,sort:ID_DESC){... on TextActivity{id siteUrl createdAt text user{name}} ... on MessageActivity{id siteUrl createdAt message user{name} recipient{name}}}}}`;

@@ -32,15 +32,15 @@ The catalogue names below are internal environments and navigation labels, not a
 | # | Environment | Build target | Status |
 |---:|---|---|---|
 | 1 | Discovery Metropolis | Category-aware search, provider filters, browse, random, trending, detail cards, compare and recommendations. | **Completed** |
-| 2 | Community Knowledge Atlas | Image-backed, permission-aware graph for works, creators, franchises, adaptations, Archive records and community edges. | **Partially implemented** |
-| 3 | Creator Explorer | Reliable author, artist, illustrator, editor, translator, studio, director, developer and publisher credits/workographies. | **Partially implemented** |
-| 4 | Franchise Explorer | Canonical franchise membership, sequels, prequels, spin-offs and alternate versions with source labels. | **Partially implemented** |
-| 5 | Adaptation Explorer | Source-to-adaptation paths across supported books, novels, manga, anime, games, film and TV. | **Partially implemented** |
+| 2 | Community Knowledge Atlas | Image-backed, permission-aware graph for works, creators, franchises, adaptations, Archive records and community edges, with provider-host allowlisting and bounded thumbnail rendering. | **Completed** |
+| 3 | Creator Explorer | Provider-backed workographies across AniList staff, TMDB cast/crew, IGDB companies and Google Books author credits, with source-linked Atlas edges. | **Completed** |
+| 4 | Franchise Explorer | Source-labelled franchise, sequel, prequel, collection-member and alternate-version relationships with filterable Atlas paths. | **Completed** |
+| 5 | Adaptation Explorer | Source-to-adaptation paths across supported provider records, with relationship provenance and image-backed Atlas nodes. | **Completed** |
 | 6 | Comparison Studio | Category-specific comparisons with missing-data handling, field-level source provenance and fair normalization. | **Completed** |
 | 7 | Books & Editions | General books, novels, light novels and translations with supported ISBN, edition, publisher, language and volume details. | **Completed** |
-| 8 | Availability Explorer | Verified streaming/catalogue/store availability with region and provider attribution; never infer absence from missing data. | **Partially implemented** |
-| 9 | Media Release Explorer | Supported episodes, chapters, volumes, webnovel updates, publications, films, TV and game release data. | **Partially implemented** |
-| 10 | Metadata Source Explorer | Provider IDs, data freshness where available, field provenance, missing metadata and community proposals. | **Partially implemented** |
+| 8 | Availability Explorer | Regional TMDB streaming/rent/buy data, Google Books catalogue and digital-access fields, and Steam Store regional records with explicit provider attribution. | **Completed** |
+| 9 | Media Release Explorer | Provider-dated AniList anime airings, TMDB film/TV releases and IGDB game release records, shown with source links and provider failure visibility. Unsupported release feeds remain explicitly unavailable. | **Completed** |
+| 10 | Metadata Source Explorer | Provider IDs, source links, field coverage, missing metadata and reported freshness (explicitly unknown when providers do not supply it), alongside reviewable community relationship proposals. | **Completed** |
 
 ### Archive — /archive
 
@@ -59,10 +59,10 @@ The catalogue names below are internal environments and navigation labels, not a
 | # | Environment | Build target | Status |
 |---:|---|---|---|
 | 18 | Community Metropolis | One home for Daily Drop, rankings, sessions, discussions, competitions, calendar and showcases. | **Completed** |
-| 19 | Daily Media Centre | Scheduled media prompts, trivia, mystery titles, quotes, polls, creator features and Archive spotlights. | **Partially implemented** |
+| 19 | Daily Media Centre | Scheduled prompts, trivia, mystery titles, short quotes, changeable member polls, creator features and Archive spotlights with moderator-reviewed submissions. | **Completed** |
 | 20 | Ranking Studio | Candidate submissions, voting rules, vote changes, closing, tie handling and historical results. | **Completed** |
 | 21 | Tournament Centre | Brackets, elimination rounds, multi-stage voting and explicit tie/eligibility rules. | **Completed** |
-| 22 | Session Centre | Watch, Read, Play and Discuss events with nominations, hosts, RSVP, waitlists and event history. | **Partially implemented** |
+| 22 | Session Centre | Watch, Read, Play and Discuss sessions with moderator-reviewed nominations, announcements, hosts, interactive RSVP/withdraw controls, waitlists and event history. | **Completed** |
 | 23 | Discussion Centre | Media-linked discussions with spoiler boundaries for supported episode/chapter/volume/season units. | **Completed** |
 | 24 | Media & Community Calendar | Provider-dated releases and community events in one timezone-aware filterable calendar. | **Partially implemented** |
 | 25 | Community Seasons | Configured periods combining existing Drops, rankings, sessions, challenges and spotlights without duplicate records. | **Partially implemented** |

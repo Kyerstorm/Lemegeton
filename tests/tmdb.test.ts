@@ -235,3 +235,13 @@ test("TMDB recommendation and detail lookups validate IDs and preserve category"
   assert.deepEqual(paths, ["/3/movie/6", "/3/movie/6/recommendations"]);
   await assert.rejects(() => client.recommendations(0, "movie"), /positive integer/);
 });
+
+test("TMDB creator credits include provider poster images for Atlas projections", () => {
+  const credits = normalizeTmdbPersonCredits({
+    cast: [{
+      id: 10, media_type: "movie", title: "Example Film", character: "Lead",
+      poster_path: "/poster.jpg", popularity: 5,
+    }],
+  });
+  assert.equal(credits[0]?.image, "https://image.tmdb.org/t/p/w500/poster.jpg");
+});

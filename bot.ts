@@ -1,4 +1,4 @@
-import {AuditLogEvent,Client,Events,GatewayIntentBits,MessageFlags,type Guild,type Interaction,type TextChannel} from "discord.js";
+import {ActionRowBuilder,AuditLogEvent,ButtonBuilder,ButtonStyle,Client,Events,GatewayIntentBits,MessageFlags,type Guild,type Interaction,type TextChannel} from "discord.js";
 import { emoji } from "./helpers/emoji.js";
 import {createServer, type Server} from "node:http";
 import {timingSafeEqual} from "node:crypto";
@@ -12,6 +12,7 @@ import {configureArchiveAccess} from "./helpers/archive/archive-access.js";
 import {findDepartedGuildProfileIds,getGuildProfileUserIds,removeGuildMemberProfileData} from "./helpers/runtime/profile.js";
 import {AniListClient} from "./helpers/integration/anilist.js";
 import {TmdbClient} from "./helpers/integration/tmdb.js";
+import {IgdbClient} from "./helpers/integration/igdb.js";
 import {handleAniListLinkMessage} from "./src/integrations/anilist-embed.js";
 import {handleSocialLinkMessage} from "./src/integrations/social-embed.js";
 import {SteamClient} from "./helpers/integration/steam.js";
@@ -40,6 +41,7 @@ const client=new Client({intents:[GatewayIntentBits.Guilds,GatewayIntentBits.Gui
 const aniListEmbedClient=new AniListClient(config.anilistApiUrl,config.anilistTimeoutMs);
 const socialEmbedSteamClient=new SteamClient(config.steamApiKey);
 const releaseCalendarTmdbClient=new TmdbClient(config.tmdbBearerToken);
+const releaseCalendarIgdbClient=new IgdbClient(config.igdbClientId,config.igdbClientSecret);
 const commands=createCommandRegistry(config);
 const commandByName=new Map<string,FeatureCommand>(commands.map(command=>[command.data.name,command]));
 let atlasBridge: Server | undefined;
@@ -415,7 +417,18 @@ async function processDailyDrops():Promise<void>{
    try{
     const channel=await client.channels.fetch(delivery.channel_id);
     if(!channel||!channel.isTextBased()||!("send" in channel)){await markDailyDelivery(delivery.id,delivery.claim_token,"pending",undefined,"Configured channel is unavailable.");continue;}
-    const message=await(channel as TextChannel).send({embeds:[homeEmbed(`Daily Drop · ${delivery.title}`,delivery.content,delivery.source_url?[{name:"Source",value:`[Open original source](${delivery.source_url})`}]:[])],allowedMentions:{parse:[]}});
+    const pollRows = delivery.format === "poll" && delivery.options.length >= 2
+     ? [new ActionRowBuilder<ButtonBuilder>().addComponents(delivery.options.slice(0,5).map((option,index)=>
+        new ButtonBuilder().setCustomId("community:daily-poll:"+delivery.id+":"+index)
+         .setLabel(option.slice(0,80)).setStyle(ButtonStyle.Secondary),
+       ))]
+     : [];
+    const description = delivery.content + (delivery.format === "poll" ? "\n\nChoose an option below. You can change your vote." : "");
+    const message=await(channel as TextChannel).send({
+     embeds:[homeEmbed("Daily Drop · "+delivery.title,description,delivery.source_url?[{name:"Source",value:"[Open original source]("+delivery.source_url+")"}]:[])],
+     components:pollRows,
+     allowedMentions:{parse:[]},
+    });
     await markDailyDelivery(delivery.id,delivery.claim_token,"sent",message.id);
    }catch(error){await markDailyDelivery(delivery.id,delivery.claim_token,"pending",undefined,error instanceof Error?error.message:"Unknown delivery error").catch(()=>undefined);}
   }
@@ -435,6 +448,7 @@ async function processDailyDrops():Promise<void>{
       new Date(delivery.window_end),
       delivery.region,
       delivery.categories,
+      releaseCalendarIgdbClient,
      ),
      client.channels.fetch(delivery.channel_id),
     ]);

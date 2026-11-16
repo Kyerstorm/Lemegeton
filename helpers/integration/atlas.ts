@@ -7,18 +7,20 @@ export interface AtlasRelationInput {
   category: MediaCategory | string;
   url?: string | null;
   relationshipType: string;
+  imageUrl?: string | null;
 }
 export interface AtlasRelation {
   title: string;
   category: MediaCategory;
   url: string | null;
+  imageUrl: string | null;
   relationType: string;
   source: string;
   sourceKind: RelationshipSource;
 }
 interface AtlasRow {
-  source_title: string; source_title_key: string; source_category: string; source_url: string | null;
-  target_title: string; target_title_key: string; target_category: string; target_url: string | null;
+  source_title: string; source_title_key: string; source_category: string; source_url: string | null; source_image_url: string | null;
+  target_title: string; target_title_key: string; target_category: string; target_url: string | null; target_image_url: string | null;
   relationship_type: string; source_kind: RelationshipSource; source_label: string;
 }
 export interface AtlasGraphNode {
@@ -26,6 +28,7 @@ export interface AtlasGraphNode {
   title: string;
   category: MediaCategory;
   url: string | null;
+  imageUrl: string | null;
   depth: number;
   sourceKind?: RelationshipSource;
   sourceLabel?: string;
@@ -82,9 +85,20 @@ export function safeAtlasUrl(value: string | null | undefined): string | null {
   }
 }
 
+export function safeAtlasImageUrl(value: string | null | undefined): string | null {
+  const safe = safeAtlasUrl(value);
+  if (!safe) return null;
+  const host = new URL(safe).hostname.toLowerCase();
+  return [
+    "s4.anilist.co", "image.tmdb.org", "images.igdb.com",
+    "books.google.com", "steamcdn-a.akamaihd.net",
+  ].includes(host) || host.endsWith(".googleusercontent.com") || host.endsWith(".steamstatic.com")
+    ? safe : null;
+}
+
 export async function recordAtlasRelationship(input: {
-  sourceTitle: string; sourceCategory: string; sourceUrl?: string | null;
-  targetTitle: string; targetCategory: string; targetUrl?: string | null;
+  sourceTitle: string; sourceCategory: string; sourceUrl?: string | null; sourceImageUrl?: string | null;
+  targetTitle: string; targetCategory: string; targetUrl?: string | null; targetImageUrl?: string | null;
   relationshipType: string; sourceKind: RelationshipSource; sourceLabel: string;
   guildId?: string | null; evidence?: string | null; createdBy?: string | null;
 }): Promise<boolean> {
@@ -102,24 +116,26 @@ export async function recordAtlasRelationship(input: {
 
   const inserted = await queryOne<{ id: string }>(
     `INSERT INTO media_relationship_graph
-      (source_title, source_title_key, source_category, source_url, target_title, target_title_key,
-       target_category, target_url, relationship_type, source_kind, source_label, guild_id, evidence, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+      (source_title, source_title_key, source_category, source_url, source_image_url,
+       target_title, target_title_key, target_category, target_url, target_image_url,
+       relationship_type, source_kind, source_label, guild_id, evidence, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
      ON CONFLICT DO NOTHING RETURNING id`,
-    [sourceTitle,sourceKey,sourceCategory,safeAtlasUrl(input.sourceUrl),targetTitle,targetKey,targetCategory,
-      safeAtlasUrl(input.targetUrl),relationshipType,input.sourceKind,input.sourceLabel.trim().slice(0,100) || input.sourceKind,
+    [sourceTitle,sourceKey,sourceCategory,safeAtlasUrl(input.sourceUrl),safeAtlasImageUrl(input.sourceImageUrl),
+      targetTitle,targetKey,targetCategory,safeAtlasUrl(input.targetUrl),safeAtlasImageUrl(input.targetImageUrl),
+      relationshipType,input.sourceKind,input.sourceLabel.trim().slice(0,100) || input.sourceKind,
       guildId,input.evidence?.trim().slice(0,1500) || null,input.createdBy ?? null],
   );
   return inserted !== null;
 }
 
 export async function recordProviderRelationships(input: {
-  sourceTitle: string; sourceCategory: string; sourceUrl?: string | null;
+  sourceTitle: string; sourceCategory: string; sourceUrl?: string | null; sourceImageUrl?: string | null;
   relations: AtlasRelationInput[]; sourceLabel: string;
 }): Promise<number> {
   const saved = await Promise.all(input.relations.slice(0, 20).map((relation) => recordAtlasRelationship({
-    sourceTitle: input.sourceTitle, sourceCategory: input.sourceCategory, sourceUrl: input.sourceUrl,
-    targetTitle: relation.title, targetCategory: relation.category, targetUrl: relation.url,
+    sourceTitle: input.sourceTitle, sourceCategory: input.sourceCategory, sourceUrl: input.sourceUrl, sourceImageUrl: input.sourceImageUrl,
+    targetTitle: relation.title, targetCategory: relation.category, targetUrl: relation.url, targetImageUrl: relation.imageUrl,
     relationshipType: relation.relationshipType, sourceKind: "provider", sourceLabel: input.sourceLabel,
   })));
   return saved.filter(Boolean).length;
@@ -135,9 +151,9 @@ export async function findAtlasRelationships(
   const visibility = guildId ? "(guild_id IS NULL OR guild_id = $1)" : "guild_id IS NULL";
   const offset = guildId ? 1 : 0;
   const rows = await query<AtlasRow>(
-    `SELECT source_title,source_title_key,source_category,source_url,target_title,target_title_key,
-            target_category,target_url,relationship_type,source_kind,source_label
-       FROM media_relationship_graph
+`SELECT source_title,source_title_key,source_category,source_url,source_image_url,target_title,target_title_key,
+            target_category,target_url,target_image_url,relationship_type,source_kind,source_label
+       FROM media_relationship_graph`
       WHERE ${visibility}
         AND ((source_category = $${offset+2} AND ((source_title_key = $${offset+1} AND ($${offset+3} = '' OR source_url = $${offset+3}))
               OR ($${offset+3} <> '' AND source_url = $${offset+3})))
@@ -162,7 +178,9 @@ export async function findAtlasRelationships(
     if (row.source_kind === "community") relationType = `Community-sourced: ${relationType}`;
     if (row.source_kind === "recommendation") relationType = `Recommendation: ${relationType}`;
     const relation: AtlasRelation = {
-      title: relatedTitle, category: relatedCategory, url: safeAtlasUrl(outgoing ? row.target_url : row.source_url),
+      title: relatedTitle, category: relatedCategory,
+      url: safeAtlasUrl(outgoing ? row.target_url : row.source_url),
+      imageUrl: safeAtlasImageUrl(outgoing ? row.target_image_url : row.source_image_url),
       relationType, source: row.source_label, sourceKind: row.source_kind,
     };
     const key = [normalizeAtlasTitle(relation.title),relation.category,relation.url ?? "",relation.relationType].join("|");
@@ -223,7 +241,7 @@ export function atlasNodeIdentity(title: string, category: string, url?: string 
  * displacing the root's direct connections.
  */
 export async function buildAtlasGraph(
-  root: { title: string; category: string; url?: string | null },
+  root: { title: string; category: string; url?: string | null; imageUrl?: string | null },
   loadRelationships: (node: AtlasGraphNode, limit: number) => Promise<AtlasRelation[]>,
   options: AtlasGraphOptions = {},
 ): Promise<AtlasGraphResult> {
@@ -238,7 +256,7 @@ export async function buildAtlasGraph(
   const maxNodes = Math.max(2, Math.min(40, Math.floor(options.maxNodes ?? 24)));
   const perNodeLimit = Math.max(1, Math.min(16, Math.floor(options.perNodeLimit ?? 8)));
   const rootNode: AtlasGraphNode = {
-    id: rootId, title, category, url: safeAtlasUrl(root.url), depth: 0,
+    id: rootId, title, category, url: safeAtlasUrl(root.url), imageUrl: safeAtlasImageUrl(root.imageUrl), depth: 0,
   };
   const nodes = new Map<string, AtlasGraphNode>([[rootId, rootNode]]);
   const parentByNode = new Map<string, string | null>([[rootId, null]]);
@@ -284,6 +302,7 @@ export async function buildAtlasGraph(
             title: targetTitle,
             category: targetCategory,
             url: safeAtlasUrl(relation.url),
+            imageUrl: safeAtlasImageUrl(relation.imageUrl),
             depth: batch.node.depth + 1,
             sourceKind: relation.sourceKind,
             sourceLabel: relation.source,
@@ -317,7 +336,7 @@ export async function buildAtlasGraph(
 /** Multi-hop expansion always reuses the guild-scoped relationship query at every hop. */
 export function findAtlasGraph(
   guildId: string | null,
-  root: { title: string; category: string; url?: string | null },
+  root: { title: string; category: string; url?: string | null; imageUrl?: string | null },
   options: AtlasGraphOptions = {},
 ): Promise<AtlasGraphResult> {
   return buildAtlasGraph(

@@ -26,3 +26,11 @@ test("Steam Store parsing rejects invalid records and unsafe image URLs",()=>{
  assert.equal(validateSteamId("76561198000000000"),"76561198000000000");
  assert.equal(validateSteamId("not-valid"),null);
 });
+
+test("Steam Store prices retain the country code used for the regional request", () => {
+ const item=parseSteamStoreGame({
+  steam_appid:10,name:"Example Game",price_overview:{initial_formatted:"€19.99",final_formatted:"€19.99",discount_percent:0},
+ }, "IE");
+ assert.equal(item?.priceRegion,"IE");
+ assert.equal(item?.price?.final,"€19.99");
+});

@@ -1,10 +1,138 @@
 import { query, queryOne, transaction } from "../../database.js";
 import { AniListClient } from "../integration/anilist.js";
 import { TmdbClient } from "../integration/tmdb.js";
+import { IgdbClient } from "../integration/igdb.js";
 import { cleanText, isValidHttpsUrl } from "../security/security.js";
 import type { CommunityActivity, CommunitySession } from "./community.js";
 
 const ACTIVITY_TYPES = new Set<CommunityActivity>(["watch", "read", "play", "discuss"]);
+
+export interface CommunitySessionNomination {
+  id: string;
+  guild_id: string;
+  channel_id: string;
+  proposer_id: string;
+  title: string;
+  description: string;
+  activity_type: CommunityActivity;
+  media_title: string | null;
+  media_url: string | null;
+  scheduled_at: Date;
+  capacity: number | null;
+  created_at: Date;
+}
+
+export interface NormalizedSessionNomination {
+  title: string;
+  description: string;
+  activity: CommunityActivity;
+  mediaTitle: string | null;
+  mediaUrl: string | null;
+  scheduledAt: Date;
+  capacity: number | null;
+}
+
+export function normalizeCommunitySessionNomination(input: {
+  title: string;
+  description: string;
+  activity: string;
+  mediaTitle?: string;
+  mediaUrl?: string;
+  scheduledAt: Date;
+  capacity?: number | null;
+}): NormalizedSessionNomination {
+  const title = cleanText(input.title, 180);
+  if (!title) throw new Error("A session nomination needs a title.");
+  if (!ACTIVITY_TYPES.has(input.activity as CommunityActivity)) throw new Error("Choose Watch, Read, Play or Discuss.");
+  if (!Number.isFinite(input.scheduledAt.getTime()) || input.scheduledAt.getTime() <= Date.now()) {
+    throw new Error("A session nomination must have a future date and time.");
+  }
+  const capacity = input.capacity ?? null;
+  if (capacity !== null && (!Number.isInteger(capacity) || capacity < 2 || capacity > 200)) {
+    throw new Error("Session capacity must be between 2 and 200.");
+  }
+  const mediaUrl = input.mediaUrl ? isValidHttpsUrl(input.mediaUrl) : null;
+  if (input.mediaUrl && !mediaUrl) throw new Error("The linked media URL must be HTTPS.");
+  return {
+    title,
+    description: cleanText(input.description, 1_000),
+    activity: input.activity as CommunityActivity,
+    mediaTitle: input.mediaTitle ? cleanText(input.mediaTitle, 200) : null,
+    mediaUrl,
+    scheduledAt: input.scheduledAt,
+    capacity,
+  };
+}
+
+export async function submitCommunitySessionNomination(input: {
+  guildId: string; channelId: string; proposerId: string; title: string; description: string;
+  activity: string; mediaTitle?: string; mediaUrl?: string; scheduledAt: Date; capacity?: number | null;
+}): Promise<string> {
+  const normalized = normalizeCommunitySessionNomination(input);
+  const row = await queryOne<{ id: string }>(
+    "INSERT INTO community_session_nominations " +
+    "(guild_id, channel_id, proposer_id, title, description, activity_type, media_title, media_url, scheduled_at, capacity) " +
+    "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id::text AS id",
+    [input.guildId, input.channelId, input.proposerId, normalized.title, normalized.description,
+      normalized.activity, normalized.mediaTitle, normalized.mediaUrl, normalized.scheduledAt, normalized.capacity],
+  );
+  if (!row) throw new Error("The community session nomination could not be saved.");
+  return row.id;
+}
+
+export async function listPendingCommunitySessionNominations(guildId: string): Promise<CommunitySessionNomination[]> {
+  return query<CommunitySessionNomination>(
+    "SELECT id::text, guild_id::text, channel_id::text, proposer_id::text, title, description, activity_type, " +
+    "media_title, media_url, scheduled_at, capacity, created_at " +
+    "FROM community_session_nominations WHERE guild_id = $1 AND status = 'pending' " +
+    "ORDER BY created_at ASC LIMIT 10",
+    [guildId],
+  );
+}
+
+export async function reviewCommunitySessionNomination(
+  guildId: string,
+  nominationId: string,
+  reviewerId: string,
+  approve: boolean,
+): Promise<{ status: "approved" | "rejected"; sessionId: string | null; channelId: string }> {
+  return transaction(async client => {
+    const result = await client.query<{
+      id: string; guild_id: string; channel_id: string; proposer_id: string; title: string; description: string;
+      activity_type: CommunityActivity; media_title: string | null; media_url: string | null;
+      scheduled_at: Date; capacity: number | null;
+    }>(
+      "SELECT id::text, guild_id::text, channel_id::text, proposer_id::text, title, description, activity_type, " +
+      "media_title, media_url, scheduled_at, capacity FROM community_session_nominations " +
+      "WHERE id = $1 AND guild_id = $2 AND status = 'pending' FOR UPDATE",
+      [nominationId, guildId],
+    );
+    const nomination = result.rows[0];
+    if (!nomination) throw new Error("That pending session nomination was not found in this server.");
+    if (!approve) {
+      await client.query(
+        "UPDATE community_session_nominations SET status = 'rejected', reviewed_by = $3, reviewed_at = NOW() WHERE id = $1 AND guild_id = $2",
+        [nominationId, guildId, reviewerId],
+      );
+      return { status: "rejected", sessionId: null, channelId: nomination.channel_id };
+    }
+    const inserted = await client.query<{ id: string }>(
+      "INSERT INTO community_sessions " +
+      "(guild_id, channel_id, creator_id, host_id, title, description, activity_type, media_title, media_url, scheduled_at, capacity) " +
+      "VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id::text AS id",
+      [guildId, nomination.channel_id, nomination.proposer_id, nomination.title, nomination.description,
+        nomination.activity_type, nomination.media_title, nomination.media_url, nomination.scheduled_at, nomination.capacity],
+    );
+    const sessionId = inserted.rows[0]?.id;
+    if (!sessionId) throw new Error("The approved session could not be scheduled.");
+    await client.query(
+      "UPDATE community_session_nominations SET status = 'approved', reviewed_by = $3, reviewed_at = NOW(), session_id = $4 " +
+      "WHERE id = $1 AND guild_id = $2 AND status = 'pending'",
+      [nominationId, guildId, reviewerId, sessionId],
+    );
+    return { status: "approved", sessionId, channelId: nomination.channel_id };
+  });
+}
 
 export async function createCommunitySession(input: {
   guildId: string; channelId: string; creatorId: string; title: string; description: string;
@@ -212,7 +340,8 @@ export async function upcomingProviderReleases(
   from: Date,
   to: Date,
   region = "IE",
-  categories: readonly ("anime" | "tv" | "movies")[] = ["anime", "tv", "movies"],
+  categories: readonly ("anime" | "tv" | "movies" | "games")[] = ["anime", "tv", "movies"],
+  igdb?: IgdbClient,
 ): Promise<ProviderReleaseCalendarResult> {
   if (from.getTime() > to.getTime()) throw new Error("The release calendar start must be before its end.");
   const include = new Set(categories);
@@ -222,11 +351,13 @@ export async function upcomingProviderReleases(
     include.has("anime") ? anilist.upcomingAirings(from, to) : Promise.resolve([]),
     include.has("movies") ? tmdb.upcomingMovies(region) : Promise.resolve([]),
     include.has("tv") ? tmdb.upcomingTvEpisodes(from, to) : Promise.resolve([]),
+    include.has("games") ? (igdb ? igdb.upcomingReleaseDates(from, to) : Promise.reject(new Error("IGDB is not configured for game release dates."))) : Promise.resolve([]),
   ]);
   const unavailableProviders: string[] = [];
   const airings = requests[0].status === "fulfilled" ? requests[0].value : (unavailableProviders.push("AniList"), []);
   const movies = requests[1].status === "fulfilled" ? requests[1].value : (unavailableProviders.push("TMDB Movies"), []);
   const episodes = requests[2].status === "fulfilled" ? requests[2].value : (unavailableProviders.push("TMDB TV"), []);
+  const gameReleases = requests[3].status === "fulfilled" ? requests[3].value : (unavailableProviders.push("IGDB Game Releases"), []);
   const results: Array<{ title: string; when: Date; provider: string; url: string }> = [];
   for (const airing of airings) {
     const when = new Date(airing.airingAt * 1000);
@@ -253,8 +384,16 @@ export async function upcomingProviderReleases(
       url: release.episode.sourceUrl,
     });
   }
+  for (const release of gameReleases) {
+    results.push({
+      title: release.title + (release.platform ? " · " + release.platform : ""),
+      when: release.when,
+      provider: "IGDB" + (release.region ? " · " + release.region : ""),
+      url: release.sourceUrl,
+    });
+  }
   return {
-    results: results.sort((a, b) => a.when.getTime() - b.when.getTime()).slice(0, 30),
+    results: results.sort((a, b) => a.when.getTime() - b.when.getTime()).slice(0, 50),
     unavailableProviders,
   };
 }

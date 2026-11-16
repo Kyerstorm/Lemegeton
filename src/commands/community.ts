@@ -24,6 +24,7 @@ import type { BotConfig } from "../../helpers/runtime/config.js";
 import { homeEmbed } from "../../helpers/runtime/discord.js";
 import { AniListClient } from "../../helpers/integration/anilist.js";
 import { TmdbClient } from "../../helpers/integration/tmdb.js";
+import { IgdbClient } from "../../helpers/integration/igdb.js";
 import {
   addRankingCandidate,
   closeDiscussion,
@@ -56,6 +57,11 @@ import {
   saveDailySchedule,
   setSessionRsvp,
   submitDailyItem,
+  normalizeDailyPollOptions,
+  voteDailyPoll,
+  submitCommunitySessionNomination,
+  listPendingCommunitySessionNominations,
+  reviewCommunitySessionNomination,
   voteForRanking,
 } from "../../helpers/community/community.js";
 import { query, queryOne } from "../../database.js";
@@ -93,6 +99,8 @@ const DAILY_FORMATS = [
   { name: "Recommendation", value: "recommendation" },
   { name: "Archive spotlight", value: "archive_spotlight" },
   { name: "Mystery clue", value: "mystery" },
+  { name: "Poll", value: "poll" },
+  { name: "Creator feature", value: "creator_feature" },
 ] as const;
 const ACTIVITIES = [
   { name: "Watch together", value: "watch" },
@@ -170,6 +178,8 @@ export class CommunityCommand implements FeatureCommand {
       { name: "Vote in ranking", value: "ranking-vote" },
       { name: "Close ranking", value: "ranking-close" },
       { name: "Create session", value: "session-create" },
+      { name: "Nominate a session", value: "session-nominate" },
+      { name: "Review session nominations", value: "session-review" },
       { name: "RSVP to session", value: "session-rsvp" },
       { name: "Cancel RSVP", value: "session-withdraw" },
       { name: "Close session", value: "session-close" },
@@ -197,6 +207,8 @@ export class CommunityCommand implements FeatureCommand {
     .addStringOption((option) => option.setName("ranking_id").setDescription("Ranking ID"))
     .addStringOption((option) => option.setName("candidate_id").setDescription("Candidate ID"))
     .addStringOption((option) => option.setName("session_id").setDescription("Session ID"))
+    .addStringOption((option) => option.setName("nomination_id").setDescription("Session nomination ID"))
+    .addStringOption((option) => option.setName("poll_options").setDescription("Poll options separated with | (2–5 distinct choices)").setMaxLength(400))
     .addStringOption((option) => option.setName("discussion_id").setDescription("Discussion ID"))
     .addStringOption((option) => option.setName("scheduled_at").setDescription("ISO-8601 time including timezone").setMaxLength(40))
     .addStringOption((option) => option.setName("activity").setDescription("Session type").addChoices(...ACTIVITIES))
@@ -222,19 +234,23 @@ export class CommunityCommand implements FeatureCommand {
       { name: "Daily", value: "daily" }, { name: "Weekly", value: "weekly" },
     ))
     .addStringOption((option) => option.setName("release_categories").setDescription("Digest categories").addChoices(
-      { name: "All categories", value: "anime,tv,movies" }, { name: "Anime only", value: "anime" },
+      { name: "All categories", value: "anime,tv,movies,games" }, { name: "Anime only", value: "anime" },
       { name: "TV only", value: "tv" }, { name: "Movies only", value: "movies" },
       { name: "Anime and TV", value: "anime,tv" }, { name: "Anime and movies", value: "anime,movies" },
       { name: "TV and movies", value: "tv,movies" },
+      { name: "Games only", value: "games" },
+      { name: "Anime and games", value: "anime,games" },
     ))
     .addIntegerOption((option) => option.setName("weekday").setDescription("Weekly digest day (0 Sunday – 6 Saturday)").setMinValue(0).setMaxValue(6));
 
   private readonly anilist: AniListClient;
   private readonly tmdb: TmdbClient;
+  private readonly igdb: IgdbClient;
 
   constructor(config: BotConfig) {
     this.anilist = new AniListClient(config.anilistApiUrl, config.anilistTimeoutMs);
     this.tmdb = new TmdbClient(config.tmdbBearerToken);
+    this.igdb = new IgdbClient(config.igdbClientId, config.igdbClientSecret);
   }
 
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -263,6 +279,8 @@ export class CommunityCommand implements FeatureCommand {
         case "ranking-vote": await this.vote(interaction); return;
         case "ranking-close": await this.closeRankingCommand(interaction); return;
         case "session-create": await this.createSession(interaction); return;
+        case "session-nominate": await this.nominateSession(interaction); return;
+        case "session-review": await this.reviewSessionNominations(interaction); return;
         case "session-rsvp": await this.rsvp(interaction, true); return;
         case "session-withdraw": await this.rsvp(interaction, false); return;
         case "session-close": await this.closeSession(interaction); return;
@@ -293,6 +311,17 @@ export class CommunityCommand implements FeatureCommand {
   }
 
   async handleButton(interaction: ButtonInteraction): Promise<boolean> {
+    const dailyPollVote = interaction.customId.match(/^community:daily-poll:(\d+):(\d+)$/);
+    if (dailyPollVote && interaction.guildId) {
+      try {
+        const result = await voteDailyPoll(interaction.guildId, dailyPollVote[1]!, interaction.user.id, Number(dailyPollVote[2]));
+        const tally = result.options.map((option, index) => (index + 1) + ". " + option + " — " + result.votes[index] + " vote(s)").join("\n");
+        await interaction.reply({ content: "Your vote is saved. You can change it by selecting another option.\n\n" + tally, flags: MessageFlags.Ephemeral });
+      } catch (error) {
+        await interaction.reply({ content: error instanceof Error ? error.message : "Your Daily Drop vote could not be saved.", flags: MessageFlags.Ephemeral });
+      }
+      return true;
+    }
     const tournamentVote = interaction.customId.match(/^community:tournament-vote:(\d+):(\d+)$/);
     if (tournamentVote && interaction.guildId) {
       try {
@@ -314,6 +343,57 @@ export class CommunityCommand implements FeatureCommand {
     }
     const [, action, id] = interaction.customId.split(":");
     if (!interaction.guildId) return false;
+    if (action === "session-nominate") {
+      await interaction.showModal(modal("community:session-nomination", "Nominate a community session", [
+        { id: "title", label: "Session title", max: 180 },
+        { id: "activity", label: "Activity: watch, read, play or discuss", max: 12 },
+        { id: "scheduled_at", label: "Future ISO date-time with timezone", max: 40, placeholder: "2026-12-01T19:00+00:00" },
+        { id: "description", label: "Session description", max: 800, paragraph: true },
+        { id: "media", label: "Optional media title | HTTPS URL", max: 200, required: false },
+      ]));
+      return true;
+    }
+    if (action === "session-review") {
+      await this.reviewSessionNominations(interaction);
+      return true;
+    }
+    if (action === "session-approve" || action === "session-reject") {
+      if (!id || !isGuildManager(interaction)) {
+        await interaction.reply({ content: "Manage Server permission is required to review session nominations.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      try {
+        const reviewed = await reviewCommunitySessionNomination(interaction.guildId, id, interaction.user.id, action === "session-approve");
+        if (reviewed.status === "rejected" || !reviewed.sessionId) {
+          await interaction.reply({ content: "Session nomination #" + id + " was rejected.", flags: MessageFlags.Ephemeral });
+          return true;
+        }
+        const channel = await interaction.guild!.channels.fetch(reviewed.channelId).catch(() => null);
+        if (channel?.isTextBased() && "send" in channel) {
+          const session = await getCommunitySession(interaction.guildId, reviewed.sessionId);
+          if (session) {
+            const announcement = await (channel as TextChannel).send({
+              embeds: [homeEmbed(
+                "Community session · " + session.title,
+                formatActivity(session.activity_type) + " together · Hosted by <@" + session.host_id + ">\n" +
+                session.description + "\n\nStarts <t:" + Math.floor(new Date(session.scheduled_at).getTime() / 1000) + ":F>",
+                session.media_title ? [{ name: "Media", value: session.media_title + (session.media_url ? " · [Open source](" + session.media_url + ")" : ""), inline: false }] : [],
+              )],
+              components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+                new ButtonBuilder().setCustomId("community:rsvp:" + session.id).setLabel("I'm going").setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId("community:withdraw:" + session.id).setLabel("Withdraw").setStyle(ButtonStyle.Secondary),
+              )],
+              allowedMentions: { parse: [] },
+            });
+            await query("UPDATE community_sessions SET message_id = $1 WHERE id = $2 AND guild_id = $3", [announcement.id, session.id, interaction.guildId]);
+          }
+        }
+        await interaction.reply({ content: "Session nomination #" + id + " approved and scheduled as session #" + reviewed.sessionId + ".", flags: MessageFlags.Ephemeral });
+      } catch (error) {
+        await interaction.reply({ content: error instanceof Error ? error.message : "The session nomination could not be reviewed.", flags: MessageFlags.Ephemeral });
+      }
+      return true;
+    }
     if (action === "daily") {
       const embed = homeEmbed("Daily Drop", "The daily item is scheduled in the server timezone and is sent from the approved contributor queue.");
       await interaction.reply({
@@ -357,16 +437,36 @@ export class CommunityCommand implements FeatureCommand {
       const sessions = await listUpcomingSessions(interaction.guildId);
       const embeds = sessions.slice(0, 5).map((session) => new EmbedBuilder()
         .setColor(0x5865f2)
-        .setTitle(`#${session.id} · ${session.title}`)
-        .setDescription(`${formatActivity(session.activity_type as "watch" | "read" | "play" | "discuss")} · <t:${Math.floor(new Date(session.scheduled_at).getTime() / 1000)}:F>\n${session.description}`));
-      await interaction.reply({
-        content: sessions.length ? "Upcoming community sessions" : "No upcoming community sessions are scheduled.",
-        embeds,
-        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+        .setTitle("#" + session.id + " · " + session.title)
+        .setDescription(formatActivity(session.activity_type) + " · <t:" + Math.floor(new Date(session.scheduled_at).getTime() / 1000) + ":F>\n" + session.description)
+        .addFields(
+          { name: "Host", value: "<@" + session.host_id + ">", inline: true },
+          { name: "Capacity", value: session.capacity === null ? "Open" : String(session.capacity), inline: true },
+          ...(session.media_title ? [{ name: "Media", value: session.media_title, inline: false }] : []),
+        ));
+      const components: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>> = [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
           new ButtonBuilder().setCustomId("community:session-create").setLabel("Create session").setStyle(ButtonStyle.Primary),
-          new ButtonBuilder().setCustomId("community:session-rsvp").setLabel("RSVP").setStyle(ButtonStyle.Success),
-        )],
-        flags: MessageFlags.Ephemeral,
+          new ButtonBuilder().setCustomId("community:session-nominate").setLabel("Nominate session").setStyle(ButtonStyle.Success),
+          new ButtonBuilder().setCustomId("community:session-review").setLabel("Review nominations").setStyle(ButtonStyle.Secondary),
+        ),
+      ];
+      if (sessions.length) {
+        const options = sessions.slice(0, 25).map(session => ({
+          label: session.title.slice(0, 100),
+          description: formatActivity(session.activity_type) + " · " + new Date(session.scheduled_at).toISOString().slice(0, 16) + " UTC",
+          value: session.id,
+        }));
+        components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+          new StringSelectMenuBuilder().setCustomId("community:session-select:rsvp").setPlaceholder("Choose a session to RSVP").addOptions(options),
+        ));
+        components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+          new StringSelectMenuBuilder().setCustomId("community:session-select:withdraw").setPlaceholder("Choose a session to withdraw").addOptions(options),
+        ));
+      }
+      await interaction.reply({
+        content: sessions.length ? "Upcoming community sessions" : "No upcoming community sessions are scheduled yet.",
+        embeds, components, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] },
       });
       return true;
     }
@@ -651,9 +751,11 @@ export class CommunityCommand implements FeatureCommand {
       await interaction.reply({ content: "Your vote was saved. You may change it while the ranking is open.", flags: MessageFlags.Ephemeral });
       return true;
     }
-    if (action === "session-select" && mode === "rsvp") {
-      const result = await setSessionRsvp(interaction.guildId, id, interaction.user.id, true);
-      await interaction.reply({ content: result === "waitlist" ? "The session is full. You have been added to its waitlist." : "Your RSVP is confirmed.", flags: MessageFlags.Ephemeral });
+    if (action === "session-select" && (mode === "rsvp" || mode === "withdraw")) {
+      const result = await setSessionRsvp(interaction.guildId, id, interaction.user.id, mode === "rsvp");
+      await interaction.reply({ content: mode === "rsvp"
+        ? result === "waitlist" ? "The session is full. You have been added to its waitlist." : "Your RSVP is confirmed."
+        : "Your RSVP was withdrawn. A waitlisted member is promoted if a place opens.", flags: MessageFlags.Ephemeral });
       return true;
     }
     return false;
@@ -721,6 +823,27 @@ export class CommunityCommand implements FeatureCommand {
         await interaction.reply({ content: "Added the existing record to the season. No activity data was copied.", flags: MessageFlags.Ephemeral });
         return true;
       }
+      if (action === "session-nomination") {
+        const scheduledText = interaction.fields.getTextInputValue("scheduled_at").trim();
+        if (!/[zZ]|[+-]\\d{2}:?\\d{2}$/.test(scheduledText)) {
+          throw new Error("The session date/time must include an explicit timezone offset.");
+        }
+        const mediaText = interaction.fields.getTextInputValue("media").trim();
+        const mediaMatch = mediaText.match(/\\s+\\|\\s+(https:\\/\\/\\S+)$/);
+        const nominationId = await submitCommunitySessionNomination({
+          guildId: interaction.guildId,
+          channelId: interaction.channelId ?? "",
+          proposerId: interaction.user.id,
+          title: interaction.fields.getTextInputValue("title"),
+          description: interaction.fields.getTextInputValue("description"),
+          activity: interaction.fields.getTextInputValue("activity"),
+          mediaTitle: mediaText ? (mediaMatch ? mediaText.slice(0, mediaMatch.index).trim() : mediaText) : undefined,
+          mediaUrl: mediaMatch?.[1],
+          scheduledAt: new Date(scheduledText),
+        });
+        await interaction.reply({ content: "Session nomination #" + nominationId + " submitted for moderator review.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
       if (action === "daily-configure") {
         if (!isGuildManager(interaction)) throw new Error("Manage Server permission is required to configure Daily Drop.");
         const channelValue = interaction.fields.getTextInputValue("channel");
@@ -729,13 +852,13 @@ export class CommunityCommand implements FeatureCommand {
         if (!channel?.isTextBased() || !("send" in channel)) throw new Error("Choose a valid text channel in this server.");
         const timeZone = interaction.fields.getTextInputValue("timezone");
         const localTime = interaction.fields.getTextInputValue("local_time");
-        const format = interaction.fields.getTextInputValue("format") as "question" | "quote" | "trivia" | "recommendation" | "archive_spotlight" | "mystery";
+        const format = interaction.fields.getTextInputValue("format") as "question" | "quote" | "trivia" | "recommendation" | "archive_spotlight" | "mystery" | "poll" | "creator_feature";
         const next = await saveDailySchedule(interaction.guildId, interaction.user.id, channel.id, timeZone, localTime, format);
         await interaction.reply({ content: `Daily Drop is scheduled for ${localTime} (${timeZone}). Next delivery: <t:${Math.floor(next.getTime() / 1000)}:F> in <#${channel.id}>.`, flags: MessageFlags.Ephemeral });
         return true;
       }
       if (action === "daily-submit") {
-        const format = interaction.fields.getTextInputValue("format") as "question" | "quote" | "trivia" | "recommendation" | "archive_spotlight" | "mystery";
+        const format = interaction.fields.getTextInputValue("format") as "question" | "quote" | "trivia" | "recommendation" | "archive_spotlight" | "mystery" | "poll" | "creator_feature";
         const id = await submitDailyItem(
           interaction.guildId,
           interaction.user.id,
@@ -743,6 +866,7 @@ export class CommunityCommand implements FeatureCommand {
           interaction.fields.getTextInputValue("title"),
           interaction.fields.getTextInputValue("content"),
           interaction.fields.getTextInputValue("source") || undefined,
+          interaction.fields.getTextInputValue("poll_options") || undefined,
         );
         await interaction.reply({ content: `Daily Drop item #${id} was submitted. It will not be scheduled until a server moderator approves it.`, flags: MessageFlags.Ephemeral });
         return true;
@@ -906,25 +1030,33 @@ export class CommunityCommand implements FeatureCommand {
       { id: "channel", label: "Destination channel mention or ID", max: 50, placeholder: channel ? `<#${channel}>` : "#channel" },
       { id: "timezone", label: "IANA timezone", max: 80, placeholder: "Europe/Dublin" },
       { id: "local_time", label: "Local delivery time (HH:MM)", max: 5, placeholder: "18:00" },
-      { id: "format", label: "Daily format", max: 32, placeholder: "question, quote, trivia, recommendation, archive_spotlight or mystery" },
+      { id: "format", label: "Daily format", max: 32, placeholder: "question, quote, trivia, recommendation, archive_spotlight, mystery, poll or creator_feature" },
     ]));
   }
 
   private async submitDaily(interaction: ChatInputCommandInteraction): Promise<void> {
-    const format = interaction.options.getString("format") as "question" | "quote" | "trivia" | "recommendation" | "mystery" | null;
+    const format = interaction.options.getString("format") as "question" | "quote" | "trivia" | "recommendation" | "mystery" | "poll" | "creator_feature" | null;
     const title = interaction.options.getString("title");
     const content = interaction.options.getString("content");
     if (!format || !title || !content) throw new Error("Provide format, title and content.");
-    const id = await submitDailyItem(interaction.guildId!, interaction.user.id, format, title, content, interaction.options.getString("source_url") ?? undefined);
+    const pollOptions = format === "poll"
+      ? normalizeDailyPollOptions(interaction.options.getString("poll_options") ?? "")
+      : [];
+    const id = await submitDailyItem(
+      interaction.guildId!, interaction.user.id, format, title, content,
+      interaction.options.getString("source_url") ?? undefined,
+      pollOptions.length ? pollOptions.join("|") : undefined,
+    );
     await interaction.reply({ content: `Daily Drop item #${id} was submitted for moderator review.`, flags: MessageFlags.Ephemeral });
   }
 
   private async openDailySubmit(interaction: ButtonInteraction): Promise<void> {
     await interaction.showModal(modal("community:daily-submit", "Submit a Daily Drop item", [
-      { id: "format", label: "Format: question, quote, trivia, recommendation, mystery", max: 32 },
+      { id: "format", label: "Format: question, quote, trivia, recommendation, mystery, poll, creator_feature", max: 32 },
       { id: "title", label: "Item title", max: 200 },
       { id: "content", label: "Prompt / text (quotes max 280 characters)", max: 1_500, paragraph: true },
       { id: "source", label: "HTTPS source link (optional)", max: 400, required: false },
+      { id: "poll_options", label: "Poll choices separated by | (2–5, optional)", max: 400, required: false },
     ]));
   }
 
@@ -1016,6 +1148,55 @@ export class CommunityCommand implements FeatureCommand {
         inline: true,
       })))],
       flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  private async nominateSession(interaction: ChatInputCommandInteraction): Promise<void> {
+    const title = interaction.options.getString("title");
+    const when = interaction.options.getString("scheduled_at");
+    const activity = interaction.options.getString("activity");
+    if (!title || !when || !activity) throw new Error("Provide title, scheduled_at and activity.");
+    if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(when)) throw new Error("scheduled_at must include an explicit timezone offset.");
+    const scheduledAt = new Date(when);
+    if (!Number.isFinite(scheduledAt.getTime())) throw new Error("scheduled_at is not a valid ISO-8601 date.");
+    const nominationId = await submitCommunitySessionNomination({
+      guildId: interaction.guildId!,
+      channelId: interaction.channelId ?? "",
+      proposerId: interaction.user.id,
+      title,
+      description: interaction.options.getString("content") ?? "",
+      activity,
+      mediaTitle: interaction.options.getString("media_title") ?? undefined,
+      mediaUrl: interaction.options.getString("media_url") ?? undefined,
+      scheduledAt,
+      capacity: interaction.options.getInteger("capacity"),
+    });
+    await interaction.reply({ content: "Session nomination #" + nominationId + " was submitted for moderator review.", flags: MessageFlags.Ephemeral });
+  }
+
+  private async reviewSessionNominations(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
+    if (!isGuildManager(interaction)) {
+      await interaction.reply({ content: "Manage Server permission is required to review session nominations.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const nominations = await listPendingCommunitySessionNominations(interaction.guildId!);
+    if (!nominations.length) {
+      await interaction.reply({ content: "There are no pending session nominations in this server.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const first = nominations[0]!;
+    await interaction.reply({
+      embeds: [homeEmbed("Session nominations", "Pending proposals are not scheduled until a server moderator approves them.",
+        nominations.slice(0, 8).map(item => ({
+          name: "#" + item.id + " · " + safeDisplay(item.title, 120),
+          value: formatActivity(item.activity_type) + " · <t:" + Math.floor(new Date(item.scheduled_at).getTime() / 1000) + ":F>\nProposed by <@" + item.proposer_id + ">\n" + safeDisplay(item.description, 240),
+          inline: false,
+        })))],
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId("community:session-approve:" + first.id).setLabel("Approve first").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId("community:session-reject:" + first.id).setLabel("Reject first").setStyle(ButtonStyle.Danger),
+      )],
+      flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] },
     });
   }
 
@@ -1281,7 +1462,7 @@ export class CommunityCommand implements FeatureCommand {
     const region = schedule?.region ?? "IE";
     const categories = schedule?.categories ?? ["anime", "tv", "movies"];
     const [calendar, sessions] = await Promise.all([
-      upcomingProviderReleases(this.anilist, this.tmdb, from, to, region, categories),
+      upcomingProviderReleases(this.anilist, this.tmdb, from, to, region, categories, this.igdb),
       upcomingCommunitySessions(interaction.guildId!, from, to),
     ]);
     const timeline = mergeCommunityCalendarEntries(calendar.results, sessions);

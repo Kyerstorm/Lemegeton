@@ -2,7 +2,7 @@ import { query, queryOne, transaction } from "../../database.js";
 import { cleanText } from "../security/security.js";
 import { resolveDeliveryRetry } from "./delivery-retries.js";
 
-export type ReleaseCategory = "anime" | "tv" | "movies";
+export type ReleaseCategory = "anime" | "tv" | "movies" | "games";
 export type ReleaseCadence = "daily" | "weekly";
 
 export interface ReleaseSchedule {
@@ -29,7 +29,7 @@ export interface ReleaseDelivery {
   claim_token: string;
 }
 
-const CATEGORY_SET = new Set<ReleaseCategory>(["anime", "tv", "movies"]);
+const CATEGORY_SET = new Set<ReleaseCategory>(["anime", "tv", "movies", "games"]);
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function zonedParts(date: Date, timeZone: string): { time: string; weekday: number } {
@@ -76,7 +76,7 @@ export function nextReleaseOccurrence(
 export function normalizeReleaseCategories(values: readonly string[]): ReleaseCategory[] {
   const categories = [...new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean))];
   if (!categories.length || categories.some((value) => !CATEGORY_SET.has(value as ReleaseCategory))) {
-    throw new Error("Choose one or more supported categories: anime, tv, movies.");
+    throw new Error("Choose one or more supported categories: anime, tv, movies or games.");
   }
   return categories as ReleaseCategory[];
 }

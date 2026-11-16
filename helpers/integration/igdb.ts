@@ -39,6 +39,39 @@ export interface IgdbCompanyExplorer {
   truncated: boolean;
 }
 
+export interface IgdbUpcomingRelease {
+  gameId: number;
+  title: string;
+  when: Date;
+  sourceUrl: string;
+  region: string | null;
+  platform: string | null;
+  image: string | null;
+}
+
+export function parseIgdbUpcomingRelease(value: unknown): IgdbUpcomingRelease | null {
+  const row = object(value);
+  const game = object(row?.game);
+  if (!row || !game || !Number.isSafeInteger(game.id) || typeof game.id !== "number"
+    || game.id < 1 || typeof game.name !== "string" || !game.name.trim()
+    || !Number.isSafeInteger(row.date) || typeof row.date !== "number" || row.date <= 0) return null;
+  const when = new Date(row.date * 1000);
+  if (!Number.isFinite(when.getTime())) return null;
+  const region = object(row.region);
+  const platform = object(row.platform);
+  const cover = object(game.cover);
+  const slug = typeof game.slug === "string" ? game.slug : null;
+  return {
+    gameId: game.id,
+    title: game.name.trim().slice(0, 200),
+    when,
+    sourceUrl: sourceUrl("games", slug, game.name),
+    region: typeof region?.name === "string" ? region.name.slice(0, 80) : null,
+    platform: typeof platform?.name === "string" ? platform.name.slice(0, 100) : null,
+    image: igdbImageUrl(cover?.url),
+  };
+}
+
 type JsonObject = Record<string, unknown>;
 
 function object(value: unknown): JsonObject | null {
@@ -233,6 +266,23 @@ export class IgdbClient {
     };
   }
 
+  async upcomingReleaseDates(from: Date, to: Date): Promise<IgdbUpcomingRelease[]> {
+    if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from.getTime() > to.getTime()) {
+      throw new Error("IGDB release window must contain valid dates in ascending order.");
+    }
+    const start = Math.floor(from.getTime() / 1000);
+    const end = Math.floor(to.getTime() / 1000);
+    const rows = await this.request("release_dates",
+      "fields date,region.name,platform.name,game.id,game.name,game.slug,game.cover.url; " +
+      "where date >= " + start + " & date <= " + end + " & game != null; " +
+      "sort date asc; limit 100;"
+    );
+    return (Array.isArray(rows) ? rows : []).flatMap(row => {
+      const release = parseIgdbUpcomingRelease(row);
+      return release && release.when >= from && release.when <= to ? [release] : [];
+    }).slice(0, 50);
+  }
+
   async similarGames(gameId: number): Promise<IgdbGame[]> {
     if (!Number.isSafeInteger(gameId) || gameId < 1) {
       throw new RangeError("IGDB game ID must be a positive safe integer.");
@@ -255,7 +305,7 @@ export class IgdbClient {
     });
   }
 
-  private async request(endpoint: "games" | "companies" | "involved_companies", body: string): Promise<unknown> {
+  private async request(endpoint: "games" | "companies" | "involved_companies" | "release_dates", body: string): Promise<unknown> {
     if (!this.clientId || !this.secret) {
       throw new Error("IGDB is not configured. Set IGDB_CLIENT_ID and IGDB_CLIENT_SECRET.");
     }

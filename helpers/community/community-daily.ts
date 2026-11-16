@@ -4,7 +4,7 @@ import { cleanText, isValidHttpsUrl } from "../security/security.js";
 import { resolveDeliveryRetry } from "./delivery-retries.js";
 import type { DailyFormat, DailySchedule } from "./community.js";
 
-const DAILY_FORMATS = new Set<DailyFormat>(["question", "quote", "trivia", "recommendation", "archive_spotlight", "mystery"]);
+const DAILY_FORMATS = new Set<DailyFormat>(["question", "quote", "trivia", "recommendation", "archive_spotlight", "mystery", "poll", "creator_feature"]);
 
 function localParts(date: Date, timeZone: string): { date: string; time: string } {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -73,6 +73,16 @@ export async function disableDailySchedule(guildId: string): Promise<void> {
   await query("UPDATE community_daily_schedules SET enabled = FALSE, updated_at = NOW() WHERE guild_id = $1", [guildId]);
 }
 
+export function normalizeDailyPollOptions(values: string | readonly string[]): string[] {
+  const raw = typeof values === "string" ? values.split(/[|\n]/) : [...values];
+  const options = raw.map(value => cleanText(value, 80)).filter(Boolean);
+  const unique = [...new Map(options.map(value => [value.toLocaleLowerCase("en-US"), value])).values()];
+  if (unique.length < 2 || unique.length > 5) {
+    throw new Error("A Daily Drop poll needs two to five distinct options separated by | or a new line.");
+  }
+  return unique;
+}
+
 export async function submitDailyItem(
   guildId: string,
   userId: string,
@@ -80,9 +90,10 @@ export async function submitDailyItem(
   title: string,
   content: string,
   sourceUrl?: string,
+  pollOptionsRaw?: string,
 ): Promise<string> {
   if (!DAILY_FORMATS.has(format) || format === "archive_spotlight") {
-    throw new Error("Choose a contributor-written prompt, question, quote, trivia item, recommendation or mystery clue.");
+    throw new Error("Choose a supported prompt, question, quote, trivia item, recommendation, mystery clue, poll or creator feature.");
   }
   const cleanTitle = cleanText(title, 200);
   const body = content.trim();
@@ -91,11 +102,12 @@ export async function submitDailyItem(
   if (format === "quote" && body.length > 280) {
     throw new Error("Quotes are limited to 280 characters. Do not submit lyrics, chapters or long copyrighted passages.");
   }
+  const pollOptions = format === "poll" ? normalizeDailyPollOptions(pollOptionsRaw ?? "") : [];
   const link = isValidHttpsUrl(sourceUrl);
   const row = await queryOne<{ id: string }>(
-    `INSERT INTO community_daily_items (guild_id, format, title, content, source_url, created_by, status)
-     VALUES ($1, $2, $3, $4, $5, $6, 'pending') RETURNING id`,
-    [guildId, format, cleanTitle, body, link, userId],
+    `INSERT INTO community_daily_items (guild_id, format, title, content, source_url, options, created_by, status)
+     VALUES ($1, $2, $3, $4, $5, $6::JSONB, $7, 'pending') RETURNING id`,
+    [guildId, format, cleanTitle, body, link, JSON.stringify(pollOptions), userId],
   );
   if (!row) throw new Error("The Daily Drop submission could not be saved.");
   return row.id;
@@ -115,6 +127,42 @@ export async function reviewDailyItem(
   if (!changed) throw new Error("That pending Daily Drop item was not found in this server.");
 }
 
+export interface DailyPollVoteResult {
+  selectedIndex: number;
+  options: string[];
+  votes: number[];
+}
+
+export async function voteDailyPoll(
+  guildId: string, deliveryId: string, userId: string, optionIndex: number,
+): Promise<DailyPollVoteResult> {
+  if (!Number.isSafeInteger(optionIndex) || optionIndex < 0) throw new Error("Choose a valid poll option.");
+  return transaction(async client => {
+    const row = await client.query<{ options: string[] }>(
+      "SELECT i.options FROM community_daily_deliveries d " +
+      "JOIN community_daily_items i ON i.id = d.item_id " +
+      "WHERE d.id = $1 AND d.guild_id = $2 AND i.format = 'poll' AND d.status IN ('processing','sent') FOR UPDATE OF d",
+      [deliveryId, guildId],
+    );
+    const options = row.rows[0]?.options;
+    if (!Array.isArray(options) || options.length < 2 || optionIndex >= options.length) {
+      throw new Error("That Daily Drop poll is no longer available in this server.");
+    }
+    await client.query(
+      "INSERT INTO community_daily_poll_votes (delivery_id,guild_id,user_id,option_index) VALUES ($1,$2,$3,$4) " +
+      "ON CONFLICT (delivery_id,user_id) DO UPDATE SET option_index = EXCLUDED.option_index, updated_at = NOW()",
+      [deliveryId, guildId, userId, optionIndex],
+    );
+    const counts = await client.query<{ option_index: number; votes: number }>(
+      "SELECT option_index, COUNT(*)::INT AS votes FROM community_daily_poll_votes " +
+      "WHERE delivery_id = $1 AND guild_id = $2 GROUP BY option_index",
+      [deliveryId, guildId],
+    );
+    const votes = options.map((_, index) => Number(counts.rows.find(item => Number(item.option_index) === index)?.votes ?? 0));
+    return { selectedIndex: optionIndex, options, votes };
+  });
+}
+
 export async function dueDailySchedules(): Promise<DailySchedule[]> {
   return query<DailySchedule>(
     `SELECT guild_id, channel_id, time_zone, local_time, format, enabled, next_run_at
@@ -124,7 +172,7 @@ export async function dueDailySchedules(): Promise<DailySchedule[]> {
   );
 }
 
-export async function prepareDailyDelivery(schedule: DailySchedule): Promise<{ deliveryId: string; itemId: string; title: string; content: string; sourceUrl: string | null } | null> {
+export async function prepareDailyDelivery(schedule: DailySchedule): Promise<{ deliveryId: string; itemId: string; title: string; content: string; sourceUrl: string | null; format: DailyFormat; options: string[] } | null> {
   return transaction(async (client: PoolClient) => {
     const lock = await client.query(
       `SELECT * FROM community_daily_schedules
@@ -147,18 +195,18 @@ export async function prepareDailyDelivery(schedule: DailySchedule): Promise<{ d
 
     const itemResult = current.format === "archive_spotlight"
       ? await client.query(
-          `SELECT id, title, content, source_url FROM community_daily_items
-           WHERE guild_id = $1 AND status = 'approved'
+          `SELECT id, title, content, source_url, format, options FROM community_daily_items
+           WHERE guild_id = $1 AND status = 'approved' AND format = 'archive_spotlight'
            ORDER BY RANDOM() LIMIT 1`,
           [current.guild_id],
         )
       : await client.query(
-          `SELECT id, title, content, source_url FROM community_daily_items
+          `SELECT id, title, content, source_url, format, options FROM community_daily_items
            WHERE guild_id = $1 AND status = 'approved' AND format = $2
            ORDER BY created_at DESC LIMIT 1`,
           [current.guild_id, current.format],
         );
-    const item = itemResult.rows[0] as { id: string; title: string; content: string; source_url: string | null } | undefined;
+    const item = itemResult.rows[0] as { id: string; title: string; content: string; source_url: string | null; format: DailyFormat; options: string[] } | undefined;
 
     let selected = item;
     if (!selected && current.format === "archive_spotlight") {
@@ -179,7 +227,7 @@ export async function prepareDailyDelivery(schedule: DailySchedule): Promise<{ d
            VALUES ($1, 'archive_spotlight', $2, $3, $4, $5, 'approved') RETURNING id`,
           [current.guild_id, row.title, row.content, row.source_url, row.created_by],
         );
-        selected = created.rows[0] ? { ...row, id: (created.rows[0] as { id: string }).id } : undefined;
+        selected = created.rows[0] ? { ...row, id: (created.rows[0] as { id: string }).id, format: "archive_spotlight" as const, options: [] } : undefined;
       }
     }
 
@@ -205,14 +253,16 @@ export async function prepareDailyDelivery(schedule: DailySchedule): Promise<{ d
       title: selected.title,
       content: selected.content,
       sourceUrl: selected.source_url,
+      format: selected.format,
+      options: Array.isArray(selected.options) ? selected.options : [],
     };
   });
 }
 
 export async function dueDailyDeliveries(): Promise<Array<{
-  id: string; guild_id: string; channel_id: string; item_id: string; title: string; content: string; source_url: string | null; claim_token: string;
+  id: string; guild_id: string; channel_id: string; item_id: string; title: string; content: string; source_url: string | null; format: DailyFormat; options: string[]; claim_token: string;
 }>> {
-  return query<{ id: string; guild_id: string; channel_id: string; item_id: string; title: string; content: string; source_url: string | null; claim_token: string }>(
+  return query<{ id: string; guild_id: string; channel_id: string; item_id: string; title: string; content: string; source_url: string | null; format: DailyFormat; options: string[]; claim_token: string }>(
     `WITH due AS (
        SELECT id FROM community_daily_deliveries
        WHERE (status = 'pending' AND next_attempt_at <= NOW())
@@ -227,7 +277,7 @@ export async function dueDailyDeliveries(): Promise<Array<{
        RETURNING d.id, d.guild_id, d.channel_id, d.item_id, d.claim_token
      )
      SELECT c.id::text, c.guild_id::text, c.channel_id::text, c.item_id::text,
-            i.title, i.content, i.source_url, c.claim_token
+            i.title, i.content, i.source_url, i.format, i.options, c.claim_token
      FROM claimed c JOIN community_daily_items i ON i.id = c.item_id
      ORDER BY c.id ASC`,
   );

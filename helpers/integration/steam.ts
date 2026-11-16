@@ -22,11 +22,11 @@ export function validateSteamId(value: string): string | null {
 
 export interface SteamStoreGame {
   appId:number;title:string;shortDescription:string;headerImage:string|null;isFree:boolean;
-  price:{initial:string;final:string;discountPercent:number}|null;releaseDate:string|null;comingSoon:boolean;
+  price:{initial:string;final:string;discountPercent:number}|null;priceRegion:string;releaseDate:string|null;comingSoon:boolean;
   genres:string[];categories:string[];developers:string[];publishers:string[];platforms:string[];
 }
 
-export function parseSteamStoreGame(value:unknown):SteamStoreGame|null{
+export function parseSteamStoreGame(value:unknown, priceRegion = "US"):SteamStoreGame|null{
  const item=record(value);
  if(!item||typeof item.steam_appid!=="number"||!Number.isSafeInteger(item.steam_appid)||item.steam_appid<1||typeof item.name!=="string"||!item.name.trim())return null;
  const price=record(item.price_overview);
@@ -39,6 +39,7 @@ export function parseSteamStoreGame(value:unknown):SteamStoreGame|null{
   headerImage:typeof item.header_image==="string"&&item.header_image.startsWith("https://")?item.header_image:null,
   isFree:item.is_free===true,
   price:price&&typeof price.initial_formatted==="string"&&typeof price.final_formatted==="string"?{initial:price.initial_formatted,final:price.final_formatted,discountPercent:typeof price.discount_percent==="number"?Math.max(0,Math.min(100,price.discount_percent)):0}:null,
+  priceRegion:priceRegion.toUpperCase(),
   releaseDate:typeof release?.date==="string"?release.date.slice(0,80):null,
   comingSoon:release?.coming_soon===true,
   genres:strings(item.genres,"description"),categories:strings(item.categories,"description"),
@@ -137,21 +138,25 @@ export class SteamClient {
     };
   }
 
-  async getStoreGameDetails(appId:number):Promise<SteamStoreGame|null>{
+  async getStoreGameDetails(appId:number, region = "US"):Promise<SteamStoreGame|null>{
     if(!Number.isSafeInteger(appId)||appId<1)throw new Error("Steam app ID is invalid.");
+    const code=region.trim().toUpperCase();
+    if(!/^[A-Z]{2}$/.test(code))throw new Error("Steam price region must be a two-letter country code.");
     const url=new URL("https://store.steampowered.com/api/appdetails");
-    url.searchParams.set("appids",String(appId));url.searchParams.set("cc","us");url.searchParams.set("l","english");
+    url.searchParams.set("appids",String(appId));url.searchParams.set("cc",code.toLowerCase());url.searchParams.set("l","english");
     const response=await fetchProviderResponse(globalThis.fetch,url,{signal:AbortSignal.timeout(10_000)});
     if(!response.ok)throw new Error(`Steam Store returned HTTP ${response.status}.`);
     const body=record(await response.json());
     const result=record(body?.[String(appId)]);
     if(result?.success!==true)return null;
-    return parseSteamStoreGame(result.data);
+    return parseSteamStoreGame(result.data,code);
   }
 
-  async searchStoreGames(query:string,maxResults=5):Promise<SteamStoreGame[]>{
+  async searchStoreGames(query:string,maxResults=5,region="US"):Promise<SteamStoreGame[]>{
     const clean=query.replace(/[\u0000-\u001f]/g," ").replace(/\s+/g," ").trim().slice(0,100);
     if(clean.length<2)return[];
+    const code=region.trim().toUpperCase();
+    if(!/^[A-Z]{2}$/.test(code))throw new Error("Steam price region must be a two-letter country code.");
     const limit=Math.max(1,Math.min(5,Math.trunc(maxResults)||5));
     const url=new URL(`https://steamcommunity.com/actions/SearchApps/${encodeURIComponent(clean)}`);
     const response=await fetchProviderResponse(globalThis.fetch,url,{signal:AbortSignal.timeout(10_000),headers:{Accept:"application/json"}});
@@ -161,7 +166,7 @@ export class SteamClient {
       const row=record(value);const id=Number(row?.appid);
       return Number.isSafeInteger(id)&&id>0?[id]:[];
     }):[];
-    const results=await Promise.allSettled(candidates.map(id=>this.getStoreGameDetails(id)));
+    const results=await Promise.allSettled(candidates.map(id=>this.getStoreGameDetails(id,code)));
     return results.flatMap(result=>result.status==="fulfilled"&&result.value?[result.value]:[]);
   }
 

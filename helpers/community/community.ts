@@ -1,4 +1,4 @@
-export type DailyFormat = "question" | "quote" | "trivia" | "recommendation" | "archive_spotlight" | "mystery";
+export type DailyFormat = "question" | "quote" | "trivia" | "recommendation" | "archive_spotlight" | "mystery" | "poll" | "creator_feature";
 export type CommunityActivity = "watch" | "read" | "play" | "discuss";
 
 export interface DailySchedule {
@@ -35,6 +35,8 @@ export {
   disableDailySchedule,
   submitDailyItem,
   reviewDailyItem,
+  normalizeDailyPollOptions,
+  voteDailyPoll,
   dueDailySchedules,
   prepareDailyDelivery,
   dueDailyDeliveries,
@@ -55,6 +57,10 @@ export {
 } from "./community-rankings.js";
 export {
   createCommunitySession,
+  normalizeCommunitySessionNomination,
+  submitCommunitySessionNomination,
+  listPendingCommunitySessionNominations,
+  reviewCommunitySessionNomination,
   setSessionRsvp,
   getCommunitySession,
   createSpoilerDiscussion,

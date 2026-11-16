@@ -24,6 +24,15 @@ export interface GoogleBook {
   previewUrl: string | null;
   infoUrl: string | null;
   image: string | null;
+  catalogueRegion: string | null;
+  viewability: string | null;
+  webReaderUrl: string | null;
+  pdfAvailable: boolean | null;
+  epubAvailable: boolean | null;
+  publicDomain: boolean | null;
+  saleability: string | null;
+  isEbook: boolean | null;
+  buyUrl: string | null;
 }
 
 type RecordValue = Record<string, unknown>;
@@ -83,6 +92,11 @@ function normalizeVolume(value: unknown): GoogleBook | null {
   const volumeSeries = Array.isArray(series?.volumeSeries) ? series.volumeSeries : [];
   const firstSeries = volumeSeries.map(object).find((entry) => entry !== null) ?? null;
   const imageLinks = object(volume.imageLinks);
+  const accessInfo = object(item?.accessInfo);
+  const pdf = object(accessInfo?.pdf);
+  const epub = object(accessInfo?.epub);
+  const saleInfo = object(item?.saleInfo);
+  const booleanValue = (value: unknown): boolean | null => typeof value === "boolean" ? value : null;
 
   return {
     id,
@@ -114,6 +128,15 @@ function normalizeVolume(value: unknown): GoogleBook | null {
     previewUrl: googleBooksUrl(volume.previewLink),
     infoUrl: googleBooksUrl(volume.infoLink),
     image: googleBooksUrl(imageLinks?.thumbnail, true),
+    catalogueRegion: stringValue(accessInfo?.country) ?? stringValue(saleInfo?.country),
+    viewability: stringValue(accessInfo?.viewability),
+    webReaderUrl: googleBooksUrl(accessInfo?.webReaderLink),
+    pdfAvailable: booleanValue(pdf?.isAvailable),
+    epubAvailable: booleanValue(epub?.isAvailable),
+    publicDomain: booleanValue(accessInfo?.publicDomain),
+    saleability: stringValue(saleInfo?.saleability),
+    isEbook: booleanValue(saleInfo?.isEbook),
+    buyUrl: googleBooksUrl(saleInfo?.buyLink),
   };
 }
 
@@ -176,12 +199,15 @@ export class GoogleBooksClient {
     throw new Error("Enter a valid ISBN-10, ISBN-13 or Google Books volume ID.");
   }
 
-  async search(query: string): Promise<GoogleBook[]> {
+  async search(query: string, country?: string): Promise<GoogleBook[]> {
     const cleanQuery = query.trim().replace(/\s+/g, " ").slice(0, 200);
     if (!cleanQuery) return [];
+    const region = country?.trim().toUpperCase();
+    if (region && !/^[A-Z]{2}$/.test(region)) throw new Error("Google Books catalogue region must be a two-letter country code.");
 
     const url = new URL("https://www.googleapis.com/books/v1/volumes");
     url.searchParams.set("q", cleanQuery);
+    if (region) url.searchParams.set("country", region);
     url.searchParams.set("maxResults", "10");
     url.searchParams.set("printType", "books");
     url.searchParams.set("projection", "full");

@@ -53,6 +53,12 @@ test("Google Books search normalizes volume metadata and source URLs", async () 
             infoLink: "https://books.google.com/books?id=dune-id",
             imageLinks: { thumbnail: "http://books.google.com/books/content?id=dune-id" },
           },
+          accessInfo: {
+            country: "IE", viewability: "PARTIAL", publicDomain: false,
+            webReaderLink: "https://books.google.com/books?id=dune-id&printsec=frontcover",
+            pdf: { isAvailable: false }, epub: { isAvailable: true },
+          },
+          saleInfo: { country: "IE", saleability: "FOR_SALE", isEbook: true, buyLink: "https://play.google.com/store/books/details?id=dune-id" },
         },
         { id: "incomplete", volumeInfo: { authors: ["No title"] } },
         null,
@@ -85,6 +91,15 @@ test("Google Books search normalizes volume metadata and source URLs", async () 
       previewUrl: "https://books.google.com/books?id=dune-id&printsec=frontcover",
       infoUrl: "https://books.google.com/books?id=dune-id",
       image: "https://books.google.com/books/content?id=dune-id",
+      catalogueRegion: "IE",
+      viewability: "PARTIAL",
+      webReaderUrl: "https://books.google.com/books?id=dune-id&printsec=frontcover",
+      pdfAvailable: false,
+      epubAvailable: true,
+      publicDomain: false,
+      saleability: "FOR_SALE",
+      isEbook: true,
+      buyUrl: "https://play.google.com/store/books/details?id=dune-id",
     });
   });
 });
@@ -184,4 +199,16 @@ test("Google Books exact edition lookup rejects invalid ISBN checksums and malfo
   const client = new GoogleBooksClient();
   await assert.rejects(client.findEdition("9780441172718"), /invalid checksum/);
   await assert.rejects(client.findEdition("not an identifier"), /valid ISBN-10, ISBN-13 or Google Books volume ID/);
+});
+
+
+test("Google Books regional search sends a validated country code", async () => {
+  await withFetch(async input => {
+    const url = new URL(String(input));
+    assert.equal(url.searchParams.get("country"), "IE");
+    return new Response(JSON.stringify({ items: [] }), { status: 200, headers: { "content-type": "application/json" } });
+  }, async () => {
+    assert.deepEqual(await new GoogleBooksClient().search("Dune", "ie"), []);
+    await assert.rejects(new GoogleBooksClient().search("Dune", "Ireland"), /two-letter country code/);
+  });
 });

@@ -55,6 +55,8 @@ import { emoji, loadingMessage } from "../../helpers/emoji.js";
 import { parseGridSourceUrls, parseGridTitles, renderMediaGrid, type MediaGridSource } from "../../helpers/media/media-grid.js";
 import { parseMediaComparisonEntries, type MediaComparisonCategory } from "../../helpers/media/media-comparison.js";
 import { formatMetadataSourceReference } from "../../helpers/media/media-provenance.js";
+import { auditMetadataSource, type MetadataSourceAuditInput } from "../../helpers/media/metadata-source-audit.js";
+import { upcomingProviderReleases } from "../../helpers/community/community-sessions.js";
 import { rankCrossMediaCandidates, recommendationGenreLabels, type CrossMediaCandidate } from "../../helpers/media/cross-media-recommendations.js";
 
 
@@ -152,6 +154,16 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
         { name: "ISBN-10", value: item.isbn10 ?? "Unavailable", inline: true },
         { name: "Series", value: [item.seriesBookTitle, item.seriesDisplayNumber, item.seriesOrder ? "Order " + item.seriesOrder : null].filter(Boolean).join(" · ") || "Unavailable", inline: true },
         { name: "Categories", value: item.categories.join(", ") || item.mainCategory || "Unavailable", inline: false },
+        { name: "Catalogue region", value: item.catalogueRegion ?? "Not reported", inline: true },
+        { name: "Reading access", value: item.viewability ?? "Not reported", inline: true },
+        { name: "Digital formats", value: [
+          item.pdfAvailable === null ? "PDF not reported" : item.pdfAvailable ? "PDF available" : "PDF unavailable",
+          item.epubAvailable === null ? "EPUB not reported" : item.epubAvailable ? "EPUB available" : "EPUB unavailable",
+        ].join(" · "), inline: false },
+        { name: "Store status", value: item.saleability ?? "Not reported", inline: true },
+        { name: "eBook", value: item.isEbook === null ? "Not reported" : item.isEbook ? "Yes" : "No", inline: true },
+        { name: "Public domain", value: item.publicDomain === null ? "Not reported" : item.publicDomain ? "Yes" : "No", inline: true },
+        ...(item.buyUrl ? [{ name: "Store record", value: "[Open provider store record](" + item.buyUrl + ")", inline: false }] : []),
       )
       .setFooter({ text: "Google Books · Source metadata" });
     embed.addFields({ name: "Source record", value: formatMetadataSourceReference("Google Books", item.id, item.sourceUrl), inline: false });
@@ -183,7 +195,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
 
   if (record.provider === "Steam") {
     const item=record.item;
-    const price=item.isFree?"Free to Play":item.price?`${item.price.final} · US store`: "Price unavailable";
+    const price=item.isFree?"Free to Play":item.price?`${item.price.final} · ${item.priceRegion} store`: "Price unavailable";
     const embed=new EmbedBuilder().setColor(item.isFree?0x2ecc71:0x5865f2)
       .setTitle(item.title.slice(0,256)).setURL(`https://store.steampowered.com/app/${item.appId}`)
       .setDescription(safeDescription(item.shortDescription,500))
@@ -195,7 +207,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
         {name:"Platforms",value:item.platforms.join(", ")||"Unavailable",inline:true},
         {name:"Developers",value:item.developers.join(", ")||"Unavailable",inline:true},
         {name:"Publishers",value:item.publishers.join(", ")||"Unavailable",inline:true},
-      ).setFooter({text:"Steam Store · US store metadata"});
+      ).setFooter({text:"Steam Store · "+item.priceRegion+" store metadata"});
     embed.addFields({name:"Source record",value:formatMetadataSourceReference("Steam Store",item.appId,"https://store.steampowered.com/app/"+item.appId),inline:false});
     if(item.headerImage)embed.setImage(item.headerImage);
     return embed;
@@ -391,12 +403,14 @@ export class DiscoverCommand implements FeatureCommand {
       { name: "Trending media", value: "trending" },
       { name: "Franchise Explorer", value: "franchise" },
       { name: "Adaptation Explorer", value: "adaptations" },
+      { name: "Metadata Source Explorer", value: "metadata" },
+      { name: "Media Release Explorer", value: "releases" },
       { name: "Exact book edition lookup", value: "edition" },
       { name: "3×3 media cover grid", value: "grid" },
       { name: "Cross-media similarity", value: "similar" },
       { name: "Knowledge Atlas", value: "atlas" },
       { name: "Creator Explorer", value: "creators" },
-      { name: "Where to watch", value: "availability" },
+      { name: "Availability Explorer", value: "availability" },
       { name: "Trailers and videos", value: "videos" },
       { name: "Movie collection guide", value: "collection" },
       { name: "TV season and episode guide", value: "tv-guide" },
@@ -469,6 +483,14 @@ export class DiscoverCommand implements FeatureCommand {
       if(!allowed.includes(filters.format)){
         await interaction.reply({content:"That format is not supported by the selected media category.",flags:MessageFlags.Ephemeral});return;
       }
+    }
+    if (view === "metadata") {
+      await this.metadataSourcesAndRespond(interaction, query ?? "");
+      return;
+    }
+    if (view === "releases") {
+      await this.releaseExplorerAndRespond(interaction, category);
+      return;
     }
     if (view === "random" || view === "trending") {
       await interaction.reply({ content: loadingMessage(view === "random" ? "Finding a random media pick…" : "Loading trending media…"), flags: MessageFlags.Ephemeral });
@@ -598,9 +620,47 @@ export class DiscoverCommand implements FeatureCommand {
       await this.tmdbTvGuideSelectionAndRespond(interaction,query);
       return;
     }
+    if (view === "availability" && category === "book") {
+      const region = (interaction.options.getString("region") ?? await getGuildMediaRegion(interaction.guildId)).trim().toUpperCase();
+      if (!/^[A-Z]{2}$/.test(region)) {
+        await interaction.reply({ content:"Region must be a two-letter country code, such as IE or US.", flags:MessageFlags.Ephemeral });
+        return;
+      }
+      await interaction.reply({ content:loadingMessage("Checking the Google Books regional catalogue…"), flags:MessageFlags.Ephemeral });
+      try {
+        const books = await this.books.search(query, region);
+        await this.presentResults(
+          interaction,
+          books.map(item=>({provider:"Google Books" as const,category:"book" as const,item})),
+          "Google Books catalogue · "+region+" · Provider-reported catalogue and digital access, not a purchase guarantee",
+        );
+      } catch (error) {
+        await interaction.editReply({ content:error instanceof Error?error.message:"The Google Books catalogue could not be checked.", embeds:[], components:[] });
+      }
+      return;
+    }
+    if (view === "availability" && category === "game") {
+      const region = (interaction.options.getString("region") ?? await getGuildMediaRegion(interaction.guildId)).trim().toUpperCase();
+      if (!/^[A-Z]{2}$/.test(region)) {
+        await interaction.reply({ content:"Region must be a two-letter country code, such as IE or US.", flags:MessageFlags.Ephemeral });
+        return;
+      }
+      await interaction.reply({ content:loadingMessage("Checking the Steam Store catalogue…"), flags:MessageFlags.Ephemeral });
+      try {
+        const games = await this.steam.searchStoreGames(query,5,region);
+        await this.presentResults(
+          interaction,
+          games.map(item=>({provider:"Steam" as const,category:"game" as const,item})),
+          "Steam Store catalogue · "+region+" · Regional price and store record, not a universal availability guarantee",
+        );
+      } catch (error) {
+        await interaction.editReply({ content:error instanceof Error?error.message:"Steam Store availability could not be checked.", embeds:[], components:[] });
+      }
+      return;
+    }
     if (view === "availability" || view === "videos") {
       if (category !== "movie" && category !== "tv") {
-        await interaction.reply({content:"Where-to-watch and video views require the Films or Television category.",flags:MessageFlags.Ephemeral});
+        await interaction.reply({content:"Choose Books for regional catalogue access, Films or Television for streaming links, or Video Games for the Steam Store catalogue.",flags:MessageFlags.Ephemeral});
         return;
       }
       const region = (interaction.options.getString("region") ?? await getGuildMediaRegion(interaction.guildId)).trim().toUpperCase();
@@ -858,6 +918,14 @@ export class DiscoverCommand implements FeatureCommand {
         });
         return true;
       }
+      await recordProviderRelationships({
+        sourceTitle:result.company.name,sourceCategory:"CREATOR",sourceUrl:result.company.sourceUrl,
+        sourceImageUrl:result.company.logo,sourceLabel:"IGDB developer and publisher credits",
+        relations:result.credits.map(credit=>({
+          title:credit.title,category:"GAME",url:credit.sourceUrl,imageUrl:credit.image,
+          relationshipType:credit.roles.join(" / ").toLowerCase()+" credit",
+        })),
+      });
       const works = result.credits.slice(0,10).map((credit) => {
         const roles = credit.roles.join(" / ");
         const release = credit.releaseDate ? " · " + credit.releaseDate : "";
@@ -904,7 +972,19 @@ export class DiscoverCommand implements FeatureCommand {
       }
       const personName = interaction.component.options.find((option) => option.value === selectedId)?.label ?? "Person";
       await interaction.deferUpdate();
-      const credits = await this.tmdb.personCredits(personId);
+      const [personMatches, credits] = await Promise.all([
+        this.tmdb.searchPeople(personName),
+        this.tmdb.personCredits(personId),
+      ]);
+      const person = personMatches.find(candidate => candidate.id === personId);
+      await recordProviderRelationships({
+        sourceTitle:personName,sourceCategory:"CREATOR",sourceUrl:person?.sourceUrl,
+        sourceImageUrl:person?.image,sourceLabel:"TMDB cast and crew credits",
+        relations:credits.map(credit=>({
+          title:credit.title,category:credit.category==="movie"?"MOVIE":"TV",
+          url:credit.sourceUrl,imageUrl:credit.image,relationshipType:credit.role??"cast or crew credit",
+        })),
+      });
       const description = credits.length
         ? credits.map((credit) => {
           const role = credit.role ? " · "+cleanText(credit.role,100) : "";
@@ -1281,6 +1361,118 @@ export class DiscoverCommand implements FeatureCommand {
     await interaction.reply({content:`Suggestion #${suggestionId} was ${result}.`,flags:MessageFlags.Ephemeral});
   }
 
+  private async releaseExplorerAndRespond(
+    interaction: ChatInputCommandInteraction,
+    category: Category,
+  ): Promise<void> {
+    const categories: Array<"anime" | "tv" | "movies" | "games"> =
+      category === "game" ? ["games"]
+        : category === "movie" ? ["movies"]
+        : category === "tv" ? ["tv"]
+        : category === "anime" ? ["anime"]
+        : category === "all" ? ["anime", "tv", "movies", "games"]
+        : [];
+    if (!categories.length) {
+      await interaction.reply({ content: "Choose Anime, Films, Television, Games or All media for provider-dated releases.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const from = new Date();
+    const to = new Date(from.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const region = (interaction.options.getString("region") ?? await getGuildMediaRegion(interaction.guildId)).trim().toUpperCase();
+    if (!/^[A-Z]{2}$/.test(region)) {
+      await interaction.reply({ content: "Region must be a two-letter country code, such as IE or US.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.reply({ content: loadingMessage("Loading provider-dated releases…"), flags: MessageFlags.Ephemeral });
+    try {
+      const calendar = await upcomingProviderReleases(
+        this.anilist, this.tmdb, from, to, region, categories, this.igdb,
+      );
+      const embeds = calendar.results.slice(0, 10).map(item => {
+        const timestamp = Math.floor(new Date(item.when).getTime() / 1000);
+        return homeEmbed(item.title, item.provider + " · <t:" + timestamp + ":F>", [
+          { name: "Provider source", value: "[Open release record](" + item.url + ")", inline: false },
+        ]).setURL(item.url).setFooter({ text: "Provider-dated result · 30-day window" });
+      });
+      await interaction.editReply({
+        content: (calendar.results.length
+          ? calendar.results.length + " dated release(s) returned"
+          : "No dated releases were returned for this window") +
+          (calendar.unavailableProviders.length ? "\nUnavailable providers: " + calendar.unavailableProviders.join(", ") : ""),
+        embeds,
+        components: [navigationButtons("discover", [{ id: "home", label: "Back to discovery" }])],
+        allowedMentions: { parse: [] },
+      });
+    } catch (error) {
+      await interaction.editReply({ content: error instanceof Error ? error.message : "The release providers could not be queried.", embeds: [], components: [] });
+    }
+  }
+
+  private metadataAuditFields(record: SearchRecord): MetadataSourceAuditInput {
+    if (record.provider === "AniList") {
+      const item = record.item;
+      return { provider: record.provider, category: record.category, id: item.id, url: item.siteUrl,
+        fields: { description:item.description, releaseDate:item.startDate?.year, creators:item.staffCredits, genres:item.genres, image:item.coverImage } };
+    }
+    if (record.provider === "Google Books") {
+      const item = record.item;
+      return { provider: record.provider, category: record.category, id: item.id, url: item.sourceUrl,
+        fields: { description:item.description, releaseDate:item.publishedDate, creators:item.authors, genres:item.categories, image:item.image } };
+    }
+    if (record.provider === "TMDB") {
+      const item = record.item;
+      return { provider: record.provider, category: record.category, id: item.id, url: item.sourceUrl,
+        fields: { description:item.overview, releaseDate:item.releaseDate, creators:undefined, genres:item.genres, image:item.image } };
+    }
+    if (record.provider === "IGDB") {
+      const item = record.item;
+      return { provider: record.provider, category: record.category, id: item.id, url: item.sourceUrl,
+        fields: { description:item.summary, releaseDate:item.releaseDate, creators:[...item.developers,...item.publishers], genres:item.genres, image:item.image } };
+    }
+    const item = record.item;
+    return { provider: record.provider, category: record.category, id: item.appId, url:this.recordUrl(record),
+      fields: { description:item.shortDescription, releaseDate:item.releaseDate, creators:[...item.developers,...item.publishers], genres:item.genres, image:item.headerImage } };
+  }
+
+  private async metadataSourcesAndRespond(
+    interaction: ChatInputCommandInteraction,
+    query: string,
+  ): Promise<void> {
+    if (!query) {
+      await interaction.reply({ content:"Enter a title to inspect provider metadata and missing fields.", flags:MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.reply({ content:loadingMessage("Comparing provider metadata…"), flags:MessageFlags.Ephemeral });
+    const results = await this.fetchSearch(query,"all");
+    if (!results.length) {
+      await interaction.editReply({ content:"No providers returned a source record for that title.", embeds:[], components:[] });
+      return;
+    }
+    const exact = results.filter(record=>normalizeAtlasTitle(this.recordTitle(record))===normalizeAtlasTitle(query));
+    const selected = (exact.length?exact:results).slice(0,8);
+    const audits = selected.map(record=>auditMetadataSource(this.metadataAuditFields(record)));
+    const embeds = selected.map((record,index)=>{
+      const audit=audits[index]!;
+      const embed=homeEmbed(this.recordTitle(record),
+        "Provider-backed metadata coverage. Missing values mean that provider did not return that field for this record; they do not prove the information does not exist.",
+        [
+          {name:"Provider record",value:formatMetadataSourceReference(audit.provider,audit.id,audit.url),inline:false},
+          {name:"Reported fields",value:audit.presentFields.map(value=>value.replace(/([A-Z])/g," $1").toLowerCase()).join(" · ")||"None of the compared fields",inline:false},
+          {name:"Missing fields",value:audit.missingFields.map(value=>value.replace(/([A-Z])/g," $1").toLowerCase()).join(" · ")||"No gaps in this comparison",inline:false},
+          {name:"Freshness",value:"Not reported by provider",inline:true},
+        ]).setURL(audit.url).setFooter({text:audit.provider+" · "+audit.category+" · source metadata"});
+      const image=this.recordImage(record);
+      if(image)embed.setThumbnail(image);
+      return embed;
+    });
+    await interaction.editReply({
+      content:(exact.length?"Exact-title provider matches":"Related search matches · exact cross-provider match was not found")+
+        " · "+selected.length+" source record(s)",
+      embeds,components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],
+      allowedMentions:{parse:[]},
+    });
+  }
+
   private async creatorAndRespond(
     interaction:ChatInputCommandInteraction|ModalSubmitInteraction,
     query:string,
@@ -1289,6 +1481,14 @@ export class DiscoverCommand implements FeatureCommand {
     await interaction.reply({content:loadingMessage("Exploring creators…"),flags:MessageFlags.Ephemeral});
     if(category==="book"){
       const books=await this.books.search("inauthor:"+query.trim());
+      const authorUrl="https://books.google.com/books?as_authors="+encodeURIComponent(query.trim());
+      await recordProviderRelationships({
+        sourceTitle:query.trim(),sourceCategory:"CREATOR",sourceUrl:authorUrl,
+        sourceLabel:"Google Books author-attributed editions",
+        relations:books.slice(0,20).map(book=>({
+          title:book.title,category:"BOOK",url:book.sourceUrl,imageUrl:book.image,relationshipType:"author credit",
+        })),
+      });
       const embeds=books.slice(0,10).map((book)=>homeEmbed(
         book.title.slice(0,256),
         [
@@ -1352,6 +1552,14 @@ export class DiscoverCommand implements FeatureCommand {
     }
     const creators=await this.anilist.searchCreators(query);
     if(!creators.length){await interaction.editReply({content:"AniList returned no matching creators.",embeds:[],components:[]});return;}
+    await Promise.allSettled(creators.map(creator=>recordProviderRelationships({
+      sourceTitle:creator.name,sourceCategory:"CREATOR",sourceUrl:creator.url,sourceImageUrl:creator.image,
+      sourceLabel:"AniList staff and creator credits",
+      relations:creator.media.map(item=>({
+        title:item.title,category:item.type==="ANIME"?"ANIME":"MANGA",url:item.url,
+        imageUrl:item.image,relationshipType:item.role,
+      })),
+    })));
     const embeds=creators.slice(0,10).map(creator=>{
       const embed=homeEmbed(creator.name,safeDescription(creator.description,1200),[
         {name:"Occupations",value:creator.occupations.join(", ")||"Unavailable",inline:true},
@@ -1676,6 +1884,7 @@ export class DiscoverCommand implements FeatureCommand {
             sourceTitle:title,
             sourceCategory:"MOVIE",
             sourceUrl:this.recordUrl(first),
+            sourceImageUrl:this.recordImage(first),
             sourceLabel:("TMDB collection membership · "+collection.name).slice(0,100),
             relations,
           });
@@ -1697,9 +1906,11 @@ export class DiscoverCommand implements FeatureCommand {
         sourceTitle:title,
         sourceCategory:mediaCategory,
         sourceUrl:this.recordUrl(first),
+        sourceImageUrl:this.recordImage(first),
         targetTitle:this.recordTitle(record),
         targetCategory:record.category,
         targetUrl:this.recordUrl(record),
+        targetImageUrl:this.recordImage(record),
         relationshipType:"exact-title match (unverified adaptation)",
         sourceKind:"recommendation",
         sourceLabel:"Cross-provider exact-title match; not a verified adaptation",
@@ -1716,7 +1927,7 @@ export class DiscoverCommand implements FeatureCommand {
     const rootUrl = this.recordUrl(first);
     const graph = await findAtlasGraph(
       interaction.guildId,
-      { title, category: mediaCategory, url: rootUrl },
+      { title, category: mediaCategory, url: rootUrl, imageUrl: this.recordImage(first) },
       { maxDepth: 3, maxNodes: 24, perNodeLimit: 8 },
     );
     const graphFilters = {
@@ -1847,6 +2058,12 @@ export class DiscoverCommand implements FeatureCommand {
     return record.category;
   }
 
+  private recordImage(record: SearchRecord): string | null {
+    if (record.provider === "AniList") return record.item.coverImage;
+    if (record.provider === "Steam") return record.item.headerImage;
+    return record.item.image;
+  }
+
   private recordUrl(record: SearchRecord): string {
     if(record.provider==="AniList")return record.item.siteUrl;
     if(record.provider==="Steam")return `https://store.steampowered.com/app/${record.item.appId}`;
@@ -1857,9 +2074,10 @@ export class DiscoverCommand implements FeatureCommand {
     const writes = results.flatMap((record) => record.provider === "AniList" ? [
       recordProviderRelationships({
         sourceTitle:this.recordTitle(record),sourceCategory:record.category,sourceUrl:record.item.siteUrl,
+        sourceImageUrl:record.item.coverImage,
         sourceLabel:"AniList provider relationships",
         relations:record.item.relations.map((relation) => ({
-          title:relation.title,category:relation.category,url:relation.url,relationshipType:relation.relation,
+          title:relation.title,category:relation.category,url:relation.url,imageUrl:relation.image,relationshipType:relation.relation,
         })),
       }),
     ] : []);
