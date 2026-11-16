@@ -32,7 +32,7 @@ import {onCustomRoleMemberAdd,onCustomRoleMemberRemove,onCustomRoleMemberUpdate,
 import {startCustomRolePicker,stopCustomRolePicker} from "./helpers/custom-roles/custom-role-picker-server.js";
 import {startDashboardBridge,stopDashboardBridge} from "./helpers/runtime/dashboard-bridge.js";
 import {startMediaNotificationScheduler,stopMediaNotificationScheduler} from "./helpers/media/media-notifications.js";
-import {getReleaseDigestEntityEvents} from "./helpers/community/community-releases.js";
+import {getReleaseDigestEntityEvents,previousReleaseDigestEventWindow} from "./helpers/community/community-releases.js";
 import {startMusicScheduler,stopMusicScheduler} from "./helpers/integration/music.js";
 import {configureMediaStorage,processArchiveAssetCleanup} from "./helpers/media/media-storage.js";
 import {configureCustomRoleIconSourceLimit} from "./helpers/custom-roles/custom-role-images.js";
@@ -441,20 +441,23 @@ async function processDailyDrops():Promise<void>{
   for(const delivery of await dueReleaseDeliveries()){
    if(!await isGuildSetupComplete(delivery.guild_id))continue;
    try{
+    const releaseWindowStart=new Date(delivery.window_start);
+    const releaseWindowEnd=new Date(delivery.window_end);
+    const entityWindow=previousReleaseDigestEventWindow(releaseWindowStart,releaseWindowEnd);
     const [calendar,entityEvents,channel]=await Promise.all([
      upcomingProviderReleases(
       aniListEmbedClient,
       releaseCalendarTmdbClient,
-      new Date(delivery.window_start),
-      new Date(delivery.window_end),
+      releaseWindowStart,
+      releaseWindowEnd,
       delivery.region,
       delivery.categories,
       releaseCalendarIgdbClient,
      ),
      getReleaseDigestEntityEvents({
       guildId:delivery.guild_id,
-      windowStart:new Date(delivery.window_start),
-      windowEnd:new Date(delivery.window_end),
+      windowStart:entityWindow.start,
+      windowEnd:entityWindow.end,
       entityTypes:delivery.entity_types,
       entityIds:delivery.entity_ids,
      }),
@@ -466,8 +469,8 @@ async function processDailyDrops():Promise<void>{
     if(!channel||!channel.isTextBased()||!("send" in channel)||!("guildId" in channel)||channel.guildId!==delivery.guild_id){
      throw new Error("The configured digest destination is unavailable in its server.");
     }
-    const start=new Date(delivery.window_start);
-    const end=new Date(delivery.window_end);
+    const start=releaseWindowStart;
+    const end=releaseWindowEnd;
     const localFormatter=new Intl.DateTimeFormat("en-GB",{
      dateStyle:"medium",timeStyle:"short",timeZone:delivery.time_zone,
     });

@@ -9,6 +9,7 @@ import {
   normalizeReleaseEntityTypes,
   normalizeReleaseEntityIds,
   parseReleaseCadenceInput,
+  previousReleaseDigestEventWindow,
 } from "../helpers/community/community-releases.js";
 
 test("daily release digest uses the selected timezone and next local time", () => {
@@ -176,4 +177,24 @@ test("daily release digest preserves its local wall-clock time across the Dublin
     "Europe/Dublin", "09:00", "daily", 1, new Date("2026-03-29T00:30:00.000Z"),
   );
   assert.equal(next.toISOString(), "2026-03-29T08:00:00.000Z");
+});
+
+
+test("followed-entity digest updates cover the previous digest interval", () => {
+  const currentRun = new Date("2026-11-16T18:30:00.000Z");
+  const nextRun = new Date("2026-11-17T18:30:00.000Z");
+  const eventWindow = previousReleaseDigestEventWindow(currentRun, nextRun);
+  assert.equal(eventWindow.start.toISOString(), "2026-11-15T18:30:00.000Z");
+  assert.equal(eventWindow.end.toISOString(), "2026-11-16T18:30:00.000Z");
+});
+
+test("followed-entity digest event windows reject invalid release ranges", () => {
+  assert.throws(
+    () => previousReleaseDigestEventWindow(new Date("invalid"), new Date("2026-11-17T18:30:00.000Z")),
+    /valid increasing dates/i,
+  );
+  assert.throws(
+    () => previousReleaseDigestEventWindow(new Date("2026-11-17T18:30:00.000Z"), new Date("2026-11-16T18:30:00.000Z")),
+    /valid increasing dates/i,
+  );
 });

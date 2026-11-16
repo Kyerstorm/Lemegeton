@@ -82,6 +82,22 @@ export function nextReleaseOccurrence(
   throw new Error("Could not find the next release digest time in the configured timezone.");
 }
 
+export function previousReleaseDigestEventWindow(
+  releaseWindowStart: Date,
+  releaseWindowEnd: Date,
+): { start: Date; end: Date } {
+  const start = releaseWindowStart.getTime();
+  const end = releaseWindowEnd.getTime();
+  const duration = end - start;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || duration <= 0) {
+    throw new Error("The release digest window must contain valid increasing dates.");
+  }
+  return {
+    start: new Date(start - duration),
+    end: new Date(start),
+  };
+}
+
 export function normalizeReleaseCategories(values: readonly string[]): ReleaseCategory[] {
   const categories = [...new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean))];
   if (!categories.length || categories.some((value) => !CATEGORY_SET.has(value as ReleaseCategory))) {
@@ -168,7 +184,19 @@ export async function saveReleaseSchedule(input: {
 }
 
 export async function disableReleaseSchedule(guildId: string): Promise<void> {
-  await query("UPDATE community_release_schedules SET enabled=FALSE, updated_at=NOW() WHERE guild_id=$1", [guildId]);
+  await transaction(async client => {
+    await client.query(
+      "UPDATE community_release_schedules SET enabled=FALSE,updated_at=NOW() WHERE guild_id=$1",
+      [guildId],
+    );
+    await client.query(
+      `UPDATE community_release_deliveries
+          SET status='failed',claim_until=NULL,claim_token=NULL,
+              last_error='Digest paused by a server administrator'
+        WHERE guild_id=$1 AND status IN ('pending','processing')`,
+      [guildId],
+    );
+  });
 }
 
 export async function resumeReleaseSchedule(guildId: string): Promise<Date | null> {
@@ -236,8 +264,12 @@ export async function dueReleaseDeliveries(): Promise<ReleaseDelivery[]> {
   return query<ReleaseDelivery>(
     `WITH due AS (
        SELECT id FROM community_release_deliveries
-       WHERE (status = 'pending' AND next_attempt_at <= NOW())
-          OR (status = 'processing' AND claim_until <= NOW())
+       WHERE ((status = 'pending' AND next_attempt_at <= NOW())
+          OR (status = 'processing' AND claim_until <= NOW()))
+         AND EXISTS (
+           SELECT 1 FROM community_release_schedules s
+            WHERE s.guild_id=community_release_deliveries.guild_id AND s.enabled=TRUE
+         )
        ORDER BY created_at ASC LIMIT 20 FOR UPDATE SKIP LOCKED
      ),
      claimed AS (
