@@ -445,7 +445,7 @@ function homePanel(): { embeds: EmbedBuilder[]; components: ActionRowBuilder<But
       { name: "Books & light novels", value: "Google Books / AniList", inline: true },
       { name: "Films & television", value: "TMDB", inline: true },
       { name: "Video games", value: "IGDB + Steam Store; account data in /profile", inline: true },
-      { name: "Webnovels", value: "NovelFire · Novel Archive · Wuxia Click · Novel Updates · Royal Road", inline: true },
+      { name: "Webnovels", value: "NovelFire · Novel Archive · Wuxia Click · Novel Updates · ScribbleHub · Royal Road", inline: true },
     ],
   );
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
@@ -1681,7 +1681,7 @@ this.webNovels = new WebNovelDiscoveryClient();
       return { provider: record.provider, category: record.category, id: item.id, url: item.sourceUrl,
         fields: { description:item.overview, releaseDate:item.releaseDate, creators:undefined, genres:item.genres, image:item.image } };
     }
-if (record.provider === "NovelFire" || record.provider === "Novel Archive" || record.provider === "Wuxia Click" || record.provider === "Novel Updates") {
+if (record.provider === "NovelFire" || record.provider === "Novel Archive" || record.provider === "Wuxia Click" || record.provider === "Novel Updates" || record.provider === "ScribbleHub") {
 const item = record.item;
 return { provider: record.provider, category: record.category, id: item.sourceUrl, url: item.sourceUrl,
 fields: { description:item.description, releaseDate:item.latestUpdate, creators:item.author ? [item.author] : [], genres:item.genres, image:item.image, rating:item.rating, chapterCount:item.chapterCount } };
