@@ -69,3 +69,32 @@ assert.equal(results.length, 1);
 assert.equal(results[0]?.provider, "Novel Updates");
 assert.equal(results[0]?.genres[0], "Fantasy");
 });
+
+test("ScribbleHub series finder results normalize title, link and cover", async () => {
+const { parseScribbleHubSearch } = await import("../helpers/integration/webnovel-discovery.js");
+const html = '<div class="search_main_box"><div class="search_title"><a href="https://www.scribblehub.com/series/123/story-name/">A Safe Story</a></div><div class="search_img"><img src="/covers/story.jpg"></div></div>';
+const results = parseScribbleHubSearch(html);
+assert.equal(results.length, 1);
+assert.equal(results[0]?.title, "A Safe Story");
+assert.equal(results[0]?.sourceUrl, "https://www.scribblehub.com/series/123/story-name/");
+});
+test("web scraper supports POST form endpoints", async () => {
+let method = "";
+let body = "";
+const fetchImpl: typeof fetch = async (_input, init) => {
+method = init?.method ?? "";
+body = String(init?.body ?? "");
+return new Response("<div class='toc_w'>Chapter item</div>", { status: 200, headers: { "content-type": "text/html" } });
+};
+const page = await fetchPublicPage("https://example.com/wp-admin/admin-ajax.php", {
+method: "POST",
+body: new URLSearchParams({ action: "list", post_id: "12" }).toString(),
+headers: { "Content-Type": "application/x-www-form-urlencoded" },
+includeHtml: true,
+includeText: false,
+fetchImpl,
+});
+assert.equal(method, "POST");
+assert.match(body, /post_id=12/);
+assert.match(page.html ?? "", /Chapter item/);
+});

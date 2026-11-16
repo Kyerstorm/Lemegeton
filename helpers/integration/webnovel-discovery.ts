@@ -1,7 +1,7 @@
 import { load } from "cheerio";
 import { fetchJson, fetchPublicPage, type ScrapeResult } from "./web-scraper.js";
 
-export type WebNovelProvider = "NovelFire" | "Novel Archive" | "Wuxia Click" | "Novel Updates";
+export type WebNovelProvider = "NovelFire" | "Novel Archive" | "Wuxia Click" | "Novel Updates" | "ScribbleHub";
 
 export interface WebNovelMedia {
 provider: WebNovelProvider;
@@ -197,6 +197,125 @@ return items.slice(0, 4).flatMap((item, index) => {
 const result = details[index];
 if (result?.status === "fulfilled" && result.value) return [result.value];
 const fallback = makeRecord("NovelFire", { title: item.title, sourceUrl: item.sourceUrl, image: item.image });
+return fallback ? [fallback] : [];
+});
+}
+
+export function parseScribbleHubSearch(html: string, baseUrl = "https://www.scribblehub.com/"): NovelFireItem[] {
+const $ = load(html);
+const results: NovelFireItem[] = [];
+const seen = new Set<string>();
+$(".search_main_box").each((_, element) => {
+const card = $(element);
+const anchor = card.find(".search_title > a[href]").first();
+const sourceUrl = absoluteUrl(anchor.attr("href"), baseUrl);
+if (!sourceUrl) return;
+const host = new URL(sourceUrl).hostname;
+if (host !== "scribblehub.com" && host !== "www.scribblehub.com") return;
+const title = clean(anchor.text() || anchor.attr("title"), 256);
+if (!title || seen.has(sourceUrl)) return;
+seen.add(sourceUrl);
+const image = card.find(".search_img > img").first().attr("data-src") || card.find(".search_img > img").first().attr("src");
+results.push({ title, sourceUrl, image: absoluteUrl(image, baseUrl) });
+});
+return results.slice(0, 10);
+}
+
+function parseScribbleHubReleaseDate(value: string | null): string | null {
+if (!value) return null;
+const relative = value.match(/(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago/i);
+if (relative) {
+const amount = Number(relative[1]);
+const unit = relative[2]!.toLowerCase();
+const duration: Record<string, number> = {
+second: 1_000,
+minute: 60_000,
+hour: 3_600_000,
+day: 86_400_000,
+week: 604_800_000,
+month: 2_592_000_000,
+year: 31_536_000_000,
+};
+return new Date(Date.now() - amount * (duration[unit] ?? 0)).toISOString();
+}
+const absolute = value.match(/([A-Za-z]{3})[a-z]*\s+(\d{1,2}),\s+(\d{4})(?:\s+(\d{1,2}):(\d{2})\s*(AM|PM))?/i);
+if (!absolute) return null;
+const monthNames = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];
+const month = monthNames.indexOf(absolute[1]!.toLowerCase());
+if (month < 0) return null;
+let hour = absolute[4] ? Number(absolute[4]) % 12 : 0;
+if (absolute[6]?.toUpperCase() === "PM") hour += 12;
+const date = new Date(Date.UTC(Number(absolute[3]), month, Number(absolute[2]), hour, Number(absolute[5] ?? 0)));
+return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+async function enrichScribbleHub(item: NovelFireItem): Promise<WebNovelMedia | null> {
+const page = await fetchPublicPage(item.sourceUrl, { includeHtml: true, includeText: false, timeoutMs: 10_000, retries: 1 });
+const $ = load(page.html ?? "");
+const title = clean($(".fic_title").first().text(), 256) ?? item.title;
+const image = $(".fic_image > img").first().attr("data-src") || $(".fic_image > img").first().attr("src") || item.image;
+const description = clean($(".wi_fic_desc").text(), 1_400);
+const author = clean($(".auth_name_fic").text(), 160);
+const genres = $(".fic_genre").map((_, element) => clean($(element).text(), 80)).get().filter((value): value is string => Boolean(value));
+const statusText = clean($("i.status").closest("li").text(), 100)?.toLowerCase() ?? "";
+const status = statusText.includes("ongoing") ? "Ongoing" : statusText.includes("hiatus") ? "Hiatus" : statusText.includes("completed") ? "Completed" : null;
+const latestChapters: string[] = [];
+let chapterCount: number | null = null;
+let latestUpdate: string | null = null;
+const postId = $("#mypostid").attr("value");
+if (postId && /^\d+$/.test(postId)) {
+const response = await fetchPublicPage("https://www.scribblehub.com/wp-admin/admin-ajax.php", {
+method: "POST",
+body: new URLSearchParams({ action: "wi_getreleases_pagination", pagenum: "-1", mypostid: postId }).toString(),
+headers: {
+"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+"X-Requested-With": "XMLHttpRequest",
+"Referer": item.sourceUrl,
+"Origin": "https://www.scribblehub.com",
+},
+includeHtml: true,
+includeText: false,
+timeoutMs: 12_000,
+retries: 0,
+});
+const chapters = load(response.html ?? "");
+const all = chapters(".toc_w").toArray().map(element => {
+const chapter = chapters(element);
+const link = chapter.find("a.toc_a").first();
+const name = clean(link.text(), 180);
+const dateText = clean(chapter.find(".fic_date_pub").attr("title") || chapter.find(".fic_date_pub").text(), 100);
+return { name, date: parseScribbleHubReleaseDate(dateText) };
+}).filter((chapter): chapter is { name: string; date: string | null } => Boolean(chapter.name));
+chapterCount = all.length;
+latestUpdate = [...all].reverse().find(chapter => chapter.date)?.date ?? null;
+latestChapters.push(...all.slice(-5).reverse().map(chapter => chapter.name));
+}
+return makeRecord("ScribbleHub", {
+title,
+sourceUrl: page.canonicalUrl || item.sourceUrl,
+description,
+image,
+author,
+status,
+genres,
+chapterCount,
+latestUpdate,
+latestChapters,
+});
+}
+
+async function searchScribbleHub(query: string): Promise<WebNovelMedia[]> {
+const url = new URL("https://www.scribblehub.com/series-finder/");
+url.searchParams.set("sf", "1");
+url.searchParams.set("sh", query);
+url.searchParams.set("pg", "1");
+const page = await fetchPublicPage(url.toString(), { includeHtml: true, includeText: false, timeoutMs: 10_000, retries: 1 });
+const items = parseScribbleHubSearch(page.html ?? "", page.url);
+const details = await Promise.allSettled(items.slice(0, 4).map(enrichScribbleHub));
+return items.slice(0, 4).flatMap((item, index) => {
+const result = details[index];
+if (result?.status === "fulfilled" && result.value) return [result.value];
+const fallback = makeRecord("ScribbleHub", { title: item.title, sourceUrl: item.sourceUrl, image: item.image });
 return fallback ? [fallback] : [];
 });
 }
@@ -441,6 +560,7 @@ searchNovelFire(normalized),
 searchNovelArchive(normalized),
 searchWuxiaClick(normalized),
 searchNovelUpdates(normalized),
+searchScribbleHub(normalized),
 ]);
 const records = providers.flatMap(result => result.status === "fulfilled" ? result.value : []);
 const unique = new Map<string, WebNovelMedia>();

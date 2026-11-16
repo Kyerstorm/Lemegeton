@@ -45,6 +45,8 @@ includeHtml?: boolean;
 timeoutMs?: number;
 retries?: number;
 headers?: Record<string, string>;
+method?: "GET" | "POST";
+body?: BodyInit | null;
 fetchImpl?: typeof fetch;
 }
 
@@ -169,7 +171,7 @@ text: string;
 
 async function fetchResource(
 input: string,
-options: { timeoutMs?: number; retries?: number; headers?: Record<string, string>; fetchImpl?: typeof fetch; maxBytes?: number } = {},
+options: { timeoutMs?: number; retries?: number; headers?: Record<string, string>; method?: "GET" | "POST"; body?: BodyInit | null; fetchImpl?: typeof fetch; maxBytes?: number } = {},
 ): Promise<ResourceResponse> {
 let current = validatePublicHttpUrl(input);
 const timeoutMs = Math.max(1_000, Math.min(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, 60_000));
@@ -180,7 +182,8 @@ let lastError: unknown;
 for (let attempt = 0; attempt <= retries; attempt++) {
 try {
 const response = await fetchImpl(current, {
-method: "GET",
+method: options.method ?? "GET",
+...(options.body !== undefined ? { body: options.body } : {}),
 redirect: "manual",
 headers: {
 "User-Agent": DEFAULT_USER_AGENT,

@@ -104,6 +104,7 @@ type SearchRecord =
 | { provider: "Novel Archive"; category: "webnovel"; item: WebNovelMedia }
 | { provider: "Wuxia Click"; category: "webnovel"; item: WebNovelMedia }
 | { provider: "Novel Updates"; category: "webnovel"; item: WebNovelMedia }
+| { provider: "ScribbleHub"; category: "webnovel"; item: WebNovelMedia }
   | { provider: "TMDB"; category: "movie" | "tv"; item: TmdbMedia }
   | { provider: "IGDB"; category: "game"; item: IgdbGame }
   | { provider: "Steam"; category: "game"; item: SteamStoreGame };
@@ -133,6 +134,16 @@ function safeDescription(value: string | null | undefined, limit = 900): string 
 
 function anilistRecord(item: AniListMedia, category: "anime" | "manga" | "light_novel"): SearchRecord {
   return { provider: "AniList", category, item };
+}
+
+function webNovelRecord(item: WebNovelMedia): SearchRecord {
+switch (item.provider) {
+case "NovelFire": return { provider: "NovelFire", category: "webnovel", item };
+case "Novel Archive": return { provider: "Novel Archive", category: "webnovel", item };
+case "Wuxia Click": return { provider: "Wuxia Click", category: "webnovel", item };
+case "Novel Updates": return { provider: "Novel Updates", category: "webnovel", item };
+case "ScribbleHub": return { provider: "ScribbleHub", category: "webnovel", item };
+}
 }
 
 function randomOne<T>(items: T[]): T[] {
@@ -235,7 +246,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
     return embed;
   }
 
-if (record.provider === "NovelFire" || record.provider === "Novel Archive" || record.provider === "Wuxia Click" || record.provider === "Novel Updates") {
+if (record.provider === "NovelFire" || record.provider === "Novel Archive" || record.provider === "Wuxia Click" || record.provider === "Novel Updates" || record.provider === "ScribbleHub") {
 const item = record.item;
 const embed = new EmbedBuilder()
 .setColor(0x5865f2)
@@ -2366,7 +2377,7 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
         this.anilist.search(query, "MANGA").then((items) => items.map((item) => anilistRecord(item, "manga"))),
         this.anilist.search(query, "MANGA", true).then((items) => items.map((item) => anilistRecord(item, "light_novel"))),
         this.books.search(query).then((items) => items.map((item) => ({ provider: "Google Books" as const, category: "book" as const, item }))),
-        this.webNovels.search(query).then(items => items.map(item => ({ provider: item.provider, category: "webnovel" as const, item }))),
+        this.webNovels.search(query).then(items => items.map(webNovelRecord)),
         this.tmdb.search(query, "movie").then((items) => items.map((item) => ({ provider: "TMDB" as const, category: "movie" as const, item }))),
         this.tmdb.search(query, "tv").then((items) => items.map((item) => ({ provider: "TMDB" as const, category: "tv" as const, item }))),
         this.igdb.search(query).then((items) => items.map((item) => ({ provider: "IGDB" as const, category: "game" as const, item }))),
@@ -2383,7 +2394,7 @@ case "webnovel": {
 if (/^\d+$/.test(query.trim()) || /^https?:\/\/www\.royalroad\.com\/fiction\/\d+/i.test(query.trim())) {
 return [{ provider: "Royal Road", category: "webnovel", item: await this.royalRoad.getFiction(query) }];
 }
-return (await this.webNovels.search(query)).map(item => ({ provider: item.provider, category: "webnovel" as const, item }));
+return (await this.webNovels.search(query)).map(webNovelRecord);
 }
       case "movie": return (await this.tmdb.search(query, "movie")).map((item) => ({ provider: "TMDB", category: "movie", item }));
       case "tv": return (await this.tmdb.search(query, "tv")).map((item) => ({ provider: "TMDB", category: "tv", item }));
