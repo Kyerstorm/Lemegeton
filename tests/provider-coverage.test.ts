@@ -25,11 +25,11 @@ test("IGDB company credits retain platform and region-specific release dates", (
   const rows = parseIgdbCompanyCredits([{
     developer: true,
     game: {
-      id: 20, name: "Example Game", slug: "example-game", first_release_date: 1798761600,
+      id: 20, name: "Example Game", slug: "example-game", first_release_date: 1798675200,
       rating: 80, rating_count: 100, aggregated_rating: 88, aggregated_rating_count: 12,
       platforms: [{ name: "PC" }, { name: "PlayStation 5" }],
       release_dates: [
-        { date: 1798761600, human: "Dec 31, 2026", region: { name: "Worldwide" }, platform: { name: "PC" } },
+        { date: 1798675200, human: "Dec 31, 2026", region: { name: "Worldwide" }, platform: { name: "PC" } },
       ],
     },
   }]);

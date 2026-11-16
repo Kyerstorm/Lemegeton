@@ -232,7 +232,7 @@ test("TMDB recommendation and detail lookups validate IDs and preserve category"
   });
   assert.equal((await client.details(6, "movie"))?.title, "Seed Film");
   assert.equal((await client.recommendations(6, "movie"))[0]?.title, "Related Film");
-  assert.deepEqual(paths, ["/3/movie/6", "/3/movie/6/recommendations"]);
+  assert.deepEqual(paths, ["/3/movie/6", "/3/movie/6/release_dates", "/3/movie/6/recommendations"]);
   await assert.rejects(() => client.recommendations(0, "movie"), /positive integer/);
 });
 
