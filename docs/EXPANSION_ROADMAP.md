@@ -267,8 +267,8 @@ Quiz Pack Studio stores four difficulty levels, allows the original contributor 
 
 **Remaining delivery:**
 - Add tournament candidate withdrawal and an audit trail for bracket lifecycle actions, with clear behavior once a round closes.
-- Test simultaneous answers, repeated component clicks, expired sessions, host departure and guild isolation.
-- Add tournament candidate withdrawal and a bracket-lifecycle audit trail with clear behavior once a round closes.
+- Extend Play with media-backed puzzle/challenge rounds only after answer normalization, source provenance, spoiler handling, timeout and host-control rules are defined.
+- Test simultaneous votes/answers, repeated component clicks, expired sessions, host departure and guild isolation.
 - Keep RSVP and session history separate from individual watch/read/play completion. Do not introduce personal progress tracking.
 
 **Exit criteria:** each activity has a finite lifecycle and idempotent transitions; vote/answer state cannot be duplicated by repeated interactions; moderation and host permissions are tested; event records can be reused by calendar, Atlas and showcase without copies.
