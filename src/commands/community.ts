@@ -45,6 +45,9 @@ import {
   upcomingProviderReleases,
   upcomingCommunitySessions,
   mergeCommunityCalendarEntries,
+  normalizeCommunityCalendarSelection,
+  formatCommunityCalendarTime,
+  filterCommunityCalendarEntries,
   getCommunityHistory,
   getCommunitySession,
   listUpcomingSessions,
@@ -714,6 +717,10 @@ export class CommunityCommand implements FeatureCommand {
     const [, action, mode] = interaction.customId.split(":");
     const id = interaction.values[0];
     if (!id) return false;
+    if (action === "calendar-filter") {
+      await this.showCalendar(interaction, id);
+      return true;
+    }
     if (action === "tournament-select") {
       await this.showTournament(interaction, id);
       return true;
@@ -825,11 +832,11 @@ export class CommunityCommand implements FeatureCommand {
       }
       if (action === "session-nomination") {
         const scheduledText = interaction.fields.getTextInputValue("scheduled_at").trim();
-        if (!/[zZ]|[+-]\\d{2}:?\\d{2}$/.test(scheduledText)) {
+        if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(scheduledText)) {
           throw new Error("The session date/time must include an explicit timezone offset.");
         }
         const mediaText = interaction.fields.getTextInputValue("media").trim();
-        const mediaMatch = mediaText.match(/\\s+\\|\\s+(https:\\/\\/\\S+)$/);
+        const mediaMatch = mediaText.match(/\s+\|\s+(https:\/\/\S+)$/);
         const nominationId = await submitCommunitySessionNomination({
           guildId: interaction.guildId,
           channelId: interaction.channelId ?? "",
@@ -1455,51 +1462,105 @@ export class CommunityCommand implements FeatureCommand {
     await interaction.reply({ content: "Release digests are disabled for this server. The on-demand calendar remains available.", flags: MessageFlags.Ephemeral });
   }
 
-  private async showCalendar(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
+  private async showCalendar(
+    interaction: ChatInputCommandInteraction | ButtonInteraction | StringSelectMenuInteraction,
+    selection = "14|all",
+  ): Promise<void> {
+    const { days, scope } = normalizeCommunityCalendarSelection(selection);
     const from = new Date();
-    const to = new Date(from.getTime() + 14 * 24 * 60 * 60 * 1000);
+    const to = new Date(from.getTime() + days * 24 * 60 * 60 * 1000);
     const schedule = await getReleaseSchedule(interaction.guildId!);
     const region = schedule?.region ?? "IE";
-    const categories = schedule?.categories ?? ["anime", "tv", "movies"];
+    const timeZone = schedule?.time_zone ?? "UTC";
+    const providerCategories: Array<"anime" | "tv" | "movies" | "games"> =
+      scope === "anime" || scope === "tv" || scope === "movies" || scope === "games"
+        ? [scope]
+        : ["anime", "tv", "movies", "games"];
+    const includeProviders = scope !== "community";
+    const includeCommunity = scope === "all" || scope === "community";
     const [calendar, sessions] = await Promise.all([
-      upcomingProviderReleases(this.anilist, this.tmdb, from, to, region, categories, this.igdb),
-      upcomingCommunitySessions(interaction.guildId!, from, to),
+      includeProviders
+        ? upcomingProviderReleases(this.anilist, this.tmdb, from, to, region, providerCategories, this.igdb)
+        : Promise.resolve({ results: [], unavailableProviders: [] }),
+      includeCommunity ? upcomingCommunitySessions(interaction.guildId!, from, to) : Promise.resolve([]),
     ]);
-    const timeline = mergeCommunityCalendarEntries(calendar.results, sessions);
-    const settings = schedule?.enabled
-      ? `Digest: ${schedule.cadence} · ${schedule.local_time} ${schedule.time_zone} · ${region} · ${categories.join(", ")} · <#${schedule.channel_id}>.`
-      : "Automatic digests are currently disabled. A server manager can configure them with /community action:calendar-configure.";
+    const timeline = filterCommunityCalendarEntries(
+      mergeCommunityCalendarEntries(calendar.results, sessions),
+      scope,
+    );
     const providerNotice = calendar.unavailableProviders.length
-      ? `Partial provider results. Unavailable sources: ${calendar.unavailableProviders.join(", ")}. Returned sessions and other source results are still shown.\n\n`
+      ? "Some provider results could not be loaded: " + calendar.unavailableProviders.join(", ") + ".\n\n"
       : "";
-    const fields = timeline.slice(0, 12).map((item) => {
+    const filterLabels = {
+      all: "All activity",
+      releases: "Provider releases",
+      community: "Community events",
+      anime: "Anime",
+      tv: "Television",
+      movies: "Films",
+      games: "Games",
+    } as const;
+    const fields = timeline.slice(0, 20).map(item => {
+      const timestamp = Math.floor(item.when.getTime() / 1000);
+      const localTime = formatCommunityCalendarTime(item.when, timeZone);
       const sourceUrl = item.sourceUrl ? isValidHttpsUrl(item.sourceUrl) : null;
       return {
-        name: `${safeDisplay(item.title, 180)} · <t:${Math.floor(item.when.getTime() / 1000)}:F> · <t:${Math.floor(item.when.getTime() / 1000)}:R>`,
+        name: safeDisplay(item.title, 150) + " · " + localTime + " · <t:" + timestamp + ":R>",
         value: item.channelId
-          ? `Community ${safeDisplay(item.source.replace("Community · ", ""), 40)} · <#${item.channelId}>${sourceUrl ? ` · [Media source](${sourceUrl})` : " · RSVP with /community"}`
-          : sourceUrl ? `[${safeDisplay(item.source, 80)} source](${sourceUrl})` : `${safeDisplay(item.source, 80)} · Source link unavailable`,
+          ? safeDisplay(item.source, 80) + " · <#" + item.channelId + ">" +
+            (sourceUrl ? " · [Media source](" + sourceUrl + ")" : "")
+          : sourceUrl ? "[" + safeDisplay(item.source, 80) + " source](" + sourceUrl + ")"
+            : safeDisplay(item.source, 80) + " · Source link unavailable",
         inline: false,
       };
     });
     if (!fields.length && calendar.unavailableProviders.length) {
-      fields.push({ name: "Provider data unavailable", value: `No release results could be retrieved from: ${calendar.unavailableProviders.join(", ")}.`, inline: false });
+      fields.push({
+        name: "Provider data unavailable",
+        value: "No calendar entries could be retrieved from: " + calendar.unavailableProviders.join(", ") + ".",
+        inline: false,
+      });
     } else if (!fields.length) {
-      fields.push({ name: "No events returned", value: "No provider-dated releases or scheduled community sessions were found in this 14-day window.", inline: false });
+      fields.push({
+        name: "No events returned",
+        value: "No matching provider releases or scheduled community sessions were found in this " + days + "-day window.",
+        inline: false,
+      });
     }
-    await interaction.reply({
+    const filterOptions = [7, 14, 30].flatMap(windowDays =>
+      (["all", "releases", "community", "anime", "tv", "movies", "games"] as const).map(filter => ({
+        label: windowDays + " days · " + filterLabels[filter],
+        value: windowDays + "|" + filter,
+        description: "Show " + filterLabels[filter].toLowerCase() + " over the next " + windowDays + " days.",
+      })),
+    );
+    const payload = {
       embeds: [homeEmbed(
-        "Media & Community Calendar · Next 14 days",
-        `${providerNotice}Provider releases are dated by AniList and TMDB. Server sessions are read from this guild's schedule. Discord timestamps display in each member's local timezone.\n\n${settings}`,
+        "Media & Community Calendar · Next " + days + " days",
+        providerNotice + "Filter: " + filterLabels[scope] + " · Timezone: " + timeZone +
+          " · Region: " + region + "\nTimes are shown in the configured timezone; Discord timestamps also adapt to each member's local timezone." +
+          (timeline.length > 20 ? "\\nShowing the first 20 of " + timeline.length + " matches. Narrow the date window or category to refine results." : ""),
         fields,
       )],
-      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId("community:calendar-configure").setLabel("Configure digests").setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId("community:calendar-disable").setLabel("Disable digests").setStyle(ButtonStyle.Secondary).setDisabled(!schedule?.enabled),
-      )],
-      flags: MessageFlags.Ephemeral,
+      components: [
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId("community:calendar-filter")
+            .setPlaceholder("Filter · " + days + " days · " + filterLabels[scope])
+            .addOptions(filterOptions),
+        ),
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId("community:calendar-configure").setLabel("Configure timezone / digest").setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId("community:calendar-disable").setLabel("Disable digests").setStyle(ButtonStyle.Secondary).setDisabled(!schedule?.enabled),
+        ),
+      ],
       allowedMentions: { parse: [] },
-    });
+    };
+    if (interaction.isStringSelectMenu()) {
+      await interaction.update(payload);
+    } else {
+      await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
+    }
   }
 
   private async showTournamentCentre(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
@@ -1572,7 +1633,7 @@ export class CommunityCommand implements FeatureCommand {
 
   private async showSeasonCentre(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
     const seasons = await listCommunitySeasons(interaction.guildId!);
-    const embed = homeEmbed("Community Seasons", "Season pages link existing Daily Drops, rankings, sessions, tournaments, spotlights, collections, Trails, approved challenges and approved puzzles.", seasons.slice(0, 10).map(item => ({
+    const embed = homeEmbed("Community Seasons", "Configured periods automatically gather this server's delivered Daily Drops, closed rankings, scheduled sessions, approved challenges and spotlights. Curated links are deduplicated; the underlying activities are never copied.", seasons.slice(0, 10).map(item => ({
       name: "#" + item.id + " · " + safeDisplay(item.title, 150),
       value: item.status + " · " + item.item_count + " records · <t:" + Math.floor(new Date(item.starts_at).getTime() / 1000) + ":d> → <t:" + Math.floor(new Date(item.ends_at).getTime() / 1000) + ":d>",
       inline: false,
@@ -1601,13 +1662,17 @@ export class CommunityCommand implements FeatureCommand {
       return;
     }
     const items = season.items.slice(0, 25).map(item => ({
-      name: safeDisplay(item.item_type.replace(/_/g, " ") + " · #" + item.item_id, 200),
-      value: safeDisplay(item.title, 500),
+      name: safeDisplay(item.item_type.replace(/_/g, " ") + " · #" + item.item_id, 180),
+      value: safeDisplay(item.title, 420) + "\n" +
+        (item.source === "period" ? "Automatically included in season period" : "Curated existing-record link") +
+        " · <t:" + Math.floor(new Date(item.occurred_at).getTime() / 1000) + ":F>" +
+        (item.added_by ? " · Added by <@" + item.added_by + ">" : ""),
       inline: false,
     }));
     const embed = homeEmbed(
       season.title,
-      season.description + "\n\n<t:" + Math.floor(new Date(season.starts_at).getTime() / 1000) + ":F> → <t:" + Math.floor(new Date(season.ends_at).getTime() / 1000) + ":F>\nStatus: " + season.status,
+      season.description + "\n\n<t:" + Math.floor(new Date(season.starts_at).getTime() / 1000) + ":F> → <t:" + Math.floor(new Date(season.ends_at).getTime() / 1000) + ":F>\nStatus: " + season.status +
+        "\n" + season.items.length + " unique record(s)" + (season.items.length > 25 ? " · showing first 25" : ""),
       items,
     );
     const components: ActionRowBuilder<ButtonBuilder>[] = [];

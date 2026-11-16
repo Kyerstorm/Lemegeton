@@ -76,7 +76,14 @@ export async function disableDailySchedule(guildId: string): Promise<void> {
 export function normalizeDailyPollOptions(values: string | readonly string[]): string[] {
   const raw = typeof values === "string" ? values.split(/[|\n]/) : [...values];
   const options = raw.map(value => cleanText(value, 80)).filter(Boolean);
-  const unique = [...new Map(options.map(value => [value.toLocaleLowerCase("en-US"), value])).values()];
+  const unique: string[] = [];
+  const seen = new Set<string>();
+  for (const option of options) {
+    const key = option.toLocaleLowerCase("en-US");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(option);
+  }
   if (unique.length < 2 || unique.length > 5) {
     throw new Error("A Daily Drop poll needs two to five distinct options separated by | or a new line.");
   }

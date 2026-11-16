@@ -724,10 +724,15 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     );
     const season = await getCommunitySeason(tournamentGuild, seasonId);
     assert.ok(season);
-    assert.deepEqual(season.items.map(item => [item.item_type, item.item_id, item.title]), [
-      ["tournament", tournamentId, "Integration Tournament"],
-      ["spotlight", seasonSpotlightId, "Spotlight server entry"],
-    ]);
+    assert.deepEqual(
+      season.items.map(item => [item.item_type, item.item_id, item.title]).sort((left, right) =>
+        String(left[0]).localeCompare(String(right[0]))),
+      [
+        ["spotlight", seasonSpotlightId, "Spotlight server entry"],
+        ["tournament", tournamentId, "Integration Tournament"],
+      ],
+    );
+    assert.equal(season.items.filter(item => item.item_type === "spotlight").length, 1);
     assert.equal(await getCommunitySeason(tournamentOtherGuild, seasonId), null);
     await assert.rejects(
       closeCommunitySeason(tournamentGuild, finalVoter, seasonId, false),

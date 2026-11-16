@@ -13,7 +13,7 @@ export interface AtlasRelation {
   title: string;
   category: MediaCategory;
   url: string | null;
-  imageUrl: string | null;
+  imageUrl?: string | null;
   relationType: string;
   source: string;
   sourceKind: RelationshipSource;
@@ -28,7 +28,7 @@ export interface AtlasGraphNode {
   title: string;
   category: MediaCategory;
   url: string | null;
-  imageUrl: string | null;
+  imageUrl?: string | null;
   depth: number;
   sourceKind?: RelationshipSource;
   sourceLabel?: string;
@@ -153,7 +153,7 @@ export async function findAtlasRelationships(
   const rows = await query<AtlasRow>(
 `SELECT source_title,source_title_key,source_category,source_url,source_image_url,target_title,target_title_key,
             target_category,target_url,target_image_url,relationship_type,source_kind,source_label
-       FROM media_relationship_graph`
+       FROM media_relationship_graph
       WHERE ${visibility}
         AND ((source_category = $${offset+2} AND ((source_title_key = $${offset+1} AND ($${offset+3} = '' OR source_url = $${offset+3}))
               OR ($${offset+3} <> '' AND source_url = $${offset+3})))

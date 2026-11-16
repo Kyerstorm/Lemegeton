@@ -379,43 +379,59 @@ export async function createCommunitySeason(input: {
 export async function listCommunitySeasons(guildId: string): Promise<Array<{
   id: string; title: string; description: string; starts_at: Date; ends_at: Date; status: string; item_count: number;
 }>> {
-  return query(
-    "SELECT s.id::text, s.title, s.description, s.starts_at, s.ends_at, s.status, " +
-    "COUNT(i.item_id)::INT AS item_count FROM community_seasons s " +
-    "LEFT JOIN community_season_items i ON i.season_id = s.id " +
-    "WHERE s.guild_id = $1 GROUP BY s.id ORDER BY s.starts_at DESC LIMIT 15",
+  const rows = await query<{
+    id: string; title: string; description: string; starts_at: Date; ends_at: Date; status: string;
+  }>(
+    "SELECT id::text, title, description, starts_at, ends_at, " +
+    "CASE WHEN status = 'open' AND ends_at <= NOW() THEN 'completed' ELSE status END AS status " +
+    "FROM community_seasons WHERE guild_id = $1 ORDER BY starts_at DESC LIMIT 15",
     [guildId],
   );
+  return Promise.all(rows.map(async season => ({
+    ...season,
+    item_count: (await getCommunitySeason(guildId, season.id))?.items.length ?? 0,
+  })));
 }
 
 const SEASON_ITEM_LOOKUPS: Record<CommunitySeasonItemType, string> = {
-  daily_drop: "SELECT id FROM community_daily_items WHERE id = $1 AND guild_id = $2 AND status = 'approved'",
-  ranking: "SELECT id FROM community_rankings WHERE id = $1 AND guild_id = $2 AND status = 'closed'",
-  session: "SELECT id FROM community_sessions WHERE id = $1 AND guild_id = $2 AND status IN ('closed','cancelled')",
-  tournament: "SELECT id FROM community_tournaments WHERE id = $1 AND guild_id = $2 AND status = 'completed'",
-  spotlight: "SELECT id FROM community_archive_spotlights WHERE id = $1 AND guild_id = $2 AND visibility = 'server' AND status = 'published'",
-  collection: "SELECT id FROM archive_collections WHERE id = $1 AND guild_id = $2 AND visibility = 'server' AND status = 'active'",
-  trail: "SELECT id FROM archive_trails WHERE id = $1 AND guild_id = $2 AND visibility = 'server' AND status = 'active'",
-  challenge: "SELECT id FROM community_quiz_packs WHERE id = $1 AND guild_id = $2 AND status = 'approved' AND mode = 'challenge'",
-  puzzle: "SELECT id FROM community_quiz_packs WHERE id = $1 AND guild_id = $2 AND status = 'approved' AND mode = 'puzzle'",
+  daily_drop: "SELECT i.id FROM community_daily_items i WHERE i.id = $1 AND i.guild_id = $2 AND i.status = 'approved' " +
+    "AND EXISTS (SELECT 1 FROM community_daily_deliveries d WHERE d.guild_id = $2 AND d.item_id = i.id AND d.status = 'sent' AND d.scheduled_for >= $3 AND d.scheduled_for < $4)",
+  ranking: "SELECT id FROM community_rankings WHERE id = $1 AND guild_id = $2 AND kind = 'ranking' AND status = 'closed' AND closed_at >= $3 AND closed_at < $4",
+  session: "SELECT id FROM community_sessions WHERE id = $1 AND guild_id = $2 AND status IN ('scheduled','open','closed') AND scheduled_at >= $3 AND scheduled_at < $4",
+  tournament: "SELECT id FROM community_tournaments WHERE id = $1 AND guild_id = $2 AND status = 'completed' AND closed_at >= $3 AND closed_at < $4",
+  spotlight: "SELECT p.id FROM community_archive_spotlights p JOIN community_archive_entries e ON e.id = p.entry_id " +
+    "WHERE p.id = $1 AND p.guild_id = $2 AND p.visibility = 'server' AND p.status = 'published' " +
+    "AND e.status = 'approved' AND (e.visibility = 'global' OR (e.visibility = 'server' AND e.created_guild_id = $2)) " +
+    "AND p.starts_at < $4 AND p.ends_at > $3",
+  collection: "SELECT id FROM archive_collections WHERE id = $1 AND guild_id = $2 AND visibility = 'server' AND status = 'active' AND created_at >= $3 AND created_at < $4",
+  trail: "SELECT id FROM archive_trails WHERE id = $1 AND guild_id = $2 AND visibility = 'server' AND status = 'active' AND created_at >= $3 AND created_at < $4",
+  challenge: "SELECT id FROM community_quiz_packs q WHERE q.id = $1 AND q.guild_id = $2 AND q.status = 'approved' AND q.mode = 'challenge' " +
+    "AND EXISTS (SELECT 1 FROM community_game_sessions s WHERE s.guild_id = $2 AND s.pack_id = q.id AND s.status = 'finished' AND s.finished_at >= $3 AND s.finished_at < $4)",
+  puzzle: "SELECT id FROM community_quiz_packs q WHERE q.id = $1 AND q.guild_id = $2 AND q.status = 'approved' AND q.mode = 'puzzle' " +
+    "AND EXISTS (SELECT 1 FROM community_game_sessions s WHERE s.guild_id = $2 AND s.pack_id = q.id AND s.status = 'finished' AND s.finished_at >= $3 AND s.finished_at < $4)",
 };
 
 export async function addCommunitySeasonItem(
   guildId: string, actorId: string, seasonId: string, rawType: string, itemId: string, isManager = false,
 ): Promise<void> {
   const itemType = normalizeSeasonItemType(rawType);
+  if (!/^[1-9]\d{0,18}$/.test(itemId) || (itemId.length === 19 && itemId > "9223372036854775807")) throw new Error("Enter a valid existing record ID.");
   await transaction(async (client) => {
-    const season = await client.query<{ id: string; creator_id: string }>(
-      "SELECT id::text, creator_id::text FROM community_seasons " +
-      "WHERE id = $1 AND guild_id = $2 AND status = 'open' FOR UPDATE",
+    const season = await client.query<{ id: string; creator_id: string; starts_at: Date; ends_at: Date }>(
+      "SELECT id::text, creator_id::text, starts_at, ends_at FROM community_seasons " +
+      "WHERE id = $1 AND guild_id = $2 AND status = 'open' AND ends_at > NOW() FOR UPDATE",
       [seasonId, guildId],
     );
     const seasonRow = season.rows[0];
     if (!seasonRow || (seasonRow.creator_id !== actorId && !isManager)) {
-      throw new Error("Only the season creator or a server manager can add season records.");
+      throw new Error("Only the season creator or a server manager can add records to an active season.");
     }
-    const item = await client.query(SEASON_ITEM_LOOKUPS[itemType], [itemId, guildId]);
-    if (!item.rowCount) throw new Error("The selected season item is not a completed, approved or visible record in this server.");
+    const item = await client.query(SEASON_ITEM_LOOKUPS[itemType], [
+      itemId, guildId, seasonRow.starts_at, seasonRow.ends_at,
+    ]);
+    if (!item.rowCount) {
+      throw new Error("The selected record is not approved, visible and dated within this Community Season.");
+    }
     await client.query(
       "INSERT INTO community_season_items (season_id, item_type, item_id, added_by) " +
       "VALUES ($1,$2,$3,$4) ON CONFLICT (season_id, item_type, item_id) DO NOTHING",
@@ -442,45 +458,111 @@ export async function closeCommunitySeason(
   });
 }
 
+export interface CommunitySeasonItem {
+  item_type: CommunitySeasonItemType;
+  item_id: string;
+  title: string;
+  added_by: string | null;
+  occurred_at: Date;
+  source: "period" | "linked";
+}
+
 export async function getCommunitySeason(guildId: string, seasonId: string): Promise<{
   id: string; title: string; description: string; starts_at: Date; ends_at: Date; status: string;
-  items: Array<{ item_type: CommunitySeasonItemType; item_id: string; title: string; added_by: string }>;
+  items: CommunitySeasonItem[];
 } | null> {
   const season = await queryOne<{
     id: string; title: string; description: string; starts_at: Date; ends_at: Date; status: string;
   }>(
-    "SELECT id::text, title, description, starts_at, ends_at, status FROM community_seasons WHERE id = $1 AND guild_id = $2",
+    "SELECT id::text, title, description, starts_at, ends_at, " +
+    "CASE WHEN status = 'open' AND ends_at <= NOW() THEN 'completed' ELSE status END AS status " +
+    "FROM community_seasons WHERE id = $1 AND guild_id = $2",
     [seasonId, guildId],
   );
   if (!season) return null;
   const items = await query<{
-    item_type: CommunitySeasonItemType; item_id: string; title: string; added_by: string;
+    item_type: CommunitySeasonItemType;
+    item_id: string;
+    title: string;
+    added_by: string | null;
+    occurred_at: Date;
+    source: "period" | "linked";
   }>(
-    "SELECT i.item_type, i.item_id::text, i.added_by::text, " +
-    "COALESCE(d.title, r.title, s.title, t.title, pe.title, c.title, a.title, q.title) AS title " +
-    "FROM community_season_items i " +
-    "JOIN community_seasons season ON season.id = i.season_id " +
-    "LEFT JOIN community_daily_items d ON i.item_type = 'daily_drop' AND d.id = i.item_id " +
-    "AND d.guild_id = season.guild_id AND d.status = 'approved' " +
-    "LEFT JOIN community_rankings r ON i.item_type = 'ranking' AND r.id = i.item_id " +
-    "AND r.guild_id = season.guild_id AND r.status = 'closed' " +
-    "LEFT JOIN community_sessions s ON i.item_type = 'session' AND s.id = i.item_id " +
-    "AND s.guild_id = season.guild_id AND s.status IN ('closed','cancelled') " +
-    "LEFT JOIN community_tournaments t ON i.item_type = 'tournament' AND t.id = i.item_id " +
-    "AND t.guild_id = season.guild_id AND t.status = 'completed' " +
-    "LEFT JOIN community_archive_spotlights p ON i.item_type = 'spotlight' AND p.id = i.item_id " +
-    "AND p.guild_id = season.guild_id AND p.visibility = 'server' AND p.status = 'published' " +
-    "LEFT JOIN community_archive_entries pe ON i.item_type = 'spotlight' AND pe.id = p.entry_id " +
-    "AND pe.status = 'approved' AND (pe.visibility = 'global' OR (pe.visibility = 'server' AND pe.created_guild_id = season.guild_id)) " +
-    "LEFT JOIN archive_collections c ON i.item_type = 'collection' AND c.id = i.item_id " +
-    "AND c.guild_id = season.guild_id AND c.visibility = 'server' AND c.status = 'active' " +
-    "LEFT JOIN archive_trails a ON i.item_type = 'trail' AND a.id = i.item_id " +
-    "AND a.guild_id = season.guild_id AND a.visibility = 'server' AND a.status = 'active' " +
-    "LEFT JOIN community_quiz_packs q ON i.item_type IN ('challenge','puzzle') AND q.id = i.item_id " +
-    "AND q.guild_id = season.guild_id AND q.status = 'approved' AND q.mode = i.item_type " +
-    "WHERE i.season_id = $1 AND COALESCE(d.id,r.id,s.id,t.id,pe.id,c.id,a.id,q.id) IS NOT NULL " +
-    "ORDER BY i.created_at ASC LIMIT 50",
-    [seasonId],
+    `WITH season AS (
+       SELECT id, guild_id, starts_at, ends_at
+       FROM community_seasons WHERE id = $1 AND guild_id = $2
+     ),
+     automatic_items AS (
+       SELECT 'daily_drop'::VARCHAR(24) AS item_type, i.id::TEXT AS item_id, i.title,
+              NULL::TEXT AS added_by, MIN(d.scheduled_for) AS occurred_at, 'period'::TEXT AS source
+       FROM season
+       JOIN community_daily_deliveries d ON d.guild_id = season.guild_id
+         AND d.status = 'sent' AND d.scheduled_for >= season.starts_at AND d.scheduled_for < season.ends_at
+       JOIN community_daily_items i ON i.id = d.item_id AND i.guild_id = season.guild_id AND i.status = 'approved'
+       GROUP BY i.id, i.title
+       UNION ALL
+       SELECT 'ranking', r.id::TEXT, r.title, NULL::TEXT, r.closed_at, 'period'::TEXT
+       FROM season JOIN community_rankings r ON r.guild_id = season.guild_id
+       WHERE r.kind = 'ranking' AND r.status = 'closed'
+         AND r.closed_at >= season.starts_at AND r.closed_at < season.ends_at
+       UNION ALL
+       SELECT 'session', s.id::TEXT, s.title, NULL::TEXT, s.scheduled_at, 'period'::TEXT
+       FROM season JOIN community_sessions s ON s.guild_id = season.guild_id
+       WHERE s.status IN ('scheduled','open','closed')
+         AND s.scheduled_at >= season.starts_at AND s.scheduled_at < season.ends_at
+       UNION ALL
+       SELECT q.mode::VARCHAR(24), q.id::TEXT, q.title, NULL::TEXT, MIN(g.finished_at), 'period'::TEXT
+       FROM season
+       JOIN community_game_sessions g ON g.guild_id = season.guild_id
+         AND g.status = 'finished' AND g.finished_at >= season.starts_at AND g.finished_at < season.ends_at
+       JOIN community_quiz_packs q ON q.id = g.pack_id AND q.guild_id = season.guild_id
+         AND q.status = 'approved' AND q.mode IN ('challenge','puzzle')
+       GROUP BY q.id, q.mode, q.title
+       UNION ALL
+       SELECT 'spotlight', p.id::TEXT, e.title, NULL::TEXT, GREATEST(p.starts_at, season.starts_at), 'period'::TEXT
+       FROM season JOIN community_archive_spotlights p ON p.guild_id = season.guild_id
+       JOIN community_archive_entries e ON e.id = p.entry_id AND e.status = 'approved'
+         AND (e.visibility = 'global' OR (e.visibility = 'server' AND e.created_guild_id = season.guild_id))
+       WHERE p.visibility = 'server' AND p.status = 'published'
+         AND p.starts_at < season.ends_at AND p.ends_at > season.starts_at
+     ),
+     linked_items AS (
+       SELECT i.item_type::VARCHAR(24) AS item_type, i.item_id::TEXT AS item_id,
+              COALESCE(d.title, r.title, s.title, t.title, pe.title, c.title, a.title, q.title) AS title,
+              i.added_by::TEXT AS added_by, i.created_at AS occurred_at, 'linked'::TEXT AS source
+       FROM community_season_items i
+       JOIN season ON season.id = i.season_id
+       LEFT JOIN community_daily_items d ON i.item_type = 'daily_drop' AND d.id = i.item_id
+         AND d.guild_id = season.guild_id AND d.status = 'approved'
+       LEFT JOIN community_rankings r ON i.item_type = 'ranking' AND r.id = i.item_id
+         AND r.guild_id = season.guild_id AND r.status = 'closed'
+       LEFT JOIN community_sessions s ON i.item_type = 'session' AND s.id = i.item_id
+         AND s.guild_id = season.guild_id AND s.status IN ('closed','cancelled')
+       LEFT JOIN community_tournaments t ON i.item_type = 'tournament' AND t.id = i.item_id
+         AND t.guild_id = season.guild_id AND t.status = 'completed'
+       LEFT JOIN community_archive_spotlights p ON i.item_type = 'spotlight' AND p.id = i.item_id
+         AND p.guild_id = season.guild_id AND p.visibility = 'server' AND p.status = 'published'
+       LEFT JOIN community_archive_entries pe ON pe.id = p.entry_id
+         AND pe.status = 'approved' AND (pe.visibility = 'global' OR (pe.visibility = 'server' AND pe.created_guild_id = season.guild_id))
+       LEFT JOIN archive_collections c ON i.item_type = 'collection' AND c.id = i.item_id
+         AND c.guild_id = season.guild_id AND c.visibility = 'server' AND c.status = 'active'
+       LEFT JOIN archive_trails a ON i.item_type = 'trail' AND a.id = i.item_id
+         AND a.guild_id = season.guild_id AND a.visibility = 'server' AND a.status = 'active'
+       LEFT JOIN community_quiz_packs q ON i.item_type IN ('challenge','puzzle') AND q.id = i.item_id
+         AND q.guild_id = season.guild_id AND q.status = 'approved' AND q.mode = i.item_type
+       WHERE i.season_id = $1
+         AND COALESCE(d.id,r.id,s.id,t.id,pe.id,c.id,a.id,q.id) IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM automatic_items auto
+           WHERE auto.item_type = i.item_type AND auto.item_id = i.item_id::TEXT
+         )
+     )
+     SELECT * FROM automatic_items
+     UNION ALL
+     SELECT * FROM linked_items
+     ORDER BY occurred_at ASC, item_type ASC, item_id ASC
+     LIMIT 100`,
+    [seasonId, guildId],
   );
   return { ...season, items };
 }

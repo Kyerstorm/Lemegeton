@@ -140,5 +140,6 @@ test("release calendar includes provider-dated IGDB game releases without invent
     when: new Date("2026-12-01T12:00:00.000Z"),
     provider: "IGDB · Worldwide",
     url: "https://www.igdb.com/games/scheduled-game",
+    category: "games",
   }]);
 });

@@ -264,12 +264,46 @@ export interface UpcomingCommunitySession {
   media_url: string | null;
 }
 
+export type CommunityCalendarScope = "all" | "releases" | "community" | "anime" | "tv" | "movies" | "games";
+export type CommunityCalendarCategory = "anime" | "tv" | "movies" | "games" | "community";
+
 export interface CommunityCalendarEntry {
   title: string;
   when: Date;
   source: string;
   sourceUrl: string | null;
   channelId: string | null;
+  kind: "release" | "community";
+  category: CommunityCalendarCategory;
+}
+
+export function normalizeCommunityCalendarSelection(value: string): { days: 7 | 14 | 30; scope: CommunityCalendarScope } {
+  const [rawDays, rawScope] = value.split("|");
+  const days = Number(rawDays);
+  const scopes = new Set<CommunityCalendarScope>(["all", "releases", "community", "anime", "tv", "movies", "games"]);
+  return {
+    days: days === 7 || days === 30 ? days : 14,
+    scope: scopes.has(rawScope as CommunityCalendarScope) ? rawScope as CommunityCalendarScope : "all",
+  };
+}
+
+export function formatCommunityCalendarTime(date: Date, timeZone: string): string {
+  if (!Number.isFinite(date.getTime())) throw new Error("Calendar entries must contain valid dates.");
+  try {
+    return new Intl.DateTimeFormat("en-IE", {
+      timeZone,
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+      timeZoneName: "short",
+    }).format(date);
+  } catch {
+    throw new Error("The calendar timezone must be a valid IANA timezone.");
+  }
 }
 
 export async function upcomingCommunitySessions(
@@ -291,7 +325,7 @@ export async function upcomingCommunitySessions(
 }
 
 export function mergeCommunityCalendarEntries(
-  providerEntries: readonly { title: string; when: Date; provider: string; url: string }[],
+  providerEntries: readonly { title: string; when: Date; provider: string; url: string; category: "anime" | "tv" | "movies" | "games" }[],
   sessions: readonly UpcomingCommunitySession[],
 ): CommunityCalendarEntry[] {
   const entries: CommunityCalendarEntry[] = [
@@ -301,6 +335,8 @@ export function mergeCommunityCalendarEntries(
       source: item.provider,
       sourceUrl: item.url,
       channelId: null,
+      kind: "release" as const,
+      category: item.category,
     })),
     ...sessions.map((session) => ({
       title: session.title,
@@ -308,12 +344,24 @@ export function mergeCommunityCalendarEntries(
       source: "Community · " + formatActivity(session.activity_type),
       sourceUrl: session.media_url,
       channelId: session.channel_id,
+      kind: "community" as const,
+      category: "community" as const,
     })),
   ];
   return entries
     .filter((item) => Number.isFinite(item.when.getTime()))
     .sort((left, right) => left.when.getTime() - right.when.getTime())
-    .slice(0, 30);
+    .slice(0, 100);
+}
+
+export function filterCommunityCalendarEntries(
+  entries: readonly CommunityCalendarEntry[],
+  scope: CommunityCalendarScope,
+): CommunityCalendarEntry[] {
+  if (scope === "all") return [...entries];
+  if (scope === "releases") return entries.filter(item => item.kind === "release");
+  if (scope === "community") return entries.filter(item => item.kind === "community");
+  return entries.filter(item => item.kind === "release" && item.category === scope);
 }
 
 export async function getCommunityHistory(guildId: string): Promise<{
@@ -330,7 +378,7 @@ export async function getCommunityHistory(guildId: string): Promise<{
 }
 
 export interface ProviderReleaseCalendarResult {
-  results: Array<{ title: string; when: Date; provider: string; url: string }>;
+  results: Array<{ title: string; when: Date; provider: string; url: string; category: "anime" | "tv" | "movies" | "games" }>;
   unavailableProviders: string[];
 }
 
@@ -358,18 +406,18 @@ export async function upcomingProviderReleases(
   const movies = requests[1].status === "fulfilled" ? requests[1].value : (unavailableProviders.push("TMDB Movies"), []);
   const episodes = requests[2].status === "fulfilled" ? requests[2].value : (unavailableProviders.push("TMDB TV"), []);
   const gameReleases = requests[3].status === "fulfilled" ? requests[3].value : (unavailableProviders.push("IGDB Game Releases"), []);
-  const results: Array<{ title: string; when: Date; provider: string; url: string }> = [];
+  const results: ProviderReleaseCalendarResult["results"] = [];
   for (const airing of airings) {
     const when = new Date(airing.airingAt * 1000);
     if (when >= from && when <= to) {
-      results.push({ title: `${airing.title} · Episode ${airing.episode}`, when, provider: "AniList", url: airing.url });
+      results.push({ title: `${airing.title} · Episode ${airing.episode}`, when, provider: "AniList", url: airing.url, category: "anime" });
     }
   }
   for (const movie of movies) {
     if (!movie.releaseDate) continue;
     const when = new Date(`${movie.releaseDate}T00:00:00.000Z`);
     if (Number.isFinite(when.getTime()) && movie.releaseDate >= fromDay && movie.releaseDate <= toDay) {
-      results.push({ title: movie.title, when, provider: `TMDB Movies · ${region.toUpperCase()}`, url: movie.sourceUrl });
+      results.push({ title: movie.title, when, provider: `TMDB Movies · ${region.toUpperCase()}`, url: movie.sourceUrl, category: "movies" });
     }
   }
   for (const release of episodes) {
@@ -382,6 +430,7 @@ export async function upcomingProviderReleases(
       when,
       provider: "TMDB TV",
       url: release.episode.sourceUrl,
+      category: "tv",
     });
   }
   for (const release of gameReleases) {
@@ -390,6 +439,7 @@ export async function upcomingProviderReleases(
       when: release.when,
       provider: "IGDB" + (release.region ? " · " + release.region : ""),
       url: release.sourceUrl,
+      category: "games",
     });
   }
   return {
