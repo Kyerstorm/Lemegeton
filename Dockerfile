@@ -34,7 +34,7 @@ ENV NODE_ENV=production \
     DASHBOARD_ALLOW_PUBLIC_BIND=true \
     DASHBOARD_PORT=8080
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash ca-certificates \
+    && apt-get install -y --no-install-recommends bash ca-certificates postgresql-client \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 10001 lemegeton \
     && useradd --system --uid 10001 --gid 10001 --home-dir /app/runtime-home --shell /usr/sbin/nologin lemegeton \

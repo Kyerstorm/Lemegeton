@@ -2,7 +2,7 @@ import {AuditLogEvent,Client,Events,GatewayIntentBits,MessageFlags,type Guild,ty
 import { emoji } from "./helpers/emoji.js";
 import {createServer, type Server} from "node:http";
 import {timingSafeEqual} from "node:crypto";
-import {findAtlasGraph,normalizeAtlasCategory,safeAtlasUrl} from "./helpers/integration/atlas.js";
+import {findAtlasGraph,normalizeAtlasCategory,safeAtlasUrl,recordAtlasRelationship} from "./helpers/integration/atlas.js";
 import {loadConfig} from "./helpers/runtime/config.js";
 import {configureTranslation,translateGuildUiText} from "./helpers/integration/translation.js";
 import {configureLogger,logger} from "./helpers/runtime/logger.js";
@@ -18,6 +18,7 @@ import {SteamClient} from "./helpers/integration/steam.js";
 import {closeDatabase,initDatabase} from "./database.js";
 import {claimDueMediaNightResults,dueDailyDeliveries,dueDailySchedules,markDailyDelivery,markMediaNightResultPublished,prepareDailyDelivery,rankingResults,dueReleaseDeliveries,dueReleaseSchedules,markReleaseDelivery,prepareReleaseDelivery,upcomingProviderReleases} from "./helpers/community/community.js";
 import {claimDueReadingReminders,markReadingReminderSent} from "./helpers/community/community-reading.js";
+import {claimDueMediaAutomationRules,claimDueMediaAutomationDeliveries,createMediaAutomationDiscussion,markMediaAutomationDelivery,queueMediaAutomationRelease,releaseMediaAutomationRuleClaim} from "./helpers/community/community-automation.js";
 import {createCommandRegistry} from "./src/registry.js";
 import {isFeatureEnabled} from "./helpers/runtime/settings.js";
 import {deleteGuildData,ensureGuildRetentionSettings,getGuildRetentionSettings,isGuildRetentionConfigured,isGuildSetupComplete,recordGuildInviter,retryDepartedGuildDeletions} from "./helpers/runtime/guild-retention.js";
@@ -456,6 +457,67 @@ async function processDailyDrops():Promise<void>{
    }catch(error){
     await markReleaseDelivery(delivery.id,delivery.claim_token,"pending",undefined,error instanceof Error?error.message:"Unknown delivery error").catch(()=>undefined);
     logger.warn("Release digest delivery failed and was queued for retry",{guildId:delivery.guild_id,deliveryId:delivery.id,reason:error instanceof Error?error.message:"Unknown error"});
+   }
+  }
+  for(const rule of await claimDueMediaAutomationRules()){
+   if(!await isGuildSetupComplete(rule.guild_id)){await releaseMediaAutomationRuleClaim(rule);continue;}
+   try{
+    const from=new Date();
+    const to=new Date(from.getTime()+14*24*60*60*1000);
+    const calendar=await upcomingProviderReleases(
+     aniListEmbedClient,releaseCalendarTmdbClient,from,to,rule.region,rule.categories,
+    );
+    if(calendar.unavailableProviders.length)throw new Error("Automation providers unavailable: "+calendar.unavailableProviders.join(", "));
+    for(const release of calendar.results)await queueMediaAutomationRelease(rule,release);
+    await releaseMediaAutomationRuleClaim(rule);
+   }catch(error){
+    await releaseMediaAutomationRuleClaim(rule,true).catch(()=>undefined);
+    logger.warn("Media automation rule could not be evaluated; it will retry",{
+     guildId:rule.guild_id,ruleId:rule.id,reason:error instanceof Error?error.message:"Unknown error",
+    });
+   }
+  }
+  for(const delivery of await claimDueMediaAutomationDeliveries()){
+   if(!await isGuildSetupComplete(delivery.guild_id)){
+    await markMediaAutomationDelivery(delivery,"pending",undefined,"Server setup is not complete.");
+    continue;
+   }
+   try{
+    const channel=await client.channels.fetch(delivery.channel_id);
+    if(!channel||!channel.isTextBased()||!("send" in channel)||!("guildId" in channel)||channel.guildId!==delivery.guild_id){
+     throw new Error("The automation destination is unavailable in its configured server.");
+    }
+    let discussionLink:string|undefined;
+    if(delivery.action==="discussion"){
+     await createMediaAutomationDiscussion({delivery,creatorId:config.applicationId});
+     const sourceCategory=delivery.provider.startsWith("AniList")?"ANIME":delivery.provider.startsWith("TMDB Movies")?"MOVIE":"TV";
+     const destinationUrl="https://discord.com/channels/"+delivery.guild_id+"/"+delivery.channel_id;
+     await recordAtlasRelationship({
+      sourceTitle:delivery.title,sourceCategory,sourceUrl:delivery.source_url,
+      targetTitle:"Release discussion · "+delivery.title,targetCategory:"DISCUSSION",targetUrl:destinationUrl,
+      relationshipType:"community release discussion",sourceKind:"community",sourceLabel:"Media Automation Studio",
+      guildId:delivery.guild_id,evidence:"Created from a provider-dated media release.",
+     });
+     discussionLink=destinationUrl;
+    }
+    const releaseTimestamp=Math.floor(new Date(delivery.release_at).getTime()/1000);
+    const message=await(channel as TextChannel).send({
+     embeds:[homeEmbed(
+      "Media automation · "+delivery.title,
+      "A "+delivery.provider+" release event matched the **"+delivery.rule_name+"** rule. Release: <t:"+releaseTimestamp+":F>.",
+      [
+       {name:"Provider source",value:"[Open release record]("+delivery.source_url+")",inline:false},
+       ...(discussionLink?[{name:"Community discussion",value:"[Open server discussion]("+discussionLink+")",inline:false}]:[]),
+      ],
+     )],
+     allowedMentions:{parse:[]},
+    });
+    await markMediaAutomationDelivery(delivery,"sent",message.id);
+   }catch(error){
+    await markMediaAutomationDelivery(delivery,"pending",undefined,error instanceof Error?error.message:"Unknown delivery error").catch(()=>undefined);
+    logger.warn("Media automation delivery failed and was queued for retry",{
+     guildId:delivery.guild_id,deliveryId:delivery.id,reason:error instanceof Error?error.message:"Unknown error",
+    });
    }
   }
   for(const session of await claimDueMediaNightResults()){

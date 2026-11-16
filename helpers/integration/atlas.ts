@@ -334,17 +334,29 @@ export interface AtlasGraphFilters {
   sourceKind?: RelationshipSource;
 }
 
+function matchesAtlasRelationshipFilter(value: string, filter: string): boolean {
+  const relationship = normalizeAtlasTitle(value);
+  const normalizedFilter = normalizeAtlasTitle(filter);
+  if (!normalizedFilter) return true;
+  const aliases: Record<string, string[]> = {
+    franchise: ["franchise", "sequel", "prequel", "spin off", "collection member", "parent story", "side story", "alternate version", "alternative version"],
+    adaptation: ["adaptation", "adapted from", "adapted into", "based on", "source material", "source work"],
+  };
+  const terms = aliases[normalizedFilter] ?? [normalizedFilter];
+  return terms.some(term => relationship.includes(normalizeAtlasTitle(term)));
+}
+
 export function filterAtlasRelations(
   relations: readonly AtlasRelation[],
   filters: AtlasGraphFilters = {},
 ): AtlasRelation[] {
   const search = normalizeAtlasTitle(filters.query ?? "");
   const category = filters.category ? normalizeAtlasCategory(filters.category) : null;
-  const relationship = normalizeAtlasTitle(filters.relationshipType ?? "");
+  const relationship = filters.relationshipType ?? "";
   return relations.filter(relation => {
     if (filters.sourceKind && relation.sourceKind !== filters.sourceKind) return false;
     if (category && relation.category !== category) return false;
-    if (relationship && !normalizeAtlasTitle(relation.relationType).includes(relationship)) return false;
+    if (relationship && !matchesAtlasRelationshipFilter(relation.relationType, relationship)) return false;
     if (search) {
       const searchable = [relation.title, relation.category, relation.relationType, relation.source]
         .map(value => normalizeAtlasTitle(value));
@@ -363,7 +375,7 @@ export interface AtlasGraphPath {
 export function filterAtlasGraph(graph: AtlasGraphResult, filters: AtlasGraphFilters = {}): AtlasGraphResult {
   const search = normalizeAtlasTitle(filters.query ?? "");
   const category = filters.category ? normalizeAtlasCategory(filters.category) : null;
-  const relationship = normalizeAtlasTitle(filters.relationshipType ?? "");
+  const relationship = filters.relationshipType ?? "";
   const matches = graph.edges.filter((edge) => {
     if (filters.sourceKind && edge.sourceKind !== filters.sourceKind) return false;
     if (category) {
@@ -371,7 +383,7 @@ export function filterAtlasGraph(graph: AtlasGraphResult, filters: AtlasGraphFil
       const to = graph.nodes.find(node => node.id === edge.to);
       if (from?.category !== category && to?.category !== category) return false;
     }
-    if (relationship && !normalizeAtlasTitle(edge.relationType).includes(relationship)) return false;
+    if (relationship && !matchesAtlasRelationshipFilter(edge.relationType, relationship)) return false;
     if (search) {
       const from = graph.nodes.find(node => node.id === edge.from);
       const to = graph.nodes.find(node => node.id === edge.to);

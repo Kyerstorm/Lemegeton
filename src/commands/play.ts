@@ -43,6 +43,7 @@ import {
 } from "../../helpers/runtime/games.js";
 import { query } from "../../database.js";
 import { isGuildManager, isValidHttpsUrl, safeDisplay } from "../../helpers/security/security.js";
+import type { QuizPackMode } from "../../helpers/runtime/games.js";
 
 function playHome(): { embeds: EmbedBuilder[]; components: ActionRowBuilder<ButtonBuilder>[] } {
   return {
@@ -67,6 +68,10 @@ function playHome(): { embeds: EmbedBuilder[]; components: ActionRowBuilder<Butt
         new ButtonBuilder().setCustomId("play:start-team").setLabel("Competitive teams").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId("play:start-coop").setLabel("Co-op game").setStyle(ButtonStyle.Success),
       ),
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId("play:challenges").setLabel("Challenge Centre").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId("play:puzzles").setLabel("Media Puzzle Room").setStyle(ButtonStyle.Secondary),
+      ),
     ],
   };
 }
@@ -83,7 +88,7 @@ function packModal(): ModalBuilder {
         new TextInputBuilder().setCustomId("description").setLabel("What is this pack about?").setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800),
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId("mode").setLabel("Mode: trivia, guessing or mystery").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(24).setValue("trivia"),
+        new TextInputBuilder().setCustomId("mode").setLabel("Mode: trivia, guessing, mystery, challenge or puzzle").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(24).setValue("trivia"),
       ),
     );
 }
@@ -160,6 +165,8 @@ export class PlayCommand implements FeatureCommand {
     .setDescription("Create source-backed media games and play with your server")
     .addStringOption((option) => option.setName("action").setDescription("Game action").addChoices(
       { name: "Create question pack", value: "create-pack" },
+      { name: "Challenge Centre", value: "challenge-centre" },
+      { name: "Media Puzzle Room", value: "puzzle-room" },
       { name: "Add a question", value: "add-question" },
       { name: "Review pack", value: "review-pack" },
       { name: "Review question", value: "review-question" },
@@ -183,6 +190,8 @@ export class PlayCommand implements FeatureCommand {
       { name: "Trivia", value: "trivia" },
       { name: "Guessing", value: "guessing" },
       { name: "Mystery", value: "mystery" },
+      { name: "Challenge", value: "challenge" },
+      { name: "Puzzle", value: "puzzle" },
     ))
     .addStringOption((option) => option.setName("question").setDescription("Question text").setMaxLength(500))
     .addStringOption((option) => option.setName("answer_text").setDescription("Your answer").setMaxLength(200))
@@ -255,6 +264,8 @@ export class PlayCommand implements FeatureCommand {
           return;
         }
         case "packs": await this.showPacks(interaction); return;
+        case "challenge-centre": await this.showPacks(interaction, "challenge"); return;
+        case "puzzle-room": await this.showPacks(interaction, "puzzle"); return;
         case "start": await this.start(interaction, interaction.options.getString("pack_id"), interaction.options.getInteger("rounds") ?? 5, (interaction.options.getString("game_mode") ?? "individual") as GameMode); return;
         case "join": await this.join(interaction, interaction.options.getString("session_id")); return;
         case "answer": await this.answerDirect(interaction); return;
@@ -314,6 +325,14 @@ export class PlayCommand implements FeatureCommand {
     }
     if (action === "packs") {
       await this.showPacks(interaction);
+      return true;
+    }
+    if (action === "challenges") {
+      await this.showPacks(interaction, "challenge");
+      return true;
+    }
+    if (action === "puzzles") {
+      await this.showPacks(interaction, "puzzle");
       return true;
     }
     if (action === "review") {
@@ -460,29 +479,33 @@ export class PlayCommand implements FeatureCommand {
     description: string,
     mode: string,
   ): Promise<void> {
-    if (!["trivia", "guessing", "mystery"].includes(mode.trim().toLowerCase())) {
-      throw new Error("Choose trivia, guessing or mystery as the pack mode.");
+    const normalizedMode = mode.trim().toLowerCase();
+    if (!["trivia", "guessing", "mystery", "challenge", "puzzle"].includes(normalizedMode)) {
+      throw new Error("Choose trivia, guessing, mystery, challenge or puzzle as the pack mode.");
     }
     const id = await createQuizPack(
       interaction.guildId!,
       interaction.user.id,
       title,
       description,
-      mode.trim().toLowerCase() as "trivia" | "guessing" | "mystery",
+      normalizedMode as QuizPackMode,
     );
     await interaction.reply({ content: `Question pack #${id} is pending moderator review. Once approved, add source-backed questions to it.`, flags: MessageFlags.Ephemeral });
   }
 
-  private async showPacks(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
-    const packs = await listQuizPacks(interaction.guildId!, "approved");
+  private async showPacks(interaction: ChatInputCommandInteraction | ButtonInteraction, mode?: QuizPackMode): Promise<void> {
+    const allPacks = await listQuizPacks(interaction.guildId!, "approved");
+    const packs = mode ? allPacks.filter(pack => pack.mode === mode) : allPacks;
     if (!packs.length) {
-      await interaction.reply({ content: "There are no approved question packs yet.", flags: MessageFlags.Ephemeral });
+      const label = mode === "challenge" ? "challenge" : mode === "puzzle" ? "puzzle" : "question";
+      await interaction.reply({ content: `There are no approved ${label} packs yet. Create a pack in this mode and submit it for moderator review.`, flags: MessageFlags.Ephemeral });
       return;
     }
+    const title = mode === "challenge" ? "Challenge Centre" : mode === "puzzle" ? "Media Puzzle Room" : "Approved question packs";
     await interaction.reply({
-      embeds: [homeEmbed("Approved question packs", "Only approved source-backed questions can enter active games.", packs.map((pack) => ({
+      embeds: [homeEmbed(title, "Only approved, source-backed packs and questions can enter a live game.", packs.map((pack) => ({
         name: `#${pack.id} · ${safeDisplay(pack.title)}`,
-        value: `${pack.question_count} approved question(s)\n${safeDisplay(pack.description, 200) || "No description"}`,
+        value: `${pack.mode.toUpperCase()} · ${pack.question_count} approved question(s)\n${safeDisplay(pack.description, 200) || "No description"}`,
         inline: false,
       })))],
       flags: MessageFlags.Ephemeral,

@@ -148,3 +148,20 @@ test("Atlas pathfinding returns the shortest bounded path and ignores unreachabl
   assert.equal(path.nodes.at(-1)?.title, "D");
   assert.equal(findAtlasPath(graph, { title: "Missing", category: "BOOK" }), null);
 });
+
+
+test("Atlas relationship aliases distinguish franchise links from adaptation paths", async () => {
+  const graph = await buildAtlasGraph(
+    { title: "Origin", category: "ANIME", url: "https://anilist.co/anime/10" },
+    async () => [
+      { title: "Sequel", category: "ANIME", url: "https://anilist.co/anime/11", relationType: "sequel", source: "AniList", sourceKind: "provider" },
+      { title: "Source novel", category: "LIGHT_NOVEL", url: "https://anilist.co/manga/12", relationType: "adaptation", source: "AniList", sourceKind: "provider" },
+      { title: "Collection film", category: "MOVIE", url: "https://www.themoviedb.org/movie/13", relationType: "collection member", source: "TMDB", sourceKind: "provider" },
+    ],
+    { maxDepth: 1, maxNodes: 8, perNodeLimit: 8 },
+  );
+  assert.deepEqual(filterAtlasGraph(graph, { relationshipType: "franchise" }).directRelationships.map(item => item.title).sort(),
+    ["Collection film", "Sequel"]);
+  assert.deepEqual(filterAtlasRelations(graph.directRelationships, { relationshipType: "adaptation" }).map(item => item.title),
+    ["Source novel"]);
+});

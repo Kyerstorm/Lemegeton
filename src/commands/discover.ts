@@ -387,6 +387,10 @@ export class DiscoverCommand implements FeatureCommand {
     .addIntegerOption((option) => option.setName("season_year").setDescription("Anime season year").setMinValue(1970).setMaxValue(2100))
     .addStringOption((option) => option.setName("view").setDescription("Choose a discovery view").addChoices(
       { name: "Search results", value: "search" },
+      { name: "Random media", value: "random" },
+      { name: "Trending media", value: "trending" },
+      { name: "Franchise Explorer", value: "franchise" },
+      { name: "Adaptation Explorer", value: "adaptations" },
       { name: "Exact book edition lookup", value: "edition" },
       { name: "3×3 media cover grid", value: "grid" },
       { name: "Cross-media similarity", value: "similar" },
@@ -466,6 +470,16 @@ export class DiscoverCommand implements FeatureCommand {
         await interaction.reply({content:"That format is not supported by the selected media category.",flags:MessageFlags.Ephemeral});return;
       }
     }
+    if (view === "random" || view === "trending") {
+      await interaction.reply({ content: loadingMessage(view === "random" ? "Finding a random media pick…" : "Loading trending media…"), flags: MessageFlags.Ephemeral });
+      try {
+        const results = view === "random" ? await this.fetchRandom(category) : await this.fetchTrending(category);
+        await this.presentResults(interaction, results, view === "random" ? "Random media picks" : "Trending media");
+      } catch (error) {
+        await interaction.editReply({ content: error instanceof Error ? error.message : "The discovery provider could not load this view.", embeds: [], components: [] });
+      }
+      return;
+    }
     if (view === "suggest-link") {
       await this.suggestRelationshipAndRespond(interaction);
       return;
@@ -532,6 +546,19 @@ export class DiscoverCommand implements FeatureCommand {
     }
     if(view==="creators"){
       await this.creatorAndRespond(interaction,query,category);
+      return;
+    }
+    if (view === "franchise" || view === "adaptations") {
+      await this.atlasAndRespond(
+        interaction,
+        query,
+        category,
+        filters,
+        interaction.options.getString("target_title"),
+        interaction.options.getString("target_category"),
+        interaction.options.getString("target_url"),
+        view === "franchise" ? "franchise" : "adaptation",
+      );
       return;
     }
     if (view === "similar") {

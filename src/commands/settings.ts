@@ -20,6 +20,7 @@ import {
   type ModalSubmitInteraction,
 } from "discord.js";
 import { emoji } from "../../helpers/emoji.js";
+import { homeEmbed } from "../../helpers/runtime/discord.js";
 import { AniListClient } from "../../helpers/integration/anilist.js";
 import type { BotConfig } from "../../helpers/runtime/config.js";
 import type { FeatureCommand } from "../../helpers/commands/command.js";
@@ -47,11 +48,85 @@ import {
   isGuildRetentionConfigured,
   setGuildLeaveAction,
 } from "../../helpers/runtime/guild-retention.js";
+import { isBotModerator, isModeratorCommandGuild } from "../../helpers/commands/moderation.js";
+import { createDatabaseBackup, listDatabaseBackups, verifyDatabaseBackup } from "../../helpers/runtime/database-backups.js";
+import { listMediaAutomationRules, saveMediaAutomationRule, toggleMediaAutomationRule } from "../../helpers/community/community-automation.js";
+
 
 type SettingsRow =
   | ActionRowBuilder<ButtonBuilder>
   | ActionRowBuilder<ChannelSelectMenuBuilder>
   | ActionRowBuilder<StringSelectMenuBuilder>;
+
+async function mediaAutomationPanel(guildId: string): Promise<{
+  embeds: EmbedBuilder[];
+  components: SettingsRow[];
+}> {
+  const rules = await listMediaAutomationRules(guildId);
+  const fields = rules.map(rule => ({
+    name: rule.name,
+    value: (rule.enabled ? "Enabled" : "Paused") + " · " + rule.action +
+      " · " + rule.categories.join(", ").toUpperCase() + " · " + rule.region +
+      " · <#" + rule.channel_id + ">",
+    inline: false,
+  }));
+  const components: SettingsRow[] = [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("settings:automation:add").setLabel("Add rule").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("settings:automation:open").setLabel("Refresh").setStyle(ButtonStyle.Secondary),
+    ),
+  ];
+  if (rules.length) {
+    components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder().setCustomId("settings:automation:toggle").setPlaceholder("Pause or resume a rule")
+        .addOptions(rules.slice(0, 25).map(rule => ({
+          label: rule.name.slice(0, 100), value: rule.id,
+          description: (rule.enabled ? "Enabled" : "Paused") + " · " + rule.action,
+        }))),
+    ));
+  }
+  return {
+    embeds: [homeEmbed("Media Automation Studio",
+      "Rules check AniList and TMDB release dates every hour. Events are deduplicated per rule; announcements can optionally open a spoiler-aware discussion and add a guild-scoped Atlas link.",
+      fields.length ? fields : [{ name: "Rules", value: "No media automation rules configured." , inline: false }])],
+    components,
+  };
+}
+
+async function databaseBackupPanel(): Promise<{
+  embeds: EmbedBuilder[];
+  components: SettingsRow[];
+}> {
+  const backups = await listDatabaseBackups(5);
+  const latest = backups[0];
+  const fields = backups.map(backup => ({
+    name: backup.id,
+    value: backup.status.toUpperCase() + " · " + backup.size_bytes + " bytes · " +
+      "<t:" + Math.floor(new Date(backup.created_at).getTime() / 1000) + ":R>" +
+      (backup.verification_error ? " · " + backup.verification_error.slice(0, 180) : ""),
+    inline: false,
+  }));
+  const controls = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("settings:backups:create").setLabel("Create backup").setStyle(ButtonStyle.Primary),
+    ...(latest ? [new ButtonBuilder().setCustomId("settings:backups:verify:" + latest.id).setLabel("Verify latest").setStyle(ButtonStyle.Secondary)] : []),
+  );
+  return {
+    embeds: [homeEmbed("Data & Backup Centre",
+      "Backups are written to the configured private S3 bucket. Verification checks the object digest and PostgreSQL archive catalogue; this panel does not restore over a live database.",
+      fields.length ? fields : [{ name: "Backup history", value: "No backups have been created." , inline: false }])],
+    components: [controls],
+  };
+}
+
+function mediaAutomationModal(): ModalBuilder {
+  return new ModalBuilder().setCustomId("settings:automation:add").setTitle("Add media automation rule").addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("name").setLabel("Rule name").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(100)),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("categories").setLabel("Categories: anime, tv, movies").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(30).setValue("anime,tv,movies")),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("region").setLabel("Two-letter region").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(2).setValue("IE")),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("channel_id").setLabel("Destination channel ID").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(20)),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("action").setLabel("Action: announce or discussion").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(12).setValue("announce")),
+  );
+}
 
 function mediaRegionModal(region: string): ModalBuilder {
   return new ModalBuilder()
@@ -385,6 +460,8 @@ export class SettingsCommand implements FeatureCommand {
           { name: "Anime episode follows", value: "media-follows" },
           { name: "Change media region", value: "media-region" },
           { name: "Data retention when the bot leaves", value: "retention" },
+          { name: "Media Automation Studio", value: "automation" },
+          { name: "Data & Backup Centre", value: "data-backups" },
           { name: "Run server diagnostics", value: "diagnostics" },
         ),
     )
@@ -415,6 +492,15 @@ export class SettingsCommand implements FeatureCommand {
 
     const configured = await isGuildRetentionConfigured(interaction.guildId);
     const action = interaction.options.getString("action") ?? (configured ? "view" : "retention");
+    if (action === "data-backups") {
+      if (!isModeratorCommandGuild(interaction.guildId, this.config.botModeratorGuildId)
+        || !await isBotModerator(interaction.user.id, this.config.adminDiscordId)) {
+        await interaction.reply({ content: "The Data & Backup Centre is restricted to configured bot moderators in the operations server.", flags: MessageFlags.Ephemeral });
+        return;
+      }
+      await interaction.reply({ ...await databaseBackupPanel(), flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+      return;
+    }
     if (action === "retention") {
       const settings = await getGuildRetentionSettings(interaction.guildId);
       if (!canConfigureGuildLeaveAction(settings.invited_by, interaction.user.id, canManage(interaction))) {
@@ -426,6 +512,14 @@ export class SettingsCommand implements FeatureCommand {
     }
     if (!configured) {
       await interaction.reply({content:"Choose the server data-retention setting before using other Lemegeton settings.",flags:MessageFlags.Ephemeral});
+      return;
+    }
+    if (action === "automation") {
+      if (!canManage(interaction)) {
+        await interaction.reply({ content: "Manage Server permission is required to configure media automation.", flags: MessageFlags.Ephemeral });
+        return;
+      }
+      await interaction.reply({ ...await mediaAutomationPanel(interaction.guildId), flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
       return;
     }
     if (action === "media-follows") {
@@ -494,8 +588,51 @@ export class SettingsCommand implements FeatureCommand {
   }
 
   async handleButton(interaction: ButtonInteraction): Promise<boolean> {
-    const [, section, target] = interaction.customId.split(":");
+    const [, section, target, recordId] = interaction.customId.split(":");
     if (!interaction.guildId) return false;
+    if (section === "backups") {
+      if (!isModeratorCommandGuild(interaction.guildId, this.config.botModeratorGuildId)
+        || !await isBotModerator(interaction.user.id, this.config.adminDiscordId)) {
+        await interaction.reply({ content: "The Backup Centre is restricted to bot moderators in the operations server.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      if (target === "create") {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        try {
+          const backup = await createDatabaseBackup(this.config, interaction.user.id);
+          await interaction.editReply("Backup " + backup.id + " uploaded and verified (" + backup.size_bytes + " bytes).");
+        } catch (error) {
+          await interaction.editReply(error instanceof Error ? error.message : "The database backup could not be created.");
+        }
+        return true;
+      }
+      if (target === "verify" && recordId) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        try {
+          const backup = await verifyDatabaseBackup(recordId, this.config);
+          await interaction.editReply("Backup " + backup.id + " passed digest and PostgreSQL archive-catalogue verification.");
+        } catch (error) {
+          await interaction.editReply(error instanceof Error ? error.message : "The database backup could not be verified.");
+        }
+        return true;
+      }
+      return false;
+    }
+    if (section === "automation") {
+      if (!canManage(interaction)) {
+        await interaction.reply({ content: "Manage Server permission is required to configure media automation.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      if (target === "add") {
+        await interaction.showModal(mediaAutomationModal());
+        return true;
+      }
+      if (target === "open") {
+        await interaction.update(await mediaAutomationPanel(interaction.guildId));
+        return true;
+      }
+      return false;
+    }
     if (section === "retention") {
       if (target !== "delete" && target !== "retain") return false;
       const settings = await getGuildRetentionSettings(interaction.guildId);
@@ -586,13 +723,33 @@ export class SettingsCommand implements FeatureCommand {
   }
 
   async handleModal(interaction: ModalSubmitInteraction): Promise<boolean> {
-    if (interaction.customId !== "settings:media-region" && interaction.customId !== "settings:media-follows:add") return false;
+    if (interaction.customId !== "settings:media-region" && interaction.customId !== "settings:media-follows:add" && interaction.customId !== "settings:automation:add") return false;
     if (!interaction.guildId) return false;
     if (!canManage(interaction as ModalSubmitInteraction)) {
       await interaction.reply({ content: "Manage Server permission is required to change server media settings.", flags: MessageFlags.Ephemeral });
       return true;
     }
     try {
+      if (interaction.customId === "settings:automation:add") {
+        const rawChannelId = interaction.fields.getTextInputValue("channel_id").trim();
+        if (!/^\d{17,20}$/.test(rawChannelId)) throw new Error("Enter a valid destination channel ID.");
+        const guild = interaction.guild ?? await interaction.client.guilds.fetch(interaction.guildId);
+        const channel = await guild.channels.fetch(rawChannelId).catch(() => null);
+        if (!channel || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)) {
+          throw new Error("Choose a text or announcement channel in this server.");
+        }
+        await saveMediaAutomationRule({
+          guildId: interaction.guildId,
+          actorId: interaction.user.id,
+          name: interaction.fields.getTextInputValue("name"),
+          channelId: channel.id,
+          categories: interaction.fields.getTextInputValue("categories"),
+          region: interaction.fields.getTextInputValue("region"),
+          action: interaction.fields.getTextInputValue("action"),
+        });
+        await interaction.reply({ content: "Media automation rule saved and enabled. Its first provider check is queued.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
       if (interaction.customId === "settings:media-follows:add") {
         const rawId = interaction.fields.getTextInputValue("anilist_id").trim();
         if (!/^\d{1,12}$/.test(rawId) || Number(rawId) < 1 || !Number.isSafeInteger(Number(rawId))) {
@@ -625,6 +782,17 @@ export class SettingsCommand implements FeatureCommand {
     interaction: ButtonInteraction | StringSelectMenuInteraction | RoleSelectMenuInteraction | ChannelSelectMenuInteraction,
   ): Promise<boolean> {
     if (!interaction.guildId) return false;
+    if (interaction.isStringSelectMenu() && interaction.customId === "settings:automation:toggle") {
+      if (!canManage(interaction)) {
+        await interaction.reply({ content: "Manage Server permission is required to manage media automation.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      const ruleId = interaction.values[0];
+      if (!ruleId || !/^\d+$/.test(ruleId)) return false;
+      const enabled = await toggleMediaAutomationRule(interaction.guildId, ruleId);
+      await interaction.update({ ...await mediaAutomationPanel(interaction.guildId), content: enabled ? "Automation rule resumed." : "Automation rule paused." });
+      return true;
+    }
     if (interaction.isStringSelectMenu() && interaction.customId === "settings:media-follows:remove") {
       if (!canManage(interaction)) {
         await interaction.reply({ content: "Manage Server permission is required to manage title follows.", flags: MessageFlags.Ephemeral });

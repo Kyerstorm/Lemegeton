@@ -3,8 +3,8 @@ import { query, queryOne, transaction } from "../../database.js";
 import { cleanText, isValidHttpsUrl } from "../security/security.js";
 
 export type QuizDifficulty = "easy" | "standard" | "hard" | "expert";
-export type MediaClueCategory = "title" | "creator" | "release" | "franchise" | "adaptation" | "game" | "genre" | "format" | "studio" | "platform" | "character" | "series";
-export type QuizPackMode = "trivia" | "guessing" | "mystery";
+export type MediaClueCategory = "title" | "creator" | "release" | "franchise" | "adaptation" | "game" | "genre" | "format" | "studio" | "platform" | "character" | "series" | "word" | "connection" | "relationship" | "chronology";
+export type QuizPackMode = "trivia" | "guessing" | "mystery" | "challenge" | "puzzle";
 export interface MediaClue { category: MediaClueCategory; text: string; }
 export interface QuizQuestion {
   id: string;
@@ -45,7 +45,7 @@ export interface GameLeaderboardEntry {
   answers: number;
 }
 export function normalizeMediaClues(values: readonly string[]): MediaClue[] {
-  const allowed = new Set<MediaClueCategory>(["title", "creator", "release", "franchise", "adaptation", "game", "genre", "format", "studio", "platform", "character", "series"]);
+  const allowed = new Set<MediaClueCategory>(["title", "creator", "release", "franchise", "adaptation", "game", "genre", "format", "studio", "platform", "character", "series", "word", "connection", "relationship", "chronology"]);
   const entries = values.flatMap(value => value.split(/\r?\n|\|/)).map(value => value.trim()).filter(Boolean);
   if (entries.length > 8) throw new Error("A guessing or mystery question can have up to eight clues.");
   return entries.map(entry => {
@@ -99,7 +99,12 @@ async function ensureGameParticipant(client: PoolClient, sessionId: string, user
   }
   return selected.name;
 }
-export async function createQuizPack(guildId: string, creatorId: string, title: string, description: string, mode: "trivia" | "guessing" | "mystery" = "trivia"): Promise<string> {
+export function normalizeQuizPackMode(value: string): QuizPackMode {
+  if (value === "trivia" || value === "guessing" || value === "mystery" || value === "challenge" || value === "puzzle") return value;
+  throw new Error("Choose trivia, guessing, mystery, challenge or puzzle.");
+}
+export async function createQuizPack(guildId: string, creatorId: string, title: string, description: string, mode: QuizPackMode = "trivia"): Promise<string> {
+  mode = normalizeQuizPackMode(mode);
   const cleanTitle = cleanText(title, 160);
   if (!cleanTitle) throw new Error("A question pack title is required.");
   const row = await queryOne<{ id: string }>(
@@ -119,7 +124,10 @@ export async function addQuizQuestion(guildId: string, packId: string, contribut
   if (!source) throw new Error("A valid HTTPS source is required.");
   const cleanDifficulty = normalizeQuizDifficulty(difficulty);
   const clues = pack.mode === "trivia" ? [] : normalizeMediaClues(clueEntries.length ? clueEntries : acceptedAnswers);
-  if (pack.mode !== "trivia" && clues.length === 0) throw new Error("Guessing and Mystery questions need at least one category-labelled clue.");
+  if (pack.mode !== "trivia" && clues.length === 0) throw new Error("Guessing, Mystery, Challenge and Puzzle questions need at least one category-labelled clue.");
+  if (pack.mode === "puzzle" && !clues.some(clue => ["word", "connection", "relationship", "chronology", "franchise", "adaptation"].includes(clue.category))) {
+    throw new Error("Puzzle packs need at least one word, connection, relationship, chronology, franchise or adaptation clue.");
+  }
   const accepted = pack.mode === "trivia" ? [...new Set([cleanAnswer, ...acceptedAnswers.map(item => cleanText(item, 200))].filter(Boolean))].slice(0, 10) : [cleanAnswer];
   const cleanOptions = options.map(item => cleanText(item, 150)).filter(Boolean);
   if (cleanOptions.length > 4 || options.length !== cleanOptions.length) throw new Error("A multiple-choice question can have up to four non-empty options.");

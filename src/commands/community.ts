@@ -455,7 +455,7 @@ export class CommunityCommand implements FeatureCommand {
     if (action === "season-add") {
       if (!id) return false;
       await interaction.showModal(modal("community:season-add:" + id, "Add an existing activity", [
-        { id: "item_type", label: "Type: daily_drop, ranking, session, tournament, spotlight, collection or trail", max: 24 },
+        { id: "item_type", label: "Type: daily_drop, ranking, session, tournament, spotlight, collection, trail, challenge or puzzle", max: 24 },
         { id: "item_id", label: "Existing record ID", max: 24 },
       ]));
       return true;
@@ -1391,7 +1391,7 @@ export class CommunityCommand implements FeatureCommand {
 
   private async showSeasonCentre(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
     const seasons = await listCommunitySeasons(interaction.guildId!);
-    const embed = homeEmbed("Community Seasons", "Season pages collect references to existing Daily Drops, rankings, sessions, tournaments, spotlights, collections and Trails.", seasons.slice(0, 10).map(item => ({
+    const embed = homeEmbed("Community Seasons", "Season pages link existing Daily Drops, rankings, sessions, tournaments, spotlights, collections, Trails, approved challenges and approved puzzles.", seasons.slice(0, 10).map(item => ({
       name: "#" + item.id + " · " + safeDisplay(item.title, 150),
       value: item.status + " · " + item.item_count + " records · <t:" + Math.floor(new Date(item.starts_at).getTime() / 1000) + ":d> → <t:" + Math.floor(new Date(item.ends_at).getTime() / 1000) + ":d>",
       inline: false,

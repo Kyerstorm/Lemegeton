@@ -31,7 +31,7 @@ The catalogue names below are internal environments and navigation labels, not a
 
 | # | Environment | Build target | Status |
 |---:|---|---|---|
-| 1 | Discovery Metropolis | Category-aware search, provider filters, browse, random, trending, detail cards, compare and recommendations. | **Partially implemented** |
+| 1 | Discovery Metropolis | Category-aware search, provider filters, browse, random, trending, detail cards, compare and recommendations. | **Completed** |
 | 2 | Community Knowledge Atlas | Image-backed, permission-aware graph for works, creators, franchises, adaptations, Archive records and community edges. | **Partially implemented** |
 | 3 | Creator Explorer | Reliable author, artist, illustrator, editor, translator, studio, director, developer and publisher credits/workographies. | **Partially implemented** |
 | 4 | Franchise Explorer | Canonical franchise membership, sequels, prequels, spin-offs and alternate versions with source labels. | **Partially implemented** |
@@ -77,9 +77,9 @@ The catalogue names below are internal environments and navigation labels, not a
 | 29 | Mystery Media | Layered clues for hidden works, franchises, creators, adaptations and games. | **Partially implemented** |
 | 30 | Guessing Arena | Title, creator, release period, franchise and other media-identification rounds. | **Partially implemented** |
 | 31 | Team Games | Cooperative/competitive teams, membership, scoring and persistent round state. | **Completed** |
-| 32 | Challenge Centre | Themed media discovery tasks, seasonal challenges and community puzzles with published rules. | **Planned** |
+| 32 | Challenge Centre | Themed media discovery tasks, seasonal challenges and community puzzles with published rules. | **Completed** |
 | 33 | Quiz Pack Studio | Community question packs, answer keys, accepted alternatives, references, review and revision history. | **Partially implemented** |
-| 34 | Media Puzzle Room | Media word puzzles, relation puzzles, franchise-connection puzzles and cooperative clue chains. | **Planned** |
+| 34 | Media Puzzle Room | Media word puzzles, relation puzzles, franchise-connection puzzles and cooperative clue chains. | **Completed** |
 
 ### Profiles — /profile
 
@@ -107,7 +107,7 @@ The catalogue names below are internal environments and navigation labels, not a
 | 44 | Media Follow Centre | Subscriptions to supported titles, creators, franchises and categories for release/metadata changes. | **Partially implemented** |
 | 45 | Media Alert Centre | Episode, chapter, publication, film, TV, game and verified catalogue updates. | **Partially implemented** |
 | 46 | Media Digest Studio | Daily/weekly media-only digests with category, entity, region, timezone and destination controls. | **Partially implemented** |
-| 47 | Media Automation Studio | Bounded, auditable, idempotent media-triggered workflows connecting releases, calendars, discussions and Atlas projections. | **Planned** |
+| 47 | Media Automation Studio | Hourly provider-dated release rules with per-rule idempotency, safe announcements, optional spoiler-aware discussions and guild-scoped Atlas links. | **Completed** |
 
 ### Atlas and operations — integrated views, not extra commands
 
@@ -115,7 +115,7 @@ The catalogue names below are internal environments and navigation labels, not a
 |---:|---|---|---|
 | 48 | Graph Export Studio | Permission-filtered graph paths, creator/franchise maps and Archive collection graphs in useful image formats. | **Partially implemented** |
 | 49 | Feature Diagnostics | Restricted checks for Discord permissions, channels, providers, assets, jobs and relevant services. | **Partially implemented** |
-| 50 | Data & Backup Centre | Authorized migration status, backup verification, recovery and selected data-safety reporting. | **Planned** |
+| 50 | Data & Backup Centre | Restricted private-S3 database backups, object digest verification and PostgreSQL archive-catalogue checks; isolated recovery rehearsal remains outstanding. | **Partially implemented** |
 
 ## 3. Media coverage strategy
 

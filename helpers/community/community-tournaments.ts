@@ -338,15 +338,15 @@ export async function cancelCommunityTournament(
   });
 }
 
-export type CommunitySeasonItemType = "daily_drop" | "ranking" | "session" | "tournament" | "spotlight" | "collection" | "trail";
+export type CommunitySeasonItemType = "daily_drop" | "ranking" | "session" | "tournament" | "spotlight" | "collection" | "trail" | "challenge" | "puzzle";
 
 const SEASON_ITEM_TYPES = new Set<CommunitySeasonItemType>([
-  "daily_drop", "ranking", "session", "tournament", "spotlight", "collection", "trail",
+  "daily_drop", "ranking", "session", "tournament", "spotlight", "collection", "trail", "challenge", "puzzle",
 ]);
 
 export function normalizeSeasonItemType(value: string): CommunitySeasonItemType {
   if (!SEASON_ITEM_TYPES.has(value as CommunitySeasonItemType)) {
-    throw new Error("Choose a supported season item: Daily Drop, ranking, past session, completed tournament, spotlight, collection or Trail.");
+    throw new Error("Choose a supported season item: Daily Drop, ranking, session, tournament, spotlight, collection, Trail, challenge or puzzle.");
   }
   return value as CommunitySeasonItemType;
 }
@@ -396,6 +396,8 @@ const SEASON_ITEM_LOOKUPS: Record<CommunitySeasonItemType, string> = {
   spotlight: "SELECT id FROM community_archive_spotlights WHERE id = $1 AND guild_id = $2 AND visibility = 'server' AND status = 'published'",
   collection: "SELECT id FROM archive_collections WHERE id = $1 AND guild_id = $2 AND visibility = 'server' AND status = 'active'",
   trail: "SELECT id FROM archive_trails WHERE id = $1 AND guild_id = $2 AND visibility = 'server' AND status = 'active'",
+  challenge: "SELECT id FROM community_quiz_packs WHERE id = $1 AND guild_id = $2 AND status = 'approved' AND mode = 'challenge'",
+  puzzle: "SELECT id FROM community_quiz_packs WHERE id = $1 AND guild_id = $2 AND status = 'approved' AND mode = 'puzzle'",
 };
 
 export async function addCommunitySeasonItem(
@@ -455,7 +457,7 @@ export async function getCommunitySeason(guildId: string, seasonId: string): Pro
     item_type: CommunitySeasonItemType; item_id: string; title: string; added_by: string;
   }>(
     "SELECT i.item_type, i.item_id::text, i.added_by::text, " +
-    "COALESCE(d.title, r.title, s.title, t.title, pe.title, c.title, a.title) AS title " +
+    "COALESCE(d.title, r.title, s.title, t.title, pe.title, c.title, a.title, q.title) AS title " +
     "FROM community_season_items i " +
     "JOIN community_seasons season ON season.id = i.season_id " +
     "LEFT JOIN community_daily_items d ON i.item_type = 'daily_drop' AND d.id = i.item_id " +
@@ -474,7 +476,9 @@ export async function getCommunitySeason(guildId: string, seasonId: string): Pro
     "AND c.guild_id = season.guild_id AND c.visibility = 'server' AND c.status = 'active' " +
     "LEFT JOIN archive_trails a ON i.item_type = 'trail' AND a.id = i.item_id " +
     "AND a.guild_id = season.guild_id AND a.visibility = 'server' AND a.status = 'active' " +
-    "WHERE i.season_id = $1 AND COALESCE(d.id,r.id,s.id,t.id,pe.id,c.id,a.id) IS NOT NULL " +
+    "LEFT JOIN community_quiz_packs q ON i.item_type IN ('challenge','puzzle') AND q.id = i.item_id " +
+    "AND q.guild_id = season.guild_id AND q.status = 'approved' AND q.mode = i.item_type " +
+    "WHERE i.season_id = $1 AND COALESCE(d.id,r.id,s.id,t.id,pe.id,c.id,a.id,q.id) IS NOT NULL " +
     "ORDER BY i.created_at ASC LIMIT 50",
     [seasonId],
   );

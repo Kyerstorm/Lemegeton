@@ -1,5 +1,7 @@
 # Lemegeton documentation
 
+- [Data backups](DATA_BACKUPS.md) — restricted backup creation, verification and recovery limitations.
+
 The current implementation is a TypeScript/Node.js Discord bot with a PostgreSQL data layer and an optional Next.js + Rust dashboard.
 
 Start with the repository [README](../README.md) for installation and setup.
