@@ -22,7 +22,7 @@ There is no single retention period covering every database row, Discord message
 
 ## External services
 
-Supported media features may send relevant search terms, URLs, provider identifiers, or linked account identifiers to AniList, Steam, IGDB, TMDB, Google Books, Crossref, Open Library, and Royal Road. Exact book edition lookups may send an ISBN to Crossref and Open Library; a Webnovel lookup sends a Royal Road fiction ID/feed URL to its public RSS endpoint. Discord is used to deliver commands, interactions, messages, attachments, and OAuth2. Hosting, PostgreSQL, and configured private object-storage providers process information required to operate the deployment. Only the data needed for a selected feature should be sent to its provider. Each external provider controls its own service and privacy practices.
+Supported media features may send relevant search terms, URLs, provider identifiers, or linked account identifiers to AniList, Steam, IGDB, TMDB, Google Books, Crossref, Open Library, NovelFire, Novel Archive, Wuxia Click, Novel Updates and Royal Road. Webnovel title searches use the selected providers' HTML or JSON search interfaces; a Royal Road ID/URL lookup requests its public story feed. Exact book edition lookups may send an ISBN to Crossref and Open Library. Discord is used to deliver commands, interactions, messages, attachments, and OAuth2. Hosting, PostgreSQL, and configured private object-storage providers process information required to operate the deployment. Only the data needed for a selected feature should be sent to its provider. Each external provider controls its own service and privacy practices.
 
 ## Security and encryption
 

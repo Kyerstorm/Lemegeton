@@ -26,7 +26,7 @@ image: string | null;
 
 function clean(value: unknown, limit = 1_000): string | null {
 if (typeof value !== "string") return null;
-const text = value.replace(/<[^>]*>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/\\s+/g, " ").trim();
+const text = value.replace(/<[^>]*>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/\s+/g, " ").trim();
 return text ? text.slice(0, limit) : null;
 }
 
@@ -42,7 +42,7 @@ return null;
 }
 
 function isSafeNovel(title: string, genres: string[], description: string | null): boolean {
-const markers = /\\b(adult|mature|smut|ecchi|hentai|erotica|erotic|nsfw|pornographic|explicit)\\b|\\b18\\s*\\+|\\br\\s*18\\b|\\bnc\\s*17\\b/i;
+const markers = /\b(adult|mature|smut|ecchi|hentai|erotica|erotic|nsfw|pornographic|explicit)\b|\b18\s*\+|\br\s*18\b|\bnc\s*17\b/i;
 return !markers.test(title) && !genres.some(genre => markers.test(genre)) && !markers.test(description ?? "");
 }
 
@@ -89,7 +89,7 @@ return results.slice(0, 10);
 
 function extractChapterCount(value: string | null): number | null {
 if (!value) return null;
-const matches = [...value.matchAll(/([\\d,]+)\\s+chapters?/gi)];
+const matches = [...value.matchAll(/([\d,]+)\s+chapters?/gi)];
 if (!matches.length) return null;
 const number = Number(matches[matches.length - 1]![1]!.replace(/,/g, ""));
 return Number.isSafeInteger(number) ? number : null;
@@ -108,7 +108,7 @@ const statsText = clean($(".header-stats").text(), 500);
 let chapterCount = extractChapterCount(statsText);
 const latestChapters: string[] = [];
 const postId = $("#novel-report").attr("report-post_id");
-if (postId && /^\\d+$/.test(postId)) {
+if (postId && /^\d+$/.test(postId)) {
 const params = new URLSearchParams({
 draw: "1",
 "columns[0][data]": "n_sort",
@@ -170,7 +170,7 @@ timeoutMs: 10_000,
 retries: 1,
 });
 } catch (error) {
-if (!(error instanceof Error)) throw error;
+try {
 page = await fetchPublicPage(url.toString(), {
 engine: "browser",
 selectors: { cards: ".novel-list.chapters .novel-item" },
@@ -179,14 +179,26 @@ includeHtml: true,
 timeoutMs: 15_000,
 retries: 0,
 });
+} catch {
+throw error;
+}
 }
 let items = parseNovelFireSearch(page.html ?? "", page.url);
 if (!items.length && page.engine === "fetch") {
+try {
 const rendered = await fetchPublicPage(url.toString(), { engine: "browser", includeHtml: true, includeText: false, timeoutMs: 15_000, retries: 0 });
 items = parseNovelFireSearch(rendered.html ?? "", rendered.url);
+} catch {
+// Static search remains available without a configured browser runtime.
+}
 }
 const details = await Promise.allSettled(items.slice(0, 4).map(enrichNovelFire));
-return details.flatMap(result => result.status === "fulfilled" && result.value ? [result.value] : []);
+return items.slice(0, 4).flatMap((item, index) => {
+const result = details[index];
+if (result?.status === "fulfilled" && result.value) return [result.value];
+const fallback = makeRecord("NovelFire", { title: item.title, sourceUrl: item.sourceUrl, image: item.image });
+return fallback ? [fallback] : [];
+});
 }
 
 type NovelArchiveNovel = {
@@ -376,7 +388,7 @@ const text = clean(card.text(), 1_800);
 const genres = card.find(".search_genre a, .search_genres a, a[href*='/genre/']").map((_, node) => clean($(node).text(), 80) ?? "").get().filter(Boolean);
 const author = clean(card.find(".search_author, .series_author, [class*='author']").first().text(), 160);
 const description = clean(card.find(".search_body, .search_body_nu, .search_desc, .series_synopsis").first().text(), 1_200);
-const chapterMatch = text?.match(/([\\d,]+)\\s+chapters?/i);
+const chapterMatch = text?.match(/([\d,]+)\s+chapters?/i);
 const chapterCount = chapterMatch ? Number(chapterMatch[1]!.replace(/,/g, "")) : null;
 const record = makeRecord("Novel Updates", {
 title,
@@ -410,15 +422,19 @@ page = await fetchPublicPage(fallback.toString(), { includeHtml: true, includeTe
 }
 let results = parseNovelUpdatesSearch(page.html ?? "", page.url);
 if (!results.length) {
+try {
 const browserPage = await fetchPublicPage(page.url, { engine: "browser", includeHtml: true, includeText: false, timeoutMs: 15_000, retries: 0 });
 results = parseNovelUpdatesSearch(browserPage.html ?? "", browserPage.url);
+} catch {
+// Static response is still useful when no browser runtime is configured.
+}
 }
 return results;
 }
 
 export class WebNovelDiscoveryClient {
 async search(query: string): Promise<WebNovelMedia[]> {
-const normalized = query.trim().replace(/\\s+/g, " ");
+const normalized = query.trim().replace(/\s+/g, " ");
 if (normalized.length < 2) return [];
 const providers = await Promise.allSettled([
 searchNovelFire(normalized),

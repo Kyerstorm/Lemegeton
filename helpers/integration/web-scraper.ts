@@ -108,7 +108,7 @@ throw new TypeError("URLs containing embedded credentials are not supported.");
 if (url.port && url.port !== "80" && url.port !== "443") {
 throw new TypeError("Only standard HTTP(S) ports are supported.");
 }
-const hostname = url.hostname.toLowerCase().replace(/\\.$/, "");
+const hostname = url.hostname.toLowerCase().replace(/^\[/, "").replace(/\]$/, "").replace(/\.$/, "");
 if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal")) {
 throw new TypeError("Local and internal hosts are not supported.");
 }
@@ -244,7 +244,7 @@ const fields: Record<string, string | string[]> = {};
 for (const [name, selector] of Object.entries(options.selectors ?? {})) {
 try {
 const values = $(selector).slice(0, MAX_SELECTOR_RESULTS).toArray()
-.map(node => $(node).text().replace(/\\s+/g, " ").trim())
+.map(node => $(node).text().replace(/\s+/g, " ").trim())
 .filter(Boolean)
 .map(value => value.slice(0, MAX_TEXT_CHARS));
 if (values.length === 1) fields[name.slice(0, 100)] = values[0]!;
@@ -266,7 +266,7 @@ if (options.includeText !== false) {
 const textPage = load(html);
 textPage("script,style,noscript,svg,template").remove();
 const max = Math.max(1, Math.min(options.maxTextChars ?? DEFAULT_MAX_TEXT_CHARS, MAX_TEXT_CHARS));
-result.text = (textPage("body").length ? textPage("body") : textPage.root()).text().replace(/\\s+/g, " ").trim().slice(0, max);
+result.text = (textPage("body").length ? textPage("body") : textPage.root()).text().replace(/\s+/g, " ").trim().slice(0, max);
 }
 if (options.includeLinks) {
 const selector = options.linkSelector?.trim() || "a[href]";
@@ -283,7 +283,7 @@ target = validatePublicHttpUrl(new URL(href, url).toString());
 } catch {
 continue;
 }
-const text = (link.text().trim() || link.attr("title") || link.attr("aria-label") || "").replace(/\\s+/g, " ").slice(0, 200);
+const text = (link.text().trim() || link.attr("title") || link.attr("aria-label") || "").replace(/\s+/g, " ").slice(0, 200);
 links.push({ text, url: target.toString() });
 }
 } catch {
@@ -296,7 +296,9 @@ return result;
 }
 
 async function fetchBrowserPage(url: string, options: ScrapeOptions): Promise<ScrapeResult> {
-const browser = await chromium.launch({
+const browser = process.env.BROWSER_WS_ENDPOINT
+? await chromium.connectOverCDP(process.env.BROWSER_WS_ENDPOINT)
+: await chromium.launch({
 headless: true,
 ...(process.env.CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.CHROMIUM_EXECUTABLE_PATH } : {}),
 args: ["--no-sandbox", "--disable-dev-shm-usage"],
@@ -373,7 +375,7 @@ return results;
 }
 
 function hostAllowed(url: URL, domains: Set<string>): boolean {
-const host = url.hostname.toLowerCase().replace(/^www\\./, "");
+const host = url.hostname.toLowerCase().replace(/^www\./, "");
 return [...domains].some(domain => host === domain || host.endsWith("." + domain));
 }
 
@@ -383,7 +385,7 @@ let rules = cache.get(origin);
 if (!rules) {
 try {
 const response = await fetchResource(origin + "/robots.txt", { retries: 0, timeoutMs: 5_000, maxBytes: 256 * 1024 });
-const lines = response.text.split(/\\r?\\n/);
+const lines = response.text.split(/\r?\n/);
 let applies = false;
 rules = [];
 for (const raw of lines) {
@@ -422,7 +424,7 @@ const maxPages = Math.max(1, Math.min(options.maxPages ?? 50, MAX_CRAWL_PAGES));
 const concurrency = Math.max(1, Math.min(options.concurrency ?? 2, 8));
 const seeds = [...new Set(startUrls.map(url => validatePublicHttpUrl(url).toString()))].slice(0, maxPages);
 if (!seeds.length) return [];
-const domains = new Set((options.allowedDomains?.length ? options.allowedDomains : seeds.map(url => new URL(url).hostname.replace(/^www\\./, ""))).map(value => value.toLowerCase().replace(/^www\\./, "")));
+const domains = new Set((options.allowedDomains?.length ? options.allowedDomains : seeds.map(url => new URL(url).hostname.replace(/^www\./, ""))).map(value => value.toLowerCase().replace(/^www\./, "")));
 if (seeds.some(url => !hostAllowed(new URL(url), domains))) {
 throw new TypeError("Every start URL must be inside allowedDomains.");
 }

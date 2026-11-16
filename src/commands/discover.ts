@@ -27,6 +27,7 @@ import { GoogleBooksClient, type GoogleBook } from "../../helpers/integration/go
 import { CrossrefClient } from "../../helpers/integration/crossref.js";
 import { OpenLibraryClient } from "../../helpers/integration/open-library.js";
 import { RoyalRoadClient } from "../../helpers/integration/royal-road.js";
+import { WebNovelDiscoveryClient, type WebNovelMedia } from "../../helpers/integration/webnovel-discovery.js";
 import { IgdbClient, type IgdbGame } from "../../helpers/integration/igdb.js";
 import { homeEmbed, navigationButtons } from "../../helpers/runtime/discord.js";
 import { TmdbClient, type TmdbMedia, type TmdbTvSeason } from "../../helpers/integration/tmdb.js";
@@ -99,6 +100,7 @@ type SearchRecord =
   | { provider: "AniList"; category: "anime" | "manga" | "light_novel"; item: AniListMedia }
   | { provider: "Google Books"; category: "book"; item: GoogleBook }
   | { provider: "Royal Road"; category: "webnovel"; item: Awaited<ReturnType<RoyalRoadClient["getFiction"]>> }
+| { provider: "NovelFire" | "Novel Archive" | "Wuxia Click" | "Novel Updates"; category: "webnovel"; item: WebNovelMedia }
   | { provider: "TMDB"; category: "movie" | "tv"; item: TmdbMedia }
   | { provider: "IGDB"; category: "game"; item: IgdbGame }
   | { provider: "Steam"; category: "game"; item: SteamStoreGame };
@@ -229,6 +231,29 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
     embed.addFields({ name: "Source record", value: formatMetadataSourceReference("Royal Road", item.id, item.sourceUrl), inline: false });
     return embed;
   }
+
+if (record.provider === "NovelFire" || record.provider === "Novel Archive" || record.provider === "Wuxia Click" || record.provider === "Novel Updates") {
+const item = record.item;
+const embed = new EmbedBuilder()
+.setColor(0x5865f2)
+.setTitle(item.title.slice(0, 256))
+.setURL(item.sourceUrl)
+.setDescription(safeDescription(item.description))
+.addFields(
+{ name: "Provider", value: item.provider, inline: true },
+{ name: "Author", value: item.author ?? "Not reported", inline: true },
+{ name: "Status", value: item.status ?? "Not reported", inline: true },
+{ name: "Chapters", value: item.chapterCount === null ? "Not reported" : item.chapterCount.toLocaleString(), inline: true },
+{ name: "Rating", value: item.rating === null ? "Not reported" : String(item.rating), inline: true },
+{ name: "Genres", value: item.genres.slice(0, 8).join(" · ") || "Not reported", inline: false },
+...(item.latestChapters.length ? [{ name: "Recent chapter titles", value: item.latestChapters.slice(0, 5).join("\n").slice(0, 1_000), inline: false }] : []),
+...(item.latestUpdate ? [{ name: "Last update", value: item.latestUpdate, inline: true }] : []),
+)
+.setFooter({ text: item.provider + " · Web-novel metadata" });
+embed.addFields({ name: "Source record", value: formatMetadataSourceReference(item.provider, item.sourceUrl, item.sourceUrl), inline: false });
+if (item.image) embed.setThumbnail(item.image);
+return embed;
+}
 
   if (record.provider === "TMDB") {
     const item = record.item;
@@ -387,8 +412,8 @@ function searchModal(category: Category): ModalBuilder {
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
           .setCustomId("query")
-          .setLabel(isWebnovel ? "Royal Road fiction ID or URL" : "Title or search phrase")
-          .setPlaceholder(isWebnovel ? "37155 or https://www.royalroad.com/fiction/…" : "Enter a title")
+          .setLabel(isWebnovel ? "Webnovel title or Royal Road ID / URL" : "Title or search phrase")
+          .setPlaceholder(isWebnovel ? "Search a webnovel title or enter a Royal Road fiction ID" : "Enter a title")
           .setStyle(TextInputStyle.Short)
           .setMinLength(2)
           .setMaxLength(100)
@@ -406,7 +431,7 @@ function homePanel(): { embeds: EmbedBuilder[]; components: ActionRowBuilder<But
       { name: "Books & light novels", value: "Google Books / AniList", inline: true },
       { name: "Films & television", value: "TMDB", inline: true },
       { name: "Video games", value: "IGDB + Steam Store; account data in /profile", inline: true },
-      { name: "Webnovels", value: "Royal Road public story RSS · ID or official URL", inline: true },
+      { name: "Webnovels", value: "NovelFire · Novel Archive · Wuxia Click · Novel Updates · Royal Road", inline: true },
     ],
   );
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
@@ -529,6 +554,7 @@ export class DiscoverCommand implements FeatureCommand {
   private readonly crossref: CrossrefClient;
   private readonly openLibrary: OpenLibraryClient;
   private readonly royalRoad: RoyalRoadClient;
+private readonly webNovels: WebNovelDiscoveryClient;
 
   constructor(config: BotConfig) {
     this.config = config;
@@ -540,6 +566,7 @@ export class DiscoverCommand implements FeatureCommand {
     this.crossref = new CrossrefClient();
     this.openLibrary = new OpenLibraryClient();
     this.royalRoad = new RoyalRoadClient();
+this.webNovels = new WebNovelDiscoveryClient();
   }
 
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -572,9 +599,9 @@ export class DiscoverCommand implements FeatureCommand {
         await interaction.reply({content:"That format is not supported by the selected media category.",flags:MessageFlags.Ephemeral});return;
       }
     }
-    if (category === "webnovel" && (view !== "search" || compareTo)) {
+    if (category === "webnovel" && view !== "search") {
       await interaction.reply({
-        content:"Royal Road currently provides story-specific RSS metadata only. Use the Webnovels search view with a fiction ID or official story URL; global search, creator, similarity and release views are not exposed by its feed.",
+        content:"Webnovel title search uses the connected metadata sources. You can also enter a Royal Road fiction ID or official story URL.",
         flags:MessageFlags.Ephemeral,
       });
       return;
@@ -1640,6 +1667,11 @@ export class DiscoverCommand implements FeatureCommand {
       return { provider: record.provider, category: record.category, id: item.id, url: item.sourceUrl,
         fields: { description:item.overview, releaseDate:item.releaseDate, creators:undefined, genres:item.genres, image:item.image } };
     }
+if (record.provider === "NovelFire" || record.provider === "Novel Archive" || record.provider === "Wuxia Click" || record.provider === "Novel Updates") {
+const item = record.item;
+return { provider: record.provider, category: record.category, id: item.sourceUrl, url: item.sourceUrl,
+fields: { description:item.description, releaseDate:item.latestUpdate, creators:item.author ? [item.author] : [], genres:item.genres, image:item.image, rating:item.rating, chapterCount:item.chapterCount } };
+}
     if (record.provider === "Royal Road") {
       const item = record.item;
       return { provider: record.provider, category: record.category, id: item.id, url: item.sourceUrl,
@@ -1701,7 +1733,7 @@ export class DiscoverCommand implements FeatureCommand {
   ):Promise<void>{
     await interaction.reply({content:loadingMessage("Exploring creators…"),flags:MessageFlags.Ephemeral});
     if(category==="webnovel"){
-      await interaction.editReply({content:"Royal Road's public RSS feed does not provide a creator directory. Open the fiction by its ID or official URL to view the story and chapter metadata.",embeds:[],components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])]});
+      await interaction.editReply({content:"Webnovel providers do not expose a shared creator directory. Search a title to view its author and source metadata.",embeds:[],components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])]});
       return;
     }
     if(category==="book"){
@@ -2331,6 +2363,7 @@ export class DiscoverCommand implements FeatureCommand {
         this.anilist.search(query, "MANGA").then((items) => items.map((item) => anilistRecord(item, "manga"))),
         this.anilist.search(query, "MANGA", true).then((items) => items.map((item) => anilistRecord(item, "light_novel"))),
         this.books.search(query).then((items) => items.map((item) => ({ provider: "Google Books" as const, category: "book" as const, item }))),
+        this.webNovels.search(query).then(items => items.map(item => ({ provider: item.provider, category: "webnovel" as const, item }))),
         this.tmdb.search(query, "movie").then((items) => items.map((item) => ({ provider: "TMDB" as const, category: "movie" as const, item }))),
         this.tmdb.search(query, "tv").then((items) => items.map((item) => ({ provider: "TMDB" as const, category: "tv" as const, item }))),
         this.igdb.search(query).then((items) => items.map((item) => ({ provider: "IGDB" as const, category: "game" as const, item }))),
@@ -2343,7 +2376,12 @@ export class DiscoverCommand implements FeatureCommand {
       case "manga": return (await this.anilist.search(query, "MANGA", false, filters)).map((item) => anilistRecord(item, "manga"));
       case "light_novel": return (await this.anilist.search(query, "MANGA", true, filters)).map((item) => anilistRecord(item, "light_novel"));
       case "book": return (await this.books.search(query)).map((item) => ({ provider: "Google Books", category: "book", item }));
-      case "webnovel": return [{ provider: "Royal Road", category: "webnovel", item: await this.royalRoad.getFiction(query) }];
+case "webnovel": {
+if (/^\d+$/.test(query.trim()) || /^https?:\/\/www\.royalroad\.com\/fiction\/\d+/i.test(query.trim())) {
+return [{ provider: "Royal Road", category: "webnovel", item: await this.royalRoad.getFiction(query) }];
+}
+return (await this.webNovels.search(query)).map(item => ({ provider: item.provider, category: "webnovel" as const, item }));
+}
       case "movie": return (await this.tmdb.search(query, "movie")).map((item) => ({ provider: "TMDB", category: "movie", item }));
       case "tv": return (await this.tmdb.search(query, "tv")).map((item) => ({ provider: "TMDB", category: "tv", item }));
       case "game": {

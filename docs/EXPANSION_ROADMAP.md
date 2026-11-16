@@ -234,10 +234,10 @@ Phase 0 code migration status does **not** mean the service is launched. Phase 8
 - Add provider-specific fixtures for network/timeouts, HTTP 429 with Retry-After seconds/date values, exhausted 5xx responses, malformed JSON/schema drift and incomplete payloads. Confirm each client surfaces a clear error or an explicit unavailable state; do not retry malformed payloads.
 - Keep category-specific metadata distinct: manga chapters/serialization must not be presented as book volumes; game platforms must not be treated as TV distribution; movie collection membership must not imply story chronology.
 - Complete edition grouping only when provider identifiers support it. Do not infer that two editions are the same work from title similarity alone.
-- Webnovel scope is intentionally limited to Royal Road's public RSS feed. Do not scrape catalogue/search pages, retrieve chapter bodies, or imply coverage for other platforms.
+- Webnovel title search now uses NovelFire HTML search/detail pages and its chapter-list JSON endpoint, Novel Archive JSON search/detail endpoints, Wuxia Click server-rendered `__NEXT_DATA__` records, and Novel Updates series-finder HTML. Royal Road's existing fiction-ID/URL and RSS lookup remains available. The shared TypeScript scraper provides bounded HTTP/browser fetches, CSS extraction, link collection, multi-URL fetching and same-site crawling; provider parsers own their HTML/JSON response shapes.
 - Add representative fixtures from each active provider and assert normalization with partial/missing data.
 
-**Exit criteria:** each displayed metadata field has a source or is explicitly unavailable; relationship provenance is visible; comparison tests cover missing and incompatible fields; unsupported webnovel integration is clearly deferred rather than presented as working.
+**Exit criteria:** each displayed metadata field has a source or is explicitly unavailable; relationship provenance is visible; comparison tests cover missing and incompatible fields; active webnovel providers are queried through their implemented HTML/JSON interfaces and have fixtures for partial or changed responses.
 
 ### Phase 3 — Archive and contribution workflows
 

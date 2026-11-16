@@ -10,7 +10,7 @@ Use **/browse** with a media category and a title for a detailed record. For TMD
 | --- | --- |
 | Anime and manga | Genre, AniList theme/tag, provider status, year range. Manga supports manga (Japan), manhwa (Korea), manhua (China), and provider-tagged webtoon subtypes using AniList origin/format metadata. Author and artist filters are available for manga/light-novel records when AniList staff roles expose the credit. Adult-flagged titles are excluded unless the user explicitly opts in from a Discord channel marked NSFW. |
 | General novels and books | Genre/subject, author, publisher, language code, publication year range through Google Books query parameters. |
-| Webnovels | Royal Road story-specific public RSS metadata using a numeric fiction ID or official HTTPS fiction/syndication URL. Shows title, author when provided, recent chapter titles/links and update timestamps. Does not support global title search or genres. |
+| Webnovels | NovelFire title search/detail pages and chapter-list JSON endpoint; Novel Archive JSON search/detail API; Wuxia Click server-rendered `__NEXT_DATA__` search/detail records; Novel Updates series-finder HTML; Royal Road story-specific RSS by fiction ID or official URL. Shows source-attributed titles, authors, summaries, genres, status, ratings, chapter counts, covers and recent chapter/update metadata when supplied. |
 | Movies and TV | TMDB genre, keyword/theme, original language code, status, release year range, runtime, director and cast filters. |
 
 A filter that the selected metadata provider cannot support is rejected instead of silently returning unfiltered results. Browse applies filters to the provider's best matching title; when the title fails one of the filters, try a broader title or fewer filters.
@@ -32,7 +32,7 @@ No chapter-to-episode or volume-to-season mapping is guessed. Release-order and 
 
 ## Cross-media similarity
 
-**/similar** resolves supported titles through AniList, Google Books, TMDB or IGDB, then searches anime, manga, light novels, general books, movies, television and games for candidates with overlapping provider-reported genres. Webnovel RSS records are excluded because that feed does not provide a genre taxonomy.
+**/similar** resolves supported titles through AniList, Google Books, TMDB or IGDB, then searches anime, manga, light novels, general books, movies, television and games for candidates with overlapping provider-reported genres. Webnovel sources are not currently part of the cross-media similarity search.
 
 The result has separate sections for:
 - **Provider-generated recommendations**, where AniList, TMDB or IGDB supplies them.
@@ -89,7 +89,7 @@ The family-friendly option is a best-effort metadata filter, not a parental-rati
 ## Configuration and operational notes
 
 - Configure TMDB_BEARER_TOKEN for movie/TV search, franchise lookups, TV guides, runtime and regional content-rating lookups, and TMDB-backed release-calendar categories.
-- Exact book edition lookup uses Crossref's public ISBN-filtered works endpoint and a rate-limited Open Library ISBN/edition lookup. Neither service is used for general catalogue search or bulk ingestion.
+- Exact book edition lookup uses Crossref's public ISBN-filtered works endpoint and a rate-limited Open Library ISBN/edition lookup. Webnovel title search uses NovelFire, Novel Archive, Wuxia Click and Novel Updates through their current HTML/JSON interfaces. Browser-rendered pages use Playwright when `CHROMIUM_EXECUTABLE_PATH` or `BROWSER_WS_ENDPOINT` is configured.
 - Google Books and AniList use the existing helpers already used elsewhere in the bot.
 - Release-calendar settings, Reading Club nominations/votes, and Media Night sessions are persisted in the shared database and keyed by guild/channel as appropriate.
 - Provider failures, unavailable metadata and missing release dates are treated as missing data. The bot does not make a failed source appear operational or manufacture metadata to fill gaps.
