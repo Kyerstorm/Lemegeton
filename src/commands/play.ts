@@ -720,7 +720,7 @@ export class PlayCommand implements FeatureCommand {
     });
   }
 
-  private async showPacks(interaction: ChatInputCommandInteraction | ButtonInteraction, mode?: QuizPackMode): Promise<void>
+  private async showPacks(interaction: ChatInputCommandInteraction | ButtonInteraction, mode?: QuizPackMode): Promise<void> {
     const allPacks = await listQuizPacks(interaction.guildId!, "approved");
     const packs = mode ? allPacks.filter(pack => pack.mode === mode) : allPacks;
     if (!packs.length) {
