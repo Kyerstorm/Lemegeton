@@ -54,12 +54,168 @@ import {
 import { isBotModerator, isModeratorCommandGuild } from "../../helpers/commands/moderation.js";
 import { createDatabaseBackup, listDatabaseBackups, verifyDatabaseBackup } from "../../helpers/runtime/database-backups.js";
 import { listMediaAutomationRules, saveMediaAutomationRule, toggleMediaAutomationRule } from "../../helpers/community/community-automation.js";
+import {
+  disableReleaseSchedule,
+  getReleaseSchedule,
+  parseReleaseCadenceInput,
+  resumeReleaseSchedule,
+  saveReleaseSchedule,
+  type ReleaseCategory,
+  type ReleaseEntityType,
+  type ReleaseSchedule,
+} from "../../helpers/community/community-releases.js";
 
 
 type SettingsRow =
   | ActionRowBuilder<ButtonBuilder>
   | ActionRowBuilder<ChannelSelectMenuBuilder>
   | ActionRowBuilder<StringSelectMenuBuilder>;
+
+const DIGEST_CATEGORIES: ReleaseCategory[] = ["anime", "tv", "movies", "games"];
+const DIGEST_ENTITY_TYPES: ReleaseEntityType[] = ["title", "creator", "franchise", "category", "episodes"];
+
+function mediaDigestModal(schedule: ReleaseSchedule | null): ModalBuilder {
+  const modal = new ModalBuilder()
+    .setCustomId("settings:media-digest:configure")
+    .setTitle("Configure media digest");
+  const input = (id: string, label: string, value: string, placeholder: string, maxLength: number) => {
+    const field = new TextInputBuilder()
+      .setCustomId(id)
+      .setLabel(label)
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true)
+      .setMaxLength(maxLength);
+    if (value) field.setValue(value);
+    else field.setPlaceholder(placeholder);
+    return new ActionRowBuilder<TextInputBuilder>().addComponents(field);
+  };
+  const cadence = schedule?.cadence === "weekly"
+    ? "weekly:" + ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][schedule.weekday]
+    : "daily";
+  modal.addComponents(
+    input("channel_id", "Destination channel ID", schedule?.channel_id ?? "", "Copy the ID of a server text channel", 20),
+    input("time_zone", "IANA timezone", schedule?.time_zone ?? "", "Europe/Dublin", 80),
+    input("local_time", "Local send time (24-hour)", schedule?.local_time ?? "", "18:30", 5),
+    input("cadence", "Cadence: daily or weekly:mon", cadence, "daily or weekly:mon", 12),
+    input("region", "Release region (two-letter code)", schedule?.region ?? "", "IE", 2),
+  );
+  return modal;
+}
+
+async function mediaDigestPanel(guildId: string): Promise<{
+  embeds: EmbedBuilder[];
+  components: SettingsRow[];
+}> {
+  const [schedule, subscriptions, animeFollows] = await Promise.all([
+    getReleaseSchedule(guildId),
+    getGuildMediaFollowSubscriptions(guildId),
+    getGuildMediaFollows(guildId),
+  ]);
+  const categories = schedule?.categories ?? DIGEST_CATEGORIES;
+  const entityTypes = schedule?.entity_types ?? DIGEST_ENTITY_TYPES;
+  const entityIds = schedule?.entity_ids ?? ["all"];
+  const availableTargets = new Map<string, { label: string; description: string; value: string }>();
+  for (const follow of subscriptions) {
+    availableTargets.set("subscription:" + follow.id, {
+      label: follow.title.slice(0, 100),
+      description: follow.follow_type.toUpperCase() + " · " + follow.target_kind,
+      value: "subscription:" + follow.id,
+    });
+  }
+  for (const follow of animeFollows) {
+    availableTargets.set("anime:" + follow.anilist_id, {
+      label: follow.title.slice(0, 100),
+      description: "Anime episode follow · AniList",
+      value: "anime:" + follow.anilist_id,
+    });
+  }
+  const selectedTargets = entityIds.filter(value => value !== "all" && value !== "none");
+  const targetOptions = [
+    ...selectedTargets.map(value => availableTargets.get(value) ?? {
+      label: "Unavailable follow · " + value.slice(0, 80),
+      description: "This follow was removed or is no longer available.",
+      value,
+    }),
+    ...[...availableTargets.values()].filter(value => !selectedTargets.includes(value.value)),
+  ].slice(0, 23);
+  const selectedTargetLabel = entityIds.includes("all") ? "All current and future follows"
+    : entityIds.includes("none") ? "No followed entities"
+      : selectedTargets.length + " selected follow target(s)";
+  const embed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle("Media Digest Studio")
+    .setDescription(schedule
+      ? [
+          "Status: " + (schedule.enabled ? "Enabled" : "Paused"),
+          "Destination: <#" + schedule.channel_id + ">",
+          "Cadence: " + (schedule.cadence === "daily" ? "Daily" : "Weekly · " + ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][schedule.weekday]),
+          "Local send time: " + schedule.local_time + " · " + schedule.time_zone,
+          "Release region: " + schedule.region,
+          "Media categories: " + (categories.join(", ") || "None"),
+          "Followed update types: " + (entityTypes.join(", ") || "Disabled"),
+          "Follow targets: " + selectedTargetLabel,
+          "Next run: <t:" + Math.floor(new Date(schedule.next_run_at).getTime() / 1000) + ":F>",
+        ].join("\n")
+      : "No digest is configured. Configure a daily or weekly destination, local schedule, timezone and region, then choose categories and followed-entity filters.")
+    .addFields({
+      name: "Provider boundary",
+      value: "Only provider-dated anime, film, TV and game releases are scheduled. Book publication dates are not inferred when no verified release feed is available.",
+      inline: false,
+    })
+    .setFooter({ text: "Manage Server permission is required. Digests contain media releases and selected server follows only." });
+  const categorySelect = new StringSelectMenuBuilder()
+    .setCustomId("settings:media-digest:categories")
+    .setPlaceholder("Choose release categories")
+    .setMinValues(1)
+    .setMaxValues(DIGEST_CATEGORIES.length)
+    .setDisabled(!schedule)
+    .addOptions(DIGEST_CATEGORIES.map(value => ({
+      label: value === "movies" ? "Films" : value.toUpperCase() === "TV" ? "Television" : value[0]!.toUpperCase() + value.slice(1),
+      value,
+      default: categories.includes(value),
+    })));
+  const entityTypeSelect = new StringSelectMenuBuilder()
+    .setCustomId("settings:media-digest:entity-types")
+    .setPlaceholder("Choose followed update types")
+    .setMinValues(0)
+    .setMaxValues(DIGEST_ENTITY_TYPES.length)
+    .setDisabled(!schedule)
+    .addOptions(DIGEST_ENTITY_TYPES.map(value => ({
+      label: value === "episodes" ? "Followed anime episodes" : value[0]!.toUpperCase() + value.slice(1) + " updates",
+      value,
+      default: entityTypes.includes(value),
+    })));
+  const entitySelect = new StringSelectMenuBuilder()
+    .setCustomId("settings:media-digest:entities")
+    .setPlaceholder("Choose followed entities")
+    .setMinValues(1)
+    .setMaxValues(25)
+    .setDisabled(!schedule)
+    .addOptions([
+      { label: "All followed entities", description: "Include current and future follows", value: "all", default: entityIds.includes("all") },
+      { label: "No followed entities", description: "Include provider-dated releases only", value: "none", default: entityIds.includes("none") },
+      ...targetOptions.map(option => ({ ...option, default: entityIds.includes(option.value) })),
+    ]);
+  const components: SettingsRow[] = [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId("settings:media-digest:configure")
+        .setLabel(schedule ? "Edit digest" : "Configure digest")
+        .setStyle(ButtonStyle.Primary),
+      ...(schedule ? [
+        new ButtonBuilder()
+          .setCustomId("settings:media-digest:" + (schedule.enabled ? "disable" : "resume"))
+          .setLabel(schedule.enabled ? "Pause digest" : "Resume digest")
+          .setStyle(schedule.enabled ? ButtonStyle.Secondary : ButtonStyle.Success),
+      ] : []),
+      new ButtonBuilder().setCustomId("settings:media-digest:open").setLabel("Refresh").setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(categorySelect),
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(entityTypeSelect),
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(entitySelect),
+  ];
+  return { embeds: [embed], components };
+}
 
 async function mediaAutomationPanel(guildId: string): Promise<{
   embeds: EmbedBuilder[];
@@ -499,6 +655,7 @@ export class SettingsCommand implements FeatureCommand {
           { name: "Toggle a feature", value: "toggle" },
           { name: "Media notifications", value: "notifications" },
           { name: "Media Follow Centre", value: "media-follows" },
+          { name: "Media Digest Studio", value: "media-digest" },
           { name: "Change media region", value: "media-region" },
           { name: "Data retention when the bot leaves", value: "retention" },
           { name: "Media Automation Studio", value: "automation" },
@@ -569,6 +726,14 @@ export class SettingsCommand implements FeatureCommand {
         return;
       }
       await interaction.reply({ ...await mediaFollowsPanel(interaction.guildId), flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+      return;
+    }
+    if (action === "media-digest") {
+      if (!canManage(interaction)) {
+        await interaction.reply({ content: "Manage Server permission is required to configure media digests.", flags: MessageFlags.Ephemeral });
+        return;
+      }
+      await interaction.reply({ ...await mediaDigestPanel(interaction.guildId), flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
       return;
     }
     if (action === "diagnostics") {
@@ -670,6 +835,34 @@ export class SettingsCommand implements FeatureCommand {
       }
       if (target === "open") {
         await interaction.update(await mediaAutomationPanel(interaction.guildId));
+        return true;
+      }
+      return false;
+    }
+    if (section === "media-digest") {
+      if (!canManage(interaction)) {
+        await interaction.reply({ content: "Manage Server permission is required to configure media digests.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      if (target === "configure") {
+        await interaction.showModal(mediaDigestModal(await getReleaseSchedule(interaction.guildId)));
+        return true;
+      }
+      if (target === "disable") {
+        await disableReleaseSchedule(interaction.guildId);
+        await interaction.update(await mediaDigestPanel(interaction.guildId));
+        return true;
+      }
+      if (target === "resume") {
+        const nextRun = await resumeReleaseSchedule(interaction.guildId);
+        await interaction.update({
+          ...await mediaDigestPanel(interaction.guildId),
+          content: nextRun ? "Media digest resumed. Next delivery: <t:" + Math.floor(nextRun.getTime() / 1000) + ":F>." : "Configure a digest before resuming it.",
+        });
+        return true;
+      }
+      if (target === "open") {
+        await interaction.update(await mediaDigestPanel(interaction.guildId));
         return true;
       }
       return false;
@@ -789,13 +982,46 @@ export class SettingsCommand implements FeatureCommand {
   }
 
   async handleModal(interaction: ModalSubmitInteraction): Promise<boolean> {
-    if (interaction.customId !== "settings:media-region" && interaction.customId !== "settings:media-follows:add" && interaction.customId !== "settings:media-subscriptions:add" && interaction.customId !== "settings:automation:add") return false;
+    if (interaction.customId !== "settings:media-region" && interaction.customId !== "settings:media-follows:add" && interaction.customId !== "settings:media-subscriptions:add" && interaction.customId !== "settings:automation:add" && interaction.customId !== "settings:media-digest:configure") return false;
     if (!interaction.guildId) return false;
     if (!canManage(interaction as ModalSubmitInteraction)) {
       await interaction.reply({ content: "Manage Server permission is required to change server media settings.", flags: MessageFlags.Ephemeral });
       return true;
     }
     try {
+      if (interaction.customId === "settings:media-digest:configure") {
+        const rawChannelId = interaction.fields.getTextInputValue("channel_id").trim();
+        if (!/^\d{17,20}$/.test(rawChannelId)) throw new Error("Enter a valid destination channel ID.");
+        const guild = interaction.guild ?? await interaction.client.guilds.fetch(interaction.guildId);
+        const channel = await guild.channels.fetch(rawChannelId).catch(() => null);
+        if (!channel || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)) {
+          throw new Error("Choose a text or announcement channel in this server.");
+        }
+        const current = await getReleaseSchedule(interaction.guildId);
+        const cadence = parseReleaseCadenceInput(
+          interaction.fields.getTextInputValue("cadence"),
+          current?.weekday ?? 1,
+        );
+        const nextRun = await saveReleaseSchedule({
+          guildId: interaction.guildId,
+          channelId: channel.id,
+          actorId: interaction.user.id,
+          timeZone: interaction.fields.getTextInputValue("time_zone"),
+          localTime: interaction.fields.getTextInputValue("local_time"),
+          cadence: cadence.cadence,
+          weekday: cadence.weekday,
+          categories: current?.categories ?? DIGEST_CATEGORIES,
+          entityTypes: current?.entity_types ?? DIGEST_ENTITY_TYPES,
+          entityIds: current?.entity_ids ?? ["all"],
+          region: interaction.fields.getTextInputValue("region"),
+          enabled: true,
+        });
+        await interaction.reply({
+          content: "Media digest saved and enabled. Next delivery: <t:" + Math.floor(nextRun.getTime() / 1000) + ":F>.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return true;
+      }
       if (interaction.customId === "settings:automation:add") {
         const rawChannelId = interaction.fields.getTextInputValue("channel_id").trim();
         if (!/^\d{17,20}$/.test(rawChannelId)) throw new Error("Enter a valid destination channel ID.");
@@ -863,6 +1089,38 @@ export class SettingsCommand implements FeatureCommand {
     interaction: ButtonInteraction | StringSelectMenuInteraction | RoleSelectMenuInteraction | ChannelSelectMenuInteraction,
   ): Promise<boolean> {
     if (!interaction.guildId) return false;
+    if (interaction.isStringSelectMenu()
+      && (interaction.customId === "settings:media-digest:categories"
+        || interaction.customId === "settings:media-digest:entity-types"
+        || interaction.customId === "settings:media-digest:entities")) {
+      if (!canManage(interaction)) {
+        await interaction.reply({ content: "Manage Server permission is required to configure media digests.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      const schedule = await getReleaseSchedule(interaction.guildId);
+      if (!schedule) {
+        await interaction.reply({ content: "Configure a media digest before choosing its categories and followed-entity filters.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      const isCategories = interaction.customId === "settings:media-digest:categories";
+      const isEntityTypes = interaction.customId === "settings:media-digest:entity-types";
+      await saveReleaseSchedule({
+        guildId: interaction.guildId,
+        channelId: schedule.channel_id,
+        actorId: interaction.user.id,
+        timeZone: schedule.time_zone,
+        localTime: schedule.local_time,
+        cadence: schedule.cadence,
+        weekday: schedule.weekday,
+        categories: isCategories ? interaction.values : schedule.categories,
+        entityTypes: isEntityTypes ? interaction.values : schedule.entity_types,
+        entityIds: !isCategories && !isEntityTypes ? interaction.values : schedule.entity_ids,
+        region: schedule.region,
+        enabled: schedule.enabled,
+      });
+      await interaction.update(await mediaDigestPanel(interaction.guildId));
+      return true;
+    }
     if (interaction.isStringSelectMenu() && interaction.customId === "settings:automation:toggle") {
       if (!canManage(interaction)) {
         await interaction.reply({ content: "Manage Server permission is required to manage media automation.", flags: MessageFlags.Ephemeral });

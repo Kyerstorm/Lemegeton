@@ -105,8 +105,8 @@ The catalogue names below are internal environments and navigation labels, not a
 | # | Environment | Build target | Status |
 |---:|---|---|---|
 | 44 | Media Follow Centre | Guild-scoped subscriptions to AniList titles, creators, franchise relationships and genres, with change snapshots and delivery. | **Completed** |
-| 45 | Media Alert Centre | Provider-dated anime, film, TV and game alerts, plus metadata-change alerts for followed manga and other AniList targets. Book publication schedules remain provider-limited. | **Partially implemented** |
-| 46 | Media Digest Studio | Daily/weekly media-only digests with category, entity, region, timezone and destination controls. | **Partially implemented** |
+| 45 | Media Alert Centre | Provider-dated anime, film, TV and game alerts, plus metadata-change alerts for followed manga and other AniList targets, with category controls, guild destinations, deduplication and retryable delivery. Book publication schedules remain provider-limited where no verified feed exists. | **Completed** |
+| 46 | Media Digest Studio | Configurable daily/weekly media-only digests with category and individual followed-entity filters, entity-type controls, region, IANA timezone, local send time, destination, pause/resume, source attribution and retryable delivery. | **Completed** |
 | 47 | Media Automation Studio | Hourly provider-dated release rules with per-rule idempotency, safe announcements, optional spoiler-aware discussions and guild-scoped Atlas links. | **Completed** |
 
 ### Atlas and operations — integrated views, not extra commands
@@ -181,7 +181,7 @@ The phase status below is an implementation audit, not a feature promise. Status
 | 3 — Archive and contributions | **Core workflows, gallery previews and spotlights implemented; lifecycle acceptance incomplete** | Submissions, moderation/reports, private asset storage, cleanup, permission-filtered image previews, collections, collaborators, Archive Trails, scheduled curator-attributed spotlights and Community spotlight display. | End-to-end visibility, attachment and storage-cleanup regression tests across every derived view. |
 | 4 — Community and games | **Core activities, tournaments, seasons, team modes and showcase implemented; lifecycle hardening incomplete** | Daily Drop, rankings, sessions/RSVP, spoiler discussions, an interactive timezone-aware release/community calendar, guild-scoped Community Seasons that automatically aggregate in-period Drops, rankings, sessions, completed challenge/puzzle runs and spotlights without copying records, reviewed quiz packs, persistent individual/team game sessions, seeded elimination brackets and the current-guild Community Showcase. | Tournament withdrawal/audit handling, richer puzzle/challenge modes and interaction/lifecycle tests. |
 | 5 — Profiles and Custom Roles | **Profile showcase implemented; live acceptance pending** | Guild-scoped AniList/Steam linking, privacy preferences, affinity/taste, leaderboard, recent approved contributions, active collections/Trails and custom-role lifecycle helpers. | Live Discord role-hierarchy/lifecycle acceptance and visibility regression tests. |
-| 6 — Notifications and automation | **Basic scheduled delivery implemented; entity automation incomplete** | Completed/cancelled AniList notifications and guild release digests have scheduling/delivery paths. | Title/creator/franchise follows, more provider release kinds and bounded trigger workflows. |
+| 6 — Notifications and automation | **Media alerts, configurable digests and bounded automation implemented; live provider acceptance pending** | AniList title/creator/franchise/category follow snapshots, anime episode alerts, AniList completion notices, TMDB film/TV and IGDB game release alerts, daily/weekly provider-release digests with category, individual follow-target and entity-type filters, timezone/region/destination controls, and bounded media automation. | Live provider/Discord acceptance; add book/chapter/volume release schedules only after an approved provider exposes dependable dates. |
 | 7 — Knowledge Atlas and dashboard | **Bounded two-hop exploration implemented; advanced graph work incomplete** | Typed provider/recommendation/community edges, guild visibility filters, direct relationship lookup, tested breadth-first expansion (2 hops / 24 nodes), provenance-aware dashboard graph and static image render. | Stable provider-ID canonicalization, node/edge search, relationship filters, pathfinding, clustering, rich node details and permission-equivalent graph export. |
 | 8 — Operations and launch | **Operational tooling implemented; live release gates open** | Docker/Compose, repository CI, health diagnostics, backup/restore rehearsal and a live-acceptance workflow exist. | Real credentials, production storage/database, Discord application and dashboard OAuth tests; owner-authorized release and rollback. |
 
@@ -294,14 +294,12 @@ Daily Drop and scheduled release digests now use atomic database claims, expirin
 
 **Objective:** notify users/guilds about selected media changes and connect approved media workflows without becoming a generic reminder service.
 
-**Already present:** a 15-minute scan for recently finished/cancelled AniList anime/manga, delivery deduplication per guild/media, guild release-digest schedules for supported anime/TV/movie releases, timezone-aware scheduling and retryable delivery state.
+**Already present:** guild-scoped AniList title, creator, franchise and genre subscriptions; followed anime episode alerts; AniList recently-finished/cancelled notices; provider-dated AniList anime, TMDB film/TV and IGDB game release alerts; per-guild category toggles and a configured alert destination; daily/weekly release digests with category filters, individual followed-entity selection or all/none controls, entity-type filters, region, IANA timezone, local send time and a distinct destination; durable claims, deduplication, bounded retries and pause/resume; and the allowlisted media automation rules in Phase 6's adjacent environment.
 
 **Remaining delivery:**
-- Add subscriptions to provider-backed title, creator and franchise IDs with explicit per-guild destination and enable/disable controls.
-- Expand alerts to chapter/volume/publication/game releases only when a provider exposes reliable release dates or update events. Never fabricate chapter dates.
-- Add daily/weekly digest selection from followed entities and configured categories; preserve original provider timestamp and the guild timezone.
-- Add a small explicit automation rule model for approved media triggers (e.g. a verified release may create a calendar item or discussion proposal). Each rule needs a trigger allowlist, target allowlist, preview, idempotency key, audit and disable control.
-- Handle provider outage, duplicate events, changed release date and missing destination without losing or duplicating deliveries.
+- Add book/chapter/volume publication schedules only after an approved provider supplies dependable dates or update events. No publication date is inferred from a catalogue record.
+- Validate the configured AniList, TMDB and IGDB credentials and Discord destinations against live services; mocked/provider-fixture checks do not replace live acceptance.
+- Re-check provider rate limits, terms, outages, changed release dates and removed destinations during live acceptance.
 - Keep all scheduling media-only. No birthdays, general reminders, productivity tasks or unrelated automation.
 
 **Exit criteria:** rules are bounded and per-guild, delivery is idempotent, every event can be traced to a provider/source, retries are safe, and a moderator can inspect/disable each active rule.

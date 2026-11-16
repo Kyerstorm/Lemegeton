@@ -32,6 +32,7 @@ import {onCustomRoleMemberAdd,onCustomRoleMemberRemove,onCustomRoleMemberUpdate,
 import {startCustomRolePicker,stopCustomRolePicker} from "./helpers/custom-roles/custom-role-picker-server.js";
 import {startDashboardBridge,stopDashboardBridge} from "./helpers/runtime/dashboard-bridge.js";
 import {startMediaNotificationScheduler,stopMediaNotificationScheduler} from "./helpers/media/media-notifications.js";
+import {getReleaseDigestEntityEvents} from "./helpers/community/community-releases.js";
 import {startMusicScheduler,stopMusicScheduler} from "./helpers/integration/music.js";
 import {configureMediaStorage,processArchiveAssetCleanup} from "./helpers/media/media-storage.js";
 import {configureCustomRoleIconSourceLimit} from "./helpers/custom-roles/custom-role-images.js";
@@ -440,7 +441,7 @@ async function processDailyDrops():Promise<void>{
   for(const delivery of await dueReleaseDeliveries()){
    if(!await isGuildSetupComplete(delivery.guild_id))continue;
    try{
-    const [calendar,channel]=await Promise.all([
+    const [calendar,entityEvents,channel]=await Promise.all([
      upcomingProviderReleases(
       aniListEmbedClient,
       releaseCalendarTmdbClient,
@@ -450,27 +451,65 @@ async function processDailyDrops():Promise<void>{
       delivery.categories,
       releaseCalendarIgdbClient,
      ),
+     getReleaseDigestEntityEvents({
+      guildId:delivery.guild_id,
+      windowStart:new Date(delivery.window_start),
+      windowEnd:new Date(delivery.window_end),
+      entityTypes:delivery.entity_types,
+      entityIds:delivery.entity_ids,
+     }),
      client.channels.fetch(delivery.channel_id),
     ]);
-    if(calendar.unavailableProviders.length)throw new Error(`Release digest providers unavailable: ${calendar.unavailableProviders.join(", ")}`);
-    if(!channel||!channel.isTextBased()||!("send" in channel))throw new Error("The configured release digest channel is unavailable.");
-    const releases=calendar.results;
-    const fields=releases.slice(0,20).map((item)=>({
-     name:`${item.title.slice(0,180)} · <t:${Math.floor(item.when.getTime()/1000)}:R>`,
-     value:`[${item.provider} source](${item.url})`,
+    if(calendar.unavailableProviders.length&&!calendar.results.length&&!entityEvents.length){
+     throw new Error("Digest release providers unavailable: "+calendar.unavailableProviders.join(", "));
+    }
+    if(!channel||!channel.isTextBased()||!("send" in channel)||!("guildId" in channel)||channel.guildId!==delivery.guild_id){
+     throw new Error("The configured digest destination is unavailable in its server.");
+    }
+    const start=new Date(delivery.window_start);
+    const end=new Date(delivery.window_end);
+    const localFormatter=new Intl.DateTimeFormat("en-GB",{
+     dateStyle:"medium",timeStyle:"short",timeZone:delivery.time_zone,
+    });
+    const period=localFormatter.format(start)+" – "+localFormatter.format(end)+" ("+delivery.time_zone+")";
+    const releaseFields=calendar.results.slice(0,8).map(item=>({
+     name:item.title.slice(0,180)+" · <t:"+Math.floor(item.when.getTime()/1000)+":R>",
+     value:item.category.toUpperCase()+" · "+item.provider+"\n[Open source]("+item.url+")",
      inline:false,
     }));
-    const description=releases.length
-     ? `Upcoming provider-dated releases for <t:${Math.floor(new Date(delivery.window_start).getTime()/1000)}:d> – <t:${Math.floor(new Date(delivery.window_end).getTime()/1000)}:d>. Region: ${delivery.region}.`
-     : `No provider-dated releases were returned for this digest window. Region: ${delivery.region}.`;
+    const entityFields=entityEvents.slice(0,8).flatMap(item=>{
+     let source:URL;
+     try{source=new URL(item.source_url);if(source.protocol!=="https:"||source.username||source.password)return [];}
+     catch{return [];}
+     const eventAt=new Date(item.event_at);
+     const timestamp=Number.isFinite(eventAt.getTime())?Math.floor(eventAt.getTime()/1000):0;
+     return [{
+      name:item.entity_type.toUpperCase()+" · "+item.title.slice(0,160),
+      value:item.description.slice(0,300)+" · Detected <t:"+timestamp+":R>\n["+item.provider+" source]("+source.toString()+")",
+      inline:false,
+     }];
+    });
+    const fields=[
+     ...releaseFields,
+     ...entityFields,
+     ...(calendar.unavailableProviders.length?[{
+      name:"Providers temporarily unavailable",
+      value:calendar.unavailableProviders.join(", ").slice(0,1000),
+      inline:false,
+     }]:[]),
+    ];
+    const description="Window: "+period+". Region: "+delivery.region+"."
+     +(fields.length?"":" No provider-dated releases or selected followed-entity updates matched this window.");
     const message=await (channel as TextChannel).send({
-     embeds:[homeEmbed("Lemegeton · Release digest",description,fields)],
+     embeds:[homeEmbed("Lemegeton · Media Digest",description,fields)],
      allowedMentions:{parse:[]},
     });
     await markReleaseDelivery(delivery.id,delivery.claim_token,"sent",message.id);
    }catch(error){
-    await markReleaseDelivery(delivery.id,delivery.claim_token,"pending",undefined,error instanceof Error?error.message:"Unknown delivery error").catch(()=>undefined);
-    logger.warn("Release digest delivery failed and was queued for retry",{guildId:delivery.guild_id,deliveryId:delivery.id,reason:error instanceof Error?error.message:"Unknown error"});
+    await markReleaseDelivery(delivery.id,delivery.claim_token,"pending",undefined,error instanceof Error?error.message:"Unknown digest delivery error").catch(()=>undefined);
+    logger.warn("Media digest delivery failed and was queued for retry",{
+     guildId:delivery.guild_id,deliveryId:delivery.id,reason:error instanceof Error?error.message:"Unknown error",
+    });
    }
   }
   for(const rule of await claimDueMediaAutomationRules()){

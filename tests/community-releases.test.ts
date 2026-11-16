@@ -6,6 +6,9 @@ import type { TmdbClient } from "../helpers/integration/tmdb.js";
 import {
   nextReleaseOccurrence,
   normalizeReleaseCategories,
+  normalizeReleaseEntityTypes,
+  normalizeReleaseEntityIds,
+  parseReleaseCadenceInput,
 } from "../helpers/community/community-releases.js";
 
 test("daily release digest uses the selected timezone and next local time", () => {
@@ -142,4 +145,35 @@ test("release calendar includes provider-dated IGDB game releases without invent
     url: "https://www.igdb.com/games/scheduled-game",
     category: "games",
   }]);
+});
+
+
+test("media digest entity type filters are deduplicated and restricted", () => {
+  assert.deepEqual(
+    normalizeReleaseEntityTypes(["title", "creator", "title", "episodes"]),
+    ["title", "creator", "episodes"],
+  );
+  assert.deepEqual(normalizeReleaseEntityTypes([]), []);
+  assert.throws(() => normalizeReleaseEntityTypes(["book-publications"]), /followed-entity types/i);
+});
+
+test("media digest entity selections support all, none and explicit server follow IDs", () => {
+  assert.deepEqual(normalizeReleaseEntityIds(["subscription:12", "anime:123", "subscription:12"]), ["subscription:12", "anime:123"]);
+  assert.deepEqual(normalizeReleaseEntityIds(["all", "anime:123"]), ["all"]);
+  assert.deepEqual(normalizeReleaseEntityIds(["none"]), ["none"]);
+  assert.throws(() => normalizeReleaseEntityIds(["invalid"]), /valid server follow/i);
+});
+
+test("media digest cadence accepts daily or an explicit weekly weekday", () => {
+  assert.deepEqual(parseReleaseCadenceInput("daily", 4), { cadence: "daily", weekday: 4 });
+  assert.deepEqual(parseReleaseCadenceInput("weekly:thu"), { cadence: "weekly", weekday: 4 });
+  assert.deepEqual(parseReleaseCadenceInput("weekly", 0), { cadence: "weekly", weekday: 0 });
+  assert.throws(() => parseReleaseCadenceInput("monthly"), /daily or weekly/i);
+});
+
+test("daily release digest preserves its local wall-clock time across the Dublin spring DST change", () => {
+  const next = nextReleaseOccurrence(
+    "Europe/Dublin", "09:00", "daily", 1, new Date("2026-03-29T00:30:00.000Z"),
+  );
+  assert.equal(next.toISOString(), "2026-03-29T08:00:00.000Z");
 });

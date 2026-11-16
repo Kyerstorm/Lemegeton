@@ -905,9 +905,11 @@ async function deliverQueuedMediaReleaseAlerts(client: Client, now: Date): Promi
     try {
       const category = delivery.category === "movies" ? "Film" : delivery.category === "tv" ? "TV episode" :
         delivery.category === "games" ? "Game release" : "Anime episode";
+      const releaseAt = new Date(delivery.release_at);
+      const releaseTimestamp = Number.isFinite(releaseAt.getTime()) ? Math.floor(releaseAt.getTime() / 1000) : 0;
       const embed = new EmbedBuilder().setColor(0x5865f2).setTitle(delivery.title.slice(0, 240))
         .setURL(delivery.source_url)
-        .setDescription(category + " · Provider-reported release time: " + new Date(delivery.release_at instanceof Date ? delivery.release_at.getTime() : delivery.release_at).toISOString())
+        .setDescription(category + " · Provider-reported release time: <t:" + releaseTimestamp + ":F> (<t:" + releaseTimestamp + ":R>)")
         .addFields({ name: "Source", value: delivery.provider, inline: true })
         .setFooter({ text: "Media Alert Centre · Verified provider schedule" }).setTimestamp(now);
       const message = await channel.send({
