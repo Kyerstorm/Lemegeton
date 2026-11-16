@@ -266,7 +266,7 @@ if (options.includeText !== false) {
 const textPage = load(html);
 textPage("script,style,noscript,svg,template").remove();
 const max = Math.max(1, Math.min(options.maxTextChars ?? DEFAULT_MAX_TEXT_CHARS, MAX_TEXT_CHARS));
-result.text = (textPage("body").length ? textPage("body") : textPage.root()).text().replace(/\s+/g, " ").trim().slice(0, max);
+result.text = textPage("body").text().replace(/\s+/g, " ").trim().slice(0, max);
 }
 if (options.includeLinks) {
 const selector = options.linkSelector?.trim() || "a[href]";

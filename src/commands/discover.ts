@@ -100,7 +100,10 @@ type SearchRecord =
   | { provider: "AniList"; category: "anime" | "manga" | "light_novel"; item: AniListMedia }
   | { provider: "Google Books"; category: "book"; item: GoogleBook }
   | { provider: "Royal Road"; category: "webnovel"; item: Awaited<ReturnType<RoyalRoadClient["getFiction"]>> }
-| { provider: "NovelFire" | "Novel Archive" | "Wuxia Click" | "Novel Updates"; category: "webnovel"; item: WebNovelMedia }
+| { provider: "NovelFire"; category: "webnovel"; item: WebNovelMedia }
+| { provider: "Novel Archive"; category: "webnovel"; item: WebNovelMedia }
+| { provider: "Wuxia Click"; category: "webnovel"; item: WebNovelMedia }
+| { provider: "Novel Updates"; category: "webnovel"; item: WebNovelMedia }
   | { provider: "TMDB"; category: "movie" | "tv"; item: TmdbMedia }
   | { provider: "IGDB"; category: "game"; item: IgdbGame }
   | { provider: "Steam"; category: "game"; item: SteamStoreGame };
