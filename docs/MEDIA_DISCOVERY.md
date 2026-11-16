@@ -10,7 +10,7 @@ Use **/browse** with a media category and a title for a detailed record. For TMD
 | --- | --- |
 | Anime and manga | Genre, AniList theme/tag, provider status, year range. Manga supports manga (Japan), manhwa (Korea), manhua (China), and provider-tagged webtoon subtypes using AniList origin/format metadata. Author and artist filters are available for manga/light-novel records when AniList staff roles expose the credit. Adult-flagged titles are excluded unless the user explicitly opts in from a Discord channel marked NSFW. |
 | General novels and books | Genre/subject, author, publisher, language code, publication year range through Google Books query parameters. |
-| Webnovels | Genre, author and status when available from Novel Updates, Novel Phoenix, NovelFire, or Novelist. |
+| Webnovels | Royal Road story-specific public RSS metadata using a numeric fiction ID or official HTTPS fiction/syndication URL. Shows title, author when provided, recent chapter titles/links and update timestamps. Does not support global title search or genres. |
 | Movies and TV | TMDB genre, keyword/theme, original language code, status, release year range, runtime, director and cast filters. |
 
 A filter that the selected metadata provider cannot support is rejected instead of silently returning unfiltered results. Browse applies filters to the provider's best matching title; when the title fails one of the filters, try a broader title or fewer filters.
@@ -32,10 +32,10 @@ No chapter-to-episode or volume-to-season mapping is guessed. Release-order and 
 
 ## Cross-media similarity
 
-**/similar** resolves a title through AniList, Novel Updates, Google Books or TMDB, then searches anime, manga, light novels, webnovels, general books, movies and television for candidates with overlapping provider-reported genres.
+**/similar** resolves supported titles through AniList, Google Books, TMDB or IGDB, then searches anime, manga, light novels, general books, movies, television and games for candidates with overlapping provider-reported genres. Webnovel RSS records are excluded because that feed does not provide a genre taxonomy.
 
 The result has separate sections for:
-- **Provider-generated recommendations**, where AniList or TMDB supplies them.
+- **Provider-generated recommendations**, where AniList, TMDB or IGDB supplies them.
 - **Local genre-overlap matches**, ranked using a transparent set intersection and accompanied by the shared genre names.
 
 The local ranking is a heuristic, not an AI-generated recommendation score. Providers with missing genre metadata may not yield local matches.
@@ -88,7 +88,8 @@ The family-friendly option is a best-effort metadata filter, not a parental-rati
 
 ## Configuration and operational notes
 
-- Configure TMDB_BEARER_TOKEN for movie/TV search, franchise lookups, TV guides and TMDB-backed release-calendar categories.
+- Configure TMDB_BEARER_TOKEN for movie/TV search, franchise lookups, TV guides, runtime and regional content-rating lookups, and TMDB-backed release-calendar categories.
+- Exact book edition lookup uses Crossref's public ISBN-filtered works endpoint and a rate-limited Open Library ISBN/edition lookup. Neither service is used for general catalogue search or bulk ingestion.
 - Google Books and AniList use the existing helpers already used elsewhere in the bot.
 - Release-calendar settings, Reading Club nominations/votes, and Media Night sessions are persisted in the shared database and keyed by guild/channel as appropriate.
 - Provider failures, unavailable metadata and missing release dates are treated as missing data. The bot does not make a failed source appear operational or manufacture metadata to fill gaps.
@@ -113,7 +114,7 @@ Lemegeton uses a shared PostgreSQL relationship graph to connect the systems it 
 - Missing optional archive tables do not take down the discovery command. Existing provider metadata remains the source of truth, and exact-title matches or recommendations are never promoted to confirmed adaptations.
 - The graph schema is created idempotently through the existing PostgreSQL access layer. It uses indexes and a uniqueness constraint to avoid repeatedly adding the same relationship.
 
-The graph is intentionally an integration layer, not a promise that every provider exposes every category or relation. AniList, TMDB, Google Books, Novel Updates, Novel Phoenix, Steam/IGDB, and community archives keep their own authoritative metadata and limitations.
+The graph is intentionally an integration layer, not a promise that every provider exposes every category or relation. AniList, TMDB, Google Books, Crossref, Open Library, Royal Road RSS, Steam/IGDB, and community archives keep their own authoritative metadata and limitations.
 
 ## Connected media commands and community archives
 
@@ -127,9 +128,9 @@ The interactive /discovery-hub command is the entry point for media navigation a
 - /trailers uses the documented movie/TV videos endpoints and constructs links only for returned YouTube or Vimeo keys. Provider-returned video types and official flags are retained.
 - /collection-guide resolves a movie, loads its belongs_to_collection reference, then displays TMDB collection parts by release date. This is not an assertion of in-universe chronology.
 - /author-works queries Google Books by author. Results may include co-authored works and editions; this is not presented as a universal cross-provider bibliography.
-- `/webnovel-updates` and `/browse` query live public search pages from Novel Updates and Novel Phoenix. Each provider is isolated so one provider failure does not discard results returned by the other.
-- The scraper returns title links and available public metadata only; it does not fetch chapter text. Results explicitly marked as adult-rated or sexually explicit are filtered out.
-- Provider markup and availability can change. A scraper timeout, access challenge, or unsupported layout is treated as a provider failure rather than proof that a title does not exist.
+- **/discover category:Webnovels** accepts a Royal Road fiction ID or an HTTPS fiction/syndication URL on `www.royalroad.com`, then requests that story's official public RSS feed.
+- The RSS result shows only the feed's story title/link, author when present, up to five recent chapter titles/links and publication timestamps. The integration never retrieves chapter bodies or scrapes site search/catalogue pages.
+- Royal Road's feed is story-specific, not a global search or trending API. A missing feed entry is reported as missing metadata; it is not proof that a story or chapter does not exist. Other webnovel platforms are not currently integrated.
 
 
 TMDB watch-provider data is powered by JustWatch. /where-to-watch labels the queried region and links to the provider-details URL when supplied; it does not manufacture direct streaming links. TMDB requests require TMDB_BEARER_TOKEN. Availability changes and should be verified with the provider.

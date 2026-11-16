@@ -10,8 +10,26 @@ export interface TmdbMedia {
   image: string | null;
   releaseDate: string | null;
   rating: number | null;
+  runtime: number | null;
+  episodeRuntimes: number[];
+  certifications: TmdbMovieCertification[];
+  contentRatings: TmdbContentRating[];
   genres: string[];
   status: string | null;
+}
+
+export interface TmdbMovieCertification {
+  region: string;
+  certification: string;
+  releaseDate: string | null;
+  releaseType: number | null;
+  descriptors: string[];
+}
+
+export interface TmdbContentRating {
+  region: string;
+  rating: string;
+  descriptors: string[];
 }
 
 export interface TmdbWatchProviderGroup {
@@ -150,6 +168,14 @@ export function normalizeTmdbMedia(value: unknown, category: TmdbCategory): Tmdb
     image: poster && poster.startsWith("/") ? `https://image.tmdb.org/t/p/w500${poster}` : null,
     releaseDate: typeof date === "string" && date ? date : null,
     rating: typeof item.vote_average === "number" && Number.isFinite(item.vote_average) ? item.vote_average : null,
+    runtime: typeof item.runtime === "number" && Number.isSafeInteger(item.runtime) && item.runtime > 0 ? item.runtime : null,
+    episodeRuntimes: Array.isArray(item.episode_run_time)
+      ? item.episode_run_time.flatMap((value): number[] =>
+          typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? [value] : [],
+        ).slice(0, 10)
+      : [],
+    certifications: [],
+    contentRatings: [],
     genres: Array.isArray(item.genres)
       ? item.genres.flatMap(entry => {
           const genre = object(entry)?.name;
@@ -158,6 +184,52 @@ export function normalizeTmdbMedia(value: unknown, category: TmdbCategory): Tmdb
       : [],
     status: typeof item.status === "string" ? item.status : null,
   };
+}
+
+export function normalizeTmdbMovieReleaseDates(value: unknown): TmdbMovieCertification[] {
+  const rows = object(value)?.results;
+  if (!Array.isArray(rows)) return [];
+  const certifications = new Map<string, TmdbMovieCertification>();
+  for (const raw of rows) {
+    const country = object(raw);
+    const region = typeof country?.iso_3166_1 === "string" ? country.iso_3166_1.toUpperCase() : "";
+    if (!/^[A-Z]{2}$/.test(region)) continue;
+    const dates = Array.isArray(country?.release_dates) ? country.release_dates : [];
+    for (const dateRaw of dates) {
+      const item = object(dateRaw);
+      const certification = typeof item?.certification === "string" ? item.certification.trim() : "";
+      if (!certification) continue;
+      const releaseDate = typeof item?.release_date === "string" && item.release_date
+        ? item.release_date.slice(0, 30)
+        : null;
+      const releaseType = typeof item?.type === "number" && Number.isSafeInteger(item.type) ? item.type : null;
+      const descriptors = Array.isArray(item?.descriptors)
+        ? item.descriptors.flatMap((entry): string[] => typeof entry === "string" && entry.trim() ? [entry.trim().slice(0, 80)] : []).slice(0, 8)
+        : [];
+      const record = { region, certification: certification.slice(0, 30), releaseDate, releaseType, descriptors };
+      certifications.set([region, record.certification, releaseDate, releaseType].join("|"), record);
+    }
+  }
+  return [...certifications.values()]
+    .sort((a, b) => a.region.localeCompare(b.region) || (a.releaseDate ?? "").localeCompare(b.releaseDate ?? ""))
+    .slice(0, 60);
+}
+
+export function normalizeTmdbContentRatings(value: unknown): TmdbContentRating[] {
+  const rows = object(value)?.results;
+  if (!Array.isArray(rows)) return [];
+  const ratings = new Map<string, TmdbContentRating>();
+  for (const raw of rows) {
+    const item = object(raw);
+    const region = typeof item?.iso_3166_1 === "string" ? item.iso_3166_1.toUpperCase() : "";
+    const rating = typeof item?.rating === "string" ? item.rating.trim() : "";
+    if (!/^[A-Z]{2}$/.test(region) || !rating) continue;
+    const descriptors = Array.isArray(item?.descriptors)
+      ? item.descriptors.flatMap((entry): string[] => typeof entry === "string" && entry.trim() ? [entry.trim().slice(0, 80)] : []).slice(0, 8)
+      : [];
+    ratings.set(region, { region, rating: rating.slice(0, 30), descriptors });
+  }
+  return [...ratings.values()].sort((a, b) => a.region.localeCompare(b.region)).slice(0, 60);
 }
 
 const PROVIDER_GROUPS = [
@@ -398,7 +470,17 @@ export class TmdbClient {
 
   async details(id: number, category: TmdbCategory): Promise<TmdbMedia | null> {
     this.validateMediaId(id);
-    return normalizeTmdbMedia(await this.request(`/${category}/${id}`), category);
+    const media = normalizeTmdbMedia(await this.request(`/${category}/${id}`), category);
+    if (!media) return null;
+    const ratingResult = await Promise.allSettled([
+      this.request(category === "movie" ? `/movie/${id}/release_dates` : `/tv/${id}/content_ratings`),
+    ]);
+    const result = ratingResult[0];
+    if (result?.status === "fulfilled") {
+      if (category === "movie") media.certifications = normalizeTmdbMovieReleaseDates(result.value);
+      else media.contentRatings = normalizeTmdbContentRatings(result.value);
+    }
+    return media;
   }
 
   async recommendations(id: number, category: TmdbCategory): Promise<TmdbMedia[]> {

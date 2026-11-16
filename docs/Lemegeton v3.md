@@ -386,7 +386,7 @@ Provider account linking and profile display belong in /profile; title discovery
 
 ### 4.10 Provider integration rules
 
-Migrate only provider adapters that exist and can be verified in the repository. The documented provider set includes AniList, TMDB, Google Books, Novel Updates, Novel Phoenix, NovelFire, Novelist, IGDB, and Steam, but documentation alone does not prove an adapter is complete or currently healthy.
+Migrate only provider adapters that exist and can be verified in the repository. The supported v3 provider set is AniList, TMDB, Google Books, Crossref (exact-ISBN contributor supplements), Open Library (rate-limited exact-ISBN work/edition identity only), Royal Road (official story-specific RSS only), IGDB, and Steam. Do not treat legacy HTML-scraping sources as active integrations; documentation alone does not prove an adapter is complete or currently healthy.
 
 For each adapter, verify:
 

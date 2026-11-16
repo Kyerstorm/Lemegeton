@@ -11,6 +11,10 @@ export interface IgdbGame {
   platforms: string[];
   developers: string[];
   publishers: string[];
+  rating: number | null;
+  ratingCount: number;
+  aggregatedRating: number | null;
+  aggregatedRatingCount: number;
 }
 
 export type IgdbCompanyRole = "Developer" | "Publisher" | "Porting" | "Supporting";
@@ -24,6 +28,13 @@ export interface IgdbCompany {
   websites: string[];
 }
 
+export interface IgdbPlatformRelease {
+  date: string;
+  humanDate: string | null;
+  platform: string | null;
+  region: string | null;
+}
+
 export interface IgdbCompanyCredit {
   gameId: number;
   title: string;
@@ -31,6 +42,12 @@ export interface IgdbCompanyCredit {
   releaseDate: string | null;
   image: string | null;
   roles: IgdbCompanyRole[];
+  platforms: string[];
+  releases: IgdbPlatformRelease[];
+  rating: number | null;
+  ratingCount: number;
+  aggregatedRating: number | null;
+  aggregatedRatingCount: number;
 }
 
 export interface IgdbCompanyExplorer {
@@ -111,7 +128,38 @@ function sourceUrl(kind: "games" | "companies", slug: unknown, title: string): s
     + "&q=" + encodeURIComponent(title);
 }
 
-function parseGame(value: unknown): IgdbGame | null {
+function score(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100
+    ? Math.round(value * 10) / 10
+    : null;
+}
+
+function count(value: unknown): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+function platformReleases(value: unknown): IgdbPlatformRelease[] {
+  const rows = Array.isArray(value) ? value : [];
+  const unique = new Map<string, IgdbPlatformRelease>();
+  for (const raw of rows) {
+    const item = object(raw);
+    if (typeof item?.date !== "number" || !Number.isSafeInteger(item.date) || item.date <= 0) continue;
+    const date = new Date(item.date * 1000);
+    if (!Number.isFinite(date.getTime())) continue;
+    const platform = object(item.platform);
+    const region = object(item.region);
+    const record = {
+      date: date.toISOString().slice(0, 10),
+      humanDate: typeof item.human === "string" && item.human.trim() ? item.human.trim().slice(0, 80) : null,
+      platform: typeof platform?.name === "string" ? platform.name.slice(0, 100) : null,
+      region: typeof region?.name === "string" ? region.name.slice(0, 80) : null,
+    };
+    unique.set([record.date, record.platform, record.region].join("|"), record);
+  }
+  return [...unique.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(0, 30);
+}
+
+export function parseIgdbGame(value: unknown): IgdbGame | null {
   const game = object(value);
   if (!game || typeof game.id !== "number" || !Number.isSafeInteger(game.id) || game.id < 1
     || typeof game.name !== "string" || !game.name.trim()) return null;
@@ -146,6 +194,10 @@ function parseGame(value: unknown): IgdbGame | null {
     platforms: names(game.platforms),
     developers: companies.filter((item) => item.developer).map((item) => item.name),
     publishers: companies.filter((item) => item.publisher).map((item) => item.name),
+    rating: score(game.rating),
+    ratingCount: count(game.rating_count),
+    aggregatedRating: score(game.aggregated_rating),
+    aggregatedRatingCount: count(game.aggregated_rating_count),
   };
 }
 
@@ -191,6 +243,17 @@ export function parseIgdbCompanyCredits(value: unknown): IgdbCompanyCredit[] {
     const existing = credits.get(game.id);
     if (existing) {
       existing.roles = [...new Set([...existing.roles, ...roles])];
+      existing.platforms = [...new Set([...existing.platforms, ...(Array.isArray(game.platforms)
+        ? game.platforms.flatMap((raw): string[] => {
+          const name = object(raw)?.name;
+          return typeof name === "string" && name.trim() ? [name.trim().slice(0, 100)] : [];
+        }) : [])])].slice(0, 20);
+      existing.releases = platformReleases([...existing.releases.map(item => ({
+        date: Math.floor(new Date(item.date + "T00:00:00Z").getTime() / 1000),
+        human: item.humanDate,
+        platform: item.platform ? { name: item.platform } : null,
+        region: item.region ? { name: item.region } : null,
+      })), ...(Array.isArray(game.release_dates) ? game.release_dates : [])]);
       continue;
     }
     const cover = object(game.cover);
@@ -204,6 +267,15 @@ export function parseIgdbCompanyCredits(value: unknown): IgdbCompanyCredit[] {
       releaseDate,
       image: igdbImageUrl(cover?.url),
       roles,
+      platforms: [...new Set((Array.isArray(game.platforms) ? game.platforms : []).flatMap((raw): string[] => {
+        const name = object(raw)?.name;
+        return typeof name === "string" && name.trim() ? [name.trim().slice(0, 100)] : [];
+      }))].slice(0, 20),
+      releases: platformReleases(game.release_dates),
+      rating: score(game.rating),
+      ratingCount: count(game.rating_count),
+      aggregatedRating: score(game.aggregated_rating),
+      aggregatedRatingCount: count(game.aggregated_rating_count),
     });
   }
   return [...credits.values()];
@@ -226,10 +298,10 @@ export class IgdbClient {
     const clean = query.replace(/[";\\]/g, " ").replace(/\s+/g, " ").trim().slice(0, 100);
     if (clean.length < 2) return [];
     const rows = await this.request("games",
-      'search "' + clean + '"; fields id,name,slug,summary,first_release_date,cover.url,genres.name,platforms.name,involved_companies.developer,involved_companies.publisher,involved_companies.company.name; limit 10;'
+      'search "' + clean + '"; fields id,name,slug,summary,first_release_date,rating,rating_count,aggregated_rating,aggregated_rating_count,cover.url,genres.name,platforms.name,involved_companies.developer,involved_companies.publisher,involved_companies.company.name; limit 10;'
     );
     return (Array.isArray(rows) ? rows : []).flatMap((raw) => {
-      const game = parseGame(raw);
+      const game = parseIgdbGame(raw);
       return game ? [game] : [];
     });
   }
@@ -256,7 +328,7 @@ export class IgdbClient {
     const company = Array.isArray(companyRows) ? parseIgdbCompany(companyRows[0]) : null;
     if (!company) return null;
     const creditRows = await this.request("involved_companies",
-      "where company = " + companyId + "; fields developer,publisher,porting,supporting,game.id,game.name,game.slug,game.first_release_date,game.cover.url; limit 21;"
+      "where company = " + companyId + "; fields developer,publisher,porting,supporting,game.id,game.name,game.slug,game.first_release_date,game.rating,game.rating_count,game.aggregated_rating,game.aggregated_rating_count,game.platforms.name,game.release_dates.date,game.release_dates.human,game.release_dates.region.name,game.release_dates.platform.name,game.cover.url; limit 21;"
     );
     const rawCredits = Array.isArray(creditRows) ? creditRows : [];
     return {
@@ -297,10 +369,10 @@ export class IgdbClient {
       : [];
     if (!ids.length) return [];
     const rows = await this.request("games",
-      "where id = (" + ids.join(",") + "); fields id,name,slug,summary,first_release_date,cover.url,genres.name,platforms.name,involved_companies.developer,involved_companies.publisher,involved_companies.company.name; limit 10;"
+      "where id = (" + ids.join(",") + "); fields id,name,slug,summary,first_release_date,rating,rating_count,aggregated_rating,aggregated_rating_count,cover.url,genres.name,platforms.name,involved_companies.developer,involved_companies.publisher,involved_companies.company.name; limit 10;"
     );
     return (Array.isArray(rows) ? rows : []).flatMap((raw) => {
-      const game = parseGame(raw);
+      const game = parseIgdbGame(raw);
       return game ? [game] : [];
     });
   }

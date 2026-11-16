@@ -24,6 +24,9 @@ import type { BotConfig } from "../../helpers/runtime/config.js";
 import { AniListClient, type AniListAiring, type AniListAiringFilters, type AniListMedia, type AniListMediaType, type AniListSearchFilters, type AniListCreator } from "../../helpers/integration/anilist.js";
 import {SteamClient,type SteamStoreGame} from "../../helpers/integration/steam.js";
 import { GoogleBooksClient, type GoogleBook } from "../../helpers/integration/google-books.js";
+import { CrossrefClient } from "../../helpers/integration/crossref.js";
+import { OpenLibraryClient } from "../../helpers/integration/open-library.js";
+import { RoyalRoadClient } from "../../helpers/integration/royal-road.js";
 import { IgdbClient, type IgdbGame } from "../../helpers/integration/igdb.js";
 import { homeEmbed, navigationButtons } from "../../helpers/runtime/discord.js";
 import { TmdbClient, type TmdbMedia, type TmdbTvSeason } from "../../helpers/integration/tmdb.js";
@@ -90,11 +93,12 @@ async function atlasExportFiles(
   };
 }
 
-type Category = "all" | "anime" | "manga" | "light_novel" | "book" | "movie" | "tv" | "game";
+type Category = "all" | "anime" | "manga" | "light_novel" | "book" | "webnovel" | "movie" | "tv" | "game";
 type DiscoverFilters = AniListSearchFilters;
 type SearchRecord =
   | { provider: "AniList"; category: "anime" | "manga" | "light_novel"; item: AniListMedia }
   | { provider: "Google Books"; category: "book"; item: GoogleBook }
+  | { provider: "Royal Road"; category: "webnovel"; item: Awaited<ReturnType<RoyalRoadClient["getFiction"]>> }
   | { provider: "TMDB"; category: "movie" | "tv"; item: TmdbMedia }
   | { provider: "IGDB"; category: "game"; item: IgdbGame }
   | { provider: "Steam"; category: "game"; item: SteamStoreGame };
@@ -105,6 +109,7 @@ const CATEGORIES: Array<{ label: string; value: Category; emoji: string }> = [
   { label: "Manga", value: "manga", emoji: emoji.mangaDiscovery },
   { label: "Light novels", value: "light_novel", emoji: emoji.lightNovelDiscovery },
   { label: "Books", value: "book", emoji: emoji.book },
+  { label: "Webnovels", value: "webnovel", emoji: emoji.book },
   { label: "Films", value: "movie", emoji: emoji.movie },
   { label: "Television", value: "tv", emoji: emoji.television },
   { label: "Games", value: "game", emoji: emoji.game },
@@ -203,6 +208,28 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
     return embed;
   }
 
+  if (record.provider === "Royal Road") {
+    const item = record.item;
+    const chapters = item.chapters.slice(0, 3).map((chapter) =>
+      "[" + safeDisplay(chapter.title, 160) + "](" + chapter.url + ")"
+        + (chapter.publishedAt ? " · <t:" + Math.floor(new Date(chapter.publishedAt).getTime() / 1000) + ":R>" : ""),
+    ).join("\n");
+    const embed = new EmbedBuilder().setColor(0x2d6b52)
+      .setTitle(item.title.slice(0, 256))
+      .setURL(item.sourceUrl)
+      .setDescription("Public story metadata from the Royal Road RSS feed. Chapter text is not retrieved.")
+      .addFields(
+        { name: "Provider", value: "Royal Road RSS", inline: true },
+        { name: "Fiction ID", value: String(item.id), inline: true },
+        { name: "Author", value: item.author ?? "Not reported in feed", inline: true },
+        { name: "Latest update", value: item.latestUpdate ? "<t:" + Math.floor(new Date(item.latestUpdate).getTime() / 1000) + ":F>" : "Not reported", inline: false },
+        { name: "Recent chapter links", value: (chapters || "No chapter entries were included in this feed.").slice(0, 1024), inline: false },
+      )
+      .setFooter({ text: "Royal Road · Public story-specific RSS metadata" });
+    embed.addFields({ name: "Source record", value: formatMetadataSourceReference("Royal Road", item.id, item.sourceUrl), inline: false });
+    return embed;
+  }
+
   if (record.provider === "TMDB") {
     const item = record.item;
     const embed = new EmbedBuilder()
@@ -216,8 +243,23 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
         { name: "Release", value: item.releaseDate ?? "Unavailable", inline: true },
         { name: "Rating", value: item.rating === null ? "Not rated" : `${item.rating.toFixed(1)}/10 (TMDB)`, inline: true },
         { name: "Status", value: item.status ?? "Unavailable", inline: true },
+        { name: item.category === "movie" ? "Runtime" : "Episode runtimes", value: item.category === "movie"
+          ? (item.runtime ? item.runtime + " minutes" : "Not reported")
+          : (item.episodeRuntimes.length ? item.episodeRuntimes.join(" / ") + " minutes" : "Not reported"), inline: true },
+        ...(item.certifications.length ? [{
+          name: "Regional release certifications",
+          value: item.certifications.slice(0, 8).map(entry =>
+            entry.region + ": " + entry.certification + (entry.releaseDate ? " · " + entry.releaseDate.slice(0, 10) : ""),
+          ).join("\n").slice(0, 1024),
+          inline: false,
+        }] : []),
+        ...(item.contentRatings.length ? [{
+          name: "Regional TV content ratings",
+          value: item.contentRatings.slice(0, 8).map(entry => entry.region + ": " + entry.rating).join("\n").slice(0, 1024),
+          inline: false,
+        }] : []),
       )
-      .setFooter({ text: "TMDB · Source metadata" });
+      .setFooter({ text: "TMDB · Source metadata · Country-specific ratings are shown only when supplied" });
     embed.addFields({ name: "Source record", value: formatMetadataSourceReference("TMDB", item.id, item.sourceUrl), inline: false });
     if (item.image) embed.setThumbnail(item.image);
     return embed;
@@ -256,8 +298,10 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
       { name: "Platforms", value: item.platforms.join(", ") || "Unavailable", inline: false },
       { name: "Developers", value: item.developers.join(", ") || "Unavailable", inline: true },
       { name: "Publishers", value: item.publishers.join(", ") || "Unavailable", inline: true },
+      { name: "User rating", value: item.rating === null ? "Not rated" : item.rating.toFixed(1) + "/100 · " + item.ratingCount + " rating(s)", inline: true },
+      { name: "Critic rating", value: item.aggregatedRating === null ? "Not rated" : item.aggregatedRating.toFixed(1) + "/100 · " + item.aggregatedRatingCount + " review(s)", inline: true },
     )
-    .setFooter({ text: "IGDB · Source metadata" });
+    .setFooter({ text: "IGDB · Source metadata · Ratings retain IGDB's 0–100 scale" });
   embed.addFields({ name: "Source record", value: formatMetadataSourceReference("IGDB", item.id, item.sourceUrl), inline: false });
   if (item.image?.startsWith("https://")) embed.setThumbnail(item.image);
   return embed;
@@ -270,6 +314,12 @@ function detailsButtons(record: SearchRecord): ActionRowBuilder<ButtonBuilder>[]
         .setCustomId(`discover:recommend:${record.item.type}:${record.item.id}`)
         .setLabel("Related recommendations")
         .setStyle(ButtonStyle.Secondary),
+    )];
+  }
+  if (record.provider === "TMDB") {
+    return [new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`discover:tmdb-details:${record.category}:${record.item.id}`)
+        .setLabel("Full runtime and rating details").setStyle(ButtonStyle.Secondary),
     )];
   }
   if(record.provider==="IGDB"&&record.category==="game"){
@@ -329,6 +379,7 @@ function creatorSearchModal(category: Category): ModalBuilder {
 }
 
 function searchModal(category: Category): ModalBuilder {
+  const isWebnovel = category === "webnovel";
   return new ModalBuilder()
     .setCustomId(`discover:search:${category}`)
     .setTitle(`Search ${categoryLabel(category)}`)
@@ -336,8 +387,8 @@ function searchModal(category: Category): ModalBuilder {
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
           .setCustomId("query")
-          .setLabel("Title or search phrase")
-          .setPlaceholder("Enter a title")
+          .setLabel(isWebnovel ? "Royal Road fiction ID or URL" : "Title or search phrase")
+          .setPlaceholder(isWebnovel ? "37155 or https://www.royalroad.com/fiction/…" : "Enter a title")
           .setStyle(TextInputStyle.Short)
           .setMinLength(2)
           .setMaxLength(100)
@@ -355,12 +406,13 @@ function homePanel(): { embeds: EmbedBuilder[]; components: ActionRowBuilder<But
       { name: "Books & light novels", value: "Google Books / AniList", inline: true },
       { name: "Films & television", value: "TMDB", inline: true },
       { name: "Video games", value: "IGDB + Steam Store; account data in /profile", inline: true },
+      { name: "Webnovels", value: "Royal Road public story RSS · ID or official URL", inline: true },
     ],
   );
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  for (let offset = 0; offset < CATEGORIES.length; offset += 4) {
+  for (let offset = 0; offset < CATEGORIES.length; offset += 5) {
     const row = new ActionRowBuilder<ButtonBuilder>();
-    for (const category of CATEGORIES.slice(offset, offset + 4)) {
+    for (const category of CATEGORIES.slice(offset, offset + 5)) {
       row.addComponents(new ButtonBuilder()
         .setCustomId(`discover:search:${category.value}`)
         .setLabel(category.label)
@@ -474,6 +526,9 @@ export class DiscoverCommand implements FeatureCommand {
   private readonly tmdb: TmdbClient;
   private readonly igdb: IgdbClient;
   private readonly steam:SteamClient;
+  private readonly crossref: CrossrefClient;
+  private readonly openLibrary: OpenLibraryClient;
+  private readonly royalRoad: RoyalRoadClient;
 
   constructor(config: BotConfig) {
     this.config = config;
@@ -482,6 +537,9 @@ export class DiscoverCommand implements FeatureCommand {
     this.tmdb = new TmdbClient(config.tmdbBearerToken);
     this.igdb = new IgdbClient(config.igdbClientId, config.igdbClientSecret);
     this.steam=new SteamClient(config.steamApiKey);
+    this.crossref = new CrossrefClient();
+    this.openLibrary = new OpenLibraryClient();
+    this.royalRoad = new RoyalRoadClient();
   }
 
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -513,6 +571,13 @@ export class DiscoverCommand implements FeatureCommand {
       if(!allowed.includes(filters.format)){
         await interaction.reply({content:"That format is not supported by the selected media category.",flags:MessageFlags.Ephemeral});return;
       }
+    }
+    if (category === "webnovel" && (view !== "search" || compareTo)) {
+      await interaction.reply({
+        content:"Royal Road currently provides story-specific RSS metadata only. Use the Webnovels search view with a fiction ID or official story URL; global search, creator, similarity and release views are not exposed by its feed.",
+        flags:MessageFlags.Ephemeral,
+      });
+      return;
     }
     if (view === "metadata") {
       await this.metadataSourcesAndRespond(interaction, query ?? "");
@@ -574,15 +639,52 @@ export class DiscoverCommand implements FeatureCommand {
       });
       try {
         const editions = await this.books.findEdition(query);
+        const enriched = await Promise.all(editions.slice(0, 5).map(async (edition) => {
+          const isbn = edition.isbn13 ?? edition.isbn10;
+          if (!isbn) return { edition, crossref: [], family: null };
+          const [credits, family] = await Promise.allSettled([
+            this.crossref.findByIsbn(isbn),
+            this.openLibrary.findEditionFamily(isbn),
+          ]);
+          return {
+            edition,
+            crossref: credits.status === "fulfilled" ? credits.value : [],
+            family: family.status === "fulfilled" ? family.value : null,
+          };
+        }));
+        const embeds = enriched.map(({ edition, crossref, family }) => {
+          const embed = toEmbed({ provider: "Google Books", category: "book", item: edition });
+          const credits = crossref.flatMap(match => [
+            ...match.editors.map(person => "Editor: " + person.name),
+            ...match.translators.map(person => "Translator: " + person.name),
+          ]);
+          embed.addFields({
+            name: "Crossref · exact ISBN contributor credits",
+            value: (credits.length
+              ? credits.slice(0, 12).join("\n").slice(0, 850) + "\nSource: " + crossref.map(item => item.sourceUrl).slice(0, 2).join(" · ")
+              : "No Crossref editor or translator record explicitly matched this ISBN.").slice(0, 1024),
+            inline: false,
+          });
+          embed.addFields({
+            name: "Open Library · work and edition identity",
+            value: (family
+              ? family.editions.slice(0, 8).map(item =>
+                  "[" + safeDisplay(item.title, 100) + "](" + item.sourceUrl + ")"
+                    + (item.editionName ? " · " + safeDisplay(item.editionName, 60) : "")
+                    + (item.publishDate ? " · " + safeDisplay(item.publishDate, 40) : ""),
+                ).join("\n").slice(0, 850)
+                  + "\nWork: " + family.workUrl + " · " + family.editionCount + " edition(s)"
+                  + (family.truncated ? " · first 50 shown" : "")
+              : "No unambiguous Open Library work ID was returned for this ISBN. No title-based edition merge was attempted.").slice(0, 1024),
+            inline: false,
+          });
+          return embed;
+        });
         await interaction.editReply({
           content: editions.length
-            ? "Exact Google Books edition match · " + query.slice(0, 80)
+            ? "Exact Google Books edition match · " + query.slice(0, 80) + " · Crossref and Open Library enrichment"
             : "Google Books returned no exact ISBN or volume-ID match. Try the other identifier printed on the edition.",
-          embeds: editions.slice(0, 5).map((edition) => toEmbed({
-            provider: "Google Books",
-            category: "book",
-            item: edition,
-          })),
+          embeds,
           components: [navigationButtons("discover", [{ id: "home", label: "Back to discovery" }])],
           allowedMentions: { parse: [] },
         });
@@ -710,6 +812,35 @@ export class DiscoverCommand implements FeatureCommand {
 
   async handleButton(interaction: ButtonInteraction): Promise<boolean> {
     const [, action, categoryValue, maybeId] = interaction.customId.split(":");
+    if (action === "tmdb-details") {
+      const category = categoryValue === "movie" || categoryValue === "tv" ? categoryValue : null;
+      const id = Number(maybeId);
+      if (!category || !/^\d+$/.test(maybeId ?? "") || !Number.isSafeInteger(id) || id < 1) {
+        await interaction.reply({ content:"That TMDB details reference is invalid.", flags:MessageFlags.Ephemeral });
+        return true;
+      }
+      await interaction.deferUpdate();
+      try {
+        const item = await this.tmdb.details(id, category);
+        if (!item) {
+          await interaction.editReply({ content:"TMDB no longer returns that title.", embeds:[], components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])] });
+          return true;
+        }
+        await interaction.editReply({
+          content:"TMDB full details · runtime and country-specific ratings where supplied",
+          embeds:[toEmbed({provider:"TMDB",category,item})],
+          components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],
+          allowedMentions:{parse:[]},
+        });
+      } catch (error) {
+        await interaction.editReply({
+          content:error instanceof Error ? error.message : "TMDB could not load the full title details.",
+          embeds:[],
+          components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],
+        });
+      }
+      return true;
+    }
     if(action==="airing"){
       await interaction.showModal(airingSearchModal());
       return true;
@@ -995,9 +1126,16 @@ export class DiscoverCommand implements FeatureCommand {
       });
       const works = result.credits.slice(0,10).map((credit) => {
         const roles = credit.roles.join(" / ");
-        const release = credit.releaseDate ? " · " + credit.releaseDate : "";
-        return "[" + safeDisplay(credit.title,120) + "](" + credit.sourceUrl + ") · " + roles + release;
-      }).join("\n");
+        const release = credit.releaseDate ? " · First release " + credit.releaseDate : "";
+        const score = credit.rating === null ? "" : " · IGDB " + credit.rating.toFixed(1) + "/100";
+        const critic = credit.aggregatedRating === null ? "" : " · Critics " + credit.aggregatedRating.toFixed(1) + "/100";
+        const platforms = credit.platforms.length ? " · " + credit.platforms.slice(0,5).join(", ") : "";
+        const dates = credit.releases.slice(0,3).map(item =>
+          (item.platform ?? "Platform unspecified") + " · " + item.date + (item.region ? " · " + item.region : ""),
+        );
+        return "[" + safeDisplay(credit.title,120) + "](" + credit.sourceUrl + ") · " + roles + release
+          + score + critic + platforms + (dates.length ? "\n" + dates.join("\n") : "");
+      }).join("\n\n").slice(0,3900);
       const graph = await findAtlasGraph(interaction.guildId, {
         title: result.company.name, category: "CREATOR", url: result.company.sourceUrl, imageUrl: result.company.logo,
       }, { maxDepth: 3, maxNodes: 32, perNodeLimit: 12 });
@@ -1502,10 +1640,15 @@ export class DiscoverCommand implements FeatureCommand {
       return { provider: record.provider, category: record.category, id: item.id, url: item.sourceUrl,
         fields: { description:item.overview, releaseDate:item.releaseDate, creators:undefined, genres:item.genres, image:item.image } };
     }
+    if (record.provider === "Royal Road") {
+      const item = record.item;
+      return { provider: record.provider, category: record.category, id: item.id, url: item.sourceUrl,
+        fields: { releaseDate:item.latestUpdate, creators:item.author ? [item.author] : [] } };
+    }
     if (record.provider === "IGDB") {
       const item = record.item;
       return { provider: record.provider, category: record.category, id: item.id, url: item.sourceUrl,
-        fields: { description:item.summary, releaseDate:item.releaseDate, creators:[...item.developers,...item.publishers], genres:item.genres, image:item.image } };
+        fields: { description:item.summary, releaseDate:item.releaseDate, creators:[...item.developers,...item.publishers], genres:item.genres, image:item.image, rating:item.rating, aggregatedRating:item.aggregatedRating } };
     }
     const item = record.item;
     return { provider: record.provider, category: record.category, id: item.appId, url:this.recordUrl(record),
@@ -1557,6 +1700,10 @@ export class DiscoverCommand implements FeatureCommand {
     category:Category="anime",
   ):Promise<void>{
     await interaction.reply({content:loadingMessage("Exploring creators…"),flags:MessageFlags.Ephemeral});
+    if(category==="webnovel"){
+      await interaction.editReply({content:"Royal Road's public RSS feed does not provide a creator directory. Open the fiction by its ID or official URL to view the story and chapter metadata.",embeds:[],components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])]});
+      return;
+    }
     if(category==="book"){
       const books=await this.books.search("inauthor:"+query.trim());
       const authorUrl="https://books.google.com/books?as_authors="+encodeURIComponent(query.trim());
@@ -1757,7 +1904,7 @@ export class DiscoverCommand implements FeatureCommand {
   private async crossMediaSimilarityAndRespond(
     interaction: ChatInputCommandInteraction,
     query: string,
-    category: Exclude<Category, "all">,
+    category: Exclude<Category, "all" | "webnovel">,
   ): Promise<void> {
     await interaction.reply({
       content: loadingMessage("Finding source-backed cross-media matches…"),
@@ -2194,6 +2341,7 @@ export class DiscoverCommand implements FeatureCommand {
       case "manga": return (await this.anilist.search(query, "MANGA", false, filters)).map((item) => anilistRecord(item, "manga"));
       case "light_novel": return (await this.anilist.search(query, "MANGA", true, filters)).map((item) => anilistRecord(item, "light_novel"));
       case "book": return (await this.books.search(query)).map((item) => ({ provider: "Google Books", category: "book", item }));
+      case "webnovel": return [{ provider: "Royal Road", category: "webnovel", item: await this.royalRoad.getFiction(query) }];
       case "movie": return (await this.tmdb.search(query, "movie")).map((item) => ({ provider: "TMDB", category: "movie", item }));
       case "tv": return (await this.tmdb.search(query, "tv")).map((item) => ({ provider: "TMDB", category: "tv", item }));
       case "game": {
@@ -2216,6 +2364,7 @@ export class DiscoverCommand implements FeatureCommand {
         case "manga": return (await this.anilist.random("MANGA")).map((media) => anilistRecord(media, "manga"));
         case "light_novel": return (await this.anilist.random("MANGA", true)).map((media) => anilistRecord(media, "light_novel"));
         case "book": return randomOne(await this.books.search("popular fiction")).map((media) => ({ provider: "Google Books", category: "book", item: media }));
+        case "webnovel": return [];
         case "movie": return randomOne(await this.tmdb.trending("movie")).map((media) => ({ provider: "TMDB", category: "movie", item: media }));
         case "tv": return randomOne(await this.tmdb.trending("tv")).map((media) => ({ provider: "TMDB", category: "tv", item: media }));
         case "game": {
@@ -2252,6 +2401,7 @@ export class DiscoverCommand implements FeatureCommand {
       case "manga": return (await this.anilist.trending("MANGA")).map((item) => anilistRecord(item, "manga"));
       case "light_novel": return (await this.anilist.search("light novel", "MANGA", true)).map((item) => anilistRecord(item, "light_novel"));
       case "book": return (await this.books.search("popular fiction")).map((item) => ({ provider: "Google Books", category: "book", item }));
+      case "webnovel": return [];
       case "movie": return (await this.tmdb.trending("movie")).map((item) => ({ provider: "TMDB", category: "movie", item }));
       case "tv": return (await this.tmdb.trending("tv")).map((item) => ({ provider: "TMDB", category: "tv", item }));
       case "game": {
