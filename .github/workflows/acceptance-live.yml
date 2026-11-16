@@ -1,0 +1,266 @@
+name: Live acceptance checks
+
+on:
+  workflow_dispatch:
+    inputs:
+      acceptance_scope:
+        description: Select which live acceptance checks to execute.
+        required: true
+        type: choice
+        options:
+          - all
+          - postgres-staging
+          - discord
+          - s3-live
+          - providers
+          - dashboard-oauth
+        default: all
+      confirm_database:
+        description: "For postgres-staging only, type DISPOSABLE_STAGING to confirm the supplied database is a disposable staging copy."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  providers:
+    if: inputs.acceptance_scope == 'all' || inputs.acceptance_scope == 'providers'
+    name: Live metadata-provider acceptance
+    runs-on: ubuntu-latest
+    env:
+      LEMEGETON_LIVE_PROVIDER_TESTS: "1"
+      STEAM_API_KEY: ${{ secrets.STEAM_API_KEY }}
+      STEAM_TEST_PROFILE_ID: ${{ secrets.STEAM_TEST_PROFILE_ID }}
+      IGDB_CLIENT_ID: ${{ secrets.IGDB_CLIENT_ID }}
+      IGDB_CLIENT_SECRET: ${{ secrets.IGDB_CLIENT_SECRET }}
+      TMDB_BEARER_TOKEN: ${{ secrets.TMDB_BEARER_TOKEN }}
+      GOOGLE_BOOKS_API_KEY: ${{ secrets.GOOGLE_BOOKS_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Require provider credentials
+        run: |
+          set -Eeuo pipefail
+          test -n "$STEAM_API_KEY"
+          test -n "$STEAM_TEST_PROFILE_ID"
+          test -n "$IGDB_CLIENT_ID"
+          test -n "$IGDB_CLIENT_SECRET"
+          test -n "$TMDB_BEARER_TOKEN"
+      - run: npm install --no-audit --no-fund
+      - run: npm run build
+      - name: Query live providers
+        run: node --test dist/tests/providers-live.integration.test.js
+
+  discord:
+    if: inputs.acceptance_scope == 'all' || inputs.acceptance_scope == 'discord'
+    name: Live Discord guild acceptance
+    runs-on: ubuntu-latest
+    env:
+      DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+      GUILD_ID: ${{ secrets.DISCORD_TEST_GUILD_ID }}
+      DISCORD_TEST_INVITER_ID: ${{ secrets.DISCORD_TEST_INVITER_ID }}
+      DISCORD_TEST_CHANNEL_ID: ${{ secrets.DISCORD_TEST_CHANNEL_ID }}
+      DISCORD_TEST_MODERATOR_GUILD_ID: ${{ secrets.DISCORD_TEST_MODERATOR_GUILD_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Require a dedicated test bot and guild
+        run: |
+          set -Eeuo pipefail
+          test -n "$DISCORD_TOKEN"
+          test -n "$GUILD_ID"
+          test -n "$DISCORD_TEST_INVITER_ID"
+          test -n "$DISCORD_TEST_CHANNEL_ID"
+          test -n "$DISCORD_TEST_MODERATOR_GUILD_ID"
+      - run: npm install --no-audit --no-fund
+      - name: Verify bot membership, permissions, audit log and deployed commands
+        run: node scripts/acceptance/discord.mjs
+
+  dashboard-oauth:
+    if: inputs.acceptance_scope == 'all' || inputs.acceptance_scope == 'dashboard-oauth'
+    name: Live dashboard OAuth bootstrap
+    runs-on: ubuntu-latest
+    env:
+      DASHBOARD_CLIENT_ID: ${{ secrets.DASHBOARD_CLIENT_ID }}
+      DASHBOARD_CLIENT_SECRET: ${{ secrets.DASHBOARD_CLIENT_SECRET }}
+      DASHBOARD_REDIRECT_URI: ${{ secrets.DASHBOARD_REDIRECT_URI }}
+      DASHBOARD_PUBLIC_URL: ${{ secrets.DASHBOARD_PUBLIC_URL }}
+      DASHBOARD_BRIDGE_SECRET: ${{ secrets.DASHBOARD_BRIDGE_SECRET }}
+      DASHBOARD_HOST: "127.0.0.1"
+      DASHBOARD_PORT: "18080"
+      DASHBOARD_COOKIE_SECURE: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Require matching Discord OAuth configuration
+        run: |
+          set -Eeuo pipefail
+          test -n "$DASHBOARD_CLIENT_ID"
+          test -n "$DASHBOARD_CLIENT_SECRET"
+          test -n "$DASHBOARD_REDIRECT_URI"
+          test -n "$DASHBOARD_PUBLIC_URL"
+          test "${#DASHBOARD_BRIDGE_SECRET}" -ge 32
+          case "$DASHBOARD_PUBLIC_URL" in https://*) ;; *) exit 1 ;; esac
+          case "$DASHBOARD_REDIRECT_URI" in "$DASHBOARD_PUBLIC_URL"/oauth/callback) ;; *) exit 1 ;; esac
+      - name: Run OAuth, session, permission and dashboard API tests
+        run: cargo test --manifest-path web/backend/Cargo.toml
+      - name: Build Rust dashboard
+        run: cargo build --manifest-path web/backend/Cargo.toml --release
+      - name: Start dashboard and validate live OAuth redirect
+        run: |
+          set -Eeuo pipefail
+          target_dir="$(cargo metadata --manifest-path web/backend/Cargo.toml --no-deps --format-version 1 | jq -r .target_directory)"
+          "$target_dir/release/lemegeton-dashboard" > "$RUNNER_TEMP/dashboard.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/dashboard.pid"
+          cleanup() {
+            if test -f "$RUNNER_TEMP/dashboard.pid"; then kill "$(cat "$RUNNER_TEMP/dashboard.pid")" 2>/dev/null || true; fi
+          }
+          trap cleanup EXIT
+          ready=false
+          for attempt in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:18080/login -o /dev/null; then ready=true; break; fi
+            sleep 1
+          done
+          test "$ready" = true
+          status="$(curl --silent --output /dev/null --dump-header "$RUNNER_TEMP/oauth.headers" --write-out '%{http_code}' http://127.0.0.1:18080/oauth/start)"
+          test "$status" = "303"
+          location="$(awk 'tolower($1) == "location:" { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit }' "$RUNNER_TEMP/oauth.headers")"
+          python3 - "$location" <<'PY'
+          import os
+          import sys
+          from urllib.parse import parse_qs, urlparse
+
+          location = urlparse(sys.argv[1])
+          query = parse_qs(location.query, strict_parsing=True)
+          expected = {
+              "client_id": os.environ["DASHBOARD_CLIENT_ID"],
+              "redirect_uri": os.environ["DASHBOARD_REDIRECT_URI"],
+              "response_type": "code",
+              "scope": "identify guilds",
+          }
+          if location.scheme != "https" or location.netloc != "discord.com" or location.path != "/oauth2/authorize":
+              raise SystemExit("OAuth authorization URL did not target Discord's HTTPS authorize endpoint.")
+          for key, value in expected.items():
+              if query.get(key) != [value]:
+                  raise SystemExit(f"OAuth authorization URL has an incorrect {key} parameter.")
+          state = query.get("state", [""])[0]
+          if len(state) != 64 or not state.isalnum():
+              raise SystemExit("OAuth authorization state is not the expected 64-character token.")
+          PY
+          grep -Eiq '^set-cookie: lemegeton_oauth_state=.*HttpOnly.*SameSite=Lax.*Secure' "$RUNNER_TEMP/oauth.headers"
+
+  postgres-staging:
+    if: inputs.acceptance_scope == 'all' || inputs.acceptance_scope == 'postgres-staging'
+    name: Staging migration, integrity and backup/restore acceptance
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: migration-restore-${{ github.run_id }}-${{ github.run_attempt }}
+          POSTGRES_DB: lemegeton_restore
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d lemegeton_restore"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      CONFIRM_DATABASE: ${{ inputs.confirm_database }}
+      MIGRATION_ACCEPTANCE_DATABASE_URL: ${{ secrets.MIGRATION_ACCEPTANCE_DATABASE_URL }}
+      TEST_DATABASE_URL: ${{ secrets.MIGRATION_ACCEPTANCE_DATABASE_URL }}
+      RESTORE_DATABASE_URL: postgresql://postgres:migration-restore-${{ github.run_id }}-${{ github.run_attempt }}@127.0.0.1:5432/lemegeton_restore
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Require an explicitly disposable staging copy
+        run: |
+          set -Eeuo pipefail
+          test "$CONFIRM_DATABASE" = "DISPOSABLE_STAGING"
+          test -n "$MIGRATION_ACCEPTANCE_DATABASE_URL"
+          echo "Only the explicitly confirmed disposable staging database will be read; migration tests create and drop isolated schemas."
+      - run: npm install --no-audit --no-fund
+      - run: npm run build
+      - name: Execute legacy migration and rollback integration tests
+        run: node --test dist/tests/database-schema.test.js
+      - name: Dump staging database and restore into isolated PostgreSQL 16
+        run: |
+          set -Eeuo pipefail
+          docker run --rm --network host --entrypoint sh \
+            -e SOURCE_DB_URL="$MIGRATION_ACCEPTANCE_DATABASE_URL" \
+            -e RESTORE_DATABASE_URL \
+            -v "$RUNNER_TEMP:/backup" postgres:16 -ec '
+              pg_dump "$SOURCE_DB_URL" --format=custom --no-owner --no-acl --file=/backup/migration-acceptance.dump
+              pg_restore --exit-on-error --no-owner --no-acl --dbname="$RESTORE_DATABASE_URL" /backup/migration-acceptance.dump
+              test "$(psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT current_schema()")" = "public"
+              psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = current_schema() ORDER BY tablename" > /backup/source-tables.txt
+              psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = current_schema() ORDER BY tablename" > /backup/restored-tables.txt
+              diff -u /backup/source-tables.txt /backup/restored-tables.txt
+              psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT table_name || '.' || column_name || ':' || data_type || ':' || is_nullable || ':' || COALESCE(column_default, '') FROM information_schema.columns WHERE table_schema = 'public' ORDER BY table_name, ordinal_position" > /backup/source-columns.txt
+              psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT table_name || '.' || column_name || ':' || data_type || ':' || is_nullable || ':' || COALESCE(column_default, '') FROM information_schema.columns WHERE table_schema = 'public' ORDER BY table_name, ordinal_position" > /backup/restored-columns.txt
+              diff -u /backup/source-columns.txt /backup/restored-columns.txt
+              psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT conrelid::regclass::text || ':' || conname || ':' || pg_get_constraintdef(oid) FROM pg_catalog.pg_constraint WHERE connamespace = 'public'::regnamespace ORDER BY conrelid::regclass::text, conname" > /backup/source-constraints.txt
+              psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT conrelid::regclass::text || ':' || conname || ':' || pg_get_constraintdef(oid) FROM pg_catalog.pg_constraint WHERE connamespace = 'public'::regnamespace ORDER BY conrelid::regclass::text, conname" > /backup/restored-constraints.txt
+              diff -u /backup/source-constraints.txt /backup/restored-constraints.txt
+              psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT tablename || ':' || indexname || ':' || indexdef FROM pg_catalog.pg_indexes WHERE schemaname = 'public' ORDER BY tablename, indexname" > /backup/source-indexes.txt
+              psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT tablename || ':' || indexname || ':' || indexdef FROM pg_catalog.pg_indexes WHERE schemaname = 'public' ORDER BY tablename, indexname" > /backup/restored-indexes.txt
+              diff -u /backup/source-indexes.txt /backup/restored-indexes.txt
+              while IFS= read -r table; do
+                case "$table" in *[!a-z0-9_]*) echo "Unexpected table identifier in staging database" >&2; exit 1 ;; esac
+                source_count="$(psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT count(*) FROM public.$table")"
+                restored_count="$(psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT count(*) FROM public.$table")"
+                test "$source_count" = "$restored_count"
+                source_digest="$(psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT COALESCE(md5(string_agg(row_hash, '' ORDER BY row_hash)), md5('')) FROM (SELECT md5(to_jsonb(source_row)::text) AS row_hash FROM public.$table AS source_row) AS row_hashes")"
+                restored_digest="$(psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT COALESCE(md5(string_agg(row_hash, '' ORDER BY row_hash)), md5('')) FROM (SELECT md5(to_jsonb(restored_row)::text) AS row_hash FROM public.$table AS restored_row) AS row_hashes")"
+                test "$source_digest" = "$restored_digest"
+              done < /backup/source-tables.txt
+            '
+
+  s3-live:
+    if: inputs.acceptance_scope == 'all' || inputs.acceptance_scope == 's3-live'
+    name: Live private S3 upload, retrieval and cleanup acceptance
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: lemegeton-s3-${{ github.run_id }}-${{ github.run_attempt }}
+          POSTGRES_DB: lemegeton_s3_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d lemegeton_s3_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:lemegeton-s3-${{ github.run_id }}-${{ github.run_attempt }}@127.0.0.1:5432/lemegeton_s3_test
+      S3_TEST_ENDPOINT_URL: ${{ secrets.S3_TEST_ENDPOINT_URL }}
+      S3_TEST_ACCESS_KEY_ID: ${{ secrets.S3_TEST_ACCESS_KEY_ID }}
+      S3_TEST_SECRET_ACCESS_KEY: ${{ secrets.S3_TEST_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Require a dedicated disposable S3-compatible test account
+        run: |
+          set -Eeuo pipefail
+          test -n "$S3_TEST_ENDPOINT_URL"
+          test -n "$S3_TEST_ACCESS_KEY_ID"
+          test -n "$S3_TEST_SECRET_ACCESS_KEY"
+          case "$S3_TEST_ENDPOINT_URL" in https://*) ;; *) exit 1 ;; esac
+      - run: npm install --no-audit --no-fund
+      - run: npm run build
+      - name: Test private upload, signed download, wrong-guild denial and failed-delete recovery
+        run: node --test dist/tests/media-storage-s3.integration.test.js

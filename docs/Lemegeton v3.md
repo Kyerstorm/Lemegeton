@@ -1,9 +1,9 @@
 # Lemegeton v3 — Product & Engineering Specification
 
 **Status:** Approved product direction; implementation in progress  
-**Target branch:** multi_guild  
-**Existing staging PR:** #17 (draft); ongoing work is committed directly to `multi_guild`  
-**Implementation status:** TypeScript runtime foundations for `/discover`, `/archive`, `/community`, `/play`, and `/profile` are present on `multi_guild`. Full feature parity remains in progress; `/custom-role`, `/settings`, the complete Knowledge Atlas, and media-specific notifications still require implementation and verification.  
+**Target branch:** lemegeton-v3  
+**Pull request:** #17 — keep Draft  
+**Implementation status:** in-scope code migration and TypeScript feature parity are complete; live-service acceptance remains pending. This PR does not deploy or cut over the bot.  
 **Product scope:** Media Intelligence, Community Archive, Community Activities, Interactive Media Games, Social & Profiles, Custom Roles, Media Notifications & Automation, Community Knowledge Atlas, and Operations & Infrastructure.
 
 ---
@@ -76,9 +76,9 @@ This does not remove essential permissions, reporting, review queues, audit reco
 | Media objects | Keep the existing S3-compatible storage and private/public separation |
 | Metadata | Migrate and reuse existing provider integrations after verification |
 | Background processing | Durable, idempotent jobs using the existing infrastructure where suitable |
-| Hosting | Preserve the current deployment model until the migration audit establishes what must change |
+| Hosting | Verify the intended deployment model as part of release readiness; do not infer a live deployment from source files |
 
-The repository currently has a Python/discord.py bot. The dashboard is a React + TypeScript frontend built with Vite and served by the existing Rust/Axum service. The frontend migration therefore means replacing the Vite frontend with Next.js; it does **not** mean rewriting the Rust API or creating a second bot backend.
+The `multi_guild` source branch contains the earlier Python/discord.py bot implementation; the `lemegeton-v3` branch contains the replacement TypeScript/Discord.js runtime. The Python files are source references for reviewing selected behavior, not evidence that a Python bot is currently deployed. The v3 dashboard frontend is a Next.js App Router application using React and TypeScript, statically served by the existing Rust/Axum service. It does **not** create a second bot backend.
 
 The existing PostgreSQL schema, S3 asset registry, private/public storage rules, OAuth2 flow, bot bridge, and deployment configuration must be inspected before changes are made. Reuse them where they still meet v3 requirements. Do not introduce a parallel database, storage layer, command registry, permission model, or authentication system.
 
@@ -97,9 +97,19 @@ The TypeScript bot owns:
 
 Discord handlers should validate the interaction, resolve the actor and guild context, authorize the operation, call a domain operation, and present its result. Provider-specific logic must not be embedded in button callbacks or command presentation code.
 
+### 2.1.1 Gateway intents and guild membership
+
+The TypeScript runtime currently requests the `Guilds`, `GuildMembers`, `GuildMessages`, and `MessageContent` gateway intents. Enable the privileged **Server Members Intent** and **Message Content Intent** for the application in the Discord Developer Portal before deploying this runtime.
+
+- `GuildMembers` is required for booster/allowed-role eligibility changes, member join/leave handling, and full-guild Custom Role reconciliation.
+- `MessageContent` is used by the configured Community Archive upload-channel workflow.
+- When the bot cannot fetch a complete member list, Custom Role reconciliation must fail closed: skip the automatic archive pass, log the reason, and leave saved roles untouched. Do not infer ineligibility from a partial cache.
+
+The PostgreSQL startup migration widens the existing `booster_roles.discord_id`, `guild_id`, and `role_id` columns to `BIGINT` when that pre-v3 table exists. This is a widening conversion that preserves existing rows and its primary key; the existing source table remains read-only during any approved one-time import.
+
 ### 2.2 Dashboard responsibilities
 
-The dashboard remains the control plane for the running bot, not a second Discord client or an alternate command registry.
+Once v3 is deployed, the dashboard is the control plane for the bot, not a second Discord client or an alternate command registry.
 
 The Next.js frontend should provide larger-screen interfaces for:
 
@@ -156,6 +166,25 @@ The target command surface should be intentionally compact:
 | **/profile** | Social & Profiles | /profile, /login, /user, /affinity, /anilist-leaderboard, /server-taste, and supported Steam/AniList account-linking and profile displays |
 | **/custom-role** | Custom Roles | Existing member custom-role panel and administrator custom-role panel, unified into one command |
 | **/settings** | Selected feature configuration and the existing control plane | Existing /dashboard, dashboard section toggles, and relevant /server-config controls for the selected v3 systems |
+| **/music** | Music artist release tracking | Artist release subscriptions across Spotify, YouTube Music, and SoundCloud, with scheduled announcements and tracker management |
+| **/language** | Required server language setup | One required autocomplete option selecting from 183 ISO 639-1 language codes; only members with Manage Server permission may use or change it; permanently protected from dashboard disabling |
+| **/help** | Standalone command guide | Keep independently discoverable; do not absorb it into a feature command or /settings |
+| **/privacy** | Standalone privacy notice | Keep the privacy notice independently accessible; do not hide it inside /profile or /settings |
+| **/feedback** | Standalone feedback intake | Keep feedback submission independent from the eight feature environments |
+
+The eight feature rows above remain the major feature environments. `/language` is a separate required server-setup command with exactly one required autocomplete option. Every server must select its language as well as its data-retention policy before normal bot functionality unlocks. Only members with Manage Server permission may use or change the server language. The /language command is permanently protected from dashboard disabling. The preferred locale is used for bot-owned interface text passed through the translation helper. Member submissions, archive content, media titles, and provider descriptions must not be sent to translation providers. Command-specific UI coverage is incremental; this does not claim that every command response is already localized. **/help, /privacy, and /feedback are deliberate standalone exceptions** and must each remain independently registered top-level slash commands.
+
+#### 3.2.1 Standalone bot-moderator commands
+
+The following operational commands are also independent top-level slash commands and must never be absorbed into a feature command:
+
+| Command | Purpose | Access |
+|---|---|---|
+| **/log** | Inspect a server-scoped diagnostic issue reference | Bot moderator only |
+| **/moderators** | Manage the bot-wide moderator allowlist | Bot moderator only |
+| **/planned** | Browse and maintain the internal development plan | Bot moderator only |
+
+These three commands are restricted to one explicitly configured Discord server through `BOT_MODERATOR_GUILD_ID`. They must be registered as guild commands for that server, never as global application commands. Runtime handlers must independently verify the configured guild ID and bot-moderator authorization on every command, button, select-menu, and modal interaction. A missing or invalid guild configuration must fail closed: do not register these commands anywhere and reject their interactions. This restriction applies only to these three operational commands; the eight feature environments and the three standalone member utility commands remain available in their configured guild installations.
 
 This is the target architecture, not a mandate to preserve every old spelling or every undocumented behavior. During the repository audit, verify each command and map it to one of these destinations or to an explicit out-of-scope decision.
 
@@ -1197,7 +1226,7 @@ Do not create extensive test infrastructure for trivial changes. Add tests propo
 - Preserve migration history and deployment configuration.
 - Define recovery steps for failed schema migrations.
 - Make scheduled-job recovery safe after restart.
-- Keep production cutover reversible until the new bot has passed parity checks.
+- Keep the first deployment and rollback reversible until the new bot has passed parity checks.
 - Protect backup access and never publish private user data in repository artifacts.
 
 ### 13.9 Security and privacy
@@ -1216,13 +1245,13 @@ Do not create extensive test infrastructure for trivial changes. Add tests propo
 
 ### 13.10 Deployment and release management
 
-- Preserve the current deployment model until a migration audit confirms required changes.
+- Keep first deployment as a separate, owner-authorized release after the code migration and live-service acceptance gates are complete.
 - Make the bot and dashboard build reproducible.
 - Use health checks appropriate to each service.
 - Separate required startup configuration from optional provider credentials.
 - Fail clearly when required configuration is missing.
 - Provide safe graceful shutdown and restart behavior.
-- Verify bot command registration and dashboard compatibility before production cutover.
+- Verify bot command registration and dashboard compatibility before the first deployment.
 - Keep environment examples synchronized with actual configuration.
 - Do not report a deployment or command sync as successful without confirming the result.
 
@@ -1305,15 +1334,21 @@ Existing useful functionality must be mapped before implementation. This invento
 | /steam-profile | /profile | Preserve supported Steam profile display |
 | /steam-recommendation | /discover | Merge into gaming discovery |
 | /steam-game | /discover | Merge into game discovery |
-| Free-game notifications | Media Notifications | Audit and preserve only supported game-release/deal notifications that fit the media scope |
+| Free-game notifications | Media Notifications | Do not port the previous Python monitor as-is: its Steam path parses storefront search responses and uses undocumented endpoints, while the Epic/GOG storefront feeds also lack a verified supported integration contract. Revisit only with a stable, permitted provider source. |
 | Custom theme commands | Out of approved expansion | Do not build a general theme or appearance system |
 | /invite-stats and /invite-leaderboard | Out of approved expansion | Do not build general invite analytics |
-| /feedback | Out of approved expansion | Do not create a separate generic feedback product as part of this scope |
+| /feedback | Standalone command (explicit exception) | Retain the existing feedback intake as its own top-level command; do not absorb it into a feature environment |
+| /privacy | Standalone command (explicit exception) | Retain the navigable privacy notice as its own top-level command |
+| /help | Standalone command (explicit exception) | Retain a focused command guide as its own top-level command |
+| /discovery-hub | /discover | Move discovery navigation into /discover rather than keep a duplicate command hub |
 | /planned-features | Out of approved expansion | Do not recreate a generic voting backlog |
-| /help and /discovery-hub | Native command discovery and contextual help | Do not add another top-level command hub |
 | /library-backup | Out of approved expansion | Do not create a Lemegeton personal media library or progress system |
 | /news and /test-twitter-scrape | Audit before any migration | Do not preserve brittle or unsupported scraping merely because an old command existed |
 | Generic utilities and invite commands | Out of approved expansion | Do not increase command count with unrelated utilities |
+
+
+
+The previous free-game checker is deliberately not included in this phase. Its Steam implementation depends on storefront search parsing and undocumented endpoints; the current Steam Web API reference and Free to Keep documentation do not supply a general public promotions feed. The GOG developer documentation describes the Galaxy SDK rather than a supported public store-catalog API. See the [Steam Web API reference](https://partner.steamgames.com/doc/webapi), [Steam Free to Keep documentation](https://partner.steamgames.com/doc/marketing/discounts/freetokeep), and [GOG developer documentation](https://docs.gog.com/) for the published platform interfaces. Do not reintroduce these scrapers as a substitute for a stable provider integration.
 
 ### 15.2 Historical Lemegeton v2 commands
 
@@ -1348,8 +1383,9 @@ The separate lemegeton-v2 branch contains older commands and modules that must r
 | /invite-stats, /invite-leaderboard, and /invite-theme | Not in the approved expansion. |
 | /anilist-leaderboard | Audit and retain only appropriate provider-based community summaries within /profile or /community. |
 | /affinity | Preserve through /profile with consent and privacy controls. |
-| /feedback | Not in the approved expansion. |
-| /help | Replace command sprawl with Discord-native discoverability and contextual help. |
+| /feedback | Preserve as a standalone top-level feedback command; it is an explicit exception to feature consolidation. |
+| /privacy | Preserve as a standalone top-level privacy notice. |
+| /help | Preserve as a standalone top-level command guide; it is not another feature hub. |
 | /notifications | Narrow to media notifications and subscriptions only. |
 | /say | General utility outside the selected scope. |
 | /userinfo | Merge into /profile where useful. |
@@ -1425,42 +1461,34 @@ Provider information may be displayed when the member explicitly links and autho
 
 ---
 
-## 17. Migration plan
+## 17. Migration and release status
 
-The redevelopment is staged so the new bot does not lose existing behavior during the rewrite.
+### Code migration — 13 November 2026
 
-### Current implementation checkpoint — 6 November 2026
+The in-scope code migration and TypeScript feature-parity work for Lemegeton v3 is complete. The `lemegeton-v3` branch is synchronized with its `multi_guild` base (zero commits behind), and the final feature-port changes are in the existing Draft PR #17. This status describes repository code and automated checks; it does not certify integrations that require live credentials or a production environment.
 
-The new TypeScript/Node.js/Discord.js runtime is established under `bot/`. It includes validated startup configuration, structured logging, slash-command registration and interaction routing, an AniList provider adapter, and the first functional `/discover` environment for anime and manga search and trending results. Focused provider/configuration tests and a dedicated CI workflow are included. This is the first migration slice, not feature parity: the existing Python bot, PostgreSQL layer, Rust/Axum dashboard API, and S3 storage remain in place until each replacement workflow has been migrated and verified. The remaining feature environments and production cutover are still outstanding.
+The Discord bot runtime is TypeScript/Discord.js, with PostgreSQL persistence, provider integrations in `helpers/integration/`, feature commands in `src/commands/`, the Next.js dashboard in `web/frontend/`, and the Rust/Axum service in `web/backend/`. The feature command surface is `/discover`, `/archive`, `/community`, `/play`, `/profile`, `/custom-role`, `/settings`, and `/music`. `/help`, `/privacy`, and `/feedback` remain independent standalone commands.
 
-1. **Repository and behavior audit** — inventory all loaded cogs, commands, interactions, jobs, helpers, providers, schemas, dashboard endpoints, deployment scripts, permissions, and tests. Include both normal cogs and dynamically loaded test-cog paths. Identify which documented features are actually implemented.
-2. **Command consolidation map** — produce the final mapping from existing commands to /discover, /archive, /community, /play, /profile, /custom-role, and /settings. Identify historical, test-only, backup, and out-of-scope commands. Do not implement additional command entry points merely to preserve old CRUD commands.
-3. **TypeScript bot foundation** — establish the Node.js/Discord.js runtime, typed configuration, logging, error handling, test setup, and feature command routing with focused home panels.
-4. **Data and domain layer** — port the existing PostgreSQL access and domain behavior without creating competing schemas. Add only migrations required for v3 records and graph relationships.
-5. **Provider migration** — port and verify existing provider adapters independently, preserving supported fields, rate limits, error handling, and provenance.
-6. **Media Intelligence** — migrate browsing, search, recommendations, random discovery, comparisons, creators, franchises, game discovery, supported release information, and relationship exploration into /discover.
-7. **Community Archive** — migrate existing archive behavior first, then add mixed collections, Archive Trails, collaboration, graph links, and approved submission/search/moderation improvements.
-8. **Community Activities** — unify Daily Drop, rankings, sessions, discussions, release calendar, competitions, and Archive Throwbacks inside /community.
-9. **Interactive Media Games** — migrate the supported quiz behavior and implement selected source-backed media game modes through /play.
-10. **Social & Profiles** — migrate supported provider linking, profile presentation, affinity, and opt-in aggregate server taste into /profile.
-11. **Custom Roles** — preserve and consolidate the existing custom-role member/admin experience into one /custom-role command.
-12. **Media Notifications & Automation** — implement title subscriptions, release digests, media update processing, and selected media-linked community automation.
-13. **Community Knowledge Atlas** — establish stable graph identities and provenance, then deliver Discord graph snapshots and the interactive Next.js graph canvas with image-backed nodes.
-14. **Next.js dashboard** — replace the current Vite frontend while retaining the Rust/Axum API and existing authorization model. Integrate the Atlas and selected configuration views.
-15. **Operations & Infrastructure hardening** — complete observability, job reliability, backups, recovery, tests, deployment gates, and production diagnostics.
-16. **Parity and production cutover** — test multi-guild isolation, providers, interactions, dashboard authorization, graph visibility, scheduled jobs, data compatibility, and deployment. Switch the live bot only after the selected feature inventory has acceptable parity.
-17. **Retire the Python runtime** — remove the old runtime only after the TypeScript bot is running successfully and the migration has been explicitly verified. Do not delete legacy code early merely to make the repository look cleaner.
+### Remaining live-service acceptance
 
-The order may change based on dependencies discovered during the audit, but the compact command surface, selected product scope, and preservation of existing useful behavior remain fixed requirements.
+The following checks require owner-provided credentials and real staging/production services:
+
+1. PostgreSQL migration dry-run, data-integrity comparison, rollback, and backup/restore against the target deployment.
+2. Discord application and real-guild interaction, permissions, command-registration, and multi-guild acceptance.
+3. Private S3-compatible storage upload, retrieval, deletion, and failed-cleanup recovery.
+4. Live provider validation for AniList, Steam, IGDB, TMDB, Google Books, and optional Spotify, YouTube Data API, and SoundCloud credentials.
+5. Dashboard OAuth, bot bridge authentication, and guild authorization using the registered application.
+
+No production deployment or cutover has been performed. First deployment remains a separate, explicitly owner-authorized release activity after the live-service gates are accepted. Keep PR #17 in Draft until that work and owner review are complete.
 
 ---
-
 ## 18. Acceptance criteria
 
 The v3 redevelopment is ready for release only when:
 
 ### Command architecture
-- The public slash-command surface is limited to the seven feature entry points: /discover, /archive, /community, /play, /profile, /custom-role, and /settings, unless a separately justified exception is approved.
+- The eight major feature entry points are /discover, /archive, /community, /play, /profile, /custom-role, /settings, and /music.
+- /help, /privacy, and /feedback are three explicit standalone top-level command exceptions. Each has its own command module and registration; none is merged into a feature command.
 - Daily, rankings, sessions, discussions, calendar, notifications, and Knowledge Atlas are not separate top-level slash commands.
 - Archive CRUD operations are handled within /archive rather than separate commands.
 - Existing commands are mapped to their new feature environments or explicitly recorded as out of scope.
@@ -1516,7 +1544,7 @@ The v3 redevelopment is ready for release only when:
 - Interaction failures, expired controls, missing permissions, provider outages, and disabled features produce clear feedback.
 - CI runs the relevant type, build, lint, and test checks.
 - Documentation and deployment instructions reflect the actual implementation.
-- Python is not retired until parity and production cutover checks have passed.
+- This PR does not delete Python reference files from `multi_guild`; v3 first deployment is a separate, owner-authorized release action.
 
 ---
 
@@ -1547,7 +1575,7 @@ Re-check the current Discord API and Discord.js support when implementing each c
 
 ## 21. Historical repository references
 
-The v3 migration audit should use the actual repository source as its authority. Useful starting points include:
+These historical source links are retained for provenance and reference, not as an unfinished migration checklist. Verify the current branch and implementation before extending behavior:
 
 - [Lemegeton v2 README and command catalogue](https://github.com/Kyerstorm/Lemegeton/blob/lemegeton-v2/Lemegeton_v2/README.md)
 - [V2 birthday module](https://github.com/Kyerstorm/Lemegeton/blob/lemegeton-v2/cogs_test/General_Commands/birthday.py)
@@ -1569,7 +1597,7 @@ These links are historical audit starting points, not implementation guarantees.
 
 This catalogue records fifty substantial feature concepts raised during v3 planning. It is deliberately a catalogue of **feature environments, workflows, and specialist views**, not a plan to register fifty top-level Discord slash commands.
 
-The approved public command surface remains the seven feature entry points in Section 3:
+The approved public command surface remains the eight major feature entry points in Section 3, plus the three independently registered /help, /privacy, and /feedback commands:
 
 - `/discover`
 - `/archive`
@@ -1675,7 +1703,7 @@ The list is a product backlog for evaluation and sequencing. Listing an idea doe
 
 ### 22.9 Consolidation map
 
-The fifty concepts route into the existing seven commands as follows:
+The fifty candidate environments route into the selected feature commands as follows. `/music` separately owns the artist-release tracker ported from Lunar:
 
 | Public command | Environments owned |
 |---|---|
@@ -1686,12 +1714,13 @@ The fifty concepts route into the existing seven commands as follows:
 | **/profile** | 35–41 |
 | **/custom-role** | 42–43 |
 | **/settings** | Configuration for 44–47, plus authorized diagnostics (49) and restricted operational views (50) |
+| **/music** | Artist-release subscriptions and notification delivery across supported music providers |
 
 Some environments intentionally connect to more than one command. For example, a release can be discovered in `/discover`, followed for notifications through the media subscription system, and displayed in `/community`'s calendar. This is a shared domain workflow, not a reason to duplicate the underlying record or register more commands.
 
 ### 22.10 Rules for turning catalogue ideas into implementation
 
-1. Keep the seven-command public surface as the default. A new top-level command requires a documented usability reason and explicit approval.
+1. Keep the eight-command feature surface as the default. A new top-level command requires a documented usability reason and explicit approval.
 2. A candidate name with a slash prefix is a planning label unless it appears in the approved public command table in Section 3.
 3. Prefer adding a focused view or action to an existing metropolis over creating a separate command.
 4. Do not implement all fifty concepts at once. Sequence them by user value, data dependencies, provider support, security, and migration readiness.
@@ -1702,16 +1731,22 @@ Some environments intentionally connect to more than one command. For example, a
 9. Graph exports, spotlights, collections, community showcases, and global archive views must re-check source visibility at the point of display and export.
 10. A candidate enters implementation only after its behavior, source of truth, permissions, failure cases, storage needs, and focused acceptance tests have been defined.
 11. Preserve the distinction between a provider-confirmed fact, a provider-generated recommendation, a local similarity result, and a community-submitted suggestion.
-12. The catalogue does not change the 200,000-line aspiration into a target to manufacture. Codebase size must arise from real implemented behavior, integrations, tests, and operational needs.
+12. The catalogue does not justify manufacturing lines. `docs/EXPANSION_ROADMAP.md` defines a 100,000-line long-range TypeScript/TSX engineering budget; count only real, tested behavior, integrations, data/domain logic and operational needs, never empty modules, duplicated code or padding.
 
 
 
-## Retired Python command modules
+## Translation providers
 
-The TypeScript `/profile` environment replaces the old account/profile and server-taste commands. The following Python Cogs have therefore been removed from `multi_guild`:
+The optional fallback chain is **MADLAD-400 → DeepL → NLLB-200 → LibreTranslate/Argos → Google Cloud Translation**. Each provider is opt-in through environment settings; missing credentials simply skip it. The TypeScript process calls providers over HTTP and does not download or execute model weights.
 
-- `cogs/account/login.py` — AniList and Steam linking/unlinking.
-- `cogs/account/profile.py` — profile presentation and privacy controls.
-- `cogs/social/server_taste.py` — opted-in server taste aggregation.
+- **MADLAD-400-3B-MT** is the primary self-hosted model. Its weights are Apache-2.0, cover 400+ languages, and require a separately hosted inference endpoint. Translation quality varies by language and the model card notes that production use has not been fully assessed.
+- **DeepL API** is the second provider and requires both `DEEPL_TRANSLATION_URL` and `DEEPL_API_KEY`. Use the Free endpoint `https://api-free.deepl.com/v2/translate` or paid endpoint `https://api.deepl.com/v2/translate`, matching the account that issued the key. DeepL supports fewer languages than the guild language selector, so unsupported pairs and provider errors fall through. DeepL is proprietary and usage is subject to the account's plan and limits.
+- **NLLB-200** is a backup only when `NLLB_NONCOMMERCIAL_USE_CONFIRMED=true`. Its weights are CC-BY-NC 4.0, so enable it only for a strictly non-commercial deployment after reviewing the licence. Its model card also says the model is not released for production deployment. The bot forcibly disables NLLB when either ENVIRONMENT or NODE_ENV is production.
+- **LibreTranslate** is backed by Argos Translate, not a host for MADLAD or NLLB. Available language pairs depend on installed Argos packages. It runs after the model providers.
+- **Google Cloud Translation Basic** is the final fallback. It requires `GOOGLE_TRANSLATE_API_KEY` and an enabled Cloud Translation API in a Google Cloud project; usage may incur charges. It uses Google's official v2 REST API and is skipped when no key is configured.
 
-Their reusable Python helpers remain until all dependants are migrated. Custom-role files and mixed-purpose media/community Cogs remain active in the legacy runtime until their complete workflows are migrated.
+MADLAD and NLLB endpoints must implement the same JSON contract: `POST` with `text`, `source_language`, and `target_language`, returning `translated_text`. The model adapter converts ISO language codes to its model identifiers. DeepL uses its JSON `/v2/translate` API, LibreTranslate its form-encoded `/translate` API, and Google the Cloud Translation v2 JSON API. Configure endpoint URLs and private API tokens through `.env.example`; remote endpoints must use HTTPS. The model services are not provisioned by Docker Compose and require their own compute and model storage.
+
+Translations are cached in PostgreSQL by source language, target language, and SHA-256 of the source UI text. Only pass bot-owned static interface strings to `translateUiText`/`translateGuildUiText`. Never pass user submissions, private member data, archive entries, media titles, or provider descriptions. A failed or unavailable provider leaves the original English string intact. NLLB remains an explicit, licence-gated opt-in.
+
+Current integration localizes the language-setup confirmation and shared interaction-gate/control messages. Other command-specific messages still need to be migrated to the helper; setting a server language alone does not yet translate every response.

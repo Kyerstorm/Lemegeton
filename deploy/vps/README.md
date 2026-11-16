@@ -4,7 +4,7 @@ This setup runs the Discord bot and Rust dashboard under separate unprivileged s
 
 ## Install and build
 
-Use a currently supported Ubuntu/Debian release, apply security updates, and install Python 3.13, Node.js 22, stable Rust, Git, Nginx, and Certbot using your distribution's official sources.
+Use a currently supported Ubuntu/Debian release, apply security updates, and install Node.js 22, stable Rust, Git, Nginx, and Certbot using your distribution's official sources.
 
 Create dedicated runtime accounts and directories:
 
@@ -23,15 +23,14 @@ Clone the repo into `/opt/lemegeton`, then build as an administrator or dedicate
 
 ```sh
 cd /opt/lemegeton
-python3.13 -m venv .venv
-.venv/bin/python -m pip install --upgrade pip
-.venv/bin/pip install -r requirements.txt
-npm install --prefix Web/frontend --no-audit --no-fund
-npm run typecheck --prefix Web/frontend
-npm audit --prefix Web/frontend --audit-level=moderate
-npm run build --prefix Web/frontend
-cargo test --workspace
-cargo build --manifest-path Web/backend/Cargo.toml --release
+npm install --no-audit --no-fund
+npm test
+npm install --prefix web/frontend --no-audit --no-fund
+npm run typecheck --prefix web/frontend
+npm audit --prefix web/frontend --audit-level=moderate
+npm run build --prefix web/frontend
+cargo test --manifest-path web/backend/Cargo.toml
+cargo build --manifest-path web/backend/Cargo.toml --release
 ```
 
 Make source/build outputs root-owned and read-only to runtime users; only the bot's runtime directories should be writable:
@@ -101,9 +100,9 @@ The config limits per-client requests and concurrent connections, bounds request
 ## Firewall, backups, and updates
 
 - Expose SSH, TCP 80 (redirect/ACME), and TCP 443 only. Never expose TCP 8080, 8091, or 8092 in the VPS firewall or cloud security group.
-- Use SSH keys, restrict administrative access, keep the OS/Python/Rust/Node/Nginx packages patched, and limit access to environment files.
+- Use SSH keys, restrict administrative access, keep the OS/Node/Rust/Nginx packages patched, and limit access to environment files.
 - Back up the existing database and `data/` using the project's storage procedures. Keep backups and secrets unreadable by the web-service account.
-- For updates, rebuild frontend assets and the Rust binary as an administrator, restore root ownership, and restart services. Do not compile or install dependencies at runtime.
+- For updates, rebuild the TypeScript bundle, frontend assets, and Rust binary as an administrator, restore root ownership, and restart services. Do not compile or install dependencies at runtime.
 - Test the live OAuth flow, one permitted and one denied guild, logout, command-sync rollback, color/name/icon edits, and maximum-size image upload after each production update.
 
 Because sessions and OAuth state are in memory, one dashboard instance is supported. Horizontal scaling requires shared session storage and distributed rate limiting.

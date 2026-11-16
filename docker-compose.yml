@@ -12,9 +12,6 @@ services:
       DASHBOARD_HOST: "0.0.0.0"
       DASHBOARD_ALLOW_PUBLIC_BIND: "true"
       DASHBOARD_PORT: "8080"
-      PYTHONUNBUFFERED: "1"
-      PYTHONPATH: "/app"
-      PYTHONDONTWRITEBYTECODE: "1"
       HOME: "/app/runtime-home"
       XDG_CACHE_HOME: "/app/runtime-home/.cache"
       TMPDIR: "/tmp"
@@ -34,7 +31,7 @@ services:
     pids_limit: 512
     stop_grace_period: 45s
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/login', timeout=3).read(1)"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       start_period: 45s

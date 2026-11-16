@@ -1,12 +1,12 @@
 # Lemegeton Terms of Service
 
-**Effective date: November 3, 2026**
+**Effective date: November 12, 2026**
 
 By using Lemegeton, you agree to these Terms of Service, the [Privacy Policy](PRIVACY_POLICY.md), and the [Community Guidelines](COMMUNITY_GUIDELINES.md). If you do not agree, do not use the bot.
 
 ## 1. What Lemegeton provides
 
-Lemegeton is an open-source, multi-server Discord bot for media discovery, information, recommendations, community submissions, and related server tools. Features and integrations may change, become unavailable, or be removed.
+Lemegeton is an open-source, multi-guild Discord bot for media discovery, information, recommendations, archives, and community features. It may also provide an optional web dashboard. Features and integrations may change, become unavailable, or be removed.
 
 The bot is provided through Discord. Your use must also comply with Discord's terms, rules, and applicable platform policies.
 
@@ -20,15 +20,15 @@ You must have the rights or permission needed to submit material and links. Give
 
 Submissions can be reviewed, rejected, hidden, or removed by moderators or the project operator. Server-scoped submissions and decisions are managed in the originating server. Archive visibility can be configured globally or for one server; this visibility setting does not make moderation queues global.
 
-Lemegeton links to external works and providers. A listing or recommendation is not an endorsement, ownership claim, or guarantee that a work is available or accurate.
+Lemegeton links to external works and metadata providers. A listing or recommendation is not an endorsement, ownership claim, or guarantee that a work is available or accurate.
 
 ## 4. External services
 
-Some commands send search terms, links, provider identifiers, or account names to third-party services such as AniList, Steam, IGDB, TMDB, Google Books, and supported webnovel sources. Those providers control their own services and privacy practices. Their availability and terms may change.
+Supported features may contact AniList, Steam, IGDB, TMDB, Google Books, Discord, hosting services, PostgreSQL providers, and configured private object storage. A provider receives the request data needed for the selected feature and controls its own service and privacy practices. Availability and provider terms may change.
 
 ## 5. Availability and warranties
 
-Lemegeton is an open-source project supplied without a promise of uninterrupted availability, error-free operation, or suitability for a particular purpose. Metadata may be incomplete, delayed, unavailable, or incorrect. You should verify important information with its original provider.
+Lemegeton is an open-source project supplied without a promise of uninterrupted availability, error-free operation, or suitability for a particular purpose. Metadata may be incomplete, delayed, unavailable, or incorrect. Verify important information with its original provider.
 
 ## 6. Restrictions and enforcement
 
@@ -40,4 +40,4 @@ The source code is available at [Kyerstorm/Lemegeton](https://github.com/Kyersto
 
 ## 8. Changes and contact
 
-These terms may be updated. A material policy update may require you to accept the new version before using commands again. For questions or privacy requests, use the project's Support Server linked by the bot's help command. Do not send private data through public feedback channels.
+These terms may be updated. A material policy update may require you to accept the new version before using commands again. For questions or privacy requests, contact the operator privately through the Support Server linked by the bot's help command. Do not send confidential information through public feedback channels.

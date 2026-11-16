@@ -1,5 +1,5 @@
 [Unit]
-Description=Lemegeton Discord bot and private runtime bridge
+Description=Lemegeton TypeScript Discord bot and private runtime bridge
 After=network-online.target
 Wants=network-online.target
 
@@ -10,12 +10,11 @@ Group=lemegeton-bot
 SupplementaryGroups=lemegeton-read
 WorkingDirectory=/opt/lemegeton
 EnvironmentFile=/etc/lemegeton/bot.env
-Environment=PYTHONPATH=/opt/lemegeton
-Environment=PYTHONUNBUFFERED=1
-Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=NODE_ENV=production
 Environment=HOME=/opt/lemegeton/runtime-home
 Environment=XDG_CACHE_HOME=/opt/lemegeton/runtime-home/.cache
-ExecStart=/opt/lemegeton/.venv/bin/python /opt/lemegeton/bot.py
+Environment=TMPDIR=/tmp
+ExecStart=/usr/bin/node /opt/lemegeton/dist/bot.js
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=45s
