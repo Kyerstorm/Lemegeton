@@ -716,8 +716,8 @@ export class DiscoverCommand implements FeatureCommand {
       return;
     }
     if (view === "similar") {
-      if (category === "all") {
-        await interaction.reply({ content: "Choose a starting category to find cross-media matches.", flags: MessageFlags.Ephemeral });
+      if (category === "all" || category === "webnovel") {
+        await interaction.reply({ content: "Choose a category with provider-reported genre metadata to find cross-media matches.", flags: MessageFlags.Ephemeral });
         return;
       }
       await this.crossMediaSimilarityAndRespond(interaction, query, category);
@@ -1928,14 +1928,16 @@ export class DiscoverCommand implements FeatureCommand {
     const seedTitle = this.recordTitle(seed);
     const seedUrl = this.recordUrl(seed);
     const seedCategory = seed.category as CrossMediaCandidate["category"];
-    const seedGenres = seed.provider === "AniList"
+    const seedGenres: string[] = seed.provider === "AniList"
       ? [
           ...seed.item.genres,
           ...seed.item.tags.filter(tag => !tag.isSpoiler && (tag.rank ?? 0) >= 75).map(tag => tag.name),
         ]
       : seed.provider === "Google Books"
         ? seed.item.categories
-        : seed.item.genres;
+        : seed.provider === "Royal Road"
+          ? []
+          : seed.item.genres;
     const genreLabels = recommendationGenreLabels([...new Set(seedGenres)]);
     const localLookups: Array<Promise<CrossMediaCandidate[]>> = [];
 
