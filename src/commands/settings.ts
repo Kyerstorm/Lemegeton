@@ -189,7 +189,7 @@ async function mediaDigestPanel(guildId: string): Promise<{
     .setCustomId("settings:media-digest:entities")
     .setPlaceholder("Choose followed entities")
     .setMinValues(1)
-    .setMaxValues(25)
+    .setMaxValues(Math.min(25, 2 + targetOptions.length))
     .setDisabled(!schedule)
     .addOptions([
       { label: "All followed entities", description: "Include current and future follows", value: "all", default: entityIds.includes("all") },
