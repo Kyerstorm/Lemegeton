@@ -72,13 +72,13 @@ The catalogue names below are internal environments and navigation labels, not a
 
 | # | Environment | Build target | Status |
 |---:|---|---|---|
-| 27 | Interactive Game Metropolis | Game catalogue, solo/team entry, join/resume controls, state persistence and result presentation. | **Partially implemented** |
-| 28 | Trivia Arena | Source-backed questions, difficulty, review, provenance and solo/team/hosted rounds. | **Partially implemented** |
-| 29 | Mystery Media | Layered clues for hidden works, franchises, creators, adaptations and games. | **Partially implemented** |
-| 30 | Guessing Arena | Title, creator, release period, franchise and other media-identification rounds. | **Partially implemented** |
+| 27 | Interactive Game Metropolis | Game catalogue, solo/team/cooperative entry, guild-scoped active-session discovery, host-only resume, persistent round state, join controls and result presentation. | **Completed** |
+| 28 | Trivia Arena | Source-backed trivia, four difficulty levels, optional two-to-four-choice questions, aliases, moderator review, provenance and solo/team/cooperative hosted rounds. | **Completed** |
+| 29 | Mystery Media | Multi-layer, category-distinct clues for hidden works, franchises, creators, adaptations, characters and games, revealed by the host during a live round. | **Completed** |
+| 30 | Guessing Arena | Media identification rounds with title, creator, release, franchise, adaptation, studio, platform, genre and game clues. | **Completed** |
 | 31 | Team Games | Cooperative/competitive teams, membership, scoring and persistent round state. | **Completed** |
 | 32 | Challenge Centre | Themed media discovery tasks, seasonal challenges and community puzzles with published rules. | **Completed** |
-| 33 | Quiz Pack Studio | Community question packs, answer keys, accepted alternatives, references, review and revision history. | **Partially implemented** |
+| 33 | Quiz Pack Studio | Guild-scoped pack creation and contributor/manager curation, source-backed questions, accepted answers, difficulty, immutable question revisions and atomic multi-question moderator review. | **Completed** |
 | 34 | Media Puzzle Room | Media word puzzles, relation puzzles, franchise-connection puzzles and cooperative clue chains. | **Completed** |
 
 ### Profiles — /profile
@@ -255,20 +255,20 @@ Phase 0 code migration status does **not** mean the service is launched. Phase 8
 
 **Exit criteria:** upload, review, browse, collection and Trail workflows pass permission tests; removed/private entries disappear from every derived view; global content requires configured permissions and contributor visibility choice; storage cleanup is recoverable.
 
-Quiz Pack Studio now stores four difficulty levels, allows the original contributor or a server manager to revise a question, preserves the previous version in an immutable snapshot, blocks edits while a question is used in an active game, and sends edits back through moderator review. `/play` displays difficulty and exposes revision history to authorized contributors/managers. Pack-level curation and bulk review remain outstanding.
+Quiz Pack Studio stores four difficulty levels, allows the original contributor or a server manager to revise a question, preserves the previous version in an immutable snapshot, blocks edits while a question is used in an active game, and sends edits back through moderator review. `/play` displays difficulty and exposes revision history to authorized contributors/managers. This pass adds contributor/manager pack-title and description curation plus atomic bulk review of up to twelve pending questions per action. Trivia now exposes and scores its stored multiple-choice options; Guessing requires identification clues and Mystery requires at least two category-distinct layers.
 
 ### Phase 4 — Community and media games
 
 **Objective:** deliver repeatable guild activities with clear ownership, durable state and fair results.
 
-**Already present:** scheduled Daily Drop with approved contributions; rankings with candidate review/voting/results; Watch/Read/Play/Discuss sessions with RSVP and waitlist; spoiler-aware discussions; release calendars/digests; quiz packs, question review and persistent individual game sessions; automatically balanced Team A/Team B competition; cooperative sessions with a shared Community Team score; single-elimination 4/8/16-candidate tournaments with locked ballots, round advancement and deterministic seed tiebreaks; Community Seasons that reference existing activity records.
+**Already present:** scheduled Daily Drop with approved contributions; rankings with candidate review/voting/results; Watch/Read/Play/Discuss sessions with RSVP and waitlist; spoiler-aware discussions; release calendars/digests; a category-aware game catalogue; persistent solo, competitive-team and cooperative game sessions with active-session discovery and host resume; source-linked Trivia with difficulty and optional multiple-choice scoring; category-distinct Mystery clue layers and Guessing identification rounds; contributor/manager Quiz Pack curation, question revisions and atomic bulk moderation; automatically balanced Team A/Team B competition; cooperative sessions with a shared Community Team score; single-elimination 4/8/16-candidate tournaments with locked ballots, round advancement and deterministic seed tiebreaks; Community Seasons that reference existing activity records.
 
 **Completed in this pass:** `/community` includes a guild-scoped Showcase for active collections and Trails, approved individual Archive contributions, closed rankings, completed tournaments, past non-cancelled sessions and closed discussions. Archive entries are re-checked for approval and server/global visibility; contribution bodies and discussion prompts are deliberately omitted so approved spoiler-bearing text is not exposed in the index. The on-demand calendar merges provider-dated releases from AniList, TMDB and IGDB with sessions from the invoking guild, supports 7/14/30-day windows and release/community/category filters, and formats dates using the configured guild timezone while retaining Discord-local timestamps. Community Seasons automatically include delivered Daily Drops, closed rankings, sessions scheduled inside the configured period, completed challenge/puzzle runs and overlapping server spotlights. Explicit curated links are deduplicated against automatic entries; all entries resolve to the original guild-scoped records. Seasons are recorded as implemented rather than repeated as future work. `/play` now supports individual sessions, automatically balanced Team A/Team B competition and one cooperative Community Team; team membership and scores are persisted and leaderboard reads remain guild-scoped.
 
 **Remaining delivery:**
 - Add tournament candidate withdrawal and an audit trail for bracket lifecycle actions, with clear behavior once a round closes.
-- Extend Play with media-backed puzzle/challenge rounds only after answer normalization, source provenance, spoiler handling, timeout and host-control rules are defined.
-- Test simultaneous votes/answers, repeated component clicks, expired sessions, host departure and guild isolation.
+- Test simultaneous answers, repeated component clicks, expired sessions, host departure and guild isolation.
+- Add tournament candidate withdrawal and a bracket-lifecycle audit trail with clear behavior once a round closes.
 - Keep RSVP and session history separate from individual watch/read/play completion. Do not introduce personal progress tracking.
 
 **Exit criteria:** each activity has a finite lifecycle and idempotent transitions; vote/answer state cannot be duplicated by repeated interactions; moderation and host permissions are tested; event records can be reused by calendar, Atlas and showcase without copies.
