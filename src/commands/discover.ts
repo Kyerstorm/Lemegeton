@@ -105,6 +105,7 @@ type SearchRecord =
 | { provider: "Wuxia Click"; category: "webnovel"; item: WebNovelMedia }
 | { provider: "Novel Updates"; category: "webnovel"; item: WebNovelMedia }
 | { provider: "ScribbleHub"; category: "webnovel"; item: WebNovelMedia }
+| { provider: "Noveli.to"; category: "webnovel"; item: WebNovelMedia }
   | { provider: "TMDB"; category: "movie" | "tv"; item: TmdbMedia }
   | { provider: "IGDB"; category: "game"; item: IgdbGame }
   | { provider: "Steam"; category: "game"; item: SteamStoreGame };
@@ -143,6 +144,7 @@ case "Novel Archive": return { provider: "Novel Archive", category: "webnovel", 
 case "Wuxia Click": return { provider: "Wuxia Click", category: "webnovel", item };
 case "Novel Updates": return { provider: "Novel Updates", category: "webnovel", item };
 case "ScribbleHub": return { provider: "ScribbleHub", category: "webnovel", item };
+case "Noveli.to": return { provider: "Noveli.to", category: "webnovel", item };
 }
 }
 
@@ -246,7 +248,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
     return embed;
   }
 
-if (record.provider === "NovelFire" || record.provider === "Novel Archive" || record.provider === "Wuxia Click" || record.provider === "Novel Updates" || record.provider === "ScribbleHub") {
+if (record.provider === "NovelFire" || record.provider === "Novel Archive" || record.provider === "Wuxia Click" || record.provider === "Novel Updates" || record.provider === "ScribbleHub" || record.provider === "Noveli.to") {
 const item = record.item;
 const embed = new EmbedBuilder()
 .setColor(0x5865f2)
