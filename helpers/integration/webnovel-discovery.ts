@@ -670,38 +670,46 @@ if (error instanceof ScrapeBlockedError) throw error;
 return results;
 }
 
+export interface WebNovelSearchProvider {
+name: WebNovelProvider;
+search: (query: string) => Promise<WebNovelMedia[]>;
+}
+
+const WEBNOVEL_SEARCH_PROVIDERS: WebNovelSearchProvider[] = [
+  { name: "NovelFire", search: searchNovelFire },
+  { name: "Noveli.to", search: searchNoveliTo },
+  { name: "Novel Archive", search: searchNovelArchive },
+  { name: "Wuxia Click", search: searchWuxiaClick },
+  { name: "Novel Updates", search: searchNovelUpdates },
+  { name: "ScribbleHub", search: searchScribbleHub },
+];
+
+export interface WebNovelSearchResult {
+  results: WebNovelMedia[];
+  unavailableProviders: WebNovelProvider[];
+}
+
 export class WebNovelDiscoveryClient {
-async search(query: string): Promise<WebNovelMedia[]> {
-const normalized = query.trim().replace(/\s+/g, " ");
-if (normalized.length < 2) return [];
-const providers = await Promise.allSettled([
-searchNovelFire(normalized),
-searchNoveliTo(normalized),
-searchNovelArchive(normalized),
-searchWuxiaClick(normalized),
-searchNovelUpdates(normalized),
-searchScribbleHub(normalized),
-]);
-const records = providers.flatMap(result => result.status === "fulfilled" ? result.value : []);
-const unique = new Map<string, WebNovelMedia>();
-for (const record of records) {
-const key = record.title.toLocaleLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "");
-const existing = unique.get(key);
-if (!existing) unique.set(key, record);
-else {
-unique.set(key, {
-...existing,
-description: existing.description ?? record.description,
-image: existing.image ?? record.image,
-author: existing.author ?? record.author,
-status: existing.status ?? record.status,
-genres: existing.genres.length ? existing.genres : record.genres,
-chapterCount: existing.chapterCount ?? record.chapterCount,
-latestUpdate: existing.latestUpdate ?? record.latestUpdate,
-latestChapters: existing.latestChapters.length ? existing.latestChapters : record.latestChapters,
-});
-}
-}
-return [...unique.values()].slice(0, 10);
-}
+  constructor(private readonly providers: readonly WebNovelSearchProvider[] = WEBNOVEL_SEARCH_PROVIDERS) {}
+
+  async searchDetailed(query: string): Promise<WebNovelSearchResult> {
+    const normalized = query.trim().replace(/\s+/g, " ");
+    if (normalized.length < 2) return { results: [], unavailableProviders: [] };
+
+    const settled = await Promise.allSettled(this.providers.map(provider => provider.search(normalized)));
+    const unavailableProviders = settled.flatMap((result, index) =>
+      result.status === "rejected" && this.providers[index] ? [this.providers[index]!.name] : [],
+    );
+    const records = settled.flatMap(result => result.status === "fulfilled" ? result.value : []);
+    const unique = new Map<string, WebNovelMedia>();
+    for (const record of records) {
+      const key = record.provider + ":" + record.sourceUrl.toLocaleLowerCase("en");
+      if (!unique.has(key)) unique.set(key, record);
+    }
+    return { results: [...unique.values()].slice(0, 10), unavailableProviders };
+  }
+
+  async search(query: string): Promise<WebNovelMedia[]> {
+    return (await this.searchDetailed(query)).results;
+  }
 }

@@ -12,6 +12,15 @@ test("metadata source audit reports present and missing provider fields without 
   assert.equal(audit.freshness, "not-reported");
 });
 
+test("metadata source audit also reports populated provider-specific fields", () => {
+  const audit = auditMetadataSource({
+    provider: "Google Books", category: "book", id: "volume-1", url: "https://books.google.com/books?id=volume-1",
+    fields: { description: "A book", isbn10: ["0306406152"], isbn13: [], language: "en", publisher: "Example Press", rating: null },
+  });
+  assert.deepEqual(audit.presentFields, ["description", "isbn10", "language", "publisher"]);
+  assert.deepEqual(audit.missingFields, ["releaseDate", "creators", "genres", "image"]);
+});
+
 test("metadata source audit treats empty arrays and blank values as missing", () => {
   const audit = auditMetadataSource({
     provider: "TMDB", category: "movie", id: "44", url: "https://www.themoviedb.org/movie/44",

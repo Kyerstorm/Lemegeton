@@ -1798,9 +1798,10 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
       return;
     }
     await interaction.reply({ content:loadingMessage("Comparing provider metadata…"), flags:MessageFlags.Ephemeral });
-    const results = await this.fetchSearch(query,"all");
+    const unavailableProviders: string[] = [];
+    const results = await this.fetchSearch(query,"all",{},unavailableProviders);
     if (!results.length) {
-      await interaction.editReply({ content:"No providers returned a source record for that title.", embeds:[], components:[] });
+      await interaction.editReply({ content:"No providers returned a source record for that title." + (unavailableProviders.length ? "\nUnavailable providers: " + unavailableProviders.join(" · ") : ""), embeds:[], components:[] });
       return;
     }
     const exact = results.filter(record=>normalizeAtlasTitle(this.recordTitle(record))===normalizeAtlasTitle(query));
@@ -1822,7 +1823,7 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
     });
     await interaction.editReply({
       content:(exact.length?"Exact-title provider matches":"Related search matches · exact cross-provider match was not found")+
-        " · "+selected.length+" source record(s)",
+        " · "+selected.length+" source record(s)"+(unavailableProviders.length ? "\nUnavailable providers: "+unavailableProviders.join(" · ") : ""),
       embeds,components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],
       allowedMentions:{parse:[]},
     });
@@ -2321,8 +2322,9 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
     filters: DiscoverFilters = {},
   ): Promise<void> {
     await interaction.reply({ content: loadingMessage("Loading media results…"), flags: MessageFlags.Ephemeral });
-    const results = await this.fetchSearch(query, category, filters);
-    await this.presentResults(interaction, results, `Search results · ${categoryLabel(category)}`);
+    const unavailableProviders: string[] = [];
+    const results = await this.fetchSearch(query, category, filters, unavailableProviders);
+    await this.presentResults(interaction, results, `Search results · ${categoryLabel(category)}`, unavailableProviders);
   }
 
   private async atlasAndRespond(
@@ -2570,12 +2572,36 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
     return rankTitleSearchResults(query, results, record => this.recordTitleVariants(record));
   }
 
-  private async fetchSearch(query: string, category: Category, filters: DiscoverFilters = {}): Promise<SearchRecord[]> {
+  private async fetchSearch(
+    query: string,
+    category: Category,
+    filters: DiscoverFilters = {},
+    unavailableProviders: string[] = [],
+  ): Promise<SearchRecord[]> {
     const hasAniListFilters = Object.values(filters).some(value =>
       Array.isArray(value) ? value.length > 0 : value !== undefined && value !== null && value !== "",
     );
+    const settle = async <T>(
+      promises: Promise<T>[],
+      providerNames: string[],
+    ): Promise<PromiseSettledResult<T>[]> => {
+      const settled = await Promise.allSettled(promises);
+      settled.forEach((result, index) => {
+        if (result.status !== "rejected") return;
+        const provider = providerNames[index] ?? "Unknown provider";
+        if (!unavailableProviders.includes(provider)) unavailableProviders.push(provider);
+        logger.warn("Media discovery provider search failed", {
+          provider,
+          category,
+          query: query.slice(0, 100),
+          reason: result.reason instanceof Error ? result.reason.message : "Unknown provider error",
+        });
+      });
+      return settled;
+    };
+
     if (category === "all") {
-      const providers = await Promise.allSettled([
+      const providers = await settle([
         this.anilist.search(query, "ANIME").then(items => items.map(item => anilistRecord(item, "anime"))),
         this.anilist.search(query, "MANGA").then(items => items.map(item => anilistRecord(item, "manga"))),
         this.anilist.search(query, "MANGA", true).then(items => items.map(item => anilistRecord(item, "light_novel"))),
@@ -2584,32 +2610,39 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
         this.mangadex.search(query).then(items => items.map(item => ({ provider: "MangaDex" as const, category: "manga" as const, item }))),
         this.books.search(query).then(items => items.map(item => ({ provider: "Google Books" as const, category: "book" as const, item }))),
         this.openLibrary.searchTitle(query).then(items => items.map(item => ({ provider: "Open Library" as const, category: "book" as const, item }))),
-        this.webNovels.search(query).then(items => items.map(webNovelRecord)),
+        this.webNovels.searchDetailed(query).then(({ results, unavailableProviders: failed }) => {
+          unavailableProviders.push(...failed);
+          return results.map(webNovelRecord);
+        }),
         this.tmdb.search(query, "movie").then(items => items.map(item => ({ provider: "TMDB" as const, category: "movie" as const, item }))),
         this.tmdb.search(query, "tv").then(items => items.map(item => ({ provider: "TMDB" as const, category: "tv" as const, item }))),
         this.igdb.search(query).then(items => items.map(item => ({ provider: "IGDB" as const, category: "game" as const, item }))),
         this.steam.searchStoreGames(query).then(items => items.map(item => ({ provider: "Steam" as const, category: "game" as const, item }))),
+      ], [
+        "AniList anime", "AniList manga", "AniList light novels", "Kitsu anime", "Kitsu manga",
+        "MangaDex", "Google Books", "Open Library", "Webnovel providers", "TMDB movies",
+        "TMDB television", "IGDB", "Steam",
       ]);
       return this.rankSearchResults(query, providers.flatMap(provider => provider.status === "fulfilled" ? provider.value : []));
     }
 
     switch (category) {
       case "anime": {
-        const providers = await Promise.allSettled([
+        const providers = await settle([
           this.anilist.search(query, "ANIME", false, filters).then(items => items.map(item => anilistRecord(item, "anime"))),
           hasAniListFilters ? Promise.resolve([] as KitsuMedia[]) : this.kitsu.search(query, "anime"),
-        ]);
+        ], ["AniList", "Kitsu"]);
         return this.rankSearchResults(query, [
           ...(providers[0]?.status === "fulfilled" ? providers[0].value : []),
           ...(providers[1]?.status === "fulfilled" ? providers[1].value.map(item => ({ provider: "Kitsu" as const, category: "anime" as const, item })) : []),
         ]);
       }
       case "manga": {
-        const providers = await Promise.allSettled([
+        const providers = await settle([
           this.anilist.search(query, "MANGA", false, filters).then(items => items.map(item => anilistRecord(item, "manga"))),
           hasAniListFilters ? Promise.resolve([] as MangaDexMedia[]) : this.mangadex.search(query),
           hasAniListFilters ? Promise.resolve([] as KitsuMedia[]) : this.kitsu.search(query, "manga"),
-        ]);
+        ], ["AniList", "MangaDex", "Kitsu"]);
         const results: SearchRecord[] = [
           ...(providers[0]?.status === "fulfilled" ? providers[0].value : []),
           ...(providers[1]?.status === "fulfilled" ? providers[1].value.map(item => ({ provider: "MangaDex" as const, category: "manga" as const, item })) : []),
@@ -2617,30 +2650,54 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
         ];
         return this.rankSearchResults(query, results);
       }
-      case "light_novel":
-        return this.rankSearchResults(query, (await this.anilist.search(query, "MANGA", true, filters)).map(item => anilistRecord(item, "light_novel")));
+      case "light_novel": {
+        const [provider] = await settle([
+          this.anilist.search(query, "MANGA", true, filters).then(items => items.map(item => anilistRecord(item, "light_novel"))),
+        ], ["AniList"]);
+        return this.rankSearchResults(query, provider?.status === "fulfilled" ? provider.value : []);
+      }
       case "book": {
-        const [google, openLibrary] = await Promise.allSettled([this.books.search(query), this.openLibrary.searchTitle(query)]);
+        const [google, openLibrary] = await settle([
+          this.books.search(query),
+          this.openLibrary.searchTitle(query),
+        ], ["Google Books", "Open Library"]);
         return this.rankSearchResults(query, [
-          ...(google.status === "fulfilled" ? google.value.map(item => ({ provider: "Google Books" as const, category: "book" as const, item })) : []),
-          ...(openLibrary.status === "fulfilled" ? openLibrary.value.map(item => ({ provider: "Open Library" as const, category: "book" as const, item })) : []),
+          ...(google?.status === "fulfilled" ? google.value.map(item => ({ provider: "Google Books" as const, category: "book" as const, item })) : []),
+          ...(openLibrary?.status === "fulfilled" ? openLibrary.value.map(item => ({ provider: "Open Library" as const, category: "book" as const, item })) : []),
         ]);
       }
       case "webnovel": {
         if (/^\d+$/.test(query.trim()) || /^https?:\/\/www\.royalroad\.com\/fiction\/\d+/i.test(query.trim())) {
           return [{ provider: "Royal Road", category: "webnovel", item: await this.royalRoad.getFiction(query) }];
         }
-        return this.rankSearchResults(query, (await this.webNovels.search(query)).map(webNovelRecord));
+        const [provider] = await settle([
+          this.webNovels.searchDetailed(query).then(({ results, unavailableProviders: failed }) => {
+          unavailableProviders.push(...failed);
+          return results.map(webNovelRecord);
+        }),
+        ], ["Webnovel providers"]);
+        return this.rankSearchResults(query, provider?.status === "fulfilled" ? provider.value : []);
       }
-      case "movie":
-        return this.rankSearchResults(query, (await this.tmdb.search(query, "movie")).map(item => ({ provider: "TMDB", category: "movie" as const, item })));
-      case "tv":
-        return this.rankSearchResults(query, (await this.tmdb.search(query, "tv")).map(item => ({ provider: "TMDB", category: "tv" as const, item })));
+      case "movie": {
+        const [provider] = await settle([
+          this.tmdb.search(query, "movie").then(items => items.map(item => ({ provider: "TMDB" as const, category: "movie" as const, item }))),
+        ], ["TMDB"]);
+        return this.rankSearchResults(query, provider?.status === "fulfilled" ? provider.value : []);
+      }
+      case "tv": {
+        const [provider] = await settle([
+          this.tmdb.search(query, "tv").then(items => items.map(item => ({ provider: "TMDB" as const, category: "tv" as const, item }))),
+        ], ["TMDB"]);
+        return this.rankSearchResults(query, provider?.status === "fulfilled" ? provider.value : []);
+      }
       case "game": {
-        const [igdb, steam] = await Promise.allSettled([this.igdb.search(query), this.steam.searchStoreGames(query)]);
+        const [igdb, steam] = await settle([
+          this.igdb.search(query),
+          this.steam.searchStoreGames(query),
+        ], ["IGDB", "Steam"]);
         return this.rankSearchResults(query, [
-          ...(igdb.status === "fulfilled" ? igdb.value.map(item => ({ provider: "IGDB" as const, category: "game" as const, item })) : []),
-          ...(steam.status === "fulfilled" ? steam.value.map(item => ({ provider: "Steam" as const, category: "game" as const, item })) : []),
+          ...(igdb?.status === "fulfilled" ? igdb.value.map(item => ({ provider: "IGDB" as const, category: "game" as const, item })) : []),
+          ...(steam?.status === "fulfilled" ? steam.value.map(item => ({ provider: "Steam" as const, category: "game" as const, item })) : []),
         ]);
       }
     }
@@ -2710,10 +2767,17 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
     interaction: ButtonInteraction | ChatInputCommandInteraction | ModalSubmitInteraction,
     results: SearchRecord[],
     title: string,
+    unavailableProviders: string[] = [],
   ): Promise<void> {
     await this.saveProviderEdges(results);
     if (!results.length) {
-      await interaction.editReply({ embeds: [homeEmbed("No results found", "The selected provider returned no matching records. Try a more specific title or a different category.")] });
+      const unavailable = unavailableProviders.length
+        ? "\nUnavailable providers: " + unavailableProviders.join(" · ")
+        : "";
+      await interaction.editReply({
+        embeds: [homeEmbed("No results found", "The selected providers returned no matching records. Try a more specific title or a different category." + unavailable)],
+        components: [],
+      });
       return;
     }
     const embeds = results.slice(0, 10).map(toEmbed);
@@ -2721,7 +2785,7 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
     const components = first ? detailsButtons(first) : [];
     if (components.length) components.push(navigationButtons("discover", [{ id: "home", label: "Back to discovery" }]));
     await interaction.editReply({
-      content: title,
+      content: title + (unavailableProviders.length ? "\nUnavailable providers: " + unavailableProviders.join(" · ") : ""),
       embeds,
       components,
       allowedMentions: { parse: [] },

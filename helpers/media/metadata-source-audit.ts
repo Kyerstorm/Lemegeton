@@ -26,7 +26,12 @@ function hasValue(value: unknown): boolean {
 }
 
 export function auditMetadataSource(input: MetadataSourceAuditInput): MetadataSourceAudit {
-  const presentFields = STANDARD_FIELDS.filter(field => hasValue(input.fields[field]));
+  const presentFields = [
+    ...STANDARD_FIELDS.filter(field => hasValue(input.fields[field])),
+    ...Object.keys(input.fields)
+      .filter(field => !(STANDARD_FIELDS as readonly string[]).includes(field) && hasValue(input.fields[field]))
+      .sort(),
+  ];
   return {
     provider: input.provider.trim().slice(0, 60),
     category: input.category.trim().slice(0, 40),

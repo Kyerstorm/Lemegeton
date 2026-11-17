@@ -20,6 +20,15 @@ test("exact, prefix and token matches rank in relevance order", () => {
     scoreTitleSearchMatch("Legend Galactic", ["Legend of Zelda"]));
 });
 
+test("title matching ignores common filler words and prefers the original token order", () => {
+  const exactMeaning = scoreTitleSearchMatch("The Legend of the Galactic Heroes", ["Legend of Galactic Heroes"]);
+  const ordered = scoreTitleSearchMatch("Legend Galactic", ["Legend of Galactic Heroes"]);
+  const reversed = scoreTitleSearchMatch("Galactic Legend", ["Legend of Galactic Heroes"]);
+  assert.ok(exactMeaning > 0);
+  assert.ok(ordered > reversed);
+  assert.ok(ordered > scoreTitleSearchMatch("Legend Galactic", ["Legend of Zelda"]));
+});
+
 test("alternate language titles match while provider display title stays unchanged", () => {
   const records = [
     { title: "My Hero Academia", aliases: ["Boku no Hero Academia"] },

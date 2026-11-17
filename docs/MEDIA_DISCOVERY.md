@@ -4,6 +4,10 @@ This guide documents the provider-backed media discovery features. Providers rem
 
 ## Browse filters
 
+Title results are relevance-ranked across the selected providers using their returned primary, alternate, synonym, and subtitle titles. A provider failure does not discard other providers’ results; the response names the sources that could not be reached. A missing result is not treated as proof that a title does not exist.
+
+Webnovel title search keeps NovelFire, Noveli.to, Novel Archive, Wuxia Click, Novel Updates and ScribbleHub results attributed to their individual provider records. Same-title records from different providers are not merged; failed sources are listed separately while successful sources remain available.
+
 Use **/browse** with a media category and a title for a detailed record. For TMDB movie/TV discovery, leave the title blank to receive a filtered list instead.
 
 | Category | Supported filters |
