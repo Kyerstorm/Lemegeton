@@ -240,3 +240,78 @@ test("crawler follows robots Allow overrides and disallows restricted paths", as
   assert.equal(allowed.length, 1);
   assert.equal(allowed[0]?.title, "Allowed path");
 });
+
+test("scraper extracts Open Graph metadata and discovers RSS alternate feeds", async () => {
+  const html = '<html><head><title>Feed page</title><meta property="og:image" content="/cover.jpg"><meta name="author" content="A. Author"><meta property="article:published_time" content="2026-11-17"><link rel="alternate" type="application/rss+xml" title="Updates" href="/feed.xml"></head><body><p>Content</p></body></html>';
+  const fetchImpl: typeof fetch = async () => new Response(html, { status: 200, headers: { "content-type": "text/html" } });
+  const page = await fetchPublicPage("https://example.com/article", { includeText: false, fetchImpl });
+  assert.equal(page.image, "https://example.com/cover.jpg");
+  assert.equal(page.author, "A. Author");
+  assert.equal(page.publishedAt, "2026-11-17");
+  assert.deepEqual(page.feeds, [{ title: "Updates", type: "application/rss+xml", url: "https://example.com/feed.xml" }]);
+});
+
+test("article extraction returns bounded readable text and metadata", async () => {
+  const paragraphs = Array.from({ length: 8 }, (_, index) => '<p>Paragraph ' + index + ' — ' + "A useful sentence about the subject. ".repeat(12) + '</p>').join("");
+  const html = '<html><head><title>Readable article</title><meta name="author" content="A. Writer"></head><body><nav>Navigation only</nav><article><h1>Readable article</h1>' + paragraphs + '</article></body></html>';
+  const fetchImpl: typeof fetch = async () => new Response(html, { status: 200, headers: { "content-type": "text/html" } });
+  const page = await fetchPublicPage("https://example.com/story", { includeArticle: true, includeHtml: false, fetchImpl });
+  assert.equal(page.article?.title, "Readable article");
+  assert.match(page.article?.content ?? "", /Paragraph 0/);
+  assert.doesNotMatch(page.article?.content ?? "", /Navigation only/);
+});
+
+test("429 responses honour a bounded Retry-After before retrying", async () => {
+  let calls = 0;
+  const fetchImpl: typeof fetch = async () => {
+    calls += 1;
+    return calls === 1
+      ? new Response("rate limited", { status: 429, headers: { "Retry-After": "0" } })
+      : new Response('{"ok":true}', { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const result = await fetchJson<{ ok: boolean }>("https://example.com/api", { fetchImpl, retries: 1 });
+  assert.equal(result.ok, true);
+  assert.equal(calls, 2);
+});
+
+test("sitemap indexes recursively collect scoped URLs and deduplicate children", async () => {
+  const fetchImpl: typeof fetch = async input => {
+    const url = String(input);
+    if (url.endsWith("/index.xml")) return new Response(
+      '<sitemapindex><sitemap><loc>https://example.com/one.xml</loc></sitemap><sitemap><loc>https://example.com/two.xml</loc></sitemap></sitemapindex>',
+      { status: 200, headers: { "content-type": "application/xml" } },
+    );
+    if (url.endsWith("/one.xml")) return new Response(
+      '<urlset><url><loc>https://example.com/a</loc></url><url><loc>https://example.com/shared</loc></url></urlset>',
+      { status: 200, headers: { "content-type": "application/xml" } },
+    );
+    return new Response(
+      '<urlset><url><loc>https://example.com/shared</loc></url><url><loc>https://other.example/out</loc></url><url><loc>https://example.com/b</loc></url></urlset>',
+      { status: 200, headers: { "content-type": "application/xml" } },
+    );
+  };
+  const urls = await fetchSitemapUrls("https://example.com/index.xml", { fetchImpl, maxUrls: 10 });
+  assert.deepEqual(urls, ["https://example.com/a", "https://example.com/shared", "https://example.com/b"]);
+});
+
+test("detailed crawling reports failures and continues with reachable pages", async () => {
+  const { crawlPublicSiteDetailed } = await import("../helpers/integration/web-scraper.js");
+  const fetchImpl: typeof fetch = async input => {
+    const url = String(input);
+    if (url.endsWith("/robots.txt")) return new Response("User-agent: *\nAllow: /", { status: 200 });
+    if (url.endsWith("/blocked")) return new Response("<html>challenge</html>", {
+      status: 503, headers: { "content-type": "text/html", "cf-mitigated": "challenge" },
+    });
+    if (url.endsWith("/broken")) return new Response("bad", { status: 500 });
+    return new Response("<html><head><title>Good page</title></head><body>Ok</body></html>", {
+      status: 200, headers: { "content-type": "text/html" },
+    });
+  };
+  const report = await crawlPublicSiteDetailed(
+    ["https://example.com/blocked", "https://example.com/broken", "https://example.com/good"],
+    { fetchImpl, concurrency: 1, delayMs: 0, maxPages: 5 },
+  );
+  assert.equal(report.pages.length, 1);
+  assert.equal(report.pages[0]?.title, "Good page");
+  assert.deepEqual(report.failures.map(value => value.kind), ["blocked", "request"]);
+});
