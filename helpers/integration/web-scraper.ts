@@ -1,8 +1,16 @@
 import { isIP } from "node:net";
+import axios from "axios";
 import { extractFromHtml } from "@extractus/article-extractor";
 import { load } from "cheerio";
-import { chromium } from "playwright-core";
+import { JSDOM } from "jsdom";
+import { parse as parseHtml } from "node-html-parser";
+import pLimit from "p-limit";
+import pRetry, { AbortError } from "p-retry";
+import { chromium, firefox, webkit } from "playwright";
+import type { BrowserType } from "playwright";
 import robotsParser from "robots-parser";
+import { request as undiciRequest } from "undici";
+import { CookieJar } from "tough-cookie";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 
 export const DEFAULT_MAX_TEXT_CHARS = 12_000;
@@ -39,6 +47,11 @@ export type ScrapeEngine = "http" | "browser";
 
 export interface ScrapeOptions {
 engine?: ScrapeEngine;
+browserEngine?: "chromium" | "firefox" | "webkit";
+httpClient?: "fetch" | "undici" | "axios";
+textParser?: "cheerio" | "fast" | "jsdom";
+/** Pass a per-user or per-guild jar; the scraper never shares cookies globally. */
+cookieJar?: CookieJar;
 selectors?: Record<string, string>;
 includeText?: boolean;
 maxTextChars?: number;
@@ -207,72 +220,205 @@ headers: Headers;
 text: string;
 }
 
-async function fetchResource(
-input: string,
-options: { timeoutMs?: number; retries?: number; headers?: Record<string, string>; method?: "GET" | "POST"; body?: BodyInit | null; fetchImpl?: typeof fetch; maxBytes?: number; maxRetryDelayMs?: number } = {},
+async function readBoundedStream(
+  stream: AsyncIterable<Uint8Array | Buffer | string>,
+  maxBytes: number,
+): Promise<string> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of stream) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buffer.byteLength;
+    if (total > maxBytes) {
+      throw new ScrapeRequestError("The response exceeded the " + maxBytes + "-byte limit.");
+    }
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks, total).toString("utf8");
+}
+
+function normalizeResponseHeaders(
+  values: Record<string, string | string[] | number | undefined>,
+): Headers {
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(values)) {
+    if (value === undefined) continue;
+    if (Array.isArray(value)) {
+      for (const entry of value) headers.append(name, entry);
+    } else {
+      headers.set(name, String(value));
+    }
+  }
+  return headers;
+}
+
+async function requestResource(
+  input: string,
+  options: ScrapeOptions,
+  timeoutMs: number,
+  maxBytes: number,
 ): Promise<ResourceResponse> {
-let current = validatePublicHttpUrl(input);
-const timeoutMs = Math.max(1_000, Math.min(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, 60_000));
-const retries = Math.max(0, Math.min(options.retries ?? 1, 4));
-const maxRetryDelayMs = Math.max(0, Math.min(options.maxRetryDelayMs ?? 4_000, 30_000));
-const fetchImpl = options.fetchImpl ?? fetch;
-for (let redirects = 0; redirects <= 5; redirects++) {
-let lastError: unknown;
-for (let attempt = 0; attempt <= retries; attempt++) {
-try {
-const response = await fetchImpl(current, {
-method: options.method ?? "GET",
-...(options.body !== undefined ? { body: options.body } : {}),
-redirect: "manual",
-headers: {
-"User-Agent": DEFAULT_USER_AGENT,
-"Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
-...options.headers,
-},
-signal: AbortSignal.timeout(timeoutMs),
-});
-if ([301, 302, 303, 307, 308].includes(response.status)) {
-const location = response.headers.get("location");
-if (!location) throw new ScrapeRequestError("A redirect did not include a Location header.");
-if (redirects === 5) throw new ScrapeRequestError("The page exceeded the five-redirect limit.");
-current = validatePublicHttpUrl(new URL(location, current).toString());
-lastError = null;
-break;
+  const headers: Record<string, string> = {
+    "User-Agent": DEFAULT_USER_AGENT,
+    "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
+    ...options.headers,
+  };
+  if (options.cookieJar && !Object.keys(headers).some(name => name.toLowerCase() === "cookie")) {
+    const cookie = await options.cookieJar.getCookieString(input);
+    if (cookie) headers.Cookie = cookie;
+  }
+
+  const method = options.method ?? "GET";
+  let result: ResourceResponse;
+  if (options.fetchImpl || options.httpClient === "fetch" || !options.httpClient) {
+    const response = await (options.fetchImpl ?? fetch)(input, {
+      method,
+      ...(options.body !== undefined ? { body: options.body } : {}),
+      redirect: "manual",
+      headers,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    result = {
+      url: input,
+      status: response.status,
+      headers: response.headers,
+      text: await readBoundedBody(response, maxBytes),
+    };
+  } else if (options.httpClient === "undici") {
+    const body = options.body instanceof URLSearchParams
+      ? options.body.toString()
+      : options.body as string | Uint8Array | undefined;
+    const response = await undiciRequest(input, {
+      method,
+      headers,
+      ...(body !== undefined ? { body } : {}),
+      maxRedirections: 0,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    result = {
+      url: input,
+      status: response.statusCode,
+      headers: normalizeResponseHeaders(response.headers as Record<string, string | string[] | undefined>),
+      text: await readBoundedStream(response.body, maxBytes),
+    };
+  } else {
+    const response = await axios.request<ArrayBuffer>({
+      url: input,
+      method,
+      ...(options.body !== undefined ? { data: options.body } : {}),
+      headers,
+      responseType: "arraybuffer",
+      maxRedirects: 0,
+      maxContentLength: maxBytes,
+      maxBodyLength: maxBytes,
+      timeout: timeoutMs,
+      signal: AbortSignal.timeout(timeoutMs),
+      validateStatus: () => true,
+    });
+    const rawHeaders: Record<string, string | string[] | number | undefined> = {};
+    for (const [name, value] of Object.entries(response.headers)) {
+      if (value === undefined) continue;
+      rawHeaders[name] = value as string | string[] | number;
+    }
+    const bytes = Buffer.from(response.data);
+    if (bytes.byteLength > maxBytes) {
+      throw new ScrapeRequestError("The response exceeded the " + maxBytes + "-byte limit.");
+    }
+    result = {
+      url: input,
+      status: response.status,
+      headers: normalizeResponseHeaders(rawHeaders),
+      text: bytes.toString("utf8"),
+    };
+  }
+
+  if (options.cookieJar) {
+    const responseHeaders = result.headers as Headers & { getSetCookie?: () => string[] };
+    const cookies = responseHeaders.getSetCookie?.()
+      ?? (result.headers.get("set-cookie") ? [result.headers.get("set-cookie")!] : []);
+    await Promise.all(cookies.map(cookie => options.cookieJar!.setCookie(cookie, input, { ignoreError: true })));
+  }
+  return result;
 }
-const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
-const text = await readBoundedBody(response, options.maxBytes ?? MAX_RESPONSE_BYTES);
-const reason = challengeReason(response.status, text, response.headers);
-if (reason) throw new ScrapeBlockedError("Scraping stopped after " + reason + ".");
-if (response.status === 429) {
-if (attempt >= retries) throw new ScrapeRequestError("HTTP 429 rate limit returned for " + current.toString() + ".");
-const waitMs = retryAfterMilliseconds(response.headers.get("retry-after")) ?? Math.min(500 * 2 ** attempt, 4_000);
-if (waitMs > maxRetryDelayMs) {
-throw new ScrapeRequestError("HTTP 429 rate limit returned for " + current.toString() + "; Retry-After exceeds the configured retry wait.");
-}
-if (waitMs > 0) await new Promise(resolve => setTimeout(resolve, waitMs));
-continue;
-}
-if (!response.ok) {
-if (response.status >= 500 && attempt < retries) {
-await new Promise(resolve => setTimeout(resolve, Math.min(500 * 2 ** attempt, 4_000)));
-continue;
-}
-throw new ScrapeRequestError("HTTP " + response.status + " returned for " + current.toString() + ".");
-}
-return { url: current.toString(), status: response.status, headers: response.headers, text };
-} catch (error) {
-if (error instanceof ScrapeError || error instanceof TypeError) throw error;
-lastError = error;
-if (attempt < retries) {
-await new Promise(resolve => setTimeout(resolve, Math.min(500 * 2 ** attempt, 4_000)));
-}
-}
-}
-if (lastError) {
-throw new ScrapeRequestError("Request failed for " + current.toString() + ": " + (lastError instanceof Error ? lastError.message : String(lastError)));
-}
-}
-throw new ScrapeRequestError("Redirect handling failed for " + input + ".");
+
+async function fetchResource(
+  input: string,
+  options: (ScrapeOptions & { maxBytes?: number }) = {},
+): Promise<ResourceResponse> {
+  let current = validatePublicHttpUrl(input);
+  const timeoutMs = Math.max(1_000, Math.min(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, 60_000));
+  const retries = Math.max(0, Math.min(options.retries ?? 1, 4));
+  const maxRetryDelayMs = Math.max(0, Math.min(options.maxRetryDelayMs ?? 4_000, 30_000));
+  const maxBytes = options.maxResponseBytes ?? options.maxBytes ?? MAX_RESPONSE_BYTES;
+
+  for (let redirects = 0; redirects <= 5; redirects++) {
+    let attempts = 0;
+    let redirected = false;
+    while (attempts <= retries) {
+      let response: ResourceResponse;
+      try {
+        response = await pRetry(async () => {
+          attempts += 1;
+          try {
+            return await requestResource(current.toString(), options, timeoutMs, maxBytes);
+          } catch (error) {
+            if (error instanceof ScrapeError || error instanceof TypeError) {
+              throw new AbortError(error);
+            }
+            throw error;
+          }
+        }, {
+          retries: Math.max(0, retries - attempts),
+          minTimeout: Math.max(1, Math.min(300, maxRetryDelayMs || 1)),
+          maxTimeout: Math.max(1, maxRetryDelayMs || 1),
+          factor: 2,
+          randomize: true,
+        });
+      } catch (error) {
+        if (error instanceof ScrapeError || error instanceof TypeError) throw error;
+        throw new ScrapeRequestError(
+          "Request failed for " + current.toString() + ": " +
+          (error instanceof Error ? error.message : String(error)),
+        );
+      }
+
+      const reason = challengeReason(response.status, response.text, response.headers);
+      if (reason) throw new ScrapeBlockedError("Scraping stopped after " + reason + ".");
+
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        const location = response.headers.get("location");
+        if (!location) throw new ScrapeRequestError("A redirect did not include a Location header.");
+        if (redirects === 5) throw new ScrapeRequestError("The page exceeded the five-redirect limit.");
+        current = validatePublicHttpUrl(new URL(location, current).toString());
+        redirected = true;
+        break;
+      }
+
+      if (response.status === 429) {
+        if (attempts >= retries + 1) {
+          throw new ScrapeRequestError("HTTP 429 rate limit returned for " + current.toString() + ".");
+        }
+        const waitMs = retryAfterMilliseconds(response.headers.get("retry-after")) ?? Math.min(500 * 2 ** (attempts - 1), 4_000);
+        if (waitMs > maxRetryDelayMs) {
+          throw new ScrapeRequestError("HTTP 429 rate limit returned for " + current.toString() + "; Retry-After exceeds the configured retry wait.");
+        }
+        if (waitMs > 0) await new Promise(resolve => setTimeout(resolve, waitMs));
+        continue;
+      }
+
+      if (response.status >= 500 && attempts < retries + 1) {
+        await new Promise(resolve => setTimeout(resolve, Math.min(500 * 2 ** (attempts - 1), maxRetryDelayMs)));
+        continue;
+      }
+      if (response.status < 200 || response.status >= 300) {
+        throw new ScrapeRequestError("HTTP " + response.status + " returned for " + current.toString() + ".");
+      }
+      return response;
+    }
+    if (redirected) continue;
+    break;
+  }
+  throw new ScrapeRequestError("Redirect handling failed for " + input + ".");
 }
 
 const xmlParser = new XMLParser({
@@ -499,10 +645,26 @@ readTimeSeconds: typeof articleData.ttr === "number" && Number.isFinite(articleD
 }
 if (options.includeStructuredData) result.structuredData = extractStructuredData(html);
 if (options.includeText !== false) {
-const textPage = load(html);
-textPage("script,style,noscript,svg,template").remove();
 const max = Math.max(1, Math.min(options.maxTextChars ?? DEFAULT_MAX_TEXT_CHARS, MAX_TEXT_CHARS));
-result.text = (articleContent || textPage("body").text().replace(/\s+/g, " ").trim()).slice(0, max);
+let extractedText = articleContent;
+if (!extractedText && options.textParser === "fast") {
+  const document = parseHtml(html);
+  document.querySelectorAll("script,style,noscript,svg,template").forEach(node => node.remove());
+  extractedText = (document.querySelector("body")?.textContent ?? document.textContent).replace(/\s+/g, " ").trim();
+} else if (!extractedText && options.textParser === "jsdom") {
+  const document = new JSDOM(html);
+  try {
+    document.window.document.querySelectorAll("script,style,noscript,svg,template").forEach(node => node.remove());
+    extractedText = (document.window.document.body?.textContent ?? "").replace(/\s+/g, " ").trim();
+  } finally {
+    document.window.close();
+  }
+} else if (!extractedText) {
+  const textPage = load(html);
+  textPage("script,style,noscript,svg,template").remove();
+  extractedText = textPage("body").text().replace(/\s+/g, " ").trim();
+}
+result.text = extractedText.slice(0, max);
 }
 if (options.includeLinks) {
 const selector = options.linkSelector?.trim() || "a[href]";
@@ -532,49 +694,60 @@ return result;
 }
 
 async function fetchBrowserPage(url: string, options: ScrapeOptions): Promise<ScrapeResult> {
-const browser = process.env.BROWSER_WS_ENDPOINT
-? await chromium.connectOverCDP(process.env.BROWSER_WS_ENDPOINT)
-: await chromium.launch({
-headless: true,
-...(process.env.CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.CHROMIUM_EXECUTABLE_PATH } : {}),
-args: ["--no-sandbox", "--disable-dev-shm-usage"],
-});
-const context = await browser.newContext({ userAgent: DEFAULT_USER_AGENT, serviceWorkers: "block" });
-try {
-const page = await context.newPage();
-await page.route("**/*", async route => {
-const request = route.request();
-const requestUrl = request.url();
-if (!requestUrl.startsWith("http://") && !requestUrl.startsWith("https://")) {
-await route.continue();
-return;
+  const engine = options.browserEngine ?? "chromium";
+  const browserType: BrowserType = engine === "firefox" ? firefox : engine === "webkit" ? webkit : chromium;
+  const endpoint = process.env.BROWSER_WS_ENDPOINT;
+  const browser = endpoint
+    ? engine === "chromium"
+      ? await chromium.connectOverCDP(endpoint)
+      : await browserType.connect(endpoint)
+    : await browserType.launch({
+      headless: true,
+      ...(engine === "chromium" && process.env.CHROMIUM_EXECUTABLE_PATH
+        ? { executablePath: process.env.CHROMIUM_EXECUTABLE_PATH }
+        : {}),
+      ...(engine === "chromium" ? { args: ["--no-sandbox", "--disable-dev-shm-usage"] } : {}),
+    });
+  const context = await browser.newContext({ userAgent: DEFAULT_USER_AGENT, serviceWorkers: "block" });
+  try {
+    const page = await context.newPage();
+    await page.route("**/*", async route => {
+      const request = route.request();
+      const requestUrl = request.url();
+      if (!requestUrl.startsWith("http://") && !requestUrl.startsWith("https://")) {
+        await route.continue();
+        return;
+      }
+      if (["image", "font", "media"].includes(request.resourceType())) {
+        await route.abort();
+        return;
+      }
+      try {
+        validatePublicHttpUrl(requestUrl);
+        await route.continue();
+      } catch {
+        await route.abort();
+      }
+    });
+    const response = await page.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout: Math.max(1_000, Math.min(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, 60_000)),
+    });
+    if (!response) throw new ScrapeRequestError("The browser did not receive a page response.");
+    const html = await page.content();
+    const reason = challengeReason(response.status(), html, new Headers(response.headers()));
+    if (reason) throw new ScrapeBlockedError("Scraping stopped after " + reason + ".");
+    if (response.status() < 200 || response.status() >= 300) {
+      throw new ScrapeRequestError("Browser navigation returned HTTP " + response.status() + ".");
+    }
+    const finalUrl = validatePublicHttpUrl(page.url()).toString();
+    return await extractPageData(finalUrl, html, response.status(), "playwright", options);
+  } finally {
+    await context.close();
+    await browser.close();
+  }
 }
-if (["image", "font", "media"].includes(request.resourceType())) {
-await route.abort();
-return;
-}
-try {
-validatePublicHttpUrl(requestUrl);
-await route.continue();
-} catch {
-await route.abort();
-}
-});
-const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: Math.max(1_000, Math.min(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, 60_000)) });
-if (!response) throw new ScrapeRequestError("The browser did not receive a page response.");
-const html = await page.content();
-const reason = challengeReason(response.status(), html, new Headers(response.headers()));
-if (reason) throw new ScrapeBlockedError("Scraping stopped after " + reason + ".");
-if (response.status() < 200 || response.status() >= 300) {
-throw new ScrapeRequestError("Browser navigation returned HTTP " + response.status() + ".");
-}
-const finalUrl = validatePublicHttpUrl(page.url()).toString();
-return await extractPageData(finalUrl, html, response.status(), "playwright", options);
-} finally {
-await context.close();
-await browser.close();
-}
-}
+
 export async function fetchPublicPage(url: string, options: ScrapeOptions = {}): Promise<ScrapeResult> {
 const validated = validatePublicHttpUrl(url);
 if (options.engine === "browser") return fetchBrowserPage(validated.toString(), options);
@@ -596,24 +769,19 @@ throw new ScrapeRequestError("The provider returned invalid JSON for " + respons
 }
 
 export async function fetchMany(urls: string[], options: ScrapeOptions & { concurrency?: number } = {}): Promise<ScrapeManyResult[]> {
-const concurrency = Math.max(1, Math.min(options.concurrency ?? 4, 8));
-const results: ScrapeManyResult[] = [];
-for (let index = 0; index < urls.length; index += concurrency) {
-const batch = urls.slice(index, index + concurrency);
-const settled = await Promise.all(batch.map(async url => {
-try {
-return { url, result: await fetchPublicPage(url, options) } as const;
-} catch (error) {
-return {
-url,
-error: error instanceof Error ? error.message : String(error),
-blocked: error instanceof ScrapeBlockedError,
-} as const;
-}
-}));
-results.push(...settled);
-}
-return results;
+  const concurrency = Math.max(1, Math.min(options.concurrency ?? 4, 8));
+  const limit = pLimit(concurrency);
+  return await Promise.all(urls.map(url => limit(async (): Promise<ScrapeManyResult> => {
+    try {
+      return { url, result: await fetchPublicPage(url, options) };
+    } catch (error) {
+      return {
+        url,
+        error: error instanceof Error ? error.message : String(error),
+        blocked: error instanceof ScrapeBlockedError,
+      };
+    }
+  })));
 }
 
 function hostAllowed(url: URL, domains: Set<string>): boolean {
@@ -667,6 +835,10 @@ failures: CrawlFailure[];
 export interface CrawlOptions {
 maxPages?: number;
 allowedDomains?: string[];
+httpClient?: ScrapeOptions["httpClient"];
+textParser?: ScrapeOptions["textParser"];
+browserEngine?: ScrapeOptions["browserEngine"];
+cookieJar?: CookieJar;
 selectors?: Record<string, string>;
 includeText?: boolean;
 maxTextChars?: number;
@@ -730,6 +902,10 @@ includeStructuredData: options.includeStructuredData,
 includeArticle: options.includeArticle,
 includeLinks: true,
 fetchImpl: options.fetchImpl,
+httpClient: options.httpClient,
+textParser: options.textParser,
+browserEngine: options.browserEngine,
+cookieJar: options.cookieJar,
 maxRetryDelayMs: options.maxRetryDelayMs,
 });
 } catch (error) {
