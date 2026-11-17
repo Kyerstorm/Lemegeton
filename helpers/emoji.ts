@@ -150,6 +150,8 @@ export const emoji = {
   Youtube: "",
   kitsu: "",
   Novelupdates: "",
+  wuxiaclick: "",
+  scribblehub: "",
 } as const;
 
 export type EmojiName = keyof typeof emoji;
