@@ -32,11 +32,11 @@ No chapter-to-episode or volume-to-season mapping is guessed. Release-order and 
 
 ## Cross-media similarity
 
-**/similar** resolves supported titles through AniList, MangaDex, Google Books, Open Library, TMDB or IGDB, then searches supported categories for candidates with overlapping provider-reported genres or tags. MangaDex tags and Open Library subjects remain attributed to their source rather than being rewritten as AniList genres.
+**/similar** resolves supported titles through AniList, MangaDex, Google Books, Open Library, TMDB or IGDB, then searches across anime, manga, light novels, books, films and television. It uses AniList genres/tags, MangaDex tags, Google Books categories and Open Library subjects as provider-native labels. AniList light-novel pools remain `format:NOVEL`; ordinary manga pools remain `format:MANGA`. Provider-generated recommendations are displayed separately from local metadata-overlap matches.
 
 The result has separate sections for:
 - **Provider-generated recommendations**, where AniList, TMDB or IGDB supplies them.
-- **Local genre-overlap matches**, ranked using a transparent set intersection and accompanied by the shared genre names.
+- **Local metadata-overlap matches**, ranked using transparent provider-reported genres, tags or subjects and accompanied by the shared labels.
 
 The local ranking is a heuristic, not an AI-generated recommendation score. Providers with missing genre metadata may not yield local matches.
 

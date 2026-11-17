@@ -87,7 +87,7 @@ test("Open Library subject search ignores non-work identifiers", async () => {
     }), { status: 200 });
   }, 0);
   const results = await client.searchBySubject("Science Fiction");
-  assert.match(requested, /\\/subjects\\/science-fiction\\.json\\?limit=10/);
+  assert.match(requested, /\/subjects\/science-fiction\.json\?limit=10/);
   assert.equal(results.length, 1);
   assert.equal(results[0]?.workId, "OL987W");
 });

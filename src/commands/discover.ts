@@ -25,13 +25,15 @@ import { AniListClient, type AniListAiring, type AniListAiringFilters, type AniL
 import {SteamClient,type SteamStoreGame} from "../../helpers/integration/steam.js";
 import { GoogleBooksClient, type GoogleBook } from "../../helpers/integration/google-books.js";
 import { CrossrefClient } from "../../helpers/integration/crossref.js";
-import { OpenLibraryClient } from "../../helpers/integration/open-library.js";
+import { OpenLibraryClient, type OpenLibraryWork } from "../../helpers/integration/open-library.js";
+import { MangaDexClient, type MangaDexMedia } from "../../helpers/integration/mangadex.js";
 import { RoyalRoadClient } from "../../helpers/integration/royal-road.js";
 import { WebNovelDiscoveryClient, type WebNovelMedia } from "../../helpers/integration/webnovel-discovery.js";
 import { IgdbClient, type IgdbGame } from "../../helpers/integration/igdb.js";
 import { homeEmbed, navigationButtons } from "../../helpers/runtime/discord.js";
 import { TmdbClient, type TmdbMedia, type TmdbTvSeason } from "../../helpers/integration/tmdb.js";
 import { getGuildMediaRegion } from "../../helpers/media/media-region.js";
+import { rankTitleSearchResults } from "../../helpers/media/title-matching.js";
 import { cleanText, safeDisplay } from "../../helpers/security/security.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
 import {
@@ -99,6 +101,8 @@ type DiscoverFilters = AniListSearchFilters;
 type SearchRecord =
   | { provider: "AniList"; category: "anime" | "manga" | "light_novel"; item: AniListMedia }
   | { provider: "Google Books"; category: "book"; item: GoogleBook }
+  | { provider: "Open Library"; category: "book"; item: OpenLibraryWork }
+  | { provider: "MangaDex"; category: "manga"; item: MangaDexMedia }
   | { provider: "Royal Road"; category: "webnovel"; item: Awaited<ReturnType<RoyalRoadClient["getFiction"]>> }
 | { provider: "NovelFire"; category: "webnovel"; item: WebNovelMedia }
 | { provider: "Novel Archive"; category: "webnovel"; item: WebNovelMedia }
@@ -185,6 +189,47 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
     }
     if (item.coverImage) embed.setThumbnail(item.coverImage);
     if (item.bannerImage) embed.setImage(item.bannerImage);
+    return embed;
+  }
+
+  if (record.provider === "MangaDex") {
+    const item = record.item;
+    const embed = new EmbedBuilder().setColor(0x2d6b52)
+      .setTitle(item.title.slice(0, 256)).setURL(item.sourceUrl)
+      .setDescription(safeDescription(item.description))
+      .addFields(
+        { name: "Provider", value: "MangaDex", inline: true },
+        { name: "Content rating", value: "Safe", inline: true },
+        { name: "Status", value: item.status ?? "Not reported", inline: true },
+        { name: "Authors", value: item.authors.join(", ").slice(0, 900) || "Not reported", inline: true },
+        { name: "Artists", value: item.artists.join(", ").slice(0, 900) || "Not reported", inline: true },
+        { name: "Language / demographic", value: [item.originalLanguage?.toUpperCase(), item.publicationDemographic, item.year ? String(item.year) : null].filter(Boolean).join(" · ") || "Not reported", inline: true },
+        { name: "Last volume / chapter", value: [item.lastVolume, item.lastChapter].filter(Boolean).join(" / ") || "Not reported", inline: true },
+        { name: "Tags", value: item.tags.slice(0, 10).join(" · ").slice(0, 900) || "Not reported", inline: false },
+        ...(item.alternateTitles.length ? [{ name: "Alternate titles", value: item.alternateTitles.slice(0, 5).join(" · ").slice(0, 900), inline: false }] : []),
+      ).setFooter({ text: "MangaDex · Safe-rated metadata only" });
+    embed.addFields({ name: "Source record", value: formatMetadataSourceReference("MangaDex", item.id, item.sourceUrl), inline: false });
+    if (item.coverUrl) embed.setThumbnail(item.coverUrl);
+    return embed;
+  }
+
+  if (record.provider === "Open Library") {
+    const item = record.item;
+    const embed = new EmbedBuilder().setColor(0x6b665e)
+      .setTitle(item.title.slice(0, 256)).setURL(item.sourceUrl)
+      .addFields(
+        { name: "Provider", value: "Open Library", inline: true },
+        { name: "Authors", value: item.authors.join(", ").slice(0, 900) || "Not reported", inline: true },
+        { name: "First published", value: item.firstPublishYear ? String(item.firstPublishYear) : "Not reported", inline: true },
+        { name: "Editions indexed", value: item.editionCount === null ? "Not reported" : item.editionCount.toLocaleString(), inline: true },
+        { name: "Publishers", value: item.publishers.slice(0, 5).join(", ").slice(0, 900) || "Not reported", inline: true },
+        { name: "Languages", value: item.languages.slice(0, 5).join(", ").toUpperCase() || "Not reported", inline: true },
+        { name: "Subjects", value: item.subjects.slice(0, 10).join(" · ").slice(0, 900) || "Not reported", inline: false },
+        ...(item.isbn13.length ? [{ name: "ISBN-13", value: item.isbn13.join(", ").slice(0, 900), inline: false }] : []),
+        ...(item.isbn10.length ? [{ name: "ISBN-10", value: item.isbn10.join(", ").slice(0, 900), inline: false }] : []),
+      ).setFooter({ text: "Open Library · Work metadata; editions remain distinct" });
+    embed.addFields({ name: "Source record", value: formatMetadataSourceReference("Open Library", item.workId, item.sourceUrl), inline: false });
+    if (item.coverUrl) embed.setThumbnail(item.coverUrl);
     return embed;
   }
 
@@ -569,6 +614,7 @@ export class DiscoverCommand implements FeatureCommand {
   private readonly steam:SteamClient;
   private readonly crossref: CrossrefClient;
   private readonly openLibrary: OpenLibraryClient;
+  private readonly mangadex: MangaDexClient;
   private readonly royalRoad: RoyalRoadClient;
 private readonly webNovels: WebNovelDiscoveryClient;
 
@@ -581,6 +627,7 @@ private readonly webNovels: WebNovelDiscoveryClient;
     this.steam=new SteamClient(config.steamApiKey);
     this.crossref = new CrossrefClient();
     this.openLibrary = new OpenLibraryClient();
+    this.mangadex = new MangaDexClient();
     this.royalRoad = new RoyalRoadClient();
 this.webNovels = new WebNovelDiscoveryClient();
   }
@@ -1986,9 +2033,13 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
         ]
       : seed.provider === "Google Books"
         ? seed.item.categories
-        : seed.provider === "Royal Road"
-          ? []
-          : seed.item.genres;
+        : seed.provider === "Open Library"
+          ? seed.item.subjects
+          : seed.provider === "MangaDex"
+            ? seed.item.tags
+            : seed.provider === "Royal Road"
+              ? []
+              : seed.item.genres;
     const genreLabels = recommendationGenreLabels([...new Set(seedGenres)]);
     const localLookups: Array<Promise<CrossMediaCandidate[]>> = [];
 
@@ -2009,6 +2060,12 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
           title: item.title.english ?? item.title.romaji ?? item.title.native ?? "Untitled",
           category: "light_novel" as const, provider: "AniList", url: item.siteUrl, genres: item.genres,
         }))),
+        this.mangadex.searchByTags(genreLabels).then(items => items.map(item => ({
+          title: item.title, category: "manga" as const, provider: "MangaDex", url: item.sourceUrl, genres: item.tags,
+        }))),
+        ...genreLabels.map(label => this.openLibrary.searchBySubject(label).then(items => items.map(item => ({
+          title: item.title, category: "book" as const, provider: "Open Library", url: item.sourceUrl, genres: item.subjects,
+        })))),
         ...genreLabels.map(label => this.books.searchBySubject(label).then(items => items.map(item => ({
           title: item.title, category: "book" as const, provider: "Google Books", url: item.sourceUrl, genres: item.categories,
         })))),
@@ -2340,9 +2397,17 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
     });
   }
 
+  private recordTitleVariants(record: SearchRecord): string[] {
+    if (record.provider === "AniList") {
+      return [...new Set([record.item.title.english, record.item.title.romaji, record.item.title.native].filter((value): value is string => Boolean(value?.trim())))];
+    }
+    if (record.provider === "MangaDex") return [...new Set([record.item.title, ...record.item.alternateTitles].filter(Boolean))];
+    if (record.provider === "Google Books" && record.item.subtitle) return [record.item.title, record.item.title + " " + record.item.subtitle];
+    return [record.item.title];
+  }
+
   private recordTitle(record: SearchRecord): string {
-    if (record.provider === "AniList") return record.item.title.english ?? record.item.title.romaji ?? record.item.title.native ?? "Untitled";
-    return record.item.title;
+    return this.recordTitleVariants(record)[0] ?? "Untitled";
   }
 
   private recordCategory(record: SearchRecord): string {
@@ -2352,6 +2417,8 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
   private recordImage(record: SearchRecord): string | null {
     if (record.provider === "AniList") return record.item.coverImage;
     if (record.provider === "Steam") return record.item.headerImage;
+    if (record.provider === "MangaDex") return record.item.coverUrl;
+    if (record.provider === "Open Library") return record.item.coverUrl;
     return record.item.image;
   }
 
@@ -2375,40 +2442,71 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
     await Promise.allSettled(writes);
   }
 
+
+  private rankSearchResults(query: string, results: SearchRecord[]): SearchRecord[] {
+    return rankTitleSearchResults(query, results, record => this.recordTitleVariants(record));
+  }
+
   private async fetchSearch(query: string, category: Category, filters: DiscoverFilters = {}): Promise<SearchRecord[]> {
+    const hasAniListFilters = Object.values(filters).some(value =>
+      Array.isArray(value) ? value.length > 0 : value !== undefined && value !== null && value !== "",
+    );
     if (category === "all") {
       const providers = await Promise.allSettled([
-        this.anilist.search(query, "ANIME").then((items) => items.map((item) => anilistRecord(item, "anime"))),
-        this.anilist.search(query, "MANGA").then((items) => items.map((item) => anilistRecord(item, "manga"))),
-        this.anilist.search(query, "MANGA", true).then((items) => items.map((item) => anilistRecord(item, "light_novel"))),
-        this.books.search(query).then((items) => items.map((item) => ({ provider: "Google Books" as const, category: "book" as const, item }))),
+        this.anilist.search(query, "ANIME").then(items => items.map(item => anilistRecord(item, "anime"))),
+        this.anilist.search(query, "MANGA").then(items => items.map(item => anilistRecord(item, "manga"))),
+        this.anilist.search(query, "MANGA", true).then(items => items.map(item => anilistRecord(item, "light_novel"))),
+        this.mangadex.search(query).then(items => items.map(item => ({ provider: "MangaDex" as const, category: "manga" as const, item }))),
+        this.books.search(query).then(items => items.map(item => ({ provider: "Google Books" as const, category: "book" as const, item }))),
+        this.openLibrary.searchTitle(query).then(items => items.map(item => ({ provider: "Open Library" as const, category: "book" as const, item }))),
         this.webNovels.search(query).then(items => items.map(webNovelRecord)),
-        this.tmdb.search(query, "movie").then((items) => items.map((item) => ({ provider: "TMDB" as const, category: "movie" as const, item }))),
-        this.tmdb.search(query, "tv").then((items) => items.map((item) => ({ provider: "TMDB" as const, category: "tv" as const, item }))),
-        this.igdb.search(query).then((items) => items.map((item) => ({ provider: "IGDB" as const, category: "game" as const, item }))),
-        this.steam.searchStoreGames(query).then((items)=>items.map((item)=>({provider:"Steam" as const,category:"game" as const,item}))),
+        this.tmdb.search(query, "movie").then(items => items.map(item => ({ provider: "TMDB" as const, category: "movie" as const, item }))),
+        this.tmdb.search(query, "tv").then(items => items.map(item => ({ provider: "TMDB" as const, category: "tv" as const, item }))),
+        this.igdb.search(query).then(items => items.map(item => ({ provider: "IGDB" as const, category: "game" as const, item }))),
+        this.steam.searchStoreGames(query).then(items => items.map(item => ({ provider: "Steam" as const, category: "game" as const, item }))),
       ]);
-      return providers.flatMap((provider) => provider.status === "fulfilled" ? provider.value : []);
+      return this.rankSearchResults(query, providers.flatMap(provider => provider.status === "fulfilled" ? provider.value : []));
     }
+
     switch (category) {
-      case "anime": return (await this.anilist.search(query, "ANIME", false, filters)).map((item) => anilistRecord(item, "anime"));
-      case "manga": return (await this.anilist.search(query, "MANGA", false, filters)).map((item) => anilistRecord(item, "manga"));
-      case "light_novel": return (await this.anilist.search(query, "MANGA", true, filters)).map((item) => anilistRecord(item, "light_novel"));
-      case "book": return (await this.books.search(query)).map((item) => ({ provider: "Google Books", category: "book", item }));
-case "webnovel": {
-if (/^\d+$/.test(query.trim()) || /^https?:\/\/www\.royalroad\.com\/fiction\/\d+/i.test(query.trim())) {
-return [{ provider: "Royal Road", category: "webnovel", item: await this.royalRoad.getFiction(query) }];
-}
-return (await this.webNovels.search(query)).map(webNovelRecord);
-}
-      case "movie": return (await this.tmdb.search(query, "movie")).map((item) => ({ provider: "TMDB", category: "movie", item }));
-      case "tv": return (await this.tmdb.search(query, "tv")).map((item) => ({ provider: "TMDB", category: "tv", item }));
-      case "game": {
-        const [igdb,steam]=await Promise.allSettled([this.igdb.search(query),this.steam.searchStoreGames(query)]);
-        return [
-          ...(igdb.status==="fulfilled"?igdb.value.map((item)=>({provider:"IGDB" as const,category:"game" as const,item})):[]),
-          ...(steam.status==="fulfilled"?steam.value.map((item)=>({provider:"Steam" as const,category:"game" as const,item})):[]),
+      case "anime":
+        return this.rankSearchResults(query, (await this.anilist.search(query, "ANIME", false, filters)).map(item => anilistRecord(item, "anime")));
+      case "manga": {
+        const providers = await Promise.allSettled([
+          this.anilist.search(query, "MANGA", false, filters).then(items => items.map(item => anilistRecord(item, "manga"))),
+          hasAniListFilters ? Promise.resolve([] as MangaDexMedia[]) : this.mangadex.search(query),
+        ]);
+        const results: SearchRecord[] = [
+          ...(providers[0]?.status === "fulfilled" ? providers[0].value : []),
+          ...(providers[1]?.status === "fulfilled" ? providers[1].value.map(item => ({ provider: "MangaDex" as const, category: "manga" as const, item })) : []),
         ];
+        return this.rankSearchResults(query, results);
+      }
+      case "light_novel":
+        return this.rankSearchResults(query, (await this.anilist.search(query, "MANGA", true, filters)).map(item => anilistRecord(item, "light_novel")));
+      case "book": {
+        const [google, openLibrary] = await Promise.allSettled([this.books.search(query), this.openLibrary.searchTitle(query)]);
+        return this.rankSearchResults(query, [
+          ...(google.status === "fulfilled" ? google.value.map(item => ({ provider: "Google Books" as const, category: "book" as const, item })) : []),
+          ...(openLibrary.status === "fulfilled" ? openLibrary.value.map(item => ({ provider: "Open Library" as const, category: "book" as const, item })) : []),
+        ]);
+      }
+      case "webnovel": {
+        if (/^\d+$/.test(query.trim()) || /^https?:\/\/www\.royalroad\.com\/fiction\/\d+/i.test(query.trim())) {
+          return [{ provider: "Royal Road", category: "webnovel", item: await this.royalRoad.getFiction(query) }];
+        }
+        return this.rankSearchResults(query, (await this.webNovels.search(query)).map(webNovelRecord));
+      }
+      case "movie":
+        return this.rankSearchResults(query, (await this.tmdb.search(query, "movie")).map(item => ({ provider: "TMDB", category: "movie" as const, item })));
+      case "tv":
+        return this.rankSearchResults(query, (await this.tmdb.search(query, "tv")).map(item => ({ provider: "TMDB", category: "tv" as const, item })));
+      case "game": {
+        const [igdb, steam] = await Promise.allSettled([this.igdb.search(query), this.steam.searchStoreGames(query)]);
+        return this.rankSearchResults(query, [
+          ...(igdb.status === "fulfilled" ? igdb.value.map(item => ({ provider: "IGDB" as const, category: "game" as const, item })) : []),
+          ...(steam.status === "fulfilled" ? steam.value.map(item => ({ provider: "Steam" as const, category: "game" as const, item })) : []),
+        ]);
       }
     }
   }
