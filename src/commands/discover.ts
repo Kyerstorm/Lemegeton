@@ -27,6 +27,7 @@ import { GoogleBooksClient, type GoogleBook } from "../../helpers/integration/go
 import { CrossrefClient } from "../../helpers/integration/crossref.js";
 import { OpenLibraryClient, type OpenLibraryWork } from "../../helpers/integration/open-library.js";
 import { MangaDexClient, type MangaDexMedia } from "../../helpers/integration/mangadex.js";
+import { KitsuClient, type KitsuMedia } from "../../helpers/integration/kitsu.js";
 import { RoyalRoadClient } from "../../helpers/integration/royal-road.js";
 import { WebNovelDiscoveryClient, type WebNovelMedia } from "../../helpers/integration/webnovel-discovery.js";
 import { IgdbClient, type IgdbGame } from "../../helpers/integration/igdb.js";
@@ -103,6 +104,7 @@ type SearchRecord =
   | { provider: "Google Books"; category: "book"; item: GoogleBook }
   | { provider: "Open Library"; category: "book"; item: OpenLibraryWork }
   | { provider: "MangaDex"; category: "manga"; item: MangaDexMedia }
+  | { provider: "Kitsu"; category: "anime" | "manga"; item: KitsuMedia }
   | { provider: "Royal Road"; category: "webnovel"; item: Awaited<ReturnType<RoyalRoadClient["getFiction"]>> }
 | { provider: "NovelFire"; category: "webnovel"; item: WebNovelMedia }
 | { provider: "Novel Archive"; category: "webnovel"; item: WebNovelMedia }
@@ -189,6 +191,38 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
     }
     if (item.coverImage) embed.setThumbnail(item.coverImage);
     if (item.bannerImage) embed.setImage(item.bannerImage);
+    return embed;
+  }
+
+  if (record.provider === "Kitsu") {
+    const item = record.item;
+    const episodeOrChapter = item.type === "anime"
+      ? (item.episodeCount === null ? "Not reported" : String(item.episodeCount))
+      : (item.chapterCount === null ? "Not reported" : String(item.chapterCount));
+    const countsLabel = item.type === "anime" ? "Episodes" : "Chapters";
+    const embed = new EmbedBuilder().setColor(0x7a5aa6)
+      .setTitle(item.title.slice(0, 256))
+      .setURL(item.sourceUrl)
+      .setDescription(safeDescription(item.description))
+      .addFields(
+        { name: "Provider", value: "Kitsu", inline: true },
+        { name: "Type", value: item.type === "anime" ? "Anime" : "Manga", inline: true },
+        { name: "Age rating", value: item.ageRating + (item.ageRatingGuide ? " · " + item.ageRatingGuide : ""), inline: true },
+        { name: "Format", value: item.format ?? "Not reported", inline: true },
+        { name: "Status", value: item.status ?? "Not reported", inline: true },
+        { name: countsLabel, value: episodeOrChapter, inline: true },
+        ...(item.type === "manga" && item.volumeCount !== null ? [{ name: "Volumes", value: String(item.volumeCount), inline: true }] : []),
+        ...(item.type === "anime" && item.episodeLength !== null ? [{ name: "Episode length", value: item.episodeLength + " minutes", inline: true }] : []),
+        { name: "Genres", value: item.genres.slice(0, 8).join(" · ") || "Not reported", inline: false },
+        { name: "Categories", value: item.categories.slice(0, 8).join(" · ") || "Not reported", inline: false },
+        ...(item.alternateTitles.length ? [{ name: "Alternate titles", value: item.alternateTitles.slice(0, 5).join(" · ").slice(0, 900), inline: false }] : []),
+        ...(item.startDate ? [{ name: "Start date", value: item.startDate, inline: true }] : []),
+        ...(item.endDate ? [{ name: "End date", value: item.endDate, inline: true }] : []),
+        { name: "Rating", value: item.rating === null ? "Not rated" : item.rating.toFixed(2) + "/100 (Kitsu)", inline: true },
+      )
+      .setFooter({ text: "Kitsu · Public metadata · G/PG titles only" });
+    embed.addFields({ name: "Source record", value: formatMetadataSourceReference("Kitsu", item.id, item.sourceUrl), inline: false });
+    if (item.image) embed.setThumbnail(item.image);
     return embed;
   }
 
@@ -615,6 +649,7 @@ export class DiscoverCommand implements FeatureCommand {
   private readonly crossref: CrossrefClient;
   private readonly openLibrary: OpenLibraryClient;
   private readonly mangadex: MangaDexClient;
+  private readonly kitsu: KitsuClient;
   private readonly royalRoad: RoyalRoadClient;
 private readonly webNovels: WebNovelDiscoveryClient;
 
@@ -628,6 +663,7 @@ private readonly webNovels: WebNovelDiscoveryClient;
     this.crossref = new CrossrefClient();
     this.openLibrary = new OpenLibraryClient();
     this.mangadex = new MangaDexClient();
+    this.kitsu = new KitsuClient();
     this.royalRoad = new RoyalRoadClient();
 this.webNovels = new WebNovelDiscoveryClient();
   }
@@ -2032,6 +2068,8 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
         genres: seed.item.genres,
         tags: seed.item.tags.filter(tag => !tag.isSpoiler && (tag.rank ?? 0) >= 75).map(tag => tag.name),
       };
+    } else if (seed.provider === "Kitsu") {
+      seedLabels = { genres: seed.item.genres, categories: seed.item.categories };
     } else if (seed.provider === "Google Books") {
       seedLabels = { categories: seed.item.categories };
     } else if (seed.provider === "Open Library") {
@@ -2103,6 +2141,31 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
         }))),
       );
     }
+    const categoryLookups = [...new Set([
+      ...genreLabels,
+      ...(seedLabels.categories ?? []),
+    ])].slice(0, 3);
+    for (const label of categoryLookups) {
+      localLookups.push(
+        this.kitsu.searchByCategory(label, "anime").then(items => items.map(item => ({
+          title: item.title,
+          category: "anime" as const,
+          provider: "Kitsu",
+          url: item.sourceUrl,
+          genres: item.genres,
+          categories: item.categories,
+        }))),
+        this.kitsu.searchByCategory(label, "manga").then(items => items.map(item => ({
+          title: item.title,
+          category: "manga" as const,
+          provider: "Kitsu",
+          url: item.sourceUrl,
+          genres: item.genres,
+          categories: item.categories,
+        }))),
+      );
+    }
+
     if (seedLabels.tags?.length) {
       localLookups.push(this.mangadex.searchByTags(seedLabels.tags.slice(0, 5)).then(items => items.map(item => ({
         title: item.title,
@@ -2217,7 +2280,7 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
     if (!ranked.length && !providerRecommendations.length) {
       embed.setDescription("No comparable source-reported genres, tags, subjects or categories, and no provider-generated recommendations, were returned for this title.");
     }
-    embed.setFooter({ text: "Sources: AniList · MangaDex · Google Books · Open Library · TMDB · IGDB · Provider-native recommendations remain separate" });
+    embed.setFooter({ text: "Sources: AniList · Kitsu · MangaDex · Google Books · Open Library · TMDB · IGDB · Provider-native recommendations remain separate" });
     await interaction.editReply({ content: "", embeds: [embed], components: [], allowedMentions: { parse: [] } });
   }
 
@@ -2460,6 +2523,8 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
       return [...new Set([record.item.title.english, record.item.title.romaji, record.item.title.native, ...(record.item.synonyms ?? [])].filter((value): value is string => Boolean(value?.trim())))];
     }
     if (record.provider === "MangaDex") return [...new Set([record.item.title, ...record.item.alternateTitles].filter(Boolean))];
+    if (record.provider === "Kitsu") return [...new Set([record.item.title, ...record.item.alternateTitles].filter(Boolean))];
+    if (record.provider === "IGDB") return [...new Set([record.item.title, ...record.item.alternateTitles].filter(Boolean))];
     if (record.provider === "Google Books" && record.item.subtitle) return [record.item.title, record.item.title + " " + record.item.subtitle];
     return [record.item.title];
   }
@@ -2514,6 +2579,8 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
         this.anilist.search(query, "ANIME").then(items => items.map(item => anilistRecord(item, "anime"))),
         this.anilist.search(query, "MANGA").then(items => items.map(item => anilistRecord(item, "manga"))),
         this.anilist.search(query, "MANGA", true).then(items => items.map(item => anilistRecord(item, "light_novel"))),
+        this.kitsu.search(query, "anime").then(items => items.map(item => ({ provider: "Kitsu" as const, category: "anime" as const, item }))),
+        this.kitsu.search(query, "manga").then(items => items.map(item => ({ provider: "Kitsu" as const, category: "manga" as const, item }))),
         this.mangadex.search(query).then(items => items.map(item => ({ provider: "MangaDex" as const, category: "manga" as const, item }))),
         this.books.search(query).then(items => items.map(item => ({ provider: "Google Books" as const, category: "book" as const, item }))),
         this.openLibrary.searchTitle(query).then(items => items.map(item => ({ provider: "Open Library" as const, category: "book" as const, item }))),
@@ -2527,16 +2594,26 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
     }
 
     switch (category) {
-      case "anime":
-        return this.rankSearchResults(query, (await this.anilist.search(query, "ANIME", false, filters)).map(item => anilistRecord(item, "anime")));
+      case "anime": {
+        const providers = await Promise.allSettled([
+          this.anilist.search(query, "ANIME", false, filters).then(items => items.map(item => anilistRecord(item, "anime"))),
+          hasAniListFilters ? Promise.resolve([] as KitsuMedia[]) : this.kitsu.search(query, "anime"),
+        ]);
+        return this.rankSearchResults(query, [
+          ...(providers[0]?.status === "fulfilled" ? providers[0].value : []),
+          ...(providers[1]?.status === "fulfilled" ? providers[1].value.map(item => ({ provider: "Kitsu" as const, category: "anime" as const, item })) : []),
+        ]);
+      }
       case "manga": {
         const providers = await Promise.allSettled([
           this.anilist.search(query, "MANGA", false, filters).then(items => items.map(item => anilistRecord(item, "manga"))),
           hasAniListFilters ? Promise.resolve([] as MangaDexMedia[]) : this.mangadex.search(query),
+          hasAniListFilters ? Promise.resolve([] as KitsuMedia[]) : this.kitsu.search(query, "manga"),
         ]);
         const results: SearchRecord[] = [
           ...(providers[0]?.status === "fulfilled" ? providers[0].value : []),
           ...(providers[1]?.status === "fulfilled" ? providers[1].value.map(item => ({ provider: "MangaDex" as const, category: "manga" as const, item })) : []),
+          ...(providers[2]?.status === "fulfilled" ? providers[2].value.map(item => ({ provider: "Kitsu" as const, category: "manga" as const, item })) : []),
         ];
         return this.rankSearchResults(query, results);
       }

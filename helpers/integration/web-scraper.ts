@@ -432,9 +432,7 @@ const articleData = options.includeArticle ? await extractFromHtml(html, url).ca
 const articleContent = typeof articleData?.content === "string"
 ? load(articleData.content).text().replace(/\s+/g, " ").trim().slice(0, MAX_TEXT_CHARS)
 : "";
-const articleAuthor = typeof articleData?.author === "string" ? articleData.author.trim()
-: Array.isArray(articleData?.author) ? articleData.author.filter((value): value is string => typeof value === "string").join(", ").trim()
-: "";
+const articleAuthor = typeof articleData?.author === "string" ? articleData.author.trim() : "";
 const safeAbsoluteUrl = (value: string | null | undefined): string | null => {
 if (!value) return null;
 try {
@@ -623,7 +621,11 @@ const host = url.hostname.toLowerCase().replace(/^www\./, "");
 return [...domains].some(domain => host === domain || host.endsWith("." + domain));
 }
 
-type RobotsRules = ReturnType<typeof robotsParser>;
+interface RobotsRules {
+  isAllowed(url: string, userAgent?: string): boolean | undefined;
+  getCrawlDelay(userAgent?: string): number | undefined;
+}
+const parseRobots = robotsParser as unknown as (url: string, text: string) => RobotsRules;
 
 async function loadRobotsRules(
 url: URL,
@@ -640,11 +642,11 @@ timeoutMs: 5_000,
 maxBytes: 256 * 1024,
 fetchImpl,
 });
-rules = robotsParser(origin + "/robots.txt", response.text);
+rules = parseRobots(origin + "/robots.txt", response.text);
 } catch (error) {
 const message = error instanceof Error ? error.message : String(error);
 if (/HTTP (?:404|410) returned/i.test(message)) {
-rules = robotsParser(origin + "/robots.txt", "");
+rules = parseRobots(origin + "/robots.txt", "");
 }
 // Network errors, challenges, access denials and server failures fail closed.
 }

@@ -36,7 +36,7 @@ function parseManga(value: unknown): MangaDexMedia | null {
   const record = object(value);
   const id = record?.id;
   const attributes = object(record?.attributes);
-  if (typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
+  if (!record || typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
     || !attributes || attributes.contentRating !== "safe") return null;
   const titleRecord = object(attributes.title);
   const title = (typeof titleRecord?.en === "string" && titleRecord.en.trim() ? titleRecord.en.trim() : localized(attributes.title)[0]) ?? "";

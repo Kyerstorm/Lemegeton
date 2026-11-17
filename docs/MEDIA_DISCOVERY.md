@@ -8,7 +8,7 @@ Use **/browse** with a media category and a title for a detailed record. For TMD
 
 | Category | Supported filters |
 | --- | --- |
-| Anime and manga | Anime uses AniList. Manga search combines AniList `type:MANGA, format:MANGA` and safe-rated MangaDex title metadata when AniList-only filters are not selected. Light novels use AniList `type:MANGA, format:NOVEL` and are excluded from ordinary manga results. MangaDex adds creators, tags, language, demographic and cover metadata, without retrieving chapters. |
+| Anime and manga | Anime search combines AniList and Kitsu when AniList-specific filters are not selected. Manga search combines AniList `type:MANGA, format:MANGA`, safe-rated Kitsu and safe-rated MangaDex metadata when AniList-only filters are not selected. Kitsu results require an explicit `G` or `PG` rating and retain their genres and categories. Light novels use AniList `type:MANGA, format:NOVEL` only and are excluded from ordinary manga results. MangaDex adds creators, tags, language, demographic and cover metadata, without retrieving chapters. |
 | General novels and books | Title and subject search through Google Books and low-volume Open Library APIs, plus Google Books volume lookup and exact Open Library ISBN-to-work lookup. |
 | Webnovels | NovelFire title search/detail pages plus its DataTables JSON chapter endpoint (chapter count and newest chapter titles ordered by chapter number); Noveli.to paginated JSON search and detail endpoints; Novel Archive JSON search/detail API; Wuxia Click server-rendered `__NEXT_DATA__` search/detail records; Novel Updates series-finder HTML; ScribbleHub series-finder/detail pages and its AJAX chapter list; Royal Road story-specific RSS by fiction ID or official URL. Shows source-attributed titles, authors, summaries, genres, status, ratings, chapter counts, covers and recent chapter/update metadata when supplied. |
 | Movies and TV | TMDB genre, keyword/theme, original language code, status, release year range, runtime, director and cast filters. |
@@ -32,7 +32,7 @@ No chapter-to-episode or volume-to-season mapping is guessed. Release-order and 
 
 ## Cross-media similarity
 
-**/similar** resolves supported titles through AniList, MangaDex, Google Books, Open Library, TMDB or IGDB, then searches across anime, manga, light novels, books, films and television. Search relevance includes AniList synonym titles, MangaDex alternate titles and Google Books subtitles. Similarity keeps AniList genres/tags, MangaDex tags, Google Books categories and Open Library subjects in their provider-native fields; generic catalogue labels such as "Fiction" are ignored. AniList light-novel pools remain `format:NOVEL`; ordinary manga pools remain `format:MANGA`. Provider-generated recommendations are displayed separately from local metadata-overlap matches.
+**/similar** resolves supported titles through AniList, Kitsu, MangaDex, Google Books, Open Library, TMDB or IGDB, then searches across anime, manga, light novels, books, films and television. Search relevance includes AniList synonym titles, Kitsu and MangaDex alternate titles, IGDB alternative names and Google Books subtitles. Similarity keeps each provider's genres, tags, subjects and book categories in their native fields; Kitsu category lookups use its categories relationship. Generic catalogue labels such as "Fiction" are ignored. AniList light-novel pools remain `format:NOVEL`; ordinary manga pools remain `format:MANGA`. Provider-generated recommendations are displayed separately from local metadata-overlap matches.
 
 The result has separate sections for:
 - **Provider-generated recommendations**, where AniList, TMDB or IGDB supplies them.
@@ -88,6 +88,7 @@ The family-friendly option is a best-effort metadata filter, not a parental-rati
 
 ## Configuration and operational notes
 
+- Kitsu uses its public read-only JSON:API and needs no credential; discovery accepts only explicit G/PG age ratings and does not request R18 data.
 - Configure TMDB_BEARER_TOKEN for movie/TV search, franchise lookups, TV guides, runtime and regional content-rating lookups, and TMDB-backed release-calendar categories.
 - Exact book edition lookup uses Crossref's public ISBN-filtered works endpoint and a rate-limited Open Library ISBN/edition lookup. Webnovel search combines NovelFire, Noveli.to, Novel Archive, Wuxia Click, Novel Updates and ScribbleHub using each source's current HTML or JSON interface. NovelFire chapter metadata is read from its JSON endpoint with the newest chapter numbers requested first; Noveli.to search and details use its paginated JSON API. Browser-rendered pages use Playwright when `CHROMIUM_EXECUTABLE_PATH` or `BROWSER_WS_ENDPOINT` is configured.
 - Google Books and AniList use the existing helpers already used elsewhere in the bot.

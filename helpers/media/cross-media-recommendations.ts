@@ -139,7 +139,7 @@ export function rankCrossMediaCandidates(
       { kind: "tags", values: matchingLabels(seedTokens, candidate.tags ?? []) },
       { kind: "subjects", values: matchingLabels(seedTokens, candidate.subjects ?? []) },
       { kind: "categories", values: matchingLabels(seedTokens, candidate.categories ?? []) },
-    ].filter(group => group.values.length > 0);
+    ].filter((group): group is SharedCrossMediaLabelGroup => group.values.length > 0);
     const ranked: RankedCrossMediaCandidate = {
       ...candidate,
       title,

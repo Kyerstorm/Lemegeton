@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { KitsuClient, parseKitsuMedia } from "../helpers/integration/kitsu.js";
+import { rankTitleSearchResults } from "../helpers/media/title-matching.js";
 
 const anime = {
   id: "1",
@@ -97,4 +98,13 @@ test("Kitsu category search normalizes its filter slug and caches repeated queri
   assert.deepEqual(await client.searchByCategory("Science Fiction", "manga"), []);
   assert.deepEqual(await client.searchByCategory("Science Fiction", "manga"), []);
   assert.equal(calls, 1);
+});
+
+test("Kitsu alternate title variants participate in shared title relevance ranking", () => {
+  const records = [
+    { title: "Other Title", alternateTitles: [] },
+    { title: "Example Anime", alternateTitles: ["例アニメ", "EA"] },
+  ];
+  const ranked = rankTitleSearchResults("EA", records, item => [item.title, ...item.alternateTitles]);
+  assert.equal(ranked[0]?.title, "Example Anime");
 });
