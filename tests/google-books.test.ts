@@ -110,7 +110,7 @@ test("Google Books falls back from ISBN-13 to ISBN-10 and ignores unsafe edition
       id: "legacy-isbn",
       volumeInfo: {
         title: "Legacy Edition",
-        industryIdentifiers: [{ type: "ISBN_10", identifier: "0123456789" }],
+        industryIdentifiers: [{ type: "ISBN_10", identifier: "0306406152" }],
         previewLink: "javascript:alert(1)",
         infoLink: "https://books.google.com/books?id=legacy-isbn",
         imageLinks: { thumbnail: "https://not-google.example/image.jpg" },
@@ -118,13 +118,31 @@ test("Google Books falls back from ISBN-13 to ISBN-10 and ignores unsafe edition
     }],
   }), { status: 200, headers: { "content-type": "application/json" } }), async () => {
     const [book] = await new GoogleBooksClient().search("Legacy Edition");
-    assert.equal(book?.isbn, "0123456789");
-    assert.equal(book?.isbn10, "0123456789");
+    assert.equal(book?.isbn, "0306406152");
+    assert.equal(book?.isbn10, "0306406152");
     assert.equal(book?.isbn13, null);
     assert.equal(book?.previewUrl, null);
     assert.equal(book?.infoUrl, "https://books.google.com/books?id=legacy-isbn");
     assert.equal(book?.image, null);
     assert.equal(book?.seriesOrder, null);
+  });
+});
+
+test("Google Books discards provider identifiers with invalid checksums", async () => {
+  await withFetch(async () => new Response(JSON.stringify({ items: [{
+    id: "bad-isbns",
+    volumeInfo: {
+      title: "Bad ISBN fixture",
+      industryIdentifiers: [
+        { type: "ISBN_13", identifier: "9780441172718" },
+        { type: "ISBN_10", identifier: "0123456789" },
+      ],
+    },
+  }] }), { status: 200, headers: { "content-type": "application/json" } }), async () => {
+    const [book] = await new GoogleBooksClient().search("Bad ISBN fixture");
+    assert.equal(book?.isbn, null);
+    assert.equal(book?.isbn10, null);
+    assert.equal(book?.isbn13, null);
   });
 });
 

@@ -48,13 +48,23 @@ function strings(value: unknown, maximum = 20): string[] {
   ).slice(0, maximum);
 }
 
+function bibliographicIsbns(value: unknown, length: 10 | 13): string[] {
+  return [...new Set(strings(value, 100).flatMap(entry => {
+    const isbn = normalizeBibliographicIsbn(entry);
+    return isbn && isbn.length === length ? [isbn] : [];
+  }))].slice(0, 5);
+}
+
 function parseWork(value: unknown): OpenLibraryWork | null {
   const item = object(value);
   const key = item?.key;
   if (typeof key !== "string" || !/^\/works\/OL\d+W$/.test(key)) return null;
   const title = typeof item?.title === "string" && item.title.trim() ? item.title.trim().slice(0, 240) : null;
   if (!title) return null;
-  const isbnValues = strings(item?.isbn, 100).map(value => value.replace(/[\s-]/g, ""));
+  const isbnValues = strings(item?.isbn, 100).flatMap(value => {
+    const isbn = normalizeBibliographicIsbn(value);
+    return isbn ? [isbn] : [];
+  });
   const coverId = typeof item?.cover_i === "number" && Number.isSafeInteger(item.cover_i) && item.cover_i > 0 ? item.cover_i : null;
   const firstPublishYear = typeof item?.first_publish_year === "number" && Number.isInteger(item.first_publish_year) ? item.first_publish_year : null;
   const editionCount = typeof item?.edition_count === "number" && Number.isInteger(item.edition_count) ? Math.max(0, item.edition_count) : null;
@@ -72,8 +82,8 @@ function parseWork(value: unknown): OpenLibraryWork | null {
     subjects: strings(item?.subject, 16),
     publishers: strings(item?.publisher, 8),
     languages: strings(item?.language, 8).map(value => value.split("/").filter(Boolean).at(-1) ?? value),
-    isbn10: isbnValues.filter(value => /^\d{9}[\dX]$/i.test(value)).slice(0, 5),
-    isbn13: isbnValues.filter(value => /^\d{13}$/.test(value)).slice(0, 5),
+    isbn10: isbnValues.filter(value => value.length === 10).slice(0, 5),
+    isbn13: isbnValues.filter(value => value.length === 13).slice(0, 5),
     coverUrl: coverId ? "https://covers.openlibrary.org/b/id/" + coverId + "-M.jpg" : null,
     sourceUrl: "https://openlibrary.org" + key,
   };
@@ -89,8 +99,8 @@ function parseEdition(value: unknown): OpenLibraryEdition | null {
     id,
     title: title.slice(0, 240),
     sourceUrl: "https://openlibrary.org" + key,
-    isbn10: strings(item?.isbn_10),
-    isbn13: strings(item?.isbn_13),
+    isbn10: bibliographicIsbns(item?.isbn_10, 10),
+    isbn13: bibliographicIsbns(item?.isbn_13, 13),
     publishDate: typeof item?.publish_date === "string" ? item.publish_date.slice(0, 80) : null,
     editionName: typeof item?.edition_name === "string" && item.edition_name.trim()
       ? item.edition_name.trim().slice(0, 120)

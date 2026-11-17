@@ -85,8 +85,10 @@ function normalizeVolume(value: unknown): GoogleBook | null {
     const identifier = object(rawIdentifier);
     const value = stringValue(identifier?.identifier);
     if (!value) continue;
-    if (identifier?.type === "ISBN_13" && !isbn13) isbn13 = value;
-    if (identifier?.type === "ISBN_10" && !isbn10) isbn10 = value;
+    const normalized = normalizeBibliographicIsbn(value);
+    if (!normalized) continue;
+    if (identifier?.type === "ISBN_13" && normalized.length === 13 && !isbn13) isbn13 = normalized;
+    if (identifier?.type === "ISBN_10" && normalized.length === 10 && !isbn10) isbn10 = normalized;
   }
 
   const series = object(volume.seriesInfo);

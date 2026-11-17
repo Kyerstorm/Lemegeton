@@ -15,7 +15,7 @@ test("Open Library links an exact ISBN edition to the editions of its single cat
     return new Response(JSON.stringify({
       size: 2,
       entries: [
-        { key: "/books/OL22597282M", title: "Dune", isbn_10: ["0441172717"], isbn_13: [isbn], publish_date: "1987" },
+        { key: "/books/OL22597282M", title: "Dune", isbn_10: ["0441172717", "0123456789"], isbn_13: [isbn, "9780441172718"], publish_date: "1987" },
         { key: "/books/OL123456M", title: "Dune", isbn_13: [isbn], edition_name: "Ace edition" },
       ],
     }));
@@ -25,6 +25,8 @@ test("Open Library links an exact ISBN edition to the editions of its single cat
   assert.equal(family?.editionCount, 2);
   assert.equal(family?.editions.length, 2);
   assert.equal(family?.editions[1]?.editionName, "Ace edition");
+  assert.deepEqual(family?.editions[0]?.isbn10, ["0441172717"]);
+  assert.deepEqual(family?.editions[0]?.isbn13, [isbn]);
   assert.equal(requests.length, 2);
   assert.match(requests[1]!, /\/works\/OL893414W\/editions\.json/);
 });
@@ -56,7 +58,7 @@ test("Open Library title search returns work metadata and caches the same user q
         subject: ["Science fiction", "Gender"],
         publisher: ["Ace Books"],
         language: ["/languages/eng"],
-        isbn: ["0441478123", "9780441478125"],
+        isbn: ["0441478123", "0123456789", "9780441478125", "9780441172718"],
         cover_i: 101,
       }],
     }), { status: 200, headers: { "content-type": "application/json" } });
@@ -70,7 +72,8 @@ test("Open Library title search returns work metadata and caches the same user q
   assert.equal(url.searchParams.get("limit"), "10");
   assert.equal(first[0]?.workId, "OL123W");
   assert.equal(first[0]?.authors[0], "Ursula K. Le Guin");
-  assert.equal(first[0]?.isbn13[0], "9780441478125");
+  assert.deepEqual(first[0]?.isbn10, ["0441478123"]);
+  assert.deepEqual(first[0]?.isbn13, ["9780441478125"]);
   assert.equal(first[0]?.coverUrl, "https://covers.openlibrary.org/b/id/101-M.jpg");
   assert.deepEqual(second, first);
 });

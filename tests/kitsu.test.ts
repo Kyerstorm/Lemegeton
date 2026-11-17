@@ -76,6 +76,7 @@ test("Kitsu title search uses the public JSON:API filter and returns only G/PG t
   const url = new URL(requestUrl);
   assert.equal(url.origin + url.pathname, "https://kitsu.io/api/edge/anime");
   assert.equal(url.searchParams.get("filter[text]"), "Example Anime");
+  assert.equal(url.searchParams.get("filter[ageRating]"), "G,PG");
   assert.equal(url.searchParams.get("page[limit]"), "20");
   assert.equal(url.searchParams.get("include"), "genres,categories");
   assert.equal(accept, "application/vnd.api+json");

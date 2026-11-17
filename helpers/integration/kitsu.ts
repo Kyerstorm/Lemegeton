@@ -160,6 +160,7 @@ export class KitsuClient {
 
     const url = new URL(`https://kitsu.io/api/edge/${type}`);
     url.searchParams.set(`filter[${filter}]`, value);
+    url.searchParams.set("filter[ageRating]", "G,PG");
     url.searchParams.set("page[limit]", "20");
     url.searchParams.set("include", "genres,categories");
     const response = await fetchProviderResponse(this.fetcher, url, {
