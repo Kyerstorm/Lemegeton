@@ -136,6 +136,14 @@ export const emoji = {
   gog: "<:GOG:1433757557628866640>",
   login: "<:login:1557774167267475516>",
   shoppingCart: "<a:shoppingcart:1557772890382798878>",
+  IGDB: "🎲",
+  Novelfire: "📈",
+  openlibrary: fireEmoji,
+  Letterboxd: ideaEmoji,
+  TMDB: calendarEmoji,
+  TTT: "🕒",
+  bookmark: "🔖",
+  archive: "🗃️",
 } as const;
 
 export type EmojiName = keyof typeof emoji;
