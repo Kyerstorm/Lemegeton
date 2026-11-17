@@ -148,6 +148,8 @@ export const emoji = {
   Spotify: "",
   Soundcloud: "",
   Youtube: "",
+  kitsu: "",
+  Novelupdates: "",
 } as const;
 
 export type EmojiName = keyof typeof emoji;
