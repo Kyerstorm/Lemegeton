@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fetchPublicPage, fetchJson, fetchXml, fetchSitemapUrls, extractStructuredData, crawlPublicSite, ScrapeBlockedError, validatePublicHttpUrl } from "../helpers/integration/web-scraper.js";
+import { CookieJar } from "tough-cookie";
+import { fetchPublicPage, fetchJson, fetchXml, fetchSitemapUrls, fetchMany, extractStructuredData, crawlPublicSite, ScrapeBlockedError, validatePublicHttpUrl } from "../helpers/integration/web-scraper.js";
 import { parseNovelFireSearch, buildNovelFireSearchUrl, parseNovelFireChapterData, parseNoveliToSearch, parseNoveliToDetail, parseNovelArchiveSearch, parseWuxiaClickPageData, parseNovelUpdatesSearch } from "../helpers/integration/webnovel-discovery.js";
 
 test("URL validation rejects local hosts, private IPs and unsupported schemes", () => {
@@ -314,4 +315,78 @@ test("detailed crawling reports failures and continues with reachable pages", as
   assert.equal(report.pages.length, 1);
   assert.equal(report.pages[0]?.title, "Good page");
   assert.deepEqual(report.failures.map(value => value.kind), ["blocked", "request"]);
+});
+
+
+test("HTTP transport retries transient network errors and preserves cookie-jar state", async () => {
+  const jar = new CookieJar();
+  await jar.setCookie("session=ready; Path=/", "https://example.com");
+  let calls = 0;
+  let sentCookie = "";
+  const fetchImpl: typeof fetch = async (_input, init) => {
+    calls += 1;
+    sentCookie = new Headers(init?.headers).get("cookie") ?? "";
+    if (calls === 1) throw new Error("temporary socket failure");
+    return new Response("<html><head><title>Cookie page</title></head><body>Public content</body></html>", {
+      status: 200,
+      headers: { "content-type": "text/html", "set-cookie": "preference=compact; Path=/" },
+    });
+  };
+  const page = await fetchPublicPage("https://example.com/page", {
+    cookieJar: jar,
+    fetchImpl,
+    retries: 1,
+    includeText: false,
+  });
+  assert.equal(page.title, "Cookie page");
+  assert.equal(calls, 2);
+  assert.match(sentCookie, /session=ready/);
+  assert.match(await jar.getCookieString("https://example.com/page"), /preference=compact/);
+});
+
+test("fast and DOM text parsers remove non-content elements", async () => {
+  const html = "<html><body><main><p>Readable content</p></main><script>secret script text</script><style>hidden style text</style></body></html>";
+  const fetchImpl: typeof fetch = async () => new Response(html, {
+    status: 200,
+    headers: { "content-type": "text/html" },
+  });
+  for (const textParser of ["fast", "jsdom"] as const) {
+    const page = await fetchPublicPage("https://example.com/page", {
+      fetchImpl,
+      textParser,
+    });
+    assert.match(page.text ?? "", /Readable content/);
+    assert.doesNotMatch(page.text ?? "", /secret script text|hidden style text/);
+  }
+});
+
+test("fetchMany enforces concurrency and preserves input ordering", async () => {
+  const urls = [
+    "https://example.com/first",
+    "https://example.com/second",
+    "https://example.com/third",
+    "https://example.com/fourth",
+  ];
+  let active = 0;
+  let maximumActive = 0;
+  const fetchImpl: typeof fetch = async input => {
+    active += 1;
+    maximumActive = Math.max(maximumActive, active);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    active -= 1;
+    const path = new URL(String(input)).pathname.slice(1);
+    return new Response("<html><head><title>" + path + "</title></head><body>Page</body></html>", {
+      status: 200,
+      headers: { "content-type": "text/html" },
+    });
+  };
+  const results = await fetchMany(urls, { fetchImpl, concurrency: 2, includeText: false });
+  assert.equal(maximumActive, 2);
+  assert.deepEqual(results.map(result => result.url), urls);
+  assert.deepEqual(results.map(result => "result" in result ? result.result.title : ""), [
+    "first",
+    "second",
+    "third",
+    "fourth",
+  ]);
 });
