@@ -8,6 +8,20 @@ import {
 } from "../helpers/integration/tmdb.js";
 import { parseIgdbGame, parseIgdbCompanyCredits } from "../helpers/integration/igdb.js";
 
+test("IGDB game metadata retains alternate titles returned by the provider", () => {
+  const game = parseIgdbGame({
+    id: 6,
+    name: "Example Game",
+    alternative_names: [
+      { name: "Example: The Game" },
+      { name: "Example Game" },
+      { name: "   " },
+      null,
+    ],
+  });
+  assert.deepEqual(game?.alternateTitles, ["Example: The Game"]);
+});
+
 test("IGDB game metadata keeps user and critic ratings on their separate scales", () => {
   const game = parseIgdbGame({
     id: 5, name: "Example", slug: "example", rating: 82.5, rating_count: 120,

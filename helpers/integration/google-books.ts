@@ -1,4 +1,5 @@
 import { fetchProviderResponse } from "./provider-http.js";
+import { normalizeBibliographicIsbn } from "./crossref.js";
 export interface GoogleBook {
   id: string;
   title: string;
@@ -140,25 +141,6 @@ function normalizeVolume(value: unknown): GoogleBook | null {
   };
 }
 
-function normalizeIsbnIdentifier(value: string): string | null {
-  const compact = value.trim()
-    .replace(/^isbn(?:[-\s]?(?:10|13))?\s*[:#]?\s*/i, "")
-    .replace(/[\s-]/g, "")
-    .toUpperCase();
-  if (/^\d{9}[\dX]$/.test(compact)) {
-    const sum = [...compact].reduce((total, digit, index) =>
-      total + (10 - index) * (digit === "X" ? 10 : Number(digit)), 0);
-    return sum % 11 === 0 ? compact : null;
-  }
-  if (/^\d{13}$/.test(compact)) {
-    const sum = [...compact.slice(0, 12)].reduce((total, digit, index) =>
-      total + Number(digit) * (index % 2 === 0 ? 1 : 3), 0);
-    const checkDigit = (10 - (sum % 10)) % 10;
-    return Number(compact[12]) === checkDigit ? compact : null;
-  }
-  return null;
-}
-
 export class GoogleBooksClient {
   constructor(private readonly apiKey?: string) {}
 
@@ -187,7 +169,7 @@ export class GoogleBooksClient {
     const clean = identifier.trim();
     const compact = clean.replace(/^isbn(?:[-\s]?(?:10|13))?\s*[:#]?\s*/i, "").replace(/[\s-]/g, "");
     if (/^\d{9}[\dX]$|^\d{13}$/.test(compact.toUpperCase())) {
-      const isbn = normalizeIsbnIdentifier(clean);
+      const isbn = normalizeBibliographicIsbn(clean);
       if (!isbn) throw new Error("That ISBN has an invalid checksum. Check the ISBN-10 or ISBN-13 digits and try again.");
       const matches = await this.search("isbn:" + isbn);
       return matches.filter((book) => book.isbn10 === isbn || book.isbn13 === isbn);

@@ -37,3 +37,10 @@ test("Crossref client sends the exact ISBN filter and retains provider failure",
   const failing = new CrossrefClient(async () => new Response("failed", { status: 503 }));
   await assert.rejects(() => failing.findByIsbn(isbn), /HTTP 503/);
 });
+
+test("bibliographic ISBN normalization validates ISBN-10 and ISBN-13 checksums", () => {
+  assert.equal(normalizeBibliographicIsbn("ISBN-10: 0-441-17271-7"), "0441172717");
+  assert.equal(normalizeBibliographicIsbn("978-0-441-17271-9"), "9780441172719");
+  assert.equal(normalizeBibliographicIsbn("0441172718"), null);
+  assert.equal(normalizeBibliographicIsbn("9780441172718"), null);
+});

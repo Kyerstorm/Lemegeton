@@ -769,5 +769,3 @@ export async function crawlPublicSite(startUrls: string[], options: CrawlOptions
 return (await crawlPublicSiteDetailed(startUrls, options)).pages;
 }
 
-return results.slice(0, maxPages);
-}

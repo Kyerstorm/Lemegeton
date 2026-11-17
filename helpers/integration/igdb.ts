@@ -8,6 +8,7 @@ export interface IgdbGame {
   image: string | null;
   releaseDate: string | null;
   genres: string[];
+  alternateTitles: string[];
   platforms: string[];
   developers: string[];
   publishers: string[];
@@ -182,10 +183,19 @@ export function parseIgdbGame(value: unknown): IgdbGame | null {
   const releaseDate = typeof game.first_release_date === "number" && Number.isFinite(game.first_release_date)
     ? new Date(game.first_release_date * 1000).toISOString().slice(0, 10)
     : null;
+  const title = game.name.trim().slice(0, 200);
+  const alternateTitles = [...new Set((Array.isArray(game.alternative_names) ? game.alternative_names : [])
+    .flatMap(entry => {
+      const name = object(entry)?.name;
+      return typeof name === "string" && name.trim() && name.trim().slice(0, 200) !== title
+        ? [name.trim().slice(0, 200)]
+        : [];
+    }))].slice(0, 20);
 
   return {
     id: game.id,
-    title: game.name.trim().slice(0, 200),
+    title,
+    alternateTitles,
     summary: typeof game.summary === "string" ? game.summary : null,
     sourceUrl: sourceUrl("games", game.slug, game.name),
     image: igdbImageUrl(cover?.url),
@@ -298,7 +308,7 @@ export class IgdbClient {
     const clean = query.replace(/[";\\]/g, " ").replace(/\s+/g, " ").trim().slice(0, 100);
     if (clean.length < 2) return [];
     const rows = await this.request("games",
-      'search "' + clean + '"; fields id,name,slug,summary,first_release_date,rating,rating_count,aggregated_rating,aggregated_rating_count,cover.url,genres.name,platforms.name,involved_companies.developer,involved_companies.publisher,involved_companies.company.name; limit 10;'
+      'search "' + clean + '"; fields id,name,slug,summary,first_release_date,rating,rating_count,aggregated_rating,aggregated_rating_count,cover.url,genres.name,alternative_names.name,platforms.name,involved_companies.developer,involved_companies.publisher,involved_companies.company.name; limit 10;'
     );
     return (Array.isArray(rows) ? rows : []).flatMap((raw) => {
       const game = parseIgdbGame(raw);

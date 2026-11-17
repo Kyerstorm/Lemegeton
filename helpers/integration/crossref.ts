@@ -24,8 +24,22 @@ function object(value: unknown): JsonObject | null {
 }
 
 export function normalizeBibliographicIsbn(value: string): string | null {
-  const isbn = value.replace(/[\s-]/g, "").toUpperCase();
-  return /^(?:\d{9}[\dX]|\d{13})$/.test(isbn) ? isbn : null;
+  const isbn = value.trim()
+    .replace(/^isbn(?:[-\s]?(?:10|13))?\s*[:#]?\s*/i, "")
+    .replace(/[\s-]/g, "")
+    .toUpperCase();
+  if (/^\d{9}[\dX]$/.test(isbn)) {
+    const checksum = [...isbn].reduce((sum, digit, index) =>
+      sum + (10 - index) * (digit === "X" ? 10 : Number(digit)), 0);
+    return checksum % 11 === 0 ? isbn : null;
+  }
+  if (/^\d{13}$/.test(isbn)) {
+    const sum = [...isbn.slice(0, 12)].reduce((total, digit, index) =>
+      total + Number(digit) * (index % 2 === 0 ? 1 : 3), 0);
+    const checkDigit = (10 - (sum % 10)) % 10;
+    return Number(isbn[12]) === checkDigit ? isbn : null;
+  }
+  return null;
 }
 
 function contributors(value: unknown): CrossrefContributor[] {
