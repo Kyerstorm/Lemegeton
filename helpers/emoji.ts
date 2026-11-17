@@ -144,7 +144,10 @@ export const emoji = {
   RoyalRoad: "🕒",
   MangaDex: "🔖",
   GoogleBooks: "🗃️",
-
+  crossref: "leave empty",
+  Spotify: "",
+  Soundcloud: "",
+  Youtube: "",
 } as const;
 
 export type EmojiName = keyof typeof emoji;
