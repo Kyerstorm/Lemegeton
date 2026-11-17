@@ -292,7 +292,6 @@ async function requestResource(
       method,
       headers,
       ...(body !== undefined ? { body } : {}),
-      maxRedirections: 0,
       signal: AbortSignal.timeout(timeoutMs),
     });
     result = {
@@ -372,7 +371,6 @@ async function fetchResource(
           minTimeout: Math.max(1, Math.min(300, maxRetryDelayMs || 1)),
           maxTimeout: Math.max(1, maxRetryDelayMs || 1),
           factor: 2,
-          randomize: true,
         });
       } catch (error) {
         if (error instanceof ScrapeError || error instanceof TypeError) throw error;
