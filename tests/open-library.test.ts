@@ -41,3 +41,53 @@ test("Open Library does not invent a work family for ambiguous ISBN records", as
   assert.equal(family, null);
   assert.equal(calls, 1);
 });
+
+test("Open Library title search returns work metadata and caches the same user query", async () => {
+  const requests: string[] = [];
+  const fetcher: typeof fetch = async input => {
+    requests.push(String(input));
+    return new Response(JSON.stringify({
+      docs: [{
+        key: "/works/OL123W",
+        title: "The Left Hand of Darkness",
+        author_name: ["Ursula K. Le Guin"],
+        first_publish_year: 1969,
+        edition_count: 24,
+        subject: ["Science fiction", "Gender"],
+        publisher: ["Ace Books"],
+        language: ["/languages/eng"],
+        isbn: ["0441478123", "9780441478125"],
+        cover_i: 101,
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const client = new OpenLibraryClient(fetcher, 0);
+  const first = await client.searchTitle("The Left Hand of Darkness");
+  const second = await client.searchTitle("The Left Hand of Darkness");
+  assert.equal(requests.length, 1);
+  const url = new URL(requests[0]!);
+  assert.equal(url.searchParams.get("title"), "The Left Hand of Darkness");
+  assert.equal(url.searchParams.get("limit"), "10");
+  assert.equal(first[0]?.workId, "OL123W");
+  assert.equal(first[0]?.authors[0], "Ursula K. Le Guin");
+  assert.equal(first[0]?.isbn13[0], "9780441478125");
+  assert.equal(first[0]?.coverUrl, "https://covers.openlibrary.org/b/id/101-M.jpg");
+  assert.deepEqual(second, first);
+});
+
+test("Open Library subject search ignores non-work identifiers", async () => {
+  let requested = "";
+  const client = new OpenLibraryClient(async input => {
+    requested = String(input);
+    return new Response(JSON.stringify({
+      works: [
+        { key: "/works/OL987W", title: "A Fantasy Chronicle", authors: [{ name: "A. Author" }], edition_count: 5 },
+        { key: "/books/OL123M", title: "Invalid edition result" },
+      ],
+    }), { status: 200 });
+  }, 0);
+  const results = await client.searchBySubject("Science Fiction");
+  assert.match(requested, /\\/subjects\\/science-fiction\\.json\\?limit=10/);
+  assert.equal(results.length, 1);
+  assert.equal(results[0]?.workId, "OL987W");
+});

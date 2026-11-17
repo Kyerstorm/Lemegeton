@@ -307,7 +307,7 @@ const AIRING=`query Airing($from:Int,$to:Int){Page(page:1,perPage:50){airingSche
 const AIRING_TITLE=`query TitleAiring($search:String!){Page(page:1,perPage:5){media(search:$search,type:ANIME,sort:SEARCH_MATCH,isAdult:false){id title{romaji english native} siteUrl coverImage{large} format status season seasonYear isAdult airingSchedule(notYetAired:true,perPage:10){nodes{airingAt episode}}}}}`;
 const AIRING_SEASON=`query SeasonAiring($season:MediaSeason,$year:Int){Page(page:1,perPage:50){media(type:ANIME,season:$season,seasonYear:$year,sort:POPULARITY_DESC,isAdult:false){id title{romaji english native} siteUrl coverImage{large} format status season seasonYear isAdult airingSchedule(notYetAired:true,perPage:10){nodes{airingAt episode}}}}}`;
 const AIRING_DAYS=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
-const MEDIA_NIGHT_QUERY=`query MediaNight($type:MediaType!){Page(page:1,perPage:50){media(type:$type,sort:TRENDING_DESC,isAdult:false){id type title{romaji english native} description(asHtml:false) siteUrl coverImage{large} startDate{year} duration genres tags{name isMediaSpoiler} isAdult}}}}`;
+const MEDIA_NIGHT_QUERY=`query MediaNight($type:MediaType!,$format:MediaFormat){Page(page:1,perPage:50){media(type:$type,format:$format,sort:TRENDING_DESC,isAdult:false){id type title{romaji english native} description(asHtml:false) siteUrl coverImage{large} startDate{year} duration genres tags{name isMediaSpoiler} isAdult}}}}`;
 function parseAiringRows(rows:unknown[]):AniListAiring[]{
  return rows.flatMap(value=>{
   if(!isObj(value)||!isObj(value.media)||value.media.isAdult===true)return[];
@@ -324,27 +324,33 @@ function parseAiringRows(rows:unknown[]):AniListAiring[]{
 export class AniListError extends Error {constructor(message:string,readonly statusCode?:number){super(message);this.name="AniListError";}}
 export class AniListClient {
  constructor(private readonly endpoint="https://graphql.anilist.co",private readonly timeoutMs=10000,private readonly fetcher:typeof fetch=globalThis.fetch){}
- async search(query:string,type:AniListMediaType,lightNovelOnly=false,filters:AniListSearchFilters={}):Promise<AniListMedia[]>{return this.searchQuery({search:query.trim(),type,...filterVariables(filters),...(lightNovelOnly?{format:"NOVEL"}:{}),sort:"SEARCH_MATCH"});} async random(type:AniListMediaType,lightNovelOnly=false,filters:AniListSearchFilters={}):Promise<AniListMedia[]>{return this.searchQuery({type,...filterVariables(filters),...(lightNovelOnly?{format:"NOVEL"}:{}),sort:"POPULARITY_DESC",page:secureRandBelow(200)+1,perPage:10});}
- async trending(type:AniListMediaType,filters:AniListSearchFilters={}):Promise<AniListMedia[]>{return this.searchQuery({type,...filterVariables(filters),sort:"TRENDING_DESC"});}
+ async search(query:string,type:AniListMediaType,lightNovelOnly=false,filters:AniListSearchFilters={}):Promise<AniListMedia[]>{
+  if(type==="MANGA"&&filters.format&&filters.format!==(lightNovelOnly?"NOVEL":"MANGA"))throw new Error("AniList manga searches separate MANGA records from light novels (NOVEL format).");
+  const variables={...filterVariables(filters),format:type==="MANGA"?(lightNovelOnly?"NOVEL":"MANGA"):(filters.format??null)};
+  return this.searchQuery({search:query.trim(),type,...variables,sort:"SEARCH_MATCH"});
+ }
+ async random(type:AniListMediaType,lightNovelOnly=false,filters:AniListSearchFilters={}):Promise<AniListMedia[]>{
+  if(type==="MANGA"&&filters.format&&filters.format!==(lightNovelOnly?"NOVEL":"MANGA"))throw new Error("AniList manga searches separate MANGA records from light novels (NOVEL format).");
+  const variables={...filterVariables(filters),format:type==="MANGA"?(lightNovelOnly?"NOVEL":"MANGA"):(filters.format??null)};
+  return this.searchQuery({type,...variables,sort:"POPULARITY_DESC",page:secureRandBelow(200)+1,perPage:10});
+ }
+ async trending(type:AniListMediaType,filters:AniListSearchFilters={},lightNovelOnly=false):Promise<AniListMedia[]>{
+  if(type==="MANGA"&&filters.format&&filters.format!==(lightNovelOnly?"NOVEL":"MANGA"))throw new Error("AniList manga searches separate MANGA records from light novels (NOVEL format).");
+  const variables={...filterVariables(filters),format:type==="MANGA"?(lightNovelOnly?"NOVEL":"MANGA"):(filters.format??null)};
+  return this.searchQuery({type,...variables,sort:"TRENDING_DESC"});
+ }
  async searchByGenres(type:AniListMediaType,genres:readonly string[],tags:readonly string[]=[],lightNovelOnly=false):Promise<AniListMedia[]>{
   const genreValues=[...new Set(genres.map(value=>value.trim()).filter(Boolean))].slice(0,3);
   const tagValues=[...new Set(tags.map(value=>value.trim()).filter(Boolean))].slice(0,3);
   if(!genreValues.length&&!tagValues.length)return[];
-  const query=`query CrossMedia($type:MediaType!,$genres:[String],$tags:[String],$format:MediaFormat){
-   Page(page:1,perPage:15){media(type:$type,genre_in:$genres,tag_in:$tags,format:$format,sort:POPULARITY_DESC,isAdult:false){
-    id type isAdult title{romaji english native} description(asHtml:false) siteUrl coverImage{large} bannerImage
-    averageScore status format startDate{year month day} episodes chapters volumes genres
-    tags{name rank isMediaSpoiler isAdult} stats{statusDistribution{status amount} scoreDistribution{score amount}}
-    recommendations{edges{node{mediaRecommendation{id siteUrl title{romaji english native} coverImage{large} isAdult}}}}
-    relations{edges{relationType node{id type isAdult siteUrl title{romaji english} status startDate{year month day}}}} trailer{id site}
-   }}
-  }`;
-  const data=await this.graphql(query,{type,genres:genreValues,tags:tagValues,format:lightNovelOnly?"NOVEL":null});
+  const query="query CrossMedia($type:MediaType!,$genres:[String],$tags:[String],$format:MediaFormat){Page(page:1,perPage:15){media(type:$type,genre_in:$genres,tag_in:$tags,format:$format,sort:POPULARITY_DESC,isAdult:false){id type isAdult title{romaji english native} description(asHtml:false) siteUrl coverImage{large} bannerImage averageScore status format startDate{year month day} episodes chapters volumes genres tags{name rank isMediaSpoiler isAdult} stats{statusDistribution{status amount} scoreDistribution{score amount}} recommendations{edges{node{mediaRecommendation{id siteUrl title{romaji english native} coverImage{large} isAdult}}}} relations{edges{relationType node{id type isAdult siteUrl title{romaji english} status startDate{year month day}}}} trailer{id site}}}}";
+  const format=type==="MANGA"?(lightNovelOnly?"NOVEL":"MANGA"):null;
+  const data=await this.graphql(query,{type,genres:genreValues,tags:tagValues,format});
   const page=isObj(data.Page)?data.Page:{};
   return(Array.isArray(page.media)?page.media:[]).flatMap(value=>{const media=parseMedia(value);return media?[media]:[];});
  }
  async mediaNightCandidates(type:AniListMediaType):Promise<AniListMediaNightCandidate[]>{
-  const data=await this.graphql(MEDIA_NIGHT_QUERY,{type});
+  const data=await this.graphql(MEDIA_NIGHT_QUERY,{type,format:type==="MANGA"?"MANGA":null});
   const page=isObj(data.Page)?data.Page:{};
   const rows=Array.isArray(page.media)?page.media:[];
   return rows.flatMap((value):AniListMediaNightCandidate[]=>{

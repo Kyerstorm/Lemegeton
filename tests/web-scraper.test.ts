@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fetchPublicPage, fetchJson, validatePublicHttpUrl } from "../helpers/integration/web-scraper.js";
+import { fetchPublicPage, fetchJson, fetchXml, fetchSitemapUrls, extractStructuredData, crawlPublicSite, ScrapeBlockedError, validatePublicHttpUrl } from "../helpers/integration/web-scraper.js";
 import { parseNovelFireSearch, buildNovelFireSearchUrl, parseNovelFireChapterData, parseNoveliToSearch, parseNoveliToDetail, parseNovelArchiveSearch, parseWuxiaClickPageData, parseNovelUpdatesSearch } from "../helpers/integration/webnovel-discovery.js";
 
 test("URL validation rejects local hosts, private IPs and unsupported schemes", () => {
@@ -172,4 +172,71 @@ fetchImpl,
 assert.equal(method, "POST");
 assert.match(body, /post_id=12/);
 assert.match(page.html ?? "", /Chapter item/);
+});
+
+test("JSON-LD extraction reads top-level and graph records", () => {
+  const html = '<script type="application/ld+json">{"@type":"Book","name":"Dune","@graph":[{"@type":"Person","name":"Frank Herbert"}]}</script>';
+  const data = extractStructuredData(html);
+  assert.equal(data.length, 2);
+  assert.equal(data[0]?.name, "Dune");
+  assert.equal(data[1]?.name, "Frank Herbert");
+});
+
+test("XML fetching validates and parses bounded RSS documents", async () => {
+  const fetchImpl: typeof fetch = async () => new Response(
+    '<rss version="2.0"><channel><title>Example feed</title><item><title>Latest</title></item></channel></rss>',
+    { status: 200, headers: { "content-type": "application/rss+xml" } },
+  );
+  const payload = await fetchXml<Record<string, unknown>>("https://example.com/feed.xml", { fetchImpl });
+  const rss = payload.rss as Record<string, unknown>;
+  const channel = rss.channel as Record<string, unknown>;
+  assert.equal(channel.title, "Example feed");
+});
+
+test("XML fetching rejects DTD/entity declarations and malformed documents", async () => {
+  const dtd: typeof fetch = async () => new Response(
+    '<!DOCTYPE rss [<!ENTITY local SYSTEM "file:///etc/passwd">]><rss>&local;</rss>',
+    { status: 200, headers: { "content-type": "application/xml" } },
+  );
+  await assert.rejects(() => fetchXml("https://example.com/feed.xml", { fetchImpl: dtd }), /DTD or entity declarations/);
+  const malformed: typeof fetch = async () => new Response("<rss><channel>", { status: 200, headers: { "content-type": "application/xml" } });
+  await assert.rejects(() => fetchXml("https://example.com/feed.xml", { fetchImpl: malformed }), /invalid XML/);
+});
+
+test("Cloudflare challenge headers stop scraping", async () => {
+  const fetchImpl: typeof fetch = async () => new Response("<html>challenge</html>", {
+    status: 503,
+    headers: { "content-type": "text/html", "cf-mitigated": "challenge" },
+  });
+  await assert.rejects(
+    () => fetchPublicPage("https://example.com/page", { fetchImpl }),
+    (error: unknown) => error instanceof ScrapeBlockedError && /Cloudflare challenge/.test(error.message),
+  );
+});
+
+test("Sitemap discovery is bounded and remains on its allowed host", async () => {
+  const fetchImpl: typeof fetch = async () => new Response(
+    '<urlset><url><loc>https://example.com/one</loc></url><url><loc>https://other.example/two</loc></url><url><loc>https://example.com/three</loc></url></urlset>',
+    { status: 200, headers: { "content-type": "application/xml" } },
+  );
+  const urls = await fetchSitemapUrls("https://example.com/sitemap.xml", { maxUrls: 1, fetchImpl });
+  assert.deepEqual(urls, ["https://example.com/one"]);
+});
+
+test("crawler follows robots Allow overrides and disallows restricted paths", async () => {
+  const fetchImpl: typeof fetch = async input => {
+    const url = String(input);
+    if (url.endsWith("/robots.txt")) {
+      return new Response("User-agent: *\\nDisallow: /private\\nAllow: /private/open\\n", { status: 200 });
+    }
+    return new Response("<html><head><title>Allowed path</title></head><body>Open</body></html>", {
+      status: 200,
+      headers: { "content-type": "text/html" },
+    });
+  };
+  const denied = await crawlPublicSite(["https://example.com/private/blocked"], { fetchImpl, delayMs: 0 });
+  const allowed = await crawlPublicSite(["https://example.com/private/open"], { fetchImpl, delayMs: 0 });
+  assert.equal(denied.length, 0);
+  assert.equal(allowed.length, 1);
+  assert.equal(allowed[0]?.title, "Allowed path");
 });

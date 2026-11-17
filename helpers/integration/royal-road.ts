@@ -1,4 +1,5 @@
 import { fetchProviderResponse } from "./provider-http.js";
+import { parseXmlDocument } from "./web-scraper.js";
 
 export interface RoyalRoadChapter {
   title: string;
@@ -17,20 +18,21 @@ export interface RoyalRoadFiction {
   image: null;
 }
 
-function xmlText(value: string | undefined): string {
-  if (!value) return "";
-  return value.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
-    .replace(/<[^>]*>/g, " ")
+function xmlValue(value: unknown): string {
+  if (typeof value === "string") return value
     .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
     .replace(/&#(\d+);/g, (_, decimal: string) => String.fromCodePoint(Number(decimal)))
     .replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&apos;|&#39;/g, "'")
     .replace(/&lt;/g, "<").replace(/&gt;/g, ">")
     .replace(/\s+/g, " ").trim();
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const record = value as Record<string, unknown>;
+  const text = record["#text"] ?? record["__cdata"];
+  return typeof text === "string" ? text.replace(/\s+/g, " ").trim() : "";
 }
 
-function tagValue(xml: string, tag: string): string {
-  const match = new RegExp("<" + tag + "(?:\\s[^>]*)?>([\\s\\S]*?)</" + tag + ">", "i").exec(xml);
-  return xmlText(match?.[1]);
+function xmlObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
 function royalRoadUrl(value: string): string | null {
@@ -63,31 +65,36 @@ export function parseRoyalRoadFictionId(value: string): number {
 }
 
 export function parseRoyalRoadFeed(value: unknown, fictionId: number): RoyalRoadFiction | null {
-  if (typeof value !== "string" || value.length > 512_000 || !/^\s*(?:<\?xml[^>]*>\s*)?<rss\b/i.test(value)
-    || /<!DOCTYPE|<!ENTITY/i.test(value)) return null;
-  const channel = /<channel(?:\s[^>]*)?>([\s\S]*?)<\/channel>/i.exec(value)?.[1];
+  if (typeof value !== "string" || Buffer.byteLength(value, "utf8") > 512_000) return null;
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = xmlObject(parseXmlDocument(value)) ?? {};
+  } catch {
+    return null;
+  }
+  const rss = xmlObject(parsed.rss);
+  const channel = xmlObject(rss?.channel);
   if (!channel) return null;
-  const channelTitle = tagValue(channel, "title");
+  const channelTitle = xmlValue(channel.title);
   const title = channelTitle.replace(/^Latest updates of\s*\(/i, "").replace(/\)$/, "").trim();
   if (!title) return null;
-  const channelLink = royalRoadUrl(tagValue(channel, "link"));
-  const author = tagValue(channel, "author") || tagValue(channel, "managingEditor") || null;
-  const chapters = [...channel.matchAll(/<item(?:\s[^>]*)?>([\s\S]*?)<\/item>/gi)]
-    .flatMap((match): RoyalRoadChapter[] => {
-      const item = match[1] ?? "";
-      const chapterTitle = tagValue(item, "title");
-      const chapterUrl = royalRoadUrl(tagValue(item, "link"));
-      if (!chapterTitle || !chapterUrl) return [];
-      const parsedDate = Date.parse(tagValue(item, "pubDate"));
-      return [{
-        title: chapterTitle.slice(0, 180),
-        url: chapterUrl,
-        publishedAt: Number.isFinite(parsedDate) ? new Date(parsedDate).toISOString() : null,
-      }];
-    })
-    .sort((a, b) => (b.publishedAt ?? "").localeCompare(a.publishedAt ?? ""))
-    .slice(0, 5);
-  const latestUpdate = chapters.find((chapter) => chapter.publishedAt)?.publishedAt ?? null;
+  const channelLink = royalRoadUrl(xmlValue(channel.link));
+  const author = xmlValue(channel.author) || xmlValue(channel.managingEditor) || null;
+  const rawItems = Array.isArray(channel.item) ? channel.item : channel.item ? [channel.item] : [];
+  const chapters = rawItems.flatMap((raw): RoyalRoadChapter[] => {
+    const item = xmlObject(raw);
+    if (!item) return [];
+    const chapterTitle = xmlValue(item.title);
+    const chapterUrl = royalRoadUrl(xmlValue(item.link));
+    if (!chapterTitle || !chapterUrl) return [];
+    const parsedDate = Date.parse(xmlValue(item.pubDate));
+    return [{
+      title: chapterTitle.slice(0, 180),
+      url: chapterUrl,
+      publishedAt: Number.isFinite(parsedDate) ? new Date(parsedDate).toISOString() : null,
+    }];
+  }).sort((a, b) => (b.publishedAt ?? "").localeCompare(a.publishedAt ?? "")).slice(0, 5);
+  const latestUpdate = chapters.find(chapter => chapter.publishedAt)?.publishedAt ?? null;
   return {
     id: fictionId,
     title: title.slice(0, 200),

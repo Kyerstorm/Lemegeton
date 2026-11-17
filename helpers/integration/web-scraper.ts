@@ -1,6 +1,8 @@
 import { isIP } from "node:net";
 import { load } from "cheerio";
 import { chromium } from "playwright-core";
+import robotsParser from "robots-parser";
+import { XMLParser, XMLValidator } from "fast-xml-parser";
 
 export const DEFAULT_MAX_TEXT_CHARS = 12_000;
 export const MAX_TEXT_CHARS = 40_000;
@@ -39,6 +41,8 @@ engine?: ScrapeEngine;
 selectors?: Record<string, string>;
 includeText?: boolean;
 maxTextChars?: number;
+includeStructuredData?: boolean;
+maxResponseBytes?: number;
 includeLinks?: boolean;
 linkSelector?: string;
 includeHtml?: boolean;
@@ -59,6 +63,7 @@ fields: Record<string, string | string[]>;
 engine: "fetch" | "playwright";
 statusCode: number;
 text?: string;
+structuredData?: Record<string, unknown>[];
 links?: Array<{ text: string; url: string }>;
 html?: string;
 }
@@ -121,11 +126,12 @@ return url;
 }
 
 function challengeReason(status: number, body: string, headers: Headers): string | null {
+if (headers.get("cf-mitigated")?.toLowerCase() === "challenge") return "Cloudflare challenge response";
 if (status === 429) return "HTTP 429 rate limit";
 if (status === 401 || status === 403) return "HTTP " + status + " access response";
 const lower = body.toLowerCase();
 const server = (headers.get("server") ?? "").toLowerCase();
-if (lower.includes("cf-chl-") || lower.includes("challenge-platform") || lower.includes("just a moment...") || lower.includes("verify you are human") || lower.includes("captcha-container") || lower.includes("g-recaptcha") || lower.includes("h-captcha")) {
+if (lower.includes("cf-chl-") || lower.includes("challenge-platform") || lower.includes("cdn-cgi/challenge-platform") || lower.includes("just a moment...") || lower.includes("verify you are human") || lower.includes("captcha-container") || lower.includes("g-recaptcha") || lower.includes("h-captcha") || lower.includes("cf-turnstile")) {
 return "access challenge";
 }
 if ((status === 503 || status === 522 || status === 524) && server.includes("cloudflare")) {
@@ -227,6 +233,117 @@ throw new ScrapeRequestError("Request failed for " + current.toString() + ": " +
 throw new ScrapeRequestError("Redirect handling failed for " + input + ".");
 }
 
+const xmlParser = new XMLParser({
+ignoreAttributes: false,
+attributeNamePrefix: "@",
+cdataPropName: "__cdata",
+parseTagValue: false,
+parseAttributeValue: false,
+processEntities: false,
+htmlEntities: false,
+allowBooleanAttributes: false,
+trimValues: true,
+removeNSPrefix: false,
+});
+
+export function parseXmlDocument(xml: string): unknown {
+if (Buffer.byteLength(xml, "utf8") > MAX_RESPONSE_BYTES) {
+throw new ScrapeRequestError("The XML document exceeded the " + MAX_RESPONSE_BYTES + "-byte limit.");
+}
+if (/<!DOCTYPE|<!ENTITY/i.test(xml)) {
+throw new ScrapeRequestError("XML documents containing DTD or entity declarations are not supported.");
+}
+const validation = XMLValidator.validate(xml);
+if (validation !== true) throw new ScrapeRequestError("The provider returned invalid XML.");
+try {
+return xmlParser.parse(xml);
+} catch {
+throw new ScrapeRequestError("The provider returned XML that could not be parsed.");
+}
+}
+
+export async function fetchXml<T = unknown>(
+url: string,
+options: Omit<ScrapeOptions, "engine" | "selectors" | "includeLinks" | "includeText" | "includeHtml" | "includeStructuredData"> = {},
+): Promise<T> {
+const response = await fetchResource(url, {
+timeoutMs: options.timeoutMs,
+retries: options.retries,
+headers: options.headers,
+method: options.method,
+body: options.body,
+fetchImpl: options.fetchImpl,
+maxBytes: options.maxResponseBytes ?? MAX_RESPONSE_BYTES,
+});
+const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
+if (contentType && !/(?:xml|rss|atom)/i.test(contentType)) {
+throw new ScrapeRequestError("Expected XML from " + response.url + ", received " + contentType + ".");
+}
+return parseXmlDocument(response.text) as T;
+}
+
+export function extractStructuredData(html: string): Record<string, unknown>[] {
+const $ = load(html);
+const records: Record<string, unknown>[] = [];
+$("script[type='application/ld+json']").each((_, node) => {
+if (records.length >= 30) return;
+const raw = $(node).text().trim();
+if (!raw || Buffer.byteLength(raw, "utf8") > 256 * 1024) return;
+try {
+const parsed: unknown = JSON.parse(raw);
+const append = (value: unknown): void => {
+if (records.length >= 30 || !value || typeof value !== "object" || Array.isArray(value)) return;
+const record = value as Record<string, unknown>;
+records.push(record);
+if (Array.isArray(record["@graph"])) for (const item of record["@graph"] as unknown[]) append(item);
+};
+if (Array.isArray(parsed)) for (const value of parsed) append(value);
+else append(parsed);
+} catch {
+// Malformed third-party JSON-LD is ignored while ordinary extraction continues.
+}
+});
+return records;
+}
+
+export async function fetchSitemapUrls(
+sitemapUrl: string,
+options: { maxUrls?: number; allowedDomains?: string[]; timeoutMs?: number; fetchImpl?: typeof fetch } = {},
+): Promise<string[]> {
+const start = validatePublicHttpUrl(sitemapUrl);
+const maxUrls = Math.max(1, Math.min(Math.floor(options.maxUrls ?? 500), MAX_CRAWL_PAGES));
+const allowed = new Set((options.allowedDomains?.length ? options.allowedDomains : [start.hostname])
+.map(value => value.toLowerCase().replace(/^www\\./, "")));
+const payload = await fetchXml<Record<string, unknown>>(start.toString(), {
+timeoutMs: options.timeoutMs ?? 10_000,
+retries: 0,
+fetchImpl: options.fetchImpl,
+maxResponseBytes: MAX_RESPONSE_BYTES,
+});
+const isIndex = Boolean(payload.sitemapindex);
+const root = isIndex ? payload.sitemapindex : payload.urlset;
+if (!root || typeof root !== "object" || Array.isArray(root)) return [];
+const rootObject = root as Record<string, unknown>;
+const key = isIndex ? "sitemap" : "url";
+const entries = Array.isArray(rootObject[key]) ? rootObject[key] as unknown[] : rootObject[key] ? [rootObject[key]] : [];
+const urls: string[] = [];
+for (const entry of entries) {
+if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+const loc = (entry as Record<string, unknown>).loc;
+if (typeof loc !== "string") continue;
+try {
+const target = validatePublicHttpUrl(new URL(loc, start).toString());
+const host = target.hostname.toLowerCase().replace(/^www\\./, "");
+if (![...allowed].some(domain => host === domain || host.endsWith("." + domain))) continue;
+urls.push(target.toString());
+if (urls.length >= maxUrls) break;
+} catch {
+// Invalid and out-of-scope sitemap locations are ignored.
+}
+}
+return [...new Set(urls)];
+}
+
 function extractPageData(url: string, html: string, statusCode: number, engine: "fetch" | "playwright", options: ScrapeOptions): ScrapeResult {
 if (Buffer.byteLength(html, "utf8") > MAX_RESPONSE_BYTES) {
 throw new ScrapeRequestError("The page exceeded the " + MAX_RESPONSE_BYTES + "-byte limit.");
@@ -265,6 +382,7 @@ fields,
 engine,
 statusCode,
 };
+if (options.includeStructuredData) result.structuredData = extractStructuredData(html);
 if (options.includeText !== false) {
 const textPage = load(html);
 textPage("script,style,noscript,svg,template").remove();
@@ -306,12 +424,18 @@ headless: true,
 ...(process.env.CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.CHROMIUM_EXECUTABLE_PATH } : {}),
 args: ["--no-sandbox", "--disable-dev-shm-usage"],
 });
+const context = await browser.newContext({ userAgent: DEFAULT_USER_AGENT, serviceWorkers: "block" });
 try {
-const page = await browser.newPage({ userAgent: DEFAULT_USER_AGENT });
+const page = await context.newPage();
 await page.route("**/*", async route => {
-const requestUrl = route.request().url();
+const request = route.request();
+const requestUrl = request.url();
 if (!requestUrl.startsWith("http://") && !requestUrl.startsWith("https://")) {
 await route.continue();
+return;
+}
+if (["image", "font", "media"].includes(request.resourceType())) {
+await route.abort();
 return;
 }
 try {
@@ -332,14 +456,14 @@ throw new ScrapeRequestError("Browser navigation returned HTTP " + response.stat
 const finalUrl = validatePublicHttpUrl(page.url()).toString();
 return extractPageData(finalUrl, html, response.status(), "playwright", options);
 } finally {
+await context.close();
 await browser.close();
 }
 }
-
 export async function fetchPublicPage(url: string, options: ScrapeOptions = {}): Promise<ScrapeResult> {
 const validated = validatePublicHttpUrl(url);
 if (options.engine === "browser") return fetchBrowserPage(validated.toString(), options);
-const response = await fetchResource(validated.toString(), options);
+const response = await fetchResource(validated.toString(), { ...options, maxBytes: options.maxResponseBytes ?? MAX_RESPONSE_BYTES });
 const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
 if (contentType && !contentType.includes("text/html") && !contentType.includes("application/xhtml+xml")) {
 throw new ScrapeRequestError("Expected HTML from " + response.url + ", received " + contentType + ".");
@@ -348,7 +472,7 @@ return extractPageData(response.url, response.text, response.status, "fetch", op
 }
 
 export async function fetchJson<T = unknown>(url: string, options: Omit<ScrapeOptions, "engine" | "selectors" | "includeLinks" | "includeText" | "includeHtml"> = {}): Promise<T> {
-const response = await fetchResource(url, options);
+const response = await fetchResource(url, { ...options, maxBytes: options.maxResponseBytes ?? MAX_RESPONSE_BYTES });
 try {
 return JSON.parse(response.text) as T;
 } catch {
@@ -382,32 +506,35 @@ const host = url.hostname.toLowerCase().replace(/^www\./, "");
 return [...domains].some(domain => host === domain || host.endsWith("." + domain));
 }
 
-async function robotsAllows(url: URL, cache: Map<string, string[]>): Promise<boolean> {
+type RobotsRules = ReturnType<typeof robotsParser>;
+
+async function loadRobotsRules(
+url: URL,
+cache: Map<string, RobotsRules | null>,
+fetchImpl: typeof fetch = fetch,
+): Promise<RobotsRules | null> {
 const origin = url.origin;
-let rules = cache.get(origin);
-if (!rules) {
+if (cache.has(origin)) return cache.get(origin) ?? null;
+let rules: RobotsRules | null = null;
 try {
-const response = await fetchResource(origin + "/robots.txt", { retries: 0, timeoutMs: 5_000, maxBytes: 256 * 1024 });
-const lines = response.text.split(/\r?\n/);
-let applies = false;
-rules = [];
-for (const raw of lines) {
-const line = raw.split("#", 1)[0]!.trim();
-if (!line) continue;
-const separator = line.indexOf(":");
-if (separator < 0) continue;
-const key = line.slice(0, separator).trim().toLowerCase();
-const value = line.slice(separator + 1).trim();
-if (key === "user-agent") applies = value === "*" || value.toLowerCase() === "lemegeton";
-else if (applies && key === "disallow" && value) rules.push(value);
+const response = await fetchResource(origin + "/robots.txt", {
+retries: 0,
+timeoutMs: 5_000,
+maxBytes: 256 * 1024,
+fetchImpl,
+});
+rules = robotsParser(origin + "/robots.txt", response.text);
+} catch (error) {
+const message = error instanceof Error ? error.message : String(error);
+if (/HTTP (?:404|410) returned/i.test(message)) {
+rules = robotsParser(origin + "/robots.txt", "");
 }
-} catch {
-rules = [];
+// Network errors, challenges, access denials and server failures fail closed.
 }
 cache.set(origin, rules);
+return rules;
 }
-return !rules.some(path => url.pathname.startsWith(path));
-}
+
 
 export async function crawlPublicSite(
 startUrls: string[],
@@ -417,9 +544,11 @@ allowedDomains?: string[];
 selectors?: Record<string, string>;
 includeText?: boolean;
 maxTextChars?: number;
+includeStructuredData?: boolean;
 includeLinks?: boolean;
 respectRobots?: boolean;
 concurrency?: number;
+fetchImpl?: typeof fetch;
 delayMs?: number;
 } = {},
 ): Promise<ScrapeResult[]> {
@@ -434,18 +563,28 @@ throw new TypeError("Every start URL must be inside allowedDomains.");
 const queue = [...seeds];
 const seen = new Set(seeds);
 const results: ScrapeResult[] = [];
-const robotsCache = new Map<string, string[]>();
+const robotsCache = new Map<string, RobotsRules | null>();
+const robotsDelays = new Map<string, number>();
 while (queue.length && results.length < maxPages) {
 const batch = queue.splice(0, concurrency);
 const settled = await Promise.all(batch.map(async url => {
 const parsed = new URL(url);
-if (options.respectRobots !== false && !(await robotsAllows(parsed, robotsCache))) return null;
+if (options.respectRobots !== false) {
+const rules = await loadRobotsRules(parsed, robotsCache, options.fetchImpl);
+if (!rules || rules.isAllowed(url, "Lemegeton") === false) return null;
+const crawlDelay = rules.getCrawlDelay("Lemegeton");
+if (typeof crawlDelay === "number" && Number.isFinite(crawlDelay) && crawlDelay > 0) {
+robotsDelays.set(parsed.origin, Math.min(crawlDelay * 1_000, 30_000));
+}
+}
 try {
 return await fetchPublicPage(url, {
 selectors: options.selectors,
 includeText: options.includeText,
 maxTextChars: options.maxTextChars,
+includeStructuredData: options.includeStructuredData,
 includeLinks: true,
+fetchImpl: options.fetchImpl,
 });
 } catch {
 return null;
@@ -465,8 +604,10 @@ queue.push(normalized);
 }
 }
 }
-if (queue.length && results.length < maxPages && (options.delayMs ?? 1_000) > 0) {
-await new Promise(resolve => setTimeout(resolve, Math.max(0, Math.min(options.delayMs ?? 1_000, 30_000))));
+if (queue.length && results.length < maxPages) {
+const policyDelay = Math.max(0, ...batch.map(url => robotsDelays.get(new URL(url).origin) ?? 0));
+const delayMs = Math.max(options.delayMs ?? 1_000, policyDelay);
+if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, Math.min(delayMs, 30_000)));
 }
 }
 return results.slice(0, maxPages);

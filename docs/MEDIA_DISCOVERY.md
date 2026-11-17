@@ -8,8 +8,8 @@ Use **/browse** with a media category and a title for a detailed record. For TMD
 
 | Category | Supported filters |
 | --- | --- |
-| Anime and manga | Genre, AniList theme/tag, provider status, year range. Manga supports manga (Japan), manhwa (Korea), manhua (China), and provider-tagged webtoon subtypes using AniList origin/format metadata. Author and artist filters are available for manga/light-novel records when AniList staff roles expose the credit. Adult-flagged titles are excluded unless the user explicitly opts in from a Discord channel marked NSFW. |
-| General novels and books | Genre/subject, author, publisher, language code, publication year range through Google Books query parameters. |
+| Anime and manga | Anime uses AniList. Manga search combines AniList `type:MANGA, format:MANGA` and safe-rated MangaDex title metadata when AniList-only filters are not selected. Light novels use AniList `type:MANGA, format:NOVEL` and are excluded from ordinary manga results. MangaDex adds creators, tags, language, demographic and cover metadata, without retrieving chapters. |
+| General novels and books | Title and subject search through Google Books and low-volume Open Library APIs, plus Google Books volume lookup and exact Open Library ISBN-to-work lookup. |
 | Webnovels | NovelFire title search/detail pages plus its DataTables JSON chapter endpoint (chapter count and newest chapter titles ordered by chapter number); Noveli.to paginated JSON search and detail endpoints; Novel Archive JSON search/detail API; Wuxia Click server-rendered `__NEXT_DATA__` search/detail records; Novel Updates series-finder HTML; ScribbleHub series-finder/detail pages and its AJAX chapter list; Royal Road story-specific RSS by fiction ID or official URL. Shows source-attributed titles, authors, summaries, genres, status, ratings, chapter counts, covers and recent chapter/update metadata when supplied. |
 | Movies and TV | TMDB genre, keyword/theme, original language code, status, release year range, runtime, director and cast filters. |
 
@@ -32,7 +32,7 @@ No chapter-to-episode or volume-to-season mapping is guessed. Release-order and 
 
 ## Cross-media similarity
 
-**/similar** resolves supported titles through AniList, Google Books, TMDB or IGDB, then searches anime, manga, light novels, general books, movies, television and games for candidates with overlapping provider-reported genres. Webnovel sources are not currently part of the cross-media similarity search.
+**/similar** resolves supported titles through AniList, MangaDex, Google Books, Open Library, TMDB or IGDB, then searches supported categories for candidates with overlapping provider-reported genres or tags. MangaDex tags and Open Library subjects remain attributed to their source rather than being rewritten as AniList genres.
 
 The result has separate sections for:
 - **Provider-generated recommendations**, where AniList, TMDB or IGDB supplies them.

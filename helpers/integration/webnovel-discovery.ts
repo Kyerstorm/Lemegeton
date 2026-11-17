@@ -1,5 +1,5 @@
 import { load } from "cheerio";
-import { fetchJson, fetchPublicPage, type ScrapeResult } from "./web-scraper.js";
+import { fetchJson, fetchPublicPage, ScrapeBlockedError, type ScrapeResult } from "./web-scraper.js";
 
 export type WebNovelProvider = "NovelFire" | "Novel Archive" | "Wuxia Click" | "Novel Updates" | "ScribbleHub" | "Noveli.to";
 
@@ -285,6 +285,7 @@ timeoutMs: 10_000,
 retries: 1,
 });
 } catch (error) {
+if (error instanceof ScrapeBlockedError) throw error;
 try {
 page = await fetchPublicPage(searchUrl, {
 engine: "browser",
@@ -311,6 +312,7 @@ const details = await Promise.allSettled(items.slice(0, 4).map(enrichNovelFire))
 return items.slice(0, 4).flatMap((item, index) => {
 const result = details[index];
 if (result?.status === "fulfilled" && result.value) return [result.value];
+if (result?.status === "rejected" && result.reason instanceof ScrapeBlockedError) return [];
 const fallback = makeRecord("NovelFire", { title: item.title, sourceUrl: item.sourceUrl, image: item.image });
 return fallback ? [fallback] : [];
 });
@@ -648,7 +650,8 @@ url.searchParams.set("order", "desc");
 let page: ScrapeResult;
 try {
 page = await fetchPublicPage(url.toString(), { includeHtml: true, includeText: false, timeoutMs: 8_000, retries: 0 });
-} catch {
+} catch (error) {
+if (error instanceof ScrapeBlockedError) throw error;
 const fallback = new URL("https://www.novelupdates.com/");
 fallback.searchParams.set("s", query);
 fallback.searchParams.set("post_type", "series");
@@ -659,7 +662,8 @@ if (!results.length) {
 try {
 const browserPage = await fetchPublicPage(page.url, { engine: "browser", includeHtml: true, includeText: false, timeoutMs: 15_000, retries: 0 });
 results = parseNovelUpdatesSearch(browserPage.html ?? "", browserPage.url);
-} catch {
+} catch (error) {
+if (error instanceof ScrapeBlockedError) throw error;
 // Static response is still useful when no browser runtime is configured.
 }
 }

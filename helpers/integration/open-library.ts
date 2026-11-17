@@ -11,6 +11,21 @@ export interface OpenLibraryEdition {
   editionName: string | null;
 }
 
+export interface OpenLibraryWork {
+  workId: string;
+  title: string;
+  authors: string[];
+  firstPublishYear: number | null;
+  editionCount: number | null;
+  subjects: string[];
+  publishers: string[];
+  languages: string[];
+  isbn10: string[];
+  isbn13: string[];
+  coverUrl: string | null;
+  sourceUrl: string;
+}
+
 export interface OpenLibraryEditionFamily {
   workId: string;
   workUrl: string;
@@ -31,6 +46,37 @@ function strings(value: unknown, maximum = 20): string[] {
   return (Array.isArray(value) ? value : []).flatMap((entry): string[] =>
     typeof entry === "string" && entry.trim() ? [entry.trim().slice(0, 100)] : [],
   ).slice(0, maximum);
+}
+
+function parseWork(value: unknown): OpenLibraryWork | null {
+  const item = object(value);
+  const key = item?.key;
+  if (typeof key !== "string" || !/^\/works\/OL\d+W$/.test(key)) return null;
+  const title = typeof item?.title === "string" && item.title.trim() ? item.title.trim().slice(0, 240) : null;
+  if (!title) return null;
+  const isbnValues = strings(item?.isbn, 100).map(value => value.replace(/[\s-]/g, ""));
+  const coverId = typeof item?.cover_i === "number" && Number.isSafeInteger(item.cover_i) && item.cover_i > 0 ? item.cover_i : null;
+  const firstPublishYear = typeof item?.first_publish_year === "number" && Number.isInteger(item.first_publish_year) ? item.first_publish_year : null;
+  const editionCount = typeof item?.edition_count === "number" && Number.isInteger(item.edition_count) ? Math.max(0, item.edition_count) : null;
+  return {
+    workId: key.slice("/works/".length),
+    title,
+    authors: strings(item?.author_name, 12).length
+      ? strings(item?.author_name, 12)
+      : (Array.isArray(item?.authors) ? item.authors.flatMap(value => {
+          const author = object(value);
+          return typeof author?.name === "string" && author.name.trim() ? [author.name.trim().slice(0, 100)] : [];
+        }).slice(0, 12) : []),
+    firstPublishYear,
+    editionCount,
+    subjects: strings(item?.subject, 16),
+    publishers: strings(item?.publisher, 8),
+    languages: strings(item?.language, 8).map(value => value.split("/").filter(Boolean).at(-1) ?? value),
+    isbn10: isbnValues.filter(value => /^\d{9}[\dX]$/i.test(value)).slice(0, 5),
+    isbn13: isbnValues.filter(value => /^\d{13}$/.test(value)).slice(0, 5),
+    coverUrl: coverId ? "https://covers.openlibrary.org/b/id/" + coverId + "-M.jpg" : null,
+    sourceUrl: "https://openlibrary.org" + key,
+  };
 }
 
 function parseEdition(value: unknown): OpenLibraryEdition | null {
@@ -55,11 +101,56 @@ function parseEdition(value: unknown): OpenLibraryEdition | null {
 export class OpenLibraryClient {
   private requestQueue: Promise<void> = Promise.resolve();
   private lastRequestAt = 0;
+  private readonly searchCache = new Map<string, { storedAt: number; items: OpenLibraryWork[] }>();
 
   constructor(
     private readonly fetcher: typeof fetch = globalThis.fetch,
     private readonly minimumIntervalMs = 1_100,
   ) {}
+
+  async searchTitle(value: string): Promise<OpenLibraryWork[]> {
+    const title = value.trim().replace(/\s+/g, " ").slice(0, 120);
+    if (title.length < 2) return [];
+    return this.cachedSearch("title:" + title.toLocaleLowerCase("en"), async () => {
+      const url = new URL("https://openlibrary.org/search.json");
+      url.searchParams.set("title", title);
+      url.searchParams.set("limit", "10");
+      url.searchParams.set("fields", "key,title,author_name,first_publish_year,edition_count,subject,publisher,language,isbn,cover_i");
+      const payload = object(await this.requestJson(url.toString()));
+      const rows = Array.isArray(payload?.docs) ? payload.docs : [];
+      return rows.flatMap((row): OpenLibraryWork[] => {
+        const work = parseWork(row);
+        return work ? [work] : [];
+      });
+    });
+  }
+
+  async searchBySubject(value: string): Promise<OpenLibraryWork[]> {
+    const subject = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80);
+    if (subject.length < 2) return [];
+    return this.cachedSearch("subject:" + subject, async () => {
+      const url = "https://openlibrary.org/subjects/" + encodeURIComponent(subject) + ".json?limit=10";
+      const payload = object(await this.requestJson(url));
+      const rows = Array.isArray(payload?.works) ? payload.works : [];
+      return rows.flatMap((row): OpenLibraryWork[] => {
+        const work = parseWork(row);
+        return work ? [work] : [];
+      });
+    });
+  }
+
+  private async cachedSearch(key: string, load: () => Promise<OpenLibraryWork[]>): Promise<OpenLibraryWork[]> {
+    const existing = this.searchCache.get(key);
+    if (existing && Date.now() - existing.storedAt < 10 * 60_000) return [...existing.items];
+    const items = await load();
+    this.searchCache.set(key, { storedAt: Date.now(), items });
+    while (this.searchCache.size > 100) {
+      const oldest = this.searchCache.keys().next().value;
+      if (oldest === undefined) break;
+      this.searchCache.delete(oldest);
+    }
+    return [...items];
+  }
 
   async findEditionFamily(value: string): Promise<OpenLibraryEditionFamily | null> {
     const isbn = normalizeBibliographicIsbn(value);
