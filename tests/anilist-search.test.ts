@@ -39,3 +39,24 @@ test("AniList rejects a format filter that crosses the manga/light-novel boundar
   await assert.rejects(() => client.search("Bookworm", "MANGA", false, { format: "NOVEL" }), /separate MANGA records from light novels/);
   await assert.rejects(() => client.search("Manga", "MANGA", true, { format: "MANGA" }), /separate MANGA records from light novels/);
 });
+
+test("AniList search selects and normalizes provider synonym titles", async () => {
+  let query = "";
+  const client = new AniListClient("https://anilist.example/graphql", 1_000, async (_input, init) => {
+    query = (JSON.parse(String(init?.body)) as { query: string }).query;
+    return new Response(JSON.stringify({ data: { Page: { media: [{
+      id: 42,
+      type: "ANIME",
+      title: { romaji: "Kimi no Na wa", english: "Your Name", native: "君の名は。" },
+      synonyms: ["Your Name. (Film)", "Kimi no Na wa."],
+      siteUrl: "https://anilist.co/anime/42",
+      genres: ["Drama"],
+      tags: [{ name: "Coming of Age", rank: 80, isMediaSpoiler: false }],
+    }] } } }), { status: 200, headers: { "content-type": "application/json" } });
+  });
+  const results = await client.search("Your Name", "ANIME");
+  assert.match(query, /synonyms/);
+  assert.match(query, /tags\{name rank isMediaSpoiler\}/);
+  assert.deepEqual(results[0]?.synonyms, ["Your Name. (Film)", "Kimi no Na wa."]);
+  assert.deepEqual(results[0]?.tags.map(tag => tag.name), ["Coming of Age"]);
+});

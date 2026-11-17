@@ -42,3 +42,28 @@ test("cross-media ranking limits each category to three results and the requeste
   assert.equal(rankCrossMediaCandidates("Seed", "anime", ["Comedy"], candidates, 10).length, 3);
   assert.equal(rankCrossMediaCandidates("Seed", "anime", ["Comedy"], candidates, 2).length, 2);
 });
+
+test("cross-media matching compares provider-native genres, tags and subjects", () => {
+  const ranked = rankCrossMediaCandidates("Seed", "anime", {
+    genres: ["Fantasy"],
+    tags: ["Magic"],
+  }, [
+    { title: "Book by subject", category: "book", provider: "Open Library", url: "https://openlibrary.org/works/OL1W", genres: [], subjects: ["Fantasy"] },
+    { title: "Manga by tag", category: "manga", provider: "MangaDex", url: "https://mangadex.org/title/1", genres: [], tags: ["Magic"] },
+    { title: "Unrelated book", category: "book", provider: "Google Books", url: "https://books.google.com/books?id=2", genres: [], categories: ["Fiction"] },
+  ]);
+  assert.equal(ranked.length, 2);
+  assert.deepEqual(ranked[0]?.sharedLabels, ["fantasy"]);
+  assert.deepEqual(ranked[0]?.sharedLabelGroups, [{ kind: "subjects", values: ["Fantasy"] }]);
+  assert.deepEqual(ranked[0]?.sharedGenres, []);
+  const manga = ranked.find(item => item.provider === "MangaDex");
+  assert.deepEqual(manga?.sharedTags, ["magic"]);
+  assert.deepEqual(manga?.sharedLabelGroups, [{ kind: "tags", values: ["Magic"] }]);
+});
+
+test("cross-media search labels normalize source display names and aliases", () => {
+  assert.deepEqual(
+    recommendationGenreLabels(["Science Fiction", "Fantasy", "Historical", "Unknown"]),
+    ["Science Fiction", "Fantasy", "History"],
+  );
+});

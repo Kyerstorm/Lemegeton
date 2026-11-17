@@ -1,17 +1,43 @@
 export type RecommendationCategory = "anime" | "manga" | "light_novel" | "book" | "movie" | "tv" | "game";
 
+export interface CrossMediaLabels {
+  genres?: readonly string[];
+  tags?: readonly string[];
+  subjects?: readonly string[];
+  categories?: readonly string[];
+}
+
 export interface CrossMediaCandidate {
   title: string;
   category: RecommendationCategory;
   provider: string;
   url: string | null;
   genres: readonly string[];
+  tags?: readonly string[];
+  subjects?: readonly string[];
+  categories?: readonly string[];
+}
+
+export interface SharedCrossMediaLabelGroup {
+  kind: "genres" | "tags" | "subjects" | "categories";
+  values: string[];
 }
 
 export interface RankedCrossMediaCandidate extends CrossMediaCandidate {
   score: number;
   sharedGenres: string[];
+  sharedTags: string[];
+  sharedSubjects: string[];
+  sharedCategories: string[];
+  sharedLabels: string[];
+  sharedLabelGroups: SharedCrossMediaLabelGroup[];
 }
+
+const GENERIC_LABELS = new Set([
+  "fiction", "nonfiction", "non fiction", "literature", "book", "books",
+  "novel", "novels", "manga", "manhwa", "manhua", "comics", "graphic novel",
+  "media", "other", "miscellaneous",
+]);
 
 const GENRE_ALIASES: Record<string, string> = {
   "science fiction": "sci-fi",
@@ -50,21 +76,52 @@ export function normalizeGenreTokens(values: readonly string[] | null | undefine
     const normalized = normalizeGenreLabel(String(value ?? ""));
     if (!normalized) continue;
     const padded = ` ${normalized} `;
+    let recognized = false;
     for (const [alias, canonical] of Object.entries(GENRE_ALIASES)) {
-      if (padded.includes(` ${alias} `)) result.add(canonical);
+      if (padded.includes(` ${alias} `)) {
+        result.add(canonical);
+        recognized = true;
+      }
     }
+    if (!recognized && !GENERIC_LABELS.has(normalized) && normalized.length <= 80) result.add(normalized);
   }
   return result;
+}
+
+function sharedTokens(seed: readonly string[], candidate: readonly string[]): string[] {
+  const seedTokens = normalizeGenreTokens(seed);
+  return [...normalizeGenreTokens(candidate)].filter(value => seedTokens.has(value)).sort();
+}
+
+function matchingLabels(seedTokens: Set<string>, candidateValues: readonly string[]): string[] {
+  return candidateValues.filter(value =>
+    [...normalizeGenreTokens([value])].some(token => seedTokens.has(token)));
+}
+
+function allLabels(value: CrossMediaLabels): string[] {
+  return [
+    ...(value.genres ?? []),
+    ...(value.tags ?? []),
+    ...(value.subjects ?? []),
+    ...(value.categories ?? []),
+  ];
 }
 
 export function rankCrossMediaCandidates(
   seedTitle: string,
   seedCategory: RecommendationCategory,
-  seedGenres: readonly string[],
+  seedMetadata: readonly string[] | CrossMediaLabels,
   candidates: readonly CrossMediaCandidate[],
   limit = 10,
 ): RankedCrossMediaCandidate[] {
-  const seedTokens = normalizeGenreTokens(seedGenres);
+  const seedLabels: CrossMediaLabels = Array.isArray(seedMetadata)
+    ? { genres: seedMetadata }
+    : seedMetadata as CrossMediaLabels;
+  const seedGenres = seedLabels.genres ?? [];
+  const seedTags = seedLabels.tags ?? [];
+  const seedSubjects = seedLabels.subjects ?? [];
+  const seedCategories = seedLabels.categories ?? [];
+  const seedTokens = normalizeGenreTokens(allLabels(seedLabels));
   const normalizedSeedTitle = normalizeGenreLabel(seedTitle);
   if (!seedTokens.size || !Number.isSafeInteger(limit) || limit < 1) return [];
   const best = new Map<string, RankedCrossMediaCandidate>();
@@ -74,18 +131,35 @@ export function rankCrossMediaCandidates(
     if (!title || !provider) continue;
     const keyTitle = normalizeGenreLabel(title);
     if (candidate.category === seedCategory && keyTitle === normalizedSeedTitle) continue;
-    const sharedGenres = [...normalizeGenreTokens(candidate.genres)]
-      .filter(token => seedTokens.has(token)).sort();
-    if (!sharedGenres.length) continue;
+    const candidateTokens = normalizeGenreTokens(allLabels(candidate));
+    const matched = [...candidateTokens].filter(value => seedTokens.has(value)).sort();
+    if (!matched.length) continue;
+    const sharedLabelGroups: SharedCrossMediaLabelGroup[] = [
+      { kind: "genres", values: matchingLabels(seedTokens, candidate.genres) },
+      { kind: "tags", values: matchingLabels(seedTokens, candidate.tags ?? []) },
+      { kind: "subjects", values: matchingLabels(seedTokens, candidate.subjects ?? []) },
+      { kind: "categories", values: matchingLabels(seedTokens, candidate.categories ?? []) },
+    ].filter(group => group.values.length > 0);
+    const ranked: RankedCrossMediaCandidate = {
+      ...candidate,
+      title,
+      provider,
+      score: matched.length,
+      sharedGenres: sharedTokens(seedGenres, candidate.genres),
+      sharedTags: sharedTokens(seedTags, candidate.tags ?? []),
+      sharedSubjects: sharedTokens(seedSubjects, candidate.subjects ?? []),
+      sharedCategories: sharedTokens(seedCategories, candidate.categories ?? []),
+      sharedLabels: matched,
+      sharedLabelGroups,
+    };
     const key = `${candidate.category}|${keyTitle}`;
-    const ranked: RankedCrossMediaCandidate = { ...candidate, title, provider, score: sharedGenres.length, sharedGenres };
     const existing = best.get(key);
     if (!existing || ranked.score > existing.score) best.set(key, ranked);
   }
   const counts = new Map<RecommendationCategory, number>();
   const result: RankedCrossMediaCandidate[] = [];
-  const ordered = [...best.values()].sort((a, b) =>
-    b.score - a.score || a.category.localeCompare(b.category) || a.title.localeCompare(b.title));
+  const ordered = [...best.values()].sort((left, right) =>
+    right.score - left.score || left.category.localeCompare(right.category) || left.title.localeCompare(right.title));
   for (const candidate of ordered) {
     if ((counts.get(candidate.category) ?? 0) >= 3) continue;
     counts.set(candidate.category, (counts.get(candidate.category) ?? 0) + 1);
@@ -118,5 +192,5 @@ export function recommendationGenreLabels(values: readonly string[]): string[] {
     sports: "Sports",
     war: "War",
   };
-  return [...new Set(values.map(value => labels[value]).filter((value): value is string => Boolean(value)))].slice(0, 3);
+  return [...new Set([...normalizeGenreTokens(values)].map(value => labels[value]).filter((value): value is string => Boolean(value)))].slice(0, 3);
 }

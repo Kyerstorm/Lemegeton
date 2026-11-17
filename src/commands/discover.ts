@@ -65,7 +65,7 @@ import { parseMediaComparisonEntries, type MediaComparisonCategory } from "../..
 import { formatMetadataSourceReference } from "../../helpers/media/media-provenance.js";
 import { auditMetadataSource, type MetadataSourceAuditInput } from "../../helpers/media/metadata-source-audit.js";
 import { upcomingProviderReleases } from "../../helpers/community/community-sessions.js";
-import { rankCrossMediaCandidates, recommendationGenreLabels, type CrossMediaCandidate } from "../../helpers/media/cross-media-recommendations.js";
+import { rankCrossMediaCandidates, recommendationGenreLabels, type CrossMediaCandidate, type CrossMediaLabels } from "../../helpers/media/cross-media-recommendations.js";
 
 
 
@@ -807,7 +807,7 @@ this.webNovels = new WebNovelDiscoveryClient();
     }
     if (view === "similar") {
       if (category === "all" || category === "webnovel") {
-        await interaction.reply({ content: "Choose a category with provider-reported genre metadata to find cross-media matches.", flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: "Choose a supported media category with provider-reported metadata to find cross-media matches.", flags: MessageFlags.Ephemeral });
         return;
       }
       await this.crossMediaSimilarityAndRespond(interaction, query, category);
@@ -2026,21 +2026,36 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
     const seedTitle = this.recordTitle(seed);
     const seedUrl = this.recordUrl(seed);
     const seedCategory = seed.category as CrossMediaCandidate["category"];
-    const seedGenres: string[] = seed.provider === "AniList"
-      ? [
-          ...seed.item.genres,
-          ...seed.item.tags.filter(tag => !tag.isSpoiler && (tag.rank ?? 0) >= 75).map(tag => tag.name),
-        ]
-      : seed.provider === "Google Books"
-        ? seed.item.categories
-        : seed.provider === "Open Library"
-          ? seed.item.subjects
-          : seed.provider === "MangaDex"
-            ? seed.item.tags
-            : seed.provider === "Royal Road"
-              ? []
-              : seed.item.genres;
-    const genreLabels = recommendationGenreLabels([...new Set(seedGenres)]);
+    let seedLabels: CrossMediaLabels;
+    if (seed.provider === "AniList") {
+      seedLabels = {
+        genres: seed.item.genres,
+        tags: seed.item.tags.filter(tag => !tag.isSpoiler && (tag.rank ?? 0) >= 75).map(tag => tag.name),
+      };
+    } else if (seed.provider === "Google Books") {
+      seedLabels = { categories: seed.item.categories };
+    } else if (seed.provider === "Open Library") {
+      seedLabels = { subjects: seed.item.subjects };
+    } else if (seed.provider === "MangaDex") {
+      seedLabels = { tags: seed.item.tags };
+    } else if (seed.provider === "Royal Road") {
+      seedLabels = {};
+    } else {
+      seedLabels = { genres: seed.item.genres };
+    }
+
+    const seedGenres = seedLabels.genres ?? [];
+    const genreLabels = recommendationGenreLabels(seedGenres);
+    const allSeedLabels = [
+      ...seedGenres,
+      ...(seedLabels.tags ?? []),
+      ...(seedLabels.subjects ?? []),
+      ...(seedLabels.categories ?? []),
+    ];
+    const subjectLookups = [...new Map(allSeedLabels
+      .map(label => label.trim())
+      .filter(label => label.length > 2)
+      .map(label => [label.toLocaleLowerCase("en-US"), label])).values()].slice(0, 3);
     const localLookups: Array<Promise<CrossMediaCandidate[]>> = [];
 
     if (genreLabels.length) {
@@ -2048,32 +2063,73 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
       localLookups.push(
         this.anilist.searchByGenres("ANIME", aniListGenres).then(items => items.map(item => ({
           title: item.title.english ?? item.title.romaji ?? item.title.native ?? "Untitled",
-          category: "anime" as const, provider: "AniList", url: item.siteUrl, genres: item.genres,
+          category: "anime" as const,
+          provider: "AniList",
+          url: item.siteUrl,
+          genres: item.genres,
+          tags: item.tags.filter(tag => !tag.isSpoiler && (tag.rank ?? 0) >= 75).map(tag => tag.name),
         }))),
         this.anilist.searchByGenres("MANGA", aniListGenres).then(items => items
           .filter(item => item.format !== "NOVEL")
           .map(item => ({
             title: item.title.english ?? item.title.romaji ?? item.title.native ?? "Untitled",
-            category: "manga" as const, provider: "AniList", url: item.siteUrl, genres: item.genres,
+            category: "manga" as const,
+            provider: "AniList",
+            url: item.siteUrl,
+            genres: item.genres,
+            tags: item.tags.filter(tag => !tag.isSpoiler && (tag.rank ?? 0) >= 75).map(tag => tag.name),
           }))),
         this.anilist.searchByGenres("MANGA", aniListGenres, [], true).then(items => items.map(item => ({
           title: item.title.english ?? item.title.romaji ?? item.title.native ?? "Untitled",
-          category: "light_novel" as const, provider: "AniList", url: item.siteUrl, genres: item.genres,
+          category: "light_novel" as const,
+          provider: "AniList",
+          url: item.siteUrl,
+          genres: item.genres,
+          tags: item.tags.filter(tag => !tag.isSpoiler && (tag.rank ?? 0) >= 75).map(tag => tag.name),
         }))),
-        this.mangadex.searchByTags(genreLabels).then(items => items.map(item => ({
-          title: item.title, category: "manga" as const, provider: "MangaDex", url: item.sourceUrl, genres: item.tags,
-        }))),
-        ...genreLabels.map(label => this.openLibrary.searchBySubject(label).then(items => items.map(item => ({
-          title: item.title, category: "book" as const, provider: "Open Library", url: item.sourceUrl, genres: item.subjects,
-        })))),
-        ...genreLabels.map(label => this.books.searchBySubject(label).then(items => items.map(item => ({
-          title: item.title, category: "book" as const, provider: "Google Books", url: item.sourceUrl, genres: item.categories,
-        })))),
         this.tmdb.discoverByGenres("movie", genreLabels).then(items => items.map(item => ({
-          title: item.title, category: "movie" as const, provider: "TMDB", url: item.sourceUrl, genres: item.genres,
+          title: item.title,
+          category: "movie" as const,
+          provider: "TMDB",
+          url: item.sourceUrl,
+          genres: item.genres,
         }))),
         this.tmdb.discoverByGenres("tv", genreLabels).then(items => items.map(item => ({
-          title: item.title, category: "tv" as const, provider: "TMDB", url: item.sourceUrl, genres: item.genres,
+          title: item.title,
+          category: "tv" as const,
+          provider: "TMDB",
+          url: item.sourceUrl,
+          genres: item.genres,
+        }))),
+      );
+    }
+    if (seedLabels.tags?.length) {
+      localLookups.push(this.mangadex.searchByTags(seedLabels.tags.slice(0, 5)).then(items => items.map(item => ({
+        title: item.title,
+        category: "manga" as const,
+        provider: "MangaDex",
+        url: item.sourceUrl,
+        genres: [],
+        tags: item.tags,
+      }))));
+    }
+    for (const label of subjectLookups) {
+      localLookups.push(
+        this.openLibrary.searchBySubject(label).then(items => items.map(item => ({
+          title: item.title,
+          category: "book" as const,
+          provider: "Open Library",
+          url: item.sourceUrl,
+          genres: [],
+          subjects: item.subjects,
+        }))),
+        this.books.searchBySubject(label).then(items => items.map(item => ({
+          title: item.title,
+          category: "book" as const,
+          provider: "Google Books",
+          url: item.sourceUrl,
+          genres: [],
+          categories: item.categories,
         }))),
       );
     }
@@ -2087,7 +2143,7 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
         reason: result.reason instanceof Error ? result.reason.message : "Unknown provider error",
       });
     }
-    const ranked = rankCrossMediaCandidates(seedTitle, seedCategory, seedGenres, localResults, 10);
+    const ranked = rankCrossMediaCandidates(seedTitle, seedCategory, seedLabels, localResults, 10);
 
     let providerRecommendations: SearchRecord[] = [];
     try {
@@ -2124,7 +2180,7 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
       targetUrl: candidate.url,
       relationshipType: "genre overlap",
       sourceKind: "recommendation",
-      sourceLabel: "Genre overlap recommendation",
+      sourceLabel: "Shared metadata-label recommendation",
     })));
     for (const write of writes) {
       if (write.status === "rejected") logger.debug("Cross-media recommendation relationship was not saved", {
@@ -2134,14 +2190,15 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
 
     const embed = homeEmbed(
       "Cross-media matches · " + seedTitle,
-      "Local matches are ranked by the number of shared provider-reported genres. This is a transparent metadata heuristic, not an AI score.",
+      "Local matches are ranked by shared normalized labels from provider-reported genres, tags, subjects and book categories. This is a transparent metadata heuristic, not an AI score.",
     ).setURL(seedUrl);
     if (ranked.length) {
       embed.addFields({
-        name: "Shared-genre matches",
+        name: "Shared-metadata matches",
         value: ranked.map((item, index) => {
           const label = item.url ? `[${item.title}](${item.url})` : item.title;
-          return `**${index + 1}. ${item.category.replaceAll("_", " ")} · ${label}**\n${item.provider} · Shared genres: ${item.sharedGenres.join(", ")}`;
+          const shared = item.sharedLabelGroups.map(group => group.kind + ": " + group.values.join(", ")).join(" · ");
+          return `**${index + 1}. ${item.category.replaceAll("_", " ")} · ${label}**\n${item.provider} · ${shared || "Shared labels: " + item.sharedLabels.join(", ")}`;
         }).join("\n\n").slice(0, 4_000),
         inline: false,
       });
@@ -2158,11 +2215,12 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
       });
     }
     if (!ranked.length && !providerRecommendations.length) {
-      embed.setDescription("No comparable provider genre metadata or provider-generated recommendations were returned for this title.");
+      embed.setDescription("No comparable source-reported genres, tags, subjects or categories, and no provider-generated recommendations, were returned for this title.");
     }
-    embed.setFooter({ text: "Sources: AniList · Google Books · TMDB · IGDB · No Novel Updates scraping or inferred adaptations" });
+    embed.setFooter({ text: "Sources: AniList · MangaDex · Google Books · Open Library · TMDB · IGDB · Provider-native recommendations remain separate" });
     await interaction.editReply({ content: "", embeds: [embed], components: [], allowedMentions: { parse: [] } });
   }
+
 
   private async compareAndRespond(
     interaction: ChatInputCommandInteraction,
@@ -2399,7 +2457,7 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
 
   private recordTitleVariants(record: SearchRecord): string[] {
     if (record.provider === "AniList") {
-      return [...new Set([record.item.title.english, record.item.title.romaji, record.item.title.native].filter((value): value is string => Boolean(value?.trim())))];
+      return [...new Set([record.item.title.english, record.item.title.romaji, record.item.title.native, ...(record.item.synonyms ?? [])].filter((value): value is string => Boolean(value?.trim())))];
     }
     if (record.provider === "MangaDex") return [...new Set([record.item.title, ...record.item.alternateTitles].filter(Boolean))];
     if (record.provider === "Google Books" && record.item.subtitle) return [record.item.title, record.item.title + " " + record.item.subtitle];
