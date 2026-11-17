@@ -141,9 +141,10 @@ export const emoji = {
   openlibrary: fireEmoji,
   Letterboxd: ideaEmoji,
   TMDB: calendarEmoji,
-  TTT: "🕒",
-  bookmark: "🔖",
-  archive: "🗃️",
+  RoyalRoad: "🕒",
+  MangaDex: "🔖",
+  GoogleBooks: "🗃️",
+
 } as const;
 
 export type EmojiName = keyof typeof emoji;
