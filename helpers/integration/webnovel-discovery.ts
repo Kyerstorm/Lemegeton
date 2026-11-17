@@ -1,7 +1,7 @@
 import { load } from "cheerio";
 import { fetchJson, fetchPublicPage, type ScrapeResult } from "./web-scraper.js";
 
-export type WebNovelProvider = "NovelFire" | "Novel Archive" | "Wuxia Click" | "Novel Updates" | "ScribbleHub";
+export type WebNovelProvider = "NovelFire" | "Novel Archive" | "Wuxia Click" | "Novel Updates" | "ScribbleHub" | "Noveli.to";
 
 export interface WebNovelMedia {
 provider: WebNovelProvider;
@@ -24,6 +24,23 @@ sourceUrl: string;
 image: string | null;
 };
 
+export type NoveliToItem = {
+id: number;
+record: WebNovelMedia;
+};
+
+function objectRecord(value: unknown): Record<string, unknown> | null {
+if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+return value as Record<string, unknown>;
+}
+
+function hasMatureMarkers(value: Record<string, unknown>): boolean {
+const flags = ["adult", "is_adult", "isAdult", "mature", "is_mature", "isMature", "nsfw", "is_nsfw", "isNsfw"];
+if (flags.some(key => value[key] === true)) return true;
+const ratings = ["content_rating", "age_rating", "rating_category", "maturity_rating"];
+return ratings.some(key => typeof value[key] === "string" && /\b(adult|mature|nsfw|explicit)\b|18\s*\+/i.test(value[key] as string));
+}
+
 function clean(value: unknown, limit = 1_000): string | null {
 if (typeof value !== "string") return null;
 const text = value.replace(/<[^>]*>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/\s+/g, " ").trim();
@@ -41,15 +58,16 @@ return null;
 }
 }
 
-function isSafeNovel(title: string, genres: string[], description: string | null): boolean {
+function isSafeNovel(title: string, genres: string[], description: string | null, chapterTitles: string[] = []): boolean {
 const markers = /\b(adult|mature|smut|ecchi|hentai|erotica|erotic|nsfw|pornographic|explicit)\b|\b18\s*\+|\br\s*18\b|\bnc\s*17\b/i;
-return !markers.test(title) && !genres.some(genre => markers.test(genre)) && !markers.test(description ?? "");
+return !markers.test(title) && !genres.some(genre => markers.test(genre)) && !markers.test(description ?? "") && !chapterTitles.some(chapter => markers.test(chapter));
 }
 
 function makeRecord(provider: WebNovelProvider, values: Partial<WebNovelMedia> & { title: string; sourceUrl: string }): WebNovelMedia | null {
 const genres = (values.genres ?? []).map(value => clean(value, 80)).filter((value): value is string => Boolean(value)).slice(0, 20);
 const description = clean(values.description, 1_400);
-if (!isSafeNovel(values.title, genres, description)) return null;
+const latestChapters = (values.latestChapters ?? []).map(value => clean(value, 180)).filter((value): value is string => Boolean(value)).slice(0, 5);
+if (!isSafeNovel(values.title, genres, description, latestChapters)) return null;
 return {
 provider,
 title: clean(values.title, 256) ?? "Untitled",
@@ -62,8 +80,78 @@ genres,
 rating: typeof values.rating === "number" && Number.isFinite(values.rating) ? values.rating : null,
 chapterCount: typeof values.chapterCount === "number" && Number.isFinite(values.chapterCount) ? values.chapterCount : null,
 latestUpdate: values.latestUpdate ?? null,
-latestChapters: (values.latestChapters ?? []).map(value => clean(value, 180)).filter((value): value is string => Boolean(value)).slice(0, 5),
+latestChapters,
 };
+}
+
+export function parseNoveliToSearch(payload: unknown): NoveliToItem[] {
+const response = objectRecord(payload);
+if (response?.success !== true || !Array.isArray(response.data)) return [];
+return response.data.flatMap(value => {
+const item = objectRecord(value);
+if (!item || hasMatureMarkers(item)) return [];
+const id = typeof item.id === "number" ? item.id : typeof item.id === "string" ? Number(item.id) : NaN;
+const title = clean(item.title, 256);
+if (!Number.isSafeInteger(id) || id <= 0 || !title) return [];
+const genres = Array.isArray(item.genres) ? item.genres.filter((genre): genre is string => typeof genre === "string") : [];
+const record = makeRecord("Noveli.to", {
+title,
+sourceUrl: "https://noveli.to/novel/" + id,
+image: clean(item.cover_image),
+genres,
+});
+return record ? [{ id, record }] : [];
+});
+}
+
+export function parseNoveliToDetail(payload: unknown, fallback: NoveliToItem): WebNovelMedia | null {
+const response = objectRecord(payload);
+const info = objectRecord(response?.data);
+if (!info) return fallback.record;
+if (hasMatureMarkers(info)) return null;
+const title = clean(info.title, 256) ?? fallback.record.title;
+const genres = Array.isArray(info.genres) ? info.genres.filter((genre): genre is string => typeof genre === "string") : fallback.record.genres;
+const rating = typeof info.rating === "number" ? info.rating : typeof info.rating === "string" && info.rating.trim() ? Number(info.rating) : null;
+const chapterCount = parseNonNegativeCount(info.total_chapters) ?? parseNonNegativeCount(info.chapter_count);
+return makeRecord("Noveli.to", {
+title,
+sourceUrl: fallback.record.sourceUrl,
+description: clean(info.description, 1_400) ?? fallback.record.description,
+image: clean(info.cover_image) ?? fallback.record.image,
+author: clean(info.author, 160),
+status: clean(info.status, 80),
+genres,
+rating: rating !== null && Number.isFinite(rating) ? rating : null,
+chapterCount,
+latestUpdate: clean(info.updated_at, 80) ?? clean(info.last_updated, 80),
+});
+}
+
+async function searchNoveliTo(query: string): Promise<WebNovelMedia[]> {
+const url = new URL("https://noveli.to/api/novels");
+url.searchParams.set("search", query);
+url.searchParams.set("page", "1");
+url.searchParams.set("limit", "36");
+const headers = { Accept: "application/json, text/plain, */*", Referer: "https://noveli.to/" };
+const payload = await fetchJson<unknown>(url.toString(), { timeoutMs: 10_000, retries: 1, headers });
+const items = parseNoveliToSearch(payload);
+const details = await Promise.allSettled(items.slice(0, 4).map(async item => {
+const detail = await fetchJson<unknown>("https://noveli.to/api/novels/" + item.id, { timeoutMs: 10_000, retries: 1, headers });
+return parseNoveliToDetail(detail, item);
+}));
+return items.slice(0, 4).flatMap((item, index) => {
+const detail = details[index];
+if (detail?.status === "fulfilled") return detail.value ? [detail.value] : [];
+return [item.record];
+});
+}
+
+export function buildNovelFireSearchUrl(query: string): string {
+const url = new URL("https://novelfire.net/search");
+url.searchParams.set("keyword", query);
+url.searchParams.set("type", "title");
+url.searchParams.set("page", "1");
+return url.toString();
 }
 
 export function parseNovelFireSearch(html: string, baseUrl = "https://novelfire.net/"): NovelFireItem[] {
@@ -95,6 +183,31 @@ const number = Number(matches[matches.length - 1]![1]!.replace(/,/g, ""));
 return Number.isSafeInteger(number) ? number : null;
 }
 
+function parseNonNegativeCount(value: unknown): number | null {
+const number = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+return Number.isSafeInteger(number) && number >= 0 ? number : null;
+}
+
+export function parseNovelFireChapterData(payload: unknown): { chapterCount: number | null; latestChapters: string[] } {
+if (!payload || typeof payload !== "object" || Array.isArray(payload)) return { chapterCount: null, latestChapters: [] };
+const response = payload as Record<string, unknown>;
+const rows = Array.isArray(response.data) ? response.data : [];
+const chapters = rows.flatMap(value => {
+if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+const chapter = value as Record<string, unknown>;
+const number = typeof chapter.n_sort === "number" || typeof chapter.n_sort === "string" ? Number(chapter.n_sort) : NaN;
+if (!Number.isFinite(number)) return [];
+const name = clean(chapter.title) || clean(chapter.slug);
+return name ? [{ number, name }] : [];
+});
+chapters.sort((left, right) => right.number - left.number);
+const latestChapters = [...new Set(chapters.map(chapter => chapter.name))].slice(0, 5);
+return {
+chapterCount: parseNonNegativeCount(response.recordsFiltered) ?? parseNonNegativeCount(response.recordsTotal),
+latestChapters,
+};
+}
+
 async function enrichNovelFire(item: NovelFireItem): Promise<WebNovelMedia | null> {
 const page = await fetchPublicPage(item.sourceUrl, { includeHtml: true, includeText: false, timeoutMs: 10_000 });
 const $ = load(page.html ?? "");
@@ -115,10 +228,17 @@ draw: "1",
 "columns[0][name]": "cmm_posts_detail.n_sort",
 "columns[0][searchable]": "true",
 "columns[0][orderable]": "true",
+"columns[0][search][value]": "",
+"columns[0][search][regex]": "false",
 "columns[1][data]": "bookmark_created_at",
 "columns[1][name]": "bookmark_chapters.created_at",
+"columns[1][searchable]": "false",
+"columns[1][orderable]": "true",
+"columns[1][search][value]": "",
+"columns[1][search][regex]": "false",
 "order[0][column]": "0",
-"order[0][dir]": "asc",
+"order[0][dir]": "desc",
+"order[0][name]": "cmm_posts_detail.n_sort",
 start: "0",
 length: "5",
 "search[value]": "",
@@ -128,16 +248,13 @@ only_bookmark: "false",
 _: String(Date.now()),
 });
 try {
-const chapters = await fetchJson<{ data?: Array<{ title?: string; slug?: string; n_sort?: string | number }>; recordsFiltered?: number; recordsTotal?: number }>(
+const chapters = await fetchJson<unknown>(
 "https://novelfire.net/ajax/listChapterDataAjax?" + params.toString(),
 { timeoutMs: 8_000, retries: 0 },
 );
-if (typeof chapters.recordsFiltered === "number") chapterCount = chapters.recordsFiltered;
-else if (typeof chapters.recordsTotal === "number") chapterCount = chapters.recordsTotal;
-for (const chapter of chapters.data ?? []) {
-const name = clean(chapter.title || chapter.slug, 180);
-if (name) latestChapters.push(name);
-}
+const metadata = parseNovelFireChapterData(chapters);
+chapterCount = metadata.chapterCount ?? chapterCount;
+latestChapters.push(...metadata.latestChapters);
 } catch {
 // Keep the detail-page metadata when the chapter endpoint is temporarily unavailable.
 }
@@ -157,12 +274,10 @@ latestChapters,
 }
 
 async function searchNovelFire(query: string): Promise<WebNovelMedia[]> {
-const url = new URL("https://novelfire.net/search");
-url.searchParams.set("keyword", query);
-url.searchParams.set("page", "1");
+const searchUrl = buildNovelFireSearchUrl(query);
 let page: ScrapeResult;
 try {
-page = await fetchPublicPage(url.toString(), {
+page = await fetchPublicPage(searchUrl, {
 selectors: { cards: ".novel-list.chapters .novel-item" },
 includeText: false,
 includeHtml: true,
@@ -171,7 +286,7 @@ retries: 1,
 });
 } catch (error) {
 try {
-page = await fetchPublicPage(url.toString(), {
+page = await fetchPublicPage(searchUrl, {
 engine: "browser",
 selectors: { cards: ".novel-list.chapters .novel-item" },
 includeText: false,
@@ -186,7 +301,7 @@ throw error;
 let items = parseNovelFireSearch(page.html ?? "", page.url);
 if (!items.length && page.engine === "fetch") {
 try {
-const rendered = await fetchPublicPage(url.toString(), { engine: "browser", includeHtml: true, includeText: false, timeoutMs: 15_000, retries: 0 });
+const rendered = await fetchPublicPage(searchUrl, { engine: "browser", includeHtml: true, includeText: false, timeoutMs: 15_000, retries: 0 });
 items = parseNovelFireSearch(rendered.html ?? "", rendered.url);
 } catch {
 // Static search remains available without a configured browser runtime.
@@ -557,6 +672,7 @@ const normalized = query.trim().replace(/\s+/g, " ");
 if (normalized.length < 2) return [];
 const providers = await Promise.allSettled([
 searchNovelFire(normalized),
+searchNoveliTo(normalized),
 searchNovelArchive(normalized),
 searchWuxiaClick(normalized),
 searchNovelUpdates(normalized),
