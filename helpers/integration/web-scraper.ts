@@ -10,7 +10,7 @@ import { chromium, firefox, webkit } from "playwright";
 import type { BrowserType } from "playwright";
 import robotsParser from "robots-parser";
 import { request as undiciRequest } from "undici";
-import { CookieJar } from "tough-cookie";
+import type { CookieJar } from "tough-cookie";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 
 export const DEFAULT_MAX_TEXT_CHARS = 12_000;
