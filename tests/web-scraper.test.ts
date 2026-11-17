@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fetchPublicPage, fetchJson, validatePublicHttpUrl } from "../helpers/integration/web-scraper.js";
-import { parseNovelFireSearch, parseNovelArchiveSearch, parseWuxiaClickPageData, parseNovelUpdatesSearch } from "../helpers/integration/webnovel-discovery.js";
+import { parseNovelFireSearch, buildNovelFireSearchUrl, parseNovelFireChapterData, parseNoveliToSearch, parseNoveliToDetail, parseNovelArchiveSearch, parseWuxiaClickPageData, parseNovelUpdatesSearch } from "../helpers/integration/webnovel-discovery.js";
 
 test("URL validation rejects local hosts, private IPs and unsupported schemes", () => {
 assert.throws(() => validatePublicHttpUrl("http://localhost/admin"));
@@ -34,12 +34,87 @@ const result = await fetchJson<{ items: number[] }>("https://example.com/api", {
 assert.deepEqual(result.items, [1, 2]);
 });
 
+test("NovelFire title search URL uses the title-search endpoint", () => {
+const url = new URL(buildNovelFireSearchUrl("The King's Avatar"));
+assert.equal(url.origin, "https://novelfire.net");
+assert.equal(url.pathname, "/search");
+assert.equal(url.searchParams.get("keyword"), "The King's Avatar");
+assert.equal(url.searchParams.get("type"), "title");
+assert.equal(url.searchParams.get("page"), "1");
+});
+
 test("NovelFire results normalize story links and reject external hosts", () => {
 const html = '<div class="novel-item"><a href="/novel/story-one" title="Story One"><h4>Story One</h4></a><div class="novel-cover"><img src="/covers/one.jpg"></div></div><div class="novel-item"><a href="https://not-novelfire.example/novel/two">Story Two</a></div>';
 const results = parseNovelFireSearch(html);
 assert.equal(results.length, 1);
 assert.equal(results[0]?.title, "Story One");
 assert.equal(results[0]?.sourceUrl, "https://novelfire.net/novel/story-one");
+});
+
+test("NovelFire chapter JSON returns the newest chapter titles and chapter count", () => {
+const metadata = parseNovelFireChapterData({
+recordsFiltered: 42,
+recordsTotal: 42,
+data: [
+{ n_sort: "2", title: "Chapter 2" },
+{ n_sort: "11", title: "Chapter 11" },
+{ n_sort: "9", title: "Chapter 9" },
+{ n_sort: "10", title: "Chapter 10" },
+{ n_sort: "7", title: "Chapter 7" },
+{ n_sort: "8", title: "Chapter 8" },
+{ n_sort: "invalid", title: "Broken row" },
+],
+});
+assert.equal(metadata.chapterCount, 42);
+assert.deepEqual(metadata.latestChapters, ["Chapter 11", "Chapter 10", "Chapter 9", "Chapter 8", "Chapter 7"]);
+});
+
+test("NovelFire chapter JSON falls back to total count and ignores malformed payloads", () => {
+assert.deepEqual(parseNovelFireChapterData({ recordsTotal: "12", data: [{ n_sort: 1, slug: "Chapter One" }] }), {
+chapterCount: 12,
+latestChapters: ["Chapter One"],
+});
+assert.deepEqual(parseNovelFireChapterData(null), { chapterCount: null, latestChapters: [] });
+});
+
+test("Noveli.to JSON search filters invalid and mature records", () => {
+const items = parseNoveliToSearch({
+success: true,
+data: [
+{ id: 123, title: "A Safe Chronicle", cover_image: "/covers/one.jpg", genres: ["Fantasy"] },
+{ id: 124, title: "Mature Story", genres: ["Adult"] },
+{ id: 125, title: "Flagged Story", is_adult: true },
+{ id: "bad-id", title: "Invalid ID" },
+],
+});
+assert.equal(items.length, 1);
+assert.equal(items[0]?.record.provider, "Noveli.to");
+assert.equal(items[0]?.record.sourceUrl, "https://noveli.to/novel/123");
+assert.equal(items[0]?.record.image, "https://noveli.to/covers/one.jpg");
+});
+
+test("Noveli.to detail JSON adds metadata and rejects flagged records", () => {
+const item = parseNoveliToSearch({ success: true, data: [{ id: 77, title: "A Safe Chronicle", cover_image: "/cover.jpg" }] })[0]!;
+const detail = parseNoveliToDetail({
+success: true,
+data: {
+title: "A Safe Chronicle",
+author: "A. Writer",
+description: "A fantasy journey.",
+genres: ["Fantasy", "Adventure"],
+status: "Ongoing",
+rating: 4.5,
+total_chapters: 82,
+updated_at: "2026-11-15",
+cover_image: "/covers/chronicle.jpg",
+},
+}, item);
+assert.equal(detail?.author, "A. Writer");
+assert.equal(detail?.chapterCount, 82);
+assert.equal(detail?.rating, 4.5);
+assert.equal(detail?.latestUpdate, "2026-11-15");
+assert.equal(parseNoveliToDetail({ data: { title: "Flagged", is_adult: true } }, item), null);
+assert.equal(parseNoveliToDetail({ data: { title: "Flagged", content_rating: "18+" } }, item), null);
 });
 
 test("Novel Archive JSON records normalize source metadata", () => {
