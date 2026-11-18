@@ -20,6 +20,7 @@ import {
   type ModalSubmitInteraction,
 } from "discord.js";
 import { emoji } from "../../helpers/emoji.js";
+import { EMBED_COLOURS } from "../../helpers/embeds/core.js";
 import { homeEmbed } from "../../helpers/runtime/discord.js";
 import { AniListClient } from "../../helpers/integration/anilist.js";
 import type { BotConfig } from "../../helpers/runtime/config.js";
@@ -143,8 +144,8 @@ async function mediaDigestPanel(guildId: string): Promise<{
     : entityIds.includes("none") ? "No followed entities"
       : selectedTargets.length + " selected follow target(s)";
   const embed = new EmbedBuilder()
-    .setColor(0x5865f2)
-    .setTitle("Media Digest Studio")
+    .setColor(EMBED_COLOURS.primary)
+    .setTitle(emoji.calendar + " Media Digest Studio")
     .setDescription(schedule
       ? [
           "Status: " + (schedule.enabled ? "Enabled" : "Paused"),
@@ -163,7 +164,7 @@ async function mediaDigestPanel(guildId: string): Promise<{
       value: "Only provider-dated anime, film, TV and game releases are scheduled. Book publication dates are not inferred when no verified release feed is available.",
       inline: false,
     })
-    .setFooter({ text: "Manage Server permission is required. Digests contain media releases and selected server follows only." });
+    .setFooter({ text: emoji.calendar + " Manage Server permission required · Digests are scoped to this server" });
   const categorySelect = new StringSelectMenuBuilder()
     .setCustomId("settings:media-digest:categories")
     .setPlaceholder("Choose release categories")
@@ -209,7 +210,7 @@ async function mediaDigestPanel(guildId: string): Promise<{
           .setLabel(schedule.enabled ? "Pause digest" : "Resume digest")
           .setStyle(schedule.enabled ? ButtonStyle.Secondary : ButtonStyle.Success),
       ] : []),
-      new ButtonBuilder().setCustomId("settings:media-digest:open").setLabel("Refresh").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("settings:media-digest:open").setLabel("Refresh").setEmoji(emoji.refresh).setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(categorySelect),
     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(entityTypeSelect),
@@ -232,7 +233,7 @@ async function mediaAutomationPanel(guildId: string): Promise<{
   }));
   const components: SettingsRow[] = [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId("settings:automation:add").setLabel("Add rule").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("settings:automation:add").setLabel("Add rule").setEmoji(emoji.tools).setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId("settings:automation:open").setLabel("Refresh").setStyle(ButtonStyle.Secondary),
     ),
   ];
@@ -271,7 +272,7 @@ async function databaseBackupPanel(config: BotConfig): Promise<{
     inline: false,
   }));
   const controls = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId("settings:backups:create").setLabel("Create backup").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("settings:backups:create").setLabel("Create backup").setEmoji(emoji.download).setStyle(ButtonStyle.Primary),
     ...(latest ? [new ButtonBuilder().setCustomId("settings:backups:verify:" + latest.id).setLabel("Verify latest").setStyle(ButtonStyle.Secondary)] : []),
     ...(config.backupRehearsalDatabase && latestVerified
       ? [new ButtonBuilder().setCustomId("settings:backups:rehearse:" + latestVerified.id).setLabel("Rehearse latest verified").setStyle(ButtonStyle.Success)]
@@ -327,8 +328,8 @@ async function panel(guildId: string): Promise<{
     ? `<#${notifications.channel_id}>`
     : "Not configured";
   const embed = new EmbedBuilder()
-    .setColor(0x5865f2)
-    .setTitle("Server settings")
+    .setColor(EMBED_COLOURS.primary)
+    .setTitle(emoji.settings + " Server settings")
     .setDescription("Manage feature availability and the media announcements sent to this server.")
     .addFields(
       ...FEATURE_NAMES.map((feature) => ({
@@ -353,7 +354,7 @@ async function panel(guildId: string): Promise<{
         inline: false,
       },
     )
-    .setFooter({ text: "Manage Server permission is required to change these settings." });
+    .setFooter({ text: emoji.settings + " Manage Server permission is required to change these settings." });
 
   const components: SettingsRow[] = [];
   for (let index = 0; index < FEATURE_NAMES.length; index += 5) {
@@ -377,11 +378,11 @@ async function panel(guildId: string): Promise<{
         .setStyle(notifications.enabled ? ButtonStyle.Success : ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId("settings:notifications:anime")
-        .setLabel(`Anime ${notifications.include_anime ? "On" : "Off"}`)
+        .setLabel(`Anime ${notifications.include_anime ? "On" : "Off"}`).setEmoji(emoji.anime)
         .setStyle(notifications.include_anime ? ButtonStyle.Primary : ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId("settings:notifications:manga")
-        .setLabel(`Manga ${notifications.include_manga ? "On" : "Off"}`)
+        .setLabel(`Manga ${notifications.include_manga ? "On" : "Off"}`).setEmoji(emoji.manga)
         .setStyle(notifications.include_manga ? ButtonStyle.Primary : ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId("settings:notifications:clear-channel")
@@ -395,15 +396,15 @@ async function panel(guildId: string): Promise<{
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId("settings:notifications:movies")
-        .setLabel(`Films ${notifications.include_movies ? "On" : "Off"}`)
+        .setLabel(`Films ${notifications.include_movies ? "On" : "Off"}`).setEmoji(emoji.movie)
         .setStyle(notifications.include_movies ? ButtonStyle.Primary : ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId("settings:notifications:tv")
-        .setLabel(`TV ${notifications.include_tv ? "On" : "Off"}`)
+        .setLabel(`TV ${notifications.include_tv ? "On" : "Off"}`).setEmoji(emoji.television)
         .setStyle(notifications.include_tv ? ButtonStyle.Primary : ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId("settings:notifications:games")
-        .setLabel(`Games ${notifications.include_games ? "On" : "Off"}`)
+        .setLabel(`Games ${notifications.include_games ? "On" : "Off"}`).setEmoji(emoji.game)
         .setStyle(notifications.include_games ? ButtonStyle.Primary : ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
@@ -427,8 +428,8 @@ async function retentionPanel(guildId: string): Promise<{
       ? "Retain this server's Lemegeton data"
       : "A choice is required";
   const embed = new EmbedBuilder()
-    .setColor(0x5865f2)
-    .setTitle("Server data when Lemegeton leaves")
+    .setColor(EMBED_COLOURS.primary)
+    .setTitle(emoji.warning + " Server data when Lemegeton leaves")
     .setDescription("Choose what happens to this server's stored Lemegeton data if the bot is removed. Delete permanently removes guild-owned records and uploaded assets (with failed private-object cleanup retried); Retain keeps them for a possible rejoin. Normal bot features stay locked until both this choice and the required server language are saved.")
     .addFields(
       { name: "Current choice", value: current },
@@ -592,8 +593,8 @@ async function serverDiagnostics(
     : [];
   const checks = [{ name: "Current channel", channel_id: currentChannelId }, ...configuredChannels];
   const embed = new EmbedBuilder()
-    .setColor(0x5865f2)
-    .setTitle("Server Check");
+    .setColor(EMBED_COLOURS.primary)
+    .setTitle(emoji.stats + " Server Check");
 
   let botMember: Awaited<ReturnType<typeof guild.members.fetchMe>> | null = null;
   try {
@@ -740,7 +741,7 @@ async function serverDiagnostics(
       inline: false,
     },
   );
-  embed.setFooter({ text: "Read-only diagnostics · Provider probes are time-bounded; delivery counts are scoped to this server." });
+  embed.setFooter({ text: emoji.info + " Read-only diagnostics · Provider probes are time-bounded; counts are server-scoped" });
   return embed;
 }
 
@@ -776,8 +777,8 @@ async function mediaFollowsPanel(guildId: string): Promise<{
     })),
   ].slice(0, 25);
   const embed = new EmbedBuilder()
-    .setColor(0x5865f2)
-    .setTitle("Media Follow Centre")
+    .setColor(EMBED_COLOURS.primary)
+    .setTitle(emoji.bell + " Media Follow Centre")
     .setDescription([
       "Follow AniList titles, creators, franchise relationships and genres for verified metadata changes.",
       "Anime episode schedules remain available through the legacy title-follow flow.",

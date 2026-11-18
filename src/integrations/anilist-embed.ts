@@ -1,5 +1,5 @@
 import { EmbedBuilder, type Message } from "discord.js";
-import { emoji } from "../../helpers/emoji.js";
+import { emoji, providerFooter } from "../../helpers/emoji.js";
 import {
   AniListClient,
   type AniListEntityKind,
@@ -104,7 +104,7 @@ function buildActivitySection(user: AniListUserProfile, activities: AniListPubli
     .setTitle(emoji.activityBubble + " " + user.name + " · Public Activity")
     .setURL(user.url)
     .setDescription("Recent public text and message activity returned by AniList. Personal list/progress activities are not displayed.")
-    .setFooter({ text: "AniList · Public profile activity" });
+    .setFooter({ text: providerFooter("AniList", "Public profile activity") });
   if (user.avatar) embed.setThumbnail(user.avatar);
   for (const activity of activities.slice(0, 8)) {
     const body = activity.text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 750);
@@ -138,7 +138,7 @@ function entityEmbed(entity:AniListPublicEntity):EmbedBuilder {
     .setTitle(entity.name.slice(0,256))
     .setURL(entity.url)
     .setDescription((entity.description?.replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim().slice(0,1_000))||"No description supplied by AniList.")
-    .setFooter({text:"AniList · "+entity.kind.toLowerCase()+" metadata"});
+    .setFooter({text:providerFooter("AniList",entity.kind.toLowerCase()+" metadata")});
   if(entity.image)embed.setThumbnail(entity.image);
   if(entity.roles.length)embed.addFields({name:entity.kind==="STAFF"?"Occupations":"Details",value:entity.roles.join(", ").slice(0,900),inline:true});
   if(entity.yearsActive.length)embed.addFields({name:"Years active",value:entity.yearsActive.join(", "),inline:true});
@@ -172,7 +172,7 @@ function reviewEmbed(review:AniListReviewRecord):EmbedBuilder {
       {name:"Rating",value:review.rating===null?"Unavailable":String(review.rating),inline:true},
       {name:"Rating count",value:review.ratingAmount===null?"Unavailable":String(review.ratingAmount),inline:true},
     )
-    .setFooter({text:"AniList · Review metadata"});
+    .setFooter({text:providerFooter("AniList","Review metadata")});
   if(review.createdAt>0)embed.setTimestamp(new Date(review.createdAt*1000));
   return embed;
 }
@@ -188,7 +188,7 @@ function linkedActivityEmbed(activity:AniListPublicActivity):EmbedBuilder {
     .setURL(activity.url)
     .setDescription(body||"No public text was supplied by AniList.")
     .addFields({name:"Author",value:activity.userName.slice(0,150),inline:true})
-    .setFooter({text:"AniList · Public activity"});
+    .setFooter({text:providerFooter("AniList","Public activity")});
   embed.setTimestamp(new Date(activity.createdAt*1000));
   return embed;
 }

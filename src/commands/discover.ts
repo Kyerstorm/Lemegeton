@@ -35,6 +35,8 @@ import { homeEmbed, navigationButtons } from "../../helpers/runtime/discord.js";
 import { TmdbClient, type TmdbMedia, type TmdbTvSeason } from "../../helpers/integration/tmdb.js";
 import { getGuildMediaRegion } from "../../helpers/media/media-region.js";
 import { rankTitleSearchResults } from "../../helpers/media/title-matching.js";
+import { EMBED_COLOURS } from "../../helpers/embeds/core.js";
+import { providerFooter, providerEmoji } from "../../helpers/emoji.js";
 import { cleanText, safeDisplay } from "../../helpers/security/security.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
 import {
@@ -129,7 +131,8 @@ const CATEGORIES: Array<{ label: string; value: Category; emoji: string }> = [
 ];
 
 function categoryLabel(category: Category): string {
-  return CATEGORIES.find((item) => item.value === category)?.label ?? "Media";
+  const entry = CATEGORIES.find((item) => item.value === category);
+  return entry ? entry.emoji + " " + entry.label : "Media";
 }
 
 function safeDescription(value: string | null | undefined, limit = 900): string {
@@ -163,7 +166,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
     const item = record.item;
     const title = item.title.english ?? item.title.romaji ?? item.title.native ?? "Untitled";
     const embed = new EmbedBuilder()
-      .setColor(0x5865f2)
+      .setColor(EMBED_COLOURS.primary)
       .setTitle(title.slice(0, 256))
       .setURL(item.siteUrl)
       .setDescription(safeDescription(item.description))
@@ -176,7 +179,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
         { name: "Score", value: item.averageScore === null ? "Not rated" : `${item.averageScore}/100`, inline: true },
         { name: "Genres", value: item.genres.slice(0, 8).join(" · ") || "Unavailable", inline: false },
       )
-      .setFooter({ text: `AniList · Source metadata` });
+      .setFooter({ text: providerFooter("AniList", "Source metadata") });
     embed.addFields({ name: "Source record", value: formatMetadataSourceReference("AniList", item.id, item.siteUrl), inline: false });
     if(item.trailer)embed.addFields({name:"Official trailer",value:`[Watch on ${item.trailer.site}](${item.trailer.url})`,inline:true});
     if (item.startDate?.year) embed.addFields({ name: "Release year", value: String(item.startDate.year), inline: true });
@@ -200,7 +203,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
       ? (item.episodeCount === null ? "Not reported" : String(item.episodeCount))
       : (item.chapterCount === null ? "Not reported" : String(item.chapterCount));
     const countsLabel = item.type === "anime" ? "Episodes" : "Chapters";
-    const embed = new EmbedBuilder().setColor(0x7a5aa6)
+    const embed = new EmbedBuilder().setColor(EMBED_COLOURS.primary)
       .setTitle(item.title.slice(0, 256))
       .setURL(item.sourceUrl)
       .setDescription(safeDescription(item.description))
@@ -220,7 +223,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
         ...(item.endDate ? [{ name: "End date", value: item.endDate, inline: true }] : []),
         { name: "Rating", value: item.rating === null ? "Not rated" : item.rating.toFixed(2) + "/100 (Kitsu)", inline: true },
       )
-      .setFooter({ text: "Kitsu · Public metadata · G/PG titles only" });
+      .setFooter({ text: providerFooter("Kitsu", "Public metadata · G/PG titles only") });
     embed.addFields({ name: "Source record", value: formatMetadataSourceReference("Kitsu", item.id, item.sourceUrl), inline: false });
     if (item.image) embed.setThumbnail(item.image);
     return embed;
@@ -228,7 +231,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
 
   if (record.provider === "MangaDex") {
     const item = record.item;
-    const embed = new EmbedBuilder().setColor(0x2d6b52)
+    const embed = new EmbedBuilder().setColor(EMBED_COLOURS.primary)
       .setTitle(item.title.slice(0, 256)).setURL(item.sourceUrl)
       .setDescription(safeDescription(item.description))
       .addFields(
@@ -241,7 +244,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
         { name: "Last volume / chapter", value: [item.lastVolume, item.lastChapter].filter(Boolean).join(" / ") || "Not reported", inline: true },
         { name: "Tags", value: item.tags.slice(0, 10).join(" · ").slice(0, 900) || "Not reported", inline: false },
         ...(item.alternateTitles.length ? [{ name: "Alternate titles", value: item.alternateTitles.slice(0, 5).join(" · ").slice(0, 900), inline: false }] : []),
-      ).setFooter({ text: "MangaDex · Safe-rated metadata only" });
+      ).setFooter({ text: providerFooter("MangaDex", "Safe-rated metadata only") });
     embed.addFields({ name: "Source record", value: formatMetadataSourceReference("MangaDex", item.id, item.sourceUrl), inline: false });
     if (item.coverUrl) embed.setThumbnail(item.coverUrl);
     return embed;
@@ -249,7 +252,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
 
   if (record.provider === "Open Library") {
     const item = record.item;
-    const embed = new EmbedBuilder().setColor(0x6b665e)
+    const embed = new EmbedBuilder().setColor(EMBED_COLOURS.primary)
       .setTitle(item.title.slice(0, 256)).setURL(item.sourceUrl)
       .addFields(
         { name: "Provider", value: "Open Library", inline: true },
@@ -261,7 +264,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
         { name: "Subjects", value: item.subjects.slice(0, 10).join(" · ").slice(0, 900) || "Not reported", inline: false },
         ...(item.isbn13.length ? [{ name: "ISBN-13", value: item.isbn13.join(", ").slice(0, 900), inline: false }] : []),
         ...(item.isbn10.length ? [{ name: "ISBN-10", value: item.isbn10.join(", ").slice(0, 900), inline: false }] : []),
-      ).setFooter({ text: "Open Library · Work metadata; editions remain distinct" });
+      ).setFooter({ text: providerFooter("Open Library", "Work metadata; editions remain distinct") });
     embed.addFields({ name: "Source record", value: formatMetadataSourceReference("Open Library", item.workId, item.sourceUrl), inline: false });
     if (item.coverUrl) embed.setThumbnail(item.coverUrl);
     return embed;
@@ -270,7 +273,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
   if (record.provider === "Google Books") {
     const item = record.item;
     const embed = new EmbedBuilder()
-      .setColor(0x4285f4)
+      .setColor(EMBED_COLOURS.primary)
       .setTitle(item.title.slice(0, 256))
       .setURL(item.sourceUrl)
       .setDescription(safeDescription(item.description))
@@ -297,7 +300,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
         { name: "Public domain", value: item.publicDomain === null ? "Not reported" : item.publicDomain ? "Yes" : "No", inline: true },
         ...(item.buyUrl ? [{ name: "Store record", value: "[Open provider store record](" + item.buyUrl + ")", inline: false }] : []),
       )
-      .setFooter({ text: "Google Books · Source metadata" });
+      .setFooter({ text: providerFooter("Google Books", "Source metadata") });
     embed.addFields({ name: "Source record", value: formatMetadataSourceReference("Google Books", item.id, item.sourceUrl), inline: false });
     if (item.image) embed.setThumbnail(item.image);
     if (item.previewUrl) embed.addFields({ name: "Preview", value: "[Open preview](" + item.previewUrl + ")", inline: true });
@@ -311,7 +314,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
       "[" + safeDisplay(chapter.title, 160) + "](" + chapter.url + ")"
         + (chapter.publishedAt ? " · <t:" + Math.floor(new Date(chapter.publishedAt).getTime() / 1000) + ":R>" : ""),
     ).join("\n");
-    const embed = new EmbedBuilder().setColor(0x2d6b52)
+    const embed = new EmbedBuilder().setColor(EMBED_COLOURS.primary)
       .setTitle(item.title.slice(0, 256))
       .setURL(item.sourceUrl)
       .setDescription("Public story metadata from the Royal Road RSS feed. Chapter text is not retrieved.")
@@ -322,7 +325,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
         { name: "Latest update", value: item.latestUpdate ? "<t:" + Math.floor(new Date(item.latestUpdate).getTime() / 1000) + ":F>" : "Not reported", inline: false },
         { name: "Recent chapter links", value: (chapters || "No chapter entries were included in this feed.").slice(0, 1024), inline: false },
       )
-      .setFooter({ text: "Royal Road · Public story-specific RSS metadata" });
+      .setFooter({ text: providerFooter("Royal Road", "Public story-specific RSS metadata") });
     embed.addFields({ name: "Source record", value: formatMetadataSourceReference("Royal Road", item.id, item.sourceUrl), inline: false });
     return embed;
   }
@@ -330,7 +333,7 @@ function toEmbed(record: SearchRecord): EmbedBuilder {
 if (record.provider === "NovelFire" || record.provider === "Novel Archive" || record.provider === "Wuxia Click" || record.provider === "Novel Updates" || record.provider === "ScribbleHub" || record.provider === "Noveli.to") {
 const item = record.item;
 const embed = new EmbedBuilder()
-.setColor(0x5865f2)
+.setColor(EMBED_COLOURS.primary)
 .setTitle(item.title.slice(0, 256))
 .setURL(item.sourceUrl)
 .setDescription(safeDescription(item.description))
@@ -344,7 +347,7 @@ const embed = new EmbedBuilder()
 ...(item.latestChapters.length ? [{ name: "Recent chapter titles", value: item.latestChapters.slice(0, 5).join("\n").slice(0, 1_000), inline: false }] : []),
 ...(item.latestUpdate ? [{ name: "Last update", value: item.latestUpdate, inline: true }] : []),
 )
-.setFooter({ text: item.provider + " · Web-novel metadata" });
+.setFooter({ text: providerFooter(item.provider, "Web-novel metadata") });
 embed.addFields({ name: "Source record", value: formatMetadataSourceReference(item.provider, item.sourceUrl, item.sourceUrl), inline: false });
 if (item.image) embed.setThumbnail(item.image);
 return embed;
@@ -353,7 +356,7 @@ return embed;
   if (record.provider === "TMDB") {
     const item = record.item;
     const embed = new EmbedBuilder()
-      .setColor(0x01b4e4)
+      .setColor(EMBED_COLOURS.primary)
       .setTitle(item.title.slice(0, 256))
       .setURL(item.sourceUrl)
       .setDescription(safeDescription(item.overview))
@@ -379,7 +382,7 @@ return embed;
           inline: false,
         }] : []),
       )
-      .setFooter({ text: "TMDB · Source metadata · Country-specific ratings are shown only when supplied" });
+      .setFooter({ text: providerFooter("TMDB", "Source metadata · Country-specific ratings are shown only when supplied") });
     embed.addFields({ name: "Source record", value: formatMetadataSourceReference("TMDB", item.id, item.sourceUrl), inline: false });
     if (item.image) embed.setThumbnail(item.image);
     return embed;
@@ -388,7 +391,7 @@ return embed;
   if (record.provider === "Steam") {
     const item=record.item;
     const price=item.isFree?"Free to Play":item.price?`${item.price.final} · ${item.priceRegion} store`: "Price unavailable";
-    const embed=new EmbedBuilder().setColor(item.isFree?0x2ecc71:0x5865f2)
+    const embed=new EmbedBuilder().setColor(EMBED_COLOURS.primary)
       .setTitle(item.title.slice(0,256)).setURL(`https://store.steampowered.com/app/${item.appId}`)
       .setDescription(safeDescription(item.shortDescription,500))
       .addFields(
@@ -399,7 +402,7 @@ return embed;
         {name:"Platforms",value:item.platforms.join(", ")||"Unavailable",inline:true},
         {name:"Developers",value:item.developers.join(", ")||"Unavailable",inline:true},
         {name:"Publishers",value:item.publishers.join(", ")||"Unavailable",inline:true},
-      ).setFooter({text:"Steam Store · "+item.priceRegion+" store metadata"});
+      ).setFooter({text:providerFooter("Steam",item.priceRegion+" store metadata")});
     embed.addFields({name:"Source record",value:formatMetadataSourceReference("Steam Store",item.appId,"https://store.steampowered.com/app/"+item.appId),inline:false});
     if(item.headerImage)embed.setImage(item.headerImage);
     return embed;
@@ -407,7 +410,7 @@ return embed;
 
   const item = record.item;
   const embed = new EmbedBuilder()
-    .setColor(0x9147ff)
+    .setColor(EMBED_COLOURS.primary)
     .setTitle(item.title.slice(0, 256))
     .setURL(item.sourceUrl)
     .setDescription(safeDescription(item.summary))
@@ -421,7 +424,7 @@ return embed;
       { name: "User rating", value: item.rating === null ? "Not rated" : item.rating.toFixed(1) + "/100 · " + item.ratingCount + " rating(s)", inline: true },
       { name: "Critic rating", value: item.aggregatedRating === null ? "Not rated" : item.aggregatedRating.toFixed(1) + "/100 · " + item.aggregatedRatingCount + " review(s)", inline: true },
     )
-    .setFooter({ text: "IGDB · Source metadata · Ratings retain IGDB's 0–100 scale" });
+    .setFooter({ text: providerFooter("IGDB", "Source metadata · Ratings retain IGDB scores on a 0–100 scale") });
   embed.addFields({ name: "Source record", value: formatMetadataSourceReference("IGDB", item.id, item.sourceUrl), inline: false });
   if (item.image?.startsWith("https://")) embed.setThumbnail(item.image);
   return embed;
@@ -1864,7 +1867,7 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
       }, { maxDepth: 2, maxNodes: 24, perNodeLimit: 8 });
       const files = graph.nodes.length > 1 ? await atlasExportFiles(query.trim(), "CREATOR", graph, "author-atlas") : null;
       const graphEmbed = files
-        ? new EmbedBuilder().setColor(0x5865f2).setTitle("Author Knowledge Map")
+        ? new EmbedBuilder().setColor(EMBED_COLOURS.primary).setTitle("Author Knowledge Map")
           .setDescription(graph.nodes.length + " nodes · " + graph.edges.length + " attributed-work connections")
           .setImage(files.image)
         : null;
@@ -2281,7 +2284,7 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
     if (!ranked.length && !providerRecommendations.length) {
       embed.setDescription("No comparable source-reported genres, tags, subjects or categories, and no provider-generated recommendations, were returned for this title.");
     }
-    embed.setFooter({ text: "Sources: AniList · Kitsu · MangaDex · Google Books · Open Library · TMDB · IGDB · Provider-native recommendations remain separate" });
+    embed.setFooter({ text: providerEmoji("AniList")+" "+providerEmoji("Kitsu")+" "+providerEmoji("MangaDex")+" "+providerEmoji("Google Books")+" "+providerEmoji("TMDB")+" Provider-native recommendations remain separate" });
     await interaction.editReply({ content: "", embeds: [embed], components: [], allowedMentions: { parse: [] } });
   }
 
@@ -2480,7 +2483,7 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
         inline:false,
       });
     }
-    embed.setFooter({text:"Knowledge Atlas · Provider provenance and guild-scoped community links"});
+    embed.setFooter({text:emoji.globe+" Knowledge Atlas · Provider provenance and guild-scoped community links"});
     let files: AttachmentBuilder[] = [];
     if (filteredGraph.nodes.length > 1 && filteredGraph.edges.length > 0) {
       try {

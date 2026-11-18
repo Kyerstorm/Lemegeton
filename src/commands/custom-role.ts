@@ -29,7 +29,7 @@ import { loadConfig } from "../../helpers/runtime/config.js";
 import { createCustomRolePickerLink } from "../../helpers/custom-roles/custom-role-picker-server.js";
 import {archiveLegacyCustomRole,cancelCustomRolePending,confirmCustomRolePending,getPendingCustomRoleRemoval,withCustomRoleLock} from "../../helpers/custom-roles/custom-role-lifecycle.js";
 import { homeEmbed } from "../../helpers/runtime/discord.js";
-import { loadingMessage } from "../../helpers/emoji.js";
+import { emoji, loadingMessage } from "../../helpers/emoji.js";
 import { extractCustomRoleAvatarPalette, processCustomRoleIconImage, type CustomRoleIconCrop } from "../../helpers/custom-roles/custom-role-images.js";
 import { deleteCustomRoleIconSource, readCustomRoleIconSource, storeCustomRoleIconSource } from "../../helpers/media/media-storage.js";
 import {
@@ -72,11 +72,11 @@ const legacyImportPreviews = new Map<string, LegacyImportPreview>();
 function legacyImportKey(guildId: string, actorId: string, planId: string): string { return guildId + ":" + actorId + ":" + planId; }
 function removalRequestKey(guildId: string, actorId: string, targetId: string): string { return guildId + ":" + actorId + ":" + targetId; }
 const MEMBER_ACTIONS = [
-  { id: "create", label: "Create role", style: ButtonStyle.Success },
-  { id: "rename", label: "Rename", style: ButtonStyle.Secondary },
-  { id: "color", label: "Change color", style: ButtonStyle.Secondary },
-  { id: "wear", label: "Put on", style: ButtonStyle.Primary },
-  { id: "unwear", label: "Take off", style: ButtonStyle.Secondary },
+  { id: "create", label: "Create role", style: ButtonStyle.Success, icon: emoji.upload },
+  { id: "rename", label: "Rename", style: ButtonStyle.Secondary, icon: emoji.tools },
+  { id: "color", label: "Change color", style: ButtonStyle.Secondary, icon: emoji.stats },
+  { id: "wear", label: "Put on", style: ButtonStyle.Primary, icon: emoji.check },
+  { id: "unwear", label: "Take off", style: ButtonStyle.Secondary, icon: emoji.cross },
 ] as const;
 
 function userCustomId(userId: string, action: string): string {
@@ -103,25 +103,25 @@ function memberRows(userId: string, manager: boolean): ActionRowBuilder<ButtonBu
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
   rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
     ...MEMBER_ACTIONS.slice(0, 3).map(action => new ButtonBuilder()
-      .setCustomId(userCustomId(userId, action.id)).setLabel(action.label).setStyle(action.style)),
+      .setCustomId(userCustomId(userId, action.id)).setLabel(action.label).setEmoji(action.icon).setStyle(action.style)),
   ));
   rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
     ...MEMBER_ACTIONS.slice(3).map(action => new ButtonBuilder()
-      .setCustomId(userCustomId(userId, action.id)).setLabel(action.label).setStyle(action.style)),
-    new ButtonBuilder().setCustomId(userCustomId(userId, "move")).setLabel("Move").setStyle(ButtonStyle.Secondary),
+      .setCustomId(userCustomId(userId, action.id)).setLabel(action.label).setEmoji(action.icon).setStyle(action.style)),
+    new ButtonBuilder().setCustomId(userCustomId(userId, "move")).setLabel("Move").setEmoji(emoji.swap).setStyle(ButtonStyle.Secondary),
     ...(manager ? [new ButtonBuilder().setCustomId(userCustomId(userId, "admin"))
-      .setLabel("Admin settings").setStyle(ButtonStyle.Danger)] : []),
+      .setLabel("Admin settings").setEmoji(emoji.settings).setStyle(ButtonStyle.Danger)] : []),
   ));
   rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(userCustomId(userId, "gradient")).setLabel("Gradient").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(userCustomId(userId, "holographic")).setLabel("Holographic").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(userCustomId(userId, "icon")).setLabel("Emoji icon").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(userCustomId(userId, "image")).setLabel("Image icon").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(userCustomId(userId, "recrop")).setLabel("Recrop image").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(userCustomId(userId, "gradient")).setLabel("Gradient").setEmoji(emoji.performance).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(userCustomId(userId, "holographic")).setLabel("Holographic").setEmoji(emoji.performance).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(userCustomId(userId, "icon")).setLabel("Emoji icon").setEmoji(emoji.gift).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(userCustomId(userId, "image")).setLabel("Image icon").setEmoji(emoji.upload).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(userCustomId(userId, "recrop")).setLabel("Recrop image").setEmoji(emoji.expand).setStyle(ButtonStyle.Secondary),
   ));
   rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(userCustomId(userId, "palette")).setLabel("Avatar colour palette").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(userCustomId(userId, "picker")).setLabel("Color picker").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(userCustomId(userId, "palette")).setLabel("Avatar colour palette").setEmoji(emoji.profile).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(userCustomId(userId, "picker")).setLabel("Color picker").setEmoji(emoji.target).setStyle(ButtonStyle.Primary),
   ));
   return rows;
 }

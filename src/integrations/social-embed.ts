@@ -1,5 +1,7 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type Message } from "discord.js";
 import { SteamClient, type SteamStoreGame } from "../../helpers/integration/steam.js";
+import { emoji, providerFooter } from "../../helpers/emoji.js";
+import { EMBED_COLOURS } from "../../helpers/embeds/core.js";
 
 const SOCIAL_HOSTS = new Map<string,string>([
   ["x.com","xeezz.com"],
@@ -56,12 +58,12 @@ export function buildSteamStoreEmbed(game:SteamStoreGame):EmbedBuilder {
     ...(game.genres.length?[{name:"Genres",value:game.genres.join(", ").slice(0,900),inline:true}]:[]),
   ];
   const embed=new EmbedBuilder()
-    .setColor(0x1b2838)
+    .setColor(EMBED_COLOURS.secondary)
     .setTitle(game.title.slice(0,256))
     .setURL("https://store.steampowered.com/app/"+game.appId)
     .setDescription(game.shortDescription||"No short description supplied by Steam.")
     .addFields(fields)
-    .setFooter({text:"Steam Store · Store metadata"});
+    .setFooter({text:providerFooter("Steam","Store metadata")});
   if(game.headerImage)embed.setImage(game.headerImage);
   if(game.price&&game.price.discountPercent>0) {
     embed.addFields({name:"Discount",value:game.price.discountPercent+"% off",inline:true});
@@ -95,10 +97,10 @@ export async function handleSocialLinkMessage(message:Message,steam:SteamClient)
     const rewritten=rewriteSocialUrl(url);
     if(rewritten) {
       const embed=new EmbedBuilder()
-        .setColor(0x5865f2)
-        .setTitle("Social link")
+        .setColor(EMBED_COLOURS.primary)
+        .setTitle(emoji.link + " Social link")
         .setDescription("[Open alternative preview]("+rewritten+")")
-        .setFooter({text:"Original message preserved"});
+        .setFooter({text:emoji.link + " Original message preserved"});
       await message.reply({
         embeds:[embed],
         components:[new ActionRowBuilder<ButtonBuilder>().addComponents(

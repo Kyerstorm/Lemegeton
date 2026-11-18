@@ -16,6 +16,7 @@ import {
   type TextChannel,
 } from "discord.js";
 import { emoji } from "../../helpers/emoji.js";
+import { EMBED_COLOURS } from "../../helpers/embeds/core.js";
 import type { FeatureCommand } from "../../helpers/commands/command.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
 import { homeEmbed } from "../../helpers/runtime/discord.js";
@@ -173,29 +174,29 @@ function questionEmbed(
     }] : []),
   ];
   return new EmbedBuilder()
-    .setColor(0x5865f2)
-    .setTitle(title)
+    .setColor(EMBED_COLOURS.primary)
+    .setTitle(emoji.game + " " + title)
     .setDescription(question)
     .addFields(fields)
     .setFooter({
       text: mode === "mystery"
-        ? "Mystery round · Category-labelled clue layers · Answers are private"
+        ? emoji.question + " Mystery round · Category-labelled clue layers · Answers are private"
         : mode === "guessing"
-          ? "Guessing round · Identify the hidden media from clues · Answers are private"
-          : "Answers are private until submitted · One answer per player per round",
+          ? emoji.target + " Guessing round · Identify the hidden media from clues · Answers are private"
+          : emoji.game + " Answers are private until submitted · One answer per player per round",
     });
 }
 
 function gameButtons(sessionId: string, packMode: string = "trivia"): ActionRowBuilder<ButtonBuilder>[] {
   const rows: ActionRowBuilder<ButtonBuilder>[] = [new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`play:join:${sessionId}`).setLabel("Join game").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`play:answer:${sessionId}`).setLabel("Answer").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`play:next:${sessionId}`).setLabel("Next round").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`play:leaderboard:${sessionId}`).setLabel("Leaderboard").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`play:finish:${sessionId}`).setLabel("Finish").setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`play:join:${sessionId}`).setLabel("Join game").setEmoji(emoji.community).setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`play:answer:${sessionId}`).setLabel("Answer").setEmoji(emoji.check).setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`play:next:${sessionId}`).setLabel("Next round").setEmoji(emoji.next).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`play:leaderboard:${sessionId}`).setLabel("Leaderboard").setEmoji(emoji.leaderboard).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`play:finish:${sessionId}`).setLabel("Finish").setEmoji(emoji.finish).setStyle(ButtonStyle.Danger),
   )];
   if (packMode !== "trivia") rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`play:clue:${sessionId}`).setLabel("Reveal next clue").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`play:clue:${sessionId}`).setLabel("Reveal next clue").setEmoji(emoji.info).setStyle(ButtonStyle.Secondary),
   ));
   return rows;
 }

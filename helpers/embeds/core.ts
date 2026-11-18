@@ -1,5 +1,5 @@
 import { EmbedBuilder } from "discord.js";
-import { emoji } from "../emoji.js";
+import { emoji, providerFooter } from "../emoji.js";
 
 export const EMBED_COLOURS = {
   primary: 0x7c5cff,
@@ -115,7 +115,7 @@ export function buildActivityEmbed(
     if (index === 0 && /\.(?:png|jpe?g|gif|webp)(?:[?#].*)?$/i.test(url)) embed.setImage(url);
     else embed.addFields({ name: emoji.link + " Media", value: `[Open attachment](${url})`, inline: false });
   }
-  return embed.setFooter({ text: "Powered by AniList" });
+  return embed.setFooter({ text: providerFooter("AniList", "Public activity") });
 }
 
 /** Summary embed used by the original AniList and shared media embed builders. */
@@ -174,7 +174,7 @@ export function buildMediaEmbed(mediaValue: unknown): EmbedBuilder {
     return id && name ? [`[${name.slice(0, 100)}](https://anilist.co/character/${id})`] : [];
   });
   if (preview.length) embed.addFields({ name: "Main Characters", value: preview.join(" • ").slice(0, 1_000), inline: false });
-  return embed.setFooter({ text: "AniList Media" });
+  return embed.setFooter({ text: providerFooter("AniList", "Media metadata") });
 }
 
 export function buildRelationsEmbeds(mediaValue: unknown): EmbedBuilder[] {
@@ -288,7 +288,7 @@ export function buildRecommendationsEmbed(mediaValue: unknown, maxItems = 5): Em
     if (count >= Math.max(1, Math.min(maxItems, 10))) break;
   }
   if (!count) embed.setDescription("No recommendations found.");
-  return embed.setFooter({ text: "AniList Recommendations" });
+  return embed.setFooter({ text: providerFooter("AniList", "Provider recommendations") });
 }
 
 export function buildTagsEmbed(mediaValue: unknown): EmbedBuilder {
@@ -336,7 +336,7 @@ export function buildUserProfileEmbed(userValue: unknown): EmbedBuilder {
     { name: emoji.movie + " Anime Snapshot", value: userStats(user.anime, "anime"), inline: true },
     { name: emoji.lightNovel + " Manga Snapshot", value: userStats(user.manga, "manga"), inline: true },
   );
-  return embed.setFooter({ text: `AniList • User ID ${number(user.id) ?? "—"}` });
+  return embed.setFooter({ text: providerFooter("AniList", "User ID " + (number(user.id) ?? "—")) });
 }
 
 export function buildUserStatsEmbed(userValue: unknown): EmbedBuilder {
@@ -349,7 +349,7 @@ export function buildUserStatsEmbed(userValue: unknown): EmbedBuilder {
     { name: emoji.movie + " Anime", value: userStats(user.anime, "anime"), inline: true },
     { name: emoji.lightNovel + " Manga", value: userStats(user.manga, "manga"), inline: true },
   );
-  return embed.setFooter({ text: `AniList • User ID ${number(user.id) ?? "—"}` });
+  return embed.setFooter({ text: providerFooter("AniList", "User ID " + (number(user.id) ?? "—")) });
 }
 
 export function buildUserFavoritesEmbed(userValue: unknown): EmbedBuilder {
@@ -379,7 +379,7 @@ export function buildUserFavoritesEmbed(userValue: unknown): EmbedBuilder {
     });
     embed.addFields({ name: label, value: links.join(", ") || "*None listed*", inline: false });
   }
-  return embed.setFooter({ text: `AniList • User ID ${number(user.id) ?? "—"}` });
+  return embed.setFooter({ text: providerFooter("AniList", "User ID " + (number(user.id) ?? "—")) });
 }
 
 function statusEmbed(title: string, description: string, color: number, prefix: string): EmbedBuilder {
@@ -406,5 +406,5 @@ export function buildTrendingEmbed(mediaList: unknown[], title: string, descript
     const value = score === null ? "Score unavailable" : `Score: ${score}%`;
     embed.addFields({ name: `${index+1}. ${mediaTitle(row.title)}`.slice(0,256), value: url ? `[${value}](${url})` : value, inline: false });
   }
-  return embed.setFooter({ text: "Fetched from AniList" });
+  return embed.setFooter({ text: providerFooter("AniList", "Trending catalogue") });
 }

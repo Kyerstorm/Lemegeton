@@ -14,6 +14,8 @@ import {
   setGuildLanguage,
 } from "../../helpers/runtime/languages.js";
 import { logger } from "../../helpers/runtime/logger.js";
+import { emoji } from "../../helpers/emoji.js";
+import { EMBED_COLOURS } from "../../helpers/embeds/core.js";
 import { translateUiText } from "../../helpers/integration/translation.js";
 
 export class LanguageCommand implements FeatureCommand {
@@ -66,15 +68,15 @@ export class LanguageCommand implements FeatureCommand {
     const title = await translateUiText("Server language saved", language.code);
     const description = await translateUiText("Lemegeton's required server language is now **" + language.label + "**.", language.code);
     const embed = new EmbedBuilder()
-      .setColor(0x57f287)
-      .setTitle(title)
+      .setColor(EMBED_COLOURS.success)
+      .setTitle(emoji.language + " " + title)
       .setDescription(description)
       .addFields(
         { name: "Language", value: language.name, inline: true },
         { name: "Language code", value: language.code, inline: true },
         { name: "Previous language", value: previous?.label ?? "Not configured", inline: true },
       )
-      .setFooter({ text: "This setting applies to the entire server. Members with Manage Server can change it using /language." });
+      .setFooter({ text: emoji.language + " Server-wide language setting · Manage Server permission required" });
 
     await interaction.editReply({ embeds: [embed] });
   }

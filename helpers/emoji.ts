@@ -67,6 +67,9 @@ export const emoji = {
   studio: "🎨",
 
   // Discovery and community
+  music: "🎧",
+  language: "🌐",
+  customRole: "🎭",
   random: "🎲",
   trending: "📈",
   popular: fireEmoji,
@@ -136,22 +139,24 @@ export const emoji = {
   gog: "<:GOG:1433757557628866640>",
   login: "<:login:1557774167267475516>",
   shoppingCart: "<a:shoppingcart:1557772890382798878>",
-  IGDB: "🎲",
-  Novelfire: "📈",
-  openlibrary: fireEmoji,
-  Letterboxd: ideaEmoji,
-  TMDB: calendarEmoji,
-  RoyalRoad: "🕒",
-  MangaDex: "🔖",
-  GoogleBooks: "🗃️",
-  crossref: "leave empty",
-  Spotify: "",
-  Soundcloud: "",
-  Youtube: "",
-  kitsu: "",
-  Novelupdates: "",
-  wuxiaclick: "",
-  scribblehub: "",
+  IGDB: "🎮",
+  Novelfire: "📖",
+  openlibrary: "📚",
+  Letterboxd: "🎞️",
+  TMDB: movieEmoji,
+  RoyalRoad: "📜",
+  MangaDex: "📚",
+  GoogleBooks: "📕",
+  crossref: "📑",
+  Spotify: "🎧",
+  Soundcloud: "☁️",
+  Youtube: "▶️",
+  kitsu: "🌸",
+  Novelupdates: "📘",
+  wuxiaclick: "📜",
+  scribblehub: "✍️",
+  NovelArchive: "📚",
+  NoveliTo: "📘",
 } as const;
 
 export type EmojiName = keyof typeof emoji;
@@ -166,4 +171,25 @@ export function withEmoji(name: EmojiName, text: string): string {
 
 export function loadingMessage(activity: string): string {
   return `${emoji.loading} ${activity}`;
+}
+
+const PROVIDER_EMOJIS: Record<string, string> = {
+  anilist: emoji.anilist, steam: emoji.steam, steamstore: emoji.steam,
+  igdb: emoji.IGDB, tmdb: emoji.TMDB, kitsu: emoji.kitsu, mangadex: emoji.MangaDex,
+  googlebooks: emoji.GoogleBooks, openlibrary: emoji.openlibrary, crossref: emoji.crossref,
+  royalroad: emoji.RoyalRoad, novelfire: emoji.Novelfire, novelarchive: emoji.NovelArchive,
+  novelupdates: emoji.Novelupdates, wuxiaclick: emoji.wuxiaclick, scribblehub: emoji.scribblehub,
+  novelito: emoji.NoveliTo, spotify: emoji.Spotify, soundcloud: emoji.Soundcloud,
+  youtubemusic: emoji.Youtube, youtube: emoji.Youtube, epicgames: emoji.epicGames,
+  gog: emoji.gog, letterboxd: emoji.Letterboxd,
+};
+
+export function providerEmoji(provider: string): string {
+  const key = provider.toLocaleLowerCase("en").replace(/[^a-z0-9]+/g, "");
+  return PROVIDER_EMOJIS[key] ?? emoji.link;
+}
+
+export function providerFooter(provider: string, detail = "Source metadata"): string {
+  const label = provider.trim().slice(0, 80) || "Metadata provider";
+  return (providerEmoji(label) + " " + label + " · " + detail.trim()).slice(0, 2_048);
 }

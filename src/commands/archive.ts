@@ -24,6 +24,8 @@ import {
   type RoleSelectMenuInteraction,
 } from "discord.js";
 import type { FeatureCommand } from "../../helpers/commands/command.js";
+import { emoji } from "../../helpers/emoji.js";
+import { EMBED_COLOURS } from "../../helpers/embeds/core.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
 import { homeEmbed } from "../../helpers/runtime/discord.js";
 import {
@@ -132,8 +134,8 @@ function spoilerContent(value: string, spoiler: boolean): string {
 function entryEmbed(entry: ArchiveEntry): EmbedBuilder {
   const tags = Array.isArray(entry.tags) ? entry.tags : [];
   const embed = new EmbedBuilder()
-    .setColor(0x5865f2)
-    .setTitle(`#${entry.id} · ${safeDisplay(entry.title, 220)}`)
+    .setColor(EMBED_COLOURS.primary)
+    .setTitle(`${emoji.archive} #${entry.id} · ${safeDisplay(entry.title, 220)}`)
     .setDescription(spoilerContent(entry.content, entry.spoiler).slice(0, 3_500))
     .addFields(
       { name: "Category", value: categoryLabel(entry.archive_type), inline: true },
@@ -141,7 +143,7 @@ function entryEmbed(entry: ArchiveEntry): EmbedBuilder {
       { name: "Visibility", value: entry.visibility === "global" ? "Global" : "This server", inline: true },
       { name: "Contributor", value: `<@${entry.created_by}>`, inline: true },
     )
-    .setFooter({ text: "Community Archive · Approved, attributed contribution" });
+    .setFooter({ text: `${emoji.archive} Community Archive · Approved, attributed contribution` });
   if(entry.chapter_number)embed.addFields({name:"Chapter",value:entry.chapter_number,inline:true});
   if (entry.source_title) embed.addFields({ name: "Work / source", value: safeDisplay(entry.source_title, 250), inline: true });
   if (entry.creator) embed.addFields({ name: "Original creator", value: safeDisplay(entry.creator, 250), inline: true });
@@ -284,21 +286,21 @@ function archiveHome(): { embeds: EmbedBuilder[]; components: ActionRowBuilder<B
     ARCHIVE_CATEGORIES.map((category) => ({ name: category.emoji + " " + category.label, value: "Browse approved entries and creator-attributed work.", inline: true })),
   );
   const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId("archive:browse").setLabel("Browse").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("archive:search").setLabel("Search").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("archive:submit").setLabel("Contribute").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId("archive:mine").setLabel("My submissions").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("archive:browse").setLabel("Browse").setEmoji(emoji.archive).setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("archive:search").setLabel("Search").setEmoji(emoji.search).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("archive:submit").setLabel("Contribute").setEmoji(emoji.upload).setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("archive:mine").setLabel("My submissions").setEmoji(emoji.profile).setStyle(ButtonStyle.Secondary),
   );
   const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId("archive:collections").setLabel("Collections").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("archive:trails").setLabel("Archive Trails").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("archive:report").setLabel("Report an entry").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("archive:review").setLabel("Review queue").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("archive:configure").setLabel("Configure").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("archive:collections").setLabel("Collections").setEmoji(emoji.collection).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("archive:trails").setLabel("Archive Trails").setEmoji(emoji.bookmark).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("archive:report").setLabel("Report an entry").setEmoji(emoji.warning).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("archive:review").setLabel("Review queue").setEmoji(emoji.testing).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("archive:configure").setLabel("Configure").setEmoji(emoji.settings).setStyle(ButtonStyle.Secondary),
   );
   const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId("archive:category-index").setLabel("Category index").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("archive:soundtrack-search").setLabel("Soundtrack discovery").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("archive:category-index").setLabel("Category index").setEmoji(emoji.stats).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("archive:soundtrack-search").setLabel("Soundtrack discovery").setEmoji(emoji.soundtrack).setStyle(ButtonStyle.Secondary),
   );
   return { embeds: [embed], components: [row1, row2, row3] };
 }
@@ -439,7 +441,7 @@ export class ArchiveCommand implements FeatureCommand {
         case "spotlight-list": {
           const spotlights = await listArchiveSpotlights(guildId);
           const embeds = spotlights.slice(0, 5).map(item => new EmbedBuilder()
-            .setColor(0x5865f2)
+            .setColor(EMBED_COLOURS.primary)
             .setTitle(item.title.slice(0, 250))
             .setDescription(`Entry #${item.entry_id} · ${item.archive_type} · contributed by <@${item.created_by}>`)
             .addFields(
@@ -1085,7 +1087,7 @@ export class ArchiveCommand implements FeatureCommand {
           ...(sourceUrl ? [{ name: "Source link", value: "[Open metadata source](" + sourceUrl + ")", inline: false }] : []),
           { name: "Contribution", value: safeDisplay(content || "Media attachment submitted.", 900), inline: false },
         ],
-      ).setFooter({ text: "Pending moderator review · Entry visibility is not public until approved" });
+      ).setFooter({ text: `${emoji.hourglass} Pending moderator review · Entry visibility is not public until approved` });
       const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId("archive:approve:" + entryId + ":" + visibility).setLabel("Approve").setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId("archive:reject:" + entryId + ":" + visibility).setLabel("Reject").setStyle(ButtonStyle.Danger),
@@ -1290,7 +1292,7 @@ export class ArchiveCommand implements FeatureCommand {
     }
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(`archive:report-entry:${entry.id}`).setLabel("Report").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("archive:collections").setLabel("Collections").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("archive:collections").setLabel("Collections").setEmoji(emoji.collection).setStyle(ButtonStyle.Secondary),
     );
     await interaction.reply({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
   }
@@ -1301,7 +1303,7 @@ export class ArchiveCommand implements FeatureCommand {
       await interaction.reply({ content: "No approved, safe Manga Panels with an available image can be featured today.", flags: MessageFlags.Ephemeral });
       return;
     }
-    const embed = entryEmbed(entry).setFooter({ text: "Panel of the Day · Selected once per server per day · Safe, approved Archive entry" });
+    const embed = entryEmbed(entry).setFooter({ text: `${emoji.panels} Panel of the Day · Selected once per server per day · Safe, approved Archive entry` });
     let imageUrl: string | null = null;
     if (entry.media_asset_id) imageUrl = await signedArchiveAssetUrl(Number(entry.media_asset_id), interaction.client, entry.created_guild_id).catch(() => null);
     if (!imageUrl) {
@@ -1327,10 +1329,10 @@ export class ArchiveCommand implements FeatureCommand {
       return;
     }
     const embeds = entries.slice(0, 5).map((entry) => new EmbedBuilder()
-      .setColor(0x5865f2)
+      .setColor(EMBED_COLOURS.primary)
       .setTitle(`#${entry.id} · ${safeDisplay(entry.title)}`)
       .setDescription(`**${entry.status}** · ${categoryLabel(entry.archive_type)}\n${safeDisplay(entry.content, 500)}`)
-      .setFooter({ text: `Submitted ${new Date(entry.created_at).toLocaleDateString()}` }));
+      .setFooter({ text: `${emoji.archive} Submitted ${new Date(entry.created_at).toLocaleDateString()}` }));
     await interaction.reply({ embeds, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
   }
 
@@ -1363,7 +1365,7 @@ export class ArchiveCommand implements FeatureCommand {
       return;
     }
     const embeds = items.slice(0, 5).map((entry) => new EmbedBuilder()
-      .setColor(0xf0b232)
+      .setColor(EMBED_COLOURS.warning)
       .setTitle(`#${entry.id} · ${safeDisplay(entry.title)}`)
       .setDescription(`${categoryLabel(entry.archive_type)} · ${entry.visibility} · submitter <@${entry.created_by}>\n${safeDisplay(entry.content, 500)}`));
     const first = items[0]!;
@@ -1612,10 +1614,10 @@ export class ArchiveCommand implements FeatureCommand {
     const first = rows[0]!;
     const scope = first.visibility === "global" ? "global" : "server";
     await interaction.reply({
-      embeds: rows.slice(0, 5).map((report) => new EmbedBuilder().setColor(0xe0a33b)
+      embeds: rows.slice(0, 5).map((report) => new EmbedBuilder().setColor(EMBED_COLOURS.warning)
         .setTitle(`Report #${report.id} · Entry #${report.entry_id}`)
         .setDescription(`**${safeDisplay(report.title)}**\n${safeDisplay(report.reason, 400)}\nReporter: <@${report.reporter_id}>`)
-        .setFooter({ text: `${report.visibility} Archive · ${categoryLabel(report.archive_type)}` })),
+        .setFooter({ text: `${emoji.warning} ${report.visibility} Archive · ${categoryLabel(report.archive_type)}` })),
       components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId(`archive:report-dismiss:${first.id}:${scope}`).setLabel("Dismiss first report").setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(`archive:report-remove:${first.id}:${scope}`).setLabel("Remove reported entry").setStyle(ButtonStyle.Danger),

@@ -14,7 +14,8 @@ import {
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction,
 } from "discord.js";
-import { emoji } from "../../helpers/emoji.js";
+import { emoji, providerFooter, providerEmoji } from "../../helpers/emoji.js";
+import { EMBED_COLOURS } from "../../helpers/embeds/core.js";
 import type { FeatureCommand } from "../../helpers/commands/command.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
 import type { BotConfig } from "../../helpers/runtime/config.js";
@@ -121,7 +122,7 @@ function leaderboardPage(
     `${config.description} (Page ${page + 1}/${pageCount})\n\n${session.optedIn.toLocaleString("en-US")} members opted in. Only current members of this server are included.`,
     fields.length ? fields : [{ name: "No data", value: "No opted-in AniList profiles were available.", inline: false }],
   ).setFooter({
-    text: emoji.refresh + " Leaderboard based on live AniList statistics",
+    text: providerFooter("AniList", "Leaderboard based on live statistics"),
     iconURL: "https://anilist.co/img/icons/android-chrome-512x512.png",
   });
   const controls = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -155,15 +156,15 @@ function profileHome(): { embeds: EmbedBuilder[]; components: ActionRowBuilder<B
     embeds: [embed],
     components: [
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId("profile:link-anilist").setLabel("Connect AniList").setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId("profile:link-steam").setLabel("Connect Steam").setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId("profile:view").setLabel("View my profile").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId("profile:privacy").setLabel("Privacy settings").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId("profile:link-anilist").setLabel("Connect AniList").setEmoji(emoji.anilist).setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId("profile:link-steam").setLabel("Connect Steam").setEmoji(emoji.steam).setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId("profile:view").setLabel("View my profile").setEmoji(emoji.profile).setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId("profile:privacy").setLabel("Privacy settings").setEmoji(emoji.lock).setStyle(ButtonStyle.Secondary),
       ),
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId("profile:affinity").setLabel("Compare interests").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId("profile:taste").setLabel("Server Taste").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId("profile:unlink").setLabel("Manage connections").setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId("profile:affinity").setLabel("Compare interests").setEmoji(emoji.heart).setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId("profile:taste").setLabel("Server Taste").setEmoji(emoji.stats).setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId("profile:unlink").setLabel("Manage connections").setEmoji(emoji.settings).setStyle(ButtonStyle.Danger),
       ),
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId("profile:leaderboard:anime").setLabel("Anime Golden Ratio").setStyle(ButtonStyle.Secondary),
@@ -509,16 +510,16 @@ export class ProfileCommand implements FeatureCommand {
       return;
     }
     const embed = new EmbedBuilder()
-      .setColor(0x5865f2)
-      .setTitle(`${member.user.displayName} · Media profile`)
+      .setColor(EMBED_COLOURS.primary)
+      .setTitle(emoji.profile + " " + member.user.displayName + " · Media profile")
       .setThumbnail(member.user.displayAvatarURL())
       .setDescription(ownProfile
         ? "Your private profile preview. Other members can see it only after you enable Public profile."
         : "Provider data shown here is controlled by this member's profile and provider visibility settings.")
       .addFields(
         { name: "Approved Archive entries", value: String(profile.contributions), inline: true },
-        { name: "AniList connection", value: profile.anilistUsername ? (profile.preferences.show_anilist ? (profile.anilist ? "Linked · verified" : "Linked · provider unavailable") : "Hidden by member") : "Not connected", inline: true },
-        { name: "Steam connection", value: profile.steamId ? (profile.preferences.show_steam ? (profile.steam ? "Linked · verified" : "Linked · provider unavailable") : "Hidden by member") : "Not connected", inline: true },
+        { name: providerEmoji("AniList") + " AniList connection", value: profile.anilistUsername ? (profile.preferences.show_anilist ? (profile.anilist ? "Linked · verified" : "Linked · provider unavailable") : "Hidden by member") : "Not connected", inline: true },
+        { name: providerEmoji("Steam") + " Steam connection", value: profile.steamId ? (profile.preferences.show_steam ? (profile.steam ? "Linked · verified" : "Linked · provider unavailable") : "Hidden by member") : "Not connected", inline: true },
       );
     embed.addFields({
       name: "Recent community work",

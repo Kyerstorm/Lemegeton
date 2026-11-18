@@ -18,6 +18,7 @@ import {
   type TextChannel,
 } from "discord.js";
 import { emoji } from "../../helpers/emoji.js";
+import { EMBED_COLOURS } from "../../helpers/embeds/core.js";
 import type { FeatureCommand } from "../../helpers/commands/command.js";
 import { createInteractionIssueLog, issueHashNotice } from "../../helpers/runtime/issue-logs.js";
 import type { BotConfig } from "../../helpers/runtime/config.js";
@@ -148,20 +149,20 @@ function communityHome(): { embeds: EmbedBuilder[]; components: ActionRowBuilder
   );
   const rows = [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId("community:daily").setLabel("Daily Drop").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("community:rankings").setLabel("Rankings").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("community:sessions").setLabel("Sessions").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("community:discussions").setLabel("Discussions").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("community:daily").setLabel("Daily Drop").setEmoji(emoji.gift).setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("community:rankings").setLabel("Rankings").setEmoji(emoji.leaderboard).setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("community:sessions").setLabel("Sessions").setEmoji(emoji.event).setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("community:discussions").setLabel("Discussions").setEmoji(emoji.discussion).setStyle(ButtonStyle.Primary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId("community:calendar").setLabel("Release calendar").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("community:history").setLabel("History").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("community:spotlights").setLabel("Spotlights").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("community:tournaments").setLabel("Tournaments").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("community:seasons").setLabel("Seasons").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("community:calendar").setLabel("Release calendar").setEmoji(emoji.calendar).setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("community:history").setLabel("History").setEmoji(emoji.clock).setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("community:spotlights").setLabel("Spotlights").setEmoji(emoji.popular).setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("community:tournaments").setLabel("Tournaments").setEmoji(emoji.leaderboard).setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("community:seasons").setLabel("Seasons").setEmoji(emoji.calendar).setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId("community:showcase").setLabel("Community Showcase").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("community:showcase").setLabel("Community Showcase").setEmoji(emoji.community).setStyle(ButtonStyle.Secondary),
     ),
   ];
   return { embeds: [embed], components: rows };
@@ -439,14 +440,14 @@ export class CommunityCommand implements FeatureCommand {
     if (action === "sessions") {
       const sessions = await listUpcomingSessions(interaction.guildId);
       const embeds = sessions.slice(0, 5).map((session) => new EmbedBuilder()
-        .setColor(0x5865f2)
+        .setColor(EMBED_COLOURS.primary)
         .setTitle("#" + session.id + " · " + session.title)
         .setDescription(formatActivity(session.activity_type) + " · <t:" + Math.floor(new Date(session.scheduled_at).getTime() / 1000) + ":F>\n" + session.description)
         .addFields(
           { name: "Host", value: "<@" + session.host_id + ">", inline: true },
           { name: "Capacity", value: session.capacity === null ? "Open" : String(session.capacity), inline: true },
           ...(session.media_title ? [{ name: "Media", value: session.media_title, inline: false }] : []),
-        ));
+        ).setFooter({ text: emoji.event + " Community session · RSVP and waitlist are server-scoped" }));
       const components: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>> = [
         new ActionRowBuilder<ButtonBuilder>().addComponents(
           new ButtonBuilder().setCustomId("community:session-create").setLabel("Create session").setStyle(ButtonStyle.Primary),
@@ -930,10 +931,10 @@ export class CommunityCommand implements FeatureCommand {
         });
         await interaction.reply({ content: `Community session #${sessionId} was scheduled.`, flags: MessageFlags.Ephemeral });
         const announcement = new EmbedBuilder()
-          .setColor(0x5865f2)
+          .setColor(EMBED_COLOURS.primary)
           .setTitle(`${emoji.event} ${interaction.fields.getTextInputValue("title")}`)
           .setDescription(`${formatActivity(activity)} together · Hosted by <@${interaction.user.id}>\n${interaction.fields.getTextInputValue("description")}\n\nStarts <t:${Math.floor(scheduledAt.getTime() / 1000)}:F>\nSession ID: ${sessionId}`)
-          .setFooter({ text: "RSVPs and waitlist are recorded per server." });
+          .setFooter({ text: emoji.event + " RSVPs and waitlist are recorded per server." });
         const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
           new ButtonBuilder().setCustomId(`community:rsvp:${sessionId}`).setLabel("I'm going").setStyle(ButtonStyle.Success),
           new ButtonBuilder().setCustomId(`community:withdraw:${sessionId}`).setLabel("Withdraw").setStyle(ButtonStyle.Secondary),
@@ -1688,7 +1689,7 @@ export class CommunityCommand implements FeatureCommand {
   private async showSpotlights(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
     const spotlights = await listArchiveSpotlights(interaction.guildId!);
     const embeds = spotlights.slice(0, 8).map(item => new EmbedBuilder()
-      .setColor(0x5865f2)
+      .setColor(EMBED_COLOURS.primary)
       .setTitle(safeDisplay(item.title, 250))
       .setDescription(`Archive #${item.entry_id} · ${item.archive_type} · contributed by <@${item.created_by}>`)
       .addFields(
@@ -1696,7 +1697,7 @@ export class CommunityCommand implements FeatureCommand {
         { name: "Scope", value: item.visibility === "global" ? "Global" : "This server", inline: true },
         { name: "Ends", value: `<t:${Math.floor(new Date(item.ends_at).getTime() / 1000)}:R>`, inline: true },
         ...(item.note ? [{ name: "Note", value: safeDisplay(item.note, 500), inline: false }] : []),
-      ));
+      ).setFooter({ text: emoji.archive + " Curated Archive highlight · Approved contribution" }));
     await interaction.reply({
       content: spotlights.length ? "Curated Archive highlights" : "No Archive spotlights are active for this server.",
       embeds,

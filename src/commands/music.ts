@@ -21,6 +21,9 @@ import {
 import { randomUUID } from "node:crypto";
 import { query } from "../../database.js";
 import { logger } from "../../helpers/runtime/logger.js";
+import { emoji, providerEmoji } from "../../helpers/emoji.js";
+import { EMBED_COLOURS } from "../../helpers/embeds/core.js";
+import { setProviderFooter } from "../../helpers/runtime/discord.js";
 import type { FeatureCommand } from "../../helpers/commands/command.js";
 import type { BotConfig } from "../../helpers/runtime/config.js";
 import {
@@ -51,11 +54,19 @@ type MusicInteraction =
   | ModalSubmitInteraction;
 
 function button(customId: string, label: string, style: ButtonStyle, disabled = false): ButtonBuilder {
-  return new ButtonBuilder().setCustomId(customId).setLabel(label).setStyle(style).setDisabled(disabled);
+  const icon = customId.includes("remove") ? emoji.warning
+    : customId.includes("test") ? emoji.refresh
+      : customId.includes("pause") ? emoji.pause
+        : customId.includes("resume") ? emoji.check
+          : customId.includes("add") ? emoji.upload
+            : customId.includes("list") || customId.includes("home") ? emoji.music : null;
+  const result = new ButtonBuilder().setCustomId(customId).setLabel(label).setStyle(style).setDisabled(disabled);
+  if (icon) result.setEmoji(icon);
+  return result;
 }
 
 function providerNames(providers: MusicProvider[]): string {
-  return providers.map(providerName).join(" · ") || "No provider matched";
+  return providers.map(provider => providerEmoji(providerName(provider)) + " " + providerName(provider)).join(" · ") || "No provider matched";
 }
 
 function addArtistModal(channelId: string): ModalBuilder {
@@ -77,8 +88,8 @@ function addArtistModal(channelId: string): ModalBuilder {
 
 function removeConfirmation(tracker: MusicTracker): MusicPayload {
   const embed = new EmbedBuilder()
-    .setColor(0xed4245)
-    .setTitle("Remove music tracker?")
+    .setColor(EMBED_COLOURS.danger)
+    .setTitle(emoji.warning + " Remove music tracker?")
     .setDescription(
       "Remove **" + cleanMusicText(tracker.artist_name, 180) + "** from this server?\n\n" +
       "This also deletes its stored release history. Existing Discord messages are not removed.",
@@ -153,15 +164,15 @@ export class MusicCommand implements FeatureCommand {
       const release = releases[0];
       if (!release) {
         await interaction.editReply({
-          embeds: [new EmbedBuilder().setColor(0xfee75c).setTitle("No release found").setDescription(
+          embeds: [new EmbedBuilder().setColor(EMBED_COLOURS.warning).setTitle(emoji.info + " No release found").setDescription(
             "None of the linked providers returned a recent release. The tracker remains unchanged.",
           )],
         });
         return true;
       }
       const embed = new EmbedBuilder()
-        .setColor(0x5865f2)
-        .setTitle("Latest release preview")
+        .setColor(EMBED_COLOURS.primary)
+        .setTitle(emoji.music + " Latest release preview")
         .setDescription("## " + cleanMusicText(release.title, 250))
         .addFields(
           { name: "Artist", value: cleanMusicText(release.artist, 200), inline: true },
@@ -169,6 +180,7 @@ export class MusicCommand implements FeatureCommand {
           { name: "Release", value: "[Open release](" + release.url + ")", inline: true },
         )
         .setURL(release.url);
+      setProviderFooter(embed, providerName(release.provider), "Latest release");
       if (release.release_date) embed.addFields({ name: "Released", value: cleanMusicText(release.release_date, 100), inline: true });
       if (release.image_url) embed.setThumbnail(release.image_url);
       await interaction.editReply({ embeds: [embed] });
@@ -199,8 +211,8 @@ export class MusicCommand implements FeatureCommand {
       if (removed) await this.audit(interaction, "music.remove", "tracker=" + trackerId);
       await interaction.update({
         embeds: [new EmbedBuilder()
-          .setColor(removed ? 0x57f287 : 0xfee75c)
-          .setTitle(removed ? "Tracker removed" : "Tracker already removed")
+          .setColor(removed ? EMBED_COLOURS.success : EMBED_COLOURS.warning)
+          .setTitle((removed ? emoji.success : emoji.warning) + " " + (removed ? "Tracker removed" : "Tracker already removed"))
           .setDescription(removed ? "The tracker and its stored release history were deleted." : "That tracker no longer exists.")],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(button("music:list", "Back to trackers", ButtonStyle.Secondary))],
         allowedMentions: { parse: [] },
@@ -291,8 +303,8 @@ export class MusicCommand implements FeatureCommand {
       const status = this.runtime.providerStatus();
       await interaction.editReply({
         embeds: [new EmbedBuilder()
-          .setColor(0xed4245)
-          .setTitle("Artist not resolved")
+          .setColor(EMBED_COLOURS.danger)
+          .setTitle(emoji.warning + " Artist not resolved")
           .setDescription(
             "I could not confidently identify **" + cleanMusicText(artist, 150) + "** on a supported provider.\n\n" +
             "Use a Spotify artist URL, YouTube channel or handle, or SoundCloud profile URL. " +
@@ -340,8 +352,8 @@ export class MusicCommand implements FeatureCommand {
     }
 
     const embed = new EmbedBuilder()
-      .setColor(0x57f287)
-      .setTitle("Artist tracking enabled")
+      .setColor(EMBED_COLOURS.success)
+      .setTitle(emoji.success + " Artist tracking enabled")
       .setDescription(
         "Lemegeton will check **" + cleanMusicText(artist, 180) + "** for new releases and announce them in <#" + channelId + ">.",
       )
@@ -350,7 +362,7 @@ export class MusicCommand implements FeatureCommand {
         { name: "Initial history", value: baseline.length + " release(s) synchronized without notifications", inline: true },
         { name: "Tracker ID", value: tracker.id, inline: false },
       )
-      .setFooter({ text: "You will be mentioned when a new release is announced. Manage this tracker from /music." });
+      .setFooter({ text: emoji.music + " New releases · Manage this tracker from /music" });
     await interaction.editReply({ embeds: [embed] });
     return true;
   }
@@ -380,8 +392,8 @@ export class MusicCommand implements FeatureCommand {
     const active = trackers.filter(tracker => tracker.enabled).length;
     const status = this.runtime.providerStatus();
     const embed = new EmbedBuilder()
-      .setColor(0x5865f2)
-      .setTitle("Music")
+      .setColor(EMBED_COLOURS.primary)
+      .setTitle(emoji.music + " Music")
       .setDescription(
         "Track artists across Spotify, YouTube Music and SoundCloud. New releases are published automatically in the channel chosen for each tracker.",
       )
@@ -393,7 +405,7 @@ export class MusicCommand implements FeatureCommand {
           "YouTube Music: " + (status.youtube ? "Ready" : "Not configured") + "\n" +
           "SoundCloud: " + (status.soundcloudSearch ? "Name search ready" : "Profile URLs only"), inline: false },
       )
-      .setFooter({ text: "Manage Server permission required · Tracker data is isolated by server" });
+      .setFooter({ text: emoji.settings + " Manage Server permission required · Tracker data is isolated by server" });
     return {
       embeds: [embed],
       components: [
@@ -412,8 +424,8 @@ export class MusicCommand implements FeatureCommand {
 
   private addChannelPayload(): MusicPayload {
     const embed = new EmbedBuilder()
-      .setColor(0x5865f2)
-      .setTitle("Choose an announcement channel")
+      .setColor(EMBED_COLOURS.primary)
+      .setTitle(emoji.calendar + " Choose an announcement channel")
       .setDescription("Select the text channel where new releases for this artist should be posted.");
     const select = new ChannelSelectMenuBuilder()
       .setCustomId("music:add-channel")
@@ -434,8 +446,8 @@ export class MusicCommand implements FeatureCommand {
   private async listPayload(guildId: string): Promise<MusicPayload> {
     const trackers = await listMusicTrackers(guildId);
     const embed = new EmbedBuilder()
-      .setColor(0x5865f2)
-      .setTitle("Music trackers")
+      .setColor(EMBED_COLOURS.primary)
+      .setTitle(emoji.music + " Music trackers")
       .setDescription(trackers.length
         ? "Choose a tracker to preview releases, pause or resume monitoring, or remove it."
         : "No trackers are configured for this server yet.");
@@ -473,8 +485,8 @@ export class MusicCommand implements FeatureCommand {
       ? "<t:" + Math.floor(Date.parse(tracker.last_checked_at) / 1000) + ":R>"
       : "Not checked yet";
     const embed = new EmbedBuilder()
-      .setColor(tracker.enabled ? 0x57f287 : 0xfee75c)
-      .setTitle(cleanMusicText(tracker.artist_name, 220))
+      .setColor(tracker.enabled ? EMBED_COLOURS.success : EMBED_COLOURS.warning)
+      .setTitle(emoji.music + " " + cleanMusicText(tracker.artist_name, 220))
       .setDescription(tracker.enabled ? "This artist is being monitored for new releases." : "This tracker is paused.")
       .addFields(
         { name: "Status", value: tracker.enabled ? "Active" : "Paused", inline: true },
@@ -500,7 +512,7 @@ export class MusicCommand implements FeatureCommand {
 
   private notFoundPayload(): MusicPayload {
     return {
-      embeds: [new EmbedBuilder().setColor(0xfee75c).setTitle("Tracker not found").setDescription("That tracker may have been removed. Refresh the tracker list and try again.")],
+      embeds: [new EmbedBuilder().setColor(EMBED_COLOURS.warning).setTitle(emoji.warning + " Tracker not found").setDescription("That tracker may have been removed. Refresh the tracker list and try again.")],
       components: [new ActionRowBuilder<ButtonBuilder>().addComponents(button("music:list", "Refresh trackers", ButtonStyle.Secondary))],
       allowedMentions: { parse: [] },
     };
