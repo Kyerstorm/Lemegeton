@@ -6,7 +6,7 @@ test("reply-mode loading is replaced by the command response", async () => {
   const events: string[] = [];
   const target = {
     deferReply: async () => { events.push("defer"); },
-    editReply: async (payload: { content?: string }) => {
+    editReply: async (payload: { content?: string | null; embeds?: unknown[] }) => {
       events.push("edit:" + (payload.content ?? ""));
       return {};
     },
@@ -22,6 +22,23 @@ test("reply-mode loading is replaced by the command response", async () => {
   assert.equal(events[0], "defer");
   assert.match(events[1] ?? "", /Loading sample/);
   assert.equal(events[2], "edit:Ready.");
+});
+
+test("embed-only replies clear the temporary loading text", async () => {
+  let finalContent: string | null | undefined;
+  const target = {
+    deferReply: async () => undefined,
+    editReply: async (payload: { content?: string | null }) => { finalContent = payload.content; return {}; },
+    deleteReply: async () => undefined,
+  };
+
+  await withFakeLoading(target, "Loading sample…", "reply", async current => {
+    await (current as typeof target & { reply(payload: { embeds: unknown[] }): Promise<unknown> })
+      .reply({ embeds: [{}] });
+    return true;
+  });
+
+  assert.equal(finalContent, null);
 });
 
 test("component loading is removed after the original panel updates", async () => {

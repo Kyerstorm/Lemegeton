@@ -17,12 +17,13 @@ interface LoadingInteraction {
   deleteReply(): Promise<unknown>;
 }
 
-function asEditPayload(payload: unknown): unknown {
+function asEditPayload(payload: unknown, clearLoadingContent = false): unknown {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return payload;
   const editPayload = { ...(payload as Record<string, unknown>) };
   delete editPayload.flags;
   delete editPayload.ephemeral;
   delete editPayload.fetchReply;
+  if (clearLoadingContent && !("content" in editPayload)) editPayload.content = null;
   return editPayload;
 }
 
@@ -63,15 +64,15 @@ export async function withFakeLoading<T extends object, R>(
       if (property === "reply" || property === "followUp") {
         return async (payload: unknown): Promise<unknown> => {
           responseSent = true;
-          if (mode === "reply") return target.editReply(payload);
-          return loadingMessageResource!.edit(asEditPayload(payload));
+          if (mode === "reply") return target.editReply(asEditPayload(payload, true));
+          return loadingMessageResource!.edit(asEditPayload(payload, true));
         };
       }
 
       if (property === "editReply") {
         return async (payload: unknown): Promise<unknown> => {
           responseSent = true;
-          const result = await target.editReply(payload);
+          const result = await target.editReply(mode === "reply" ? asEditPayload(payload, true) : payload);
           if (mode === "update") await removeLoadingMessage();
           return result;
         };
