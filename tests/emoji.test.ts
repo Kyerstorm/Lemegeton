@@ -10,6 +10,10 @@ test("provider emoji mapping resolves the central Steam, AniList and media provi
   assert.equal(providerEmoji("TMDB"), emoji.TMDB);
 });
 
+test("the shared palette exposes an idea symbol for feedback surfaces", () => {
+  assert.equal(emoji.idea, "💡");
+});
+
 test("provider emoji mapping normalizes punctuation and has a safe fallback", () => {
   assert.equal(providerEmoji("Noveli.to"), emoji.NoveliTo);
   assert.equal(providerEmoji("Novel Archive"), emoji.NovelArchive);

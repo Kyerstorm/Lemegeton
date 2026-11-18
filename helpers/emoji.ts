@@ -74,6 +74,7 @@ export const emoji = {
   trending: "📈",
   popular: fireEmoji,
   recommendation: ideaEmoji,
+  idea: ideaEmoji,
   calendar: calendarEmoji,
   clock: "🕒",
   bookmark: "🔖",
