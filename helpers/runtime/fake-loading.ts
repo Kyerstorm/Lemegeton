@@ -3,18 +3,23 @@ import { loadingMessage } from "../emoji.js";
 
 type LoadingMode = "reply" | "update";
 
-interface LoadingMessageResource {
-  edit(payload: unknown): Promise<unknown>;
-  delete(): Promise<unknown>;
+interface LoadingMessageSnapshot {
+  content: string;
+  embeds: Array<{ toJSON(): unknown }>;
+  components: Array<{ toJSON(): unknown }>;
+  attachments: {
+    values(): Iterable<{ id: string; name: string | null }>;
+  };
 }
 
 interface LoadingInteraction {
   deferReply(options: { flags: MessageFlags }): Promise<unknown>;
   deferUpdate(): Promise<unknown>;
   reply(payload: unknown): Promise<unknown>;
-  followUp(payload: unknown): Promise<LoadingMessageResource>;
+  followUp(payload: unknown): Promise<unknown>;
   editReply(payload: unknown): Promise<unknown>;
   deleteReply(): Promise<unknown>;
+  message?: LoadingMessageSnapshot;
 }
 
 function asEditPayload(payload: unknown, clearLoadingContent = false): unknown {
@@ -27,6 +32,20 @@ function asEditPayload(payload: unknown, clearLoadingContent = false): unknown {
   return editPayload;
 }
 
+function messageSnapshot(message: LoadingMessageSnapshot | undefined): Record<string, unknown> | null {
+  if (!message) return null;
+  const attachments = [...message.attachments.values()].map(attachment => ({
+    id: attachment.id,
+    filename: attachment.name ?? undefined,
+  }));
+  return {
+    content: message.content || null,
+    embeds: message.embeds.map(embed => embed.toJSON()),
+    components: message.components.map(component => component.toJSON()),
+    ...(attachments.length ? { attachments } : {}),
+  };
+}
+
 export async function withFakeLoading<T extends object, R>(
   interaction: T,
   activity: string,
@@ -34,14 +53,14 @@ export async function withFakeLoading<T extends object, R>(
   work: (interaction: T) => Promise<R>,
 ): Promise<R> {
   const target = interaction as unknown as LoadingInteraction;
-  let loadingMessageResource: LoadingMessageResource | undefined;
-  let loadingRemoved = false;
+  const originalMessage = mode === "update" ? messageSnapshot(target.message) : null;
   let responseSent = false;
+  let originalRestored = false;
 
-  const removeLoadingMessage = async (): Promise<void> => {
-    if (!loadingMessageResource || loadingRemoved) return;
-    loadingRemoved = true;
-    await loadingMessageResource.delete().catch(() => undefined);
+  const restoreOriginalMessage = async (): Promise<void> => {
+    if (!originalMessage || originalRestored) return;
+    originalRestored = true;
+    await target.editReply(originalMessage);
   };
 
   if (mode === "reply") {
@@ -49,9 +68,11 @@ export async function withFakeLoading<T extends object, R>(
     await target.editReply({ content: loadingMessage(activity) });
   } else {
     await target.deferUpdate();
-    loadingMessageResource = await target.followUp({
+    await target.editReply({
       content: loadingMessage(activity),
-      flags: MessageFlags.Ephemeral,
+      embeds: [],
+      components: [],
+      allowedMentions: { parse: [] },
     });
   }
 
@@ -61,35 +82,37 @@ export async function withFakeLoading<T extends object, R>(
         return async (): Promise<void> => undefined;
       }
 
-      if (property === "reply" || property === "followUp") {
+      if (property === "reply") {
         return async (payload: unknown): Promise<unknown> => {
           responseSent = true;
           if (mode === "reply") return target.editReply(asEditPayload(payload, true));
-          return loadingMessageResource!.edit(asEditPayload(payload, true));
-        };
-      }
-
-      if (property === "editReply") {
-        return async (payload: unknown): Promise<unknown> => {
-          responseSent = true;
-          const result = await target.editReply(mode === "reply" ? asEditPayload(payload, true) : payload);
-          if (mode === "update") await removeLoadingMessage();
-          return result;
-        };
-      }
-
-      if (property === "update" && mode === "update") {
-        return async (payload: unknown): Promise<unknown> => {
-          responseSent = true;
           try {
-            return await target.editReply(payload);
+            return await target.followUp(payload);
           } finally {
-            await removeLoadingMessage();
+            await restoreOriginalMessage();
           }
         };
       }
 
-      if (property === "deleteReply" && mode === "reply") {
+      if (property === "followUp") {
+        return async (payload: unknown): Promise<unknown> => {
+          responseSent = true;
+          try {
+            return await target.followUp(payload);
+          } finally {
+            if (mode === "update") await restoreOriginalMessage();
+          }
+        };
+      }
+
+      if (property === "editReply" || property === "update") {
+        return async (payload: unknown): Promise<unknown> => {
+          responseSent = true;
+          return target.editReply(asEditPayload(payload, true));
+        };
+      }
+
+      if (property === "deleteReply") {
         return async (): Promise<unknown> => {
           responseSent = true;
           return target.deleteReply();
@@ -102,17 +125,13 @@ export async function withFakeLoading<T extends object, R>(
   }) as T;
 
   try {
-    await new Promise<void>(resolve => setTimeout(resolve, 700));
     const result = await work(proxy);
-    if (!responseSent && result !== false) {
-      if (mode === "reply") await target.deleteReply().catch(() => undefined);
-      else await removeLoadingMessage();
-    } else if (!responseSent && result === false && mode === "update") {
-      await removeLoadingMessage();
-    }
+    if (mode === "update" && !responseSent) await restoreOriginalMessage();
     return result;
   } catch (error) {
-    if (mode === "update") await removeLoadingMessage();
+    if (mode === "update" && !originalRestored) {
+      await restoreOriginalMessage().catch(() => undefined);
+    }
     throw error;
   }
 }

@@ -46,6 +46,7 @@ const releaseCalendarTmdbClient=new TmdbClient(config.tmdbBearerToken);
 const releaseCalendarIgdbClient=new IgdbClient(config.igdbClientId,config.igdbClientSecret);
 const commands=createCommandRegistry(config);
 const commandByName=new Map<string,FeatureCommand>(commands.map(command=>[command.data.name,command]));
+const updateDeferredInteractions=new WeakSet<Interaction>();
 let atlasBridge: Server | undefined;
 let reconciliationTimer: NodeJS.Timeout | undefined;
 let dailyWorkerTimer: NodeJS.Timeout | undefined;
@@ -101,10 +102,15 @@ async function closeAtlasBridge(): Promise<void> {
 
 async function respondWithError(interaction:Interaction,message:string):Promise<void>{
  if(!interaction.isRepliable())return;
- try{if(interaction.deferred)await interaction.editReply({content:message,embeds:[],components:[]});
- else if(interaction.replied)await interaction.followUp({content:message,flags:MessageFlags.Ephemeral});
- else await interaction.reply({content:message,flags:MessageFlags.Ephemeral});}
- catch(error){logger.warn("Failed to respond to interaction error",{reason:error instanceof Error?error.message:"Unknown error"});}
+ try{
+  if(interaction.isMessageComponent()&&interaction.deferred&&updateDeferredInteractions.has(interaction)){
+   await interaction.followUp({content:message,flags:MessageFlags.Ephemeral});
+   updateDeferredInteractions.delete(interaction);
+  }
+  else if(interaction.deferred)await interaction.editReply({content:message,embeds:[],components:[]});
+  else if(interaction.replied)await interaction.followUp({content:message,flags:MessageFlags.Ephemeral});
+  else await interaction.reply({content:message,flags:MessageFlags.Ephemeral});
+ }catch(error){logger.warn("Failed to respond to interaction error",{reason:error instanceof Error?error.message:"Unknown error"});}
 }
 function interactionIssueAction(interaction:Interaction):string{
  if(interaction.isChatInputCommand())return "/"+interaction.commandName;
@@ -165,10 +171,114 @@ function componentOpensModal(interaction:Interaction):boolean{
   default:return false;
  }
 }
+
+function componentUsesEphemeralLoadingReply(interaction:Interaction):boolean{
+ if(!interaction.isMessageComponent())return false;
+ const [prefix,action,third]=interaction.customId.split(":");
+ if(prefix==="music"&&action==="test")return true;
+ if(prefix==="discover"&&["trending","random","recommend","similar"].includes(action??""))return true;
+ if(prefix==="custom-role"&&["legacy-takeover","legacy-archive"].includes(third??""))return true;
+ return prefix==="settings"&&action==="backups"&&["create","verify","rehearse"].includes(third??"");
+}
 function interactionLoadingActivity(interaction:Interaction):string{
- if(interaction.isChatInputCommand())return "Loading /"+interaction.commandName+"…";
- if(interaction.isModalSubmit())return "Saving "+(interaction.customId.split(":")[0]??"your changes")+"…";
- if(interaction.isMessageComponent())return "Updating "+(interaction.customId.split(":")[0]??"this panel")+"…";
+ const stages:Record<string,string> = {
+  discover:"Searching media providers…",
+  archive:"Fetching Archive entries…",
+  community:"Fetching community activity…",
+  play:"Loading game session data…",
+  profile:"Fetching server profile data…",
+  "custom-role":"Checking role permissions…",
+  settings:"Fetching server settings…",
+  music:"Fetching artist and release data…",
+  language:"Saving server language…",
+  help:"Preparing the command guide…",
+  privacy:"Loading privacy details…",
+  feedback:"Saving your feedback…",
+  log:"Fetching diagnostic records…",
+  moderators:"Fetching moderator access…",
+  planned:"Checking feature availability…",
+  timestamp:"Calculating timestamp…",
+  invite:"Preparing the invite link…",
+  convertlinks:"Checking media links…",
+  "admin-login":"Verifying dashboard access…",
+ };
+ if(interaction.isChatInputCommand()){
+  const name=interaction.commandName;
+  const action=interaction.options.getString("action")??"";
+  if(name==="discover"){
+   const view=interaction.options.getString("view")??"search";
+   return view==="random"?"Finding a random media pick…"
+    :view==="trending"?"Fetching trending media…"
+    :view==="edition"?"Checking exact book editions…"
+    :view==="metadata"?"Fetching provider metadata…"
+    :view==="releases"?"Fetching release dates…"
+    :view==="grid"?"Matching the media grid…"
+    :"Searching media providers…";
+  }
+  if(name==="archive"){
+   if(["browse","search","panel-of-the-day","spotlight-list","mine","collection-list","trail-list"].includes(action))return "Fetching Archive entries…";
+   if(["edit","delete","submit","finish-upload","collection-add","collection-remove","trail-add"].includes(action))return "Updating Archive records…";
+   return "Loading the Community Archive…";
+  }
+  if(name==="community"){
+   if(action==="media-night")return "Fetching Media Night candidates…";
+   if(action==="calendar")return "Fetching the release calendar…";
+   if(["history","spotlights","tournaments","seasons","reading-list"].includes(action))return "Fetching community activity…";
+   if(["daily-submit","ranking-create","ranking-candidate","session-create","session-nominate","discussion-create"].includes(action))return "Saving community activity…";
+   return "Loading community records…";
+  }
+  if(name==="play"){
+   if(["start","join","resume","answer","next","finish","active-sessions"].includes(action))return "Loading the game session…";
+   if(["packs","catalogue","manage-packs","challenge-centre","puzzle-room"].includes(action))return "Fetching question packs…";
+   if(["create-pack","add-question","edit-question"].includes(action))return "Saving game content…";
+   return "Loading the game room…";
+  }
+  if(name==="profile"){
+   if(action.startsWith("leaderboard"))return "Fetching leaderboard data…";
+   if(["link-anilist","link-steam","unlink"].includes(action))return "Updating account connections…";
+   return "Fetching profile data…";
+  }
+  if(name==="settings"){
+   if(action==="diagnostics")return "Running server diagnostics…";
+   if(action==="data-backups")return "Checking backup records…";
+   if(["toggle","media-region"].includes(action))return "Updating server configuration…";
+   return "Fetching server settings…";
+  }
+  if(name==="music")return "Checking music providers…";
+  if(name==="custom-role")return "Checking role permissions…";
+  return stages[name]??("Processing /"+name+"…");
+ }
+ if(interaction.isModalSubmit()){
+  const prefix=interaction.customId.split(":")[0]??"";
+  const modalStages:Record<string,string> = {
+   archive:"Saving your Archive contribution…",
+   community:"Saving community changes…",
+   "custom-role":"Updating your role settings…",
+   discover:"Searching media providers…",
+   music:"Adding the artist tracker…",
+   play:"Saving game content…",
+   profile:"Updating your profile…",
+   settings:"Saving server settings…",
+   feedback:"Submitting your feedback…",
+   moderators:"Updating moderator access…",
+   "admin-login":"Verifying dashboard credentials…",
+  };
+  return modalStages[prefix]??"Saving your changes…";
+ }
+ if(interaction.isMessageComponent()){
+  const [prefix,action] = interaction.customId.split(":");
+  if(prefix==="discover")return action==="tmdb-details"||action==="similar"?"Fetching related media details…":"Searching media providers…";
+  if(prefix==="archive")return action==="browse-category"||action==="open-entry"||action==="collection-open"?"Fetching Archive entries…":"Updating Archive records…";
+  if(prefix==="community")return action==="daily-poll"||action==="tournament-vote"?"Saving your vote…":"Fetching community activity…";
+  if(prefix==="play")return action==="answer"?"Checking your answer…":"Loading game session…";
+  if(prefix==="profile")return "Fetching profile data…";
+  if(prefix==="custom-role")return "Updating role configuration…";
+  if(prefix==="settings")return "Fetching server settings…";
+  if(prefix==="music")return "Fetching artist and release data…";
+  if(prefix==="moderators")return "Fetching moderator access…";
+  if(prefix==="admin-login")return "Refreshing dashboard access…";
+  return "Processing your request…";
+ }
  return "Processing your request…";
 }
 async function routeInteraction(interaction:Interaction):Promise<void>{
@@ -218,19 +328,21 @@ async function routeInteraction(interaction:Interaction):Promise<void>{
    return false;
   };
   const activity=interactionLoadingActivity(interaction);
+  const loadingMode=componentUsesEphemeralLoadingReply(interaction)?"reply":"update";
+  if(interaction.isMessageComponent()&&!componentOpensModal(interaction)&&loadingMode==="update")updateDeferredInteractions.add(interaction);
   const handled=interaction.isModalSubmit()
    ?await withFakeLoading(interaction,activity,"reply",invoke)
    :componentOpensModal(interaction)
     ?await invoke(interaction)
-    :interaction.isButton()&&interaction.customId.startsWith("music:test:")
-     ?await withFakeLoading(interaction,activity,"reply",invoke)
-     :await withFakeLoading(interaction,activity,"update",invoke);
+    :await withFakeLoading(interaction,activity,loadingMode,invoke);
   if(!handled){
    const message=await translateGuildUiText(interaction.guildId,"This control is no longer available. Reopen the feature command and try again.");
-   if(interaction.isMessageComponent()&&interaction.deferred)await interaction.followUp({content:message,flags:MessageFlags.Ephemeral});
-   else if(interaction.deferred||interaction.replied)await interaction.editReply({content:message,embeds:[],components:[]});
+   if(interaction.isMessageComponent()&&interaction.deferred&&updateDeferredInteractions.has(interaction)){
+    await interaction.followUp({content:message,flags:MessageFlags.Ephemeral});
+   }else if(interaction.deferred||interaction.replied)await interaction.editReply({content:message,embeds:[],components:[]});
    else{await interaction.deferReply({flags:MessageFlags.Ephemeral});await interaction.editReply({content:message});}
   }
+  if(interaction.isMessageComponent())updateDeferredInteractions.delete(interaction);
  }catch(error){
   const message=safeInteractionErrorMessage(error);
   logger.error("Discord interaction failed",{interactionId:interaction.id,reason:message});
