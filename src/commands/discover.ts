@@ -999,7 +999,7 @@ this.webNovels = new WebNovelDiscoveryClient();
         "Media comparison",
         "Compare provider-reported information side by side. Missing fields are not inferred and no overall winner is calculated.",
         fields,
-      ).setFooter({text:"AniList · Google Books · TMDB · IGDB · Steam · Source metadata only"});
+      ).setFooter({text:providerEmoji("AniList")+" "+providerEmoji("Google Books")+" "+providerEmoji("TMDB")+" "+providerEmoji("IGDB")+" "+providerEmoji("Steam")+" Multi-provider source metadata only"});
       clearTimeout(session.timeout);
       this.comparisonSessions.delete(categoryValue??"");
       await interaction.editReply({
@@ -1291,7 +1291,7 @@ this.webNovels = new WebNovelDiscoveryClient();
         safeDisplay(result.company.name,240),
         safeDescription(result.company.description,1_200),
         fields,
-      ).setFooter({text:"IGDB · Company and involved-company credits"});
+      ).setFooter({text:providerFooter("IGDB","Company and involved-company credits")});
       if (result.company.logo) embed.setThumbnail(result.company.logo);
       await interaction.editReply({
         content:"Developer and publisher workography · " + safeDisplay(result.company.name,100),
@@ -1338,7 +1338,7 @@ this.webNovels = new WebNovelDiscoveryClient();
         }).join("\n").slice(0,4000)
         : "TMDB did not return combined movie or television credits for this person.";
       const embed = homeEmbed("Credits · "+personName,description).setURL("https://www.themoviedb.org/person/"+personId)
-        .setFooter({text:"TMDB · Cast and crew credits deduplicated by work"});
+        .setFooter({text:providerFooter("TMDB","Cast and crew credits deduplicated by work")});
       await interaction.editReply({content:"Person Credits · "+personName,embeds:[embed.setImage(exported.image)],files:exported.files,components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],allowedMentions:{parse:[]}});
       return true;
     }
@@ -1360,7 +1360,7 @@ this.webNovels = new WebNovelDiscoveryClient();
         ? collection.items.map((item) => "["+cleanText(item.title,180).replace(/[\[\]]/g,"")+"]("+item.sourceUrl+") · "+(item.releaseDate??"Date unavailable")).join("\n").slice(0,4000)
         : "TMDB returned no member films for this collection.";
       const embed = homeEmbed("Collection · "+collection.name,description).setURL(collection.sourceUrl)
-        .setFooter({text:"TMDB collection membership · Release dates do not establish story chronology"});
+        .setFooter({text:providerFooter("TMDB","Collection membership · Release dates do not establish story chronology")});
       if (collection.image) embed.setThumbnail(collection.image);
       await interaction.editReply({content:"Collection guide · "+movieTitle,embeds:[embed],components:[navigationButtons("discover",[{id:"home",label:"Back to discovery"}])],allowedMentions:{parse:[]}});
       return true;
@@ -1391,7 +1391,7 @@ this.webNovels = new WebNovelDiscoveryClient();
         ("Where to watch · " + selectedTitle).slice(0,256),
         "Region: " + region + ". Provider data can change; verify current availability with the listed service.",
         availability.groups.map((group) => ({name:group.label,value:group.providers.join(", ").slice(0,1024),inline:false})),
-      ).setFooter({text:"TMDB metadata · Watch-provider data powered by JustWatch"});
+      ).setFooter({text:providerFooter("TMDB","Watch-provider data powered by JustWatch")});
       if (availability.link) embed.setURL(availability.link);
       if (!availability.groups.length) {
         embed.setDescription("TMDB returned a regional record but no provider categories. This does not prove that the title is unavailable.");
@@ -1410,7 +1410,7 @@ this.webNovels = new WebNovelDiscoveryClient();
       videos.length
         ? videos.map((video) => "[" + cleanText(video.name,160).replace(/[\[\]]/g,"") + "](" + video.url + ") · " + video.type + " · " + video.site + (video.official ? " · Official" : "")).join("\n").slice(0,4000)
         : "TMDB has no supported YouTube or Vimeo video records for this title.",
-    ).setFooter({text:"TMDB video metadata · Video type and official flag are shown as returned"});
+    ).setFooter({text:providerFooter("TMDB","Video type and official flag are shown as returned")});
     await interaction.editReply({
       content:"Trailer and video results · " + selectedTitle,
       embeds:[embed],
@@ -1452,7 +1452,7 @@ this.webNovels = new WebNovelDiscoveryClient();
     }).join("\n\n")||"TMDB has not listed episode entries for this season.";
     const embed=homeEmbed(showName+" · "+season.name,description)
       .setURL(season.sourceUrl)
-      .setFooter({text:"TMDB episode metadata · Synopsis text is spoiler-marked · Page "+(current+1)+"/"+totalPages});
+      .setFooter({text:providerFooter("TMDB","Episode metadata · Spoiler-marked synopsis · Page "+(current+1)+"/"+totalPages)});
     const buttons=new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId("discover:tv-page:"+season.showId+":"+season.seasonNumber+":"+(current-1)).setLabel("Previous").setStyle(ButtonStyle.Secondary).setDisabled(current===0),
       new ButtonBuilder().setCustomId("discover:tv-page:"+season.showId+":"+season.seasonNumber+":"+(current+1)).setLabel("Next").setStyle(ButtonStyle.Secondary).setDisabled(current>=totalPages-1),
@@ -1681,7 +1681,7 @@ this.webNovels = new WebNovelDiscoveryClient();
           {name:"Relationship",value:cleanText(suggestion.relationship_type,100),inline:true},
           {name:"Target",value:"["+cleanText(suggestion.target_title,180)+"]("+suggestion.target_url+") · "+suggestion.target_category,inline:false},
           {name:"Submitter evidence",value:cleanText(suggestion.evidence,1_000),inline:false},
-        ]).setFooter({text:"Submitted by "+suggestion.submitter_id});
+        ]).setFooter({text:emoji.discussion+" Community relationship suggestion · Submitted by "+suggestion.submitter_id});
       await interaction.reply({embeds:[embed],flags:MessageFlags.Ephemeral,allowedMentions:{parse:[]}});
       return;
     }
@@ -1737,7 +1737,7 @@ this.webNovels = new WebNovelDiscoveryClient();
         const timestamp = Math.floor(new Date(item.when).getTime() / 1000);
         return homeEmbed(item.title, item.provider + " · <t:" + timestamp + ":F>", [
           { name: "Provider source", value: "[Open release record](" + item.url + ")", inline: false },
-        ]).setURL(item.url).setFooter({ text: "Provider-dated result · 30-day window" });
+        ]).setURL(item.url).setFooter({ text: providerFooter(item.provider,"Dated release · 30-day window") });
       });
       await interaction.editReply({
         content: (calendar.results.length
@@ -1819,7 +1819,7 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
           {name:"Reported fields",value:audit.presentFields.map(value=>value.replace(/([A-Z])/g," $1").toLowerCase()).join(" · ")||"None of the compared fields",inline:false},
           {name:"Missing fields",value:audit.missingFields.map(value=>value.replace(/([A-Z])/g," $1").toLowerCase()).join(" · ")||"No gaps in this comparison",inline:false},
           {name:"Freshness",value:"Not reported by provider",inline:true},
-        ]).setURL(audit.url).setFooter({text:audit.provider+" · "+audit.category+" · source metadata"});
+        ]).setURL(audit.url).setFooter({text:providerFooter(audit.provider,audit.category+" · source metadata")});
       const image=this.recordImage(record);
       if(image)embed.setThumbnail(image);
       return embed;
@@ -1861,7 +1861,7 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
           book.isbn?"ISBN: "+book.isbn:"",
         ].filter(Boolean).join("\n"),
         [{name:"Google Books",value:"[Open edition]("+book.sourceUrl+")",inline:false}],
-      ).setFooter({text:"Google Books · Author-attributed editions"}));
+      ).setFooter({text:providerFooter("Google Books","Author-attributed editions")}));
       const graph = await findAtlasGraph(interaction.guildId, {
         title: query.trim(), category: "CREATOR", url: authorUrl,
       }, { maxDepth: 2, maxNodes: 24, perNodeLimit: 8 });
@@ -1938,7 +1938,7 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
         {name:"Occupations",value:creator.occupations.join(", ")||"Unavailable",inline:true},
         {name:"Years active",value:creator.yearsActive.length?creator.yearsActive.join(" – "):"Unavailable",inline:true},
         {name:"Known work",value:creator.media.slice(0,5).map(item=>`[${item.title}](${item.url}) · ${item.role}`).join("\n")||"No linked media returned",inline:false},
-      ]).setURL(creator.url).setFooter({text:"AniList · Creator metadata"});
+      ]).setURL(creator.url).setFooter({text:providerFooter("AniList","Creator metadata")});
       if(creator.image)embed.setThumbnail(creator.image);
       return embed;
     });
@@ -2809,7 +2809,7 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
         ? "AniList schedule · "+session.entries.length+" matching episode(s). Times are provided in UTC; Discord also displays them in your local timezone."
         : "AniList returned no upcoming episodes for these filters. Try another title, season or date window.",
       fields,
-    ).setFooter({text:"AniList · Page "+(session.page+1)+"/"+totalPages+" · Schedule may change"});
+    ).setFooter({text:providerFooter("AniList","Page "+(session.page+1)+"/"+totalPages+" · Schedule may change")});
     const controls=new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId("discover:airing-page:"+sessionId+":"+Math.max(0,session.page-1)).setLabel("Previous").setStyle(ButtonStyle.Secondary).setDisabled(session.page===0),
       new ButtonBuilder().setCustomId("discover:airing-page:"+sessionId+":"+Math.min(totalPages-1,session.page+1)).setLabel("Next").setStyle(ButtonStyle.Secondary).setDisabled(session.page>=totalPages-1),
