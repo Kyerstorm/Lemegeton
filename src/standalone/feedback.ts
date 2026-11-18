@@ -3,7 +3,8 @@ import {
   TextInputBuilder, TextInputStyle, type ChatInputCommandInteraction, type ModalSubmitInteraction,
 } from "discord.js";
 import type { FeatureCommand } from "../../helpers/commands/command.js";
-import { loadingMessage } from "../../helpers/emoji.js";
+import { emoji, loadingMessage } from "../../helpers/emoji.js";
+import { EMBED_COLOURS } from "../../helpers/embeds/core.js";
 import { findIssueLog, isIssueHash } from "../../helpers/runtime/issue-logs.js";
 import { logger } from "../../helpers/runtime/logger.js";
 import { query } from "../../database.js";
@@ -57,7 +58,7 @@ export class FeedbackCommand implements FeatureCommand {
     );
     const feedbackId = inserted[0]?.id;
     if (!feedbackId) {
-      await interaction.editReply("The feedback could not be saved. Please try again.");
+      await interaction.editReply(emoji.error + " The feedback could not be saved. Please try again.");
       return true;
     }
 
@@ -67,14 +68,14 @@ export class FeedbackCommand implements FeatureCommand {
         const channel = await interaction.client.channels.fetch(channelId);
         if (channel?.isTextBased() && "send" in channel) {
           const embed = new EmbedBuilder()
-            .setColor(normalizedCategory === "bugs" ? 0xed4245 : 0x57f287)
-            .setTitle(`New ${normalizedCategory === "bugs" ? "bug report" : "idea"} · #${feedbackId}`)
+            .setColor(normalizedCategory === "bugs" ? EMBED_COLOURS.danger : EMBED_COLOURS.success)
+            .setTitle((normalizedCategory === "bugs" ? emoji.bug : emoji.idea) + ` New ${normalizedCategory === "bugs" ? "bug report" : "idea"} · #${feedbackId}`)
             .setDescription(description.slice(0, 4000))
             .addFields(
               { name: "Submitted by", value: `${interaction.user.tag} (${interaction.user.id})`, inline: true },
               { name: "Server", value: interaction.guild?.name ?? interaction.guildId!, inline: true },
               ...(issueHash ? [{ name: "Issue reference", value: `\`${issueHash}\``, inline: false }] : []),
-            ).setTimestamp();
+            ).setFooter({ text: emoji.info + " Private feedback · Lemegeton" }).setTimestamp();
           await channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
         }
       } catch (error) {
@@ -83,7 +84,7 @@ export class FeedbackCommand implements FeatureCommand {
         });
       }
     }
-    await interaction.editReply(`Feedback **#${feedbackId}** was saved. Thank you for helping improve Lemegeton.`);
+    await interaction.editReply(emoji.success + ` Feedback **#${feedbackId}** was saved. Thank you for helping improve Lemegeton.`);
     return true;
   }
 }
