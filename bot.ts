@@ -1,5 +1,6 @@
 import {ActionRowBuilder,AuditLogEvent,ButtonBuilder,ButtonStyle,Client,Events,GatewayIntentBits,MessageFlags,type Guild,type Interaction,type TextChannel} from "discord.js";
 import { emoji } from "./helpers/emoji.js";
+import { withFakeLoading } from "./helpers/runtime/fake-loading.js";
 import {createServer, type Server} from "node:http";
 import {timingSafeEqual} from "node:crypto";
 import {findAtlasGraph,normalizeAtlasCategory,safeAtlasUrl,recordAtlasRelationship} from "./helpers/integration/atlas.js";
@@ -111,6 +112,65 @@ function interactionIssueAction(interaction:Interaction):string{
  if(interaction.isMessageComponent())return "/"+(interaction.customId.split(":",1)[0]??"component")+" component · "+interaction.customId;
  return "Discord interaction";
 }
+function commandOpensModal(interaction:Interaction):boolean{
+ if(!interaction.isChatInputCommand())return false;
+ const action=interaction.options.getString("action")??"";
+ switch(interaction.commandName){
+  case "feedback":return true;
+  case "archive":return action==="collection-add"||action==="trail-add";
+  case "custom-role":
+   if(action==="create"||action==="rename")return !interaction.options.getString("name");
+   if(action==="color")return !interaction.options.getString("color");
+   if(action==="gradient")return !interaction.options.getString("color")||!interaction.options.getString("secondary_color");
+   if(action==="icon")return !interaction.options.getString("emoji");
+   if(action==="move"){
+    const placement=interaction.options.getString("placement");
+    return placement!=="above"&&placement!=="below";
+   }
+   if(action==="cooldown")return interaction.options.getInteger("seconds")===null;
+   return false;
+  case "play":
+   if(action==="create-pack")return !interaction.options.getString("title");
+   if(action==="add-question")return ["pack_id","question","correct_answer","source_url"].some(name=>!interaction.options.getString(name));
+   return action==="edit-question";
+  case "profile":
+   if(action==="link-anilist"||action==="link-steam")return !interaction.options.getString("account");
+   return action==="affinity"&&!interaction.options.getUser("member");
+  case "settings":return action==="media-region"&&!interaction.options.getString("region");
+  default:return false;
+ }
+}
+function componentOpensModal(interaction:Interaction):boolean{
+ if(!interaction.isMessageComponent())return false;
+ const parts=interaction.customId.split(":");
+ const [prefix,action,third]=parts;
+ switch(prefix){
+  case "archive":
+   return (action==="usual"&&third==="yes")
+    ||["configure-types","search","soundtrack-search","collection-feature","report","report-entry","submit-category"].includes(action??"");
+  case "community":
+   return ["session-nominate","tournament-create","season-create","season-add","ranking-create","ranking-candidate","session-create","discussion-create","daily-configure","daily-submit"].includes(action??"");
+  case "custom-role":
+   return ["words","create","rename","color","gradient","icon","move","cooldown"].includes(parts[2]??"");
+  case "discover":
+   return interaction.customId==="discover:airing"||interaction.customId==="discover:compare"
+    ||interaction.customId.startsWith("discover:search:")||interaction.customId==="discover:creator-map";
+  case "music":return interaction.customId==="music:add-channel";
+  case "play":
+   return ["create-pack","edit-pack","answer","question-pack"].includes(action??"");
+  case "profile":return ["link-anilist","link-steam","affinity"].includes(action??"");
+  case "settings":
+   return ["settings:automation:add","settings:media-digest:configure","settings:media-region:open","settings:media-follows:add","settings:media-follows:subscriptions"].includes(interaction.customId);
+  case "moderators":return action==="add"||action==="remove";
+  default:return false;
+ }
+}
+function interactionLoadingActivity(interaction:Interaction):string{
+ if(interaction.isChatInputCommand())return "Loading /"+interaction.commandName+"…";
+ if(interaction.isModalSubmit())return "Saving "+(interaction.customId.split(":")[0]??"your changes")+"…";
+ if(interaction.isMessageComponent())return "Updating "+(interaction.customId.split(":")[0]??"this panel")+"…";
+ return "Processing your request…";
+}
 async function routeInteraction(interaction:Interaction):Promise<void>{
  if(!interaction.guildId){
   if(interaction.isAutocomplete()){await interaction.respond([]).catch(()=>undefined);return;}
@@ -148,13 +208,29 @@ async function routeInteraction(interaction:Interaction):Promise<void>{
    return;
   }
   if(interaction.isAutocomplete()){const command=commandByName.get(interaction.commandName);if(command?.handleAutocomplete){await command.handleAutocomplete(interaction);}else{await interaction.respond([]);}return;}
-  if(interaction.isChatInputCommand()){const command=commandByName.get(interaction.commandName);if(!command){await interaction.deferReply({flags:MessageFlags.Ephemeral});await interaction.editReply({content:await translateGuildUiText(interaction.guildId,"That feature command is not available.")});return;}if(["discover","archive","community","play","profile","custom-role"].includes(interaction.commandName)&&interaction.guildId&&interaction.commandName!=="settings"&&!await isFeatureEnabled(interaction.guildId,interaction.commandName)){await interaction.deferReply({flags:MessageFlags.Ephemeral});await interaction.editReply({content:await translateGuildUiText(interaction.guildId,"This feature is currently disabled by this server’s settings.")});return;}await command.execute(interaction);return;}
+  if(interaction.isChatInputCommand()){const command=commandByName.get(interaction.commandName);if(!command){await interaction.deferReply({flags:MessageFlags.Ephemeral});await interaction.editReply({content:await translateGuildUiText(interaction.guildId,"That feature command is not available.")});return;}if(["discover","archive","community","play","profile","custom-role"].includes(interaction.commandName)&&interaction.guildId&&interaction.commandName!=="settings"&&!await isFeatureEnabled(interaction.guildId,interaction.commandName)){await interaction.deferReply({flags:MessageFlags.Ephemeral});await interaction.editReply({content:await translateGuildUiText(interaction.guildId,"This feature is currently disabled by this server’s settings.")});return;}if(commandOpensModal(interaction))await command.execute(interaction);else await withFakeLoading(interaction,interactionLoadingActivity(interaction),"reply",current=>command.execute(current));return;}
   if(!interaction.isButton()&&!interaction.isStringSelectMenu()&&!interaction.isRoleSelectMenu()&&!interaction.isChannelSelectMenu()&&!interaction.isModalSubmit())return;
   const prefix=interaction.customId.split(":",1)[0]??"";const command=commandByName.get(prefix);if(!command)return;
-  const handled=interaction.isButton()?await(command.handleButton?.(interaction)??false)
-   :(interaction.isStringSelectMenu()||interaction.isRoleSelectMenu()||interaction.isChannelSelectMenu())?await(command.handleSelect?.(interaction)??false)
-   :await(command.handleModal?.(interaction)??false);
-  if(!handled&&!interaction.replied&&!interaction.deferred){await interaction.deferReply({flags:MessageFlags.Ephemeral});await interaction.editReply({content:await translateGuildUiText(interaction.guildId,"This control is no longer available. Reopen the feature command and try again.")});}
+  const invoke=async(current:Interaction):Promise<boolean>=>{
+   if(current.isButton())return command.handleButton?command.handleButton(current):false;
+   if(current.isStringSelectMenu()||current.isRoleSelectMenu()||current.isChannelSelectMenu())return command.handleSelect?command.handleSelect(current):false;
+   if(current.isModalSubmit())return command.handleModal?command.handleModal(current):false;
+   return false;
+  };
+  const activity=interactionLoadingActivity(interaction);
+  const handled=interaction.isModalSubmit()
+   ?await withFakeLoading(interaction,activity,"reply",invoke)
+   :componentOpensModal(interaction)
+    ?await invoke(interaction)
+    :interaction.isButton()&&interaction.customId.startsWith("music:test:")
+     ?await withFakeLoading(interaction,activity,"reply",invoke)
+     :await withFakeLoading(interaction,activity,"update",invoke);
+  if(!handled){
+   const message=await translateGuildUiText(interaction.guildId,"This control is no longer available. Reopen the feature command and try again.");
+   if(interaction.isMessageComponent()&&interaction.deferred)await interaction.followUp({content:message,flags:MessageFlags.Ephemeral});
+   else if(interaction.deferred||interaction.replied)await interaction.editReply({content:message,embeds:[],components:[]});
+   else{await interaction.deferReply({flags:MessageFlags.Ephemeral});await interaction.editReply({content:message});}
+  }
  }catch(error){
   const message=safeInteractionErrorMessage(error);
   logger.error("Discord interaction failed",{interactionId:interaction.id,reason:message});
