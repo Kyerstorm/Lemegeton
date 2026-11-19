@@ -135,7 +135,7 @@ test("Google Books discards provider identifiers with invalid checksums", async 
       title: "Bad ISBN fixture",
       industryIdentifiers: [
         { type: "ISBN_13", identifier: "9780441172718" },
-        { type: "ISBN_10", identifier: "0123456789" },
+        { type: "ISBN_10", identifier: "0123456788" },
       ],
     },
   }] }), { status: 200, headers: { "content-type": "application/json" } }), async () => {

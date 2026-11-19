@@ -14,12 +14,12 @@ Live acceptance workflows are manual-only and each job is guarded to execute onl
 |---|---|
 | `ci-bot.yml` | TypeScript type-check and complete Node test suite using disposable PostgreSQL 16 and MinIO services |
 | `ci-dashboard-frontend.yml` | Next.js type-check, production static export, expected routes and emitted assets |
-| `ci-dashboard-rust.yml` | Rust formatting, Clippy with warnings denied, test suite and release build |
+| `ci-dashboard-rust.yml` | Clippy with warnings denied, test suite and release build |
 | `ci-container.yml` | Startup script syntax, ShellCheck, Compose configuration, production Docker build, non-root user and runtime bundle contract |
 | `ci-scraper-security.yml` | Isolated SSRF regression tests for URL validation, mapped IPv6, DNS answer validation and redirects |
 | `ci-repo-hygiene.yml` | JSON and environment-template parsing, Node maintenance script syntax, shell syntax and whitespace checks |
 
-The complete bot test suite uses temporary PostgreSQL and MinIO services. It does not use production credentials or data. Provider API and real Discord checks remain in the manual acceptance workflows.
+The complete bot test suite uses temporary PostgreSQL and MinIO services. MinIO is started by the job with per-run credentials from its official Quay image because GitHub Actions service containers do not accept a custom command. It does not use production credentials or data. Provider API and real Discord checks remain in the manual acceptance workflows.
 
 ## Automated security checks
 
@@ -29,7 +29,7 @@ The complete bot test suite uses temporary PostgreSQL and MinIO services. It doe
 | `security-dependencies.yml` | Root bot npm, dashboard npm and Rust Cargo advisory audits |
 | `security-secrets.yml` | Gitleaks scan of current files and full Git history; PR comments are disabled |
 | `security-trivy.yml` | Trivy filesystem scan for vulnerable dependencies, configuration mistakes and secrets |
-| `security-workflows.yml` | actionlint syntax/expression checks and zizmor workflow supply-chain/permission analysis |
+| `security-workflows.yml` | actionlint syntax/expression checks and a pinned zizmor CLI audit of workflow supply-chain/permissions |
 
 Action references in the new workflows are pinned to full commit SHAs. Jobs use read-only repository permissions by default. CodeQL receives only the `security-events: write` permission required to publish findings.
 
@@ -49,8 +49,8 @@ The following workflow definitions are ready for dedicated test accounts on the 
 
 The staging PostgreSQL workflow reads the explicitly confirmed source database, runs schema/migration tests, restores a dump into an isolated CI PostgreSQL service, then compares tables, columns, constraints, indexes, row counts and deterministic row digests. Do not point it at a production database.
 
-## Known CI blocker at the time of this change
+## Provider type safety
 
-The current v3 branch has pre-existing provider-union TypeScript errors in `src/commands/discover.ts` (around lines 2635–2701). They were present before this CI reorganization. The bot type-check, full bot test build and production Docker build will continue to fail until those source errors are corrected. The focused scraper security suite runs independently so its regression tests still execute and report separately.
+Provider search results are normalized to the shared `SearchRecord` union before aggregation. This keeps Kitsu, MangaDex, Open Library, Google Books, IGDB and Steam results type-safe without widening their provider-specific item types. Bot type-check, the full test build and the production image use the same root TypeScript project.
 
 A green CI result is necessary but does not prove production OAuth configuration, live Discord permission behavior, external provider uptime, real S3 access policy, VPS firewall state or production backup recoverability. Those need owner-controlled staging acceptance.

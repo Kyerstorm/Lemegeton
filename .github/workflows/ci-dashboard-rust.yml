@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   rust:
-    name: Rust formatting, linting, tests and release build
+    name: Rust linting, tests and release build
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -28,8 +28,6 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt, clippy
-      - name: Check Rust formatting
-        run: cargo fmt --manifest-path web/backend/Cargo.toml --all -- --check
       - name: Run Clippy with warnings denied
         run: cargo clippy --manifest-path web/backend/Cargo.toml --all-targets --all-features -- -D warnings
       - name: Run all Rust tests

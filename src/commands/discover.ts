@@ -2604,7 +2604,7 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
     };
 
     if (category === "all") {
-      const providers = await settle([
+      const providers = await settle<SearchRecord[]>([
         this.anilist.search(query, "ANIME").then(items => items.map(item => anilistRecord(item, "anime"))),
         this.anilist.search(query, "MANGA").then(items => items.map(item => anilistRecord(item, "manga"))),
         this.anilist.search(query, "MANGA", true).then(items => items.map(item => anilistRecord(item, "light_novel"))),
@@ -2631,49 +2631,49 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
 
     switch (category) {
       case "anime": {
-        const providers = await settle([
+        const providers = await settle<SearchRecord[]>([
           this.anilist.search(query, "ANIME", false, filters).then(items => items.map(item => anilistRecord(item, "anime"))),
-          hasAniListFilters ? Promise.resolve([] as KitsuMedia[]) : this.kitsu.search(query, "anime"),
+          hasAniListFilters ? Promise.resolve([] as SearchRecord[]) : this.kitsu.search(query, "anime").then(items => items.map(item => ({ provider: "Kitsu" as const, category: "anime" as const, item }))),
         ], ["AniList", "Kitsu"]);
         return this.rankSearchResults(query, [
           ...(providers[0]?.status === "fulfilled" ? providers[0].value : []),
-          ...(providers[1]?.status === "fulfilled" ? providers[1].value.map(item => ({ provider: "Kitsu" as const, category: "anime" as const, item })) : []),
+          ...(providers[1]?.status === "fulfilled" ? providers[1].value : []),
         ]);
       }
       case "manga": {
-        const providers = await settle([
+        const providers = await settle<SearchRecord[]>([
           this.anilist.search(query, "MANGA", false, filters).then(items => items.map(item => anilistRecord(item, "manga"))),
-          hasAniListFilters ? Promise.resolve([] as MangaDexMedia[]) : this.mangadex.search(query),
-          hasAniListFilters ? Promise.resolve([] as KitsuMedia[]) : this.kitsu.search(query, "manga"),
+          hasAniListFilters ? Promise.resolve([] as SearchRecord[]) : this.mangadex.search(query).then(items => items.map(item => ({ provider: "MangaDex" as const, category: "manga" as const, item }))),
+          hasAniListFilters ? Promise.resolve([] as SearchRecord[]) : this.kitsu.search(query, "manga").then(items => items.map(item => ({ provider: "Kitsu" as const, category: "manga" as const, item }))),
         ], ["AniList", "MangaDex", "Kitsu"]);
         const results: SearchRecord[] = [
           ...(providers[0]?.status === "fulfilled" ? providers[0].value : []),
-          ...(providers[1]?.status === "fulfilled" ? providers[1].value.map(item => ({ provider: "MangaDex" as const, category: "manga" as const, item })) : []),
-          ...(providers[2]?.status === "fulfilled" ? providers[2].value.map(item => ({ provider: "Kitsu" as const, category: "manga" as const, item })) : []),
+          ...(providers[1]?.status === "fulfilled" ? providers[1].value : []),
+          ...(providers[2]?.status === "fulfilled" ? providers[2].value : []),
         ];
         return this.rankSearchResults(query, results);
       }
       case "light_novel": {
-        const [provider] = await settle([
+        const [provider] = await settle<SearchRecord[]>([
           this.anilist.search(query, "MANGA", true, filters).then(items => items.map(item => anilistRecord(item, "light_novel"))),
         ], ["AniList"]);
         return this.rankSearchResults(query, provider?.status === "fulfilled" ? provider.value : []);
       }
       case "book": {
-        const [google, openLibrary] = await settle([
-          this.books.search(query),
-          this.openLibrary.searchTitle(query),
+        const [google, openLibrary] = await settle<SearchRecord[]>([
+          this.books.search(query).then(items => items.map(item => ({ provider: "Google Books" as const, category: "book" as const, item }))),
+          this.openLibrary.searchTitle(query).then(items => items.map(item => ({ provider: "Open Library" as const, category: "book" as const, item }))),
         ], ["Google Books", "Open Library"]);
         return this.rankSearchResults(query, [
-          ...(google?.status === "fulfilled" ? google.value.map(item => ({ provider: "Google Books" as const, category: "book" as const, item })) : []),
-          ...(openLibrary?.status === "fulfilled" ? openLibrary.value.map(item => ({ provider: "Open Library" as const, category: "book" as const, item })) : []),
+          ...(google?.status === "fulfilled" ? google.value : []),
+          ...(openLibrary?.status === "fulfilled" ? openLibrary.value : []),
         ]);
       }
       case "webnovel": {
         if (/^\d+$/.test(query.trim()) || /^https?:\/\/www\.royalroad\.com\/fiction\/\d+/i.test(query.trim())) {
           return [{ provider: "Royal Road", category: "webnovel", item: await this.royalRoad.getFiction(query) }];
         }
-        const [provider] = await settle([
+        const [provider] = await settle<SearchRecord[]>([
           this.webNovels.searchDetailed(query).then(({ results, unavailableProviders: failed }) => {
           unavailableProviders.push(...failed);
           return results.map(webNovelRecord);
@@ -2682,25 +2682,25 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
         return this.rankSearchResults(query, provider?.status === "fulfilled" ? provider.value : []);
       }
       case "movie": {
-        const [provider] = await settle([
+        const [provider] = await settle<SearchRecord[]>([
           this.tmdb.search(query, "movie").then(items => items.map(item => ({ provider: "TMDB" as const, category: "movie" as const, item }))),
         ], ["TMDB"]);
         return this.rankSearchResults(query, provider?.status === "fulfilled" ? provider.value : []);
       }
       case "tv": {
-        const [provider] = await settle([
+        const [provider] = await settle<SearchRecord[]>([
           this.tmdb.search(query, "tv").then(items => items.map(item => ({ provider: "TMDB" as const, category: "tv" as const, item }))),
         ], ["TMDB"]);
         return this.rankSearchResults(query, provider?.status === "fulfilled" ? provider.value : []);
       }
       case "game": {
-        const [igdb, steam] = await settle([
-          this.igdb.search(query),
-          this.steam.searchStoreGames(query),
+        const [igdb, steam] = await settle<SearchRecord[]>([
+          this.igdb.search(query).then(items => items.map(item => ({ provider: "IGDB" as const, category: "game" as const, item }))),
+          this.steam.searchStoreGames(query).then(items => items.map(item => ({ provider: "Steam" as const, category: "game" as const, item }))),
         ], ["IGDB", "Steam"]);
         return this.rankSearchResults(query, [
-          ...(igdb?.status === "fulfilled" ? igdb.value.map(item => ({ provider: "IGDB" as const, category: "game" as const, item })) : []),
-          ...(steam?.status === "fulfilled" ? steam.value.map(item => ({ provider: "Steam" as const, category: "game" as const, item })) : []),
+          ...(igdb?.status === "fulfilled" ? igdb.value : []),
+          ...(steam?.status === "fulfilled" ? steam.value : []),
         ]);
       }
     }

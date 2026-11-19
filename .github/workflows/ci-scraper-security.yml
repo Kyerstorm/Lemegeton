@@ -29,11 +29,11 @@ jobs:
           node-version: "22"
       - name: Install root dependencies
         run: npm install --no-audit --no-fund
-      - name: Compile focused scraper test graph
+      - name: Compile and run scraper SSRF regression suite
         run: |
           set -Eeuo pipefail
           rm -rf .scraper-test-dist
           trap 'rm -rf .scraper-test-dist' EXIT
           npx tsc --ignoreConfig --target ES2022 --module NodeNext --moduleResolution NodeNext --lib ES2022,DOM --strict --noUncheckedIndexedAccess --noImplicitOverride --skipLibCheck --esModuleInterop --verbatimModuleSyntax --rootDir . --outDir .scraper-test-dist tests/web-scraper.test.ts
-      - name: Run scraper SSRF regression suite
-        run: node --test .scraper-test-dist/tests/web-scraper.test.js
+          test -s .scraper-test-dist/tests/web-scraper.test.js
+          node --test .scraper-test-dist/tests/web-scraper.test.js

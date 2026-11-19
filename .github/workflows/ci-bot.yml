@@ -50,14 +50,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-      minio:
-        image: dappros/minio:RELEASE.2025-09-07T16-13-09Z
-        env:
-          MINIO_ROOT_USER: lemegeton-ci
-          MINIO_ROOT_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
-        ports:
-          - 9000:9000
-        command: server /data
     env:
       TEST_DATABASE_URL: postgresql://postgres:${{ github.run_id }}-${{ github.run_attempt }}@127.0.0.1:5432/lemegeton_test
       S3_TEST_ENDPOINT_URL: http://127.0.0.1:9000
@@ -74,5 +66,29 @@ jobs:
           node-version: "22"
       - name: Install root dependencies
         run: npm install --no-audit --no-fund
+      - name: Start disposable MinIO test service
+        run: |
+          set -Eeuo pipefail
+          docker run --detach --rm --name lemegeton-ci-minio \
+            --publish 9000:9000 \
+            --env MINIO_ROOT_USER=lemegeton-ci \
+            --env MINIO_ROOT_PASSWORD="${{ github.run_id }}-${{ github.run_attempt }}" \
+            dappros/minio:RELEASE.2025-09-07T16-13-09Z server /data
+          ready=false
+          for attempt in {1..30}; do
+            if curl --silent --fail http://127.0.0.1:9000/minio/health/ready -o /dev/null; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          printf 'MinIO readiness checked %s times.\n' "$attempt"
+          if test "$ready" != true; then
+            docker logs lemegeton-ci-minio
+            exit 1
+          fi
       - name: Build and run every bot test
         run: npm test
+      - name: Stop disposable MinIO service
+        if: always()
+        run: docker stop lemegeton-ci-minio 2>/dev/null || true

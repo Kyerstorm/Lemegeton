@@ -63,13 +63,14 @@ export async function withFakeLoading<T extends object, R>(
     await target.editReply(originalMessage);
   };
 
+  const loadingContent = loadingMessage(activity);
   if (mode === "reply") {
     await target.deferReply({ flags: MessageFlags.Ephemeral });
-    await target.editReply({ content: loadingMessage(activity) });
+    await target.editReply({ content: loadingContent });
   } else {
     await target.deferUpdate();
     await target.editReply({
-      content: loadingMessage(activity),
+      content: loadingContent,
       embeds: [],
       components: [],
       allowedMentions: { parse: [] },
@@ -85,7 +86,14 @@ export async function withFakeLoading<T extends object, R>(
       if (property === "reply") {
         return async (payload: unknown): Promise<unknown> => {
           responseSent = true;
-          if (mode === "reply") return target.editReply(asEditPayload(payload, true));
+          if (mode === "reply") {
+            const editPayload = asEditPayload(payload, true);
+            if (typeof editPayload === "object" && editPayload !== null && !Array.isArray(editPayload)
+              && (editPayload as Record<string, unknown>).content === loadingContent) {
+              return undefined;
+            }
+            return target.editReply(editPayload);
+          }
           try {
             return await target.followUp(payload);
           } finally {

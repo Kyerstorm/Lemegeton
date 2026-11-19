@@ -15,7 +15,7 @@ test("Open Library links an exact ISBN edition to the editions of its single cat
     return new Response(JSON.stringify({
       size: 2,
       entries: [
-        { key: "/books/OL22597282M", title: "Dune", isbn_10: ["0441172717", "0123456789"], isbn_13: [isbn, "9780441172718"], publish_date: "1987" },
+        { key: "/books/OL22597282M", title: "Dune", isbn_10: ["0441172717", "0123456788"], isbn_13: [isbn, "9780441172718"], publish_date: "1987" },
         { key: "/books/OL123456M", title: "Dune", isbn_13: [isbn], edition_name: "Ace edition" },
       ],
     }));
@@ -58,7 +58,7 @@ test("Open Library title search returns work metadata and caches the same user q
         subject: ["Science fiction", "Gender"],
         publisher: ["Ace Books"],
         language: ["/languages/eng"],
-        isbn: ["0441478123", "0123456789", "9780441478125", "9780441172718"],
+        isbn: ["0441478123", "0123456788", "9780441478125", "9780441172718"],
         cover_i: 101,
       }],
     }), { status: 200, headers: { "content-type": "application/json" } });

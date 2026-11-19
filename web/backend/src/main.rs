@@ -62,7 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     if !config.oauth_ready() { error!("Discord OAuth is not configured; dashboard sign-in is disabled until credentials are supplied."); }
-    if config.bridge_secret.as_bytes().len() < 32 { error!("DASHBOARD_BRIDGE_SECRET must contain at least 32 UTF-8 bytes; dashboard bot-management APIs will remain disabled."); }
+    if config.bridge_secret.len() < 32 { error!("DASHBOARD_BRIDGE_SECRET must contain at least 32 UTF-8 bytes; dashboard bot-management APIs will remain disabled."); }
     let bind_host = if config.bind_host.contains(':') && !config.bind_host.starts_with('[') {
         format!("[{}]", config.bind_host)
     } else {

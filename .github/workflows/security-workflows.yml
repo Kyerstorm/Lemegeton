@@ -32,21 +32,23 @@ jobs:
   zizmor:
     name: Audit workflow supply-chain and permissions
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Check out complete workflow history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Analyze workflows with zizmor
-        uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd
+      - name: Install stable Rust for the pinned zizmor CLI
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
         with:
-          inputs: .github/workflows
-          collect: workflows
-          version: v1.0.0
-          persona: auditor
-          min-severity: low
-          online-audits: true
-          advanced-security: false
-          annotations: true
+          toolchain: stable
+      - name: Install pinned zizmor
+        run: cargo install zizmor --locked --version 1.0.0
+      - name: Audit all repository workflows
+        env:
+          GITHUB_TOKEN: \${{ github.token }}
+        run: zizmor --collect workflows-only --min-severity low --persona auditor .github/workflows

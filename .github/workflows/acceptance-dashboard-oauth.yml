@@ -64,6 +64,7 @@ jobs:
             fi
             sleep 1
           done
+          printf 'Dashboard readiness checked %s times.\n' "$attempt"
           test "$ready" = true
           status="$(curl --silent --output /dev/null --dump-header "$RUNNER_TEMP/oauth.headers" --write-out '%{http_code}' http://127.0.0.1:18080/oauth/start)"
           test "$status" = "303"

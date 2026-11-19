@@ -24,6 +24,10 @@ export function scoreTitleSearchMatch(query: string, titles: readonly string[]):
     const normalizedTitle = normalizeTitleSearchValue(title);
     if (!normalizedTitle) continue;
     if (normalizedTitle === normalizedQuery) return 1_000;
+    if (normalizedTitle.endsWith(normalizedQuery)) {
+      best = Math.max(best, 850 - Math.min(100, normalizedTitle.length - normalizedQuery.length));
+      continue;
+    }
     if (normalizedTitle.startsWith(normalizedQuery)) {
       best = Math.max(best, 850 - Math.min(100, normalizedTitle.length - normalizedQuery.length));
       continue;

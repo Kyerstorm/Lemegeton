@@ -1,4 +1,4 @@
-use axum::{body::{to_bytes, Body}, extract::{Path, Query, State}, http::{header, HeaderMap, Method, Request, StatusCode}, response::{IntoResponse, Response}, Json};
+use axum::{body::{to_bytes, Body}, extract::{Path, Query, State}, http::{HeaderMap, Method, Request, StatusCode}, response::{IntoResponse, Response}, Json};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -156,6 +156,7 @@ pub async fn custom_roles_proxy(State(state): State<AppState>, request: Request<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::header;
     #[test]
     fn atlas_query_accepts_supported_categories_and_public_https_urls() {
         let valid = AtlasQuery {

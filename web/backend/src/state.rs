@@ -244,7 +244,7 @@ async fn bridge_json_at(
     path: &str,
     body: Option<Value>,
 ) -> ApiResult<Value> {
-    if state.config.bridge_secret.as_bytes().len() < 32 { return Err(ApiError::unavailable()); }
+    if state.config.bridge_secret.len() < 32 { return Err(ApiError::unavailable()); }
     if !path.starts_with('/') || path.contains("..") { return Err(ApiError::bad_request("Invalid management operation.")); }
     let mut request = state.client.request(method, format!("{base_url}{path}"))
         .header(header::AUTHORIZATION, format!("Bearer {}", state.config.bridge_secret));
@@ -282,7 +282,7 @@ pub async fn manageable_guilds(state: &AppState, session_id: &str, _session: &Se
             icon: bot_guild.get("icon").and_then(Value::as_str).map(ToOwned::to_owned),
             member_count: bot_guild.get("member_count").and_then(Value::as_u64), administrator });
     }
-    result.sort_by(|a,b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    result.sort_by_key(|a| a.name.to_lowercase());
     Ok(result)
 }
 pub async fn authorized_guild(state: &AppState, headers: &HeaderMap, guild_id: &str) -> ApiResult<(String, Session, DashboardGuild)> {
