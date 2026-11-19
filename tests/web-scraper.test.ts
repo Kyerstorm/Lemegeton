@@ -1,15 +1,44 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CookieJar } from "tough-cookie";
-import { fetchPublicPage, fetchJson, fetchXml, fetchSitemapUrls, fetchMany, extractStructuredData, crawlPublicSite, ScrapeBlockedError, validatePublicHttpUrl } from "../helpers/integration/web-scraper.js";
+import { fetchPublicPage, fetchJson, fetchXml, fetchSitemapUrls, fetchMany, extractStructuredData, crawlPublicSite, ScrapeBlockedError, validatePublicHttpUrl, resolvePublicAddresses } from "../helpers/integration/web-scraper.js";
 import { parseNovelFireSearch, buildNovelFireSearchUrl, parseNovelFireChapterData, parseNoveliToSearch, parseNoveliToDetail, parseNovelArchiveSearch, parseWuxiaClickPageData, parseNovelUpdatesSearch } from "../helpers/integration/webnovel-discovery.js";
 
-test("URL validation rejects local hosts, private IPs and unsupported schemes", () => {
+test("URL validation rejects local hosts, non-public IPv4 ranges and unsupported schemes", () => {
 assert.throws(() => validatePublicHttpUrl("http://localhost/admin"));
 assert.throws(() => validatePublicHttpUrl("http://127.0.0.1/"));
+assert.throws(() => validatePublicHttpUrl("http://10.0.0.1/"));
+assert.throws(() => validatePublicHttpUrl("http://100.64.0.1/"));
+assert.throws(() => validatePublicHttpUrl("http://192.0.2.1/"));
+assert.throws(() => validatePublicHttpUrl("http://198.18.0.1/"));
 assert.throws(() => validatePublicHttpUrl("http://[::1]/"));
+assert.throws(() => validatePublicHttpUrl("http://[::ffff:7f00:1]/"));
+assert.throws(() => validatePublicHttpUrl("http://[::ffff:a00:1]/"));
+assert.throws(() => validatePublicHttpUrl("http://[::ffff:a9fe:1]/"));
+assert.throws(() => validatePublicHttpUrl("http://[2001:db8::1]/"));
+assert.throws(() => validatePublicHttpUrl("http://[2002:0808:0808::1]/"));
+assert.throws(() => validatePublicHttpUrl("http://[64:ff9b::7f00:1]/"));
 assert.throws(() => validatePublicHttpUrl("file:///etc/passwd"));
 assert.equal(validatePublicHttpUrl("https://example.com/page").hostname, "example.com");
+assert.equal(validatePublicHttpUrl("https://[2001:4860:4860::8888]/").hostname, "[2001:4860:4860::8888]");
+});
+
+test("DNS resolution rejects mixed public/private answers and accepts public-only records", async () => {
+const publicAddress = async () => [{ address: "8.8.8.8", family: 4 as const }];
+assert.deepEqual(await resolvePublicAddresses("example.com", publicAddress), [
+{ address: "8.8.8.8", family: 4 },
+]);
+await assert.rejects(
+() => resolvePublicAddresses("example.com", async () => [
+{ address: "8.8.8.8", family: 4 },
+{ address: "127.0.0.1", family: 4 },
+]),
+/private or reserved address/,
+);
+await assert.rejects(
+() => resolvePublicAddresses("example.com", async () => [{ address: "::ffff:7f00:1", family: 6 }]),
+/private or reserved address/,
+);
 });
 
 test("HTML scraping extracts metadata, CSS fields and scoped links", async () => {
