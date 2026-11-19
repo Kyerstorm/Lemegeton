@@ -257,7 +257,7 @@ test("crawler follows robots Allow overrides and disallows restricted paths", as
   const fetchImpl: typeof fetch = async input => {
     const url = String(input);
     if (url.endsWith("/robots.txt")) {
-      return new Response("User-agent: *\\nDisallow: /private\\nAllow: /private/open\\n", { status: 200 });
+      return new Response("User-agent: *\nDisallow: /private\nAllow: /private/open\n", { status: 200 });
     }
     return new Response("<html><head><title>Allowed path</title></head><body>Open</body></html>", {
       status: 200,
