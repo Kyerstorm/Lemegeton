@@ -17,11 +17,12 @@ export interface AtlasRelation {
   relationType: string;
   source: string;
   sourceKind: RelationshipSource;
+  evidence?: string | null;
 }
 interface AtlasRow {
   source_title: string; source_title_key: string; source_category: string; source_url: string | null; source_image_url: string | null;
   target_title: string; target_title_key: string; target_category: string; target_url: string | null; target_image_url: string | null;
-  relationship_type: string; source_kind: RelationshipSource; source_label: string;
+  relationship_type: string; source_kind: RelationshipSource; source_label: string; evidence: string | null;
 }
 export interface AtlasGraphNode {
   id: string;
@@ -40,6 +41,7 @@ export interface AtlasGraphEdge {
   relationType: string;
   sourceLabel: string;
   sourceKind: RelationshipSource;
+  evidence?: string | null;
 }
 export interface AtlasGraphResult {
   rootId: string;
@@ -152,7 +154,7 @@ export async function findAtlasRelationships(
   const offset = guildId ? 1 : 0;
   const rows = await query<AtlasRow>(
 `SELECT source_title,source_title_key,source_category,source_url,source_image_url,target_title,target_title_key,
-            target_category,target_url,target_image_url,relationship_type,source_kind,source_label
+            target_category,target_url,target_image_url,relationship_type,source_kind,source_label,evidence
        FROM media_relationship_graph
       WHERE ${visibility}
         AND ((source_category = $${offset+2} AND ((source_title_key = $${offset+1} AND ($${offset+3} = '' OR source_url = $${offset+3}))
@@ -181,7 +183,7 @@ export async function findAtlasRelationships(
       title: relatedTitle, category: relatedCategory,
       url: safeAtlasUrl(outgoing ? row.target_url : row.source_url),
       imageUrl: safeAtlasImageUrl(outgoing ? row.target_image_url : row.source_image_url),
-      relationType, source: row.source_label, sourceKind: row.source_kind,
+      relationType, source: row.source_label, sourceKind: row.source_kind, evidence: row.evidence,
     };
     const key = [normalizeAtlasTitle(relation.title),relation.category,relation.url ?? "",relation.relationType].join("|");
     if (!seen.has(key)) { seen.add(key); result.push(relation); }
@@ -322,6 +324,7 @@ export async function buildAtlasGraph(
           relationType: relation.relationType,
           sourceLabel: relation.source,
           sourceKind: relation.sourceKind,
+          evidence: relation.evidence ?? null,
         });
         if (batch.node.depth === 0) directRelationships.push(relation);
       }
@@ -377,7 +380,7 @@ export function filterAtlasRelations(
     if (category && relation.category !== category) return false;
     if (relationship && !matchesAtlasRelationshipFilter(relation.relationType, relationship)) return false;
     if (search) {
-      const searchable = [relation.title, relation.category, relation.relationType, relation.source]
+      const searchable = [relation.title, relation.category, relation.relationType, relation.source, relation.evidence ?? ""]
         .map(value => normalizeAtlasTitle(value));
       if (!searchable.some(value => value.includes(search))) return false;
     }

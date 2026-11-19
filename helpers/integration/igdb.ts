@@ -297,6 +297,7 @@ export class IgdbClient {
   private tokenRequest: Promise<string> | null = null;
   private requestQueue: Promise<void> = Promise.resolve();
   private lastRequestAt = 0;
+  private genreIndex: Promise<Map<string, number>> | null = null;
 
   constructor(
     private readonly clientId?: string,
@@ -311,6 +312,47 @@ export class IgdbClient {
       'search "' + clean + '"; fields id,name,slug,summary,first_release_date,rating,rating_count,aggregated_rating,aggregated_rating_count,cover.url,genres.name,alternative_names.name,platforms.name,involved_companies.developer,involved_companies.publisher,involved_companies.company.name; limit 10;'
     );
     return (Array.isArray(rows) ? rows : []).flatMap((raw) => {
+      const game = parseIgdbGame(raw);
+      return game ? [game] : [];
+    });
+  }
+
+  async searchByGenres(genres: readonly string[]): Promise<IgdbGame[]> {
+    const normalize = (value: string): string => value.normalize("NFKC")
+      .toLocaleLowerCase("en-US").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+    const requested = new Set(genres.map(normalize).filter(Boolean).slice(0, 5));
+    if (!requested.size) return [];
+
+    if (!this.genreIndex) {
+      this.genreIndex = this.request("genres", "fields id,name; limit 100;").then(rows => {
+        const index = new Map<string, number>();
+        for (const raw of Array.isArray(rows) ? rows : []) {
+          const genre = object(raw);
+          if (typeof genre?.id !== "number" || !Number.isSafeInteger(genre.id) || genre.id < 1
+            || typeof genre.name !== "string" || !genre.name.trim()) continue;
+          index.set(normalize(genre.name), genre.id);
+        }
+        return index;
+      });
+    }
+
+    let index: Map<string, number>;
+    try {
+      index = await this.genreIndex;
+    } catch (error) {
+      this.genreIndex = null;
+      throw error;
+    }
+    const ids = [...new Set([...index]
+      .filter(([name]) => requested.has(name))
+      .map(([, id]) => id))].slice(0, 5);
+    if (!ids.length) return [];
+
+    const rows = await this.request("games",
+      "fields id,name,slug,summary,first_release_date,rating,rating_count,aggregated_rating,aggregated_rating_count,cover.url,genres.name,platforms.name,involved_companies.developer,involved_companies.publisher,involved_companies.company.name; " +
+      "where genres = (" + ids.join(",") + "); sort rating desc; limit 10;"
+    );
+    return (Array.isArray(rows) ? rows : []).flatMap(raw => {
       const game = parseIgdbGame(raw);
       return game ? [game] : [];
     });
@@ -387,7 +429,7 @@ export class IgdbClient {
     });
   }
 
-  private async request(endpoint: "games" | "companies" | "involved_companies" | "release_dates", body: string): Promise<unknown> {
+  private async request(endpoint: "games" | "companies" | "genres" | "involved_companies" | "release_dates", body: string): Promise<unknown> {
     if (!this.clientId || !this.secret) {
       throw new Error("IGDB is not configured. Set IGDB_CLIENT_ID and IGDB_CLIENT_SECRET.");
     }

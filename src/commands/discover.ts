@@ -64,7 +64,7 @@ import { renderAtlasGraphSnapshot, renderAtlasGraphSvgSnapshot } from "../../hel
 import { logger } from "../../helpers/runtime/logger.js";
 import { emoji, loadingMessage } from "../../helpers/emoji.js";
 import { parseGridSourceUrls, parseGridTitles, renderMediaGrid, type MediaGridSource } from "../../helpers/media/media-grid.js";
-import { parseMediaComparisonEntries, type MediaComparisonCategory } from "../../helpers/media/media-comparison.js";
+import { formatMediaComparisonSide, parseMediaComparisonEntries, type MediaComparisonCategory } from "../../helpers/media/media-comparison.js";
 import { formatMetadataSourceReference } from "../../helpers/media/media-provenance.js";
 import { auditMetadataSource, type MetadataSourceAuditInput } from "../../helpers/media/metadata-source-audit.js";
 import { upcomingProviderReleases } from "../../helpers/community/community-sessions.js";
@@ -987,13 +987,18 @@ this.webNovels = new WebNovelDiscoveryClient();
       await interaction.deferUpdate();
       const fields=session.sides.map(side=>{
         const record=side.results[side.selected]!;
-        const details=toEmbed(record).data.fields?.filter(field=>field.name!=="Provider")
-          .map(field=>field.name+": "+field.value).join("\n")??"No additional provider metadata was supplied.";
-        return{
-          name:(categoryLabel(side.category)+" · "+this.recordTitle(record)).slice(0,256),
-          value:("Provider: "+record.provider+"\nSource: "+this.recordUrl(record)+"\n"+details).slice(0,1024),
-          inline:true,
-        };
+        const metadata=toEmbed(record).data.fields?.flatMap(field=>
+          typeof field.name==="string"&&typeof field.value==="string"
+            ?[{name:field.name,value:field.value}]
+            :[],
+        )??[];
+        return formatMediaComparisonSide({
+          category:side.category,
+          title:this.recordTitle(record),
+          provider:record.provider,
+          sourceUrl:this.recordUrl(record),
+          fields:metadata,
+        });
       });
       const embed=homeEmbed(
         "Media comparison",
@@ -2143,6 +2148,13 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
           url: item.sourceUrl,
           genres: item.genres,
         }))),
+        this.igdb.searchByGenres(genreLabels).then(items => items.map(item => ({
+          title: item.title,
+          category: "game" as const,
+          provider: "IGDB",
+          url: item.sourceUrl,
+          genres: item.genres,
+        }))),
       );
     }
     const categoryLookups = [...new Set([
@@ -2248,6 +2260,9 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
       relationshipType: "genre overlap",
       sourceKind: "recommendation",
       sourceLabel: "Shared metadata-label recommendation",
+      evidence: candidate.sharedLabelGroups
+        .map(group => group.kind + " ← " + group.matchedAgainst.join("/") + ": " + group.values.join(", "))
+        .join("; "),
     })));
     for (const write of writes) {
       if (write.status === "rejected") logger.debug("Cross-media recommendation relationship was not saved", {
@@ -2444,7 +2459,8 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
               const from = path.nodes[index]?.title ?? "Unknown";
               const to = path.nodes[index + 1]?.title ?? "Unknown";
               return safeDisplay(from, 90) + " — " + safeDisplay(edge.relationType, 60) + " → " + safeDisplay(to, 90)
-                + " · " + safeDisplay(edge.sourceLabel, 60);
+                + " · " + safeDisplay(edge.sourceLabel, 60)
+                + (edge.evidence ? " · " + safeDisplay(edge.evidence, 100) : "");
             }).join("\n").slice(0, 1024)
           : "No path was found within the bounded graph for the selected category and title.",
         inline: false,
@@ -2460,7 +2476,7 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
       for (const relation of relationships.slice(0,20)) {
         const label = relation.url ? `[${relation.title.slice(0,180)}](${relation.url})` : relation.title.slice(0,180);
         embed.addFields({name:`${relation.relationType} · ${relation.category}`.slice(0,256),
-          value:`${label}\nSource: ${relation.source}`.slice(0,1024),inline:false});
+          value:`${label}\nSource: ${relation.source}${relation.evidence ? "\nEvidence: " + safeDisplay(relation.evidence,700) : ""}`.slice(0,1024),inline:false});
       }
     } else {
       embed.addFields({name:"No recorded connections yet",value:"This provider has not supplied related-work edges for this title, and this server has not approved any community links yet.",inline:false});
@@ -2533,6 +2549,8 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
     if (record.provider === "Kitsu") return [...new Set([record.item.title, ...record.item.alternateTitles].filter(Boolean))];
     if (record.provider === "IGDB") return [...new Set([record.item.title, ...record.item.alternateTitles].filter(Boolean))];
     if (record.provider === "Google Books" && record.item.subtitle) return [record.item.title, record.item.title + " " + record.item.subtitle];
+    if (record.provider === "Open Library") return [...new Set([record.item.title, ...record.item.alternateTitles].filter(Boolean))];
+    if (record.provider === "TMDB") return [...new Set([record.item.title, record.item.originalTitle].filter((value): value is string => Boolean(value?.trim())))];
     return [record.item.title];
   }
 

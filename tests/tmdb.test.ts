@@ -17,18 +17,21 @@ test("TMDB media normalization accepts valid movie and TV records", () => {
   const movie = normalizeTmdbMedia({
     id: 12,
     title: "Example Film",
+    original_title: "Exemple de film",
     overview: "A film.",
     poster_path: "/poster.jpg",
     release_date: "2026-01-02",
     vote_average: 7.5,
   }, "movie");
   assert.equal(movie?.title, "Example Film");
+  assert.equal(movie?.originalTitle, "Exemple de film");
   assert.equal(movie?.sourceUrl, "https://www.themoviedb.org/movie/12");
   assert.equal(movie?.image, "https://image.tmdb.org/t/p/w500/poster.jpg");
   assert.equal(movie?.releaseDate, "2026-01-02");
 
-  const series = normalizeTmdbMedia({ id: 13, name: "Example Series" }, "tv");
+  const series = normalizeTmdbMedia({ id: 13, name: "Example Series", original_name: "Série Exemple" }, "tv");
   assert.equal(series?.title, "Example Series");
+  assert.equal(series?.originalTitle, "Série Exemple");
   assert.equal(series?.sourceUrl, "https://www.themoviedb.org/tv/13");
 });
 
@@ -36,6 +39,7 @@ test("TMDB media normalization rejects invalid identifiers and missing titles", 
   assert.equal(normalizeTmdbMedia({ id: -1, title: "Bad" }, "movie"), null);
   assert.equal(normalizeTmdbMedia({ id: 3, name: "TV name" }, "movie"), null);
   assert.equal(normalizeTmdbMedia({ id: 3, title: " " }, "movie"), null);
+  assert.equal(normalizeTmdbMedia({ id: 4, title: "Same", original_title: "Same" }, "movie")?.originalTitle, null);
 });
 
 test("TMDB watch availability deduplicates provider names and validates the provider link", () => {

@@ -27,6 +27,30 @@ const CATEGORY_ALIASES: Readonly<Record<string, MediaComparisonCategory>> = {
   games: "game",
 };
 
+export interface MediaComparisonSideInput {
+  category: MediaComparisonCategory;
+  title: string;
+  provider: string;
+  sourceUrl: string;
+  fields: readonly { name: string; value: string }[];
+}
+
+export function formatMediaComparisonSide(input: MediaComparisonSideInput): {
+  name: string;
+  value: string;
+  inline: true;
+} {
+  const details = input.fields
+    .filter(field => field.name !== "Provider" && field.value.trim())
+    .map(field => field.name + ": " + field.value)
+    .join("\n") || "No additional provider metadata was supplied.";
+  return {
+    name: (input.category.replaceAll("_", " ") + " · " + input.title).slice(0, 256),
+    value: ("Provider: " + input.provider + "\nSource: " + input.sourceUrl + "\n" + details).slice(0, 1024),
+    inline: true,
+  };
+}
+
 export function parseMediaComparisonEntries(input: string): MediaComparisonEntry[] {
   const lines = input.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   if (lines.length < 2 || lines.length > 4) {

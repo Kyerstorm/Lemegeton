@@ -168,11 +168,12 @@ export function rankCrossMediaCandidates(
     const matched = [...candidateTokens].filter(value => seedTokens.has(value)).sort();
     if (!matched.length) continue;
     const sharedLabelGroups = findSharedLabelGroups(seedLabels, candidate);
+    // Dice similarity keeps candidates with large catalogues from winning on raw label count alone.
     const ranked: RankedCrossMediaCandidate = {
       ...candidate,
       title,
       provider,
-      score: matched.length,
+      score: Math.round(2_000 * matched.length / (seedTokens.size + candidateTokens.size)),
       sharedGenres: sharedTokens(seedGenres, candidate.genres),
       sharedTags: sharedTokens(seedTags, candidate.tags ?? []),
       sharedSubjects: sharedTokens(seedSubjects, candidate.subjects ?? []),
@@ -187,7 +188,8 @@ export function rankCrossMediaCandidates(
   const counts = new Map<RecommendationCategory, number>();
   const result: RankedCrossMediaCandidate[] = [];
   const ordered = [...best.values()].sort((left, right) =>
-    right.score - left.score || left.category.localeCompare(right.category) || left.title.localeCompare(right.title));
+    right.score - left.score || right.sharedLabels.length - left.sharedLabels.length
+    || left.category.localeCompare(right.category) || left.title.localeCompare(right.title));
   for (const candidate of ordered) {
     if ((counts.get(candidate.category) ?? 0) >= 3) continue;
     counts.set(candidate.category, (counts.get(candidate.category) ?? 0) + 1);

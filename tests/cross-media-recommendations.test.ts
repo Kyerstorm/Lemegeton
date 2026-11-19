@@ -99,3 +99,20 @@ test("cross-media ranking returns no matches for missing or non-overlapping meta
     { ...candidate, categories: [] },
   ]), []);
 });
+
+
+test("cross-media similarity normalizes overlap and resists metadata-volume bias", () => {
+  const seed = ["Fantasy", "Drama", "Mystery", "Adventure"];
+  const ranked = rankCrossMediaCandidates("Seed", "anime", seed, [
+    { title: "Sparse match", category: "book", provider: "Open Library", url: null, genres: ["Fantasy"] },
+    { title: "Strong match", category: "book", provider: "Google Books", url: null, genres: ["Fantasy", "Drama", "Mystery"] },
+    { title: "Noisy match", category: "movie", provider: "TMDB", url: null, genres: [
+      "Fantasy", "Crime", "War", "Family", "Sports", "History", "Documentary", "Animation",
+      "Action", "Comedy", "Horror", "Romance", "Thriller", "Adventure", "Western",
+    ] },
+  ]);
+  assert.equal(ranked[0]?.title, "Strong match");
+  assert.equal(ranked[0]?.score, 857);
+  assert.ok((ranked.find(item => item.title === "Sparse match")?.score ?? 0)
+    > (ranked.find(item => item.title === "Noisy match")?.score ?? 0));
+});

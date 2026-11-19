@@ -111,7 +111,7 @@ test("Atlas filtering keeps only matching category, relationship and provenance 
   const graph = await buildAtlasGraph(
     { title: "Root", category: "ANIME", url: "https://anilist.co/anime/1" },
     async () => [
-      { title: "Manga One", category: "MANGA", url: "https://anilist.co/manga/2", relationType: "adaptation", source: "AniList", sourceKind: "provider" },
+      { title: "Manga One", category: "MANGA", url: "https://anilist.co/manga/2", relationType: "adaptation", source: "AniList", sourceKind: "provider", evidence: "Provider relation type: ADAPTATION" },
       { title: "Game One", category: "GAME", url: "https://store.steampowered.com/app/3", relationType: "related", source: "Server proposal", sourceKind: "community" },
     ],
     { maxDepth: 1, maxNodes: 5, perNodeLimit: 5 },
@@ -121,6 +121,10 @@ test("Atlas filtering keeps only matching category, relationship and provenance 
   assert.equal(filtered.edges.length, 1);
   assert.equal(filtered.directRelationships.length, 1);
   assert.equal(filtered.directRelationships[0]?.title, "Manga One");
+  assert.equal(filtered.edges[0]?.evidence, "Provider relation type: ADAPTATION");
+  assert.deepEqual(filterAtlasRelations(graph.directRelationships, {
+    query: "provider relation type adaptation",
+  }).map(item => item.title), ["Manga One"]);
   assert.deepEqual(filterAtlasRelations(graph.directRelationships, {
     query: "manga one", relationshipType: "adaptation",
   }).map(item => item.title), ["Manga One"]);

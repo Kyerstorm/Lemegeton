@@ -421,13 +421,13 @@ Finish typed provider adapters, source identifiers, field-level provenance, time
 
 **Status: Completed — 19 November 2026.**
 
-Category-aware multi-provider search, alternate-title matching and stable relevance ranking are implemented for the supported anime, manga, light-novel, book, webnovel, film, television and game categories. Mixed-media comparisons keep each provider's native fields and rating scale instead of manufacturing a shared score. Franchise/adaptation and creator exploration retain provider relationship labels and source links; exact-title matches remain explicitly unverified. Cross-media local matches identify both the candidate metadata field and the source field it matched, while provider-generated recommendations remain in a separate section.
+Category-aware multi-provider search, alternate-title matching and stable relevance ranking are implemented for the supported anime, manga, light-novel, book, webnovel, film, television and game categories. Search relevance includes provider-supplied aliases, synonyms, subtitles and original-language titles. Mixed-media comparisons keep each provider's native fields and rating scale instead of manufacturing a shared score. Franchise/adaptation and creator exploration retain provider relationship labels and source links; exact-title matches remain explicitly unverified. Local cross-media recommendations cover IGDB games through provider genre IDs and use normalized Dice overlap to limit metadata-volume bias. Each match identifies both metadata field types, and its overlap evidence is retained on the Knowledge Atlas relationship; provider-generated recommendations remain separate.
 
 **Verification in this pass:** ranking tests cover absent title variants and stable ordering; cross-media tests cover missing labels, generic/non-matching metadata, duplicate candidates, field-type provenance and result limits; comparison tests prove mixed media categories remain distinct. Existing provider fixtures cover partial metadata and provider-specific rating scales. The command retains provider failure reporting and does not treat unavailable data as a negative fact.
 
 **Exit gate:** category distinctions remain correct; comparison and ranking tests cover missing/incompatible metadata; displayed relationships retain source evidence and provenance.
 
-**Completion evidence:** tests/title-matching.test.ts, tests/cross-media-recommendations.test.ts, tests/media-comparison.test.ts, tests/provider-coverage.test.ts, tests/metadata-source-audit.test.ts, and the /discover search, comparison, franchise, creator and similarity paths.
+**Completion evidence:** tests/title-matching.test.ts, tests/cross-media-recommendations.test.ts, tests/media-comparison.test.ts, tests/igdb-genre-search.test.ts, tests/atlas.test.ts, tests/open-library.test.ts, tests/tmdb.test.ts, tests/provider-coverage.test.ts, tests/metadata-source-audit.test.ts, and the /discover search, comparison, franchise, creator and similarity paths.
 
 #### Phase 5 — Community Archive and asset lifecycle (8,000)
 

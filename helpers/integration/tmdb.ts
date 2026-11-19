@@ -5,6 +5,7 @@ export interface TmdbMedia {
   id: number;
   category: TmdbCategory;
   title: string;
+  originalTitle: string | null;
   overview: string | null;
   sourceUrl: string;
   image: string | null;
@@ -159,10 +160,14 @@ export function normalizeTmdbMedia(value: unknown, category: TmdbCategory): Tmdb
   if (typeof name !== "string" || !name.trim()) return null;
   const poster = typeof item.poster_path === "string" ? item.poster_path : null;
   const date = item[category === "movie" ? "release_date" : "first_air_date"];
+  const originalTitle = item[category === "movie" ? "original_title" : "original_name"];
   return {
     id: item.id,
     category,
     title: name.trim(),
+    originalTitle: typeof originalTitle === "string" && originalTitle.trim() !== name.trim()
+      ? originalTitle.trim().slice(0, 240) || null
+      : null,
     overview: typeof item.overview === "string" ? item.overview : null,
     sourceUrl: `https://www.themoviedb.org/${category}/${item.id}`,
     image: poster && poster.startsWith("/") ? `https://image.tmdb.org/t/p/w500${poster}` : null,

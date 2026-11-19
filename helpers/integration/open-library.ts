@@ -14,6 +14,7 @@ export interface OpenLibraryEdition {
 export interface OpenLibraryWork {
   workId: string;
   title: string;
+  alternateTitles: string[];
   authors: string[];
   firstPublishYear: number | null;
   editionCount: number | null;
@@ -71,6 +72,7 @@ function parseWork(value: unknown): OpenLibraryWork | null {
   return {
     workId: key.slice("/works/".length),
     title,
+    alternateTitles: [...new Set(strings(item?.alternate_titles, 20).filter(value => value.toLocaleLowerCase("en-US") !== title.toLocaleLowerCase("en-US")))],
     authors: strings(item?.author_name, 12).length
       ? strings(item?.author_name, 12)
       : (Array.isArray(item?.authors) ? item.authors.flatMap(value => {
@@ -125,7 +127,7 @@ export class OpenLibraryClient {
       const url = new URL("https://openlibrary.org/search.json");
       url.searchParams.set("title", title);
       url.searchParams.set("limit", "10");
-      url.searchParams.set("fields", "key,title,author_name,first_publish_year,edition_count,subject,publisher,language,isbn,cover_i");
+      url.searchParams.set("fields", "key,title,alternate_titles,author_name,first_publish_year,edition_count,subject,publisher,language,isbn,cover_i");
       const payload = object(await this.requestJson(url.toString()));
       const rows = Array.isArray(payload?.docs) ? payload.docs : [];
       return rows.flatMap((row): OpenLibraryWork[] => {

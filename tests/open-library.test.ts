@@ -52,6 +52,7 @@ test("Open Library title search returns work metadata and caches the same user q
       docs: [{
         key: "/works/OL123W",
         title: "The Left Hand of Darkness",
+        alternate_titles: ["The Left Hand of Darkness", "Winter's King", "Le Guin's Winter World"],
         author_name: ["Ursula K. Le Guin"],
         first_publish_year: 1969,
         edition_count: 24,
@@ -72,6 +73,7 @@ test("Open Library title search returns work metadata and caches the same user q
   assert.equal(url.searchParams.get("limit"), "10");
   assert.equal(first[0]?.workId, "OL123W");
   assert.equal(first[0]?.authors[0], "Ursula K. Le Guin");
+  assert.deepEqual(first[0]?.alternateTitles, ["Winter's King", "Le Guin's Winter World"]);
   assert.deepEqual(first[0]?.isbn10, ["0441478123"]);
   assert.deepEqual(first[0]?.isbn13, ["9780441478125"]);
   assert.equal(first[0]?.coverUrl, "https://covers.openlibrary.org/b/id/101-M.jpg");
