@@ -67,6 +67,8 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+      - name: Audit bot runtime dependencies
+        run: npm audit --audit-level=high
       - name: Type-check
         run: npm run typecheck
       - name: Validate live acceptance scripts and workflow syntax
