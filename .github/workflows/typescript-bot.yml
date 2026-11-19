@@ -73,7 +73,7 @@ jobs:
         run: |
           set -eu
           rm -rf .scraper-test-dist
-          npx tsc --target ES2022 --module NodeNext --moduleResolution NodeNext --lib ES2022,DOM --strict --noUncheckedIndexedAccess --noImplicitOverride --skipLibCheck --esModuleInterop --verbatimModuleSyntax --rootDir . --outDir .scraper-test-dist tests/web-scraper.test.ts
+          npx tsc --ignoreConfig --target ES2022 --module NodeNext --moduleResolution NodeNext --lib ES2022,DOM --strict --noUncheckedIndexedAccess --noImplicitOverride --skipLibCheck --esModuleInterop --verbatimModuleSyntax --rootDir . --outDir .scraper-test-dist tests/web-scraper.test.ts
           node --test .scraper-test-dist/tests/web-scraper.test.js
           rm -rf .scraper-test-dist
       - name: Type-check
