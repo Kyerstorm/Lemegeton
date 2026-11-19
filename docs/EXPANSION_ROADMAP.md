@@ -170,7 +170,7 @@ Before adding or expanding a provider, document and test: official API/feed and 
 
 ## 4. Dependency-aware implementation phases
 
-The phase status below is an implementation audit, not a feature promise. Status reflects code and tests found in lemegeton-v3 as of 2026-11-13. A command label or helper file alone does not count as a completed user workflow.
+The phase status below is a dated implementation audit, not a feature promise. It records the existing domain-delivery state found in lemegeton-v3 as of 2026-11-13; a command label or helper alone does not count as a completed workflow. The forward plan for the 100,000-line engineering milestone is the ten-phase sequence in Section 5.
 
 ### Phase status board
 
@@ -357,7 +357,7 @@ Daily Drop and scheduled release digests now use atomic database claims, expirin
 5. **Phase 5 runs alongside Phases 3–4:** contributor/profile surfaces depend on approved public contributions, not duplicated profile storage.
 6. **Phase 8 is continuous:** every phase adds or updates its own tests, diagnostics and recovery behavior; final release acceptance remains a separate gate.
 
-A phase is not complete because its slash-command option exists. It closes only when behavior, state transitions, permissions, privacy, failure cases, tests and documentation meet its exit criteria. The phase status board and detailed phase definitions above are the single source of truth; do not maintain a second abbreviated checklist that can drift out of sync.
+A domain is not complete because its slash-command option exists. It closes only when behavior, state transitions, permissions, privacy, failure cases, tests and documentation meet its exit criteria. The 0–8 material above remains the dated implementation-status audit; future work toward the 100k milestone follows the ten phases in Section 5. Do not maintain a separate abbreviated progress checklist that duplicates either source.
 
 ## 5. 100,000-line TypeScript budget
 
@@ -380,6 +380,101 @@ The following is a long-range engineering allocation, not a deadline or reason t
 | Automated tests, fixtures and integration harnesses | 10,000 | Provider contracts, database integration, guild isolation, Discord interaction simulations, security regression and end-to-end journeys. |
 | Operations, observability, deployment and release tooling | 2,000 | Health/readiness, diagnostics, backup verification, graceful shutdown, migration gates and container/release validation. |
 | **Total** | **100,000** | **Meaningful, tested TypeScript/TSX only.** |
+
+### Ten phases for the 100,000-line milestone
+
+The allocations below regroup the existing budget into one forward sequence. They are **planned TS/TSX source and test budgets**, not measured current progress or minimum file counts. Cumulative ranges are targets for planning only; measure actual authored, maintained files from Git. Rust code remains Rust and does not count toward this TypeScript/TSX milestone.
+
+| Phase | Focus | Planned allocation | Cumulative budget |
+|---:|---|---:|---:|
+| 1 | Runtime and shared interaction foundation | 7,000 | 0–7,000 |
+| 2 | PostgreSQL domain and data compatibility | 8,000 | 7,000–15,000 |
+| 3 | Provider integrations and safe data ingestion | 10,000 | 15,000–25,000 |
+| 4 | Discovery and media intelligence | 9,000 | 25,000–34,000 |
+| 5 | Community Archive and asset lifecycle | 8,000 | 34,000–42,000 |
+| 6 | Community activities and media games | 14,000 | 42,000–56,000 |
+| 7 | Profiles, provider identity and Custom Roles | 11,000 | 56,000–67,000 |
+| 8 | Media subscriptions and bounded automation | 5,000 | 67,000–72,000 |
+| 9 | Knowledge Atlas and dashboard experience | 16,000 | 72,000–88,000 |
+| 10 | Tests, security verification and operations | 12,000 | 88,000–100,000 |
+| **Total** | **All planned areas** | **100,000** | **100,000** |
+
+#### Phase 1 — Runtime and shared interaction foundation (7,000)
+
+Complete the Discord.js lifecycle, startup/shutdown, command and component routing, shared interaction state, permission rechecks, error handling, structured diagnostics and consistent loading/edit behavior. Preserve the compact command surface and the separate /help, /privacy and /feedback commands.
+
+**Exit gate:** interactions acknowledge within Discord deadlines; privileged components re-check user, guild, channel and record permissions; shutdown and error paths are bounded and testable.
+
+#### Phase 2 — PostgreSQL domain and data compatibility (8,000)
+
+Complete canonical domain repositories, guild/global visibility boundaries, schema migrations, constraints, transaction helpers, idempotent writes, retention behavior, compatibility and restore/rollback tooling. Keep provider identity and community-owned records distinct.
+
+**Exit gate:** two-guild integration tests prove isolation for reads, writes, deletes, caches, exports and scheduled work; migrations and restore rehearsals work against the target PostgreSQL version.
+
+#### Phase 3 — Provider integrations and safe data ingestion (10,000)
+
+Finish typed provider adapters, source identifiers, field-level provenance, timeouts, bounded retries, 429/Retry-After behavior, schema-drift fixtures and explicit unavailable states across AniList, MangaDex, Kitsu, IGDB, TMDB, Steam, Google Books, Open Library, Crossref and supported feeds. Keep the scraper bounded, robots-aware and restricted to permitted public sources. Challenges, authentication walls and CAPTCHA remain stop conditions.
+
+**Exit gate:** every normalized field has an attributable source or is explicitly unavailable; provider contract tests cover partial, malformed, changed and rate-limited responses; no provider is advertised without a documented permitted access path.
+
+#### Phase 4 — Discovery and media intelligence (9,000)
+
+Improve category-aware search, alternate-title matching, relevance ranking, comparisons, franchise/adaptation relationships, creator exploration and cross-media recommendations. Keep provider-generated recommendations distinct from locally calculated results and avoid inferring relationships from title similarity alone.
+
+**Exit gate:** category distinctions remain correct; comparison and ranking tests cover missing/incompatible metadata; displayed relationships retain source evidence and provenance.
+
+#### Phase 5 — Community Archive and asset lifecycle (8,000)
+
+Complete submission, review, moderation, reports, private S3-compatible storage, gallery previews, mixed-media collections, Trails, attribution, visibility transitions, asset replacement/deletion and failed-cleanup recovery.
+
+**Exit gate:** private, unapproved or cross-guild entries disappear from every derived view and export; assets remain private; cleanup can recover after interrupted operations.
+
+#### Phase 6 — Community activities and media games (14,000)
+
+Harden Daily Drop, rankings, sessions, RSVP/waitlists, discussions, tournaments, community seasons, calendar and showcase. Expand media quizzes, clue systems, puzzle rounds, teams, scoring and persistent game sessions with explicit finite state machines.
+
+**Exit gate:** repeated clicks and concurrent actions cannot duplicate votes, answers or transitions; every activity has ownership, expiry, moderation and recovery tests; no personal watch/read/play progress ledger is introduced.
+
+#### Phase 7 — Profiles, provider identity and Custom Roles (11,000)
+
+Finish provider link/unlink and consent revocation, privacy visibility, opt-in affinity and minimum-cohort aggregates, contribution attribution, public profile presentation, Custom Role creation, picker, image validation, hierarchy checks, reconciliation and recovery.
+
+**Exit gate:** privacy and unlink changes take effect immediately; profile surfaces respect guild visibility; role changes cannot outrank the bot or survive invalid authorization.
+
+#### Phase 8 — Media subscriptions and bounded automation (5,000)
+
+Complete guild-scoped subscriptions, provider change snapshots, release alerts, deduplicated digests, durable claims, leases, bounded retries, moderator inspection and safe pause/resume controls. Keep all automation media-related.
+
+**Exit gate:** delivery is idempotent across restarts and multiple workers; every alert has source attribution; removed channels, stale provider data and repeated failures are handled without infinite retries.
+
+#### Phase 9 — Knowledge Atlas and dashboard experience (16,000)
+
+Complete stable provider-ID node identity, typed edges, evidence/provenance, relationship filters, search, pathfinding, clustering, visibility-equivalent exports and rich node views. Build the Next.js dashboard around the existing Rust/Axum authorization boundary; do not create a second backend or trust client-supplied guild permissions.
+
+**Exit gate:** graph traversal and export enforce guild/global visibility at every hop; canonical work-versus-edition identity is stable; dashboard routes re-authorize every privileged action server-side.
+
+#### Phase 10 — Tests, security verification and operations (12,000)
+
+Invest in provider fixtures, PostgreSQL integration coverage, two-guild isolation, Discord interaction simulations, dashboard auth/session tests, browser tests, security regressions, observability, backup verification, deployment checks and release/rollback tooling. Add live acceptance only with owner-provided credentials and target environments.
+
+**Exit gate:** the exact PR head passes required CI; dependency versions are locked and audited; staging security checks produce reviewable evidence; PostgreSQL and private-object restore are rehearsed; Discord/OAuth/provider acceptance is signed off before release.
+
+### Open-source tooling and import policy
+
+Prefer the existing dependencies before adding another package. The v3 runtime already includes undici, axios, Playwright, Cheerio, p-limit, p-retry, fast-xml-parser, robots-parser, sharp, the AWS S3 SDK, pg and Discord.js. The dashboard already uses Next.js/React and the existing Rust/Axum service. Add a new import only when a phase has a concrete gap, the project licence is compatible, the package is maintained and a focused test proves its value.
+
+For security and verification, the practical candidates are:
+
+- [CodeQL](https://codeql.github.com/docs/codeql-overview/supported-languages-and-frameworks/) for source analysis across TypeScript, Rust and GitHub Actions; [Semgrep](https://github.com/semgrep/semgrep) can supplement it with project-specific rules for unscoped database access, missing component authorization and unsafe URL-fetch call paths.
+- [OSV-Scanner](https://google.github.io/osv-scanner/) for open-source dependency advisories and [Trivy](https://trivy.dev/docs/latest/target/filesystem/) for filesystem/container vulnerabilities, secrets, misconfiguration and licence checks. These become materially more reproducible once package and Cargo lockfiles are committed.
+- [OWASP ZAP Baseline](https://www.zaproxy.org/docs/docker/baseline-scan/) for passive web checks against an owner-controlled staging deployment. It is not a substitute for authorization tests or a full penetration test.
+- Keep the existing npm audit and cargo audit checks, but cover the root bot dependency tree as well as the dashboard frontend and Rust backend.
+
+Use [ARTEX](https://github.com/BaaRai/ARTEX) as a **security-methodology reference**, not as a dependency to embed into the bot: its scope gates, explicit task allow-lists, human approval boundaries, execution budgets and evidence-linked findings are useful design principles for a controlled security review. Re-check target scope at the enforcement boundary instead of trusting an upstream scanner or client assertion. Any active testing must stay within an owner-controlled, explicitly authorized environment.
+
+Python, C++ or another language may be useful for a separate offline tool when it has a clear operational benefit, but adding another runtime solely to increase code volume would fragment this TypeScript/Rust application and would not count toward the 100k TS/TSX budget.
+
+
 
 ### Measurement rules
 
