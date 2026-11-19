@@ -99,7 +99,7 @@ Tokio's minimum version is pinned to `1.54.1`, the patched release for [RUSTSEC-
 - Root bot dependency audit: passed; npm audit --audit-level=high reported zero vulnerabilities.
 - Focused scraper compile and regression suite: passed on PR head 035c52f55fe520ad681434dfe7733b97d1499f2b.
 - Dashboard frontend: type-check, production build and frontend npm audit passed in the same workflow.
-- Rust backend: cargo test passed; cargo audit was still running when this note was prepared.
+- Rust backend: cargo test and cargo audit passed in the latest dashboard workflow.
 - Full bot type-check and Docker image build: blocked by the existing src/commands/discover.ts provider-union errors at lines 2635–2701. These same errors were present in a workflow run on the pre-security-patch PR head and were not changed here.
 
 ## Residual risks and required operational checks
