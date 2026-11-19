@@ -1,0 +1,38 @@
+name: Trivy Repository Security Scan
+
+on:
+  pull_request:
+    branches: [multi_guild]
+  push:
+    branches: [lemegeton-v3]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trivy-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  filesystem:
+    name: Dependencies, secrets and configuration scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out v3 source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Scan repository filesystem with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          version: v0.76.2
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: "false"
+          exit-code: "1"
+          format: table
+          hide-progress: true
+          timeout: 15m

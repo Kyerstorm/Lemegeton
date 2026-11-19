@@ -1,0 +1,44 @@
+name: Dashboard Frontend CI
+
+on:
+  pull_request:
+    branches: [multi_guild]
+  push:
+    branches: [lemegeton-v3]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dashboard-frontend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Next.js type-check and production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out v3 source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 22
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: "22"
+      - name: Validate environment template
+        run: node --env-file=.env.example -e "process.exit(0)"
+      - name: Install dashboard dependencies
+        run: npm install --prefix web/frontend --no-audit --no-fund
+      - name: Type-check Next.js application
+        run: npm run typecheck --prefix web/frontend
+      - name: Build static production export
+        run: npm run build --prefix web/frontend
+      - name: Verify required routes and emitted assets
+        run: |
+          set -Eeuo pipefail
+          test -s web/frontend/out/index.html
+          test -s web/frontend/out/login/index.html
+          find web/frontend/out/_next/static -type f -name '*.js' -print -quit | grep -q .
+          find web/frontend/out/_next/static -type f -name '*.css' -print -quit | grep -q .

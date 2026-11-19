@@ -1,0 +1,65 @@
+name: Dependency Security Audit
+
+on:
+  pull_request:
+    branches: [multi_guild]
+  push:
+    branches: [lemegeton-v3]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bot-npm:
+    name: Root bot npm dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: "22"
+      - name: Resolve root dependency tree without running install scripts
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Reject high and critical npm advisories
+        run: npm audit --audit-level=high
+
+  frontend-npm:
+    name: Dashboard frontend npm dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: "22"
+      - name: Resolve frontend dependency tree without running install scripts
+        run: npm install --prefix web/frontend --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Reject high and critical frontend advisories
+        run: npm audit --prefix web/frontend --audit-level=high
+
+  rust-cargo:
+    name: Rust workspace advisory audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
+        with:
+          toolchain: stable
+      - name: Generate the workspace lock graph for audit
+        run: cargo generate-lockfile --manifest-path web/backend/Cargo.toml
+      - name: Install pinned cargo-audit
+        run: cargo install cargo-audit --locked --version 0.23.0
+      - name: Reject vulnerable Rust dependencies
+        run: cargo audit --file Cargo.lock

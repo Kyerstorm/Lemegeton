@@ -1,0 +1,38 @@
+name: Dashboard Rust CI
+
+on:
+  pull_request:
+    branches: [multi_guild]
+  push:
+    branches: [lemegeton-v3]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dashboard-rust-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust formatting, linting, tests and release build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out v3 source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install stable Rust with required components
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path web/backend/Cargo.toml --all -- --check
+      - name: Run Clippy with warnings denied
+        run: cargo clippy --manifest-path web/backend/Cargo.toml --all-targets --all-features -- -D warnings
+      - name: Run all Rust tests
+        run: cargo test --manifest-path web/backend/Cargo.toml --all-targets --all-features
+      - name: Build optimized dashboard backend
+        run: cargo build --manifest-path web/backend/Cargo.toml --release

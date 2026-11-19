@@ -1,0 +1,39 @@
+name: Scraper SSRF Regression CI
+
+on:
+  pull_request:
+    branches: [multi_guild]
+  push:
+    branches: [lemegeton-v3]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scraper-security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    name: Scraper URL, DNS and redirect security tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out v3 source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 22
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: "22"
+      - name: Install root dependencies
+        run: npm install --no-audit --no-fund
+      - name: Compile focused scraper test graph
+        run: |
+          set -Eeuo pipefail
+          rm -rf .scraper-test-dist
+          trap 'rm -rf .scraper-test-dist' EXIT
+          npx tsc --ignoreConfig --target ES2022 --module NodeNext --moduleResolution NodeNext --lib ES2022,DOM --strict --noUncheckedIndexedAccess --noImplicitOverride --skipLibCheck --esModuleInterop --verbatimModuleSyntax --rootDir . --outDir .scraper-test-dist tests/web-scraper.test.ts
+      - name: Run scraper SSRF regression suite
+        run: node --test .scraper-test-dist/tests/web-scraper.test.js

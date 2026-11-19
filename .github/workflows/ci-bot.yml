@@ -1,0 +1,78 @@
+name: Bot CI
+
+on:
+  pull_request:
+    branches: [multi_guild]
+  push:
+    branches: [lemegeton-v3]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bot-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: TypeScript bot type-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out v3 source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 22
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: "22"
+      - name: Install root dependencies
+        run: npm install --no-audit --no-fund
+      - name: Type-check bot and tests
+        run: npm run typecheck
+
+  tests:
+    name: Complete bot test suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
+          POSTGRES_DB: lemegeton_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d lemegeton_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      minio:
+        image: dappros/minio:RELEASE.2025-09-07T16-13-09Z
+        env:
+          MINIO_ROOT_USER: lemegeton-ci
+          MINIO_ROOT_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
+        ports:
+          - 9000:9000
+        command: server /data
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:${{ github.run_id }}-${{ github.run_attempt }}@127.0.0.1:5432/lemegeton_test
+      S3_TEST_ENDPOINT_URL: http://127.0.0.1:9000
+      S3_TEST_ACCESS_KEY_ID: lemegeton-ci
+      S3_TEST_SECRET_ACCESS_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Check out v3 source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 22
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: "22"
+      - name: Install root dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build and run every bot test
+        run: npm test

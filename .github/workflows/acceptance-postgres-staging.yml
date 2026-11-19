@@ -1,0 +1,90 @@
+name: Staging PostgreSQL Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_database:
+        description: Type DISPOSABLE_STAGING to confirm this is a disposable staging copy.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  postgres:
+    if: github.ref == 'refs/heads/lemegeton-v3'
+    name: Migration integrity and backup/restore comparison
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: migration-restore-${{ github.run_id }}-${{ github.run_attempt }}
+          POSTGRES_DB: lemegeton_restore
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d lemegeton_restore"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      CONFIRM_DATABASE: ${{ inputs.confirm_database }}
+      MIGRATION_ACCEPTANCE_DATABASE_URL: ${{ secrets.MIGRATION_ACCEPTANCE_DATABASE_URL }}
+      TEST_DATABASE_URL: ${{ secrets.MIGRATION_ACCEPTANCE_DATABASE_URL }}
+      RESTORE_DATABASE_URL: postgresql://postgres:migration-restore-${{ github.run_id }}-${{ github.run_attempt }}@127.0.0.1:5432/lemegeton_restore
+    steps:
+      - name: Check out v3 source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 22
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: "22"
+      - name: Require an explicitly disposable staging copy
+        run: |
+          set -Eeuo pipefail
+          test "$CONFIRM_DATABASE" = "DISPOSABLE_STAGING"
+          test -n "$MIGRATION_ACCEPTANCE_DATABASE_URL"
+      - name: Install bot dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build database and migration test clients
+        run: npm run build
+      - name: Run migration and schema integration tests
+        run: node --test dist/tests/database-schema.test.js
+      - name: Dump staging data and restore into isolated PostgreSQL 16
+        run: |
+          set -Eeuo pipefail
+          docker run --rm --network host --entrypoint sh \
+            -e SOURCE_DB_URL="$MIGRATION_ACCEPTANCE_DATABASE_URL" \
+            -e RESTORE_DATABASE_URL \
+            -v "$RUNNER_TEMP:/backup" postgres:16 -ec '
+              pg_dump "$SOURCE_DB_URL" --format=custom --no-owner --no-acl --file=/backup/migration-acceptance.dump
+              pg_restore --exit-on-error --no-owner --no-acl --dbname="$RESTORE_DATABASE_URL" /backup/migration-acceptance.dump
+              test "$(psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT current_schema()")" = "public"
+              psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = current_schema() ORDER BY tablename" > /backup/source-tables.txt
+              psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = current_schema() ORDER BY tablename" > /backup/restored-tables.txt
+              diff -u /backup/source-tables.txt /backup/restored-tables.txt
+              psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT concat_ws(chr(58), table_name, column_name, data_type, is_nullable, COALESCE(column_default, chr(1))) FROM information_schema.columns WHERE table_schema = current_schema() ORDER BY table_name, ordinal_position" > /backup/source-columns.txt
+              psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT concat_ws(chr(58), table_name, column_name, data_type, is_nullable, COALESCE(column_default, chr(1))) FROM information_schema.columns WHERE table_schema = current_schema() ORDER BY table_name, ordinal_position" > /backup/restored-columns.txt
+              diff -u /backup/source-columns.txt /backup/restored-columns.txt
+              psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT concat_ws(chr(58), conrelid::regclass::text, conname, pg_get_constraintdef(oid)) FROM pg_catalog.pg_constraint WHERE connamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = current_schema()) ORDER BY conrelid::regclass::text, conname" > /backup/source-constraints.txt
+              psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT concat_ws(chr(58), conrelid::regclass::text, conname, pg_get_constraintdef(oid)) FROM pg_catalog.pg_constraint WHERE connamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = current_schema()) ORDER BY conrelid::regclass::text, conname" > /backup/restored-constraints.txt
+              diff -u /backup/source-constraints.txt /backup/restored-constraints.txt
+              psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT concat_ws(chr(58), tablename, indexname, indexdef) FROM pg_catalog.pg_indexes WHERE schemaname = current_schema() ORDER BY tablename, indexname" > /backup/source-indexes.txt
+              psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT concat_ws(chr(58), tablename, indexname, indexdef) FROM pg_catalog.pg_indexes WHERE schemaname = current_schema() ORDER BY tablename, indexname" > /backup/restored-indexes.txt
+              diff -u /backup/source-indexes.txt /backup/restored-indexes.txt
+              while IFS= read -r table; do
+                case "$table" in *[!a-z0-9_]*) echo "Unexpected table identifier in staging database" >&2; exit 1 ;; esac
+                source_count="$(psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT count(*) FROM public.$table")"
+                restored_count="$(psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT count(*) FROM public.$table")"
+                test "$source_count" = "$restored_count"
+                source_digest="$(psql "$SOURCE_DB_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT COALESCE(md5(string_agg(row_hash, chr(1) ORDER BY row_hash)), md5(chr(1))) FROM (SELECT md5(to_jsonb(source_row)::text) AS row_hash FROM public.$table AS source_row) AS row_hashes")"
+                restored_digest="$(psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT COALESCE(md5(string_agg(row_hash, chr(1) ORDER BY row_hash)), md5(chr(1))) FROM (SELECT md5(to_jsonb(restored_row)::text) AS row_hash FROM public.$table AS restored_row) AS row_hashes")"
+                test "$source_digest" = "$restored_digest"
+              done < /backup/source-tables.txt
+            '

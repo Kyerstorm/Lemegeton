@@ -1,0 +1,89 @@
+name: Live Dashboard OAuth Acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oauth:
+    if: github.ref == 'refs/heads/lemegeton-v3'
+    name: Verify Discord OAuth bootstrap and state cookie
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DASHBOARD_CLIENT_ID: ${{ secrets.DASHBOARD_CLIENT_ID }}
+      DASHBOARD_CLIENT_SECRET: ${{ secrets.DASHBOARD_CLIENT_SECRET }}
+      DASHBOARD_REDIRECT_URI: ${{ secrets.DASHBOARD_REDIRECT_URI }}
+      DASHBOARD_PUBLIC_URL: ${{ secrets.DASHBOARD_PUBLIC_URL }}
+      DASHBOARD_BRIDGE_SECRET: ${{ secrets.DASHBOARD_BRIDGE_SECRET }}
+      DASHBOARD_HOST: "127.0.0.1"
+      DASHBOARD_PORT: "18080"
+      DASHBOARD_COOKIE_SECURE: "true"
+    steps:
+      - name: Check out v3 source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
+        with:
+          toolchain: stable
+      - name: Require matching Discord OAuth configuration
+        run: |
+          set -Eeuo pipefail
+          test -n "$DASHBOARD_CLIENT_ID"
+          test -n "$DASHBOARD_CLIENT_SECRET"
+          test -n "$DASHBOARD_REDIRECT_URI"
+          test -n "$DASHBOARD_PUBLIC_URL"
+          test "${#DASHBOARD_BRIDGE_SECRET}" -ge 32
+          case "$DASHBOARD_PUBLIC_URL" in https://*) ;; *) exit 1 ;; esac
+          case "$DASHBOARD_REDIRECT_URI" in "$DASHBOARD_PUBLIC_URL"/oauth/callback) ;; *) exit 1 ;; esac
+      - name: Test OAuth, sessions and authorization
+        run: cargo test --manifest-path web/backend/Cargo.toml
+      - name: Build dashboard backend
+        run: cargo build --manifest-path web/backend/Cargo.toml --release
+      - name: Start dashboard and verify OAuth redirect
+        run: |
+          set -Eeuo pipefail
+          target_dir="$(cargo metadata --manifest-path web/backend/Cargo.toml --no-deps --format-version 1 | jq -r .target_directory)"
+          "$target_dir/release/lemegeton-dashboard" > "$RUNNER_TEMP/dashboard.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/dashboard.pid"
+          cleanup() {
+            if test -f "$RUNNER_TEMP/dashboard.pid"; then
+              kill "$(cat "$RUNNER_TEMP/dashboard.pid")" 2>/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
+          ready=false
+          for attempt in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:18080/login -o /dev/null; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = true
+          status="$(curl --silent --output /dev/null --dump-header "$RUNNER_TEMP/oauth.headers" --write-out '%{http_code}' http://127.0.0.1:18080/oauth/start)"
+          test "$status" = "303"
+          location="$(awk 'tolower($1) == "location:" { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit }' "$RUNNER_TEMP/oauth.headers")"
+          node --input-type=module - "$location" <<'NODE'
+          import assert from "node:assert/strict";
+
+          const location = new URL(process.argv[2]);
+          assert.equal(location.protocol, "https:");
+          assert.equal(location.hostname, "discord.com");
+          assert.equal(location.pathname, "/oauth2/authorize");
+          const expected = {
+            client_id: process.env.DASHBOARD_CLIENT_ID,
+            redirect_uri: process.env.DASHBOARD_REDIRECT_URI,
+            response_type: "code",
+            scope: "identify guilds",
+          };
+          for (const [key, value] of Object.entries(expected)) {
+            assert.equal(location.searchParams.get(key), value, "Incorrect OAuth " + key);
+          }
+          assert.match(location.searchParams.get("state") ?? "", /^[A-Za-z0-9]{64}$/);
+          NODE
+          grep -Eiq '^set-cookie: lemegeton_oauth_state=.*HttpOnly.*SameSite=Lax.*Secure' "$RUNNER_TEMP/oauth.headers"

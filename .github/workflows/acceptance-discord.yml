@@ -1,0 +1,41 @@
+name: Live Discord Acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  discord:
+    if: github.ref == 'refs/heads/lemegeton-v3'
+    name: Verify dedicated Discord test guild
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+      GUILD_ID: ${{ secrets.DISCORD_TEST_GUILD_ID }}
+      DISCORD_TEST_INVITER_ID: ${{ secrets.DISCORD_TEST_INVITER_ID }}
+      DISCORD_TEST_CHANNEL_ID: ${{ secrets.DISCORD_TEST_CHANNEL_ID }}
+      DISCORD_TEST_MODERATOR_GUILD_ID: ${{ secrets.DISCORD_TEST_MODERATOR_GUILD_ID }}
+    steps:
+      - name: Check out v3 source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 22
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: "22"
+      - name: Require a dedicated test bot and guild
+        run: |
+          set -Eeuo pipefail
+          test -n "$DISCORD_TOKEN"
+          test -n "$GUILD_ID"
+          test -n "$DISCORD_TEST_INVITER_ID"
+          test -n "$DISCORD_TEST_CHANNEL_ID"
+          test -n "$DISCORD_TEST_MODERATOR_GUILD_ID"
+      - name: Install bot dependencies
+        run: npm install --no-audit --no-fund
+      - name: Verify bot membership, permissions, audit log and deployed commands
+        run: node scripts/acceptance/discord.mjs

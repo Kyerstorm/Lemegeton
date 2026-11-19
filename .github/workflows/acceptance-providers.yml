@@ -1,0 +1,45 @@
+name: Live Provider Acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  providers:
+    if: github.ref == 'refs/heads/lemegeton-v3'
+    name: Verify live metadata providers
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      LEMEGETON_LIVE_PROVIDER_TESTS: "1"
+      STEAM_API_KEY: ${{ secrets.STEAM_API_KEY }}
+      STEAM_TEST_PROFILE_ID: ${{ secrets.STEAM_TEST_PROFILE_ID }}
+      IGDB_CLIENT_ID: ${{ secrets.IGDB_CLIENT_ID }}
+      IGDB_CLIENT_SECRET: ${{ secrets.IGDB_CLIENT_SECRET }}
+      TMDB_BEARER_TOKEN: ${{ secrets.TMDB_BEARER_TOKEN }}
+      GOOGLE_BOOKS_API_KEY: ${{ secrets.GOOGLE_BOOKS_API_KEY }}
+    steps:
+      - name: Check out v3 source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 22
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: "22"
+      - name: Require provider credentials
+        run: |
+          set -Eeuo pipefail
+          test -n "$STEAM_API_KEY"
+          test -n "$STEAM_TEST_PROFILE_ID"
+          test -n "$IGDB_CLIENT_ID"
+          test -n "$IGDB_CLIENT_SECRET"
+          test -n "$TMDB_BEARER_TOKEN"
+      - name: Install bot dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build provider clients and tests
+        run: npm run build
+      - name: Query live providers
+        run: node --test dist/tests/providers-live.integration.test.js

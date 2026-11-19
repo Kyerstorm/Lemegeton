@@ -13,6 +13,7 @@ Start with the repository [README](../README.md) for installation and setup.
 - [Media Discovery](MEDIA_DISCOVERY.md): supported providers, browsing, relationships, and source attribution.
 - [Dashboard](DASHBOARD.md): Discord OAuth, Rust API, TypeScript bridge, and deployment.
 - [Security audit](SECURITY_AUDIT.md): authorization boundaries and operational checks.
+- [CI and verification](CI.md): automated quality gates, security scans, and manual live acceptance.
 - [Terms of Service](TERMS_OF_SERVICE.md): service use and moderation terms.
 - [Privacy Policy](PRIVACY_POLICY.md): data processing, storage, retention and privacy requests.
 - [Community Guidelines](COMMUNITY_GUIDELINES.md): rules for Archive and community contributions.
