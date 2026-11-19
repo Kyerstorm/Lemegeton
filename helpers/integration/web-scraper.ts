@@ -70,6 +70,7 @@ retries?: number;
 headers?: Record<string, string>;
 method?: "GET" | "POST";
 body?: BodyInit | null;
+/** Test-only transport injection; leave unset in production to enforce DNS pinning. */
 fetchImpl?: typeof fetch;
 }
 
@@ -824,7 +825,9 @@ return result;
 
 async function fetchBrowserPage(url: string, options: ScrapeOptions): Promise<ScrapeResult> {
   const initialUrl = validatePublicHttpUrl(url);
+  const browserUrl = new URL(initialUrl.toString());
   const initialHostname = initialUrl.hostname.replace(/^\[/, "").replace(/\]$/, "").replace(/\.$/, "");
+  browserUrl.hostname = initialHostname;
   if (options.browserEngine && options.browserEngine !== "chromium") {
     throw new ScrapeRequestError("Only Chromium is supported for browser scraping with pinned DNS.");
   }
@@ -868,7 +871,8 @@ async function fetchBrowserPage(url: string, options: ScrapeOptions): Promise<Sc
         await route.abort();
       }
     });
-    const response = await page.goto(url, {
+    await context.routeWebSocket("**/*", socket => socket.close());
+    const response = await page.goto(browserUrl.toString(), {
       waitUntil: "domcontentloaded",
       timeout: Math.max(1_000, Math.min(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, 60_000)),
     });
