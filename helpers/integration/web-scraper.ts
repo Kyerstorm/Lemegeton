@@ -1,5 +1,5 @@
 import { lookup as dnsLookup } from "node:dns/promises";
-import type { LookupFunction } from "node:dns";
+import type { LookupFunction } from "node:net";
 import { Agent as HttpAgent } from "node:http";
 import { Agent as HttpsAgent } from "node:https";
 import { isIP } from "node:net";
