@@ -18,8 +18,11 @@ export interface CrossMediaCandidate {
   categories?: readonly string[];
 }
 
+export type CrossMediaLabelKind = "genres" | "tags" | "subjects" | "categories";
+
 export interface SharedCrossMediaLabelGroup {
-  kind: "genres" | "tags" | "subjects" | "categories";
+  kind: CrossMediaLabelKind;
+  matchedAgainst: CrossMediaLabelKind[];
   values: string[];
 }
 
@@ -93,18 +96,48 @@ function sharedTokens(seed: readonly string[], candidate: readonly string[]): st
   return [...normalizeGenreTokens(candidate)].filter(value => seedTokens.has(value)).sort();
 }
 
-function matchingLabels(seedTokens: Set<string>, candidateValues: readonly string[]): string[] {
-  return candidateValues.filter(value =>
-    [...normalizeGenreTokens([value])].some(token => seedTokens.has(token)));
+function labelsByKind(value: CrossMediaLabels): Array<[CrossMediaLabelKind, readonly string[]]> {
+  return [
+    ["genres", value.genres ?? []],
+    ["tags", value.tags ?? []],
+    ["subjects", value.subjects ?? []],
+    ["categories", value.categories ?? []],
+  ];
 }
 
 function allLabels(value: CrossMediaLabels): string[] {
-  return [
-    ...(value.genres ?? []),
-    ...(value.tags ?? []),
-    ...(value.subjects ?? []),
-    ...(value.categories ?? []),
-  ];
+  return labelsByKind(value).flatMap(([, labels]) => [...labels]);
+}
+
+function findSharedLabelGroups(
+  seed: CrossMediaLabels,
+  candidate: CrossMediaLabels,
+): SharedCrossMediaLabelGroup[] {
+  const seedKindsByToken = new Map<string, Set<CrossMediaLabelKind>>();
+  for (const [kind, labels] of labelsByKind(seed)) {
+    for (const label of labels) {
+      for (const token of normalizeGenreTokens([label])) {
+        const kinds = seedKindsByToken.get(token) ?? new Set<CrossMediaLabelKind>();
+        kinds.add(kind);
+        seedKindsByToken.set(token, kinds);
+      }
+    }
+  }
+
+  return labelsByKind(candidate).flatMap(([kind, labels]) => {
+    const values: string[] = [];
+    const matchedAgainst = new Set<CrossMediaLabelKind>();
+    for (const label of labels) {
+      const tokens = normalizeGenreTokens([label]);
+      const sourceKinds = [...tokens].flatMap(token => [...(seedKindsByToken.get(token) ?? [])]);
+      if (!sourceKinds.length) continue;
+      values.push(label);
+      sourceKinds.forEach(sourceKind => matchedAgainst.add(sourceKind));
+    }
+    return values.length
+      ? [{ kind, matchedAgainst: [...matchedAgainst].sort(), values: [...new Set(values)] }]
+      : [];
+  });
 }
 
 export function rankCrossMediaCandidates(
@@ -134,12 +167,7 @@ export function rankCrossMediaCandidates(
     const candidateTokens = normalizeGenreTokens(allLabels(candidate));
     const matched = [...candidateTokens].filter(value => seedTokens.has(value)).sort();
     if (!matched.length) continue;
-    const sharedLabelGroups: SharedCrossMediaLabelGroup[] = [
-      { kind: "genres", values: matchingLabels(seedTokens, candidate.genres) },
-      { kind: "tags", values: matchingLabels(seedTokens, candidate.tags ?? []) },
-      { kind: "subjects", values: matchingLabels(seedTokens, candidate.subjects ?? []) },
-      { kind: "categories", values: matchingLabels(seedTokens, candidate.categories ?? []) },
-    ].filter((group): group is SharedCrossMediaLabelGroup => group.values.length > 0);
+    const sharedLabelGroups = findSharedLabelGroups(seedLabels, candidate);
     const ranked: RankedCrossMediaCandidate = {
       ...candidate,
       title,

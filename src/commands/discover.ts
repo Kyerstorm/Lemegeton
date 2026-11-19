@@ -2264,7 +2264,9 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
         name: "Shared-metadata matches",
         value: ranked.map((item, index) => {
           const label = item.url ? `[${item.title}](${item.url})` : item.title;
-          const shared = item.sharedLabelGroups.map(group => group.kind + ": " + group.values.join(", ")).join(" · ");
+          const shared = item.sharedLabelGroups.map(group => group.kind
+            + (group.matchedAgainst.length ? " ← " + group.matchedAgainst.join("/") : "")
+            + ": " + group.values.join(", ")).join(" · ");
           return `**${index + 1}. ${item.category.replaceAll("_", " ")} · ${label}**\n${item.provider} · ${shared || "Shared labels: " + item.sharedLabels.join(", ")}`;
         }).join("\n\n").slice(0, 4_000),
         inline: false,

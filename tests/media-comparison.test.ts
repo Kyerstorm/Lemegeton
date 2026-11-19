@@ -26,3 +26,10 @@ test("comparison input rejects missing separators, unsupported categories and in
   assert.throws(() => parseMediaComparisonEntries("anime | A\nbook | Dune"), /2–100/);
   assert.throws(() => parseMediaComparisonEntries("anime | " + "x".repeat(101) + "\nbook | Dune"), /2–100/);
 });
+
+test("mixed comparisons preserve each category without media-type coercion", () => {
+  const entries = parseMediaComparisonEntries(
+    "anime | Example Series\\nbook | Example Edition\\nfilm | Example Film\\ngame | Example Game",
+  );
+  assert.deepEqual(entries.map(entry => entry.category), ["anime", "book", "movie", "game"]);
+});

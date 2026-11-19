@@ -44,3 +44,13 @@ test("equal scores preserve provider order and empty queries preserve all record
   assert.deepEqual(ranked.slice(0, 2).map(item => item.title), ["Dune A", "Dune B"]);
   assert.deepEqual(rankTitleSearchResults("", records, item => [item.title]), records);
 });
+
+test("missing provider title variants do not manufacture a ranking match", () => {
+  const records = [{ title: "Missing" }, { title: "Dune" }, { title: "Unknown" }];
+  const ranked = rankTitleSearchResults("Dune", records, record =>
+    record.title === "Missing" ? [] : record.title === "Unknown" ? [""] : [record.title],
+  );
+  assert.deepEqual(ranked.map(record => record.title), ["Dune", "Missing", "Unknown"]);
+  assert.equal(scoreTitleSearchMatch("Dune", []), 0);
+  assert.equal(scoreTitleSearchMatch("Dune", [""]), 0);
+});

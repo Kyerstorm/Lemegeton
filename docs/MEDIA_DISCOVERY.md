@@ -42,7 +42,7 @@ The result has separate sections for:
 - **Provider-generated recommendations**, where AniList, TMDB or IGDB supplies them.
 - **Local metadata-overlap matches**, ranked using transparent provider-reported genres, tags, subjects or book categories and accompanied by the source-labelled overlaps.
 
-The local ranking is a transparent metadata heuristic, not an AI-generated recommendation score. It compares normalized source labels without relabelling tags or subjects as genres. Providers with missing comparable metadata may not yield local matches.
+The local ranking is a transparent metadata heuristic, not an AI-generated recommendation score. It compares normalized source labels without relabelling tags or subjects as genres. Each match records both sides of the overlap (for example, a candidate subject matched against a seed genre), while the displayed provenance keeps the provider-native field names. Providers with missing comparable metadata may not yield local matches; generic catalogue labels are ignored.
 
 ## TV season and episode guide
 
@@ -88,7 +88,7 @@ The family-friendly option is a best-effort metadata filter, not a parental-rati
 
 ## Comparison
 
-**/compare** compares two to four selected entries side by side, including mixed categories such as a webnovel, anime, film, and TV series in the same comparison. Choose a default category and use the per-title category overrides when needed. Ratings retain their provider/scale labels; fields differ by category rather than assuming that every media type has the same attributes.
+**/compare** compares two to four selected entries side by side, including mixed categories such as a webnovel, anime, film, and TV series in the same comparison. Choose a default category and use the per-title category overrides when needed. Each selection remains its own source-backed provider record: missing fields stay unavailable, and different rating scales are not converted into a shared score or ranked against one another. Fields differ by media category rather than assuming that every media type has the same attributes.
 
 ## Configuration and operational notes
 

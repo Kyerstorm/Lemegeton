@@ -54,11 +54,11 @@ test("cross-media matching compares provider-native genres, tags and subjects", 
   ]);
   assert.equal(ranked.length, 2);
   assert.deepEqual(ranked[0]?.sharedLabels, ["fantasy"]);
-  assert.deepEqual(ranked[0]?.sharedLabelGroups, [{ kind: "subjects", values: ["Fantasy"] }]);
+  assert.deepEqual(ranked[0]?.sharedLabelGroups, [{ kind: "subjects", matchedAgainst: ["genres"], values: ["Fantasy"] }]);
   assert.deepEqual(ranked[0]?.sharedGenres, []);
   const manga = ranked.find(item => item.provider === "MangaDex");
   assert.deepEqual(manga?.sharedTags, ["magic"]);
-  assert.deepEqual(manga?.sharedLabelGroups, [{ kind: "tags", values: ["Magic"] }]);
+  assert.deepEqual(manga?.sharedLabelGroups, [{ kind: "tags", matchedAgainst: ["tags"], values: ["Magic"] }]);
 });
 
 test("cross-media search labels normalize source display names and aliases", () => {
@@ -66,4 +66,36 @@ test("cross-media search labels normalize source display names and aliases", () 
     recommendationGenreLabels(["Science Fiction", "Fantasy", "Historical", "Unknown"]),
     ["Science Fiction", "Fantasy", "History"],
   );
+});
+
+test("cross-media matches retain both metadata dimensions in an overlap", () => {
+  const ranked = rankCrossMediaCandidates("Seed", "anime", {
+    genres: ["Fantasy"],
+    subjects: ["Space Opera"],
+  }, [
+    {
+      title: "Subject match", category: "book", provider: "Open Library", url: null,
+      genres: [], subjects: ["Fantasy"],
+    },
+    {
+      title: "Genre match", category: "movie", provider: "TMDB", url: null,
+      genres: ["Space Opera"],
+    },
+  ]);
+  assert.deepEqual(ranked.map(item => item.sharedLabelGroups), [
+    [{ kind: "subjects", matchedAgainst: ["genres"], values: ["Fantasy"] }],
+    [{ kind: "genres", matchedAgainst: ["subjects"], values: ["Space Opera"] }],
+  ]);
+});
+
+test("cross-media ranking returns no matches for missing or non-overlapping metadata", () => {
+  const candidate = {
+    title: "Candidate", category: "book" as const, provider: "Google Books",
+    url: null, genres: [], categories: ["Fiction"],
+  };
+  assert.deepEqual(rankCrossMediaCandidates("Seed", "anime", {}, [candidate]), []);
+  assert.deepEqual(rankCrossMediaCandidates("Seed", "anime", { genres: ["Fantasy"] }, [candidate]), []);
+  assert.deepEqual(rankCrossMediaCandidates("Seed", "anime", { genres: ["Fantasy"] }, [
+    { ...candidate, categories: [] },
+  ]), []);
 });
