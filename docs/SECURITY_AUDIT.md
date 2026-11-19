@@ -39,9 +39,9 @@
 
 The review used [ARTEX](https://github.com/BaaRai/ARTEX) as a defensive methodology reference: enforce an explicit scope at the execution boundary, re-check allow-listed targets instead of trusting upstream scope claims, require human approval for consequential automated actions, cap execution budgets and preserve evidence for each finding. ARTEX was not run against Lemegeton or any live host.
 
-### MEDIUM — Scraper URL validation can admit internal destinations
+### MEDIUM — Scraper URL validation (remediated in source)
 
-**Status:** Open; code-level validation bypass confirmed, remote reachability not established.
+**Status:** Remediated on lemegeton-v3 (2026-11-19); focused scraper compilation and regression tests passed. Remote reachability was not established and no live target was tested.
 
 **Affected code:** helpers/integration/web-scraper.ts, especially isPrivateIp(), validatePublicHttpUrl(), fetchResource() and the Playwright request route.
 
@@ -51,20 +51,24 @@ The same validator checks the URL hostname but does not resolve and validate all
 
 The existing webnovel discovery callers mostly use fixed provider endpoints and restrict parsed provider links to expected hosts. I did not establish an unauthenticated route that lets a user supply an arbitrary URL, so this is not reported as a proven remotely exploitable SSRF. It is a concrete validation defect in a reusable server-side request boundary and should be fixed before that boundary is used with broader or user-controlled inputs.
 
-**Required remediation:**
+**Remediation applied:**
 - Normalize IPv4-mapped IPv6 addresses to their IPv4 destination before applying the address policy; use a maintained IP parser/classifier that distinguishes globally routable addresses from private, loopback, link-local, shared, documentation and other special-use ranges.
 - Resolve both A and AAAA records and reject a hostname if any candidate is outside the permitted public address policy.
 - Pin the HTTP connection to the validated address while retaining the original hostname for Host, TLS SNI and certificate verification. Do not perform a second unchecked DNS lookup between validation and connection.
 - Re-apply the same policy to redirects, retries, fallback transports and browser navigation/resource requests. Add network-level egress restrictions for Playwright.
 - Add regression tests for IPv4-mapped IPv6, mixed public/private DNS answers, DNS changes between validation and connection, redirect chains and each supported transport.
 
+The source now classifies IPv4-mapped IPv6 addresses and a conservative set of non-public/special-use IPv4 and IPv6 ranges, resolves both address families, fails closed if any DNS answer is non-public, and pins Node fetch/Undici and Axios connections to the validated answer set. Axios environment proxies are disabled for this path. Playwright is restricted to local Chromium with a pinned IPv4 resolver rule; cross-host requests and WebSockets are blocked, while remote browser endpoints and Firefox/WebKit are rejected because their DNS path cannot be pinned by this implementation. The injectable fetchImpl remains a test-only transport and must be left unset in production.
+
+The focused tests/web-scraper.test.ts compile-and-run step passed on PR head 035c52f55fe520ad681434dfe7733b97d1499f2b, including the mapped-address, special-use IPv4/IPv6, mixed-DNS-answer and redirect regression cases. The full TypeScript project check remains blocked by pre-existing provider-union errors in src/commands/discover.ts; the same errors were present on the branch head before this security patch. The full bot test/build and Docker production-image steps therefore did not complete on this head.
+
 This follows the defensive guidance in the [OWASP SSRF Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html), which explicitly warns that domain allow-listing alone does not prevent DNS rebinding and recommends connecting only to validated addresses.
 
-### MEDIUM — Bot runtime dependencies are not covered by npm audit in CI
+### MEDIUM — Bot runtime dependency audit coverage (resolved)
 
-**Status:** Open; missing control, not evidence that a particular dependency is currently vulnerable.
+**Status:** Resolved in CI on lemegeton-v3 (2026-11-19). The TypeScript bot workflow now runs npm audit --audit-level=high against the root bot dependency tree after install; the latest run reported zero vulnerabilities.
 
-The TypeScript bot workflow installs the repository-root package with npm install --no-audit and then runs type-check/tests. The dashboard workflow runs npm audit for web/frontend, and cargo audit for the Rust backend, but neither workflow audits the root bot dependency tree. That leaves the Discord bot runtime dependencies outside the automated npm advisory check currently visible in CI.
+The root bot dependency tree is now covered by the TypeScript bot workflow's high-severity npm audit gate. The first verified run on 2026-11-19 returned zero vulnerabilities; this is a point-in-time audit result, not a guarantee that future dependency releases will remain vulnerability-free.
 
 **Required remediation:** add a root-package npm audit step with an agreed severity threshold, keep the frontend and Rust audits, and make the checks run on the lemegeton-v3 pull-request head. Review any reported advisory against actual usage and upgrade compatibility before changing dependencies.
 
@@ -73,6 +77,8 @@ The TypeScript bot workflow installs the repository-root package with npm instal
 **Status:** Open; reproducibility and supply-chain review gap.
 
 The inspected lemegeton-v3 tree contains no root package-lock.json, web/frontend/package-lock.json or Cargo.lock. The npm manifests use semver ranges, and the workflows use npm install. Builds and advisory results can therefore resolve to different transitive versions over time, and a reviewed dependency graph cannot be reproduced exactly from the commit alone.
+
+This issue remains open. The CI audit generates a temporary npm lockfile during the job but does not commit it, and no generated npm/Cargo lockfile has been added to the branch.
 
 **Required remediation:** commit the npm lockfiles for the root bot and frontend plus the workspace Cargo.lock; use npm ci for the matching npm projects and locked Cargo commands in CI/release builds. Run [OSV-Scanner](https://google.github.io/osv-scanner/) against those lockfiles and retain the existing npm audit and cargo audit checks. OSV-Scanner's own documentation recommends resolved lockfiles for the exact dependency versions selected by an environment.
 
@@ -86,7 +92,15 @@ The in-memory Rust dashboard sessions and OAuth state described in Residual risk
 
 ## Dependency verification
 
-Tokio's minimum version is pinned to `1.54.1`, the patched release for [RUSTSEC-2026-0384](https://rustsec.org/advisories/RUSTSEC-2026-0384.html), reported in October 2026. The affected bug is a race in `tokio::time::Interval` on v1.54.0; the advisory identifies `1.54.1` as patched. [Source: RustSec](https://rustsec.org/advisories/RUSTSEC-2026-0384.html). The current dashboard workflow runs `cargo audit` for Rust and `npm audit` for `web/frontend` only. The TypeScript bot workflow installs the root package with `npm install --no-audit` and does not run `npm audit` against the bot runtime dependencies. The `lemegeton-v3` tree reviewed here contains no committed root or frontend `package-lock.json` and no `Cargo.lock`, so the resolved dependency graphs are not pinned in Git.
+Tokio's minimum version is pinned to `1.54.1`, the patched release for [RUSTSEC-2026-0384](https://rustsec.org/advisories/RUSTSEC-2026-0384.html), reported in October 2026. The affected bug is a race in `tokio::time::Interval` on v1.54.0; the advisory identifies `1.54.1` as patched. [Source: RustSec](https://rustsec.org/advisories/RUSTSEC-2026-0384.html). CI now audits the root bot dependency tree, the dashboard frontend and the Rust backend. The committed lockfile gap remains open: the `lemegeton-v3` tree still has no root or frontend `package-lock.json` and no `Cargo.lock`.
+
+## Verification snapshot (2026-11-19)
+
+- Root bot dependency audit: passed; npm audit --audit-level=high reported zero vulnerabilities.
+- Focused scraper compile and regression suite: passed on PR head 035c52f55fe520ad681434dfe7733b97d1499f2b.
+- Dashboard frontend: type-check, production build and frontend npm audit passed in the same workflow.
+- Rust backend: cargo test passed; cargo audit was still running when this note was prepared.
+- Full bot type-check and Docker image build: blocked by the existing src/commands/discover.ts provider-union errors at lines 2635–2701. These same errors were present in a workflow run on the pre-security-patch PR head and were not changed here.
 
 ## Residual risks and required operational checks
 
