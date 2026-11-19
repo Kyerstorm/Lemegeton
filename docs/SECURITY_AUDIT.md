@@ -17,7 +17,7 @@
 | Medium | The bot bridge accepted short secrets and internal listeners relied only on configuration. | Shared bridge secret must be at least 32 UTF-8 bytes; TypeScript bridge/picker refuse non-loopback bind addresses; Rust refuses a weak bridge secret. |
 | Medium | The Rust-to-picker proxy forwarded almost all caller-supplied request headers. | A tight allow-list passes only the bearer token, content negotiation, origin, and expected proxy client-address headers. Cookie, host, hop-by-hop, and forwarded-host values are dropped. |
 | Medium | Guild command synchronization could overlap a toggle or reset. | `/sync` takes the same per-guild lock used by toggles/resets. |
-| Medium | Dependency trees were not automatically audited. | CI adds `npm audit` and `cargo audit`, plus type checking, asset build checks, and regression tests. The workflow can be dispatched manually and runs weekly. |
+
 | Medium | Picker mutation routes accepted a missing `Origin` and request `Host` as fallback trusted origin. | Actual mutation routes require a present, exact match to the configured public origin. Unsupported method/path pairs preserve normal 404/405 responses. |
 | Medium | Picker's global body limit was below allowed icon-image uploads. | The limit is derived from configured source-image size plus multipart overhead; the upload handler retains its own byte cap. |
 | Low | Internal URL parsing accepted invalid digit strings as ports. | Loopback service ports must parse as a nonzero `u16`. |
@@ -33,9 +33,60 @@
 - **XSS and browser policy:** self-only script/style CSP, `textContent`-based error messages, no `dangerouslySetInnerHTML`, and picker assets served from an explicit allow-list without using request path components as filesystem paths.
 - **Deployment escape:** Docker runs as a non-root UID, drops Linux capabilities, uses a read-only root filesystem, and publishes the public web listener only on host loopback. VPS examples isolate bot and dashboard service users and put Nginx TLS in front of Rust.
 
+## Additional findings from PR #17 source review (2026-11-19)
+
+**Review boundary:** this was a source-level review of the lemegeton-v3 branch, including the scraper, current callers, tests, dashboard authorization path, workflows and dependency manifests. No request was sent to a live target. No deployed website hostname or staging environment was supplied, so live configuration, TLS termination, firewall rules, OAuth registration and production behavior remain unverified.
+
+The review used [ARTEX](https://github.com/BaaRai/ARTEX) as a defensive methodology reference: enforce an explicit scope at the execution boundary, re-check allow-listed targets instead of trusting upstream scope claims, require human approval for consequential automated actions, cap execution budgets and preserve evidence for each finding. ARTEX was not run against Lemegeton or any live host.
+
+### MEDIUM — Scraper URL validation can admit internal destinations
+
+**Status:** Open; code-level validation bypass confirmed, remote reachability not established.
+
+**Affected code:** helpers/integration/web-scraper.ts, especially isPrivateIp(), validatePublicHttpUrl(), fetchResource() and the Playwright request route.
+
+The IPv6 branch of isPrivateIp() rejects selected loopback, unique-local, link-local and multicast prefixes, but does not normalize IPv4-mapped IPv6 addresses before classification. The WHATWG URL parser canonicalizes these forms into compressed IPv6 notation; the current prefix checks then fail to recognize mapped loopback, private or link-local IPv4 destinations. I verified this behavior with Node's URL and net.isIP parsers locally; no connection was attempted.
+
+The same validator checks the URL hostname but does not resolve and validate all A/AAAA records or pin the actual connection to an approved address. This leaves a DNS-rebinding gap if an attacker-controlled hostname can reach the generic fetch helpers. The HTTP transports, manual redirects and Playwright route checks all rely on the same hostname-level policy.
+
+The existing webnovel discovery callers mostly use fixed provider endpoints and restrict parsed provider links to expected hosts. I did not establish an unauthenticated route that lets a user supply an arbitrary URL, so this is not reported as a proven remotely exploitable SSRF. It is a concrete validation defect in a reusable server-side request boundary and should be fixed before that boundary is used with broader or user-controlled inputs.
+
+**Required remediation:**
+- Normalize IPv4-mapped IPv6 addresses to their IPv4 destination before applying the address policy; use a maintained IP parser/classifier that distinguishes globally routable addresses from private, loopback, link-local, shared, documentation and other special-use ranges.
+- Resolve both A and AAAA records and reject a hostname if any candidate is outside the permitted public address policy.
+- Pin the HTTP connection to the validated address while retaining the original hostname for Host, TLS SNI and certificate verification. Do not perform a second unchecked DNS lookup between validation and connection.
+- Re-apply the same policy to redirects, retries, fallback transports and browser navigation/resource requests. Add network-level egress restrictions for Playwright.
+- Add regression tests for IPv4-mapped IPv6, mixed public/private DNS answers, DNS changes between validation and connection, redirect chains and each supported transport.
+
+This follows the defensive guidance in the [OWASP SSRF Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html), which explicitly warns that domain allow-listing alone does not prevent DNS rebinding and recommends connecting only to validated addresses.
+
+### MEDIUM — Bot runtime dependencies are not covered by npm audit in CI
+
+**Status:** Open; missing control, not evidence that a particular dependency is currently vulnerable.
+
+The TypeScript bot workflow installs the repository-root package with npm install --no-audit and then runs type-check/tests. The dashboard workflow runs npm audit for web/frontend, and cargo audit for the Rust backend, but neither workflow audits the root bot dependency tree. That leaves the Discord bot runtime dependencies outside the automated npm advisory check currently visible in CI.
+
+**Required remediation:** add a root-package npm audit step with an agreed severity threshold, keep the frontend and Rust audits, and make the checks run on the lemegeton-v3 pull-request head. Review any reported advisory against actual usage and upgrade compatibility before changing dependencies.
+
+### LOW — Dependency resolution is not pinned in the repository
+
+**Status:** Open; reproducibility and supply-chain review gap.
+
+The inspected lemegeton-v3 tree contains no root package-lock.json, web/frontend/package-lock.json or Cargo.lock. The npm manifests use semver ranges, and the workflows use npm install. Builds and advisory results can therefore resolve to different transitive versions over time, and a reviewed dependency graph cannot be reproduced exactly from the commit alone.
+
+**Required remediation:** commit the npm lockfiles for the root bot and frontend plus the workspace Cargo.lock; use npm ci for the matching npm projects and locked Cargo commands in CI/release builds. Run [OSV-Scanner](https://google.github.io/osv-scanner/) against those lockfiles and retain the existing npm audit and cargo audit checks. OSV-Scanner's own documentation recommends resolved lockfiles for the exact dependency versions selected by an environment.
+
+### Additional hardening coverage
+
+No CodeQL or Semgrep workflow appeared in the checked-in workflow inventory. Add a source-analysis gate for TypeScript, Rust and GitHub Actions, then use narrow custom rules for the high-risk local patterns: unscoped guild database operations, privileged Discord component handlers without action-time authorization, and unvalidated URL-fetch sinks. [CodeQL's current language support](https://codeql.github.com/docs/codeql-overview/supported-languages-and-frameworks/) includes TypeScript, Rust and GitHub Actions; [Semgrep](https://github.com/semgrep/semgrep) supports custom static-analysis rules across both application languages.
+
+Use [Trivy filesystem scanning](https://trivy.dev/docs/latest/target/filesystem/) for repository/container vulnerability, secret and misconfiguration checks. Use [OWASP ZAP Baseline](https://www.zaproxy.org/docs/docker/baseline-scan/) as a passive check against an owner-controlled staging deployment; it does not perform active attacks and does not replace authorization tests. Do not run active security tests against a live system without explicit ownership and authorization.
+
+The in-memory Rust dashboard sessions and OAuth state described in Residual risks remain an operational limitation: process restarts invalidate sessions, and multiple replicas require shared session storage and distributed rate limiting. This was already documented and is not a newly discovered source flaw in this review.
+
 ## Dependency verification
 
-Tokio's minimum version is pinned to `1.54.1`, the patched release for [RUSTSEC-2026-0384](https://rustsec.org/advisories/RUSTSEC-2026-0384.html), reported in October 2026. The affected bug is a race in `tokio::time::Interval` on v1.54.0; the advisory identifies `1.54.1` as patched. [Source: RustSec](https://rustsec.org/advisories/RUSTSEC-2026-0384.html). CI runs `cargo audit` and `npm audit` against the dependency resolution for that build.
+Tokio's minimum version is pinned to `1.54.1`, the patched release for [RUSTSEC-2026-0384](https://rustsec.org/advisories/RUSTSEC-2026-0384.html), reported in October 2026. The affected bug is a race in `tokio::time::Interval` on v1.54.0; the advisory identifies `1.54.1` as patched. [Source: RustSec](https://rustsec.org/advisories/RUSTSEC-2026-0384.html). The current dashboard workflow runs `cargo audit` for Rust and `npm audit` for `web/frontend` only. The TypeScript bot workflow installs the root package with `npm install --no-audit` and does not run `npm audit` against the bot runtime dependencies. The `lemegeton-v3` tree reviewed here contains no committed root or frontend `package-lock.json` and no `Cargo.lock`, so the resolved dependency graphs are not pinned in Git.
 
 ## Residual risks and required operational checks
 
