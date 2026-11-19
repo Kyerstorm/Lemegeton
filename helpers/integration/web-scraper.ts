@@ -1,3 +1,7 @@
+import { lookup as dnsLookup } from "node:dns/promises";
+import type { LookupFunction } from "node:dns";
+import { Agent as HttpAgent } from "node:http";
+import { Agent as HttpsAgent } from "node:https";
 import { isIP } from "node:net";
 import axios from "axios";
 import { extractFromHtml } from "@extractus/article-extractor";
@@ -6,10 +10,9 @@ import { JSDOM } from "jsdom";
 import { parse as parseHtml } from "node-html-parser";
 import pLimit from "p-limit";
 import pRetry, { AbortError } from "p-retry";
-import { chromium, firefox, webkit } from "playwright";
-import type { BrowserType } from "playwright";
+import { chromium } from "playwright";
 import robotsParser from "robots-parser";
-import { request as undiciRequest } from "undici";
+import { Agent as UndiciAgent, request as undiciRequest } from "undici";
 import type { CookieJar } from "tough-cookie";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 
@@ -110,31 +113,130 @@ export type ScrapeManyResult =
 | { url: string; result: ScrapeResult }
 | { url: string; error: string; blocked: boolean };
 
+type PinnedAddress = { address: string; family: 4 | 6 };
+type LookupAll = (hostname: string) => Promise<PinnedAddress[]>;
+
+const NON_PUBLIC_IPV4_RANGES: Array<[number, number]> = [
+[0x00000000, 8], [0x0a000000, 8], [0x64400000, 10], [0x7f000000, 8],
+[0xa9fe0000, 16], [0xac100000, 12], [0xc0000000, 24], [0xc0000200, 24],
+[0xc01fc400, 24], [0xc031c100, 24], [0xc0586300, 24], [0xc0a80000, 16],
+[0xc0af3000, 24], [0xc6120000, 15], [0xc61fc400, 24], [0xc6336400, 24],
+[0xcb007100, 24], [0xe0000000, 4], [0xf0000000, 4],
+];
+
+function parseIpv4Number(value: string): number | null {
+const octets = value.split(".").map(Number);
+if (octets.length !== 4 || octets.some(octet => !Number.isInteger(octet) || octet < 0 || octet > 255)) return null;
+return (((octets[0]! << 24) | (octets[1]! << 16) | (octets[2]! << 8) | octets[3]!) >>> 0);
+}
+
+function parseIpv6Groups(value: string): number[] | null {
+let normalized = value.toLowerCase();
+if (!normalized.includes(":") || normalized.includes("%")) return null;
+const dottedTail = normalized.match(/(?:^|:)(\d{1,3}(?:\.\d{1,3}){3})$/);
+if (dottedTail) {
+const ipv4 = parseIpv4Number(dottedTail[1]!);
+if (ipv4 === null) return null;
+const first = (ipv4 >>> 16).toString(16);
+const second = (ipv4 & 0xffff).toString(16);
+normalized = normalized.slice(0, normalized.length - dottedTail[1]!.length) + first + ":" + second;
+}
+const separator = normalized.indexOf("::");
+if (separator !== -1 && normalized.indexOf("::", separator + 2) !== -1) return null;
+const leftText = separator === -1 ? normalized : normalized.slice(0, separator);
+const rightText = separator === -1 ? "" : normalized.slice(separator + 2);
+const parseSide = (side: string): number[] | null => {
+if (!side) return [];
+const groups = side.split(":");
+if (groups.some(group => !/^[0-9a-f]{1,4}$/.test(group))) return null;
+return groups.map(group => Number.parseInt(group, 16));
+};
+const left = parseSide(leftText);
+const right = parseSide(rightText);
+if (!left || !right) return null;
+const missing = 8 - left.length - right.length;
+if (separator === -1 ? missing !== 0 : missing < 1) return null;
+return [...left, ...Array<number>(missing).fill(0), ...right];
+}
+
+function isNonPublicIpv4(value: string): boolean {
+const address = parseIpv4Number(value);
+if (address === null) return true;
+return NON_PUBLIC_IPV4_RANGES.some(([network, prefix]) =>
+(address >>> (32 - prefix)) === (network >>> (32 - prefix)));
+}
+
 function isPrivateIp(hostname: string): boolean {
-const ipVersion = isIP(hostname);
-if (ipVersion === 4) {
-const octets = hostname.split(".").map(Number);
-return octets[0] === 0
-|| octets[0] === 10
-|| octets[0] === 127
-|| (octets[0] === 169 && octets[1] === 254)
-|| (octets[0] === 172 && octets[1]! >= 16 && octets[1]! <= 31)
-|| (octets[0] === 192 && octets[1] === 168)
-|| octets[0]! >= 224;
+const value = hostname.toLowerCase().replace(/^\[/, "").replace(/\]$/, "");
+const ipVersion = isIP(value);
+if (ipVersion === 4) return isNonPublicIpv4(value);
+if (ipVersion !== 6) return false;
+const groups = parseIpv6Groups(value);
+if (!groups) return true;
+
+if (groups.slice(0, 5).every(group => group === 0) && groups[5] === 0xffff) {
+const ipv4 = (((groups[6]! << 16) | groups[7]!) >>> 0);
+return isNonPublicIpv4([
+(ipv4 >>> 24) & 255, (ipv4 >>> 16) & 255, (ipv4 >>> 8) & 255, ipv4 & 255,
+].join("."));
 }
-if (ipVersion === 6) {
-const value = hostname.toLowerCase();
-return value === "::"
-|| value === "::1"
-|| value.startsWith("fc")
-|| value.startsWith("fd")
-|| value.startsWith("fe8")
-|| value.startsWith("fe9")
-|| value.startsWith("fea")
-|| value.startsWith("feb")
-|| value.startsWith("ff");
-}
+if (groups.slice(0, 6).every(group => group === 0)) return true;
+
+const first = groups[0]!;
+const second = groups[1]!;
+if ((first & 0xe000) !== 0x2000) return true;
+if (first === 0x2001 && (second & 0xfe00) === 0) return true;
+if (first === 0x2001 && second === 0x0db8) return true;
+if (first === 0x2002) return true;
+if (first === 0x3fff && (second & 0xf000) === 0) return true;
+if (first === 0x0064 && second === 0xff9b) return true;
 return false;
+}
+
+async function systemLookupAll(hostname: string): Promise<PinnedAddress[]> {
+const answers = await dnsLookup(hostname, { all: true, verbatim: true });
+return answers.map(answer => ({ address: answer.address, family: answer.family as 4 | 6 }));
+}
+
+export async function resolvePublicAddresses(hostname: string, lookupAll: LookupAll = systemLookupAll): Promise<PinnedAddress[]> {
+const normalized = hostname.toLowerCase().replace(/^\[/, "").replace(/\]$/, "").replace(/\.$/, "");
+const family = isIP(normalized);
+if (family) {
+if (isPrivateIp(normalized)) throw new ScrapeBlockedError("The target address is private or reserved.");
+return [{ address: normalized, family: family as 4 | 6 }];
+}
+
+let answers: PinnedAddress[];
+try {
+answers = await lookupAll(normalized);
+} catch {
+throw new ScrapeRequestError("The target hostname could not be resolved safely.");
+}
+if (!answers.length || answers.some(answer => isPrivateIp(answer.address))) {
+throw new ScrapeBlockedError("The target hostname resolves to a private or reserved address.");
+}
+return [...new Map(answers.map(answer => [answer.address + "/" + answer.family, answer])).values()];
+}
+
+function createPinnedLookup(hostname: string, addresses: PinnedAddress[]): LookupFunction {
+const expectedHost = hostname.toLowerCase().replace(/^\[/, "").replace(/\]$/, "").replace(/\.$/, "");
+const lookup = (
+requestedHost: string,
+options: number | { family?: number; all?: boolean },
+callback: (...args: unknown[]) => void,
+): void => {
+const normalizedHost = requestedHost.toLowerCase().replace(/^\[/, "").replace(/\]$/, "").replace(/\.$/, "");
+const family = typeof options === "number" ? options : options.family;
+const candidates = addresses.filter(address =>
+(!family || family === 0 || address.family === family) && normalizedHost === expectedHost);
+if (!candidates.length) {
+callback(Object.assign(new Error("No validated address is available for this hostname."), { code: "ENOTFOUND" }), "", 0);
+return;
+}
+if (typeof options === "object" && options.all) callback(null, candidates);
+else callback(null, candidates[0]!.address, candidates[0]!.family);
+};
+return lookup as unknown as LookupFunction;
 }
 
 export function validatePublicHttpUrl(value: string): URL {
@@ -257,6 +359,7 @@ async function requestResource(
   options: ScrapeOptions,
   timeoutMs: number,
   maxBytes: number,
+  addresses?: PinnedAddress[],
 ): Promise<ResourceResponse> {
   const headers: Record<string, string> = {
     "User-Agent": DEFAULT_USER_AGENT,
@@ -269,66 +372,91 @@ async function requestResource(
   }
 
   const method = options.method ?? "GET";
+  const parsed = new URL(input);
+  const hostname = parsed.hostname.replace(/^\[/, "").replace(/\]$/, "").replace(/\.$/, "");
+  const pinnedLookup = addresses ? createPinnedLookup(hostname, addresses) : undefined;
   let result: ResourceResponse;
   if (options.fetchImpl || options.httpClient === "fetch" || !options.httpClient) {
-    const response = await (options.fetchImpl ?? fetch)(input, {
-      method,
-      ...(options.body !== undefined ? { body: options.body } : {}),
-      redirect: "manual",
-      headers,
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    result = {
-      url: input,
-      status: response.status,
-      headers: response.headers,
-      text: await readBoundedBody(response, maxBytes),
-    };
+    const dispatcher = pinnedLookup ? new UndiciAgent({ connect: { lookup: pinnedLookup } }) : undefined;
+    try {
+      const init: RequestInit & { dispatcher?: UndiciAgent } = {
+        method,
+        ...(options.body !== undefined ? { body: options.body } : {}),
+        redirect: "manual",
+        headers,
+        signal: AbortSignal.timeout(timeoutMs),
+        ...(dispatcher ? { dispatcher } : {}),
+      };
+      const response = await (options.fetchImpl ?? fetch)(input, init);
+      result = {
+        url: input,
+        status: response.status,
+        headers: response.headers,
+        text: await readBoundedBody(response, maxBytes),
+      };
+    } finally {
+      await dispatcher?.close();
+    }
   } else if (options.httpClient === "undici") {
     const body = options.body instanceof URLSearchParams
       ? options.body.toString()
       : options.body as string | Uint8Array | undefined;
-    const response = await undiciRequest(input, {
-      method,
-      headers,
-      ...(body !== undefined ? { body } : {}),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    result = {
-      url: input,
-      status: response.statusCode,
-      headers: normalizeResponseHeaders(response.headers as Record<string, string | string[] | undefined>),
-      text: await readBoundedStream(response.body, maxBytes),
-    };
+    const dispatcher = pinnedLookup ? new UndiciAgent({ connect: { lookup: pinnedLookup } }) : undefined;
+    try {
+      const response = await undiciRequest(input, {
+        method,
+        headers,
+        ...(body !== undefined ? { body } : {}),
+        signal: AbortSignal.timeout(timeoutMs),
+        ...(dispatcher ? { dispatcher } : {}),
+      });
+      result = {
+        url: input,
+        status: response.statusCode,
+        headers: normalizeResponseHeaders(response.headers as Record<string, string | string[] | undefined>),
+        text: await readBoundedStream(response.body, maxBytes),
+      };
+    } finally {
+      await dispatcher?.close();
+    }
   } else {
-    const response = await axios.request<ArrayBuffer>({
-      url: input,
-      method,
-      ...(options.body !== undefined ? { data: options.body } : {}),
-      headers,
-      responseType: "arraybuffer",
-      maxRedirects: 0,
-      maxContentLength: maxBytes,
-      maxBodyLength: maxBytes,
-      timeout: timeoutMs,
-      signal: AbortSignal.timeout(timeoutMs),
-      validateStatus: () => true,
-    });
-    const rawHeaders: Record<string, string | string[] | number | undefined> = {};
-    for (const [name, value] of Object.entries(response.headers)) {
-      if (value === undefined) continue;
-      rawHeaders[name] = value as string | string[] | number;
+    const httpAgent = pinnedLookup ? new HttpAgent({ lookup: pinnedLookup, keepAlive: false }) : undefined;
+    const httpsAgent = pinnedLookup ? new HttpsAgent({ lookup: pinnedLookup, keepAlive: false }) : undefined;
+    try {
+      const response = await axios.request<ArrayBuffer>({
+        url: input,
+        method,
+        ...(options.body !== undefined ? { data: options.body } : {}),
+        headers,
+        responseType: "arraybuffer",
+        maxRedirects: 0,
+        maxContentLength: maxBytes,
+        maxBodyLength: maxBytes,
+        timeout: timeoutMs,
+        signal: AbortSignal.timeout(timeoutMs),
+        validateStatus: () => true,
+        proxy: false,
+        ...(httpAgent ? { httpAgent, httpsAgent } : {}),
+      });
+      const rawHeaders: Record<string, string | string[] | number | undefined> = {};
+      for (const [name, value] of Object.entries(response.headers)) {
+        if (value === undefined) continue;
+        rawHeaders[name] = value as string | string[] | number;
+      }
+      const bytes = Buffer.from(response.data);
+      if (bytes.byteLength > maxBytes) {
+        throw new ScrapeRequestError("The response exceeded the " + maxBytes + "-byte limit.");
+      }
+      result = {
+        url: input,
+        status: response.status,
+        headers: normalizeResponseHeaders(rawHeaders),
+        text: bytes.toString("utf8"),
+      };
+    } finally {
+      httpAgent?.destroy();
+      httpsAgent?.destroy();
     }
-    const bytes = Buffer.from(response.data);
-    if (bytes.byteLength > maxBytes) {
-      throw new ScrapeRequestError("The response exceeded the " + maxBytes + "-byte limit.");
-    }
-    result = {
-      url: input,
-      status: response.status,
-      headers: normalizeResponseHeaders(rawHeaders),
-      text: bytes.toString("utf8"),
-    };
   }
 
   if (options.cookieJar) {
@@ -351,6 +479,9 @@ async function fetchResource(
   const maxBytes = options.maxResponseBytes ?? options.maxBytes ?? MAX_RESPONSE_BYTES;
 
   for (let redirects = 0; redirects <= 5; redirects++) {
+    const addresses = options.fetchImpl
+      ? undefined
+      : await resolvePublicAddresses(current.hostname);
     let attempts = 0;
     let redirected = false;
     while (attempts <= retries) {
@@ -359,7 +490,7 @@ async function fetchResource(
         response = await pRetry(async () => {
           attempts += 1;
           try {
-            return await requestResource(current.toString(), options, timeoutMs, maxBytes);
+            return await requestResource(current.toString(), options, timeoutMs, maxBytes, addresses);
           } catch (error) {
             if (error instanceof ScrapeError || error instanceof TypeError) {
               throw new AbortError(error);
@@ -692,36 +823,46 @@ return result;
 }
 
 async function fetchBrowserPage(url: string, options: ScrapeOptions): Promise<ScrapeResult> {
-  const engine = options.browserEngine ?? "chromium";
-  const browserType: BrowserType = engine === "firefox" ? firefox : engine === "webkit" ? webkit : chromium;
-  const endpoint = process.env.BROWSER_WS_ENDPOINT;
-  const browser = endpoint
-    ? engine === "chromium"
-      ? await chromium.connectOverCDP(endpoint)
-      : await browserType.connect(endpoint)
-    : await browserType.launch({
-      headless: true,
-      ...(engine === "chromium" && process.env.CHROMIUM_EXECUTABLE_PATH
-        ? { executablePath: process.env.CHROMIUM_EXECUTABLE_PATH }
-        : {}),
-      ...(engine === "chromium" ? { args: ["--no-sandbox", "--disable-dev-shm-usage"] } : {}),
-    });
+  const initialUrl = validatePublicHttpUrl(url);
+  const initialHostname = initialUrl.hostname.replace(/^\[/, "").replace(/\]$/, "").replace(/\.$/, "");
+  if (options.browserEngine && options.browserEngine !== "chromium") {
+    throw new ScrapeRequestError("Only Chromium is supported for browser scraping with pinned DNS.");
+  }
+  if (process.env.BROWSER_WS_ENDPOINT) {
+    throw new ScrapeRequestError("Remote browser endpoints cannot guarantee the required pinned-DNS policy.");
+  }
+  const addresses = await resolvePublicAddresses(initialHostname);
+  const browserAddress = addresses.find(address => address.family === 4);
+  if (!isIP(initialHostname) && !browserAddress) {
+    throw new ScrapeRequestError("Browser scraping requires a validated public IPv4 address for DNS pinning.");
+  }
+  const resolverRule = isIP(initialHostname)
+    ? "--host-resolver-rules=EXCLUDE localhost"
+    : "--host-resolver-rules=MAP " + initialHostname + " " + browserAddress!.address + ",EXCLUDE localhost";
+  const browser = await chromium.launch({
+    headless: true,
+    ...(process.env.CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.CHROMIUM_EXECUTABLE_PATH } : {}),
+    args: ["--no-sandbox", "--disable-dev-shm-usage", "--dns-prefetch-disable", resolverRule],
+  });
   const context = await browser.newContext({ userAgent: DEFAULT_USER_AGENT, serviceWorkers: "block" });
   try {
     const page = await context.newPage();
     await page.route("**/*", async route => {
-      const request = route.request();
-      const requestUrl = request.url();
-      if (!requestUrl.startsWith("http://") && !requestUrl.startsWith("https://")) {
+      const requestUrl = route.request().url();
+      if (requestUrl.startsWith("data:") || requestUrl.startsWith("blob:")) {
         await route.continue();
         return;
       }
-      if (["image", "font", "media"].includes(request.resourceType())) {
-        await route.abort();
-        return;
-      }
       try {
-        validatePublicHttpUrl(requestUrl);
+        const requestTarget = validatePublicHttpUrl(requestUrl);
+        if (requestTarget.hostname.replace(/^\[/, "").replace(/\]$/, "").replace(/\.$/, "") !== initialHostname) {
+          await route.abort();
+          return;
+        }
+        if (["image", "font", "media"].includes(route.request().resourceType())) {
+          await route.abort();
+          return;
+        }
         await route.continue();
       } catch {
         await route.abort();
@@ -738,8 +879,11 @@ async function fetchBrowserPage(url: string, options: ScrapeOptions): Promise<Sc
     if (response.status() < 200 || response.status() >= 300) {
       throw new ScrapeRequestError("Browser navigation returned HTTP " + response.status() + ".");
     }
-    const finalUrl = validatePublicHttpUrl(page.url()).toString();
-    return await extractPageData(finalUrl, html, response.status(), "playwright", options);
+    const finalUrl = validatePublicHttpUrl(page.url());
+    if (finalUrl.hostname.replace(/^\[/, "").replace(/\]$/, "").replace(/\.$/, "") !== initialHostname) {
+      throw new ScrapeBlockedError("Browser navigation changed to an unpinned hostname.");
+    }
+    return await extractPageData(finalUrl.toString(), html, response.status(), "playwright", options);
   } finally {
     await context.close();
     await browser.close();
