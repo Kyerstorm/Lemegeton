@@ -69,6 +69,13 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Audit bot runtime dependencies
         run: npm audit --audit-level=high
+      - name: Compile and run focused scraper tests
+        run: |
+          set -eu
+          rm -rf .scraper-test-dist
+          npx tsc --target ES2022 --module NodeNext --moduleResolution NodeNext --lib ES2022,DOM --strict --noUncheckedIndexedAccess --noImplicitOverride --skipLibCheck --esModuleInterop --verbatimModuleSyntax --rootDir . --outDir .scraper-test-dist tests/web-scraper.test.ts
+          node --test .scraper-test-dist/tests/web-scraper.test.js
+          rm -rf .scraper-test-dist
       - name: Type-check
         run: npm run typecheck
       - name: Validate live acceptance scripts and workflow syntax
