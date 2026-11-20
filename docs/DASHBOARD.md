@@ -70,10 +70,10 @@ The TypeScript workflow runs the bot tests against its PostgreSQL 16 service con
 
 ## Operational notes
 
-- Rust sessions and OAuth state are held in process memory. Restarting the service invalidates dashboard sessions; this deployment mode expects one Rust dashboard instance. Use a shared session store before scaling horizontally.
+- Rust dashboard sessions, single-use OAuth state, write/OAuth rate events and Discord refresh-token leases are stored in SQLite. All dashboard instances on one host must use the same local file. WAL permits concurrent readers and serializes writers; it is not suitable for network filesystems or sharing across hosts. Keep the database on local persistent storage with its directory restricted to the dashboard service user.
 - Gateway status from the TypeScript bridge is reported as online, degraded (ready but at least 500 ms latency), offline (a previously ready connection is no longer ready), or connecting (ready has not yet been observed). If the bot bridge is down, status is unknown with the last in-memory observation where available. Command mutations fail instead of returning optimistic success.
 - Application command visibility in Discord is distinct from command execution. The v3 bridge publishes the consolidated global command registry; it is not a per-guild command registrar and does not promise to retain unrelated legacy application commands outside that registry.
-- Database and audit writes reuse the existing configuration tables in PostgreSQL. No competing dashboard database is introduced.
+- PostgreSQL remains authoritative for bot, guild configuration, archive, community and media data. SQLite is a small secondary store only for Rust dashboard session/OAuth/rate-limit coordination; it is not a second bot database or a PostgreSQL replacement.
 - If the dashboard sign-in button fails, verify the application ID, client secret, exact callback URL, public origin, and secure-cookie setting. If login works but command data is unavailable, verify the bridge secret matches, the TypeScript bridge is listening on loopback port 8091, and the bot process can reach PostgreSQL.
 
 ## Production deployment: VPS, systemd, and Nginx
@@ -88,7 +88,7 @@ The example is designed for a single VPS instance. Sessions and OAuth states are
 
 A minimal Docker deployment is provided by `Dockerfile`, `.dockerignore`, and `docker-compose.yml`. It builds the TypeScript bundle and Rust release binary in separate build stages, runs as a non-root user, drops Linux capabilities, applies `no-new-privileges`, and publishes port 8080 only on the host loopback interface for a host-level reverse proxy. Create the bind-mounted `data`, `logs`, and `runtime-home` directories and set their ownership to UID/GID `10001` before starting it. Keep `.env` out of the image and readable only by the Docker operator.
 
-The combined container uses `scripts/start.sh` to supervise the compiled TypeScript bot and Rust dashboard. The TypeScript bot serves the private Custom Roles picker assets and bridge; the Rust service reverse-proxies the picker. For stronger process isolation on a VPS, use the separate systemd services and keep both private listeners on loopback.
+The combined container uses `scripts/start.sh` to supervise the compiled TypeScript bot and Rust dashboard. Dashboard state is persisted at `/app/data/dashboard/sessions.sqlite` on the existing data volume; the startup script applies a restrictive umask. The TypeScript bot serves the private Custom Roles picker assets and bridge; the Rust service reverse-proxies the picker. For stronger process isolation on a VPS, use the separate systemd services and keep both private listeners on loopback.
 
 ## Security and dependency checks
 

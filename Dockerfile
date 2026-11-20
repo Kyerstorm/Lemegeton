@@ -32,7 +32,8 @@ ENV NODE_ENV=production \
     TMPDIR=/tmp \
     DASHBOARD_HOST=0.0.0.0 \
     DASHBOARD_ALLOW_PUBLIC_BIND=true \
-    DASHBOARD_PORT=8080
+    DASHBOARD_PORT=8080 \
+    DASHBOARD_SESSION_DB_PATH=/app/data/dashboard/sessions.sqlite
 RUN apt-get update \
     && apt-get install -y --no-install-recommends bash ca-certificates postgresql-client \
     && rm -rf /var/lib/apt/lists/* \
@@ -51,5 +52,5 @@ RUN chmod 0755 /app/scripts/start.sh \
 USER 10001:10001
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:8080/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 ENTRYPOINT ["/app/scripts/start.sh"]

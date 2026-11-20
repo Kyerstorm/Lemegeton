@@ -9,8 +9,11 @@ User=lemegeton-dashboard
 Group=lemegeton-dashboard
 SupplementaryGroups=lemegeton-read
 WorkingDirectory=/opt/lemegeton
+StateDirectory=lemegeton-dashboard
+StateDirectoryMode=0700
 EnvironmentFile=/etc/lemegeton/dashboard.env
 Environment=HOME=/nonexistent
+Environment=DASHBOARD_SESSION_DB_PATH=/var/lib/lemegeton-dashboard/sessions.sqlite
 ExecStart=/opt/lemegeton/target/release/lemegeton-dashboard
 Restart=on-failure
 RestartSec=5s
