@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1120" viewBox="0 0 1600 1120" role="img" aria-labelledby="title description">
+  <title id="title">Lemegeton v3 system architecture</title>
+  <desc id="description">Discord interactions flow through the TypeScript bot, command environments, and shared helpers. Helpers use PostgreSQL, external metadata providers, and optional S3 storage. The Next.js dashboard communicates with the same bot through a private Rust and HTTP bridge.</desc>
+  <defs>
+    <linearGradient id="surface" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1b1c20"/>
+      <stop offset="1" stop-color="#111215"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#c7ae85"/>
+      <stop offset="1" stop-color="#82735d"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0 0 L9 4.5 L0 9 Z" fill="#bba47f"/>
+    </marker>
+    <style>
+      .bg{fill:#090a0c}
+      .panel{fill:url(#surface);stroke:#35363b;stroke-width:1.5}
+      .eyebrow{fill:#a99a81;font:600 13px Inter,Arial,sans-serif;letter-spacing:3px}
+      .heading{fill:#f0eee8;font:600 29px Inter,Arial,sans-serif;letter-spacing:4px}
+      .title{fill:#f0eee8;font:600 23px Inter,Arial,sans-serif}
+      .path{fill:#c8b18b;font:600 16px Inter,Arial,sans-serif}
+      .body{fill:#c0beb8;font:16px Inter,Arial,sans-serif}
+      .muted{fill:#8b8a85;font:14px Inter,Arial,sans-serif}
+      .rule{stroke:#45413a;stroke-width:1}
+      .line{fill:none;stroke:#bba47f;stroke-width:2;marker-end:url(#arrow)}
+      .dash{fill:none;stroke:#bba47f;stroke-width:2;stroke-dasharray:7 7;marker-end:url(#arrow)}
+      .chip{fill:#24242a;stroke:#49443a;stroke-width:1}
+      .chiptext{fill:#d9d2c5;font:14px Inter,Arial,sans-serif}
+    </style>
+  </defs>
+
+  <rect class="bg" width="1600" height="1120" rx="28"/>
+  <circle cx="1490" cy="85" r="130" fill="#c6a879" opacity=".035"/>
+  <circle cx="55" cy="1035" r="190" fill="#c6a879" opacity=".025"/>
+
+  <text x="72" y="78" class="eyebrow">LEMEGETON / MULTI-GUILD</text>
+  <text x="72" y="126" class="heading">SYSTEM ARCHITECTURE</text>
+  <text x="1528" y="92" class="muted" text-anchor="end">V3 SOURCE MAP</text>
+  <path d="M72 158 H1528" class="rule"/>
+
+  <!-- Discord execution path -->
+  <rect x="72" y="210" width="310" height="270" rx="18" class="panel"/>
+  <text x="102" y="252" class="eyebrow">01 / ENTRY</text>
+  <text x="102" y="295" class="title">Discord</text>
+  <path d="M102 316 H352" class="rule"/>
+  <text x="102" y="358" class="body">Guild members and moderators</text>
+  <text x="102" y="395" class="body">Commands · buttons · modals</text>
+  <text x="102" y="432" class="body">Guild and actor context</text>
+  <text x="102" y="460" class="muted">One Discord gateway</text>
+
+  <rect x="430" y="210" width="310" height="270" rx="18" class="panel"/>
+  <text x="460" y="252" class="eyebrow">02 / RUNTIME</text>
+  <text x="460" y="295" class="title">TypeScript bot</text>
+  <path d="M460 316 H710" class="rule"/>
+  <text x="460" y="358" class="path">bot.ts</text>
+  <text x="460" y="395" class="body">Node.js 22 · discord.js</text>
+  <text x="460" y="432" class="body">Events · workers · lifecycle</text>
+  <text x="460" y="460" class="muted">Owns the live client and gateway</text>
+
+  <rect x="788" y="210" width="330" height="270" rx="18" class="panel"/>
+  <text x="818" y="252" class="eyebrow">03 / COMMAND SURFACE</text>
+  <text x="818" y="295" class="title">Feature environments</text>
+  <path d="M818 316 H1088" class="rule"/>
+  <text x="818" y="354" class="path">src/commands/</text>
+  <text x="818" y="384" class="body">Discover · Archive · Community</text>
+  <text x="818" y="414" class="body">Play · Profile · Custom Role</text>
+  <text x="818" y="444" class="body">Settings · Language · Music</text>
+  <text x="818" y="466" class="muted">Separate help · privacy · feedback</text>
+
+  <rect x="1166" y="210" width="362" height="270" rx="18" class="panel"/>
+  <text x="1196" y="252" class="eyebrow">04 / DOMAIN SERVICES</text>
+  <text x="1196" y="295" class="title">Shared helpers</text>
+  <path d="M1196 316 H1498" class="rule"/>
+  <text x="1196" y="354" class="path">helpers/</text>
+  <text x="1196" y="384" class="body">Providers · media · archive</text>
+  <text x="1196" y="414" class="body">Community · runtime · security</text>
+  <text x="1196" y="444" class="body">Storage · validation · embeds</text>
+  <text x="1196" y="466" class="muted">Reusable logic outside callbacks</text>
+
+  <path d="M382 345 H418" class="line"/>
+  <path d="M740 345 H776" class="line"/>
+  <path d="M1118 345 H1154" class="line"/>
+
+  <!-- Guild scope -->
+  <rect x="430" y="520" width="1098" height="72" rx="14" fill="#191815" stroke="#716044" stroke-width="1.2"/>
+  <circle cx="466" cy="556" r="7" fill="#c7ae85"/>
+  <text x="490" y="551" class="path">GUILD CONTEXT</text>
+  <text x="490" y="575" class="body">Server-owned settings, privacy choices, activity, and moderation remain scoped to the invoking guild.</text>
+
+  <!-- Supporting services -->
+  <rect x="72" y="640" width="450" height="176" rx="18" class="panel"/>
+  <text x="102" y="680" class="eyebrow">PERSISTENCE</text>
+  <text x="102" y="722" class="title">PostgreSQL</text>
+  <text x="102" y="759" class="path">database.ts</text>
+  <text x="102" y="790" class="muted">Shared pool · transactions · guild records</text>
+
+  <rect x="575" y="640" width="450" height="176" rx="18" class="panel"/>
+  <text x="605" y="680" class="eyebrow">EXTERNAL METADATA</text>
+  <text x="605" y="722" class="title">Provider adapters</text>
+  <text x="605" y="759" class="body">AniList · TMDB · Books · IGDB · Steam</text>
+  <text x="605" y="790" class="muted">Manga · webnovel · music · translation sources</text>
+
+  <rect x="1078" y="640" width="450" height="176" rx="18" class="panel"/>
+  <text x="1108" y="680" class="eyebrow">MEDIA OBJECTS</text>
+  <text x="1108" y="722" class="title">S3-compatible storage</text>
+  <text x="1108" y="759" class="body">Configured private originals</text>
+  <text x="1108" y="790" class="muted">Separate public output where explicitly enabled</text>
+
+  <path d="M1347 480 V610 H297 V630" class="line"/>
+  <path d="M1347 480 V610 H800 V630" class="line"/>
+  <path d="M1347 480 V630" class="line"/>
+
+  <!-- Optional dashboard control plane -->
+  <rect x="72" y="872" width="1456" height="184" rx="20" fill="#121316" stroke="#45413a" stroke-width="1.4"/>
+  <text x="102" y="912" class="eyebrow">OPTIONAL WEB CONTROL PLANE</text>
+  <text x="1498" y="912" class="muted" text-anchor="end">NOT A SECOND DISCORD GATEWAY</text>
+
+  <rect x="102" y="940" width="280" height="82" rx="12" class="chip"/>
+  <text x="124" y="973" class="title">Browser</text>
+  <text x="124" y="1000" class="muted">Guild administrator</text>
+
+  <rect x="462" y="940" width="280" height="82" rx="12" class="chip"/>
+  <text x="484" y="973" class="title">Next.js</text>
+  <text x="484" y="1000" class="muted">web/frontend/</text>
+
+  <rect x="822" y="940" width="280" height="82" rx="12" class="chip"/>
+  <text x="844" y="973" class="title">Rust / Axum</text>
+  <text x="844" y="1000" class="muted">web/backend/</text>
+
+  <rect x="1182" y="940" width="316" height="82" rx="12" class="chip"/>
+  <text x="1204" y="973" class="title">Private bot bridge</text>
+  <text x="1204" y="1000" class="muted">helpers/runtime/</text>
+
+  <path d="M382 981 H450" class="line"/>
+  <path d="M742 981 H810" class="line"/>
+  <path d="M1102 981 H1170" class="line"/>
+  <path d="M1340 940 V850 H585 V490" class="dash"/>
+</svg>

@@ -1,211 +1,169 @@
 <div align="center">
 
-# L E M E G E T O N
+<img src="assets/icons/lemegeton.svg" alt="Lemegeton emblem" width="132" />
 
-[![Node.js](https://img.shields.io/badge/Node.js-22.9+-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+<h1>LEME<br />GETON</h1>
+
+<p><strong>MEDIA INTELLIGENCE · COMMUNITY · CONNECTION</strong></p>
+<p>A Discord-native home for discovering media, connecting knowledge, and building communities.</p>
+
+<p>
+  <a href="docs/README.md">DOCUMENTATION</a>
+  &nbsp;·&nbsp;
+  <a href="docs/ARCHITECTURE.md">ARCHITECTURE</a>
+  &nbsp;·&nbsp;
+  <a href="CONTRIBUTING.md">CONTRIBUTE</a>
+  &nbsp;·&nbsp;
+  <a href="SECURITY.md">SECURITY</a>
+</p>
+
+[![Bot CI](https://github.com/Kyerstorm/Lemegeton/actions/workflows/ci-bot.yml/badge.svg?branch=lemegeton-v3)](https://github.com/Kyerstorm/Lemegeton/actions/workflows/ci-bot.yml)
+[![Node.js](https://img.shields.io/badge/Node.js-22.9%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![discord.js](https://img.shields.io/badge/discord.js-14-5865F2?logo=discord&logoColor=white)](https://discord.js.org/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
-[![Dashboard](https://img.shields.io/badge/Dashboard-Rust%20%2B%20Next.js-8B5CF6)](docs/DASHBOARD.md)
-[![License](https://img.shields.io/badge/License-MIT-4CAF50)](docs/LICENSE)
-
-### One Discord bot. Many media worlds. One connected community layer.
-
-Discover anime, manga, novels, webnovels, films, television, and video games, then explore source-attributed connections and community features across servers.
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%2B-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Dashboard](https://img.shields.io/badge/Dashboard-Next.js%20%2B%20Rust-8B7355)](docs/DASHBOARD.md)
+[![License](https://img.shields.io/badge/License-MIT-8a806e)](docs/LICENSE)
 
 </div>
 
 ---
 
-## What Lemegeton does
+## The project
 
-Lemegeton is a multi-guild Discord bot focused on media discovery, recommendations, information, and community features.
+Lemegeton is a multi-guild Discord bot for media discovery and community participation. It brings related media, shared resources, community activities, and server configuration into one connected experience.
 
-- **Media discovery:** category-aware search and metadata from AniList, TMDB, Google Books, IGDB, and Steam where supported.
-- **Community:** server-scoped archives, rankings, Daily Drops, sessions, discussions, and media games.
-- **Profiles:** supported AniList and Steam connections, privacy controls, and server-local comparisons.
-- **Custom Roles:** server configuration, member role controls, icons, and the private role picker.
-- **Operations:** settings, diagnostic issue references, moderator tools, and an optional web dashboard.
+| Discover | Contribute | Participate | Shape your server |
+|:--|:--|:--|:--|
+| Anime, manga, books, novels, webnovels, film, television, and games | Curated archives, knowledge links, and shared collections | Daily Drops, rankings, sessions, discussions, and media games | Guild settings, language, retention, themes, and Custom Roles |
 
-Slash commands and their components are intended to be used in a Discord server, not in direct messages. Feature availability and stored community data are scoped by guild.
+Recommendations, provider-declared relationships, local matches, and community-reviewed links remain distinct. A suggestion is never presented as proof of an adaptation or shared continuity.
 
-## Command map
+## Command environments
 
-| Command | Purpose |
-|---|---|
-| /discover | Search and explore supported media categories |
-| /archive | Browse, submit, curate, and moderate community archive content |
-| /community | Rankings, Daily Drops, sessions, discussions, and calendar |
-| /play | Source-backed media quiz games |
-| /profile | AniList/Steam connections, privacy, and server comparisons |
-| /custom-role | Member Custom Roles and server administration |
-| /settings | Configure supported features for the current server |
-| /planned | Browse the development plan and moderator controls |
-| /feedback | Submit ideas or report bugs with an optional issue reference |
-| /log | Retrieve a server-scoped diagnostic record (bot moderators only) |
-| /moderators | Manage the bot-wide moderator list (restricted to the configured moderator server) |
-| /help, /privacy | Standalone help and privacy information |
-| /timestamp, /invite, /convertlinks | Server utility commands |
+| Command | What it opens |
+|:--|:--|
+| `/discover` | Search, browse, compare, and explore supported media |
+| `/archive` | Submit, curate, organise, and discover community resources |
+| `/community` | Daily activities, rankings, sessions, discussions, and events |
+| `/play` | Interactive media quizzes and group games |
+| `/profile` | Provider connections, profiles, privacy, and community comparisons |
+| `/custom-role` | Member Custom Roles and server-side management |
+| `/settings` | Guild configuration and protected server controls |
+| `/music` | Guild-scoped artist releases and notification controls |
 
-An error that is captured by the diagnostic handler receives a copyable SHA-512 issue reference. Include it in /feedback; authorized bot moderators can inspect the corresponding record with /log. Diagnostic details redact common credential fields.
+`/language` is part of required server setup. A guild must configure both its language and data-retention choice before normal feature commands and dashboard guild routes become available.
+
+`/help`, `/privacy`, and `/feedback` remain standalone commands. Restricted operator commands and utilities are documented in the command registry and help interface.
 
 ## Architecture
 
-~~~mermaid
-flowchart TB
-    Discord[Discord guild interactions] --> Bot[TypeScript / discord.js runtime]
-    Bot --> Commands[Registered command handlers]
-    Commands --> Providers[AniList / TMDB / Books / IGDB / Steam]
-    Commands --> Database[(PostgreSQL)]
-    Commands --> Objects[(S3-compatible media storage)]
-    Dashboard[Next.js dashboard] --> Rust[Rust / Axum control plane]
-    Rust --> Bridge[Private TypeScript bot bridge]
-    Bridge --> Bot
-~~~
+<p align="center">
+  <img src="assets/architecture.svg" alt="Lemegeton architecture: Discord interactions enter the TypeScript bot, pass through command environments and shared helpers, and use PostgreSQL, metadata providers, and optional S3 storage. The optional Next.js and Rust dashboard connects to the same bot through a private bridge." width="100%" />
+</p>
 
-- **Bot runtime:** Node.js 22+, TypeScript, and discord.js.
-- **Persistence:** PostgreSQL through the shared TypeScript database layer.
-- **Media storage:** configured S3-compatible storage for supported private/public assets.
-- **Dashboard:** Next.js frontend and Rust/Axum API. The Rust service handles Discord OAuth, browser sessions, and guild authorization; its private bridge talks to the running TypeScript bot.
-- **Custom Role picker:** a TypeScript service behind the dashboard's Rust proxy.
+The diagram is a static, versioned SVG built from the current source layout. It does not depend on a Mermaid renderer. See the [architecture guide](docs/ARCHITECTURE.md) for execution flow, service boundaries, and the source map.
 
-The dashboard is a control plane for the same running bot, not a second Discord gateway. It does not expose arbitrary shell execution or raw SQL controls.
+## Integrations
 
-## Getting started
+Provider-specific adapters keep metadata and source coverage explicit. The current integration layer includes AniList, Kitsu, MangaDex, Open Library, Google Books, Crossref, Royal Road, TMDB, IGDB, Steam, translation providers, and public webnovel discovery.
 
-### Requirements
+The optional music-release environment uses Spotify, YouTube Data API, and SoundCloud where the corresponding credentials and public endpoints are available. Optional S3-compatible storage handles configured media assets.
 
-- Node.js 22.9 or newer and npm.
-- PostgreSQL.
-- A Discord application and bot token.
-- Rust and Cargo for the optional dashboard backend.
-- Optional provider, S3, and OAuth credentials for the features being enabled.
+Provider availability and fields differ. Missing metadata, unavailable credentials, or blocked public pages are reported as unavailable rather than filled with invented information.
 
-### Install
+## Get started
 
-~~~bash
+**Requirements:** Node.js 22.9+, npm, PostgreSQL, and a Discord application. Rust/Cargo and dashboard dependencies are required only when building the web dashboard.
+
+```bash
 git clone https://github.com/Kyerstorm/Lemegeton.git
 cd Lemegeton
 npm install --no-audit --no-fund
 cp .env.example .env
-~~~
+```
 
-On Windows PowerShell, use Copy-Item .env.example .env. Configure the required Discord and PostgreSQL settings in .env. Add only the provider and dashboard credentials you intend to use. Never commit environment files or real tokens.
+Configure the Discord application credentials and PostgreSQL connection in `.env`. Add provider, S3, and dashboard credentials only for the features you intend to run. Never commit a populated environment file.
 
-### Build and run the bot
-
-~~~bash
+```bash
 npm run typecheck
 npm test
 npm start
-~~~
+```
 
-npm test builds the TypeScript project into dist/ before running the Node.js test suite. npm start launches dist/bot.js and loads .env when present.
+Register slash commands with:
 
-To deploy the slash command definitions:
-
-~~~bash
+```bash
 npm run deploy:commands
-~~~
+```
 
-### Build and run the combined deployment
-
-The combined startup script runs the compiled TypeScript bot and Rust dashboard:
-
-~~~bash
-npm install --prefix web/frontend --no-audit --no-fund
-npm run typecheck --prefix web/frontend
-npm run build --prefix web/frontend
-cargo build --manifest-path web/backend/Cargo.toml --release
-./scripts/start.sh
-~~~
-
-The startup script checks for dist/bot.js, the Next.js static export, and the Rust dashboard executable. It builds the TypeScript bot if its compiled output is missing and its dependencies are installed.
-
-Docker and Railway use the same TypeScript/Rust runtime contract. For VPS deployment, use the separate hardened systemd services and Nginx configuration in deploy/vps/README.md.
+For the combined bot and dashboard deployment, follow the [dashboard guide](docs/DASHBOARD.md) and [VPS deployment guide](deploy/vps/README.md). The combined startup script expects the built Next.js export and Rust dashboard binary; `npm start` runs the bot independently.
 
 ## Configuration
 
-.env.example is the environment-variable template. The main groups include:
+The complete variable list, defaults, and comments live in [`.env.example`](.env.example). The main groups are:
 
-| Variables | Purpose |
-|---|---|
-| DISCORD_TOKEN, BOT_ID / DISCORD_CLIENT_ID | Discord application authentication |
-| DATABASE_URL / PostgreSQL connection variables | Shared PostgreSQL connection |
-| ANILIST_API_URL, ANILIST_API_TIMEOUT | AniList client |
-| TMDB_BEARER_TOKEN | TMDB metadata |
-| IGDB_CLIENT_ID, IGDB_CLIENT_SECRET | IGDB metadata |
-| STEAM_API_KEY | Supported Steam lookups |
-| S3_* | Optional object-storage configuration |
-| DASHBOARD_* | Rust dashboard, OAuth, sessions, and private bridge |
-| CUSTOM_ROLES_* | Custom Roles and picker configuration |
-| BOT_FEEDBACK_CHANNEL_ID | Optional channel for forwarding saved feedback |
+| Group | Purpose |
+|:--|:--|
+| Discord | Bot token, application ID, moderator server, and feedback routing |
+| PostgreSQL | Connection URL or host settings, TLS, and pool size |
+| Metadata providers | AniList, TMDB, IGDB, Steam, books, and webnovel sources |
+| Music | Optional Spotify, YouTube Data API, and SoundCloud credentials |
+| Storage | S3 endpoint, bucket, credentials, and signed URL lifetime |
+| Dashboard | OAuth, public origin, sessions, and private bot bridge |
+| Guild features | Language, retention, archive, notifications, and Custom Roles |
 
-The required values are validated by the TypeScript configuration and database modules at startup. A variable being present in the template does not mean every feature requires it.
+## Documentation
 
-## Development and verification
+| Guide | Coverage |
+|:--|:--|
+| [Documentation index](docs/README.md) | All current project guides |
+| [Architecture](docs/ARCHITECTURE.md) | Runtime diagram, module map, data flow, and guild boundaries |
+| [Dashboard](docs/DASHBOARD.md) | Next.js, Rust/Axum, OAuth, bridge, and deployment |
+| [Media discovery](docs/MEDIA_DISCOVERY.md) | Providers, search, relationships, and attribution |
+| [Security policy](SECURITY.md) | Private vulnerability reporting |
+| [Security review](docs/SECURITY_AUDIT.md) | Source-level findings, controls, and residual risks |
+| [CI and verification](docs/CI.md) | Automated checks and manual live acceptance |
+| [Data backups](docs/DATA_BACKUPS.md) | Backup verification and recovery boundaries |
+| [Privacy policy](docs/PRIVACY_POLICY.md) | Data processing, storage, and retention |
+| [Community guidelines](docs/COMMUNITY_GUIDELINES.md) | Archive submissions and moderation |
+| [Contributing](CONTRIBUTING.md) | Development and review expectations |
+| [Terms of service](docs/TERMS_OF_SERVICE.md) | Service conditions |
+| [License](docs/LICENSE) | MIT |
 
-Run commands from the repository root.
+## Development
 
-~~~bash
+The Discord gateway is owned by `bot.ts`. Command environments are registered in `src/registry.ts`; reusable provider, domain, storage, and security logic belongs in `helpers/`. Preserve guild scope on server-owned state and verify permissions again for component interactions.
+
+Run the checks relevant to your changes:
+
+```bash
 npm run typecheck
 npm test
-bash -n scripts/start.sh
 npm run typecheck --prefix web/frontend
 npm run build --prefix web/frontend
 cargo fmt --manifest-path web/backend/Cargo.toml -- --check
 cargo test --manifest-path web/backend/Cargo.toml
-~~~
+```
 
-The dashboard workflow also audits frontend/Rust dependencies and builds the production Docker image. Do not treat a command listed here as evidence that a check has passed; use the actual CI result for the commit being reviewed.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [CI.md](docs/CI.md). A listed command is not evidence that a check passed; use the result from the exact commit being reviewed.
 
-## Repository layout
+## Security
 
-~~~text
-bot.ts                         Discord.js gateway, events, and runtime
-database.ts                    PostgreSQL schema, pool, and transactions
-src/                           Slash commands and interaction handlers
-helpers/                       Grouped providers, commands, security, media, and domain services
-tests/                          TypeScript tests
-scripts/start.sh                Combined bot/dashboard startup
-scripts/repo-stats.mjs          Generated README statistics
-web/frontend/                   Next.js / React dashboard
-web/backend/                    Rust/Axum OAuth and dashboard API
-Dockerfile                      Multi-stage Node.js, Next.js, and Rust image
-docker-compose.yml              Hardened container deployment
-railway.json / railway.toml     Hosted deployment configuration
-.github/workflows/              TypeScript, dashboard, Rust, and container checks
-~~~
+Keep Discord, database, provider, S3, OAuth, and bridge credentials out of Git and logs. Use least-privilege Discord permissions, keep private media objects private, and preserve current guild authorization checks.
 
-## Repository statistics
+Report security vulnerabilities through the process in [SECURITY.md](SECURITY.md). For ordinary defects or feature requests, use [GitHub Issues](https://github.com/Kyerstorm/Lemegeton/issues) or `/feedback`.
 
-The following block is refreshed by the repository-statistics workflow.
+<details>
+<summary>Repository statistics</summary>
 
 <!-- REPO-STATS:START -->
 Statistics are generated from tracked text and source files after changes are integrated.
 <!-- REPO-STATS:END -->
 
-## Security and operational boundaries
+</details>
 
-- Use least-privilege Discord permissions and keep all credentials outside Git.
-- Guild-owned records and moderation actions must retain their guild context.
-- Diagnostic log lookups are restricted to bot moderators and remain server-scoped.
-- Private media originals must not be made public through a convenience URL.
-- The dashboard must verify current Discord identity and guild permissions for protected actions.
-- Automated tests reduce risk but do not replace a production OAuth, HTTPS, permission, backup, and deployment review.
+---
 
-## Documentation
-
-- [Media discovery](docs/MEDIA_DISCOVERY.md)
-- [Dashboard setup and architecture](docs/DASHBOARD.md)
-- [Interaction and UX guidelines](docs/UX_GUIDELINES.md)
-- [Security review](docs/SECURITY_AUDIT.md)
-- [Terms of Service](docs/TERMS_OF_SERVICE.md)
-- [Privacy Policy](docs/PRIVACY_POLICY.md)
-- [Community Guidelines](docs/COMMUNITY_GUIDELINES.md)
-- [MIT License](docs/LICENSE)
-- [Historical Custom Roles build spec (pre-v3)](docs/CUSTOM_ROLES_SPEC.md)
-- [VPS deployment](deploy/vps/README.md)
-
-## Contributing
-
-Inspect existing command handlers, provider clients, database operations, and callers before changing behavior. Keep changes focused, maintain multi-guild isolation, add relevant TypeScript tests, and report only checks that actually ran successfully.
+<div align="center">
+  <strong>Discover more. Connect the dots. Build together.</strong>
+</div>

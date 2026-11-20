@@ -1,25 +1,36 @@
 # Lemegeton documentation
 
-- [Data backups](DATA_BACKUPS.md) — restricted backup creation, verification and recovery limitations.
+Lemegeton v3 is a TypeScript/Node.js Discord bot with PostgreSQL persistence and an optional Next.js + Rust/Axum dashboard.
 
-The current implementation is a TypeScript/Node.js Discord bot with a PostgreSQL data layer and an optional Next.js + Rust dashboard.
+Start with the repository [README](../README.md) for the product overview and quick setup. Use the architecture guide when navigating code.
 
-Start with the repository [README](../README.md) for installation and setup.
+## Product and architecture
 
-## Core guides
+- [Architecture](ARCHITECTURE.md) — current runtime diagram, source map, data flow, and multi-guild boundaries.
+- [Media Discovery](MEDIA_DISCOVERY.md) — providers, browsing, relationships, and source attribution.
+- [Dashboard](DASHBOARD.md) — Next.js frontend, Rust API, Discord OAuth, private bridge, and deployment.
+- [Data backups](DATA_BACKUPS.md) — backup verification and recovery boundaries.
+- [Interaction and UX guidelines](UX_GUIDELINES.md) — Discord components, loading states, embeds, errors, accessibility, and motion.
 
-- [Interaction and UX guidelines](UX_GUIDELINES.md): loading states, component behaviour, embeds, and diagnostic responses.
+## Security, privacy, and community
 
-- [Media Discovery](MEDIA_DISCOVERY.md): supported providers, browsing, relationships, and source attribution.
-- [Dashboard](DASHBOARD.md): Discord OAuth, Rust API, TypeScript bridge, and deployment.
-- [Security audit](SECURITY_AUDIT.md): authorization boundaries and operational checks.
-- [CI and verification](CI.md): automated quality gates, security scans, and manual live acceptance.
-- [Terms of Service](TERMS_OF_SERVICE.md): service use and moderation terms.
-- [Privacy Policy](PRIVACY_POLICY.md): data processing, storage, retention and privacy requests.
-- [Community Guidelines](COMMUNITY_GUIDELINES.md): rules for Archive and community contributions.
-- [MIT License](LICENSE): software licence.
-- [Issue reference format](ISSUE_REFERENCE_FORMAT.md): fixed 40-character SHA-512-derived diagnostic reference contract.
-- [Historical Custom Roles build spec](CUSTOM_ROLES_SPEC.md): pre-v3 Python implementation notes; not current setup guidance.
-- [VPS deployment](../deploy/vps/README.md): Node.js bot, Rust dashboard, systemd, and Nginx.
+- [Repository security policy](../SECURITY.md) — how to privately report a vulnerability.
+- [Security audit](SECURITY_AUDIT.md) — source-level findings, controls, and residual risks.
+- [Privacy Policy](PRIVACY_POLICY.md) — data processing, storage, and retention.
+- [Terms of Service](TERMS_OF_SERVICE.md) — service conditions.
+- [Community Guidelines](COMMUNITY_GUIDELINES.md) — archive submissions, attribution, spoilers, and moderation.
 
-The supported runtime entry point is `scripts/start.sh`. It runs the compiled TypeScript bot from `dist/bot.js` alongside the Rust dashboard binary. The bot's source is in `bot.ts`, `src/`, and `helpers/`; tests are TypeScript under `tests/`.
+## Development and operations
+
+- [Contributing](../CONTRIBUTING.md) — setup, engineering expectations, tests, and review checklist.
+- [CI and verification](CI.md) — automated quality gates and manual live acceptance.
+- [VPS deployment](../deploy/vps/README.md) — systemd, Nginx, TLS, and runtime configuration.
+- [Issue reference format](ISSUE_REFERENCE_FORMAT.md) — SHA-512-derived diagnostic reference contract.
+- [MIT License](LICENSE) — software licence.
+
+## Historical references
+
+- [Custom Roles specification](CUSTOM_ROLES_SPEC.md) — legacy pre-v3 implementation notes; consult the current source and dashboard guide for v3 behaviour.
+- [Lemegeton v3 specification](Lemegeton%20v3.md) — approved product direction, migration scope, and release acceptance criteria.
+
+The supported runtime entry point for the combined bot and dashboard is `scripts/start.sh`. The bot source is in `bot.ts`, `src/`, and `helpers/`; dashboard sources are in `web/frontend/` and `web/backend/`; tests are in `tests/`.
