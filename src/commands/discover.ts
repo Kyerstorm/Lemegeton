@@ -118,6 +118,29 @@ type SearchRecord =
   | { provider: "IGDB"; category: "game"; item: IgdbGame }
   | { provider: "Steam"; category: "game"; item: SteamStoreGame };
 
+function atlasProviderReferenceForRecord(record: SearchRecord): { provider: string; providerId: string } | null {
+  switch (record.provider) {
+    case "AniList":
+      return { provider: "anilist:" + record.item.type.toLowerCase(), providerId: String(record.item.id) };
+    case "Google Books":
+      return { provider: "google-books:volume", providerId: record.item.id };
+    case "Open Library":
+      return { provider: "open-library:work", providerId: record.item.workId };
+    case "MangaDex":
+      return { provider: "mangadex:title", providerId: record.item.id };
+    case "Kitsu":
+      return { provider: "kitsu:" + record.item.type, providerId: record.item.id };
+    case "TMDB":
+      return { provider: "tmdb:" + record.item.category, providerId: String(record.item.id) };
+    case "IGDB":
+      return { provider: "igdb:game", providerId: String(record.item.id) };
+    case "Steam":
+      return { provider: "steam:app", providerId: String(record.item.appId) };
+    default:
+      return null;
+  }
+}
+
 const CATEGORIES: Array<{ label: string; value: Category; emoji: string }> = [
   { label: "All media", value: "all", emoji: emoji.globe },
   { label: "Anime", value: "anime", emoji: emoji.anime },
@@ -1124,6 +1147,7 @@ this.webNovels = new WebNovelDiscoveryClient();
       }
       await recordProviderRelationships({
         sourceTitle: creator.name, sourceCategory: "CREATOR", sourceUrl: creator.url,
+        sourceProvider: "anilist:staff", sourceProviderId: String(creator.id),
         sourceImageUrl: creator.image, sourceLabel: "AniList staff and creator credits",
         relations: creator.media.map(item => ({
           title: item.title, category: item.type === "ANIME" ? "ANIME" : "MANGA",
@@ -1131,7 +1155,8 @@ this.webNovels = new WebNovelDiscoveryClient();
         })),
       });
       const graph = await findAtlasGraph(interaction.guildId, {
-        title: creator.name, category: "CREATOR", url: creator.url, imageUrl: creator.image,
+        title: creator.name, category: "CREATOR", url: creator.url,
+        provider: "anilist:staff", providerId: String(creator.id), imageUrl: creator.image,
       }, { maxDepth: 3, maxNodes: 32, perNodeLimit: 12 });
       const exported = await atlasExportFiles(creator.name, "CREATOR", graph, "creator-atlas");
       const embed = homeEmbed("Creator Knowledge Map", creator.name, [
@@ -1252,9 +1277,11 @@ this.webNovels = new WebNovelDiscoveryClient();
       }
       await recordProviderRelationships({
         sourceTitle:result.company.name,sourceCategory:"CREATOR",sourceUrl:result.company.sourceUrl,
+        sourceProvider:"igdb:company",sourceProviderId:String(result.company.id),
         sourceImageUrl:result.company.logo,sourceLabel:"IGDB developer and publisher credits",
         relations:result.credits.map(credit=>({
           title:credit.title,category:"GAME",url:credit.sourceUrl,imageUrl:credit.image,
+          provider:"igdb:game",providerId:String(credit.gameId),
           relationshipType:credit.roles.join(" / ").toLowerCase()+" credit",
         })),
       });
@@ -1271,7 +1298,8 @@ this.webNovels = new WebNovelDiscoveryClient();
           + score + critic + platforms + (dates.length ? "\n" + dates.join("\n") : "");
       }).join("\n\n").slice(0,3900);
       const graph = await findAtlasGraph(interaction.guildId, {
-        title: result.company.name, category: "CREATOR", url: result.company.sourceUrl, imageUrl: result.company.logo,
+        title: result.company.name, category: "CREATOR", url: result.company.sourceUrl,
+        provider: "igdb:company", providerId: String(result.company.id), imageUrl: result.company.logo,
       }, { maxDepth: 3, maxNodes: 32, perNodeLimit: 12 });
       const exported = await atlasExportFiles(result.company.name, "CREATOR", graph, "developer-atlas");
       const fields = [
@@ -1323,16 +1351,19 @@ this.webNovels = new WebNovelDiscoveryClient();
       const person = personMatches.find(candidate => candidate.id === personId);
       await recordProviderRelationships({
         sourceTitle:personName,sourceCategory:"CREATOR",sourceUrl:person?.sourceUrl,
+        sourceProvider:"tmdb:person",sourceProviderId:String(personId),
         sourceImageUrl:person?.image,sourceLabel:"TMDB cast and crew credits",
         relations:credits.map(credit=>({
           title:credit.title,category:credit.category==="movie"?"MOVIE":"TV",
-          url:credit.sourceUrl,imageUrl:credit.image,relationshipType:credit.role??"cast or crew credit",
+          url:credit.sourceUrl,imageUrl:credit.image,
+          provider:"tmdb:"+credit.category,providerId:String(credit.id),
+          relationshipType:credit.role??"cast or crew credit",
         })),
       });
       const graph = await findAtlasGraph(interaction.guildId, {
         title: personName, category: "CREATOR",
         url: person?.sourceUrl ?? "https://www.themoviedb.org/person/" + personId,
-        imageUrl: person?.image,
+        provider: "tmdb:person", providerId: String(personId), imageUrl: person?.image,
       }, { maxDepth: 3, maxNodes: 32, perNodeLimit: 12 });
       const exported = await atlasExportFiles(personName, "CREATOR", graph, "tmdb-person-atlas");
       const description = credits.length
@@ -2387,9 +2418,15 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
             sourceTitle:title,
             sourceCategory:"MOVIE",
             sourceUrl:this.recordUrl(first),
+            sourceProvider:"tmdb:movie",
+            sourceProviderId:String(first.item.id),
             sourceImageUrl:this.recordImage(first),
             sourceLabel:("TMDB collection membership · "+collection.name).slice(0,100),
-            relations,
+            relations:relations.map((relation,index)=>({
+              ...relation,
+              provider:"tmdb:movie",
+              providerId:String(collection.items.filter(item=>item.id!==first.item.id)[index]?.id ?? ""),
+            })),
           });
         }
       }catch(error){
@@ -2405,32 +2442,42 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
         &&normalizeAtlasTitle(this.recordTitle(record))===normalizeAtlasTitle(title)
         &&this.recordUrl(record)!==this.recordUrl(first)
       ).slice(0,12);
-      await Promise.allSettled(exactMatches.map(record=>recordAtlasRelationship({
+      const sourceReference = atlasProviderReferenceForRecord(first);
+      await Promise.allSettled(exactMatches.map(record=>{
+        const targetReference = atlasProviderReferenceForRecord(record);
+        return recordAtlasRelationship({
         sourceTitle:title,
         sourceCategory:mediaCategory,
         sourceUrl:this.recordUrl(first),
+        sourceProvider:sourceReference?.provider,
+        sourceProviderId:sourceReference?.providerId,
         sourceImageUrl:this.recordImage(first),
         targetTitle:this.recordTitle(record),
         targetCategory:record.category,
         targetUrl:this.recordUrl(record),
+        targetProvider:targetReference?.provider,
+        targetProviderId:targetReference?.providerId,
         targetImageUrl:this.recordImage(record),
         relationshipType:"exact-title match (unverified adaptation)",
         sourceKind:"recommendation",
         sourceLabel:"Cross-provider exact-title match; not a verified adaptation",
-      })));
+      });
+      }));
     }catch(error){
       logger.warn("Cross-provider exact-title Atlas enrichment failed",{
         reason:error instanceof Error?error.message:"Unknown error",
       });
     }
+    const rootReference = atlasProviderReferenceForRecord(first);
     const [providerRelationships, communityRelationships] = await Promise.all([
-      findAtlasRelationships(interaction.guildId, title, mediaCategory, this.recordUrl(first), 20),
+      findAtlasRelationships(interaction.guildId, title, mediaCategory, this.recordUrl(first), 20,
+        rootReference?.provider, rootReference?.providerId),
       findAtlasCommunityLinks(interaction.guildId, title, mediaCategory, this.recordUrl(first), first.provider === "AniList" ? String(first.item.id) : null, 20),
     ]);
     const rootUrl = this.recordUrl(first);
     const graph = await findAtlasGraph(
       interaction.guildId,
-      { title, category: mediaCategory, url: rootUrl, imageUrl: this.recordImage(first) },
+      { title, category: mediaCategory, url: rootUrl, provider: rootReference?.provider, providerId: rootReference?.providerId, imageUrl: this.recordImage(first) },
       { maxDepth: 3, maxNodes: 24, perNodeLimit: 8 },
     );
     const graphFilters = {
@@ -2580,10 +2627,12 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
     const writes = results.flatMap((record) => record.provider === "AniList" ? [
       recordProviderRelationships({
         sourceTitle:this.recordTitle(record),sourceCategory:record.category,sourceUrl:record.item.siteUrl,
+        sourceProvider:"anilist:"+record.item.type.toLowerCase(),sourceProviderId:String(record.item.id),
         sourceImageUrl:record.item.coverImage,
         sourceLabel:"AniList provider relationships",
         relations:record.item.relations.map((relation) => ({
-          title:relation.title,category:relation.category,url:relation.url,imageUrl:relation.image,relationshipType:relation.relation,
+          title:relation.title,category:relation.category,url:relation.url,imageUrl:relation.image,
+          provider:"anilist:"+relation.category,providerId:String(relation.id),relationshipType:relation.relation,
         })),
       }),
     ] : []);
