@@ -35,6 +35,10 @@ import {
   getArchiveEntry,
   getArchiveSettings,
   getPanelOfTheDay,
+  attachArchiveAssetToEntry,
+  changeArchiveEntryVisibility,
+  replaceArchiveEntryAsset,
+  removeArchiveEntryAsset,
   getLastArchiveCategory,
   getOwnSubmissions,
   isArchiveCategory,
@@ -74,10 +78,20 @@ import {
   listArchiveTrails,
   getCollectionItems,
   saveArchiveCollection,
-  saveArchiveTrail
+  saveArchiveTrail,
+  changeArchiveCollectionVisibility,
+  changeArchiveTrailVisibility
 } from "../../helpers/archive/archive-collections.js";
 import { query, queryOne } from "../../database.js";
-import { deleteArchiveAsset, resolveLegacyArchiveAttachmentUrl, signedArchiveAssetUrl, storeArchiveUpload, classifyArchiveUpload } from "../../helpers/media/media-storage.js";
+import {
+  archiveUploadChannelIsPrivate,
+  deleteArchiveAsset,
+  downloadArchiveUpload,
+  resolveLegacyArchiveAttachmentUrl,
+  signedArchiveAssetUrl,
+  storeArchiveUpload,
+  classifyArchiveUpload,
+} from "../../helpers/media/media-storage.js";
 import { cleanText, isGuildManager, isValidHttpsUrl, safeDisplay } from "../../helpers/security/security.js";
 import { logger } from "../../helpers/runtime/logger.js";
 import { createArchiveSpotlight, listArchiveSpotlights, cancelArchiveSpotlight, createArchiveCollectionSpotlight, listArchiveCollectionSpotlights, cancelArchiveCollectionSpotlight, listArchiveCategoryIndex } from "../../helpers/archive/archive-curation.js";
@@ -359,6 +373,8 @@ export class ArchiveCommand implements FeatureCommand {
       { name: "Reject", value: "reject" },
       { name: "Remove", value: "remove" },
       { name: "Dismiss report", value: "dismiss" },
+      { name: "Replace attachment", value: "replace-asset" },
+      { name: "Remove attachment", value: "remove-asset" },
     ))
     .addStringOption((option) => option.setName("reason").setDescription("Report or moderation reason").setMaxLength(500))
     .addAttachmentOption((option) => option.setName("file").setDescription("Optional media upload (private storage)"))
@@ -493,10 +509,119 @@ export class ArchiveCommand implements FeatureCommand {
         case "mine": await this.showMine(interaction); return;
         case "edit": {
           const entryId = interaction.options.getString("entry_id");
-          if (!entryId) throw new Error("Provide entry_id.");
+          const collectionId = interaction.options.getString("collection_id");
+          const trailId = interaction.options.getString("trail_id");
+          const visibility = interaction.options.getString("visibility") as ArchiveVisibility | null;
+          const decision = interaction.options.getString("decision");
           const chapterInput = interaction.options.getString("chapter_caption");
+          const member = await interaction.guild!.members.fetch(userId);
+          const canModerateServer = await canModerateArchive(member, guildId, "server");
+          const globalModerator = isGlobalArchiveModerator(userId);
+
+          if (collectionId || trailId) {
+            if (!visibility || Boolean(collectionId) === Boolean(trailId) || entryId || decision) {
+              throw new Error("Provide exactly one collection_id or trail_id with a new visibility.");
+            }
+            if (collectionId) {
+              await changeArchiveCollectionVisibility(guildId, userId, collectionId, visibility, canModerateServer, globalModerator);
+              await interaction.reply({
+                content: `Collection #${collectionId} is now ${visibility === "global" ? "globally visible" : "visible only in this server"}.`,
+                flags: MessageFlags.Ephemeral,
+              });
+            } else {
+              await changeArchiveTrailVisibility(guildId, userId, trailId!, visibility, canModerateServer, globalModerator);
+              await interaction.reply({
+                content: `Archive Trail #${trailId} is now ${visibility === "global" ? "globally visible" : "visible only in this server"}.`,
+                flags: MessageFlags.Ephemeral,
+              });
+            }
+            return;
+          }
+
+          if (!entryId) throw new Error("Provide entry_id.");
+          if (decision === "replace-asset" || decision === "remove-asset") {
+            if (visibility) throw new Error("Change publication visibility separately from attachment actions.");
+            const positionText = chapterInput?.trim() || "1";
+            if (!/^[1-5]$/.test(positionText)) throw new Error("Use chapter_caption as an attachment position from 1 to 5.");
+            const position = Number(positionText);
+            const entry = await getArchiveEntry(guildId, entryId, true);
+            if (!entry) throw new Error("That server-only Archive entry was not found.");
+            if (decision === "remove-asset") {
+              if (interaction.options.getAttachment("file")) throw new Error("Do not attach a file when removing an attachment.");
+              await removeArchiveEntryAsset(guildId, userId, entryId, position, interaction.client);
+              await interaction.reply({
+                content: `Attachment ${position} was removed from entry #${entryId}. An approved entry has returned to moderation review.`,
+                flags: MessageFlags.Ephemeral,
+              });
+              return;
+            }
+            const attachment = interaction.options.getAttachment("file");
+            if (!attachment) throw new Error("Attach the replacement file using the file option.");
+            const settings = await getArchiveSettings(guildId);
+            const metadata = {
+              name: attachment.name,
+              contentType: attachment.contentType ?? "application/octet-stream",
+              bytes: Buffer.from([1]),
+            };
+            const kind = classifyArchiveUpload(entry.archive_type, metadata).kind;
+            if (!settings.uploadTypes.includes(kind)) throw new Error(`This server has not enabled ${kind} uploads.`);
+            if (attachment.size > getArchiveUploadMaxBytes()) throw new Error("Archive uploads exceed this server's configured size limit.");
+            const bytes = await downloadArchiveUpload(attachment.url);
+            const assetId = await storeArchiveUpload(
+              guildId,
+              userId,
+              entry.archive_type,
+              { ...metadata, bytes },
+              settings.uploadTypes,
+              { client: interaction.client, legacyStorageChannelId: settings.legacyStorageChannelId },
+            );
+            await replaceArchiveEntryAsset(guildId, userId, entryId, position, assetId, attachment.name, interaction.client);
+            const refreshed = await getArchiveEntry(guildId, entryId, true);
+            if (refreshed && entry.status === "approved") {
+              await this.notifyModerationChannel(
+                interaction.client, guildId, entryId, refreshed.title, refreshed.archive_type,
+                refreshed.visibility, refreshed.content, refreshed.source_title ?? undefined, refreshed.source_url ?? undefined,
+              );
+            }
+            await interaction.reply({
+              content: `Attachment ${position} was replaced on entry #${entryId}. The entry is pending moderator review.`,
+              flags: MessageFlags.Ephemeral,
+            });
+            return;
+          }
+
+          if (visibility) {
+            if (interaction.options.getString("title") !== null
+              || interaction.options.getString("content") !== null
+              || interaction.options.getString("source_title") !== null
+              || interaction.options.getString("creator") !== null
+              || interaction.options.getString("source_url") !== null
+              || interaction.options.getString("tags") !== null
+              || interaction.options.getBoolean("spoiler") !== null
+              || chapterInput !== null) {
+              throw new Error("Change publication visibility separately from editing entry metadata.");
+            }
+            await changeArchiveEntryVisibility(guildId, userId, entryId, visibility, canModerateServer);
+            await interaction.reply({
+              content: `Entry #${entryId} is now ${visibility === "global" ? "globally visible" : "visible only in its originating server"}.`,
+              flags: MessageFlags.Ephemeral,
+            });
+            return;
+          }
+
+          if (!entryId) throw new Error("Provide entry_id.");
           const chapterEdit = chapterInput !== null ? parsePanelChapterCaption(chapterInput) : null;
           await updateArchiveEntry(guildId, userId, entryId, {
+            title: interaction.options.getString("title") ?? undefined,
+            content: chapterEdit?.caption ?? interaction.options.getString("content") ?? undefined,
+            sourceTitle: interaction.options.getString("source_title") ?? undefined,
+            creator: interaction.options.getString("creator") ?? undefined,
+            sourceUrl: interaction.options.getString("source_url") ?? undefined,
+            tags: interaction.options.getString("tags")?.split(","),
+            spoiler: interaction.options.getBoolean("spoiler") ?? undefined,
+            chapterNumber: chapterEdit?.chapterNumber,
+          });
+
             title: interaction.options.getString("title") ?? undefined,
             content: chapterEdit?.caption ?? interaction.options.getString("content") ?? undefined,
             sourceTitle: interaction.options.getString("source_title") ?? undefined,
@@ -680,7 +805,7 @@ export class ArchiveCommand implements FeatureCommand {
       await interaction.reply({content:"The Archive moderator role was cleared.",flags:MessageFlags.Ephemeral});
       return true;
     }
-    if (action === "configure-types" || action === "configure-clear-upload" || action === "configure-clear-moderation") {
+    if (action === "configure-types" || action === "configure-clear-upload" || action === "configure-clear-moderation" || action === "configure-clear-storage") {
       if (!isGuildManager(interaction)) {
         await interaction.reply({content:"Manage Server permission is required to change Archive settings.",flags:MessageFlags.Ephemeral});
         return true;
@@ -690,9 +815,15 @@ export class ArchiveCommand implements FeatureCommand {
         await interaction.showModal(configureModal(settings.enabledCategories,settings.uploadTypes));
         return true;
       }
-      const kind=action==="configure-clear-upload"?"upload":"moderation";
-      await saveArchiveChannelSetting(interaction.guildId,interaction.user.id,kind,null);
-      await interaction.reply({content:kind==="upload"?"The Archive upload channel was cleared.":"The Archive moderation channel was cleared.",flags:MessageFlags.Ephemeral});
+      const kind = action === "configure-clear-upload" ? "upload"
+        : action === "configure-clear-storage" ? "storage" : "moderation";
+      await saveArchiveChannelSetting(interaction.guildId, interaction.user.id, kind, null);
+      await interaction.reply({
+        content: kind === "upload" ? "The Archive upload channel was cleared."
+          : kind === "storage" ? "The legacy Archive storage channel was cleared."
+            : "The Archive moderation channel was cleared.",
+        flags: MessageFlags.Ephemeral,
+      });
       return true;
     }
     if (action === "approve" || action === "reject") {
@@ -803,7 +934,7 @@ export class ArchiveCommand implements FeatureCommand {
       return true;
     }
     if (interaction.isChannelSelectMenu()) {
-      if (action !== "configure-upload" && action !== "configure-moderation") return false;
+      if (action !== "configure-upload" && action !== "configure-moderation" && action !== "configure-storage") return false;
       if (!isGuildManager(interaction)) {
         await interaction.reply({content:"Manage Server permission is required to change Archive channels.",flags:MessageFlags.Ephemeral});
         return true;
@@ -813,13 +944,41 @@ export class ArchiveCommand implements FeatureCommand {
         await interaction.reply({content:"Choose a normal text or announcement channel from this server.",flags:MessageFlags.Ephemeral});
         return true;
       }
-      const kind=action==="configure-upload"?"upload":"moderation";
-      await saveArchiveChannelSetting(interaction.guildId,interaction.user.id,kind,selectedChannel.id);
+      const guild = interaction.guild!;
+      const botMember = await guild.members.fetchMe();
+      const botPermissions = selectedChannel.permissionsFor(botMember);
+      const everyonePermissions = selectedChannel.permissionsFor(guild.roles.everyone);
+      const everyoneCanView = everyonePermissions?.has(PermissionsBitField.Flags.ViewChannel) ?? true;
+      if (action === "configure-upload") {
+        if (!archiveUploadChannelIsPrivate(
+          everyoneCanView,
+          Boolean(botPermissions?.has([
+            PermissionsBitField.Flags.ViewChannel,
+            PermissionsBitField.Flags.SendMessages,
+            PermissionsBitField.Flags.ManageMessages,
+          ])),
+        )) {
+          throw new Error("The upload channel must be hidden from @everyone and let the bot view, reply to, and delete raw uploads.");
+        }
+      } else if (action === "configure-storage") {
+        if (everyoneCanView || !botPermissions?.has([
+          PermissionsBitField.Flags.ViewChannel,
+          PermissionsBitField.Flags.SendMessages,
+          PermissionsBitField.Flags.AttachFiles,
+        ])) {
+          throw new Error("The legacy storage channel must be hidden from @everyone and grant the bot View Channel, Send Messages and Attach Files.");
+        }
+      }
+      const kind = action === "configure-upload" ? "upload"
+        : action === "configure-storage" ? "storage" : "moderation";
+      await saveArchiveChannelSetting(interaction.guildId, interaction.user.id, kind, selectedChannel.id);
       await interaction.reply({
-        content:kind==="upload"
-          ? "Archive media uploads will now be received in <#"+selectedChannel.id+">."
-          : "New Archive submissions will now be sent to <#"+selectedChannel.id+"> for moderation.",
-        flags:MessageFlags.Ephemeral,
+        content: kind === "upload"
+          ? "Private upload intake will now use <#" + selectedChannel.id + ">."
+          : kind === "storage"
+            ? "Private legacy media storage will now use <#" + selectedChannel.id + ">."
+            : "New Archive submissions will now be sent to <#" + selectedChannel.id + "> for moderation.",
+        flags: MessageFlags.Ephemeral,
       });
       return true;
     }
@@ -1160,20 +1319,11 @@ export class ArchiveCommand implements FeatureCommand {
       if (category === "panels" && kind !== "image") throw new Error("Manga Panels accept image attachments only.");
       if (!settings.uploadTypes.includes(kind)) throw new Error(`This server has not enabled ${kind} uploads.`);
       if (attachment.size > 20 * 1024 * 1024) throw new Error("Archive uploads are limited to 20 MB.");
-      const response = await fetch(attachment.url, { signal: AbortSignal.timeout(15_000) });
-      if (!response.ok) throw new Error("Discord could not provide the attachment bytes.");
-      const bytes = Buffer.from(await response.arrayBuffer());
+      const bytes = await downloadArchiveUpload(attachment.url);
       const assetId = await storeArchiveUpload(interaction.guildId!, interaction.user.id, category, {
         name: attachment.name, contentType: attachment.contentType ?? "application/octet-stream", bytes,
       }, settings.uploadTypes, { client: interaction.client, legacyStorageChannelId: settings.legacyStorageChannelId });
-      await query(
-        "INSERT INTO community_archive_entry_assets (entry_id, asset_id, position, uploaded_by) VALUES ($1, $2, 1, $3)",
-        [entryId, assetId, interaction.user.id],
-      );
-      await query(
-        "UPDATE community_archive_entries SET media_asset_id = $1, attachment_filename = $2, attachment_content_type = $3 WHERE id = $4",
-        [assetId, attachment.name, attachment.contentType ?? null, entryId],
-      );
+      await attachArchiveAssetToEntry(interaction.guildId!, interaction.user.id, entryId, assetId, attachment.name, interaction.client);
       if (needsUpload) await finishArchiveUpload(interaction.guildId!, interaction.user.id, entryId);
       savedFile = true;
     }
@@ -1409,6 +1559,12 @@ export class ArchiveCommand implements FeatureCommand {
       .setChannelTypes(ChannelType.GuildText,ChannelType.GuildAnnouncement)
       .setMinValues(1)
       .setMaxValues(1);
+    const storage = new ChannelSelectMenuBuilder()
+      .setCustomId("archive:configure-storage")
+      .setPlaceholder("Choose a private legacy storage channel")
+      .setChannelTypes(ChannelType.GuildText,ChannelType.GuildAnnouncement)
+      .setMinValues(1)
+      .setMaxValues(1);
     const moderatorRole = new RoleSelectMenuBuilder()
       .setCustomId("archive:configure-moderator-role")
       .setPlaceholder("Choose the Archive moderator role")
@@ -1419,12 +1575,14 @@ export class ArchiveCommand implements FeatureCommand {
       new ButtonBuilder().setCustomId("archive:configure-clear-upload").setLabel("Clear upload channel").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("archive:configure-clear-moderation").setLabel("Clear moderation channel").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("archive:configure-clear-moderator-role").setLabel("Clear moderator role").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("archive:configure-clear-storage").setLabel("Clear storage channel").setStyle(ButtonStyle.Secondary),
     );
     await interaction.reply({
       embeds:[embed],
       components:[
         new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(upload),
         new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(moderation),
+        new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(storage),
         new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(moderatorRole),
         controls,
       ],
