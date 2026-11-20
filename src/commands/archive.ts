@@ -480,7 +480,6 @@ export class ArchiveCommand implements FeatureCommand {
           if (!spotlightId) throw new Error("Provide spotlight_id.");
           const member = await interaction.guild!.members.fetch(userId);
           const canModerateServer = await canModerateArchive(member, guildId, "server");
-          const global = isGlobalArchiveModerator(userId);
           await cancelArchiveSpotlight(guildId, spotlightId, userId, canModerateServer);
           await interaction.reply({ content: "Archive spotlight cancelled.", flags: MessageFlags.Ephemeral });
           return;
