@@ -45,6 +45,27 @@ import { deleteGuildData, retryDepartedGuildDeletions } from "../helpers/runtime
 import { claimDueReadingReminders } from "../helpers/community/community-reading.js";
 import { claimDueMediaNightResults } from "../helpers/community/community-rankings.js";
 import { followAniListAnime, getGuildMediaFollows, unfollowAniListAnime } from "../helpers/media/media-notifications.js";
+import {
+  claimDueMediaAutomationDeliveries,
+  claimDueMediaAutomationRules,
+  createMediaAutomationDiscussion,
+  listMediaAutomationRules,
+  markMediaAutomationDelivery,
+  queueMediaAutomationRelease,
+  releaseMediaAutomationRuleClaim,
+  saveMediaAutomationRule,
+  toggleMediaAutomationRule,
+} from "../helpers/community/community-automation.js";
+import {
+  disableReleaseSchedule,
+  dueReleaseDeliveries,
+  dueReleaseSchedules,
+  getReleaseSchedule,
+  markReleaseDelivery,
+  prepareReleaseDelivery,
+  resumeReleaseSchedule,
+  saveReleaseSchedule,
+} from "../helpers/community/community-releases.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
 
@@ -1485,6 +1506,251 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       ),
       { status: "open", results_attempts: 0 },
     );
+
+    // Phase 8: multi-guild automation claims, source-linked event deduplication and pause/resume.
+    const automationGuild = "333333333333333338";
+    const automationOtherGuild = "333333333333333339";
+    const automationChannel = "666666666666666671";
+    const automationOtherChannel = "666666666666666672";
+    await saveMediaAutomationRule({
+      guildId: automationGuild,
+      actorId: "555555555555555571",
+      name: "Anime release announcements",
+      channelId: automationChannel,
+      categories: ["anime", "tv", "anime"],
+      region: "ie",
+      action: "announce",
+    });
+    await saveMediaAutomationRule({
+      guildId: automationGuild,
+      actorId: "555555555555555571",
+      name: "Movie release discussions",
+      channelId: automationChannel,
+      categories: "movies",
+      region: "IE",
+      action: "discussion",
+    });
+    await saveMediaAutomationRule({
+      guildId: automationOtherGuild,
+      actorId: "555555555555555572",
+      name: "Other server only",
+      channelId: automationOtherChannel,
+      categories: ["tv"],
+      region: "US",
+      action: "announce",
+    });
+    assert.deepEqual(
+      (await listMediaAutomationRules(automationGuild)).map(rule => rule.name).sort(),
+      ["Anime release announcements", "Movie release discussions"],
+    );
+    assert.deepEqual(
+      (await listMediaAutomationRules(automationOtherGuild)).map(rule => rule.name),
+      ["Other server only"],
+    );
+    await assert.rejects(
+      toggleMediaAutomationRule(automationOtherGuild, (await listMediaAutomationRules(automationGuild))[0]!.id),
+      /not found in this server/i,
+    );
+
+    const automationRuleClaims = await Promise.all([
+      claimDueMediaAutomationRules(),
+      claimDueMediaAutomationRules(),
+    ]);
+    const automationRules = automationRuleClaims.flat().filter(rule =>
+      rule.guild_id === automationGuild || rule.guild_id === automationOtherGuild,
+    );
+    assert.equal(automationRules.length, 3);
+    assert.equal(new Set(automationRules.map(rule => rule.id)).size, 3,
+      "concurrent workers must never claim the same rule");
+    const announcementRule = automationRules.find(rule => rule.name === "Anime release announcements");
+    const discussionRule = automationRules.find(rule => rule.name === "Movie release discussions");
+    assert.ok(announcementRule && discussionRule);
+
+    const announcementEvent = {
+      title: "Provider-dated anime release",
+      provider: "AniList",
+      url: "https://anilist.co/anime/12345",
+      when: new Date("2026-12-01T18:00:00.000Z"),
+    };
+    assert.equal(
+      await queueMediaAutomationRelease({ ...announcementRule, claim_token: "stale-claim" }, announcementEvent),
+      false,
+      "a stale rule claim cannot enqueue events",
+    );
+    assert.equal(
+      await queueMediaAutomationRelease(announcementRule, { ...announcementEvent, url: "http://example.com/release" }),
+      false,
+      "automation must reject non-HTTPS source links",
+    );
+    assert.equal(await queueMediaAutomationRelease(announcementRule, announcementEvent), true);
+    assert.equal(await queueMediaAutomationRelease(announcementRule, announcementEvent), false,
+      "the same provider event is inserted only once per rule");
+
+    const discussionEvent = {
+      title: "Provider-dated movie release",
+      provider: "TMDB Movies · IE",
+      url: "https://www.themoviedb.org/movie/12345",
+      when: new Date("2026-12-02T18:00:00.000Z"),
+    };
+    assert.equal(await queueMediaAutomationRelease(discussionRule, discussionEvent), true);
+    const automationDeliveryClaims = await Promise.all([
+      claimDueMediaAutomationDeliveries(),
+      claimDueMediaAutomationDeliveries(),
+    ]);
+    const automationDeliveries = automationDeliveryClaims.flat().filter(delivery =>
+      delivery.guild_id === automationGuild,
+    );
+    assert.equal(automationDeliveries.length, 2);
+    assert.equal(new Set(automationDeliveries.map(delivery => delivery.id)).size, 2,
+      "concurrent delivery workers must not claim a delivery twice");
+    const announcementDelivery = automationDeliveries.find(delivery => delivery.rule_name === announcementRule.name);
+    const discussionDelivery = automationDeliveries.find(delivery => delivery.rule_name === discussionRule.name);
+    assert.ok(announcementDelivery && discussionDelivery);
+    assert.match(announcementDelivery.source_url, /^https:\/\//);
+    assert.equal(announcementDelivery.provider, "AniList");
+
+    const discussionId = await createMediaAutomationDiscussion({
+      delivery: discussionDelivery,
+      creatorId: "555555555555555571",
+    });
+    assert.equal(await createMediaAutomationDiscussion({
+      delivery: discussionDelivery,
+      creatorId: "555555555555555571",
+    }), discussionId, "retries must reuse the existing release discussion");
+    assert.equal(
+      (await query("SELECT id FROM community_discussions WHERE id = $1", [discussionId])).length,
+      1,
+    );
+    await markMediaAutomationDelivery(discussionDelivery, "sent", "777777777777777771");
+    await markMediaAutomationDelivery(discussionDelivery, "pending", undefined, "stale worker");
+    assert.deepEqual(
+      await queryOne<{ status: string; message_id: string | null }>(
+        "SELECT status, message_id::text FROM community_media_automation_deliveries WHERE id = $1",
+        [discussionDelivery.id],
+      ),
+      { status: "sent", message_id: "777777777777777771" },
+      "a stale delivery token must not overwrite a completed announcement",
+    );
+
+    await markMediaAutomationDelivery(announcementDelivery, "pending", undefined, "temporary Discord failure");
+    await markMediaAutomationDelivery(announcementDelivery, "sent", "777777777777777772");
+    assert.deepEqual(
+      await queryOne<{ status: string; attempts: number; message_id: string | null }>(
+        "SELECT status, attempts, message_id::text FROM community_media_automation_deliveries WHERE id = $1",
+        [announcementDelivery.id],
+      ),
+      { status: "pending", attempts: 1, message_id: null },
+      "the old claim token cannot complete a delivery after it has been released for retry",
+    );
+    await query(
+      "UPDATE community_media_automation_deliveries SET next_attempt_at = NOW() - INTERVAL '1 minute' WHERE id = $1",
+      [announcementDelivery.id],
+    );
+    assert.equal(await toggleMediaAutomationRule(automationGuild, announcementRule.id), false);
+    assert.equal((await listMediaAutomationRules(automationGuild))
+      .find(rule => rule.id === announcementRule.id)?.enabled, false);
+    assert.equal(
+      (await claimDueMediaAutomationDeliveries()).some(delivery => delivery.id === announcementDelivery.id),
+      false,
+      "paused rules cannot produce new delivery claims",
+    );
+    assert.equal(await toggleMediaAutomationRule(automationGuild, announcementRule.id), true);
+    const resumedDelivery = (await claimDueMediaAutomationDeliveries())
+      .find(delivery => delivery.id === announcementDelivery.id);
+    assert.ok(resumedDelivery);
+    assert.notEqual(resumedDelivery.claim_token, announcementDelivery.claim_token);
+    await markMediaAutomationDelivery(resumedDelivery, "sent", "777777777777777773");
+    await releaseMediaAutomationRuleClaim(discussionRule, false);
+    await releaseMediaAutomationRuleClaim(announcementRule, false);
+    assert.equal((await listMediaAutomationRules(automationGuild)).length, 2);
+
+    // Digest schedules use the same lease/token discipline and fail outstanding work closed on pause.
+    const digestGuild = "333333333333333340";
+    const pausedDigestGuild = "333333333333333341";
+    const digestChannel = "666666666666666673";
+    const scheduledTime = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString().slice(11, 16);
+    const scheduleInput = {
+      timeZone: "UTC",
+      localTime: scheduledTime,
+      cadence: "daily" as const,
+      weekday: 1,
+      categories: ["anime", "movies"],
+      entityTypes: ["title"],
+      entityIds: ["all"],
+      region: "IE",
+    };
+    await saveReleaseSchedule({
+      guildId: digestGuild,
+      channelId: digestChannel,
+      actorId: "555555555555555573",
+      ...scheduleInput,
+    });
+    await saveReleaseSchedule({
+      guildId: pausedDigestGuild,
+      channelId: "666666666666666674",
+      actorId: "555555555555555574",
+      ...scheduleInput,
+    });
+    assert.equal(await getReleaseSchedule(automationOtherGuild), null);
+    await query(
+      "UPDATE community_release_schedules SET next_run_at = NOW() - INTERVAL '1 day' WHERE guild_id = ANY($1::bigint[])",
+      [[digestGuild, pausedDigestGuild]],
+    );
+    const digestSchedule = await getReleaseSchedule(digestGuild);
+    const pausedSchedule = await getReleaseSchedule(pausedDigestGuild);
+    assert.ok(digestSchedule && pausedSchedule);
+    assert.ok((await dueReleaseSchedules()).some(row => row.guild_id === digestGuild));
+    await Promise.all([
+      prepareReleaseDelivery(digestSchedule),
+      prepareReleaseDelivery(digestSchedule),
+    ]);
+    assert.equal(
+      (await query("SELECT id FROM community_release_deliveries WHERE guild_id = $1", [digestGuild])).length,
+      1,
+      "concurrent schedule workers must create only one digest for a scheduled window",
+    );
+    const digestClaims = await Promise.all([dueReleaseDeliveries(), dueReleaseDeliveries()]);
+    const digestDelivery = digestClaims.flat().find(delivery => delivery.guild_id === digestGuild);
+    assert.ok(digestDelivery);
+    assert.equal(digestClaims.flat().filter(delivery => delivery.guild_id === digestGuild).length, 1,
+      "concurrent digest workers must not claim the same delivery");
+    assert.equal(await markReleaseDelivery(digestDelivery.id, digestDelivery.claim_token, "pending", undefined, "transient failure"), "pending");
+    assert.equal(await markReleaseDelivery(digestDelivery.id, digestDelivery.claim_token, "sent", "777777777777777775"), null,
+      "an expired claim token cannot complete the retry");
+    await query(
+      "UPDATE community_release_deliveries SET next_attempt_at = NOW() - INTERVAL '1 minute' WHERE id = $1",
+      [digestDelivery.id],
+    );
+    const retriedDigest = (await dueReleaseDeliveries()).find(delivery => delivery.id === digestDelivery.id);
+    assert.ok(retriedDigest);
+    assert.notEqual(retriedDigest.claim_token, digestDelivery.claim_token);
+    assert.equal(await markReleaseDelivery(retriedDigest.id, retriedDigest.claim_token, "sent", "777777777777777776"), "sent");
+    assert.deepEqual(
+      await queryOne<{ status: string; attempts: number; message_id: string | null }>(
+        "SELECT status, attempts, message_id::text FROM community_release_deliveries WHERE id = $1",
+        [digestDelivery.id],
+      ),
+      { status: "sent", attempts: 2, message_id: "777777777777777776" },
+    );
+
+    await prepareReleaseDelivery(pausedSchedule);
+    const pausedDigest = (await dueReleaseDeliveries()).find(delivery => delivery.guild_id === pausedDigestGuild);
+    assert.ok(pausedDigest);
+    await disableReleaseSchedule(pausedDigestGuild);
+    assert.equal(await markReleaseDelivery(pausedDigest.id, pausedDigest.claim_token, "sent", "777777777777777777"), null,
+      "pausing the schedule invalidates in-flight delivery claims");
+    assert.deepEqual(
+      await queryOne<{ enabled: boolean; status: string; claim_token: string | null }>(
+        "SELECT s.enabled, d.status, d.claim_token FROM community_release_schedules s " +
+        "JOIN community_release_deliveries d ON d.guild_id = s.guild_id WHERE s.guild_id = $1",
+        [pausedDigestGuild],
+      ),
+      { enabled: false, status: "failed", claim_token: null },
+    );
+    assert.ok(await resumeReleaseSchedule(pausedDigestGuild));
+    assert.equal((await getReleaseSchedule(pausedDigestGuild))?.enabled, true);
+    assert.equal((await dueReleaseDeliveries()).some(delivery => delivery.guild_id === pausedDigestGuild), false,
+      "resume does not silently requeue deliveries that were explicitly failed during pause");
 
     const retentionGuild = "333333333333333333";
     const retentionOtherGuild = "333333333333333334";
