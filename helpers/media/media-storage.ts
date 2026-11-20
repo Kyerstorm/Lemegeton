@@ -373,82 +373,124 @@ export async function queueArchiveAssetCleanup(assetId: number): Promise<boolean
 }
 
 export async function deleteArchiveAsset(assetId: number, client?: Client): Promise<boolean> {
-  const asset = await queryOne<{
-    provider: string; bucket_name: string; object_key: string; guild_id: string | null; namespace: string;
-  }>(
-    "SELECT provider, bucket_name, object_key, guild_id::text, namespace FROM media_assets WHERE id = $1",
-    [assetId],
-  );
-  if (!asset) return false;
-  await queueArchiveAssetCleanup(assetId);
-  const references = await queryOne<{ referenced: boolean }>(
-    "SELECT (EXISTS (SELECT 1 FROM community_archive_entry_assets WHERE asset_id = $1) OR EXISTS (SELECT 1 FROM community_archive_entries WHERE media_asset_id = $1)) AS referenced",
-    [assetId],
-  );
-  if (references?.referenced) {
-    await query("DELETE FROM media_asset_cleanup_queue WHERE asset_id = $1", [assetId]);
-    return false;
-  }
-  try {
-    if (asset.provider === "discord") {
-      if (!client || !asset.guild_id || asset.namespace !== `archive/${asset.guild_id}`) {
-        throw new Error("The Discord client is unavailable for legacy Archive cleanup.");
-      }
-      const [messageId, attachmentId] = asset.object_key.split("/", 2);
-      if (typeof messageId !== "string" || typeof attachmentId !== "string" || !/^\d{17,20}$/.test(messageId) || !/^\d{17,20}$/.test(attachmentId)) {
-        throw new Error("Legacy Archive asset metadata is invalid.");
-      }
-      const channel = await client.channels.fetch(asset.bucket_name).catch(error => {
-        const code = Number((error as { code?: unknown })?.code);
-        const status = Number((error as { status?: unknown })?.status);
-        if (code === 10003 || status === 404) return null;
-        throw error;
-      });
-      if (channel) {
-        if ((channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)
-          || (channel as TextChannel).guildId !== asset.guild_id) {
-          throw new Error("Legacy Archive asset channel no longer matches its source server.");
+  let deletionError: unknown;
+  const deleted = await transaction(async database => {
+    // Linkers share-lock this row. Holding its update lock through remote deletion
+    // prevents an attachment from being linked after the reference check.
+    const selected = await database.query<{
+      provider: string; bucket_name: string; object_key: string; guild_id: string | null; namespace: string;
+    }>(
+      "SELECT provider, bucket_name, object_key, guild_id::text, namespace FROM media_assets WHERE id = $1 FOR UPDATE",
+      [assetId],
+    );
+    const asset = selected.rows[0];
+    if (!asset) return false;
+
+    await database.query(
+      "INSERT INTO media_asset_cleanup_queue (asset_id) VALUES ($1) ON CONFLICT (asset_id) DO NOTHING",
+      [assetId],
+    );
+    const references = await database.query<{ referenced: boolean }>(
+      "SELECT (EXISTS (SELECT 1 FROM community_archive_entry_assets WHERE asset_id = $1) OR EXISTS (SELECT 1 FROM community_archive_entries WHERE media_asset_id = $1)) AS referenced",
+      [assetId],
+    );
+    if (references.rows[0]?.referenced) {
+      await database.query("DELETE FROM media_asset_cleanup_queue WHERE asset_id = $1", [assetId]);
+      return false;
+    }
+
+    try {
+      if (asset.provider === "discord") {
+        if (!client || !asset.guild_id || asset.namespace !== `archive/${asset.guild_id}`) {
+          throw new Error("The Discord client is unavailable for legacy Archive cleanup.");
         }
-        const message = await (channel as TextChannel).messages.fetch(messageId).catch(error => {
+        const [messageId, attachmentId] = asset.object_key.split("/", 2);
+        if (typeof messageId !== "string" || typeof attachmentId !== "string"
+          || !/^\d{17,20}$/.test(messageId) || !/^\d{17,20}$/.test(attachmentId)) {
+          throw new Error("Legacy Archive asset metadata is invalid.");
+        }
+        const channel = await client.channels.fetch(asset.bucket_name).catch(error => {
           const code = Number((error as { code?: unknown })?.code);
           const status = Number((error as { status?: unknown })?.status);
-          if (code === 10008 || status === 404) return null;
+          if (code === 10003 || status === 404) return null;
           throw error;
         });
-        if (message && (message.guildId !== asset.guild_id || message.channelId !== asset.bucket_name)) {
-          throw new Error("Legacy Archive asset message ownership could not be verified.");
+        if (channel) {
+          if ((channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)
+            || (channel as TextChannel).guildId !== asset.guild_id) {
+            throw new Error("Legacy Archive asset channel no longer matches its source server.");
+          }
+          const message = await (channel as TextChannel).messages.fetch(messageId).catch(error => {
+            const code = Number((error as { code?: unknown })?.code);
+            const status = Number((error as { status?: unknown })?.status);
+            if (code === 10008 || status === 404) return null;
+            throw error;
+          });
+          if (message && (message.guildId !== asset.guild_id || message.channelId !== asset.bucket_name)) {
+            throw new Error("Legacy Archive asset message ownership could not be verified.");
+          }
+          await message?.delete();
         }
-        await message?.delete();
+      } else if (asset.provider === "s3") {
+        await s3Client().send(
+          new DeleteObjectCommand({ Bucket: asset.bucket_name, Key: asset.object_key }),
+          { abortSignal: AbortSignal.timeout(30_000) },
+        );
+      } else {
+        throw new Error("Unsupported Archive storage provider.");
       }
-    } else if (asset.provider === "s3") {
-      await s3Client().send(new DeleteObjectCommand({ Bucket: asset.bucket_name, Key: asset.object_key }));
-    } else {
-      throw new Error("Unsupported Archive storage provider.");
+    } catch (error) {
+      const queued = await database.query<{ attempts: number }>(
+        "SELECT attempts FROM media_asset_cleanup_queue WHERE asset_id = $1 FOR UPDATE",
+        [assetId],
+      );
+      const attempts = Number(queued.rows[0]?.attempts ?? 0) + 1;
+      const reason = error instanceof Error ? error.message.slice(0, 300) : "Unknown storage error";
+      await database.query(
+        "UPDATE media_asset_cleanup_queue SET attempts = $2, next_attempt_at = NOW() + ($3 * INTERVAL '1 second'), last_error = $4 WHERE asset_id = $1",
+        [assetId, attempts, archiveAssetCleanupBackoffSeconds(attempts), reason],
+      );
+      logger.warn("Private Archive asset deletion failed; retry remains queued", {
+        assetId,
+        provider: asset.provider,
+        reason,
+      });
+      deletionError = error;
+      return false;
     }
-    await query("DELETE FROM media_assets WHERE id = $1", [assetId]);
+
+    await database.query("DELETE FROM media_assets WHERE id = $1", [assetId]);
     return true;
-  } catch (error) {
-    const queued = await queryOne<{ attempts: number }>(
-      "SELECT attempts FROM media_asset_cleanup_queue WHERE asset_id = $1",
-      [assetId],
-    ).catch(() => null);
-    const attempts = Number(queued?.attempts ?? 0) + 1;
-    const reason = error instanceof Error ? error.message.slice(0, 300) : "Unknown storage error";
-    logger.warn("Private Archive asset deletion failed; retry remains queued", { assetId, provider: asset.provider, reason });
-    await query(
-      "UPDATE media_asset_cleanup_queue SET attempts = $2, next_attempt_at = NOW() + ($3 * INTERVAL '1 second'), last_error = $4 WHERE asset_id = $1",
-      [assetId, attempts, archiveAssetCleanupBackoffSeconds(attempts), reason],
-    ).catch(() => undefined);
-    throw error;
-  }
+  });
+
+  if (deletionError) throw deletionError;
+  return deleted;
 }
 
 export async function processArchiveAssetCleanup(limit = 10, client?: Client): Promise<{ attempted: number; failed: number }> {
   const boundedLimit = Math.min(50, Math.max(1, Math.floor(limit)));
-  const due = await query<{ asset_id: string }>(
-    "SELECT asset_id::text FROM media_asset_cleanup_queue WHERE next_attempt_at <= NOW() ORDER BY next_attempt_at ASC LIMIT $1",
-    [boundedLimit],
-  );
+  const due = await transaction(async database => {
+    // Claim due rows atomically. A five-minute lease lets another worker recover
+    // the row if this process exits before the object deletion is attempted.
+    const claimed = await database.query<{ asset_id: string }>(
+      `WITH due AS (
+         SELECT asset_id
+         FROM media_asset_cleanup_queue
+         WHERE next_attempt_at <= NOW()
+         ORDER BY next_attempt_at ASC
+         LIMIT $1
+         FOR UPDATE SKIP LOCKED
+       )
+       UPDATE media_asset_cleanup_queue q
+       SET next_attempt_at = NOW() + INTERVAL '5 minutes'
+       FROM due
+       WHERE q.asset_id = due.asset_id
+       RETURNING q.asset_id::text`,
+      [boundedLimit],
+    );
+    return claimed.rows;
+  });
+
   let attempted = 0;
   let failed = 0;
   for (const item of due) {

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
+import { ChannelType, type Client } from "discord.js";
 import {
   CreateBucketCommand,
   DeleteBucketCommand,
@@ -426,6 +427,24 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
     );
     assert.equal(Number(queued?.attempts), 1);
 
+    await admin.query(
+      'UPDATE "' + schema + '".media_asset_cleanup_queue SET next_attempt_at = NOW() WHERE asset_id = $1',
+      [assetId],
+    );
+    const concurrentCleanup = await Promise.all([
+      processArchiveAssetCleanup(10),
+      processArchiveAssetCleanup(10),
+    ]);
+    assert.equal(concurrentCleanup.reduce((total, result) => total + result.attempted, 0), 1,
+      "two cleanup workers must not claim the same due asset");
+    assert.equal(concurrentCleanup.reduce((total, result) => total + result.failed, 0), 1,
+      "the single claimed deletion should report its failed S3 attempt");
+    const afterConcurrentFailure = await queryOne<{ attempts: number }>(
+      "SELECT attempts FROM media_asset_cleanup_queue WHERE asset_id = $1",
+      [assetId],
+    );
+    assert.equal(Number(afterConcurrentFailure?.attempts), 2);
+
     configureMediaStorage(goodConfig);
     await admin.query(
       'UPDATE "' + schema + '".media_asset_cleanup_queue SET next_attempt_at = NOW() WHERE asset_id = $1',
@@ -433,14 +452,52 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
     );
     const cleanup = await processArchiveAssetCleanup(10);
     assert.deepEqual(cleanup, { attempted: 1, failed: 0 });
-    assert.equal(
-      await queryOne("SELECT id FROM media_assets WHERE id = $1", [assetId]),
-      null,
+    assert.equal(await queryOne("SELECT id FROM media_assets WHERE id = $1", [assetId]), null);
+    assert.equal(await queryOne("SELECT asset_id FROM media_asset_cleanup_queue WHERE asset_id = $1", [assetId]), null);
+
+    // Deleted legacy Discord channels/messages are already-cleaned storage, not retryable failures.
+    const legacyChannelId = "111111111111111111";
+    const legacyMessageId = "222222222222222222";
+    const legacyAttachmentId = "333333333333333333";
+    const legacyChannelAsset = await admin.query<{ id: string }>(
+      'INSERT INTO "' + schema + '".media_assets ' +
+      "(provider, namespace, bucket_name, object_key, content_type, size_bytes, sha256, is_private, uploaded_by, guild_id) " +
+      "VALUES ('discord', $1, $2, $3, 'image/png', $4, $5, TRUE, $6, $7) RETURNING id::text AS id",
+      [`archive/${guildId}`, legacyChannelId, `${legacyMessageId}/${legacyAttachmentId}`, bytes.byteLength, "a".repeat(64), userId, guildId],
     );
-    assert.equal(
-      await queryOne("SELECT asset_id FROM media_asset_cleanup_queue WHERE asset_id = $1", [assetId]),
-      null,
+    const missingChannelClient = {
+      channels: {
+        fetch: async () => {
+          const error = Object.assign(new Error("Unknown Channel"), { code: 10003 });
+          throw error;
+        },
+      },
+    } as unknown as Client;
+    assert.equal(await deleteArchiveAsset(Number(legacyChannelAsset.rows[0]!.id), missingChannelClient), true);
+    assert.equal(await queryOne("SELECT id FROM media_assets WHERE id = $1", [legacyChannelAsset.rows[0]!.id]), null);
+
+    const legacyMessageAsset = await admin.query<{ id: string }>(
+      'INSERT INTO "' + schema + '".media_assets ' +
+      "(provider, namespace, bucket_name, object_key, content_type, size_bytes, sha256, is_private, uploaded_by, guild_id) " +
+      "VALUES ('discord', $1, $2, $3, 'image/png', $4, $5, TRUE, $6, $7) RETURNING id::text AS id",
+      [`archive/${guildId}`, legacyChannelId, `${legacyMessageId}/${legacyAttachmentId}`, bytes.byteLength, "b".repeat(64), userId, guildId],
     );
+    const missingMessageClient = {
+      channels: {
+        fetch: async () => ({
+          type: ChannelType.GuildText,
+          guildId,
+          messages: {
+            fetch: async () => {
+              const error = Object.assign(new Error("Unknown Message"), { code: 10008 });
+              throw error;
+            },
+          },
+        }),
+      },
+    } as unknown as Client;
+    assert.equal(await deleteArchiveAsset(Number(legacyMessageAsset.rows[0]!.id), missingMessageClient), true);
+    assert.equal(await queryOne("SELECT id FROM media_assets WHERE id = $1", [legacyMessageAsset.rows[0]!.id]), null);
 
     const leftover = await objectClient.send(new ListObjectsV2Command({ Bucket: bucket }));
     assert.equal(leftover.KeyCount ?? 0, 0);
