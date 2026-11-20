@@ -158,8 +158,10 @@ export async function changeArchiveTrailVisibility(
   trailId: string,
   visibility: ArchiveVisibility,
   canModerateServer: boolean,
-  isGlobalModerator: boolean,
 ): Promise<void> {
+  if (visibility === "global" && !isGlobalArchiveModerator(userId)) {
+    throw new Error("Only configured global Archive moderators can publish an Archive Trail globally.");
+  }
   await transaction(async client => {
     const selected = await client.query<{ owner_id: string; visibility: ArchiveVisibility }>(
       "SELECT owner_id::text, visibility FROM archive_trails " +
@@ -308,7 +310,7 @@ export async function saveArchiveTrail(
   const row = await queryOne<{ id: string }>(
     `INSERT INTO archive_trails (guild_id, owner_id, title, introduction, visibility)
      VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-    [guildId, ownerId, cleanText(title, 160), cleanText(introduction, 1_000), visibility],
+    [guildId, ownerId, cleanTitle, cleanText(introduction, 1_000), visibility],
   );
   if (!row) throw new Error("The Archive Trail could not be created.");
   return row.id;
