@@ -484,7 +484,7 @@ export async function advanceGame(guildId: string, sessionId: string, actorId: s
     const nextRound = session.current_round + 1;
     const finished = finish || nextRound >= session.question_ids.length;
     await client.query(
-      "UPDATE community_game_sessions SET current_round = $1, status = $2, clue_index = CASE WHEN $2 = 'active' THEN 0 ELSE clue_index END, finished_at = CASE WHEN $2 = 'finished' THEN NOW() ELSE finished_at END WHERE id = $3 AND guild_id = $4",
+      "UPDATE community_game_sessions SET current_round = $1, status = $2::varchar, clue_index = CASE WHEN $2::varchar = 'active' THEN 0 ELSE clue_index END, finished_at = CASE WHEN $2::varchar = 'finished' THEN NOW() ELSE finished_at END WHERE id = $3 AND guild_id = $4",
       [finished ? session.current_round : nextRound, finished ? "finished" : "active", sessionId, guildId],
     );
     return { round: finished ? session.question_ids.length : nextRound + 1, total: session.question_ids.length, finished };
