@@ -189,7 +189,7 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
     assert.equal((await queryOne<{ count: string }>(
       "SELECT COUNT(*)::text AS count FROM community_archive_entry_assets WHERE entry_id = $1",
       [lifecycleEntry],
-    ))?.count, "0");
+    ))?.count, "0", "removing the only attachment clears its relation rows");
 
     // A legacy direct-only primary asset remains attached when a secondary attachment is removed.
     const legacyEntry = await submitArchiveEntry({
@@ -278,25 +278,25 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
     assert.equal((await queryOne<{ status: string }>(
       "SELECT status FROM community_archive_entries WHERE id = $1",
       [reportedEntry],
-    ))?.status, "removed");
+    ))?.status, "removed", "report review removes the entry");
     assert.equal((await queryOne<{ status: string }>(
       "SELECT status FROM community_archive_reports WHERE id = $1",
       [report.id],
-    ))?.status, "actioned");
+    ))?.status, "actioned", "report review commits the report disposition");
     assert.equal(await queryOne(
       "SELECT asset_id FROM community_archive_entry_assets WHERE entry_id = $1",
       [reportedEntry],
-    ), null);
+    ), null, "report removal detaches all entry asset relations");
     assert.ok(await queryOne(
       "SELECT asset_id FROM media_asset_cleanup_queue WHERE asset_id = $1",
       [reportedAsset],
-    ));
+    ), "report removal queues the private object for cleanup");
     await admin.query(
       'UPDATE "' + schema + '".media_asset_cleanup_queue SET next_attempt_at = NOW() WHERE asset_id = $1',
       [reportedAsset],
     );
-    assert.deepEqual(await processArchiveAssetCleanup(10), { attempted: 1, failed: 0 });
-    assert.equal(await queryOne("SELECT id FROM media_assets WHERE id = $1", [reportedAsset]), null);
+    assert.deepEqual(await processArchiveAssetCleanup(10), { attempted: 1, failed: 0 }, "report removal cleanup worker should delete the detached asset");
+    assert.equal(await queryOne("SELECT id FROM media_assets WHERE id = $1", [reportedAsset]), null, "cleanup worker deletes the report-removed asset registry row");
 
     // Global collection/Trail creation is enforced by the configured moderator set.
     configureArchiveAccess([]);
