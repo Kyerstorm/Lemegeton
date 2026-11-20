@@ -110,6 +110,11 @@ test("Atlas canonicalizes stable provider identities without merging different w
   assert.equal(atlasProviderIdentity("MANGA", "https://mangadex.org/title/01234567-89ab-4cde-8fab-0123456789ab/example"),
     JSON.stringify(["mangadex:title","MANGA","01234567-89ab-4cde-8fab-0123456789ab"]));
   assert.equal(atlasProviderIdentity("ANIME", "https://kitsu.io/anime/12345-title"), JSON.stringify(["kitsu:anime","ANIME","12345"]));
+  assert.equal(
+    atlasProviderIdentity("ANIME", "https://kitsu.io/anime/12345-renamed-title"),
+    atlasProviderIdentity("ANIME", "https://kitsu.io/anime/12345-title"),
+  );
+  assert.equal(atlasProviderIdentity("MANGA", "https://kitsu.io/manga/67890-changed-slug"), JSON.stringify(["kitsu:manga","MANGA","67890"]));
 });
 
 test("Atlas provider IDs preserve canonical nodes across title and URL changes", () => {

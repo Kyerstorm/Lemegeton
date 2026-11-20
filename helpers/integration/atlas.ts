@@ -168,7 +168,7 @@ export function atlasProviderReference(
     if (match) return { provider: "mangadex:title", providerId: match[1]!.toLowerCase() };
   }
   if (host === "kitsu.io") {
-    const match = /^\/(anime|manga)\/([A-Za-z0-9_-]{1,40})(?:\/|$)/i.exec(path);
+    const match = /^\/(anime|manga)\/([A-Za-z0-9]+)(?:-[^/]+)?(?:\/|$)/i.exec(path);
     const type = match?.[1]?.toLowerCase();
     if (match && ((type === "anime" && normalizedCategory === "ANIME") || (type === "manga" && normalizedCategory === "MANGA"))) {
       return { provider: "kitsu:" + type, providerId: match[2]! };
