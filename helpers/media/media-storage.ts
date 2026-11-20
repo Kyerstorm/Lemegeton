@@ -40,6 +40,15 @@ export function archiveUploadChannelIsPrivate(
   return !everyoneCanView && botCanView && botCanSendMessages && botCanManageMessages;
 }
 
+export function archiveStorageChannelIsPrivate(
+  everyoneCanView: boolean,
+  botCanView: boolean,
+  botCanSendMessages: boolean,
+  botCanAttachFiles: boolean,
+): boolean {
+  return !everyoneCanView && botCanView && botCanSendMessages && botCanAttachFiles;
+}
+
 export async function downloadArchiveUpload(
   value: string,
   fetcher: typeof fetch = globalThis.fetch,
@@ -194,8 +203,12 @@ async function legacyStorageChannel(client: Client, guildId: string, channelId: 
   const member = await textChannel.guild.members.fetchMe();
   const botPermissions = textChannel.permissionsFor(member);
   const publicPermissions = textChannel.permissionsFor(textChannel.guild.roles.everyone);
-  if (!botPermissions.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles])
-    || publicPermissions.has(PermissionFlagsBits.ViewChannel)) {
+  if (!archiveStorageChannelIsPrivate(
+    publicPermissions.has(PermissionFlagsBits.ViewChannel),
+    botPermissions.has(PermissionFlagsBits.ViewChannel),
+    botPermissions.has(PermissionFlagsBits.SendMessages),
+    botPermissions.has(PermissionFlagsBits.AttachFiles),
+  )) {
     throw new Error("The configured legacy Archive storage channel must remain private and grant the bot View Channel, Send Messages and Attach Files.");
   }
   return textChannel;
@@ -330,10 +343,9 @@ export async function signedArchiveAssetUrl(
     if (!client || !asset.guild_id || asset.namespace !== `archive/${asset.guild_id}`) return null;
     const [messageId, attachmentId] = asset.object_key.split("/", 2);
     if (typeof messageId !== "string" || typeof attachmentId !== "string" || !/^\d{17,20}$/.test(messageId) || !/^\d{17,20}$/.test(attachmentId)) return null;
-    const channel = await client.channels.fetch(asset.bucket_name).catch(() => null);
-    if (!channel || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)
-      || (channel as TextChannel).guildId !== asset.guild_id) return null;
-    const message = await (channel as TextChannel).messages.fetch(messageId).catch(() => null);
+    const channel = await legacyStorageChannel(client, asset.guild_id, asset.bucket_name).catch(() => null);
+    if (!channel) return null;
+    const message = await channel.messages.fetch(messageId).catch(() => null);
     if (!message || message.guildId !== asset.guild_id || message.channelId !== asset.bucket_name) return null;
     return message.attachments.get(attachmentId)?.url ?? null;
   }

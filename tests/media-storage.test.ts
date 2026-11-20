@@ -4,6 +4,7 @@ import {
   archiveAssetCleanupBackoffSeconds,
   archiveStorageProvider,
   archiveUploadChannelIsPrivate,
+  archiveStorageChannelIsPrivate,
   classifyArchiveUpload,
   configureMediaStorage,
   downloadArchiveUpload,
@@ -92,4 +93,12 @@ test("Archive attachment downloads accept only the Discord CDN and reject redire
       s3SignedUrlTtlSeconds: 900,
     });
   }
+});
+
+test("Legacy Archive storage channels must remain private and writable by the bot", () => {
+  assert.equal(archiveStorageChannelIsPrivate(false, true, true, true), true);
+  assert.equal(archiveStorageChannelIsPrivate(true, true, true, true), false);
+  assert.equal(archiveStorageChannelIsPrivate(false, false, true, true), false);
+  assert.equal(archiveStorageChannelIsPrivate(false, true, false, true), false);
+  assert.equal(archiveStorageChannelIsPrivate(false, true, true, false), false);
 });
