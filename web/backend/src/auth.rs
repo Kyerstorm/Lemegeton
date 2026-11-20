@@ -18,17 +18,18 @@ pub async fn oauth_start(State(state): State<AppState>) -> Response {
     if !state.config.oauth_ready() {
         return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "Discord OAuth is not configured. Set DASHBOARD_CLIENT_ID, DASHBOARD_CLIENT_SECRET, and DASHBOARD_REDIRECT_URI.").into_response();
     }
-    if !allow_oauth_start(&state).await {
-        return ApiError::new(StatusCode::TOO_MANY_REQUESTS, "Too many sign-in attempts. Wait a minute and try again.").into_response();
+    match allow_oauth_start(&state).await {
+        Ok(true) => {}
+        Ok(false) => return ApiError::new(StatusCode::TOO_MANY_REQUESTS, "Too many sign-in attempts. Wait a minute and try again.").into_response(),
+        Err(_) => return ApiError::unavailable().into_response(),
     }
     let state_token = new_token();
     let browser_nonce = new_token();
-    {
-        let now = now_secs();
-        let mut states = state.oauth_states.lock().await;
-        states.retain(|_, item| item.expires_at > now);
-        if states.len() >= 5_000 { return ApiError::new(StatusCode::TOO_MANY_REQUESTS, "Too many sign-in attempts are pending. Try again shortly.").into_response(); }
-        states.insert(state_token.clone(), OAuthState { expires_at: now.saturating_add(600), browser_nonce: browser_nonce.clone() });
+    let oauth_state = OAuthState { expires_at: now_secs().saturating_add(600), browser_nonce: browser_nonce.clone() };
+    match state.store.insert_oauth_state(&state_token, &oauth_state, now_secs(), 5_000).await {
+        Ok(true) => {}
+        Ok(false) => return ApiError::new(StatusCode::TOO_MANY_REQUESTS, "Too many sign-in attempts are pending. Try again shortly.").into_response(),
+        Err(_) => return ApiError::unavailable().into_response(),
     }
     let url = format!("https://discord.com/oauth2/authorize?client_id={}&redirect_uri={}&response_type=code&scope=identify%20guilds&state={}",
         urlencoding::encode(&state.config.client_id), urlencoding::encode(&state.config.redirect_uri), urlencoding::encode(&state_token));
@@ -41,7 +42,9 @@ pub async fn oauth_start(State(state): State<AppState>) -> Response {
 }
 pub async fn oauth_callback(State(state): State<AppState>, headers: HeaderMap, Query(query): Query<OAuthCallback>) -> Response {
     if query.error.is_some() {
-        if let Some(value) = query.state.as_deref() { state.oauth_states.lock().await.remove(value); }
+        if let Some(value) = query.state.as_deref() {
+            if state.store.remove_oauth_state(value).await.is_err() { return ApiError::unavailable().into_response(); }
+        }
         let mut response = Redirect::to("/login?error=cancelled").into_response();
         if let Ok(cookie) = HeaderValue::from_str(&expired_oauth_state_cookie(&state)) {
             response.headers_mut().append(header::SET_COOKIE, cookie);
@@ -52,7 +55,10 @@ pub async fn oauth_callback(State(state): State<AppState>, headers: HeaderMap, Q
         _ => return ApiError::new(StatusCode::BAD_REQUEST, "Discord sign-in response is invalid. Start sign-in again.").into_response() };
     let state_value = match query.state { Some(value) if !value.is_empty() && value.len() <= 256 => value,
         _ => return ApiError::new(StatusCode::BAD_REQUEST, "Sign-in state is missing. Start sign-in again.").into_response() };
-    let saved = state.oauth_states.lock().await.remove(&state_value);
+    let saved = match state.store.take_oauth_state(&state_value, now_secs()).await {
+        Ok(saved) => saved,
+        Err(_) => return ApiError::unavailable().into_response(),
+    };
     let browser_nonce = cookie_value(&headers, "lemegeton_oauth_state").unwrap_or_default();
     let state_matches_browser = saved.as_ref().is_some_and(|saved| {
         saved.expires_at > now_secs()
@@ -87,22 +93,18 @@ pub async fn oauth_callback(State(state): State<AppState>, headers: HeaderMap, Q
         access_token: access, refresh_token: tokens.refresh_token,
         access_expires_at: now_secs().saturating_add(tokens.expires_in.unwrap_or(3600).saturating_sub(45).max(30)),
         expires_at: now_secs().saturating_add(state.config.session_ttl), csrf: new_token() };
-    {
-        let now = now_secs();
-        let mut sessions = state.sessions.lock().await;
-        sessions.retain(|_, existing| existing.expires_at > now);
-        if sessions.len() >= 5_000 {
-            return ApiError::new(StatusCode::TOO_MANY_REQUESTS, "Too many active dashboard sessions. Try again later.").into_response();
-        }
-        sessions.insert(session_id.clone(), session.clone());
+    match state.store.insert_session(&session_id, &session, now_secs(), 5_000).await {
+        Ok(true) => {}
+        Ok(false) => return ApiError::new(StatusCode::TOO_MANY_REQUESTS, "Too many active dashboard sessions. Try again later.").into_response(),
+        Err(_) => return ApiError::unavailable().into_response(),
     }
     match manageable_guilds(&state, &session_id, &session).await {
         Ok(guilds) if !guilds.is_empty() || is_owner(&state, &session.user.id) => {}
         Ok(_) => {
-            state.sessions.lock().await.remove(&session_id);
+            let _ = state.store.remove_session(&session_id).await;
             return ApiError::new(StatusCode::FORBIDDEN, "No manageable servers found. The bot must be present in a server where your account has Manage Server or Administrator permission.").into_response();
         }
-        Err(error) => { state.sessions.lock().await.remove(&session_id); return error.into_response(); }
+        Err(error) => { let _ = state.store.remove_session(&session_id).await; return error.into_response(); }
     }
     let mut response = Redirect::to("/").into_response();
     match HeaderValue::from_str(&token_response_cookie(&session_id, &state)) {
@@ -123,8 +125,8 @@ pub async fn bootstrap(State(state): State<AppState>, headers: HeaderMap) -> Api
 }
 pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Response> {
     let (session_id, session) = crate::state::write_session(&state, &headers).await?;
-    state.sessions.lock().await.remove(&session_id);
-    state.write_limits.lock().await.remove(&session_id);
+    state.store.remove_session(&session_id).await.map_err(|_| ApiError::unavailable())?;
+
 
     // Revoke the refresh token after removing the local session. Logout still succeeds if
     // Discord is unreachable; the server-side session is already invalidated.
@@ -209,7 +211,7 @@ mod tests {
             port: 8080,
             secure_cookie: false,
             session_ttl: 3600,
-            owner_ids: HashSet::new(),
+            owner_ids: HashSet::new(), session_db_path: ":memory:".to_string(),
         };
         let mut state = AppState::new(config);
         state.discord_api_base = mock_url;
@@ -285,7 +287,7 @@ mod tests {
             bridge_url: "http://127.0.0.1:8091".to_string(), atlas_bridge_url: "http://127.0.0.1:8093".to_string(), bridge_secret: String::new(),
             picker_url: "http://127.0.0.1:8092".to_string(), bind_host: "127.0.0.1".to_string(),
             port: 8080, secure_cookie: false, session_ttl: 3600,
-            owner_ids: HashSet::new(),
+            owner_ids: HashSet::new(), session_db_path: ":memory:".to_string(),
         })
     }
     #[tokio::test]
@@ -297,26 +299,26 @@ mod tests {
     #[tokio::test]
     async fn oauth_callback_rejects_state_from_another_browser_before_network_access() {
         let state = test_state();
-        state.oauth_states.lock().await.insert("state-token".to_string(), OAuthState {
+        state.store.insert_oauth_state("state-token", &OAuthState {
             expires_at: now_secs() + 600,
             browser_nonce: "browser-A".to_string(),
-        });
+        }, now_secs(), 5_000).await.unwrap();
         let mut headers = HeaderMap::new();
         headers.insert(header::COOKIE, HeaderValue::from_static("lemegeton_oauth_state=browser-B"));
         let response = oauth_callback(State(state.clone()), headers, Query(OAuthCallback {
             code: Some("authorization-code".to_string()), state: Some("state-token".to_string()), error: None,
         })).await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        assert!(!state.oauth_states.lock().await.contains_key("state-token"));
+        assert!(!state.store.has_oauth_state("state-token").await.unwrap());
     }
 
     #[tokio::test]
     async fn oauth_callback_rejects_missing_browser_cookie_before_network_access() {
         let state = test_state();
-        state.oauth_states.lock().await.insert("state-token".to_string(), OAuthState {
+        state.store.insert_oauth_state("state-token", &OAuthState {
             expires_at: now_secs() + 600,
             browser_nonce: "browser-A".to_string(),
-        });
+        }, now_secs(), 5_000).await.unwrap();
         let response = oauth_callback(State(state), HeaderMap::new(), Query(OAuthCallback {
             code: Some("authorization-code".to_string()), state: Some("state-token".to_string()), error: None,
         })).await;

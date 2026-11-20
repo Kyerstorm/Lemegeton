@@ -1,6 +1,7 @@
 mod api;
 mod auth;
 mod state;
+mod store;
 mod ui;
 
 use axum::{body::Body, extract::State, http::{header, Request}, middleware::Next, response::{IntoResponse, Response}, routing::{any, get, post, put}, Router};
@@ -69,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.bind_host.clone()
     };
     let bind = format!("{}:{}", bind_host, config.port);
-    let state = AppState::new(config);
+    let state = AppState::try_new(config).map_err(|message| std::io::Error::new(std::io::ErrorKind::Other, message))?;
     let app = Router::new()
         .route("/", get(auth::home)).route("/login", get(auth::login_page))
         .route("/oauth/start", get(auth::oauth_start)).route("/oauth/callback", get(auth::oauth_callback))

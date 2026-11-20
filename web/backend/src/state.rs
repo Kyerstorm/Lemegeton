@@ -1,9 +1,10 @@
 use axum::{http::{header, HeaderMap, Method, StatusCode}, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{collections::{HashMap, HashSet, VecDeque}, env, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{collections::HashSet, env, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
 use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
+use crate::store::DashboardStore;
 use uuid::Uuid;
 
 pub const DISCORD_API: &str = "https://discord.com/api/v10";
@@ -15,6 +16,7 @@ pub struct AppConfig {
     pub client_id: String, pub client_secret: String, pub redirect_uri: String, pub public_origin: String,
     pub bridge_url: String, pub atlas_bridge_url: String, pub bridge_secret: String, pub picker_url: String, pub bind_host: String,
     pub port: u16, pub secure_cookie: bool, pub session_ttl: u64, pub owner_ids: HashSet<String>,
+    pub session_db_path: String,
 }
 impl AppConfig {
     pub fn from_env() -> Self {
@@ -41,6 +43,7 @@ impl AppConfig {
             secure_cookie,
             session_ttl: env::var("DASHBOARD_SESSION_TTL").ok().and_then(|v| v.parse().ok()).unwrap_or(28_800).max(300),
             owner_ids,
+            session_db_path: env::var("DASHBOARD_SESSION_DB_PATH").unwrap_or_else(|_| "./data/dashboard/sessions.sqlite".to_string()),
         }
     }
     pub fn oauth_ready(&self) -> bool { !self.client_id.is_empty() && !self.client_secret.is_empty() && !self.redirect_uri.is_empty() }
@@ -88,7 +91,7 @@ fn env_bool(key: &str, default: bool) -> bool {
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct DashboardUser { pub id: String, pub username: String, pub global_name: Option<String>, pub avatar: Option<String> }
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Session {
     pub user: DashboardUser, pub access_token: String, pub refresh_token: Option<String>,
     pub access_expires_at: u64, pub expires_at: u64, pub csrf: String,
@@ -99,21 +102,23 @@ pub struct DashboardGuild { pub id: String, pub name: String, pub icon: Option<S
 pub struct OAuthState { pub expires_at: u64, pub browser_nonce: String }
 #[derive(Clone)]
 pub struct AppState {
-    pub config: Arc<AppConfig>, pub client: reqwest::Client, pub discord_api_base: String,
-    pub sessions: Arc<Mutex<HashMap<String, Session>>>,
-    pub oauth_states: Arc<Mutex<HashMap<String, OAuthState>>>, pub oauth_start_events: Arc<Mutex<VecDeque<u64>>>,
-    pub token_refresh_lock: Arc<Mutex<()>>, pub write_limits: Arc<Mutex<HashMap<String, VecDeque<u64>>>>,
+    pub config: Arc<AppConfig>,
+    pub client: reqwest::Client,
+    pub discord_api_base: String,
+    pub store: DashboardStore,
     pub last_status: Arc<Mutex<Option<Value>>>,
 }
 impl AppState {
-    pub fn new(config: AppConfig) -> Self {
+    pub fn try_new(config: AppConfig) -> Result<Self, String> {
+        let store = DashboardStore::open(&config.session_db_path)?;
         let client = reqwest::Client::builder().timeout(Duration::from_secs(12)).connect_timeout(Duration::from_secs(4))
-            .redirect(reqwest::redirect::Policy::none()).user_agent("Lemegeton-Dashboard/2.0").build().expect("reqwest client configuration is valid");
-        Self { config: Arc::new(config), client, discord_api_base: DISCORD_API.to_string(),
-            sessions: Arc::new(Mutex::new(HashMap::new())),
-            oauth_states: Arc::new(Mutex::new(HashMap::new())), oauth_start_events: Arc::new(Mutex::new(VecDeque::new())),
-            token_refresh_lock: Arc::new(Mutex::new(())), write_limits: Arc::new(Mutex::new(HashMap::new())),
-            last_status: Arc::new(Mutex::new(None)) }
+            .redirect(reqwest::redirect::Policy::none()).user_agent("Lemegeton-Dashboard/2.0").build()
+            .map_err(|error| format!("Could not configure dashboard HTTP client: {error}"))?;
+        Ok(Self { config: Arc::new(config), client, discord_api_base: DISCORD_API.to_string(), store,
+            last_status: Arc::new(Mutex::new(None)) })
+    }
+    pub fn new(config: AppConfig) -> Self {
+        Self::try_new(config).expect("dashboard state and SQLite session store must initialize")
     }
 }
 #[derive(Debug)]
@@ -143,15 +148,10 @@ pub fn cookie_value(headers: &HeaderMap, key: &str) -> Option<String> {
 }
 pub async fn session_from_headers(state: &AppState, headers: &HeaderMap) -> ApiResult<(String, Session)> {
     let id = cookie_value(headers, "lemegeton_session").ok_or_else(ApiError::unauthorized)?;
-    let mut sessions = state.sessions.lock().await;
-    if sessions.get(&id).map(|s| s.expires_at <= now_secs()).unwrap_or(true) {
-        sessions.remove(&id); return Err(ApiError::unauthorized());
-    }
-    if let Some(session) = sessions.get_mut(&id) {
-        session.expires_at = now_secs().saturating_add(state.config.session_ttl);
-        return Ok((id, session.clone()));
-    }
-    Err(ApiError::unauthorized())
+    let session = state.store.get_session(&id, now_secs(), state.config.session_ttl).await
+        .map_err(|_| ApiError::unavailable())?
+        .ok_or_else(ApiError::unauthorized)?;
+    Ok((id, session))
 }
 pub async fn write_session(state: &AppState, headers: &HeaderMap) -> ApiResult<(String, Session)> {
     let (id, session) = session_from_headers(state, headers).await?;
@@ -161,13 +161,9 @@ pub async fn write_session(state: &AppState, headers: &HeaderMap) -> ApiResult<(
     if supplied.is_empty() || supplied.as_bytes().ct_eq(session.csrf.as_bytes()).unwrap_u8() != 1 {
         return Err(ApiError::forbidden("The security token is missing or expired. Refresh the dashboard and try again."));
     }
-    let now = now_secs();
-    let mut limits = state.write_limits.lock().await;
-    let events = limits.entry(id.clone()).or_default();
-    while events.front().map(|t| now.saturating_sub(*t) >= 60).unwrap_or(false) { events.pop_front(); }
-    if events.len() >= 30 { return Err(ApiError::new(StatusCode::TOO_MANY_REQUESTS, "Too many changes were submitted. Wait a minute and try again.")); }
-    events.push_back(now);
-    if limits.len() > 5_000 { limits.retain(|_, values| values.back().map(|t| now.saturating_sub(*t) < 600).unwrap_or(false)); }
+    let allowed = state.store.allow_rate_event("write", &id, now_secs(), 60, 30).await
+        .map_err(|_| ApiError::unavailable())?;
+    if !allowed { return Err(ApiError::new(StatusCode::TOO_MANY_REQUESTS, "Too many changes were submitted. Wait a minute and try again.")); }
     Ok((id, session))
 }
 pub async fn discord_json(state: &AppState, path: &str, token: &str) -> ApiResult<Value> {
@@ -177,59 +173,69 @@ pub async fn discord_json(state: &AppState, path: &str, token: &str) -> ApiResul
     response.json::<Value>().await.map_err(|_| ApiError::new(StatusCode::BAD_GATEWAY, "Discord returned an invalid response."))
 }
 pub async fn access_token(state: &AppState, session_id: &str) -> ApiResult<String> {
-    let mut snapshot = state.sessions.lock().await.get(session_id).cloned().ok_or_else(ApiError::unauthorized)?;
-    if snapshot.expires_at <= now_secs() { return Err(ApiError::unauthorized()); }
-    if snapshot.access_expires_at > now_secs().saturating_add(15) { return Ok(snapshot.access_token); }
-
-    // Discord may rotate refresh tokens. Serialize refreshes, then re-read the session so
-    // concurrent requests reuse the first successful refresh instead of racing the old token.
-    let _refresh_guard = state.token_refresh_lock.lock().await;
-    snapshot = state.sessions.lock().await.get(session_id).cloned().ok_or_else(ApiError::unauthorized)?;
-    if snapshot.expires_at <= now_secs() { return Err(ApiError::unauthorized()); }
-    if snapshot.access_expires_at > now_secs().saturating_add(15) { return Ok(snapshot.access_token); }
-    let refresh = snapshot.refresh_token.clone().ok_or_else(ApiError::unauthorized)?;
-    if !state.config.oauth_ready() { return Err(ApiError::unauthorized()); }
-    let response = state.client.post(format!("{DISCORD_API}/oauth2/token"))
-        .form(&[("client_id", state.config.client_id.as_str()), ("client_secret", state.config.client_secret.as_str()),
-            ("grant_type", "refresh_token"), ("refresh_token", refresh.as_str())])
-        .send().await.map_err(|_| ApiError::new(StatusCode::BAD_GATEWAY, "Discord authorization refresh failed."))?;
-    let status = response.status();
-    let data = response.json::<Value>().await.unwrap_or(Value::Null);
-    let token = data.get("access_token").and_then(Value::as_str).filter(|value| !value.is_empty()).map(ToOwned::to_owned);
-    if !status.is_success() || token.is_none() {
-        if let Some(session) = state.sessions.lock().await.get_mut(session_id) {
-            session.access_token.clear();
-            session.refresh_token = None;
+    const REFRESH_LEASE_SECONDS: u64 = 30;
+    const MAX_WAIT_ATTEMPTS: usize = 50;
+    for attempt in 0..=MAX_WAIT_ATTEMPTS {
+        let now = now_secs();
+        let snapshot = state.store.get_session(session_id, now, state.config.session_ttl).await
+            .map_err(|_| ApiError::unavailable())?
+            .ok_or_else(ApiError::unauthorized)?;
+        if snapshot.access_expires_at > now.saturating_add(15) {
+            return Ok(snapshot.access_token);
         }
-        return Err(ApiError::unauthorized());
+        let claim = state.store.claim_session_refresh(session_id, now, REFRESH_LEASE_SECONDS).await
+            .map_err(|_| ApiError::unavailable())?;
+        let Some((snapshot, lease_until)) = claim else {
+            if attempt == MAX_WAIT_ATTEMPTS {
+                return Err(ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "Discord authorization is being refreshed by another dashboard instance. Retry shortly."));
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            continue;
+        };
+        let Some(refresh) = snapshot.refresh_token.clone() else {
+            state.store.invalidate_refreshed_tokens(session_id, lease_until).await
+                .map_err(|_| ApiError::unavailable())?;
+            return Err(ApiError::unauthorized());
+        };
+        if !state.config.oauth_ready() {
+            state.store.release_session_refresh(session_id, lease_until).await
+                .map_err(|_| ApiError::unavailable())?;
+            return Err(ApiError::unauthorized());
+        }
+        let response = match state.client.post(format!("{DISCORD_API}/oauth2/token"))
+            .form(&[("client_id", state.config.client_id.as_str()), ("client_secret", state.config.client_secret.as_str()),
+                ("grant_type", "refresh_token"), ("refresh_token", refresh.as_str())])
+            .send().await {
+                Ok(response) => response,
+                Err(_) => {
+                    state.store.release_session_refresh(session_id, lease_until).await
+                        .map_err(|_| ApiError::unavailable())?;
+                    return Err(ApiError::new(StatusCode::BAD_GATEWAY, "Discord authorization refresh failed."));
+                }
+            };
+        let status = response.status();
+        let data = response.json::<Value>().await.unwrap_or(Value::Null);
+        let token = data.get("access_token").and_then(Value::as_str).filter(|value| !value.is_empty()).map(ToOwned::to_owned);
+        if !status.is_success() || token.is_none() {
+            state.store.invalidate_refreshed_tokens(session_id, lease_until).await
+                .map_err(|_| ApiError::unavailable())?;
+            return Err(ApiError::unauthorized());
+        }
+        let token = token.unwrap_or_default();
+        let new_refresh = data.get("refresh_token").and_then(Value::as_str).filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned).or(snapshot.refresh_token);
+        let expiry = data.get("expires_in").and_then(Value::as_u64).unwrap_or(3600);
+        let saved = state.store.save_refreshed_tokens(
+            session_id, lease_until, token.clone(), new_refresh,
+            now_secs().saturating_add(expiry.saturating_sub(45).max(30)), now_secs(),
+        ).await.map_err(|_| ApiError::unavailable())?;
+        return if saved { Ok(token) } else { Err(ApiError::unauthorized()) };
     }
-    let token = token.unwrap_or_default();
-    let new_refresh = data.get("refresh_token").and_then(Value::as_str).filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned).or(snapshot.refresh_token);
-    let expiry = data.get("expires_in").and_then(Value::as_u64).unwrap_or(3600);
-    if let Some(session) = state.sessions.lock().await.get_mut(session_id) {
-        session.access_token = token.clone();
-        session.refresh_token = new_refresh;
-        session.access_expires_at = now_secs().saturating_add(expiry.saturating_sub(45).max(30));
-    } else {
-        return Err(ApiError::unauthorized());
-    }
-    Ok(token)
+    Err(ApiError::unavailable())
 }
 
-pub async fn allow_oauth_start(state: &AppState) -> bool {
-    const WINDOW_SECONDS: u64 = 60;
-    const MAX_STARTS_PER_WINDOW: usize = 60;
-    let now = now_secs();
-    let mut events = state.oauth_start_events.lock().await;
-    while events.front().is_some_and(|timestamp| now.saturating_sub(*timestamp) >= WINDOW_SECONDS) {
-        events.pop_front();
-    }
-    if events.len() >= MAX_STARTS_PER_WINDOW {
-        return false;
-    }
-    events.push_back(now);
-    true
+pub async fn allow_oauth_start(state: &AppState) -> Result<bool, String> {
+    state.store.allow_rate_event("oauth", "global", now_secs(), 60, 60).await
 }
 pub async fn bridge_json(state: &AppState, method: Method, path: &str, body: Option<Value>) -> ApiResult<Value> {
     bridge_json_at(state, &state.config.bridge_url, method, path, body).await
@@ -366,7 +372,7 @@ mod tests {
             bridge_url: "http://127.0.0.1:8091".to_string(), atlas_bridge_url: "http://127.0.0.1:8093".to_string(), bridge_secret: "bridge".to_string(),
             picker_url: "http://127.0.0.1:8092".to_string(), bind_host: "127.0.0.1".to_string(),
             port: 8080, secure_cookie: true, session_ttl: 3600,
-            owner_ids: HashSet::new(),
+            owner_ids: HashSet::new(), session_db_path: ":memory:".to_string(),
         })
     }
     fn test_session(csrf: &str, expires_at: u64) -> Session {
@@ -431,9 +437,9 @@ mod tests {
     async fn oauth_start_rate_limit_blocks_excessive_attempts() {
         let state = test_state();
         for _ in 0..60 {
-            assert!(allow_oauth_start(&state).await);
+            assert!(allow_oauth_start(&state).await.unwrap());
         }
-        assert!(!allow_oauth_start(&state).await);
+        assert!(!allow_oauth_start(&state).await.unwrap());
     }
 
     #[test]
@@ -454,7 +460,7 @@ mod tests {
     #[tokio::test]
     async fn writes_require_matching_origin_and_csrf_token() {
         let state = test_state();
-        state.sessions.lock().await.insert("test-session".to_string(), test_session("csrf-secret", now_secs() + 600));
+        state.store.insert_session("test-session", &test_session("csrf-secret", now_secs() + 600), now_secs(), 100).await.unwrap();
         assert!(matches!(write_session(&state, &session_headers(Some("csrf-secret"), None)).await, Err(e) if e.status == StatusCode::FORBIDDEN));
         assert!(matches!(write_session(&state, &session_headers(Some("wrong"), Some("https://dashboard.example"))).await, Err(e) if e.status == StatusCode::FORBIDDEN));
         assert!(matches!(write_session(&state, &session_headers(Some("csrf-secret"), Some("https://attacker.example"))).await, Err(e) if e.status == StatusCode::FORBIDDEN));
@@ -463,14 +469,14 @@ mod tests {
     #[tokio::test]
     async fn expired_sessions_are_removed_and_rejected() {
         let state = test_state();
-        state.sessions.lock().await.insert("test-session".to_string(), test_session("csrf-secret", now_secs().saturating_sub(1)));
+        state.store.insert_session("test-session", &test_session("csrf-secret", now_secs().saturating_sub(1)), now_secs().saturating_sub(2), 100).await.unwrap();
         assert!(matches!(session_from_headers(&state, &session_headers(None, None)).await, Err(e) if e.status == StatusCode::UNAUTHORIZED));
-        assert!(!state.sessions.lock().await.contains_key("test-session"));
+        assert!(state.store.get_session("test-session", now_secs(), 3600).await.unwrap().is_none());
     }
     #[tokio::test]
     async fn write_rate_limit_rejects_the_31st_change_in_a_minute() {
         let state = test_state();
-        state.sessions.lock().await.insert("test-session".to_string(), test_session("csrf-secret", now_secs() + 600));
+        state.store.insert_session("test-session", &test_session("csrf-secret", now_secs() + 600), now_secs(), 100).await.unwrap();
         let headers = session_headers(Some("csrf-secret"), Some("https://dashboard.example"));
         for _ in 0..30 { assert!(write_session(&state, &headers).await.is_ok()); }
         assert!(matches!(write_session(&state, &headers).await, Err(e) if e.status == StatusCode::TOO_MANY_REQUESTS));
