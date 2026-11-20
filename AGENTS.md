@@ -387,3 +387,152 @@ The work is complete when:
 - **Use Git as evidence:** review file co-change history and repeated patterns rather than relying only on intuition.
 
 The governing principle is that this is a redesign of change boundaries: pieces that change together should be together, pieces that change for different reasons should not be tied together, and everything should depend on what changes less.
+
+
+---
+
+## Evidence-Led Folder Architecture and Repository Organization
+
+Folder structure is part of the architecture: it should make ownership, dependencies, runtime boundaries, and change-together relationships obvious. Do not choose a layout because it is fashionable or copy another repository wholesale. Choose it from the project's actual requirements and verified code.
+
+This section is mandatory before a substantial folder reorganization, a new large feature area, a new service/package, or an Untangle Codebase run. Apply the same reasoning to small changes when deciding where new files belong.
+
+### 1. Inspect the real repository before proposing a structure
+
+Before moving or creating folders:
+
+1. Inspect the complete tracked file tree and identify the repository's actual top-level boundaries. Inspect enough depth to understand the ownership of important files; do not rely only on a short root listing.
+2. Read the entry points, representative files, package/workspace manifests, build configuration, tests, and relevant documentation. Folder names alone do not prove what a module does.
+3. Trace imports, calls, shared state, data ownership, runtime processes, build/deploy units, and test coverage. Generate or inspect a dependency graph when it can reveal hidden coupling.
+4. Use Git history and co-change evidence where available to identify files that repeatedly change together.
+5. Separate production code, test code, generated output, static assets, operational scripts, infrastructure, migrations, and documentation according to their actual purpose.
+6. Record the current structure and its problems before changing anything. Do not start a broad move while the ownership and dependency map is still unclear.
+
+Every proposed directory must have a clear responsibility. Every moved file must have an explicit destination and reason. Avoid moving files merely to make the tree look tidy.
+
+### 2. Benchmark mature repositories with relevant architecture
+
+Research real, actively maintained, substantial projects that use a comparable language, framework, deployment model, or engineering problem. Inspect their actual repository trees, manifests, and representative code. Use examples as evidence for a decision, not as templates to copy.
+
+The following repositories are useful verified reference points:
+
+| Project | Observed organization | Useful lesson |
+|---|---|---|
+| [Vercel / Next.js](https://github.com/vercel/next.js) | Separates apps/, packages/, Rust crates/, docs/, examples/, benchmarks, scripts, and tests. | Different deployable apps, reusable packages, language-specific workspace crates, and supporting material have explicit boundaries. |
+| [Supabase](https://github.com/supabase/supabase) | Uses apps/, packages/, e2e/, examples/, and supabase/ for database functions and migrations. | Product applications, shared libraries, end-to-end coverage, examples, and database platform assets should not be mixed into one source folder. |
+| [Visual Studio Code](https://github.com/microsoft/vscode) | Separates core src/, independently organized extensions/, cli/, remote/, build/, and tests. | Large products benefit from strong product/runtime/extension boundaries rather than a single undifferentiated components or utilities directory. |
+| [Django](https://github.com/django/django) | Groups framework capabilities under django/ (for example db/, forms/, http/, middleware/, views/) and maintains broad behavior-oriented tests/ suites. | Stable domain capabilities deserve clear modules; tests can mirror externally observable capabilities rather than private file layouts. |
+| [Axum](https://github.com/tokio-rs/axum) | Separates Rust crates such as axum/, axum-core/, axum-extra/, and axum-macros/, with crate-specific source/tests/benches and standalone examples. | Split a Rust workspace into crates when the API, dependency, release, or ownership boundary is real—not merely to create more folders. |
+
+Benchmarking rules:
+
+- Prefer primary repository trees, manifests, and source over blog-post folder diagrams.
+- Check the project's current branch and current layout; repository architecture can change.
+- Choose examples that solve a comparable problem. A framework monorepo, a desktop application, and a small single-app project should not be treated as interchangeable.
+- Identify the principle behind a pattern and adapt it to this codebase's scale, runtime, team, and deployment model.
+- Do not add apps/, packages/, crates/, microservices, or layers unless there is a real boundary that justifies them.
+- Do not claim that a reference project uses a pattern unless its tree or implementation has been inspected.
+
+### 3. Use GoodSale and LOOP as first-party folder-organization references
+
+The user's own repositories are additional concrete references. Inspect their current trees and relevant source before using them; these observations describe the inspected layouts, not a requirement to duplicate every directory.
+
+#### GoodSale — VireonNoctis/GoodSale
+
+Observed root-level organization:
+
+- app/ — Next.js App Router pages, route groups, layouts, loading/error states, metadata, and API route handlers.
+- components/ — reusable interface components grouped in areas such as admin/, auth/, checkout/, marketplace/, onboarding/, premium/, seller/, tracking/, verification/, wallet/, and shared ui/.
+- lib/ — non-route application logic and capabilities grouped in areas such as auth/, business/, delivery/, logistics/, marketplace/, payments/, shipping/, wallet/, referrals/, seo/, and supabase/.
+- supabase/ — schema and ordered database migrations.
+- tests/ — behavior-oriented test groups such as business, chat, data, payments, premium, referrals, and seed.
+- docs/, scripts/, public/, and .github/ — documentation, operational/verification tooling, public assets, and automation.
+
+Patterns to carry forward where appropriate:
+
+- Keep framework-required routes and handlers in app/, but keep substantial domain logic out of route files. Route handlers should validate/translate the HTTP boundary and delegate to the owning domain/service module.
+- Group feature UI by product capability; keep generic primitives in components/ui/.
+- Group business logic by capability instead of placing unrelated functions in one global helper file.
+- Keep schema and ordered database migrations in the database platform's established migration area.
+- Organize tests around behavior/capability, not a one-to-one copy of internal source filenames.
+
+Audit caveat: GoodSale also has a number of top-level component files and capability files directly under lib/. Treat those flatter areas as candidates to evaluate when related files begin changing together; do not bulk-move them without evidence or a coherent ownership boundary.
+
+#### LOOP — VireonNoctis/loop-app
+
+Observed root-level organization:
+
+- app/ — Next.js App Router pages and API routes, including product areas such as chains, circles, communities, co-loop, creator, messages, profiles, quests, shop, and wallet.
+- components/ — feature-oriented interface areas such as accounts, admin, chat, circles, communities, marketplace, onboarding, profile, reels, settings, shop, streams, team, verification, and shared ui/.
+- backend/ — a separate Rust service boundary, with its own Cargo.toml, src/, route and storage modules, configuration, Docker setup, and migrations/.
+- hooks/ and providers/ — shared React hooks and application providers.
+- lib/ — application/domain capabilities and integrations, including auth, circles, communities, discovery, moderation, notifications, payments, privacy, quests, realtime, theming, verification, and the Rust API client.
+- android/ — native Android project and platform resources.
+- infra/, assets/, styles/, public/, scripts/, __tests__/, docs/, and licenses/ — deployment/infrastructure, static assets, styling, operational tooling, tests, documentation, and legal material.
+
+Patterns to carry forward where appropriate:
+
+- Preserve clear runtime boundaries: Next.js application, separately runnable Rust backend, and Android native project should remain distinguishable.
+- Keep frontend routes in the framework's app/ structure, and keep Rust-specific source, manifests, tests, and migrations inside the backend boundary.
+- Group components around product domains and keep generic design-system primitives in components/ui/.
+- Keep truly cross-feature React hooks in hooks/ and app-wide providers in providers/; feature-only hooks/providers may be colocated with their owning feature when that makes ownership clearer.
+- Put infrastructure and native platform assets under their own boundaries rather than mixing them with application logic.
+- Keep domain capabilities identifiable. When lib/ grows into a large flat collection, assess cohesive groups such as auth/, circles/, community/, payments/, notifications/, moderation/, and theming/; consolidate only where import and change-together evidence supports it.
+
+Audit caveat: LOOP's current lib/ contains many root-level capability files, and scripts/ contains a substantial mix of migrations, schema changes, repair scripts, seeds, and verification utilities. Treat these as opportunities for an evidence-led organization review, not proof that every script or helper must be moved immediately. Keep one canonical home for each migration and script; do not duplicate SQL or change execution order while organizing it.
+
+Use these two repositories as first-party examples of how the user separates routes, feature UI, domain logic, backend/runtime boundaries, tests, migrations, infrastructure, and documentation. Do not assume they are perfectly organized or copy their existing rough edges into another project.
+
+### 4. Select the folder model from actual change and deployment boundaries
+
+Use these principles to design the target tree:
+
+- **Separate deployables first.** Use top-level apps/ for multiple independently built/deployed applications, services/ or a clearly named backend boundary for independently run services, and platform folders such as android/ for native projects. In a Rust workspace, use crates/ or named crate directories when crate boundaries are real. A single application does not need a monorepo structure just because large repositories use one.
+- **Separate reusable packages from applications.** In a genuine monorepo, packages/ or language-appropriate workspace members should contain independently reusable libraries, UI systems, configuration, clients, or domain packages. Applications consume shared packages through public interfaces; one app must not reach into another app's private source tree.
+- **Organize product logic by capability.** Prefer cohesive domains such as auth/, billing/, catalog/, chat/, community/, delivery/, or payments/ when the code in each area changes together. Avoid a generic misc/ or a huge utils/ directory that hides ownership.
+- **Respect framework conventions.** Keep framework-mandated route, page, layout, middleware, and handler files where the framework expects them. Use these files as thin entry points; place substantial domain behavior in the owning feature/service modules.
+- **Group UI by responsibility.** Feature-specific components belong with their feature or in a feature-grouped components tree. Generic controls, primitives, and design-system elements belong in a shared UI layer. A shared component must not import a feature's private implementation.
+- **Keep integrations at the boundary.** Provider/API clients, persistence adapters, storage, email, payment gateways, and external-system integrations should have explicit boundaries. Domain rules should not be coupled to vendor-specific transport or SDK details without a reason.
+- **Use hooks/, providers/, and state/ deliberately.** They should contain genuinely shared cross-feature behavior. Feature-only state and hooks should normally stay with the feature that owns them.
+- **Keep data ownership explicit.** Put migrations, schemas, seeds, and persistence-specific code in one clear location per data store/runtime. Separate migration history from disposable scripts and verification utilities; never create a second canonical migration directory.
+- **Give tests a deliberate shape.** Choose either useful colocation or a central tests/ tree based on the existing test tooling. Distinguish unit, integration, contract, and end-to-end tests, and group them around behavior or domain. Keep fixtures and test helpers discoverable. Avoid testing only private folder structure.
+- **Separate operations from source.** Keep deployment manifests, infrastructure-as-code, container configuration, CI workflows, developer scripts, data migrations, and generated build output distinguishable. Do not put generated output into source folders.
+- **Make documentation discoverable.** Keep architecture decisions, runbooks, setup, API contracts, and feature guidance in predictable locations. Avoid duplicate or contradictory instructions scattered across folders.
+- **Keep naming consistent.** Follow the repository's established casing and naming convention. Use clear lowercase names where the project already does so; do not rename large areas just to impose a new style.
+- **Create a folder only when it earns its existence.** Do not add empty directories, one-file abstraction layers, or deeply nested structures that make navigation harder without improving ownership.
+
+### 5. Prefer cohesive feature slices without violating runtime boundaries
+
+A feature slice should make it easy to find the code that changes together. Depending on the framework and scale, a feature may own:
+
+- Its public entry point or route adapter (where framework rules allow).
+- UI components and feature-only hooks/state.
+- Domain rules and application services.
+- Persistence/provider interfaces or adapters where the feature owns them.
+- Types, validation schemas, and feature-specific tests.
+- Documentation for non-obvious behavior and invariants.
+
+Do not force every feature into an identical folder template. A small feature may need one module; a mature domain may need clear domain/, application/, infrastructure/, and presentation/ boundaries. Add those layers only when they separate genuine responsibilities and change rates. Avoid deep ceremonial architecture for simple code.
+
+### 6. Validate a folder reorganization as an architectural change
+
+Before moving files, produce:
+
+1. A current-tree summary and relevant dependency map.
+2. A list of the identified ownership/coupling problems.
+3. The target tree, with a reason for each new boundary.
+4. An old-path → new-path move map.
+5. A dependency-direction plan, including public interfaces and import-alias changes.
+6. A test/build/documentation/configuration impact list.
+
+After moving files:
+
+- Update imports, aliases, manifests, code-generation paths, scripts, CI references, Docker/build contexts, deployment commands, test discovery, documentation links, and editor/tool configuration.
+- Search for stale old paths, dynamic imports, case-sensitive path mismatches, generated references, and string-based file lookups.
+- Verify there is one canonical implementation, migration history, schema source, or configuration owner; do not leave duplicate copies.
+- Run formatter, lint, typecheck, unit/integration/e2e tests, build, and relevant packaging/deployment checks where configured and feasible.
+- Inspect the final tree and dependency graph again. Confirm the new layout makes likely changes easier to locate and does not create new cross-feature imports or dependency cycles.
+- Preserve runtime behavior and public import/API contracts, or provide deliberate compatibility shims when a breaking change is authorized.
+- Report the exact moves, the structural reason, checks run, and checks not run.
+
+Do not perform broad folder moves as incidental cleanup during an unrelated task. When a folder refactor is explicitly requested, complete the structural work coherently rather than stopping after creating the target folders.
