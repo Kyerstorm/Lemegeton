@@ -233,3 +233,157 @@ Before reporting completion, confirm all applicable items:
 - [ ] The summary names changed files and states actual verification results.
 
 When a requirement conflicts with existing code, do not silently assume the code is correct or the docs are correct. Trace the behavior and callers, preserve compatibility by default, and explain the discrepancy before making a broad change.
+
+
+---
+
+## Structural Untangling Protocol — Untangle Codebase
+
+Use this protocol when the user explicitly asks to untangle, structurally refactor, or comprehensively redesign the codebase. Treat it as a complete goal, not a superficial cleanup. When invoked, inspect and improve the whole relevant codebase, finish the work, and preserve intended behavior except for bugs corrected by the structural redesign. This protocol does not expand ordinary feature or bug-fix requests into unsolicited whole-repository refactors.
+
+### 1. Ask about optional additions
+
+Besides untangling the codebase, the user may choose either or both of these additions. Present the options with these exact descriptions and ask which to include before starting an untangling run:
+
+| Addition | Exact description |
+|---|---|
+| **Comments** | Remove comments that only restate the code. |
+| **Tests** | Remove tests that wouldn't catch a real bug, and fix the ones that fail without one. |
+
+Do only the additions the user chooses. If an addition is not selected, do not perform that category of cleanup as part of the untangling work. The structural redesign and the regression verification needed to protect it remain part of the core task.
+
+### 2. List every structural problem before changing anything
+
+Do not edit code during the initial audit. Walk the whole codebase and ask one question of every relevant relationship:
+
+**Should these pieces change together?**
+
+Record every place where the current design answers that question incorrectly. There are three problem classes:
+
+#### Hidden links — pieces that must change together, but the code does not make that relationship visible
+
+Look for:
+
+- **Copied logic or values:** changing one copy means the others must change too, but there is no explicit shared source or relationship.
+- **Hidden shared state:** a module reads a global or a file that another module sets or mutates, so changing the producer can silently break the consumer.
+- **Scattered features:** one feature is split across folders by technical layer, or related code is separated across unrelated locations, so a normal feature change requires edits in multiple places.
+- **Implicit call order or conventions:** callers must know an undocumented sequence, side effect, or convention for the code to work.
+
+#### Needless links — pieces are coupled even though they change for different reasons
+
+Look for:
+
+- **Leaky encapsulation:** callers depend on implementation details and break when internals change.
+- **Wrong dependency direction:** stable code imports more volatile code and must change whenever that volatile implementation changes.
+- **Caller-specific vocabulary:** a general function has a parameter or branch that only one workflow understands, coupling the general abstraction to that caller.
+- **Shallow modules:** a module's interface changes whenever its implementation changes, forcing callers to change for internal reasons.
+
+#### Surplus — pieces with no independent reason to change
+
+Look for:
+
+- **Pass-through wrappers:** wrappers that only change when the thing they wrap changes.
+- **Speculative generality:** extension points, configuration, or abstractions for behavior that does not and is not expected to vary.
+- **Dead code:** code that has no callers or other real use and therefore has no reason to change.
+
+#### Record every special case
+
+A special case is code that exists for one situation rather than following naturally from the system's general rules. Treat each one as evidence of a requirement the design may not have accounted for. Inspect at least:
+
+- An if branch for one particular value.
+- A parameter that exists for one specific caller.
+- A swallowed or ignored exception.
+- A retry, arbitrary sleep, or timing workaround.
+- A disabled test.
+
+Do not automatically delete every special case. Determine whether the redesign makes it unnecessary or whether it represents a real requirement that the system must continue to support.
+
+For every finding, record the file and location, the behavior or relationship involved, why the current design is wrong, and the other places that are coupled to it. Be exhaustive before implementation; do not start fixing the first issue as soon as it is found.
+
+### 3. Redesign from first principles
+
+Work out how the system would have been designed if it had understood today's actual requirements from the beginning.
+
+- Search for one underlying design fix that resolves several symptoms. Prefer correcting the structural cause over adding local patches for each symptom.
+- Place code that changes together together; keep independently changing code separate.
+- Make dependencies point toward the parts of the system that change less.
+- Give modules cohesive responsibilities and interfaces that hide volatile implementation details.
+- Make important relationships explicit rather than relying on duplicated values, hidden state, caller knowledge, or call order.
+- Re-evaluate every proposed fix—even one that appears cleaner—to ensure it improves the change boundaries rather than merely moving complexity elsewhere.
+- Keep intended external behavior, public contracts, data compatibility, security properties, and operational requirements intact unless a deliberate behavior change is part of the request.
+
+Maintain a decision log. Write each proposed structural fix first, followed by the complete set of problems it solves. Do not write a list of unrelated edits; make the relationship between the redesign and its evidence explicit.
+
+Use this format:
+
+> Proposed structural fix: [one coherent design change]
+>
+> - Problem it solves: [file/path and concrete issue]
+> - Problem it solves: [file/path and concrete issue]
+> - Problem it solves: [file/path and concrete issue]
+
+### 4. Fix everything on the decision log
+
+Implement the redesigned structure across all listed locations. Do not stop after fixing the easiest symptoms.
+
+- Remove special cases that the redesign makes unnecessary.
+- Preserve special cases that still express real requirements, and make their purpose and boundary clear.
+- Prefer one coherent structural correction over a set of one-off conditionals, flags, wrappers, retries, or duplicate implementations.
+- Keep the refactor aligned with current repository architecture, language, dependencies, runtime constraints, security requirements, and compatibility obligations.
+- Do not introduce speculative frameworks, extension points, or abstractions as a side effect of making the design appear more general.
+- Do not silently broaden the scope into unrelated product features or behavior changes.
+
+If the user selected **Comments**, apply these rules:
+
+- Remove comments that merely restate what the code does, including comments phrased as a rationale when the rationale is fully evident from the implementation.
+- Keep comments documenting facts outside the code that the code itself cannot express, such as an external service limitation or platform behavior.
+- Remove comments that explain workarounds when the redesign removes the underlying problem; retain them only when the workaround remains necessary and its reason is not otherwise evident.
+
+If the user selected **Tests**, do this after the structural implementation, because tests are the regression safety net:
+
+- Remove tests that merely repeat the implementation's own logic or interpretation rather than checking observable behavior.
+- Rewrite tests coupled to private implementation details so they verify stable behavior and contracts instead.
+- Remove tests that cannot fail for a meaningful regression and therefore do not verify anything.
+- Fix genuinely failing tests when the failure does not represent a real product bug, while preserving tests that expose regressions.
+- Keep useful regression coverage. Do not weaken the suite merely to obtain a green result.
+
+### 5. Check and repeat until done
+
+After the first implementation pass, independently audit the resulting codebase again for:
+
+- Hidden links.
+- Needless links.
+- Surplus code and abstractions.
+- Special cases that remain.
+- Dependencies and import direction.
+- Features still scattered across unrelated locations.
+- Callers that still need to know implementation details or undocumented conventions.
+
+Use subagents to inspect separate areas and independently search for these problems. Compare their findings, resolve disagreements against the actual code and behavior, and update the decision log. If subagents are unavailable, perform separate independent audit passes and state that limitation; do not claim parallel review that did not occur.
+
+Generate or inspect dependency graphs where useful, and rerun them after significant changes. Use repository history and Git evidence to identify files that repeatedly change together. Test the redesigned behavior, not merely the new implementation shape.
+
+**Do not stop while worthwhile structural problems remain.** Repeat the audit, decision-log, redesign, implementation, and verification cycle until the completion criteria below are satisfied.
+
+The work is complete when:
+
+- As few special cases remain as the actual requirements allow; the remaining count and reasons are understood.
+- A typical change can be made in one obvious place.
+- Imports and dependencies are reasonable, and stable code does not depend on more volatile implementation details.
+- Related code is grouped around the behavior that changes together.
+- Independent code is no longer needlessly coupled.
+- Subagent reviews, or equivalent independent audits when subagents are unavailable, have no unresolved worthwhile structural findings.
+- Intended behavior remains the same, apart from bugs the structural redesign corrected.
+- Relevant tests and checks have been run, and limitations are explicitly reported.
+- The final diff contains only intentional changes.
+
+### Untangling techniques
+
+- **Start from a skeleton:** where useful, temporarily reason from function signatures, module boundaries, and dependency structure before reading every implementation detail.
+- **Summarize by area:** use subagents or independent passes to summarize separate parts of the codebase, then reason across the whole system.
+- **Inspect dependency graphs often:** generate or review a graph of what imports what, and revisit it after structural changes.
+- **Start where leverage is highest:** investigate the area whose structural correction is likely to remove the most coupling or repeated work.
+- **Keep the decision log:** it preserves the connection between evidence, redesign, and implementation across long tasks and context changes.
+- **Use Git as evidence:** review file co-change history and repeated patterns rather than relying only on intuition.
+
+The governing principle is that this is a redesign of change boundaries: pieces that change together should be together, pieces that change for different reasons should not be tied together, and everything should depend on what changes less.
