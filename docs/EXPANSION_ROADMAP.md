@@ -183,7 +183,7 @@ The phase status below is a dated implementation audit, not a feature promise. I
 | 4 — Community and games | **Code phase completed; live acceptance pending** | Daily Drop, rankings, sessions/RSVP, spoiler discussions, timezone-aware release/community calendar, guild-scoped Community Seasons, persistent solo/team/co-op games, reviewed quiz packs, seeded tournaments with withdrawal audit and stale-control protection, plus the current-guild Showcase. | Owner-controlled Discord acceptance and current-head CI; no production release is implied. |
 | 5 — Profiles and Custom Roles | **Code phase completed; Discord acceptance pending** | Guild-scoped AniList/Steam linking and unlinking, view-time privacy gates, minimum-cohort affinity/taste, profile contribution attribution, Custom Role hierarchy validation, saved-role restore guard and lifecycle reconciliation. | Owner-controlled Discord role-hierarchy, departure/rejoin, provider-account and privacy acceptance. |
 | 6 — Notifications and automation | **Code phase completed; live provider acceptance pending** | Guild-scoped follows, source-backed alerts, daily/weekly digests, bounded automation, per-guild rule inspection, pause/resume, idempotent provider-event keys, lease/claim-token delivery and retry limits. PostgreSQL tests cover concurrent claims, duplicate events, stale workers and pause recovery. | Owner-controlled provider/Discord acceptance; book/chapter/volume schedules remain conditional on a dependable approved feed. |
-| 7 — Knowledge Atlas and dashboard | **Provider-ID identity core implemented; Phase 9 in progress** | Stable provider namespaces/IDs on source and target edges; ID-based lookup and graph-node deduplication for AniList, IGDB, TMDB, Steam, MangaDex, Kitsu, Google Books and Open Library; guild-scoped DB tests for renamed titles/URLs; bounded two-hop traversal. | Legacy-edge backfill where URLs unambiguously expose IDs, provider/evidence filters, rich node views, clustering, focused Atlas views and permission-equivalent export. |
+| 7 — Knowledge Atlas and dashboard | **Code phase completed; live acceptance pending** | Stable provider identity, conservative legacy backfill, guild-scoped multi-hop provider/community traversal, source/evidence/provider filters, deterministic clusters, shortest paths, bounded JSON/SVG/PNG exports, dashboard UI and SQLite-backed multi-instance Rust sessions. | Owner-controlled provider, OAuth, multi-worker VPS, image-host, backup/restore and live Discord acceptance. |
 | 8 — Operations and launch | **Operational tooling implemented; live release gates open** | Docker/Compose, repository CI, health diagnostics, backup/restore rehearsal and a live-acceptance workflow exist. | Real credentials, production storage/database, Discord application and dashboard OAuth tests; owner-authorized release and rollback. |
 
 Phase 0 code migration status does **not** mean the service is launched. Phase 8 cannot be marked complete from local mocks or GitHub CI alone.
@@ -320,27 +320,24 @@ Daily Drop and scheduled release digests now use atomic database claims, expirin
 
 ## Phase 7 — Knowledge Atlas and dashboard
 
-**Objective:** make canonical media relationships explorable while preserving provenance and visibility.
+**Objective:** make canonical media relationships explorable while preserving provenance, stable identity and guild visibility.
 
-**Already present:** normalized media categories/titles; stored provider, recommendation and community relationship edges; guild visibility filtering; direct relationship and related community-record lookup; a static PNG snapshot renderer; and a dashboard Atlas view.
+**Implemented architecture:** normalized media categories and title keys; provider, recommendation and community edges; provider namespace plus stable provider ID for both edge endpoints; deterministic bounded breadth-first graph traversal; cycle and duplicate-node handling; shortest-path search; source-kind, category, relationship, provider, provider-ID and evidence filters; deterministic category clusters; and SVG/PNG/JSON export. The Rust/Axum dashboard API remains the authorization boundary and calls the existing private TypeScript bridge; no second backend was introduced.
 
-**Completed in the earlier implementation pass:** the dashboard Atlas bridge performs deterministic breadth-first traversal for up to two relationship steps, capped at 24 nodes and eight queried relationships per node. Cycles and ancestor back-edges are suppressed, repeated nodes are deduplicated while alternative paths can remain visible, direct root relationships remain backward-compatible, and guild-scoped lookup is applied again at every hop. The dashboard draws parent-to-node edges, labels node depth and exposes truncation. Bot exports use bounded multi-hop PNG/JSON graphs and selected shortest paths.
+**Completed in this pass (20 November 2026):**
+- Added an idempotent PostgreSQL legacy-edge backfill for known provider URL patterns: AniList, TMDB, Steam, Google Books, MangaDex, Kitsu and Open Library. It records identity only when the URL encodes an unambiguous provider ID. Duplicate identity pairs and unknown/slug-only URLs retain the title/category fallback rather than violating the uniqueness index.
+- Expanded Atlas traversal so each bounded hop collects provider edges and approved guild-scoped community links. Guild/global visibility is applied in every database lookup, not only to the root.
+- Added provider namespace, provider ID and evidence filters to relationship and graph filtering; search now includes source/evidence and canonical identity fields.
+- Added deterministic category clusters and shortest-path targets. The dashboard exposes provider, provider-ID, relationship and evidence filters, path selection and JSON/SVG/PNG export.
+- Added a bounded `/atlas` bridge route: validated guild/setup gate, provider identity validation, maximum depth 3, maximum 40 nodes, per-node query cap, export-size cap, source/provenance metadata and error handling. The Rust API validates categories, identity formats, public HTTPS URLs, query lengths, export formats and graph limits after authorizing the requested guild.
+- SVG/PNG rendering includes source kind, provider identity and edge evidence. Image fetching only accepts the pre-approved provider image hosts, disables redirects and applies a timeout; exports operate on the already guild-filtered graph.
+- Added unit, Rust API, dashboard bridge, renderer and PostgreSQL integration coverage for stable identity, ambiguous legacy data, filters, pathfinding, clusters, export provenance, guild scoping and invalid requests.
 
-**Completed in this implementation pass (20 November 2026):** Atlas edges now persist a provider namespace and stable provider ID for both endpoints when that identity is available. Lookup, graph traversal, node deduplication and path resolution accept the same provider reference, so display-title or URL slug changes do not create a new node. URL-derived identities are limited to known provider URL patterns; provider IDs are preferred when passed directly. The migration adds nullable source/target provider columns and lookup/uniqueness indexes without changing existing rows. `/discover` forwards provider IDs for selected media, AniList creators and provider relationship writers for IGDB companies, TMDB people, AniList media and cross-provider title matches. Unit and PostgreSQL integration tests cover category separation, renamed IDs/URLs, slug changes and persisted edge lookup.
+**Code phase status: complete.** The Atlas exit gate is satisfied at code level: traversal is bounded and deterministic; provider identity is stable where available; legacy uncertainty preserves fallback; filters and exports reuse the guild-scoped graph; and edges expose source kind/evidence.
 
-**Current limitation:** legacy relationship rows remain readable through the existing title/URL fallback, but the migration does not backfill provider IDs into old rows. Unambiguous legacy URL backfill, provider/evidence filters, clustering, rich node details and focused creator/franchise/adaptation/Archive collection views remain outstanding.
+**Live acceptance remains separate:** real provider metadata and media image hosts, Discord guild membership/setup, OAuth login across multiple Rust workers, VPS Nginx/systemd behaviour, backup/restore of SQLite WAL files and production latency still require owner-controlled acceptance. No deployment or production cutover is implied.
 
-**Remaining delivery:**
-- Backfill provider IDs for legacy rows only where the existing provider URL unambiguously identifies the record; retain title/category/edition fallback for every other row.
-- Add graph search and filters for provider identity and relationship evidence, while retaining source-kind and guild/global visibility filters.
-- Expose edge evidence and source links. Community proposals must remain visibly different from provider-confirmed relationships and recommendations.
-- Add focused creator, franchise, adaptation and Archive collection views, reusing the bounded graph traversal and path helpers.
-- Re-check visibility at each traversal step and at render/export time; filtering only the root node is insufficient.
-- Add image-backed node thumbnails only from approved provider URLs or permission-checked Archive assets.
-- Complete graph export with size/node limits, source/provenance legend and the same permissions as interactive views.
-- Keep the Rust/Axum service as the dashboard authorization/API boundary; do not add a second backend.
-
-**Exit criteria:** graph traversal is bounded and deterministic; no cross-guild/private edge leaks through paths or exports; each edge shows source kind/evidence; traversal tests cover cycles, duplicate nodes and node limits; path/export tests cover hidden Archive entries and missing provider records.
+**Operational constraints:** PostgreSQL remains the authoritative bot/domain database. SQLite is a secondary local database only for Rust dashboard sessions, OAuth state, distributed request limits and token-refresh leases. Rust dashboard workers can share one SQLite WAL file on the same host and local persistent disk; do not put it on NFS or share it between hosts. Nginx uses `least_conn` for three loopback dashboard workers. Keep the Discord bot/gateway as a single service.
 
 ### Phase 8 — operational hardening and launch
 
@@ -486,9 +483,17 @@ PostgreSQL integration tests cover competing rule and delivery workers, guild is
 
 #### Phase 9 — Knowledge Atlas and dashboard experience (16,000)
 
-Complete stable provider-ID node identity, typed edges, evidence/provenance, relationship filters, search, pathfinding, clustering, visibility-equivalent exports and rich node views. Build the Next.js dashboard around the existing Rust/Axum authorization boundary; do not create a second backend or trust client-supplied guild permissions.
+**Status: Code phase completed — 20 November 2026.**
 
-**Exit gate:** graph traversal and export enforce guild/global visibility at every hop; canonical work-versus-edition identity is stable; dashboard routes re-authorize every privileged action server-side.
+Canonical provider identity now spans AniList, TMDB, Steam, Google Books, MangaDex, Kitsu and Open Library URL patterns, with a conservative one-time backfill for legacy edges. Unknown URLs and duplicate inferred pairs preserve title/category fallback. Atlas traversal combines provider and visible community links at every bounded hop, enforces guild/global scope, suppresses cycles and duplicate nodes, and caps the graph at three hops and forty nodes.
+
+The UI and private bridge support search, category, source-kind, relationship, provider, provider-ID and evidence filters; category clustering; shortest-path selection; and bounded JSON/SVG/PNG export. The export carries the same filtered graph and source/evidence labels as the interactive view. Rust/Axum re-authorizes the guild and validates all Atlas parameters; the TypeScript bridge repeats guild membership and setup checks. Image fetches are restricted to approved HTTPS provider hosts, with redirects disabled and timeouts enforced.
+
+Dashboard session/OAuth/rate-limit state now uses SQLite WAL, allowing three local Rust dashboard instances behind Nginx `least_conn` to share login and refresh coordination. PostgreSQL remains the bot's authoritative domain store. The documented topology keeps SQLite on local same-host storage and leaves the Discord gateway as one service.
+
+Tests cover canonical identity, ambiguous legacy backfill, guild visibility, multi-hop cycles and node caps, provider/evidence filters, clusters, shortest paths, export provenance, API validation, bridge authorization and cross-instance SQLite state.
+
+**Exit gate:** code-level Atlas and dashboard implementation is complete. Live provider, OAuth, production Nginx/systemd, WAL backup/restore, host filesystem and Discord acceptance remain under Phase 10/owner release verification. No production launch is implied.
 
 #### Phase 10 — Tests, security verification and operations (12,000)
 
