@@ -214,10 +214,10 @@ export async function markMediaAutomationDelivery(
   const retryMinutes = Math.min(60, Math.max(2, 2 ** attempts));
   await query(
     "UPDATE community_media_automation_deliveries SET status = $4, attempts = $5, " +
-    "next_attempt_at = CASE WHEN $4 = 'pending' THEN NOW() + ($6 * INTERVAL '1 minute') ELSE next_attempt_at END, " +
+    "next_attempt_at = CASE WHEN $9::boolean THEN NOW() + ($6::integer * INTERVAL '1 minute') ELSE next_attempt_at END, " +
     "message_id = COALESCE($7, message_id), last_error = $8, claim_until = NULL, claim_token = NULL " +
     "WHERE id = $1 AND guild_id = $2 AND claim_token = $3",
     [delivery.id, delivery.guild_id, delivery.claim_token, nextStatus, attempts, retryMinutes,
-      messageId ?? null, error?.slice(0, 1_000) ?? null],
+      messageId ?? null, error?.slice(0, 1_000) ?? null, status === "pending"],
   );
 }
