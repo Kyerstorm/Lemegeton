@@ -414,3 +414,6 @@ body{background:radial-gradient(ellipse at 72% -18%,#171717 0%,transparent 45%),
 .atlas-clusters button strong{color:#fff}
 .atlas-path-summary{padding:10px 12px;border-left:2px solid #fff;background:#101010;color:#ddd;font-size:12px;line-height:1.6}
 .atlas-connection small{display:block;color:#999;margin-top:4px}
+
+.atlas-path-tools .filter-control,.atlas-tools .filter-control{min-width:170px}
+.atlas-provider-id-filter input{max-width:190px}

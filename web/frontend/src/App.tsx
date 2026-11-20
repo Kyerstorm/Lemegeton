@@ -213,6 +213,7 @@ export default function App() {
   const [atlasCategoryFilter, setAtlasCategoryFilter] = useState("All");
   const [atlasSourceFilter, setAtlasSourceFilter] = useState("All");
   const [atlasProviderFilter, setAtlasProviderFilter] = useState("All");
+  const [atlasProviderIdFilter, setAtlasProviderIdFilter] = useState("");
   const [atlasRelationshipFilter, setAtlasRelationshipFilter] = useState("All");
   const [atlasEvidenceFilter, setAtlasEvidenceFilter] = useState("");
   const [atlasPathTarget, setAtlasPathTarget] = useState("");
@@ -501,6 +502,7 @@ export default function App() {
     filter_category: atlasCategoryFilter === "All" ? "" : atlasCategoryFilter,
     source_kind: atlasSourceFilter === "All" ? "" : atlasSourceFilter,
     provider_filter: atlasProviderFilter === "All" ? "" : atlasProviderFilter,
+    provider_id_filter: atlasProviderIdFilter,
     relationship_type: atlasRelationshipFilter === "All" ? "" : atlasRelationshipFilter,
     evidence: atlasEvidenceFilter,
   });
@@ -635,6 +637,7 @@ export default function App() {
       && (atlasRelationshipFilter === "All" || edge.relationType.toLocaleLowerCase("en-US").includes(atlasRelationshipFilter.toLocaleLowerCase("en-US")))
       && (!evidenceQuery || (edge.evidence ?? "").toLocaleLowerCase("en-US").includes(evidenceQuery))
       && (atlasProviderFilter === "All" || from?.provider === atlasProviderFilter || to?.provider === atlasProviderFilter)
+      && (!atlasProviderIdFilter.trim() || from?.providerId === atlasProviderIdFilter.trim() || to?.providerId === atlasProviderIdFilter.trim())
       && atlasCandidateIds.has(edge.from) && atlasCandidateIds.has(edge.to);
   });
   const atlasConnectedIds = new Set([atlasRootId]);
@@ -658,6 +661,7 @@ export default function App() {
     (atlasCategoryFilter === "All" || item.category === atlasCategoryFilter)
     && (atlasSourceFilter === "All" || item.sourceKind === atlasSourceFilter)
     && (atlasProviderFilter === "All" || item.provider === atlasProviderFilter)
+    && (!atlasProviderIdFilter.trim() || item.providerId === atlasProviderIdFilter.trim())
     && (atlasRelationshipFilter === "All" || item.relationType.toLocaleLowerCase("en-US").includes(atlasRelationshipFilter.toLocaleLowerCase("en-US")))
     && (!atlasEvidenceFilter.trim() || (item.evidence ?? "").toLocaleLowerCase("en-US").includes(atlasEvidenceFilter.trim().toLocaleLowerCase("en-US"))),
   );
@@ -793,6 +797,7 @@ export default function App() {
               <label className="filter-control"><span>MEDIA TYPE</span><select value={atlasCategoryFilter} onChange={(event) => setAtlasCategoryFilter(event.target.value)}><option value="All">All categories</option>{atlasCategories.map((item) => <option key={item} value={item}>{item.replaceAll("_", " ")}</option>)}</select></label>
               <label className="filter-control"><span>PROVENANCE</span><select value={atlasSourceFilter} onChange={(event) => setAtlasSourceFilter(event.target.value)}><option value="All">All sources</option><option value="provider">Provider</option><option value="recommendation">Recommendation</option><option value="community">Community</option></select></label>
               <label className="filter-control"><span>PROVIDER IDENTITY</span><select value={atlasProviderFilter} onChange={(event) => setAtlasProviderFilter(event.target.value)}><option value="All">All providers</option>{atlasProviders.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+              <label className="filter-control"><span>PROVIDER RECORD ID</span><input type="search" value={atlasProviderIdFilter} onChange={(event) => setAtlasProviderIdFilter(event.target.value)} maxLength={128} placeholder="Stable provider ID" /></label>
               <label className="filter-control"><span>RELATIONSHIP</span><select value={atlasRelationshipFilter} onChange={(event) => setAtlasRelationshipFilter(event.target.value)}><option value="All">All relations</option><option value="adaptation">Adaptation</option><option value="franchise">Franchise</option><option value="sequel">Sequel</option><option value="prequel">Prequel</option><option value="related">Related</option><option value="discussed in">Discussed in</option><option value="included in">Included in</option></select></label>
               <label className="filter-control atlas-evidence-filter"><span>EDGE EVIDENCE</span><input type="search" value={atlasEvidenceFilter} onChange={(event) => setAtlasEvidenceFilter(event.target.value)} maxLength={200} placeholder="Search evidence or source text" /></label>
               <div className="atlas-path-tools"><label className="filter-control"><span>FIND PATH TO</span><select value={atlasPathTarget} onChange={(event) => setAtlasPathTarget(event.target.value)}><option value="">Choose a connected node</option>{atlasVisibleNodes.map(node => <option key={node.id} value={node.id}>{node.title}</option>)}</select></label><Button disabled={!atlasPathTarget || atlasLoading} onClick={() => {
