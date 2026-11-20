@@ -325,7 +325,7 @@ export async function signedArchiveAssetUrl(
     [assetId],
   );
   if (!asset || !asset.is_private) return null;
-  if (asset.guild_id !== expectedGuildId) return null;
+  if (asset.guild_id !== expectedGuildId || asset.namespace !== `archive/${expectedGuildId}`) return null;
   if (asset.provider === "discord") {
     if (!client || !asset.guild_id || asset.namespace !== `archive/${asset.guild_id}`) return null;
     const [messageId, attachmentId] = asset.object_key.split("/", 2);

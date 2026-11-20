@@ -315,6 +315,7 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
     const roleAssetId = await storeCustomRoleIconSource(guildId, userId, roleBytes, "image/png");
     assert.deepEqual(await readCustomRoleIconSource(roleAssetId, guildId), roleBytes);
     assert.equal(await readCustomRoleIconSource(roleAssetId, "987654321098765433"), null);
+    assert.equal(await signedArchiveAssetUrl(roleAssetId, undefined, guildId), null);
     const roleAsset = await queryOne<{ provider: string; namespace: string; is_private: boolean }>(
       "SELECT provider, namespace, is_private FROM media_assets WHERE id = $1",
       [roleAssetId],
