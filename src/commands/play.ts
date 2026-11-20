@@ -144,9 +144,9 @@ function editQuestionModal(question: EditableQuizQuestion): ModalBuilder {
     new ActionRowBuilder<TextInputBuilder>().addComponents(new TextInputBuilder().setCustomId("difficulty").setLabel("Difficulty: easy, standard, hard or expert").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(12).setValue(question.difficulty)),
   );
 }
-function answerModal(sessionId: string): ModalBuilder {
+function answerModal(sessionId: string, expectedRound: number): ModalBuilder {
   return new ModalBuilder()
-    .setCustomId(`play:answer:${sessionId}`)
+    .setCustomId(`play:answer:${sessionId}:${expectedRound}`)
     .setTitle("Submit your answer")
     .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
       new TextInputBuilder().setCustomId("answer").setLabel("Your answer or choice number (1–4)").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(200),
@@ -187,16 +187,21 @@ function questionEmbed(
     });
 }
 
-function gameButtons(sessionId: string, packMode: string = "trivia"): ActionRowBuilder<ButtonBuilder>[] {
+function gameButtons(
+  sessionId: string,
+  packMode = "trivia",
+  expectedRound = 0,
+  expectedClueIndex = 0,
+): ActionRowBuilder<ButtonBuilder>[] {
   const rows: ActionRowBuilder<ButtonBuilder>[] = [new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`play:join:${sessionId}`).setLabel("Join game").setEmoji(emoji.community).setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`play:answer:${sessionId}`).setLabel("Answer").setEmoji(emoji.check).setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`play:next:${sessionId}`).setLabel("Next round").setEmoji(emoji.next).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`play:answer:${sessionId}:${expectedRound}`).setLabel("Answer").setEmoji(emoji.check).setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`play:next:${sessionId}:${expectedRound}`).setLabel("Next round").setEmoji(emoji.next).setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`play:leaderboard:${sessionId}`).setLabel("Leaderboard").setEmoji(emoji.leaderboard).setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`play:finish:${sessionId}`).setLabel("Finish").setEmoji(emoji.finish).setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`play:finish:${sessionId}:${expectedRound}`).setLabel("Finish").setEmoji(emoji.finish).setStyle(ButtonStyle.Danger),
   )];
   if (packMode !== "trivia") rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`play:clue:${sessionId}`).setLabel("Reveal next clue").setEmoji(emoji.info).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`play:clue:${sessionId}:${expectedRound}:${expectedClueIndex}`).setLabel("Reveal next clue").setEmoji(emoji.info).setStyle(ButtonStyle.Secondary),
   ));
   return rows;
 }
@@ -342,7 +347,7 @@ export class PlayCommand implements FeatureCommand {
 
   async handleButton(interaction: ButtonInteraction): Promise<boolean> {
     if (!interaction.guildId) return false;
-    const [, action, sessionId] = interaction.customId.split(":");
+    const [, action, sessionId, expectedRoundText, expectedClueIndexText] = interaction.customId.split(":");
     if (action === "create-pack") {
       await interaction.showModal(packModal());
       return true;
@@ -425,11 +430,21 @@ export class PlayCommand implements FeatureCommand {
       return true;
     }
     if (action === "answer" && sessionId) {
-      await interaction.showModal(answerModal(sessionId));
+      const expectedRound = Number(expectedRoundText);
+      if (!Number.isInteger(expectedRound) || expectedRound < 0) {
+        await interaction.reply({ content: "This answer button is outdated. Use the current game message.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      await interaction.showModal(answerModal(sessionId, expectedRound));
       return true;
     }
     if ((action === "next" || action === "finish") && sessionId) {
-      await this.advanceFromButton(interaction, sessionId, action === "finish");
+      const expectedRound = Number(expectedRoundText);
+      if (!Number.isInteger(expectedRound) || expectedRound < 0) {
+        await interaction.reply({ content: "This game control is outdated. Use the current game message.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      await this.advanceFromButton(interaction, sessionId, action === "finish", expectedRound);
       return true;
     }
     if (action === "clue" && sessionId) {
@@ -444,13 +459,22 @@ export class PlayCommand implements FeatureCommand {
         return true;
       }
       try {
-        const revealed = await revealGameClue(interaction.guildId, sessionId, interaction.user.id);
+        const expectedRound = Number(expectedRoundText);
+        const expectedClueIndex = Number(expectedClueIndexText);
+        if (!Number.isInteger(expectedRound) || expectedRound < 0
+          || !Number.isInteger(expectedClueIndex) || expectedClueIndex < 0) {
+          await interaction.reply({ content: "This clue button is outdated. Use the current game message.", flags: MessageFlags.Ephemeral });
+          return true;
+        }
+        const revealed = await revealGameClue(
+          interaction.guildId, sessionId, interaction.user.id, expectedRound, expectedClueIndex,
+        );
         const embed = EmbedBuilder.from(currentEmbed).addFields({
           name: "Clue " + revealed.number + " / " + revealed.total + " · " + revealed.clue.category.toUpperCase(),
           value: safeDisplay(revealed.clue.text, 200),
           inline: false,
         });
-        await interaction.update({ embeds: [embed], components: gameButtons(sessionId, session.pack_mode) });
+        await interaction.update({ embeds: [embed], components: gameButtons(sessionId, session.pack_mode, session.current_round, revealed.number) });
       } catch (error) {
         await interaction.reply({ content: error instanceof Error ? error.message : "The next clue could not be revealed.", flags: MessageFlags.Ephemeral });
       }
@@ -527,7 +551,7 @@ export class PlayCommand implements FeatureCommand {
 
   async handleModal(interaction: ModalSubmitInteraction): Promise<boolean> {
     if (!interaction.guildId) return false;
-    const [prefix, action, sessionId] = interaction.customId.split(":");
+    const [prefix, action, sessionId, expectedRoundText] = interaction.customId.split(":");
     if (prefix !== "play") return false;
     try {
       if (action === "create-pack") {
@@ -569,12 +593,18 @@ export class PlayCommand implements FeatureCommand {
           interaction.fields.getTextInputValue("difficulty"));
         await interaction.reply({ content: `Question #${sessionId} was saved as revision ${revision} and returned to moderator review.`, flags: MessageFlags.Ephemeral });
         return true;
-      }      if (action === "answer" && sessionId) {
+      }
+      if (action === "answer" && sessionId) {
+        const expectedRound = Number(expectedRoundText);
+        if (!Number.isInteger(expectedRound) || expectedRound < 0) {
+          throw new Error("That answer form is outdated. Open the current game message.");
+        }
         const result = await answerGameQuestion(
           interaction.guildId,
           sessionId,
           interaction.user.id,
           interaction.fields.getTextInputValue("answer"),
+          expectedRound,
         );
         await interaction.reply({
           content: result.correct
@@ -683,7 +713,7 @@ export class PlayCommand implements FeatureCommand {
         question.question, question.source_url, session.current_round + 1, session.question_ids.length,
         question.difficulty, question.options ?? [], session.pack_mode,
       )],
-      components: gameButtons(session.id, session.pack_mode),
+      components: gameButtons(session.id, session.pack_mode, session.current_round, session.clue_index),
       allowedMentions: { parse: [] },
     };
     const textChannel = channel as TextChannel;
@@ -850,7 +880,7 @@ export class PlayCommand implements FeatureCommand {
           question.question, question.source_url, 1, session.question_ids.length, question.difficulty,
           question.options ?? [], session.pack_mode,
         )],
-        components: gameButtons(session.id, session.pack_mode),
+        components: gameButtons(session.id, session.pack_mode, session.current_round, session.clue_index),
         allowedMentions: { parse: [] },
       });
       await query("UPDATE community_game_sessions SET message_id = $1 WHERE id = $2 AND guild_id = $3", [message.id, session.id, interaction.guildId]);
@@ -889,7 +919,7 @@ export class PlayCommand implements FeatureCommand {
     if (!session) throw new Error("That game session was not found.");
     if (session.host_id !== interaction.user.id) throw new Error("Only the host can advance or finish the game.");
     const current = await getCurrentGameQuestion(interaction.guildId!, sessionId);
-    const result = await advanceGame(interaction.guildId!, sessionId, interaction.user.id, finish);
+    const result = await advanceGame(interaction.guildId!, sessionId, interaction.user.id, finish, expectedRound);
     const leaderboard = result.finished ? await getGameLeaderboard(interaction.guildId!, sessionId) : [];
     await interaction.reply({
       embeds: [homeEmbed(result.finished ? "Game finished" : "Round advanced", [
@@ -900,7 +930,7 @@ export class PlayCommand implements FeatureCommand {
     });
   }
 
-  private async advanceFromButton(interaction: ButtonInteraction, sessionId: string, finish: boolean): Promise<void> {
+  private async advanceFromButton(interaction: ButtonInteraction, sessionId: string, finish: boolean, expectedRound: number): Promise<void> {
     const session = await getGameSession(interaction.guildId!, sessionId);
     if (!session) {
       await interaction.reply({ content: "That game session no longer exists.", flags: MessageFlags.Ephemeral });
@@ -937,7 +967,7 @@ export class PlayCommand implements FeatureCommand {
         nextQuestion.options ?? [],
         session.pack_mode,
       )],
-      components: gameButtons(sessionId, session.pack_mode),
+      components: gameButtons(sessionId, session.pack_mode, result.round - 1, 0),
     });
   }
 

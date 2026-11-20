@@ -80,10 +80,12 @@ import {
   createCommunityTournament,
   getCommunitySeason,
   getCommunityTournament,
+  getCommunityTournamentAudit,
   listCommunitySeasons,
   listCommunityTournaments,
   parseTournamentCandidates,
   voteInCommunityTournament,
+  withdrawCommunityTournamentCandidate,
 } from "../../helpers/community/community-tournaments.js";
 import { cleanText, isGuildManager, isValidHttpsUrl, safeDisplay } from "../../helpers/security/security.js";
 import {
@@ -527,6 +529,38 @@ export class CommunityCommand implements FeatureCommand {
       ]));
       return true;
     }
+    if (action === "tournament-withdraw" && id) {
+      const tournament = await getCommunityTournament(interaction.guildId, id);
+      if (!tournament || tournament.status !== "open") {
+        await interaction.reply({ content: "That open tournament was not found in this server.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      const candidates = new Map<string, string>();
+      for (const match of tournament.matches) {
+        if (match.status !== "open") continue;
+        candidates.set(match.candidate_a_id, match.candidate_a_title);
+        candidates.set(match.candidate_b_id, match.candidate_b_title);
+      }
+      if (!candidates.size) {
+        await interaction.reply({ content: "There are no active candidates available to withdraw.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      const select = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId("community:tournament-withdraw-select:" + id)
+          .setPlaceholder("Choose a candidate to withdraw")
+          .addOptions([...candidates.entries()].slice(0, 25).map(([candidateId, title]) => ({
+            label: title.slice(0, 100),
+            value: candidateId,
+          }))),
+      );
+      await interaction.reply({
+        content: "Withdrawals decide the current match for the remaining candidate. A match with any ballot cast cannot be changed. Only the tournament creator or a server manager can confirm.",
+        components: [select],
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
     if (action === "tournament-advance" || action === "tournament-cancel") {
       if (!id) return false;
       try {
@@ -724,6 +758,27 @@ export class CommunityCommand implements FeatureCommand {
     }
     if (action === "tournament-select") {
       await this.showTournament(interaction, id);
+      return true;
+    }
+    if (action === "tournament-withdraw-select" && mode) {
+      try {
+        await withdrawCommunityTournamentCandidate(
+          interaction.guildId,
+          mode,
+          id,
+          interaction.user.id,
+          isGuildManager(interaction),
+        );
+        await interaction.reply({
+          content: "Candidate withdrawn. The current match is recorded as a walkover; the bracket will include that winner when the round advances.",
+          flags: MessageFlags.Ephemeral,
+        });
+      } catch (error) {
+        await interaction.reply({
+          content: error instanceof Error ? error.message : "The candidate could not be withdrawn.",
+          flags: MessageFlags.Ephemeral,
+        });
+      }
       return true;
     }
     if (action === "season-select") {
@@ -1602,6 +1657,28 @@ export class CommunityCommand implements FeatureCommand {
           + (match.decision === "seed_tiebreak" ? " · lower-seed tiebreak" : "") : ""),
       inline: false,
     }));
+    const audit = await getCommunityTournamentAudit(interaction.guildId!, tournamentId, 6);
+    if (audit.length) {
+      const labels: Record<string, string> = {
+        created: "Created",
+        candidate_withdrawn: "Candidate withdrawn",
+        round_advanced: "Round advanced",
+        completed: "Tournament completed",
+        cancelled: "Cancelled",
+      };
+      fields.push({
+        name: "Bracket history",
+        value: audit.map(event => {
+          const eventLabel = labels[event.action] ?? "Updated";
+          const candidate = event.candidate_title ? " · " + safeDisplay(event.candidate_title, 80) : "";
+          const round = event.round_number ? " · round " + event.round_number : "";
+          const details = event.details && event.action === "candidate_withdrawn"
+            ? " · " + safeDisplay(event.details, 140) : "";
+          return eventLabel + candidate + round + " · <@"+event.actor_id+">" + details;
+        }).join("\n").slice(0, 1_000),
+        inline: false,
+      });
+    }
     const embed = homeEmbed(
       tournament.title,
       tournament.description + "\n\nRound " + tournament.current_round + " of " + tournament.rounds_total
@@ -1626,6 +1703,7 @@ export class CommunityCommand implements FeatureCommand {
       }
       components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId("community:tournament-advance:" + tournament.id).setLabel("Advance round").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId("community:tournament-withdraw:" + tournament.id).setLabel("Withdraw candidate").setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId("community:tournament-cancel:" + tournament.id).setLabel("Cancel").setStyle(ButtonStyle.Danger),
       ));
     }

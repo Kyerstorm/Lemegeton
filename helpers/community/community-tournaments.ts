@@ -1,3 +1,4 @@
+import type { PoolClient } from "pg";
 import { query, queryOne, transaction } from "../../database.js";
 import { cleanText, isValidHttpsUrl } from "../security/security.js";
 
@@ -22,7 +23,7 @@ export interface TournamentMatch {
   votes_b: number;
   status: "open" | "completed";
   winner_candidate_id: string | null;
-  decision: "votes" | "seed_tiebreak" | null;
+  decision: "votes" | "seed_tiebreak" | "withdrawal" | null;
 }
 
 export interface CommunityTournament {
@@ -35,6 +36,40 @@ export interface CommunityTournament {
   closes_at: Date;
   winner_candidate_id: string | null;
   matches: TournamentMatch[];
+}
+
+export interface TournamentAuditEntry {
+  id: string;
+  actor_id: string;
+  action: "created" | "candidate_withdrawn" | "round_advanced" | "completed" | "cancelled";
+  candidate_id: string | null;
+  candidate_title: string | null;
+  round_number: number | null;
+  details: string;
+  created_at: Date;
+}
+
+async function recordTournamentAudit(
+  client: PoolClient,
+  input: {
+    guildId: string;
+    tournamentId: string;
+    actorId: string;
+    action: TournamentAuditEntry["action"];
+    candidateId?: string | null;
+    roundNumber?: number | null;
+    details?: string;
+  },
+): Promise<void> {
+  await client.query(
+    "INSERT INTO community_tournament_audit_log " +
+    "(guild_id, tournament_id, actor_id, action, candidate_id, round_number, details) " +
+    "VALUES ($1,$2,$3,$4,$5,$6,$7)",
+    [
+      input.guildId, input.tournamentId, input.actorId, input.action,
+      input.candidateId ?? null, input.roundNumber ?? null, input.details ?? "",
+    ],
+  );
 }
 
 export function normalizeTournamentCandidates(values: readonly TournamentCandidateInput[]): TournamentCandidateInput[] {
@@ -133,6 +168,13 @@ export async function createCommunityTournament(input: {
         [tournamentId, index + 1, candidateA, candidateB],
       );
     }
+    await recordTournamentAudit(client, {
+      guildId: input.guildId,
+      tournamentId,
+      actorId: input.creatorId,
+      action: "created",
+      details: `${candidates.length} candidates seeded into a single-elimination bracket.`,
+    });
     return tournamentId;
   });
 }
@@ -172,6 +214,22 @@ export async function getCommunityTournament(guildId: string, tournamentId: stri
     [tournamentId, tournament.current_round],
   );
   return { ...tournament, matches };
+}
+
+export async function getCommunityTournamentAudit(
+  guildId: string,
+  tournamentId: string,
+  limit = 8,
+): Promise<TournamentAuditEntry[]> {
+  return query<TournamentAuditEntry>(
+    "SELECT a.id::text, a.actor_id::text, a.action, a.candidate_id::text, c.title AS candidate_title, " +
+    "a.round_number, a.details, a.created_at " +
+    "FROM community_tournament_audit_log a " +
+    "LEFT JOIN community_tournament_candidates c ON c.id = a.candidate_id " +
+    "WHERE a.guild_id = $1 AND a.tournament_id = $2 " +
+    "ORDER BY a.created_at DESC, a.id DESC LIMIT $3",
+    [guildId, tournamentId, Math.max(1, Math.min(20, Math.floor(limit)))],
+  );
 }
 
 export async function voteInCommunityTournament(
@@ -222,6 +280,79 @@ export async function voteInCommunityTournament(
   });
 }
 
+export async function withdrawCommunityTournamentCandidate(
+  guildId: string,
+  tournamentId: string,
+  candidateId: string,
+  actorId: string,
+  isManager: boolean,
+  reason = "",
+): Promise<void> {
+  await transaction(async client => {
+    const selectedTournament = await client.query<{ creator_id: string; status: string; current_round: number }>(
+      "SELECT creator_id::text, status, current_round FROM community_tournaments " +
+      "WHERE id = $1 AND guild_id = $2 FOR UPDATE",
+      [tournamentId, guildId],
+    );
+    const tournament = selectedTournament.rows[0];
+    if (!tournament || tournament.status !== "open") {
+      throw new Error("That open tournament was not found in this server.");
+    }
+    if (tournament.creator_id !== actorId && !isManager) {
+      throw new Error("Only the tournament creator or a server manager can withdraw a candidate.");
+    }
+
+    const selectedCandidate = await client.query<{ id: string; title: string; status: string }>(
+      "SELECT id::text, title, status FROM community_tournament_candidates " +
+      "WHERE id = $1 AND tournament_id = $2 FOR UPDATE",
+      [candidateId, tournamentId],
+    );
+    const candidate = selectedCandidate.rows[0];
+    if (!candidate || candidate.status !== "active") {
+      throw new Error("That active tournament candidate was not found.");
+    }
+
+    const selectedMatch = await client.query<{
+      id: string; candidate_a_id: string; candidate_b_id: string;
+    }>(
+      "SELECT id::text, candidate_a_id::text, candidate_b_id::text " +
+      "FROM community_tournament_matches WHERE tournament_id = $1 AND round_number = $2 " +
+      "AND status = 'open' AND (candidate_a_id = $3 OR candidate_b_id = $3) FOR UPDATE",
+      [tournamentId, tournament.current_round, candidateId],
+    );
+    const match = selectedMatch.rows[0];
+    if (!match) throw new Error("That candidate is not in an open match in the current round.");
+
+    const ballots = await client.query<{ count: number }>(
+      "SELECT COUNT(*)::INT AS count FROM community_tournament_votes WHERE match_id = $1",
+      [match.id],
+    );
+    if (Number(ballots.rows[0]?.count ?? 0) > 0) {
+      throw new Error("A candidate cannot withdraw after a ballot has been cast in its match.");
+    }
+
+    const winnerId = match.candidate_a_id === candidateId ? match.candidate_b_id : match.candidate_a_id;
+    await client.query(
+      "UPDATE community_tournament_candidates SET status = 'withdrawn' WHERE id = $1 AND status = 'active'",
+      [candidateId],
+    );
+    await client.query(
+      "UPDATE community_tournament_matches SET status = 'completed', winner_candidate_id = $1, " +
+      "decision = 'withdrawal', completed_at = NOW() WHERE id = $2 AND status = 'open'",
+      [winnerId, match.id],
+    );
+    await recordTournamentAudit(client, {
+      guildId,
+      tournamentId,
+      actorId,
+      action: "candidate_withdrawn",
+      candidateId,
+      roundNumber: tournament.current_round,
+      details: cleanText(reason, 300) || "Withdrawn by tournament creator or a server manager.",
+    });
+  });
+}
+
 export async function advanceCommunityTournament(
   guildId: string,
   tournamentId: string,
@@ -249,19 +380,32 @@ export async function advanceCommunityTournament(
     }
     const matches = await client.query<{
       id: string; candidate_a_id: string; candidate_b_id: string;
-      seed_a: number; seed_b: number;
+      seed_a: number; seed_b: number; status: string;
+      winner_candidate_id: string | null; decision: string | null;
     }>(
       "SELECT m.id::text, m.candidate_a_id::text, m.candidate_b_id::text, " +
-      "a.seed AS seed_a, b.seed AS seed_b FROM community_tournament_matches m " +
+      "a.seed AS seed_a, b.seed AS seed_b, m.status, m.winner_candidate_id::text, m.decision " +
+      "FROM community_tournament_matches m " +
       "JOIN community_tournament_candidates a ON a.id = m.candidate_a_id " +
       "JOIN community_tournament_candidates b ON b.id = m.candidate_b_id " +
-      "WHERE m.tournament_id = $1 AND m.round_number = $2 AND m.status = 'open' " +
+      "WHERE m.tournament_id = $1 AND m.round_number = $2 " +
       "ORDER BY m.match_number FOR UPDATE OF m",
       [tournamentId, tournament.current_round],
     );
-    if (!matches.rowCount) throw new Error("The current round has no open matches to advance.");
+    if (!matches.rowCount) throw new Error("The current round has no matches to advance.");
     const winners: string[] = [];
+    let withdrawalByes = 0;
+    let voteDecisions = 0;
+    let seedTiebreaks = 0;
     for (const match of matches.rows) {
+      if (match.status === "completed") {
+        if (match.decision !== "withdrawal" || !match.winner_candidate_id) {
+          throw new Error("The current round contains an unexpected completed match.");
+        }
+        winners.push(match.winner_candidate_id);
+        withdrawalByes += 1;
+        continue;
+      }
       const voteRows = await client.query<{ candidate_id: string; count: number }>(
         "SELECT candidate_id::text, COUNT(*)::INT AS count FROM community_tournament_votes " +
         "WHERE match_id = $1 GROUP BY candidate_id",
@@ -274,6 +418,8 @@ export async function advanceCommunityTournament(
         Number(match.seed_a),
         Number(match.seed_b),
       );
+      if (result.decision === "votes") voteDecisions += 1;
+      else seedTiebreaks += 1;
       const winnerId = result.winner === "a" ? match.candidate_a_id : match.candidate_b_id;
       const loserId = result.winner === "a" ? match.candidate_b_id : match.candidate_a_id;
       winners.push(winnerId);
@@ -298,6 +444,14 @@ export async function advanceCommunityTournament(
         "UPDATE community_tournaments SET status = 'completed', winner_candidate_id = $1, closed_at = $2 WHERE id = $3",
         [winnerId, now, tournamentId],
       );
+      await recordTournamentAudit(client, {
+        guildId,
+        tournamentId,
+        actorId,
+        action: "completed",
+        roundNumber: tournament.current_round,
+        details: `Champion: ${champion.rows[0]?.title ?? "unavailable"}.`,
+      });
       return { status: "completed", round: Number(tournament.current_round), winnerTitle: champion.rows[0]?.title ?? null };
     }
     for (const [index, [candidateA, candidateB]] of tournamentMatchups(winners).entries()) {
@@ -313,6 +467,14 @@ export async function advanceCommunityTournament(
       "UPDATE community_tournaments SET current_round = $1, closes_at = $2 WHERE id = $3 AND guild_id = $4",
       [nextRound, new Date(now.getTime() + Number(tournament.round_duration_hours) * 60 * 60 * 1000), tournamentId, guildId],
     );
+    await recordTournamentAudit(client, {
+      guildId,
+      tournamentId,
+      actorId,
+      action: "round_advanced",
+      roundNumber: nextRound,
+      details: JSON.stringify({ previousRound: Number(tournament.current_round), voteDecisions, seedTiebreaks, withdrawalByes }),
+    });
     return { status: "open", round: nextRound, winnerTitle: null };
   });
 }
@@ -335,6 +497,13 @@ export async function cancelCommunityTournament(
       "UPDATE community_tournaments SET status = 'cancelled', closed_at = NOW() WHERE id = $1 AND guild_id = $2 AND status = 'open'",
       [tournamentId, guildId],
     );
+    await recordTournamentAudit(client, {
+      guildId,
+      tournamentId,
+      actorId,
+      action: "cancelled",
+      details: "Tournament cancelled by its creator or a server manager.",
+    });
   });
 }
 

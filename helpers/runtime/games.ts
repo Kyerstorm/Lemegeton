@@ -33,6 +33,7 @@ export type GameMode = "individual" | "teams" | "cooperative";
 export interface GameSession {
   id: string;
   guild_id: string;
+  clue_index: number;
   channel_id: string;
   message_id: string | null;
   pack_id: string;
@@ -450,11 +451,14 @@ export async function getCurrentGameQuestion(guildId: string, sessionId: string)
     [sessionId, guildId],
   );
 }
-export async function answerGameQuestion(guildId: string, sessionId: string, userId: string, answer: string): Promise<{ correct: boolean; round: number; total: number; sourceUrl: string; finished: boolean; teamName: string | null }> {
+export async function answerGameQuestion(guildId: string, sessionId: string, userId: string, answer: string, expectedRound?: number): Promise<{ correct: boolean; round: number; total: number; sourceUrl: string; finished: boolean; teamName: string | null }> {
   return transaction(async client => {
     const result = await client.query("SELECT id, question_ids, current_round, status, game_mode FROM community_game_sessions WHERE id = $1 AND guild_id = $2 FOR UPDATE", [sessionId, guildId]);
     const session = result.rows[0] as { id: string; question_ids: string[]; current_round: number; status: string; game_mode: GameMode } | undefined;
     if (!session || session.status !== "active") throw new Error("That game is not active.");
+    if (expectedRound !== undefined && session.current_round !== expectedRound) {
+      throw new Error("That answer form belongs to an earlier round. Use the current game message.");
+    }
     const questionId = session.question_ids[session.current_round];
     if (!questionId) throw new Error("The current round has no question.");
     const teamName = await ensureGameParticipant(client, sessionId, userId, session.game_mode);
@@ -468,12 +472,15 @@ export async function answerGameQuestion(guildId: string, sessionId: string, use
     return { correct, round: session.current_round + 1, total: session.question_ids.length, sourceUrl: question.source_url, finished: false, teamName };
   });
 }
-export async function advanceGame(guildId: string, sessionId: string, actorId: string, finish = false): Promise<{ round: number; total: number; finished: boolean }> {
+export async function advanceGame(guildId: string, sessionId: string, actorId: string, finish = false, expectedRound?: number): Promise<{ round: number; total: number; finished: boolean }> {
   return transaction(async (client) => {
     const result = await client.query("SELECT host_id, question_ids, current_round, status FROM community_game_sessions WHERE id = $1 AND guild_id = $2 FOR UPDATE", [sessionId, guildId]);
     const session = result.rows[0] as { host_id: string; question_ids: string[]; current_round: number; status: string } | undefined;
     if (!session || session.status !== "active") throw new Error("That game is not active.");
     if (session.host_id !== actorId) throw new Error("Only the game host can advance or finish this game.");
+    if (expectedRound !== undefined && session.current_round !== expectedRound) {
+      throw new Error("That control belongs to an earlier round. Refresh the current game message.");
+    }
     const nextRound = session.current_round + 1;
     const finished = finish || nextRound >= session.question_ids.length;
     await client.query(
@@ -483,7 +490,7 @@ export async function advanceGame(guildId: string, sessionId: string, actorId: s
     return { round: finished ? session.question_ids.length : nextRound + 1, total: session.question_ids.length, finished };
   });
 }
-export async function revealGameClue(guildId: string, sessionId: string, actorId: string): Promise<{ clue: MediaClue; number: number; total: number }> {
+export async function revealGameClue(guildId: string, sessionId: string, actorId: string, expectedRound?: number, expectedClueIndex?: number): Promise<{ clue: MediaClue; number: number; total: number }> {
   return transaction(async client => {
     const result = await client.query<{ host_id: string; question_ids: string[]; current_round: number; clue_index: number; status: string }>(
       "SELECT host_id, question_ids, current_round, clue_index, status FROM community_game_sessions WHERE id = $1 AND guild_id = $2 FOR UPDATE",
@@ -492,6 +499,12 @@ export async function revealGameClue(guildId: string, sessionId: string, actorId
     const session = result.rows[0];
     if (!session || session.status !== "active") throw new Error("That game is not active.");
     if (session.host_id !== actorId) throw new Error("Only the game host can reveal clues.");
+    if (expectedRound !== undefined && session.current_round !== expectedRound) {
+      throw new Error("That clue control belongs to an earlier round. Refresh the current game message.");
+    }
+    if (expectedClueIndex !== undefined && session.clue_index !== expectedClueIndex) {
+      throw new Error("That clue has already been revealed. Use the current game message.");
+    }
     const questionId = session.question_ids[session.current_round];
     if (!questionId) throw new Error("The current round has no question.");
     const question = await client.query<{ clues: MediaClue[] }>("SELECT clues FROM community_quiz_questions WHERE id = $1 AND status = 'approved'", [questionId]);
