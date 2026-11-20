@@ -128,7 +128,7 @@ export async function listArchiveCollectionSpotlights(
     "LEFT JOIN community_archive_entries e ON e.id = ci.entry_id AND e.status = 'approved' " +
     "AND ((c.visibility = 'global' AND e.visibility = 'global') OR " +
     "(c.visibility = 'server' AND (e.visibility = 'global' OR (e.visibility = 'server' AND e.created_guild_id = $1)))) " +
-    "WHERE s.status = 'published' AND s.starts_at <= $2 AND s.ends_at > $2 " +
+    "WHERE s.status = 'published' AND c.status = 'active' AND s.starts_at <= $2 AND s.ends_at > $2 " +
     "AND (s.visibility = 'global' OR (s.visibility = 'server' AND s.guild_id = $1)) " +
     "AND ((s.visibility = 'global' AND c.visibility = 'global') OR " +
     "(s.visibility = 'server' AND (c.visibility = 'global' OR (c.visibility = 'server' AND c.guild_id = $1)))) " +
