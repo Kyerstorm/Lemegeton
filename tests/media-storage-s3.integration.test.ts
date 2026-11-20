@@ -16,6 +16,23 @@ import {
 } from "../database.js";
 import type { DatabaseConfig } from "../helpers/runtime/config.js";
 import {
+  addArchiveReport,
+  reviewArchiveReport,
+} from "../helpers/archive/archive-moderation.js";
+import {
+  attachArchiveAssetToEntry,
+  changeArchiveEntryVisibility,
+  deleteArchiveEntry,
+  finishArchiveUpload,
+  removeArchiveEntryAsset,
+  replaceArchiveEntryAsset,
+  submitArchiveEntry,
+} from "../helpers/archive/archive.js";
+import {
+  changeArchiveCollectionVisibility,
+  changeArchiveTrailVisibility,
+} from "../helpers/archive/archive-collections.js";
+import {
   configureMediaStorage,
   deleteArchiveAsset,
   deleteCustomRoleIconSource,
@@ -123,6 +140,162 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
     assert.equal(downloaded.status, 200);
     assert.deepEqual(Buffer.from(await downloaded.arrayBuffer()), bytes);
     assert.equal(await signedArchiveAssetUrl(assetId, undefined, "987654321098765433"), null);
+
+    // A pending entry attaches privately, then replacement/removal releases the old object.
+    const lifecycleEntry = await submitArchiveEntry({
+      guildId, userId, category: "panels", title: "Lifecycle panel", content: "",
+      mediaType: "Manga", tags: [], spoiler: false, visibility: "server",
+      needsUpload: true, chapterNumber: "1",
+    });
+    const firstPanelBytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 11]);
+    const firstPanelAsset = await storeArchiveUpload(
+      guildId, userId, "panels",
+      { name: "first-panel.png", contentType: "image/png", bytes: firstPanelBytes },
+      ["image"],
+    );
+    assert.ok(await queryOne(
+      "SELECT asset_id FROM media_asset_cleanup_queue WHERE asset_id = $1",
+      [firstPanelAsset],
+    ));
+    await attachArchiveAssetToEntry(guildId, userId, lifecycleEntry, firstPanelAsset, "first-panel.png");
+    assert.equal(await queryOne(
+      "SELECT asset_id FROM media_asset_cleanup_queue WHERE asset_id = $1",
+      [firstPanelAsset],
+    ), null);
+    await finishArchiveUpload(guildId, userId, lifecycleEntry);
+
+    const replacementBytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 12]);
+    const replacementAsset = await storeArchiveUpload(
+      guildId, userId, "panels",
+      { name: "replacement.png", contentType: "image/png", bytes: replacementBytes },
+      ["image"],
+    );
+    await replaceArchiveEntryAsset(guildId, userId, lifecycleEntry, 1, replacementAsset, "replacement.png");
+    assert.equal(await queryOne("SELECT id FROM media_assets WHERE id = $1", [firstPanelAsset]), null);
+    assert.equal((await queryOne<{ media_asset_id: string }>(
+      "SELECT media_asset_id::text FROM community_archive_entries WHERE id = $1",
+      [lifecycleEntry],
+    ))?.media_asset_id, String(replacementAsset));
+
+    await removeArchiveEntryAsset(guildId, userId, lifecycleEntry, 1);
+    assert.equal(await queryOne("SELECT id FROM media_assets WHERE id = $1", [replacementAsset]), null);
+    assert.equal((await queryOne<{ media_asset_id: string | null }>(
+      "SELECT media_asset_id::text FROM community_archive_entries WHERE id = $1",
+      [lifecycleEntry],
+    ))?.media_asset_id, null);
+    assert.equal((await queryOne<{ count: string }>(
+      "SELECT COUNT(*)::text AS count FROM community_archive_entry_assets WHERE entry_id = $1",
+      [lifecycleEntry],
+    ))?.count, "0");
+
+    // Report removal updates the report, entry and asset references as one transition.
+    const reportedEntry = await submitArchiveEntry({
+      guildId, userId, category: "panels", title: "Reported panel", content: "",
+      mediaType: "Manga", tags: [], spoiler: false, visibility: "server",
+      needsUpload: true, chapterNumber: "2",
+    });
+    const reportedAsset = await storeArchiveUpload(
+      guildId, userId, "panels",
+      { name: "reported.png", contentType: "image/png", bytes },
+      ["image"],
+    );
+    await attachArchiveAssetToEntry(guildId, userId, reportedEntry, reportedAsset, "reported.png");
+    await finishArchiveUpload(guildId, userId, reportedEntry);
+    await admin.query(
+      'UPDATE "' + schema + '".community_archive_entries SET status = \'approved\' WHERE id = $1',
+      [reportedEntry],
+    );
+    await addArchiveReport(guildId, "222222222222222222", reportedEntry, "Broken attribution");
+    const report = await queryOne<{ id: string }>(
+      "SELECT id::text FROM community_archive_reports WHERE entry_id = $1",
+      [reportedEntry],
+    );
+    assert.ok(report);
+    await reviewArchiveReport(guildId, report.id, "333333333333333333", "remove", "Removed after review");
+    assert.equal((await queryOne<{ status: string }>(
+      "SELECT status FROM community_archive_entries WHERE id = $1",
+      [reportedEntry],
+    ))?.status, "removed");
+    assert.equal((await queryOne<{ status: string }>(
+      "SELECT status FROM community_archive_reports WHERE id = $1",
+      [report.id],
+    ))?.status, "actioned");
+    assert.equal(await queryOne(
+      "SELECT asset_id FROM community_archive_entry_assets WHERE entry_id = $1",
+      [reportedEntry],
+    ), null);
+    assert.ok(await queryOne(
+      "SELECT asset_id FROM media_asset_cleanup_queue WHERE asset_id = $1",
+      [reportedAsset],
+    ));
+    await admin.query(
+      'UPDATE "' + schema + '".media_asset_cleanup_queue SET next_attempt_at = NOW() WHERE asset_id = $1',
+      [reportedAsset],
+    );
+    assert.deepEqual(await processArchiveAssetCleanup(10), { attempted: 1, failed: 0 });
+    assert.equal(await queryOne("SELECT id FROM media_assets WHERE id = $1", [reportedAsset]), null);
+
+    // Publication scope transitions cannot promote collections or Trails containing server-only entries.
+    await admin.query(
+      'UPDATE "' + schema + '".community_archive_entries SET status = \'approved\', media_asset_id = NULL, visibility = \'server\' WHERE id = $1',
+      [lifecycleEntry],
+    );
+    const collection = await admin.query<{ id: string }>(
+      'INSERT INTO "' + schema + '".archive_collections (guild_id, owner_id, title, visibility) ' +
+      "VALUES ($1, $2, 'Scope test collection', 'server') RETURNING id::text",
+      [guildId, userId],
+    );
+    await admin.query(
+      'INSERT INTO "' + schema + '".archive_collection_items (collection_id, entry_id, added_by) VALUES ($1, $2, $3)',
+      [collection.rows[0]!.id, lifecycleEntry, userId],
+    );
+    await assert.rejects(
+      changeArchiveCollectionVisibility(guildId, userId, collection.rows[0]!.id, "global", true, true),
+      /server-only entries/,
+    );
+    const trail = await admin.query<{ id: string }>(
+      'INSERT INTO "' + schema + '".archive_trails (guild_id, owner_id, title, visibility) ' +
+      "VALUES ($1, $2, 'Scope test Trail', 'server') RETURNING id::text",
+      [guildId, userId],
+    );
+    await admin.query(
+      'INSERT INTO "' + schema + '".archive_trail_steps (trail_id, step_number, entry_id, added_by) VALUES ($1, 1, $2, $3)',
+      [trail.rows[0]!.id, lifecycleEntry, userId],
+    );
+    await assert.rejects(
+      changeArchiveTrailVisibility(guildId, userId, trail.rows[0]!.id, "global", true, true),
+      /server-only entries/,
+    );
+    await admin.query(
+      'UPDATE "' + schema + '".community_archive_entries SET visibility = \'global\' WHERE id = $1',
+      [lifecycleEntry],
+    );
+    await changeArchiveCollectionVisibility(guildId, userId, collection.rows[0]!.id, "global", false, true);
+    await changeArchiveTrailVisibility(guildId, userId, trail.rows[0]!.id, "global", false, true);
+    assert.equal((await queryOne<{ visibility: string }>(
+      'SELECT visibility FROM "' + schema + '".archive_collections WHERE id = $1',
+      [collection.rows[0]!.id],
+    ))?.visibility, "global");
+    assert.equal((await queryOne<{ visibility: string }>(
+      'SELECT visibility FROM "' + schema + '".archive_trails WHERE id = $1',
+      [trail.rows[0]!.id],
+    ))?.visibility, "global");
+
+    // Deleting an entry also cleans its direct media_asset_id reference.
+    const deletedEntry = await submitArchiveEntry({
+      guildId, userId, category: "panels", title: "Deleted panel", content: "",
+      mediaType: "Manga", tags: [], spoiler: false, visibility: "server",
+      needsUpload: true, chapterNumber: "3",
+    });
+    const deletedAsset = await storeArchiveUpload(
+      guildId, userId, "panels",
+      { name: "deleted.png", contentType: "image/png", bytes },
+      ["image"],
+    );
+    await attachArchiveAssetToEntry(guildId, userId, deletedEntry, deletedAsset, "deleted.png");
+    await finishArchiveUpload(guildId, userId, deletedEntry);
+    await deleteArchiveEntry(guildId, userId, deletedEntry, false, false);
+    assert.equal(await queryOne("SELECT id FROM media_assets WHERE id = $1", [deletedAsset]), null);
 
     const roleBytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 4, 5, 6]);
     const roleAssetId = await storeCustomRoleIconSource(guildId, userId, roleBytes, "image/png");
