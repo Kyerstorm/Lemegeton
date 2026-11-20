@@ -191,6 +191,55 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
       [lifecycleEntry],
     ))?.count, "0");
 
+    // A legacy direct-only primary asset remains attached when a secondary attachment is removed.
+    const legacyEntry = await submitArchiveEntry({
+      guildId, userId, category: "panels", title: "Legacy primary panel", content: "",
+      mediaType: "Manga", tags: [], spoiler: false, visibility: "server",
+      needsUpload: true, chapterNumber: "legacy",
+    });
+    const legacyPrimary = await storeArchiveUpload(
+      guildId, userId, "panels",
+      { name: "legacy-primary.png", contentType: "image/png", bytes },
+      ["image"],
+    );
+    await admin.query(
+      'UPDATE "' + schema + '".community_archive_entries ' +
+      "SET media_asset_id = $1, attachment_filename = 'legacy-primary.png', " +
+      "attachment_content_type = 'image/png', status = 'pending' WHERE id = $2",
+      [legacyPrimary, legacyEntry],
+    );
+    await admin.query(
+      'DELETE FROM "' + schema + '".media_asset_cleanup_queue WHERE asset_id = $1',
+      [legacyPrimary],
+    );
+    const secondaryAsset = await storeArchiveUpload(
+      guildId, userId, "panels",
+      { name: "legacy-secondary.png", contentType: "image/png", bytes: replacementBytes },
+      ["image"],
+    );
+    await admin.query(
+      'INSERT INTO "' + schema + '".community_archive_entry_assets (entry_id, asset_id, position, uploaded_by) ' +
+      "VALUES ($1, $2, 2, $3)",
+      [legacyEntry, secondaryAsset, userId],
+    );
+    await removeArchiveEntryAsset(guildId, userId, legacyEntry, 2);
+    assert.equal((await queryOne<{ media_asset_id: string }>(
+      'SELECT media_asset_id::text FROM "' + schema + '".community_archive_entries WHERE id = $1',
+      [legacyEntry],
+    ))?.media_asset_id, String(legacyPrimary));
+    assert.deepEqual(await queryOne<{ asset_id: string; position: number }>(
+      'SELECT asset_id::text, position FROM "' + schema + '".community_archive_entry_assets WHERE entry_id = $1',
+      [legacyEntry],
+    ), { asset_id: String(legacyPrimary), position: 1 });
+    assert.equal(await queryOne(
+      'SELECT id FROM "' + schema + '".media_assets WHERE id = $1',
+      [legacyPrimary],
+    ) !== null, true);
+    assert.equal(await queryOne(
+      'SELECT id FROM "' + schema + '".media_assets WHERE id = $1',
+      [secondaryAsset],
+    ), null);
+
     // Report removal updates the report, entry and asset references as one transition.
     const reportedEntry = await submitArchiveEntry({
       guildId, userId, category: "panels", title: "Reported panel", content: "",
