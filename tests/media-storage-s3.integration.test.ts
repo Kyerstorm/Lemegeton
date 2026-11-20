@@ -254,6 +254,11 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
       'UPDATE "' + schema + '".community_archive_entries SET status = \'approved\', media_asset_id = NULL, visibility = \'server\' WHERE id = $1',
       [lifecycleEntry],
     );
+    configureArchiveAccess([]);
+    await assert.rejects(
+      changeArchiveEntryVisibility(guildId, "222222222222222222", lifecycleEntry, "global", true),
+      /configured global Archive moderators/,
+    );
     const collection = await admin.query<{ id: string }>(
       'INSERT INTO "' + schema + '".archive_collections (guild_id, owner_id, title, visibility) ' +
       "VALUES ($1, $2, 'Scope test collection', 'server') RETURNING id::text",
@@ -280,10 +285,11 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
       changeArchiveTrailVisibility(guildId, userId, trail.rows[0]!.id, "global", true),
       /server-only entries/,
     );
-    await admin.query(
-      'UPDATE "' + schema + '".community_archive_entries SET visibility = \'global\' WHERE id = $1',
+    await changeArchiveEntryVisibility(guildId, userId, lifecycleEntry, "global", false);
+    assert.equal((await queryOne<{ visibility: string }>(
+      "SELECT visibility FROM community_archive_entries WHERE id = $1",
       [lifecycleEntry],
-    );
+    ))?.visibility, "global");
     await changeArchiveCollectionVisibility(guildId, userId, collection.rows[0]!.id, "global", false);
     await changeArchiveTrailVisibility(guildId, userId, trail.rows[0]!.id, "global", false);
     assert.equal((await queryOne<{ visibility: string }>(
