@@ -30,6 +30,13 @@ impl DashboardStore {
             }
         }
 
+        if Path::new(path).exists() {
+            let metadata = std::fs::symlink_metadata(path)
+                .map_err(|error| format!("Could not inspect dashboard SQLite database: {error}"))?;
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err("The dashboard SQLite path must refer to a regular file, not a symlink or directory.".to_string());
+            }
+        }
         let connection = Connection::open(path).map_err(|error| format!("Could not open dashboard SQLite database: {error}"))?;
         connection.busy_timeout(Duration::from_secs(10))
             .map_err(|error| format!("Could not configure dashboard SQLite lock timeout: {error}"))?;
@@ -133,8 +140,8 @@ impl DashboardStore {
 
     pub async fn get_session(&self, session_id: &str, now: u64, ttl: u64) -> Result<Option<Session>, String> {
         let session_id = session_id.to_string();
+        let next_expiry = as_sqlite_integer(now.saturating_add(ttl));
         let now = as_sqlite_integer(now);
-        let next_expiry = as_sqlite_integer(now.saturating_add(as_sqlite_integer(ttl) as u64));
         self.run(move |connection| {
             let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(|error| error.to_string())?;

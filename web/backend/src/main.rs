@@ -37,6 +37,12 @@ async fn security_headers(State(state): State<AppState>, request: Request<Body>,
     if !headers.contains_key(header::CACHE_CONTROL) { headers.insert(header::CACHE_CONTROL, "no-store".parse().unwrap()); }
     response
 }
+async fn readiness(State(state): State<AppState>) -> Response {
+    match state.store.health().await {
+        Ok(()) => (axum::http::StatusCode::OK, axum::Json(serde_json::json!({"status":"ready"}))).into_response(),
+        Err(_) => (axum::http::StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({"status":"unavailable"}))).into_response(),
+    }
+}
 async fn not_found() -> Response {
     (axum::http::StatusCode::NOT_FOUND, axum::Json(serde_json::json!({"error":"Route not found."}))).into_response()
 }
@@ -72,6 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bind = format!("{}:{}", bind_host, config.port);
     let state = AppState::try_new(config).map_err(|message| std::io::Error::new(std::io::ErrorKind::Other, message))?;
     let app = Router::new()
+        .route("/health/ready", get(readiness))
         .route("/", get(auth::home)).route("/login", get(auth::login_page))
         .route("/oauth/start", get(auth::oauth_start)).route("/oauth/callback", get(auth::oauth_callback))
         .route("/api/bootstrap", get(auth::bootstrap)).route("/api/logout", post(auth::logout))
