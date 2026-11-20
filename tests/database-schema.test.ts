@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
-import { closeDatabase, initDatabase, query, queryOne } from "../database.js";
+import { backfillAtlasProviderIdentities, closeDatabase, initDatabase, query, queryOne } from "../database.js";
 import { getAniListAffinity, getAniListLeaderboard, getLinkedProfile, getProfilePreferences, getServerTaste, unlinkAniListAccount, unlinkSteamAccount, updateProfilePreferences } from "../helpers/runtime/profile.js";
 import type { AniListClient } from "../helpers/integration/anilist.js";
 import type { SteamClient } from "../helpers/integration/steam.js";
@@ -1790,6 +1790,40 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       0,
       "same provider ID under a different category must not resolve a game node",
     );
+    // Old rows are canonicalized only where their provider URL encodes an unambiguous stable ID.
+    const legacyAtlasGuild = "333333333333333343";
+    const legacyAtlasRows = [
+      ["Legacy anime source", "ANIME", "https://anilist.co/anime/887766/legacy-slug", "Legacy film", "MOVIE", "https://www.themoviedb.org/movie/998877-legacy-film"],
+      ["Legacy anime duplicate", "ANIME", "https://anilist.co/anime/887766/renamed-slug", "Legacy film", "MOVIE", "https://www.themoviedb.org/movie/998877-another-slug"],
+      ["Ambiguous legacy source", "ANIME", "https://metadata.example/works/slug-only", "Known film target", "MOVIE", "https://www.themoviedb.org/movie/998878-known-film"],
+    ] as const;
+    for (const [sourceTitle, sourceCategory, sourceUrl, targetTitle, targetCategory, targetUrl] of legacyAtlasRows) {
+      await query(
+        `INSERT INTO media_relationship_graph
+          (source_title,source_title_key,source_category,source_url,target_title,target_title_key,target_category,target_url,
+           relationship_type,source_kind,source_label,guild_id,evidence)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'legacy-link','provider','Legacy provider URL',$9,'Imported before provider identity migration')`,
+        [sourceTitle,sourceTitle.toLowerCase(),sourceCategory,sourceUrl,targetTitle,targetTitle.toLowerCase(),targetCategory,targetUrl,legacyAtlasGuild],
+      );
+    }
+    await backfillAtlasProviderIdentities();
+    const legacyAtlasResults = await query<{
+      source_title: string; source_provider: string | null; source_provider_id: string | null;
+      target_provider: string | null; target_provider_id: string | null;
+    }>(
+      "SELECT source_title,source_provider,source_provider_id,target_provider,target_provider_id FROM media_relationship_graph WHERE guild_id=$1 AND relationship_type='legacy-link' ORDER BY source_title",
+      [legacyAtlasGuild],
+    );
+    const legacyAnime = legacyAtlasResults.find(row => row.source_title === "Legacy anime source");
+    assert.deepEqual([legacyAnime?.source_provider,legacyAnime?.source_provider_id,legacyAnime?.target_provider,legacyAnime?.target_provider_id],
+      ["anilist:anime","887766","tmdb:movie","998877"]);
+    const duplicateLegacyAnime = legacyAtlasResults.find(row => row.source_title === "Legacy anime duplicate");
+    assert.deepEqual([duplicateLegacyAnime?.source_provider,duplicateLegacyAnime?.source_provider_id,duplicateLegacyAnime?.target_provider,duplicateLegacyAnime?.target_provider_id],
+      [null,null,null,null], "duplicate legacy identity pairs remain on title/category fallback");
+    const ambiguousLegacy = legacyAtlasResults.find(row => row.source_title === "Ambiguous legacy source");
+    assert.deepEqual([ambiguousLegacy?.source_provider,ambiguousLegacy?.source_provider_id,ambiguousLegacy?.target_provider,ambiguousLegacy?.target_provider_id],
+      [null,null,"tmdb:movie","998878"], "unknown or slug-only URLs retain title/category fallback");
+
 
     const retentionGuild = "333333333333333333";
     const retentionOtherGuild = "333333333333333334";
