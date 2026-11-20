@@ -39,3 +39,36 @@ test("Atlas graph export also produces a reusable vector SVG", async () => {
   assert.match(svg.toString("utf8"), /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
   assert.match(svg.toString("utf8"), /Root Media/);
 });
+
+test("Atlas SVG export exposes canonical provider identity and recorded edge evidence", async () => {
+  const { renderAtlasGraphSvgSnapshot } = await import("../helpers/media/atlas-renderer.js");
+  const evidenceGraph: AtlasGraphResult = {
+    ...graph,
+    nodes: [
+      graph.nodes[0]!,
+      {
+        id: "provider-node",
+        title: "Canonical Manga",
+        category: "MANGA",
+        url: "https://anilist.co/manga/42",
+        provider: "anilist:manga",
+        providerId: "42",
+        depth: 1,
+        sourceKind: "provider",
+        relationType: "adaptation",
+      },
+    ],
+    edges: [{
+      from: "root",
+      to: "provider-node",
+      relationType: "adaptation",
+      sourceLabel: "AniList",
+      sourceKind: "provider",
+      evidence: "Provider relationship ADAPTATION",
+    }],
+    directRelationships: [],
+  };
+  const svg = (await renderAtlasGraphSvgSnapshot("Root Media", "ANIME", evidenceGraph)).toString("utf8");
+  assert.match(svg, /anilist:manga:42/);
+  assert.match(svg, /Provider relationship ADAPTATION/);
+});

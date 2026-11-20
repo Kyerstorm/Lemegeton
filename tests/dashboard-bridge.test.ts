@@ -90,3 +90,29 @@ test("dashboard bridge rejects absent and incorrect bearer secrets and serves au
     await stopDashboardBridge();
   }
 });
+
+test("Atlas bridge route authenticates requests and validates guild IDs before querying guild data", async () => {
+  const port = await availablePort();
+  const secret = "atlas-bridge-secret-".padEnd(48, "x");
+  const client = {
+    isReady: () => true,
+    guilds: { cache: new Map() },
+    ws: { ping: 18 },
+  } as unknown as Client;
+  const config = {
+    dashboardBridgeSecret: secret,
+    dashboardBridgeHost: "127.0.0.1",
+    dashboardBridgePort: port,
+  } as BotConfig;
+  await startDashboardBridge(client, [] as FeatureCommand[], config);
+  try {
+    const url = "http://127.0.0.1:" + port + "/atlas?guild_id=invalid&title=Example&category=ANIME";
+    const unauthorized = await fetch(url);
+    assert.equal(unauthorized.status, 401);
+    const accepted = await fetch(url, { headers: { Authorization: "Bearer " + secret } });
+    assert.equal(accepted.status, 400);
+    assert.deepEqual(await accepted.json(), { error: "A valid server ID is required." });
+  } finally {
+    await stopDashboardBridge();
+  }
+});
