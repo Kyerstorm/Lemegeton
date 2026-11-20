@@ -242,6 +242,7 @@ impl DashboardStore {
         }).await
     }
 
+    #[cfg(test)]
     pub async fn has_oauth_state(&self, state_token: &str) -> Result<bool, String> {
         let state_token = state_token.to_string();
         self.run(move |connection| {

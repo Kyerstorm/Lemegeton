@@ -117,6 +117,7 @@ impl AppState {
         Ok(Self { config: Arc::new(config), client, discord_api_base: DISCORD_API.to_string(), store,
             last_status: Arc::new(Mutex::new(None)) })
     }
+    #[cfg(test)]
     pub fn new(config: AppConfig) -> Self {
         Self::try_new(config).expect("dashboard state and SQLite session store must initialize")
     }

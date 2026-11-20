@@ -76,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.bind_host.clone()
     };
     let bind = format!("{}:{}", bind_host, config.port);
-    let state = AppState::try_new(config).map_err(|message| std::io::Error::new(std::io::ErrorKind::Other, message))?;
+    let state = AppState::try_new(config).map_err(|message| std::io::Error::other(message))?;
     let app = Router::new()
         .route("/health/ready", get(readiness))
         .route("/", get(auth::home)).route("/login", get(auth::login_page))
