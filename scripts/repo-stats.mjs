@@ -96,22 +96,12 @@ function formatBytes(size) {
   return `${value.toFixed(1)} TB`;
 }
 function renderReadmeTable(stats, refreshedAt) {
-  const languageBreakdown = Object.entries(stats.language_lines)
-    .sort(([aName, aCount], [bName, bCount]) => bCount - aCount || aName.localeCompare(bName))
-    .map(([name, count]) => `${name}: ${count.toLocaleString()} lines`).join("; ") || "No source files detected";
   return [
-    "| Metric | Current total |",
-    "|:--|--:|",
-    `| Tracked files | ${stats.tracked_files.toLocaleString()} |`,
-    `| Text files scanned | ${stats.text_files.toLocaleString()} |`,
-    `| Source code files | ${stats.source_files.toLocaleString()} |`,
-    `| Source lines (including blank lines) | ${stats.source_lines.toLocaleString()} |`,
-    `| Non-blank source lines | ${stats.nonblank_source_lines.toLocaleString()} |`,
-    `| Text lines (code, docs, and configuration) | ${stats.text_lines.toLocaleString()} |`,
-    `| Characters (excluding line breaks) | ${stats.text_characters.toLocaleString()} |`,
-    `| Text file size | ${formatBytes(stats.text_bytes)} |`,
-    `| Source line breakdown | ${languageBreakdown} |`,
-    `| Last refreshed (UTC) | ${refreshedAt} |`,
+    "| Tracked files | Lines of code | Text characters |",
+    "|--:|--:|--:|",
+    `| ${stats.tracked_files.toLocaleString()} | ${stats.nonblank_source_lines.toLocaleString()} | ${stats.text_characters.toLocaleString()} |`,
+    "",
+    `<sub>Tracked files after generated/cache exclusions · non-blank lines across source files · characters across tracked text files, excluding line breaks · refreshed ${refreshedAt}.</sub>`,
   ].join("\n");
 }
 async function updateReadme() {

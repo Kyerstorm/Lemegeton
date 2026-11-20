@@ -1,140 +1,223 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1120" viewBox="0 0 1600 1120" role="img" aria-labelledby="title description">
-  <title id="title">Lemegeton v3 system architecture</title>
-  <desc id="description">Discord interactions flow through the TypeScript bot, command environments, and shared helpers. Helpers use PostgreSQL, external metadata providers, and optional S3 storage. The Next.js dashboard communicates with the same bot through a private Rust and HTTP bridge.</desc>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="2400"
+     height="1680"
+     viewBox="0 0 2400 1680"
+     role="img"
+     aria-labelledby="map-title map-desc">
+  <title id="map-title">Lemegeton v3 system architecture</title>
+  <desc id="map-desc">A detailed monochrome map of the Discord bot runtime, command registry, shared services, optional web control plane, provider adapters, PostgreSQL, media storage, background jobs, tenant boundaries, and quality gates.</desc>
   <defs>
-    <linearGradient id="surface" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#1b1c20"/>
-      <stop offset="1" stop-color="#111215"/>
-    </linearGradient>
-    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#c7ae85"/>
-      <stop offset="1" stop-color="#82735d"/>
-    </linearGradient>
-    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
-      <path d="M0 0 L9 4.5 L0 9 Z" fill="#bba47f"/>
-    </marker>
     <style>
-      .bg{fill:#090a0c}
-      .panel{fill:url(#surface);stroke:#35363b;stroke-width:1.5}
-      .eyebrow{fill:#a99a81;font:600 13px Inter,Arial,sans-serif;letter-spacing:3px}
-      .heading{fill:#f0eee8;font:600 29px Inter,Arial,sans-serif;letter-spacing:4px}
-      .title{fill:#f0eee8;font:600 23px Inter,Arial,sans-serif}
-      .path{fill:#c8b18b;font:600 16px Inter,Arial,sans-serif}
-      .body{fill:#c0beb8;font:16px Inter,Arial,sans-serif}
-      .muted{fill:#8b8a85;font:14px Inter,Arial,sans-serif}
-      .rule{stroke:#45413a;stroke-width:1}
-      .line{fill:none;stroke:#bba47f;stroke-width:2;marker-end:url(#arrow)}
-      .dash{fill:none;stroke:#bba47f;stroke-width:2;stroke-dasharray:7 7;marker-end:url(#arrow)}
-      .chip{fill:#24242a;stroke:#49443a;stroke-width:1}
-      .chiptext{fill:#d9d2c5;font:14px Inter,Arial,sans-serif}
+      .bg { fill: #050505; }
+      .panel { fill: #090909; stroke: #cfcfcf; stroke-width: 1.5; }
+      .inner { fill: #0c0c0c; stroke: #606060; stroke-width: 1.1; }
+      .rule { stroke: #555; stroke-width: 1; }
+      .flow { fill: none; stroke: #f1f1f1; stroke-width: 2; marker-end: url(#arrow); }
+      .async { fill: none; stroke: #a9a9a9; stroke-width: 2; stroke-dasharray: 9 8; marker-end: url(#arrow); }
+      .eyebrow { fill: #a6a6a6; font: 600 15px Inter, Arial, sans-serif; letter-spacing: 4px; }
+      .heading { fill: #f7f7f7; font: 600 38px Inter, Arial, sans-serif; letter-spacing: 6px; }
+      .panel-title { fill: #f5f5f5; font: 600 26px Inter, Arial, sans-serif; letter-spacing: 1px; }
+      .sub-title { fill: #f0f0f0; font: 600 18px Inter, Arial, sans-serif; letter-spacing: 1px; }
+      .path { fill: #fff; font: 600 17px 'SFMono-Regular', Consolas, monospace; }
+      .copy { fill: #c6c6c6; font: 17px Inter, Arial, sans-serif; }
+      .small { fill: #969696; font: 14px Inter, Arial, sans-serif; }
+      .tiny { fill: #8a8a8a; font: 12px Inter, Arial, sans-serif; letter-spacing: 1.4px; }
+      .tag { fill: #121212; stroke: #737373; stroke-width: 1; }
+      .tag-text { fill: #dcdcdc; font: 14px Inter, Arial, sans-serif; }
+      .line-label { fill: #bababa; font: 13px 'SFMono-Regular', Consolas, monospace; letter-spacing: 1px; }
     </style>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0 0 L9 4.5 L0 9 Z" fill="#f1f1f1"/>
+    </marker>
   </defs>
 
-  <rect class="bg" width="1600" height="1120" rx="28"/>
-  <circle cx="1490" cy="85" r="130" fill="#c6a879" opacity=".035"/>
-  <circle cx="55" cy="1035" r="190" fill="#c6a879" opacity=".025"/>
+  <rect class="bg" width="2400" height="1680"/>
+  <path d="M72 153 H2328" class="rule"/>
+  <text x="72" y="70" class="eyebrow">LEMEGETON / V3</text>
+  <text x="72" y="121" class="heading">SYSTEM ARCHITECTURE</text>
+  <text x="2328" y="69" class="tiny" text-anchor="end">RUNTIME / SERVICES / DATA / DELIVERY</text>
+  <path d="M1910 115 H1955" class="flow"/>
+  <text x="1970" y="120" class="tiny">SYNCHRONOUS</text>
+  <path d="M2140 115 H2185" class="async"/>
+  <text x="2200" y="120" class="tiny" text-anchor="start">ASYNC</text>
 
-  <text x="72" y="78" class="eyebrow">LEMEGETON / MULTI-GUILD</text>
-  <text x="72" y="126" class="heading">SYSTEM ARCHITECTURE</text>
-  <text x="1528" y="92" class="muted" text-anchor="end">V3 SOURCE MAP</text>
-  <path d="M72 158 H1528" class="rule"/>
+  <!-- Primary execution and control-plane connectors -->
+  <path d="M512 340 H552" class="flow"/>
+  <text x="532" y="315" class="line-label" text-anchor="middle">INTERACTIONS</text>
+  <path d="M1574 340 H1530" class="async"/>
+  <text x="1552" y="315" class="line-label" text-anchor="middle">PRIVATE BRIDGE</text>
+  <path d="M1010 490 V535 H312 V575" class="flow"/>
+  <text x="675" y="525" class="line-label" text-anchor="middle">DISPATCH</text>
 
-  <!-- Discord execution path -->
-  <rect x="72" y="210" width="310" height="270" rx="18" class="panel"/>
-  <text x="102" y="252" class="eyebrow">01 / ENTRY</text>
-  <text x="102" y="295" class="title">Discord</text>
-  <path d="M102 316 H352" class="rule"/>
-  <text x="102" y="358" class="body">Guild members and moderators</text>
-  <text x="102" y="395" class="body">Commands · buttons · modals</text>
-  <text x="102" y="432" class="body">Guild and actor context</text>
-  <text x="102" y="460" class="muted">One Discord gateway</text>
+  <!-- Command and domain connectors -->
+  <path d="M552 755 H584" class="flow"/>
+  <path d="M1724 755 H1756" class="async"/>
+  <text x="1740" y="730" class="line-label" text-anchor="middle">API</text>
 
-  <rect x="430" y="210" width="310" height="270" rx="18" class="panel"/>
-  <text x="460" y="252" class="eyebrow">02 / RUNTIME</text>
-  <text x="460" y="295" class="title">TypeScript bot</text>
-  <path d="M460 316 H710" class="rule"/>
-  <text x="460" y="358" class="path">bot.ts</text>
-  <text x="460" y="395" class="body">Node.js 22 · discord.js</text>
-  <text x="460" y="432" class="body">Events · workers · lifecycle</text>
-  <text x="460" y="460" class="muted">Owns the live client and gateway</text>
+  <!-- Service to backing-system connectors -->
+  <path d="M1154 935 V980 H372 V1024" class="flow"/>
+  <path d="M1154 935 V980 H936 V1024" class="flow"/>
+  <path d="M1154 935 V980 H1450 V1024" class="async"/>
+  <path d="M1724 865 V982 H2040 V1024" class="flow"/>
+  <path d="M1724 865 V955 H1840 V1000 H2040 V1024" class="async"/>
+  <path d="M1724 935 V955 H2040 V1024" class="flow"/>
+  <path d="M1724 1190 H1756" class="flow"/>
+  <text x="1740" y="1165" class="line-label" text-anchor="middle">DELIVERY</text>
 
-  <rect x="788" y="210" width="330" height="270" rx="18" class="panel"/>
-  <text x="818" y="252" class="eyebrow">03 / COMMAND SURFACE</text>
-  <text x="818" y="295" class="title">Feature environments</text>
-  <path d="M818 316 H1088" class="rule"/>
-  <text x="818" y="354" class="path">src/commands/</text>
-  <text x="818" y="384" class="body">Discover · Archive · Community</text>
-  <text x="818" y="414" class="body">Play · Profile · Custom Role</text>
-  <text x="818" y="444" class="body">Settings · Language · Music</text>
-  <text x="818" y="466" class="muted">Separate help · privacy · feedback</text>
+  <!-- Row 1: entry points and runtime -->
+  <rect x="72" y="190" width="440" height="300" rx="12" class="panel"/>
+  <text x="104" y="231" class="eyebrow">01 / ENTRY</text>
+  <text x="104" y="272" class="panel-title">Discord surface</text>
+  <path d="M104 292 H480" class="rule"/>
+  <text x="104" y="331" class="sub-title">Guild members / moderators</text>
+  <text x="104" y="370" class="copy">Slash commands · buttons</text>
+  <text x="104" y="400" class="copy">Select menus · modals</text>
+  <text x="104" y="445" class="path">guild_id / actor_id</text>
+  <text x="104" y="469" class="small">Discord Gateway + REST API</text>
 
-  <rect x="1166" y="210" width="362" height="270" rx="18" class="panel"/>
-  <text x="1196" y="252" class="eyebrow">04 / DOMAIN SERVICES</text>
-  <text x="1196" y="295" class="title">Shared helpers</text>
-  <path d="M1196 316 H1498" class="rule"/>
-  <text x="1196" y="354" class="path">helpers/</text>
-  <text x="1196" y="384" class="body">Providers · media · archive</text>
-  <text x="1196" y="414" class="body">Community · runtime · security</text>
-  <text x="1196" y="444" class="body">Storage · validation · embeds</text>
-  <text x="1196" y="466" class="muted">Reusable logic outside callbacks</text>
+  <rect x="552" y="190" width="978" height="300" rx="12" class="panel"/>
+  <text x="584" y="231" class="eyebrow">02 / BOT RUNTIME</text>
+  <text x="584" y="272" class="panel-title">TypeScript process</text>
+  <text x="584" y="310" class="path">bot.ts</text>
+  <text x="584" y="340" class="copy">Node.js 22 · discord.js client · single gateway</text>
+  <path d="M584 360 H1498" class="rule"/>
+  <rect x="584" y="380" width="278" height="80" rx="8" class="inner"/>
+  <text x="604" y="410" class="sub-title">EVENT ROUTER</text>
+  <text x="604" y="438" class="small">Interactions · lifecycle</text>
+  <rect x="882" y="380" width="278" height="80" rx="8" class="inner"/>
+  <text x="902" y="410" class="sub-title">COMMAND REGISTRY</text>
+  <text x="902" y="438" class="path">src/registry.ts</text>
+  <rect x="1180" y="380" width="318" height="80" rx="8" class="inner"/>
+  <text x="1200" y="410" class="sub-title">WORKERS / BRIDGE</text>
+  <text x="1200" y="438" class="small">Schedules · private listener</text>
 
-  <path d="M382 345 H418" class="line"/>
-  <path d="M740 345 H776" class="line"/>
-  <path d="M1118 345 H1154" class="line"/>
+  <rect x="1574" y="190" width="754" height="300" rx="12" class="panel"/>
+  <text x="1606" y="231" class="eyebrow">03 / OPTIONAL WEB CONTROL PLANE</text>
+  <text x="1606" y="272" class="panel-title">Dashboard</text>
+  <rect x="1606" y="296" width="212" height="142" rx="8" class="inner"/>
+  <text x="1626" y="328" class="sub-title">BROWSER</text>
+  <text x="1626" y="358" class="path">Next.js</text>
+  <text x="1626" y="386" class="small">React · App Router</text>
+  <rect x="1830" y="296" width="228" height="142" rx="8" class="inner"/>
+  <text x="1850" y="328" class="sub-title">API SERVICE</text>
+  <text x="1850" y="358" class="path">Rust / Axum</text>
+  <text x="1850" y="386" class="small">OAuth · sessions · RBAC</text>
+  <rect x="2070" y="296" width="226" height="142" rx="8" class="inner"/>
+  <text x="2090" y="328" class="sub-title">BOT BRIDGE</text>
+  <text x="2090" y="358" class="path">Private HTTP</text>
+  <text x="2090" y="386" class="small">Signed service requests</text>
+  <path d="M1818 367 H1828" class="flow"/>
+  <path d="M2058 367 H2068" class="async"/>
+  <text x="1606" y="467" class="small">One Discord gateway; the dashboard is a separate control plane.</text>
 
-  <!-- Guild scope -->
-  <rect x="430" y="520" width="1098" height="72" rx="14" fill="#191815" stroke="#716044" stroke-width="1.2"/>
-  <circle cx="466" cy="556" r="7" fill="#c7ae85"/>
-  <text x="490" y="551" class="path">GUILD CONTEXT</text>
-  <text x="490" y="575" class="body">Server-owned settings, privacy choices, activity, and moderation remain scoped to the invoking guild.</text>
+  <!-- Row 2: command and domain layers -->
+  <rect x="72" y="575" width="480" height="360" rx="12" class="panel"/>
+  <text x="104" y="616" class="eyebrow">04 / COMMAND SURFACE</text>
+  <text x="104" y="656" class="panel-title">Feature environments</text>
+  <path d="M104 676 H520" class="rule"/>
+  <text x="104" y="716" class="path">/discover · /archive · /community</text>
+  <text x="104" y="750" class="path">/play · /profile · /custom-role</text>
+  <text x="104" y="784" class="path">/settings · /language · /music</text>
+  <rect x="104" y="812" width="416" height="50" rx="7" class="inner"/>
+  <text x="124" y="844" class="copy">Standalone: /help · /privacy · /feedback</text>
+  <text x="104" y="892" class="small">Utilities · message integrations · restricted tools</text>
 
-  <!-- Supporting services -->
-  <rect x="72" y="640" width="450" height="176" rx="18" class="panel"/>
-  <text x="102" y="680" class="eyebrow">PERSISTENCE</text>
-  <text x="102" y="722" class="title">PostgreSQL</text>
-  <text x="102" y="759" class="path">database.ts</text>
-  <text x="102" y="790" class="muted">Shared pool · transactions · guild records</text>
+  <rect x="584" y="575" width="1140" height="360" rx="12" class="panel"/>
+  <text x="616" y="616" class="eyebrow">05 / DOMAIN LAYER</text>
+  <text x="616" y="656" class="panel-title">Shared services</text>
+  <rect x="616" y="678" width="340" height="102" rx="8" class="inner"/>
+  <text x="636" y="708" class="sub-title">MEDIA</text>
+  <text x="636" y="737" class="copy">Search · matching · provenance</text>
+  <text x="636" y="762" class="small">Atlas · comparisons · franchise order</text>
+  <rect x="976" y="678" width="340" height="102" rx="8" class="inner"/>
+  <text x="996" y="708" class="sub-title">ARCHIVE</text>
+  <text x="996" y="737" class="copy">Access · collections · curation</text>
+  <text x="996" y="762" class="small">Visibility · moderation · ordering</text>
+  <rect x="1336" y="678" width="356" height="102" rx="8" class="inner"/>
+  <text x="1356" y="708" class="sub-title">COMMUNITY</text>
+  <text x="1356" y="737" class="copy">Daily · rankings · sessions</text>
+  <text x="1356" y="762" class="small">Releases · tournaments · retries</text>
+  <rect x="616" y="798" width="340" height="102" rx="8" class="inner"/>
+  <text x="636" y="828" class="sub-title">CUSTOM ROLES</text>
+  <text x="636" y="857" class="copy">Lifecycle · validation · picker</text>
+  <text x="636" y="882" class="small">Images · member role operations</text>
+  <rect x="976" y="798" width="340" height="102" rx="8" class="inner"/>
+  <text x="996" y="828" class="sub-title">RUNTIME</text>
+  <text x="996" y="857" class="copy">Guild settings · language · retention</text>
+  <text x="996" y="882" class="small">Diagnostics · backups · delivery</text>
+  <rect x="1336" y="798" width="356" height="102" rx="8" class="inner"/>
+  <text x="1356" y="828" class="sub-title">SECURITY / PRESENTATION</text>
+  <text x="1356" y="857" class="copy">Crypto · consent · permissions</text>
+  <text x="1356" y="882" class="small">Embeds · emoji · interaction UX</text>
+  <text x="616" y="918" class="tiny">helpers/archive · community · custom-roles · integration · media · runtime · security · embeds</text>
 
-  <rect x="575" y="640" width="450" height="176" rx="18" class="panel"/>
-  <text x="605" y="680" class="eyebrow">EXTERNAL METADATA</text>
-  <text x="605" y="722" class="title">Provider adapters</text>
-  <text x="605" y="759" class="body">AniList · TMDB · Books · IGDB · Steam</text>
-  <text x="605" y="790" class="muted">Manga · webnovel · music · translation sources</text>
+  <rect x="1756" y="575" width="572" height="360" rx="12" class="panel"/>
+  <text x="1788" y="616" class="eyebrow">06 / ADAPTER LAYER</text>
+  <text x="1788" y="656" class="panel-title">Metadata providers</text>
+  <path d="M1788 676 H2296" class="rule"/>
+  <text x="1788" y="713" class="path">ANILIST · KITSU · MANGADEX</text>
+  <text x="1788" y="747" class="path">TMDB · IGDB · STEAM</text>
+  <text x="1788" y="781" class="path">GOOGLE BOOKS · OPEN LIBRARY</text>
+  <text x="1788" y="815" class="path">CROSSREF · ROYAL ROAD</text>
+  <text x="1788" y="849" class="path">SPOTIFY · YOUTUBE · SOUNDCLOUD</text>
+  <path d="M1788 870 H2296" class="rule"/>
+  <text x="1788" y="899" class="small">provider-http · web-scraper · translation</text>
+  <text x="1788" y="920" class="tiny">OPTIONAL SOURCES REQUIRE THEIR OWN CREDENTIALS</text>
 
-  <rect x="1078" y="640" width="450" height="176" rx="18" class="panel"/>
-  <text x="1108" y="680" class="eyebrow">MEDIA OBJECTS</text>
-  <text x="1108" y="722" class="title">S3-compatible storage</text>
-  <text x="1108" y="759" class="body">Configured private originals</text>
-  <text x="1108" y="790" class="muted">Separate public output where explicitly enabled</text>
+  <!-- Row 3: backing systems and delivery -->
+  <rect x="72" y="1024" width="600" height="300" rx="12" class="panel"/>
+  <text x="104" y="1065" class="eyebrow">07 / PRIMARY STATE</text>
+  <text x="104" y="1107" class="panel-title">PostgreSQL</text>
+  <text x="104" y="1145" class="path">database.ts · pg pool</text>
+  <path d="M104 1165 H640" class="rule"/>
+  <text x="104" y="1200" class="copy">Guild settings · retention · command state</text>
+  <text x="104" y="1230" class="copy">Membership · audit · community records</text>
+  <text x="104" y="1278" class="small">Queries · transactions · schema initialization</text>
 
-  <path d="M1347 480 V610 H297 V630" class="line"/>
-  <path d="M1347 480 V610 H800 V630" class="line"/>
-  <path d="M1347 480 V630" class="line"/>
+  <rect x="704" y="1024" width="465" height="300" rx="12" class="panel"/>
+  <text x="736" y="1065" class="eyebrow">08 / OBJECT DATA</text>
+  <text x="736" y="1107" class="panel-title">S3-compatible</text>
+  <text x="736" y="1145" class="path">helpers/media/media-storage.ts</text>
+  <path d="M736 1165 H1137" class="rule"/>
+  <text x="736" y="1200" class="copy">Private source objects</text>
+  <text x="736" y="1230" class="copy">Separate public generated output</text>
+  <text x="736" y="1278" class="small">Presigned access · cleanup · retention</text>
 
-  <!-- Optional dashboard control plane -->
-  <rect x="72" y="872" width="1456" height="184" rx="20" fill="#121316" stroke="#45413a" stroke-width="1.4"/>
-  <text x="102" y="912" class="eyebrow">OPTIONAL WEB CONTROL PLANE</text>
-  <text x="1498" y="912" class="muted" text-anchor="end">NOT A SECOND DISCORD GATEWAY</text>
+  <rect x="1201" y="1024" width="525" height="300" rx="12" class="panel"/>
+  <text x="1233" y="1065" class="eyebrow">09 / AUTOMATION</text>
+  <text x="1233" y="1107" class="panel-title">Background workers</text>
+  <path d="M1233 1127 H1694" class="rule"/>
+  <text x="1233" y="1165" class="copy">Community schedules and daily tasks</text>
+  <text x="1233" y="1195" class="copy">Music release polling and notifications</text>
+  <text x="1233" y="1225" class="copy">Retry queues and delivery recovery</text>
+  <text x="1233" y="1278" class="small">Started and stopped with bot lifecycle</text>
 
-  <rect x="102" y="940" width="280" height="82" rx="12" class="chip"/>
-  <text x="124" y="973" class="title">Browser</text>
-  <text x="124" y="1000" class="muted">Guild administrator</text>
+  <rect x="1756" y="1024" width="572" height="300" rx="12" class="panel"/>
+  <text x="1788" y="1065" class="eyebrow">10 / OUTBOUND</text>
+  <text x="1788" y="1107" class="panel-title">Discord delivery</text>
+  <path d="M1788 1127 H2296" class="rule"/>
+  <text x="1788" y="1165" class="copy">Embeds · interactions · follow-ups</text>
+  <text x="1788" y="1195" class="copy">Guild notifications · role operations</text>
+  <text x="1788" y="1225" class="copy">Member and moderator responses</text>
+  <text x="1788" y="1278" class="small">Discord API · scoped to the target guild</text>
 
-  <rect x="462" y="940" width="280" height="82" rx="12" class="chip"/>
-  <text x="484" y="973" class="title">Next.js</text>
-  <text x="484" y="1000" class="muted">web/frontend/</text>
+  <!-- Cross-cutting trust and quality bands -->
+  <rect x="72" y="1380" width="2256" height="145" rx="12" class="panel"/>
+  <text x="104" y="1420" class="eyebrow">CROSS-CUTTING / TRUST BOUNDARIES</text>
+  <rect x="104" y="1442" width="420" height="56" rx="7" class="tag"/>
+  <text x="124" y="1477" class="tag-text">TENANCY · guild-scoped state</text>
+  <rect x="544" y="1442" width="420" height="56" rx="7" class="tag"/>
+  <text x="564" y="1477" class="tag-text">ONBOARDING · language + retention</text>
+  <rect x="984" y="1442" width="420" height="56" rx="7" class="tag"/>
+  <text x="1004" y="1477" class="tag-text">AUTHORIZATION · recheck permissions</text>
+  <rect x="1424" y="1442" width="420" height="56" rx="7" class="tag"/>
+  <text x="1444" y="1477" class="tag-text">PRIVACY · cleanup + private objects</text>
+  <rect x="1864" y="1442" width="432" height="56" rx="7" class="tag"/>
+  <text x="1884" y="1477" class="tag-text">OPERATIONS · audit + logs + retries</text>
 
-  <rect x="822" y="940" width="280" height="82" rx="12" class="chip"/>
-  <text x="844" y="973" class="title">Rust / Axum</text>
-  <text x="844" y="1000" class="muted">web/backend/</text>
-
-  <rect x="1182" y="940" width="316" height="82" rx="12" class="chip"/>
-  <text x="1204" y="973" class="title">Private bot bridge</text>
-  <text x="1204" y="1000" class="muted">helpers/runtime/</text>
-
-  <path d="M382 981 H450" class="line"/>
-  <path d="M742 981 H810" class="line"/>
-  <path d="M1102 981 H1170" class="line"/>
-  <path d="M1340 940 V850 H585 V490" class="dash"/>
+  <rect x="72" y="1550" width="2256" height="82" rx="12" class="inner"/>
+  <text x="104" y="1582" class="eyebrow">QUALITY / RELEASE GATES</text>
+  <text x="104" y="1610" class="copy">Bot typecheck + tests · PostgreSQL / MinIO integration · Next.js checks · Rust fmt / tests · CodeQL · dependencies · secrets · Trivy · scraper / workflow checks</text>
+  <text x="2328" y="1658" class="tiny" text-anchor="end">LIVE DISCORD / OAUTH / PROVIDER / STORAGE ACCEPTANCE REMAINS DEPLOYMENT-SPECIFIC</text>
 </svg>
