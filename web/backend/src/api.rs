@@ -154,7 +154,7 @@ fn validate_atlas_query(query: &AtlasQuery) -> ApiResult<()> {
         ("evidence filter", query.evidence.as_deref(), 200),
     ] {
         if value.is_some_and(|value| value.chars().count() > maximum) {
-            return Err(ApiError::bad_request(&format!("The Atlas {name} is too long.")));
+            return Err(ApiError::bad_request(format!("The Atlas {name} is too long.")));
         }
     }
     if query.provider_filter.as_deref().is_some_and(|value| !valid_atlas_provider(value)) {
