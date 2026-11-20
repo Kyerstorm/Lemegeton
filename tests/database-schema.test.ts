@@ -563,7 +563,6 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       startsAt: new Date(),
       endsAt: collectionSpotlightEnd,
       canModerateServer: false,
-      isGlobalModerator: false,
     }), /owner or an Archive moderator/i);
     await assert.rejects(createArchiveCollectionSpotlight({
       guildId: collectionGuild,

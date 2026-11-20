@@ -235,7 +235,7 @@ export async function cancelArchiveSpotlight(
         AND ((visibility = 'server' AND guild_id = $2 AND (curator_id = $3 OR $4 = TRUE))
           OR (visibility = 'global' AND $5 = TRUE))
       RETURNING id::text AS id`,
-    [spotlightId, guildId, actorId, canModerateServer, isGlobalModerator],
+    [spotlightId, guildId, actorId, canModerateServer, globalModerator],
   );
   if (!changed) throw new Error("That spotlight was not found in your moderation scope or is already cancelled.");
 }
