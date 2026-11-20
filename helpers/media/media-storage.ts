@@ -9,6 +9,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { query, queryOne, transaction } from "../../database.js";
 import { AttachmentBuilder, ChannelType, PermissionFlagsBits, type Client, type TextChannel } from "discord.js";
 import type { BotConfig } from "../runtime/config.js";
+import { logger } from "../runtime/logger.js";
 
 type MediaStorageConfig = Pick<BotConfig,
   "archiveUploadMaxBytes" | "s3EndpointUrl" | "s3Region" | "s3AccessKeyId" |
@@ -432,9 +433,11 @@ export async function deleteArchiveAsset(assetId: number, client?: Client): Prom
       [assetId],
     ).catch(() => null);
     const attempts = Number(queued?.attempts ?? 0) + 1;
+    const reason = error instanceof Error ? error.message.slice(0, 300) : "Unknown storage error";
+    logger.warn("Private Archive asset deletion failed; retry remains queued", { assetId, provider: asset.provider, reason });
     await query(
-      "UPDATE media_asset_cleanup_queue SET attempts = $2, next_attempt_at = NOW() + ($3 * INTERVAL '1 second'), last_error = 'Private asset deletion failed' WHERE asset_id = $1",
-      [assetId, attempts, archiveAssetCleanupBackoffSeconds(attempts)],
+      "UPDATE media_asset_cleanup_queue SET attempts = $2, next_attempt_at = NOW() + ($3 * INTERVAL '1 second'), last_error = $4 WHERE asset_id = $1",
+      [assetId, attempts, archiveAssetCleanupBackoffSeconds(attempts), reason],
     ).catch(() => undefined);
     throw error;
   }

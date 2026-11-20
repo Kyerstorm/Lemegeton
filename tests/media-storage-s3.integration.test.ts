@@ -295,7 +295,13 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
       'UPDATE "' + schema + '".media_asset_cleanup_queue SET next_attempt_at = NOW() WHERE asset_id = $1',
       [reportedAsset],
     );
-    assert.deepEqual(await processArchiveAssetCleanup(10), { attempted: 1, failed: 0 }, "report removal cleanup worker should delete the detached asset");
+    const reportCleanup = await processArchiveAssetCleanup(10);
+    const reportCleanupState = await queryOne<{ attempts: number; last_error: string | null }>(
+      'SELECT attempts, last_error FROM "' + schema + '".media_asset_cleanup_queue WHERE asset_id = $1',
+      [reportedAsset],
+    );
+    console.info("Report Archive asset cleanup", { reportCleanup, reportCleanupState });
+    assert.deepEqual(reportCleanup, { attempted: 1, failed: 0 }, "report removal cleanup worker should delete the detached asset");
     assert.equal(await queryOne("SELECT id FROM media_assets WHERE id = $1", [reportedAsset]), null, "cleanup worker deletes the report-removed asset registry row");
 
     // Global collection/Trail creation is enforced by the configured moderator set.
