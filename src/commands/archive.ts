@@ -926,12 +926,13 @@ export class ArchiveCommand implements FeatureCommand {
         await interaction.reply({content:"Manage Server permission is required to change Archive channels.",flags:MessageFlags.Ephemeral});
         return true;
       }
-      const selectedChannel=interaction.channels.first();
+      const selected = interaction.channels.first();
+      const guild = interaction.guild!;
+      const selectedChannel = selected ? await guild.channels.fetch(selected.id).catch(() => null) : null;
       if (!selectedChannel || (selectedChannel.type !== ChannelType.GuildText && selectedChannel.type !== ChannelType.GuildAnnouncement)) {
         await interaction.reply({content:"Choose a normal text or announcement channel from this server.",flags:MessageFlags.Ephemeral});
         return true;
       }
-      const guild = interaction.guild!;
       const botMember = await guild.members.fetchMe();
       const botPermissions = selectedChannel.permissionsFor(botMember);
       const everyonePermissions = selectedChannel.permissionsFor(guild.roles.everyone);

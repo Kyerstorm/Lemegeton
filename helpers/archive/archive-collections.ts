@@ -1,6 +1,6 @@
 import { query, queryOne, transaction } from "../../database.js";
 import { cleanText } from "../security/security.js";
-import { getArchiveEntry, parseTags, type ArchiveEntry, type ArchiveVisibility } from "./archive.js";
+import { canChangeArchiveVisibility, getArchiveEntry, parseTags, type ArchiveEntry, type ArchiveVisibility } from "./archive.js";
 
 export function canCollectionShowEntry(
   collectionVisibility: ArchiveVisibility,
@@ -107,6 +107,84 @@ export async function reorderArchiveTrailStep(
       );
     }
     await client.query("UPDATE archive_trails SET updated_at = NOW() WHERE id = $1 AND guild_id = $2", [trailId, guildId]);
+  });
+}
+
+export async function changeArchiveCollectionVisibility(
+  guildId: string,
+  userId: string,
+  collectionId: string,
+  visibility: ArchiveVisibility,
+  canModerateServer: boolean,
+  isGlobalModerator: boolean,
+): Promise<void> {
+  await transaction(async client => {
+    const selected = await client.query<{ owner_id: string; visibility: ArchiveVisibility }>(
+      "SELECT owner_id::text, visibility FROM archive_collections " +
+      "WHERE id = $1 AND guild_id = $2 AND status = 'active' FOR UPDATE",
+      [collectionId, guildId],
+    );
+    const collection = selected.rows[0];
+    if (!collection) throw new Error("That active collection was not found in this server.");
+    if (!canChangeArchiveVisibility(collection.visibility, visibility, collection.owner_id, userId, canModerateServer, isGlobalModerator)) {
+      throw new Error(visibility === "global"
+        ? "Only configured global Archive moderators can publish a collection globally."
+        : "Only the collection owner or an Archive moderator can change this collection's visibility.");
+    }
+    if (visibility === "global" && collection.visibility !== "global") {
+      const privateItems = await client.query<{ count: string }>(
+        "SELECT COUNT(*)::text AS count FROM archive_collection_items ci " +
+        "LEFT JOIN community_archive_entries e ON e.id = ci.entry_id " +
+        "WHERE ci.collection_id = $1 AND (e.id IS NULL OR e.status <> 'approved' OR e.visibility <> 'global')",
+        [collectionId],
+      );
+      if (Number(privateItems.rows[0]?.count ?? 0) > 0) {
+        throw new Error("Remove pending, removed, or server-only entries before publishing this collection globally.");
+      }
+    }
+    await client.query(
+      "UPDATE archive_collections SET visibility = $1, updated_at = NOW() WHERE id = $2 AND guild_id = $3",
+      [visibility, collectionId, guildId],
+    );
+  });
+}
+
+export async function changeArchiveTrailVisibility(
+  guildId: string,
+  userId: string,
+  trailId: string,
+  visibility: ArchiveVisibility,
+  canModerateServer: boolean,
+  isGlobalModerator: boolean,
+): Promise<void> {
+  await transaction(async client => {
+    const selected = await client.query<{ owner_id: string; visibility: ArchiveVisibility }>(
+      "SELECT owner_id::text, visibility FROM archive_trails " +
+      "WHERE id = $1 AND guild_id = $2 AND status = 'active' FOR UPDATE",
+      [trailId, guildId],
+    );
+    const trail = selected.rows[0];
+    if (!trail) throw new Error("That active Archive Trail was not found in this server.");
+    if (!canChangeArchiveVisibility(trail.visibility, visibility, trail.owner_id, userId, canModerateServer, isGlobalModerator)) {
+      throw new Error(visibility === "global"
+        ? "Only configured global Archive moderators can publish an Archive Trail globally."
+        : "Only the Trail owner or an Archive moderator can change this Trail's visibility.");
+    }
+    if (visibility === "global" && trail.visibility !== "global") {
+      const privateSteps = await client.query<{ count: string }>(
+        "SELECT COUNT(*)::text AS count FROM archive_trail_steps s " +
+        "LEFT JOIN community_archive_entries e ON e.id = s.entry_id " +
+        "WHERE s.trail_id = $1 AND (e.id IS NULL OR e.status <> 'approved' OR e.visibility <> 'global')",
+        [trailId],
+      );
+      if (Number(privateSteps.rows[0]?.count ?? 0) > 0) {
+        throw new Error("Remove pending, removed, or server-only entries before publishing this Trail globally.");
+      }
+    }
+    await client.query(
+      "UPDATE archive_trails SET visibility = $1, updated_at = NOW() WHERE id = $2 AND guild_id = $3",
+      [visibility, trailId, guildId],
+    );
   });
 }
 

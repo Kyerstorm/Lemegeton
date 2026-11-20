@@ -305,7 +305,7 @@ export async function resolveLegacyArchiveAttachmentUrl(
 
 export async function signedArchiveAssetUrl(
   assetId: number,
-  client?: Client,
+  client: Client | undefined,
   expectedGuildId: string,
 ): Promise<string | null> {
   const asset = await queryOne<{ provider: string; bucket_name: string; object_key: string; is_private: boolean; guild_id: string | null; namespace: string }>(

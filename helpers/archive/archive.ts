@@ -213,13 +213,14 @@ export function isValidArchiveChannelId(channelId:string|null):boolean {
 export async function saveArchiveChannelSetting(
   guildId: string,
   actorId: string,
-  kind: "upload" | "moderation",
+  kind: "upload" | "moderation" | "storage",
   channelId: string | null,
 ): Promise<void> {
   if (!isValidArchiveChannelId(channelId)) {
     throw new Error("Choose a normal text or announcement channel from this server.");
   }
-  const column = kind === "upload" ? "upload_channel_id" : "moderation_channel_id";
+  const column = kind === "upload" ? "upload_channel_id"
+    : kind === "storage" ? "legacy_storage_channel_id" : "moderation_channel_id";
   await query(
     `INSERT INTO guild_archive_settings (guild_id, ${column}, updated_by, updated_at)
      VALUES ($1, $2, $3, NOW())
@@ -297,8 +298,8 @@ export async function submitArchiveEntry(input: ArchiveSubmission): Promise<stri
   if (needsUpload && input.category === "soundtracks" && !allowedUploads.has("audio") && !allowedUploads.has("video")) {
     throw new Error("This server has not enabled audio or video uploads. Supply an HTTPS music/video source link instead.");
   }
-  if (input.visibility === "global" && !GLOBAL_MODERATOR_IDS.size) {
-    throw new Error("Global Archive publishing is not enabled yet. This server can still publish server-only entries.");
+  if (input.visibility === "global" && !isGlobalArchiveModerator(input.userId)) {
+    throw new Error("Only configured global Archive moderators can publish globally. Choose this server for a server-only entry.");
   }
   const result = await queryOne<{ id: string }>(
     `INSERT INTO community_archive_entries
@@ -579,6 +580,221 @@ export async function finishArchiveUpload(guildId: string, userId: string, entry
   });
 }
 
+
+export function canChangeArchiveVisibility(
+  current: ArchiveVisibility,
+  next: ArchiveVisibility,
+  ownerId: string,
+  actorId: string,
+  canModerateServer: boolean,
+  isGlobalModerator: boolean,
+): boolean {
+  if (current === next) return true;
+  if (next === "global") return isGlobalModerator;
+  return ownerId === actorId || canModerateServer || (current === "global" && isGlobalModerator);
+}
+
+export async function changeArchiveEntryVisibility(
+  guildId: string,
+  actorId: string,
+  entryId: string,
+  visibility: ArchiveVisibility,
+  canModerateServer: boolean,
+): Promise<void> {
+  await transaction(async client => {
+    const selected = await client.query<{
+      created_by: string;
+      visibility: ArchiveVisibility;
+      status: string;
+    }>(
+      "SELECT created_by::text, visibility, status FROM community_archive_entries " +
+      "WHERE id = $1 AND created_guild_id = $2 FOR UPDATE",
+      [entryId, guildId],
+    );
+    const entry = selected.rows[0];
+    if (!entry) throw new Error("That Archive entry was not found in its originating server.");
+    if (entry.status !== "approved") {
+      throw new Error("Only approved Archive entries can change publication visibility.");
+    }
+    const globalModerator = isGlobalArchiveModerator(actorId);
+    if (!canChangeArchiveVisibility(entry.visibility, visibility, entry.created_by, actorId, canModerateServer, globalModerator)) {
+      throw new Error(visibility === "global"
+        ? "Only configured global Archive moderators can publish an entry globally."
+        : "Only the contributor, a server moderator, or a global moderator can unpublish this entry.");
+    }
+    if (entry.visibility !== visibility) {
+      await client.query(
+        "UPDATE community_archive_entries SET visibility = $1, updated_at = NOW() WHERE id = $2 AND created_guild_id = $3",
+        [visibility, entryId, guildId],
+      );
+    }
+  });
+}
+
+export async function replaceArchiveEntryAsset(
+  guildId: string,
+  userId: string,
+  entryId: string,
+  position: number,
+  assetId: number,
+  filename: string,
+  client?: Client,
+): Promise<void> {
+  if (!Number.isSafeInteger(position) || position < 1 || position > 5) {
+    throw new Error("Attachment position must be between 1 and 5.");
+  }
+  let oldAssetId: number | null;
+  try {
+    oldAssetId = await transaction(async database => {
+      const entryResult = await database.query<{
+        created_by: string;
+        status: string;
+        media_asset_id: string | null;
+      }>(
+        "SELECT created_by::text, status, media_asset_id::text FROM community_archive_entries " +
+        "WHERE id = $1 AND created_guild_id = $2 FOR UPDATE",
+        [entryId, guildId],
+      );
+      const entry = entryResult.rows[0];
+      if (!entry || entry.created_by !== userId || !["pending", "approved"].includes(entry.status)) {
+        throw new Error("Only your pending or approved Archive entry can have an attachment replaced.");
+      }
+      const assetResult = await database.query<{ content_type: string }>(
+        "SELECT content_type FROM media_assets WHERE id = $1 AND guild_id = $2 AND uploaded_by = $3 " +
+        "AND namespace = $4 AND is_private = TRUE FOR SHARE",
+        [assetId, guildId, userId, "archive/" + guildId],
+      );
+      const newAsset = assetResult.rows[0];
+      if (!newAsset) throw new Error("The replacement upload does not belong to you in this server.");
+
+      const existing = await database.query<{ asset_id: string }>(
+        "SELECT asset_id::text FROM community_archive_entry_assets WHERE entry_id = $1 AND position = $2 FOR UPDATE",
+        [entryId, position],
+      );
+      const previous = existing.rows[0] ? Number(existing.rows[0].asset_id)
+        : position === 1 && entry.media_asset_id ? Number(entry.media_asset_id) : null;
+      if (position > 1 && !existing.rows[0]) {
+        throw new Error("That attachment position does not exist on this entry.");
+      }
+      if (existing.rows[0]) {
+        await database.query(
+          "UPDATE community_archive_entry_assets SET asset_id = $1, uploaded_by = $2, created_at = NOW() " +
+          "WHERE entry_id = $3 AND position = $4",
+          [assetId, userId, entryId, position],
+        );
+      } else {
+        await database.query(
+          "INSERT INTO community_archive_entry_assets (entry_id, asset_id, position, uploaded_by) VALUES ($1, $2, 1, $3)",
+          [entryId, assetId, userId],
+        );
+      }
+      if (position === 1) {
+        await database.query(
+          "UPDATE community_archive_entries SET media_asset_id = $1, attachment_filename = $2, " +
+          "attachment_content_type = $3, status = CASE WHEN status = 'approved' THEN 'pending' ELSE status END, " +
+          "moderation_reason = NULL, updated_at = NOW() WHERE id = $4 AND created_guild_id = $5",
+          [assetId, filename.slice(0, 255), newAsset.content_type, entryId, guildId],
+        );
+      } else if (entry.status === "approved") {
+        await database.query(
+          "UPDATE community_archive_entries SET status = 'pending', moderation_reason = NULL, updated_at = NOW() " +
+          "WHERE id = $1 AND created_guild_id = $2",
+          [entryId, guildId],
+        );
+      }
+      await database.query("DELETE FROM media_asset_cleanup_queue WHERE asset_id = $1", [assetId]);
+      if (previous !== null && previous !== assetId) {
+        await database.query(
+          "INSERT INTO media_asset_cleanup_queue (asset_id) VALUES ($1) ON CONFLICT (asset_id) DO NOTHING",
+          [previous],
+        );
+      }
+      return previous;
+    });
+  } catch (error) {
+    await deleteArchiveAsset(assetId, client).catch(() => undefined);
+    throw error;
+  }
+  if (oldAssetId !== null && oldAssetId !== assetId) {
+    await deleteArchiveAsset(oldAssetId, client).catch(() => undefined);
+  }
+}
+
+export async function removeArchiveEntryAsset(
+  guildId: string,
+  userId: string,
+  entryId: string,
+  position: number,
+  client?: Client,
+): Promise<void> {
+  if (!Number.isSafeInteger(position) || position < 1 || position > 5) {
+    throw new Error("Attachment position must be between 1 and 5.");
+  }
+  const removedAssetId = await transaction(async database => {
+    const entryResult = await database.query<{
+      created_by: string;
+      status: string;
+      media_asset_id: string | null;
+    }>(
+      "SELECT created_by::text, status, media_asset_id::text FROM community_archive_entries " +
+      "WHERE id = $1 AND created_guild_id = $2 FOR UPDATE",
+      [entryId, guildId],
+    );
+    const entry = entryResult.rows[0];
+    if (!entry || entry.created_by !== userId || !["pending", "approved"].includes(entry.status)) {
+      throw new Error("Only your pending or approved Archive entry can have an attachment removed.");
+    }
+    const allAssets = await database.query<{ asset_id: string; position: number }>(
+      "SELECT asset_id::text, position FROM community_archive_entry_assets WHERE entry_id = $1 ORDER BY position ASC FOR UPDATE",
+      [entryId],
+    );
+    const selected = allAssets.rows.find(item => Number(item.position) === position);
+    const removedId = selected ? Number(selected.asset_id)
+      : position === 1 && entry.media_asset_id ? Number(entry.media_asset_id) : null;
+    if (removedId === null) throw new Error("That attachment position does not exist on this entry.");
+
+    if (selected) {
+      await database.query(
+        "DELETE FROM community_archive_entry_assets WHERE entry_id = $1 AND asset_id = $2",
+        [entryId, removedId],
+      );
+    }
+    const remaining = allAssets.rows
+      .filter(item => Number(item.asset_id) !== removedId)
+      .map(item => Number(item.asset_id));
+    await database.query(
+      "UPDATE community_archive_entry_assets SET position = -position - 1000 WHERE entry_id = $1",
+      [entryId],
+    );
+    for (const [index, remainingId] of remaining.entries()) {
+      await database.query(
+        "UPDATE community_archive_entry_assets SET position = $1 WHERE entry_id = $2 AND asset_id = $3",
+        [index + 1, entryId, remainingId],
+      );
+    }
+
+    const nextAsset = remaining.length
+      ? await database.query<{ content_type: string; object_key: string }>(
+          "SELECT content_type, object_key FROM media_assets WHERE id = $1 AND guild_id = $2 AND is_private = TRUE",
+          [remaining[0], guildId],
+        )
+      : null;
+    const next = nextAsset?.rows[0];
+    await database.query(
+      "UPDATE community_archive_entries SET media_asset_id = $1, attachment_filename = $2, " +
+      "attachment_content_type = $3, status = CASE WHEN status = 'approved' THEN 'pending' ELSE status END, " +
+      "moderation_reason = NULL, updated_at = NOW() WHERE id = $4 AND created_guild_id = $5",
+      [remaining[0] ?? null, next ? next.object_key.split("/").at(-1) ?? null : null,
+        next?.content_type ?? null, entryId, guildId],
+    );
+    await database.query(
+      "INSERT INTO media_asset_cleanup_queue (asset_id) VALUES ($1) ON CONFLICT (asset_id) DO NOTHING",
+      [removedId],
+    );
+    return removedId;
+  });
+  await deleteArchiveAsset(removedAssetId, client).catch(() => undefined);
+}
 
 export async function updateArchiveEntry(
   guildId: string,

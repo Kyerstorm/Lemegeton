@@ -170,26 +170,61 @@ export async function reviewArchiveReport(
   if (global && !GLOBAL_MODERATOR_IDS.has(moderatorId)) {
     throw new Error("Only configured global Archive moderators can review global reports.");
   }
-  const scope = global
-    ? "e.visibility = 'global'"
-    : "r.guild_id = $2 AND e.visibility = 'server' AND e.created_guild_id = $2";
-  const report = await queryOne<{
-    entry_id: string;
-    visibility: ArchiveVisibility;
-    created_guild_id: string;
-    entry_status: string;
-  }>(
-    "SELECT r.entry_id, e.visibility, e.created_guild_id, e.status AS entry_status " +
-    "FROM community_archive_reports r JOIN community_archive_entries e ON e.id = r.entry_id " +
-    "WHERE r.id = $1 AND " + scope + " AND r.status = 'pending'",
-    global ? [reportId] : [reportId, guildId],
-  );
-  if (!report) throw new Error("That pending Archive report was not found in this moderation scope.");
-  if (decision === "remove" && report.entry_status !== "removed") {
-    await moderateArchiveEntry(guildId, moderatorId, report.entry_id, "remove", reason, global);
-  }
-  await query(
-    "UPDATE community_archive_reports SET status = $1, reviewed_by = $2, review_reason = $3, reviewed_at = NOW() WHERE id = $4 AND status = 'pending'",
-    [decision === "dismiss" ? "dismissed" : "actioned", moderatorId, cleanText(reason, 500), reportId],
-  );
+  const cleanReason = cleanText(reason, 500);
+  await transaction(async client => {
+    const scope = global
+      ? "e.visibility = 'global'"
+      : "r.guild_id = $2 AND e.visibility = 'server' AND e.created_guild_id = $2";
+    const selected = await client.query<{
+      entry_id: string;
+      visibility: ArchiveVisibility;
+      created_guild_id: string;
+      entry_status: string;
+    }>(
+      "SELECT r.entry_id::text, e.visibility, e.created_guild_id::text, e.status AS entry_status " +
+      "FROM community_archive_reports r JOIN community_archive_entries e ON e.id = r.entry_id " +
+      "WHERE r.id = $1 AND " + scope + " AND r.status = 'pending' FOR UPDATE OF r,e",
+      global ? [reportId] : [reportId, guildId],
+    );
+    const report = selected.rows[0];
+    if (!report) throw new Error("That pending Archive report was not found in this moderation scope.");
+    if (decision === "remove" && report.entry_status !== "removed") {
+      if (!canModerateArchiveStatus(report.entry_status, "remove")) {
+        throw new Error("That reported entry cannot be removed in its current state.");
+      }
+      const updated = await client.query(
+        "UPDATE community_archive_entries SET status = 'removed', moderation_reason = $1, updated_at = NOW() " +
+        "WHERE id = $2 AND visibility = $3 AND status = $4",
+        [cleanReason, report.entry_id, report.visibility, report.entry_status],
+      );
+      if (updated.rowCount !== 1) {
+        throw new Error("The entry changed before the report action was saved. Refresh the report queue.");
+      }
+      await client.query(
+        "INSERT INTO media_asset_cleanup_queue (asset_id) " +
+        "SELECT asset_id FROM community_archive_entry_assets WHERE entry_id = $1 " +
+        "UNION SELECT media_asset_id FROM community_archive_entries WHERE id = $1 AND media_asset_id IS NOT NULL " +
+        "ON CONFLICT (asset_id) DO NOTHING",
+        [report.entry_id],
+      );
+      await client.query("DELETE FROM community_archive_entry_assets WHERE entry_id = $1", [report.entry_id]);
+      await client.query(
+        "UPDATE community_archive_entries SET media_asset_id = NULL, attachment_filename = NULL, attachment_content_type = NULL WHERE id = $1",
+        [report.entry_id],
+      );
+      await client.query(
+        "INSERT INTO community_archive_moderation_log (entry_id, guild_id, moderator_id, action, reason, is_global) " +
+        "VALUES ($1, $2, $3, 'remove', $4, $5)",
+        [report.entry_id, report.created_guild_id, moderatorId, cleanReason, global],
+      );
+    }
+    const reviewed = await client.query(
+      "UPDATE community_archive_reports SET status = $1, reviewed_by = $2, review_reason = $3, reviewed_at = NOW() " +
+      "WHERE id = $4 AND status = 'pending'",
+      [decision === "dismiss" ? "dismissed" : "actioned", moderatorId, cleanReason, reportId],
+    );
+    if (reviewed.rowCount !== 1) {
+      throw new Error("The report changed before review could be saved. Refresh the report queue.");
+    }
+  });
 }
