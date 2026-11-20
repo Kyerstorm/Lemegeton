@@ -1577,9 +1577,9 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       false,
       "a stale rule claim cannot enqueue events",
     );
-    assert.equal(
-      await queueMediaAutomationRelease(announcementRule, { ...announcementEvent, url: "http://example.com/release" }),
-      false,
+    await assert.rejects(
+      queueMediaAutomationRelease(announcementRule, { ...announcementEvent, url: "http://example.com/release" }),
+      /must use HTTPS/i,
       "automation must reject non-HTTPS source links",
     );
     assert.equal(await queueMediaAutomationRelease(announcementRule, announcementEvent), true);
