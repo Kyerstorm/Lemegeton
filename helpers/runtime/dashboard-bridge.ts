@@ -525,7 +525,10 @@ async function handleRequest(
       const targetId = atlasNodeIdentity(
         targetTitle, targetCategory, targetUrl, targetIdentity?.provider, targetIdentity?.providerId,
       );
-      if (targetId) path = findAtlasPath(filteredGraph, targetId);
+      if (targetId) path = findAtlasPath(filteredGraph, {
+        title: targetTitle, category: targetCategory, url: targetUrl,
+        provider: targetIdentity?.provider, providerId: targetIdentity?.providerId,
+      });
     }
     const payload = {
       root: { title, category, url: sourceUrl, provider: identity?.provider ?? null, providerId: identity?.providerId ?? null },
