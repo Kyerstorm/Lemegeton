@@ -195,7 +195,7 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
     const legacyEntry = await submitArchiveEntry({
       guildId, userId, category: "panels", title: "Legacy primary panel", content: "",
       mediaType: "Manga", tags: [], spoiler: false, visibility: "server",
-      needsUpload: true, chapterNumber: "legacy",
+      needsUpload: true, chapterNumber: "N/A",
     });
     const legacyPrimary = await storeArchiveUpload(
       guildId, userId, "panels",
