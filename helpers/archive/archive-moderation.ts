@@ -107,6 +107,21 @@ export async function moderateArchiveEntry(
         : [newStatus, cleanReason, entryId, guildId, row.status],
     );
     if (updated.rowCount !== 1) throw new Error("That contribution changed before moderation could be saved. Refresh the queue and try again.");
+    if (action === "reject" || action === "remove") {
+      await client.query(
+        "INSERT INTO media_asset_cleanup_queue (asset_id) " +
+        "SELECT asset_id FROM community_archive_entry_assets WHERE entry_id = $1 " +
+        "UNION SELECT media_asset_id FROM community_archive_entries WHERE id = $1 AND media_asset_id IS NOT NULL " +
+        "ON CONFLICT (asset_id) DO NOTHING",
+        [entryId],
+      );
+      await client.query("DELETE FROM community_archive_entry_assets WHERE entry_id = $1", [entryId]);
+      await client.query(
+        "UPDATE community_archive_entries SET media_asset_id = NULL, attachment_filename = NULL, " +
+        "attachment_content_type = NULL WHERE id = $1",
+        [entryId],
+      );
+    }
     await client.query(
       "INSERT INTO community_archive_moderation_log (entry_id, guild_id, moderator_id, action, reason, is_global) VALUES ($1, $2, $3, $4, $5, $6)",
       [entryId, row.created_guild_id, moderatorId, action, cleanReason, global],
