@@ -481,7 +481,7 @@ export class ArchiveCommand implements FeatureCommand {
           const member = await interaction.guild!.members.fetch(userId);
           const canModerateServer = await canModerateArchive(member, guildId, "server");
           const global = isGlobalArchiveModerator(userId);
-          await cancelArchiveSpotlight(guildId, spotlightId, userId, canModerateServer, global);
+          await cancelArchiveSpotlight(guildId, spotlightId, userId, canModerateServer);
           await interaction.reply({ content: "Archive spotlight cancelled.", flags: MessageFlags.Ephemeral });
           return;
         }
@@ -1003,7 +1003,6 @@ export class ArchiveCommand implements FeatureCommand {
         selectedId,
         interaction.user.id,
         await canModerateArchive(member, interaction.guildId, "server"),
-        isGlobalArchiveModerator(interaction.user.id),
       );
       await interaction.reply({ content: "Featured collection cancelled.", flags: MessageFlags.Ephemeral });
       return true;
@@ -1056,7 +1055,6 @@ export class ArchiveCommand implements FeatureCommand {
           endsAt,
           note: interaction.fields.getTextInputValue("note"),
           canModerateServer: await canModerateArchive(member, interaction.guildId, "server"),
-          isGlobalModerator: isGlobalArchiveModerator(interaction.user.id),
         });
         await interaction.reply({
           content: "Collection spotlight #" + id + " scheduled until <t:" + Math.floor(endsAt.getTime() / 1000) + ":F>.",

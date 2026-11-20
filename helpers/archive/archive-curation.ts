@@ -79,7 +79,6 @@ export async function createArchiveCollectionSpotlight(input: {
   endsAt: Date;
   note?: string;
   canModerateServer: boolean;
-  isGlobalModerator: boolean;
 }): Promise<string> {
   validateSpotlightWindow(input.startsAt, input.endsAt);
   const globalModerator = isGlobalArchiveModerator(input.curatorId);
@@ -143,17 +142,14 @@ export async function cancelArchiveCollectionSpotlight(
   spotlightId: string,
   actorId: string,
   canModerateServer: boolean,
-  isGlobalModerator: boolean,
 ): Promise<void> {
-  if (isGlobalModerator && !isGlobalArchiveModerator(actorId)) {
-    throw new Error("Only configured global Archive moderators can cancel a global collection feature.");
-  }
+  const globalModerator = isGlobalArchiveModerator(actorId);
   const changed = await queryOne<{ id: string }>(
     "UPDATE community_archive_collection_spotlights SET status = 'cancelled' " +
     "WHERE id = $1 AND status = 'published' " +
     "AND ((visibility = 'server' AND guild_id = $2 AND (curator_id = $3 OR $4 = TRUE)) " +
     "OR (visibility = 'global' AND $5 = TRUE)) RETURNING id::text AS id",
-    [spotlightId, guildId, actorId, canModerateServer, isGlobalModerator],
+    [spotlightId, guildId, actorId, canModerateServer, globalModerator],
   );
   if (!changed) throw new Error("That featured collection was not found in your moderation scope or is already cancelled.");
 }
@@ -230,11 +226,8 @@ export async function cancelArchiveSpotlight(
   spotlightId: string,
   actorId: string,
   canModerateServer: boolean,
-  isGlobalModerator: boolean,
 ): Promise<void> {
-  if (isGlobalModerator && !isGlobalArchiveModerator(actorId)) {
-    throw new Error("Only configured global Archive moderators can cancel a global spotlight.");
-  }
+  const globalModerator = isGlobalArchiveModerator(actorId);
   const changed = await queryOne<{ id: string }>(
     `UPDATE community_archive_spotlights
         SET status = 'cancelled'

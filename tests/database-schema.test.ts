@@ -474,10 +474,10 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     await query("UPDATE community_archive_entries SET status = 'removed' WHERE id = $1", [globalEntry.id]);
     assert.equal((await listArchiveSpotlights("111111111111111112")).length, 0, "Removed global entries disappear from every spotlight view");
     await assert.rejects(
-      cancelArchiveSpotlight("987654321098765432", serverSpotlightId, "202", false, false),
+      cancelArchiveSpotlight("987654321098765432", serverSpotlightId, "202", false),
       /not found in your moderation scope/i,
     );
-    await cancelArchiveSpotlight("987654321098765432", serverSpotlightId, "111111111111111111", false, false);
+    await cancelArchiveSpotlight("987654321098765432", serverSpotlightId, "111111111111111111", false);
     assert.equal((await listArchiveSpotlights("987654321098765432")).length, 0);
 
 
@@ -544,7 +544,6 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       endsAt: collectionSpotlightEnd,
       note: "Server collection feature",
       canModerateServer: false,
-      isGlobalModerator: false,
     });
     const globalCollectionSpotlight = await createArchiveCollectionSpotlight({
       guildId: collectionGuild,
@@ -555,7 +554,6 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       endsAt: collectionSpotlightEnd,
       note: "Global collection feature",
       canModerateServer: false,
-      isGlobalModerator: true,
     });
     await assert.rejects(createArchiveCollectionSpotlight({
       guildId: collectionGuild,
@@ -575,18 +573,17 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       startsAt: new Date(),
       endsAt: collectionSpotlightEnd,
       canModerateServer: true,
-      isGlobalModerator: false,
     }), /global Archive moderators/i);
     const collectionSpotlights = await listArchiveCollectionSpotlights(collectionGuild);
     const collectionSpotlightsOtherGuild = await listArchiveCollectionSpotlights(collectionOtherGuild);
     assert.deepEqual(collectionSpotlights.map(item => item.id).sort(), [serverCollectionSpotlight, globalCollectionSpotlight].sort());
     assert.deepEqual(collectionSpotlightsOtherGuild.map(item => item.id), [globalCollectionSpotlight]);
     await assert.rejects(
-      cancelArchiveCollectionSpotlight(collectionGuild, serverCollectionSpotlight, "202", false, false),
+      cancelArchiveCollectionSpotlight(collectionGuild, serverCollectionSpotlight, "202", false),
       /not found in your moderation scope/i,
     );
-    await cancelArchiveCollectionSpotlight(collectionGuild, serverCollectionSpotlight, "111111111111111111", false, false);
-    await cancelArchiveCollectionSpotlight(collectionGuild, globalCollectionSpotlight, "111111111111111111", false, true);
+    await cancelArchiveCollectionSpotlight(collectionGuild, serverCollectionSpotlight, "111111111111111111", false);
+    await cancelArchiveCollectionSpotlight(collectionGuild, globalCollectionSpotlight, "111111111111111111", false);
     assert.equal((await listArchiveCollectionSpotlights(collectionGuild)).length, 0);
 
     const tournamentGuild = "987654321098765432";
