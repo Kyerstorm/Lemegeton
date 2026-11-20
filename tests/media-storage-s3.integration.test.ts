@@ -239,6 +239,7 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
     assert.equal(await queryOne("SELECT id FROM media_assets WHERE id = $1", [reportedAsset]), null);
 
     // Global collection/Trail creation is enforced by the configured moderator set.
+    configureArchiveAccess([]);
     await assert.rejects(
       saveArchiveCollection(guildId, userId, "Unauthorized global collection", "", "global"),
       /configured global Archive moderators/,
@@ -259,6 +260,7 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
       changeArchiveEntryVisibility(guildId, "222222222222222222", lifecycleEntry, "global", true),
       /configured global Archive moderators/,
     );
+    configureArchiveAccess([userId]);
     const collection = await admin.query<{ id: string }>(
       'INSERT INTO "' + schema + '".archive_collections (guild_id, owner_id, title, visibility) ' +
       "VALUES ($1, $2, 'Scope test collection', 'server') RETURNING id::text",
