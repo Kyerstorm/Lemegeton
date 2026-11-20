@@ -8,6 +8,21 @@ import { FEATURE_NAMES, getFeatureSettings, isFeatureName, setFeatureEnabled, ty
 import { query, queryOne } from "../../database.js";
 import { isGuildSetupComplete } from "./guild-retention.js";
 import { logger, readRecentLogs } from "./logger.js";
+import {
+  atlasNodeIdentity,
+  atlasProviderReference,
+  clusterAtlasGraph,
+  filterAtlasGraph,
+  findAtlasGraph,
+  findAtlasPath,
+  normalizeAtlasCategory,
+  normalizeAtlasProviderReference,
+  safeAtlasUrl,
+  type AtlasGraphFilters,
+  type RelationshipSource,
+} from "../integration/atlas.js";
+import { renderAtlasGraphSnapshot, renderAtlasGraphSvgSnapshot } from "../media/atlas-renderer.js";
+
 
 const MAX_BODY_BYTES = 64 * 1024;
 const PROTECTED_COMMANDS = new Set(["settings", "language"]);
@@ -426,6 +441,121 @@ async function handleRequest(
   const guildRoute = /^\/guilds\/(\d{17,20})(?:\/|$)/.exec(url.pathname);
   if (guildRoute && !await isGuildSetupComplete(guildRoute[1]!)) {
     errorResponse(response, 423, "Required server data-retention and language setup must be completed before dashboard features can be used.");
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/atlas") {
+    const guildId = url.searchParams.get("guild_id") ?? "";
+    if (!isDashboardGuildId(guildId)) { errorResponse(response, 400, "A valid server ID is required."); return; }
+    const guild = guildFor(client, guildId);
+    if (!guild) { errorResponse(response, 404, "The bot is no longer in this server."); return; }
+    if (!await isGuildSetupComplete(guildId)) {
+      errorResponse(response, 423, "Required server data-retention and language setup must be completed before dashboard features can be used.");
+      return;
+    }
+    const title = (url.searchParams.get("title") ?? "").trim();
+    const category = normalizeAtlasCategory(url.searchParams.get("category") ?? "");
+    if (!title || title.length > 256 || !category) {
+      errorResponse(response, 400, "Enter a valid Atlas title and media category.");
+      return;
+    }
+    const rawUrl = url.searchParams.get("url");
+    const sourceUrl = rawUrl ? safeAtlasUrl(rawUrl) : null;
+    if (rawUrl && !sourceUrl) { errorResponse(response, 400, "The media source must be a public HTTPS URL without credentials."); return; }
+    const suppliedProvider = url.searchParams.get("provider");
+    const suppliedProviderId = url.searchParams.get("provider_id");
+    const explicitIdentity = normalizeAtlasProviderReference(suppliedProvider, suppliedProviderId);
+    if ((suppliedProvider || suppliedProviderId) && !explicitIdentity) {
+      errorResponse(response, 400, "Provider namespace and stable provider ID must both be valid.");
+      return;
+    }
+    const identity = explicitIdentity ?? atlasProviderReference(category, sourceUrl);
+    const parseBound = (key: string, fallback: number, maximum: number): number | null => {
+      const raw = url.searchParams.get(key);
+      if (raw === null || raw === "") return fallback;
+      const parsed = Number(raw);
+      return Number.isInteger(parsed) && parsed >= 1 && parsed <= maximum ? parsed : null;
+    };
+    const maxDepth = parseBound("max_depth", 2, 3);
+    const maxNodes = parseBound("max_nodes", 24, 40);
+    if (maxDepth === null || maxNodes === null) {
+      errorResponse(response, 400, "Atlas graph depth is limited to 3 and graph size to 40 nodes.");
+      return;
+    }
+    const sourceKindValue = url.searchParams.get("source_kind") ?? undefined;
+    const sourceKind = sourceKindValue && ["provider", "recommendation", "community"].includes(sourceKindValue)
+      ? sourceKindValue as RelationshipSource
+      : undefined;
+    if (sourceKindValue && !sourceKind) { errorResponse(response, 400, "Unknown Atlas provenance filter."); return; }
+    const filters: AtlasGraphFilters = {
+      query: url.searchParams.get("query")?.slice(0, 200) ?? undefined,
+      category: url.searchParams.get("filter_category") ?? undefined,
+      relationshipType: url.searchParams.get("relationship_type")?.slice(0, 80) ?? undefined,
+      sourceKind,
+      provider: url.searchParams.get("provider_filter")?.slice(0, 40) ?? undefined,
+      providerId: url.searchParams.get("provider_id_filter")?.slice(0, 128) ?? undefined,
+      evidence: url.searchParams.get("evidence")?.slice(0, 200) ?? undefined,
+    };
+    if (filters.category && !normalizeAtlasCategory(filters.category)) {
+      errorResponse(response, 400, "Unknown Atlas category filter."); return;
+    }
+    const root = { title, category, url: sourceUrl, provider: identity?.provider ?? null, providerId: identity?.providerId ?? null };
+    let graph;
+    try {
+      graph = await findAtlasGraph(guild.id, root, { maxDepth, maxNodes, perNodeLimit: 12 });
+    } catch (error) {
+      logger.error("Dashboard Atlas graph query failed", {
+        guildId, reason: error instanceof Error ? error.message : "Unknown error",
+      });
+      errorResponse(response, 503, "The Knowledge Atlas is temporarily unavailable.");
+      return;
+    }
+    const filteredGraph = filterAtlasGraph(graph, filters);
+    const targetTitle = url.searchParams.get("target_title")?.trim() ?? "";
+    let path = null;
+    if (targetTitle) {
+      const targetCategory = normalizeAtlasCategory(url.searchParams.get("target_category") ?? "");
+      if (!targetCategory || targetTitle.length > 256) { errorResponse(response, 400, "The selected Atlas path target is invalid."); return; }
+      const targetUrlRaw = url.searchParams.get("target_url");
+      const targetUrl = targetUrlRaw ? safeAtlasUrl(targetUrlRaw) : null;
+      if (targetUrlRaw && !targetUrl) { errorResponse(response, 400, "The path target URL must be public HTTPS."); return; }
+      const targetIdentity = normalizeAtlasProviderReference(
+        url.searchParams.get("target_provider"),
+        url.searchParams.get("target_provider_id"),
+      ) ?? atlasProviderReference(targetCategory, targetUrl);
+      const targetId = atlasNodeIdentity(
+        targetTitle, targetCategory, targetUrl, targetIdentity?.provider, targetIdentity?.providerId,
+      );
+      if (targetId) path = findAtlasPath(filteredGraph, targetId);
+    }
+    const payload = {
+      root: { title, category, url: sourceUrl, provider: identity?.provider ?? null, providerId: identity?.providerId ?? null },
+      relationships: filteredGraph.directRelationships,
+      graph: filteredGraph,
+      clusters: clusterAtlasGraph(filteredGraph),
+      path,
+    };
+    const format = url.searchParams.get("export") ?? "json";
+    if (!["json", "svg", "png"].includes(format)) { errorResponse(response, 400, "Atlas exports support JSON, SVG and PNG."); return; }
+    if (format === "json") { jsonResponse(response, 200, payload); return; }
+    try {
+      const image = format === "svg"
+        ? await renderAtlasGraphSvgSnapshot(title, category, filteredGraph, path)
+        : await renderAtlasGraphSnapshot(title, category, filteredGraph, path);
+      if (image.byteLength > 2_500_000) { errorResponse(response, 413, "The bounded Atlas image export is too large."); return; }
+      jsonResponse(response, 200, {
+        ...payload,
+        export: {
+          filename: "lemegeton-atlas." + format,
+          mimeType: format === "svg" ? "image/svg+xml" : "image/png",
+          base64: image.toString("base64"),
+        },
+      });
+    } catch (error) {
+      logger.warn("Dashboard Atlas image export failed", {
+        guildId, format, reason: error instanceof Error ? error.message : "Unknown error",
+      });
+      errorResponse(response, 503, "The Atlas image export is temporarily unavailable.");
+    }
     return;
   }
   if (request.method === "GET" && url.pathname === "/guilds") {

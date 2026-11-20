@@ -169,6 +169,7 @@ export async function renderAtlasGraphSvgSnapshot(
         text(left + (images.get(node.id) ? 72 : 27), top + 55, shorten(node.title, images.get(node.id) ? 12 : 22), 14, "#f3f3f3", 700),
         text(left + (images.get(node.id) ? 72 : 27), top + 79, shorten(relationType, images.get(node.id) ? 14 : 22), 10, "#c0c0c0", 500),
         text(left + 27, top + 102, kind.toUpperCase() + " · " + shorten(sourceLabel, 16), 8, color, 600),
+        text(left + 27, top + 116, shorten((node.provider ? node.provider + ":" + (node.providerId ?? "") + " · " : "") + (incoming?.evidence ?? "No additional evidence"), 32), 7, "#a0a0a0", 400),
         "</g>",
       ].join("");
     }).join("");
