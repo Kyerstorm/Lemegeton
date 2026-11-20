@@ -6,7 +6,7 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { query, queryOne } from "../../database.js";
+import { query, queryOne, transaction } from "../../database.js";
 import { AttachmentBuilder, ChannelType, PermissionFlagsBits, type Client, type TextChannel } from "discord.js";
 import type { BotConfig } from "../runtime/config.js";
 
@@ -31,6 +31,71 @@ export function configureMediaStorage(config: MediaStorageConfig): void {
 export function getArchiveUploadMaxBytes(): number {
   return runtimeConfig.archiveUploadMaxBytes;
 }
+export function archiveUploadChannelIsPrivate(everyoneCanView: boolean, botCanManageMessages: boolean): boolean {
+  return !everyoneCanView && botCanManageMessages;
+}
+
+export async function downloadArchiveUpload(
+  value: string,
+  fetcher: typeof fetch = globalThis.fetch,
+): Promise<Buffer> {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("The Discord attachment URL is invalid.");
+  }
+  if (url.protocol !== "https:" || url.hostname !== "cdn.discordapp.com"
+    || url.username || url.password) {
+    throw new Error("Archive uploads must come directly from Discord's attachment CDN.");
+  }
+
+  const response = await fetcher(url, {
+    signal: AbortSignal.timeout(15_000),
+    redirect: "error",
+  });
+  if (!response.ok) throw new Error("Discord could not provide the attachment bytes.");
+  if (response.url) {
+    const finalUrl = new URL(response.url);
+    if (finalUrl.protocol !== "https:" || finalUrl.hostname !== "cdn.discordapp.com") {
+      throw new Error("The Discord attachment redirected outside its trusted CDN.");
+    }
+  }
+
+  const maximum = getArchiveUploadMaxBytes();
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > maximum) {
+    throw new Error("Archive uploads are limited to " + maximum + " bytes.");
+  }
+  if (!response.body) {
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (!bytes.length || bytes.byteLength > maximum) {
+      throw new Error("Archive uploads must be between 1 byte and " + maximum + " bytes.");
+    }
+    return bytes;
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      total += next.value.byteLength;
+      if (total > maximum) {
+        await reader.cancel();
+        throw new Error("Archive uploads are limited to " + maximum + " bytes.");
+      }
+      chunks.push(next.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (!total) throw new Error("The Discord attachment was empty.");
+  return Buffer.concat(chunks.map(chunk => Buffer.from(chunk)), total);
+}
+
 const MIME_BY_EXTENSION: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
   ".gif": "image/gif", ".webp": "image/webp", ".avif": "image/avif",
@@ -180,6 +245,22 @@ export async function storeArchiveUpload(
   const storage = s3Client();
   const key = `archive/${guildId}/${randomUUID()}${extension}`;
   const digest = createHash("sha256").update(upload.bytes).digest("hex");
+  const assetId = await transaction(async database => {
+    const inserted = await database.query<{ id: string }>(
+      `INSERT INTO media_assets
+       (provider, namespace, bucket_name, object_key, content_type, size_bytes, sha256, is_private, uploaded_by, guild_id)
+       VALUES ('s3', $1, $2, $3, $4, $5, $6, TRUE, $7, $8) RETURNING id`,
+      [`archive/${guildId}`, bucket, key, contentType, upload.bytes.byteLength, digest, userId, guildId],
+    );
+    const id = inserted.rows[0]?.id;
+    if (!id) throw new Error("Media asset registry insert returned no ID.");
+    await database.query(
+      "INSERT INTO media_asset_cleanup_queue (asset_id, next_attempt_at) VALUES ($1, NOW() + INTERVAL '1 hour')",
+      [id],
+    );
+    return Number(id);
+  });
+
   try {
     await storage.send(new PutObjectCommand({
       Bucket: bucket,
@@ -188,23 +269,16 @@ export async function storeArchiveUpload(
       ContentType: contentType,
       CacheControl: "private, no-store",
       Metadata: { sha256: digest },
-    }));
+    }), { abortSignal: AbortSignal.timeout(30_000) });
+    // Keep the one-hour orphan lease until the asset is atomically linked to an Archive entry.
+    return assetId;
   } catch {
+    await query(
+      "UPDATE media_asset_cleanup_queue SET next_attempt_at = NOW() WHERE asset_id = $1",
+      [assetId],
+    ).catch(() => undefined);
+    await deleteArchiveAsset(assetId, options.client).catch(() => undefined);
     throw new Error("The private media upload failed. The archive entry was not saved.");
-  }
-
-  try {
-    const inserted = await queryOne<{ id: string }>(
-      `INSERT INTO media_assets
-       (provider, namespace, bucket_name, object_key, content_type, size_bytes, sha256, is_private, uploaded_by, guild_id)
-       VALUES ('s3', $1, $2, $3, $4, $5, $6, TRUE, $7, $8) RETURNING id`,
-      [`archive/${guildId}`, bucket, key, contentType, upload.bytes.byteLength, digest, userId, guildId],
-    );
-    if (!inserted) throw new Error("Media asset registry insert returned no ID.");
-    return Number(inserted.id);
-  } catch (error) {
-    try { await storage.send(new DeleteObjectCommand({ Bucket: bucket, Key: key })); } catch { /* preserve the database error */ }
-    throw error;
   }
 }
 
@@ -232,14 +306,14 @@ export async function resolveLegacyArchiveAttachmentUrl(
 export async function signedArchiveAssetUrl(
   assetId: number,
   client?: Client,
-  expectedGuildId?: string,
+  expectedGuildId: string,
 ): Promise<string | null> {
   const asset = await queryOne<{ provider: string; bucket_name: string; object_key: string; is_private: boolean; guild_id: string | null; namespace: string }>(
     "SELECT provider, bucket_name, object_key, is_private, guild_id::text, namespace FROM media_assets WHERE id = $1",
     [assetId],
   );
   if (!asset || !asset.is_private) return null;
-  if (expectedGuildId && asset.guild_id !== expectedGuildId) return null;
+  if (asset.guild_id !== expectedGuildId) return null;
   if (asset.provider === "discord") {
     if (!client || !asset.guild_id || asset.namespace !== `archive/${asset.guild_id}`) return null;
     const [messageId, attachmentId] = asset.object_key.split("/", 2);
