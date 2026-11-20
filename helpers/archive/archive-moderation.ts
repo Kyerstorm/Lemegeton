@@ -11,18 +11,22 @@ export async function addArchiveReport(
   entryId: string,
   reason: string,
 ): Promise<void> {
-  const entry = await getArchiveEntry(guildId, entryId);
-  if (!entry) throw new Error("That approved entry is not visible in this server.");
-  await query(
+  const cleanReason = cleanText(reason, 500);
+  if (!cleanReason) throw new Error("A report reason is required.");
+  const inserted = await queryOne<{ id: string }>(
     `INSERT INTO community_archive_reports (archive_type, entry_id, guild_id, reporter_id, reason)
-     VALUES ($1, $2, $3, $4, $5)
+     SELECT e.archive_type, e.id, $2, $3, $4
+       FROM community_archive_entries e
+      WHERE e.id = $1 AND e.status = 'approved'
+        AND (e.visibility = 'global' OR (e.visibility = 'server' AND e.created_guild_id = $2))
      ON CONFLICT (guild_id, entry_id, reporter_id) DO UPDATE SET
        reason = EXCLUDED.reason, status = 'pending', reviewed_by = NULL, review_reason = NULL,
-       created_at = NOW(), reviewed_at = NULL`,
-    [entry.archive_type, entryId, guildId, reporterId, cleanText(reason, 500)],
+       created_at = NOW(), reviewed_at = NULL
+     RETURNING id::text`,
+    [entryId, guildId, reporterId, cleanReason],
   );
+  if (!inserted) throw new Error("That approved entry is not visible in this server.");
 }
-
 export async function canModerateArchive(member: GuildMember, guildId: string, visibility: ArchiveVisibility): Promise<boolean> {
   const canManage = member.permissions.has(PermissionsBitField.Flags.Administrator)
     || member.permissions.has(PermissionsBitField.Flags.ManageGuild)
