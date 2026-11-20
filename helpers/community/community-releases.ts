@@ -300,9 +300,9 @@ export async function markReleaseDelivery(
       `UPDATE community_release_deliveries
        SET status = $1, message_id = COALESCE($2, message_id), attempts = attempts + 1,
            last_error = $3, claim_until = NULL, claim_token = NULL,
-           next_attempt_at = CASE WHEN $1 = 'pending' THEN NOW() + $4 * INTERVAL '1 minute' ELSE next_attempt_at END
+           next_attempt_at = CASE WHEN $7::boolean THEN NOW() + ($4::integer * INTERVAL '1 minute') ELSE next_attempt_at END
        WHERE id = $5 AND status = 'processing' AND claim_token = $6`,
-      [nextStatus, messageId ?? null, error ? cleanText(error, 500) : null, retry?.delayMinutes ?? 0, deliveryId, claimToken],
+      [nextStatus, messageId ?? null, error ? cleanText(error, 500) : null, retry?.delayMinutes ?? 0, deliveryId, claimToken, status === "pending"],
     );
     return nextStatus;
   });
