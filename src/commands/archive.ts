@@ -356,7 +356,7 @@ export class ArchiveCommand implements FeatureCommand {
     ))
     .addStringOption((option) => option.setName("title").setDescription("Entry or collection title").setMaxLength(200))
     .addStringOption((option) => option.setName("content").setDescription("Description or contribution").setMaxLength(3_000))
-    .addStringOption((option) => option.setName("chapter_caption").setDescription("For Manga Panels: Chapter 12 — caption, or N/A").setMaxLength(500))
+    .addStringOption((option) => option.setName("chapter_caption").setDescription("Manga Panels chapter caption; attachment actions use position 1–5").setMaxLength(500))
     .addStringOption((option) => option.setName("source_title").setDescription("Linked work / source title").setMaxLength(200))
     .addStringOption((option) => option.setName("creator").setDescription("Original creator / contributor").setMaxLength(200))
     .addStringOption((option) => option.setName("source_url").setDescription("HTTPS source URL").setMaxLength(1_000))

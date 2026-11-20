@@ -64,7 +64,7 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
   const schema = "lemegeton_migration_" + randomUUID().replaceAll("-", "");
 
   try {
-    configureArchiveAccess(["101"]);
+    configureArchiveAccess(["111111111111111111"]);
     await admin.query(`CREATE SCHEMA "${schema}"`);
 
     await admin.query(`
@@ -453,16 +453,16 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     assert.ok(serverEntry && globalEntry && otherGuildEntry);
     const spotlightEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     const serverSpotlightId = await createArchiveSpotlight({
-      guildId: "987654321098765432", curatorId: "101", entryId: serverEntry.id, visibility: "server",
+      guildId: "987654321098765432", curatorId: "111111111111111111", entryId: serverEntry.id, visibility: "server",
       startsAt: new Date(), endsAt: spotlightEnd, note: "Server highlight",
     });
     const globalSpotlightId = await createArchiveSpotlight({
-      guildId: "987654321098765432", curatorId: "101", entryId: globalEntry.id, visibility: "global",
+      guildId: "987654321098765432", curatorId: "111111111111111111", entryId: globalEntry.id, visibility: "global",
       startsAt: new Date(), endsAt: spotlightEnd, note: "Global highlight",
     });
     await assert.rejects(
       createArchiveSpotlight({
-        guildId: "987654321098765432", curatorId: "101", entryId: otherGuildEntry.id, visibility: "server",
+        guildId: "987654321098765432", curatorId: "111111111111111111", entryId: otherGuildEntry.id, visibility: "server",
         startsAt: new Date(), endsAt: spotlightEnd,
       }),
       /approved Archive entry/i,
@@ -477,7 +477,7 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       cancelArchiveSpotlight("987654321098765432", serverSpotlightId, "202", false, false),
       /not found in your moderation scope/i,
     );
-    await cancelArchiveSpotlight("987654321098765432", serverSpotlightId, "101", false, false);
+    await cancelArchiveSpotlight("987654321098765432", serverSpotlightId, "111111111111111111", false, false);
     assert.equal((await listArchiveSpotlights("987654321098765432")).length, 0);
 
 
@@ -487,7 +487,7 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       `INSERT INTO community_archive_entries
         (archive_type,title,content,media_type,tags,created_by,created_guild_id,visibility,status)
        VALUES ('soundtracks','Global collection soundtrack','','Music','[]',$1,$2,'global','approved')`,
-      ["101", collectionGuild],
+      ["111111111111111111", collectionGuild],
     );
     const globalCollectionEntry = await queryOne<{ id: string }>(
       "SELECT id::text AS id FROM community_archive_entries WHERE title = 'Global collection soundtrack'",
@@ -495,17 +495,17 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     assert.ok(globalCollectionEntry);
 
     const serverCollectionId = await saveArchiveCollection(
-      collectionGuild, "101", "Server curation", "Server-visible mixed collection", "server",
+      collectionGuild, "111111111111111111", "Server curation", "Server-visible mixed collection", "server",
     );
     const globalCollectionId = await saveArchiveCollection(
-      collectionGuild, "101", "Global curation", "Global-only collection", "global",
+      collectionGuild, "111111111111111111", "Global curation", "Global-only collection", "global",
     );
-    await addEntryToCollection(collectionGuild, "101", serverCollectionId, serverEntry.id, "");
-    await addEntryToCollection(collectionGuild, "101", serverCollectionId, globalCollectionEntry.id, "");
-    await addEntryToCollection(collectionGuild, "101", globalCollectionId, globalCollectionEntry.id, "");
+    await addEntryToCollection(collectionGuild, "111111111111111111", serverCollectionId, serverEntry.id, "");
+    await addEntryToCollection(collectionGuild, "111111111111111111", serverCollectionId, globalCollectionEntry.id, "");
+    await addEntryToCollection(collectionGuild, "111111111111111111", globalCollectionId, globalCollectionEntry.id, "");
     await query(
       "INSERT INTO archive_collection_items (collection_id,entry_id,added_by,note,position) VALUES ($1,$2,$3,'stale hidden reference',3),($4,$5,$3,'stale server reference in global collection',2)",
-      [serverCollectionId, otherGuildEntry.id, "101", globalCollectionId, serverEntry.id],
+      [serverCollectionId, otherGuildEntry.id, "111111111111111111", globalCollectionId, serverEntry.id],
     );
     const serverCollectionItems = await getCollectionItems(collectionGuild, serverCollectionId);
     const globalCollectionItems = await getCollectionItems(collectionGuild, globalCollectionId);
@@ -516,14 +516,14 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     assert.equal(listedCollections.find(item => item.id === globalCollectionId)?.entry_count, 1);
     assert.equal((await getCollectionItems(collectionOtherGuild, serverCollectionId)).length, 0);
 
-    const serverTrailId = await saveArchiveTrail(collectionGuild, "101", "Server path", "Guild-curated path", "server");
-    const globalTrailId = await saveArchiveTrail(collectionGuild, "101", "Global path", "Global-curated path", "global");
-    await addEntryToTrail(collectionGuild, "101", serverTrailId, serverEntry.id, "Server entry");
-    await addEntryToTrail(collectionGuild, "101", serverTrailId, globalCollectionEntry.id, "Global entry");
-    await addEntryToTrail(collectionGuild, "101", globalTrailId, globalCollectionEntry.id, "Global entry");
+    const serverTrailId = await saveArchiveTrail(collectionGuild, "111111111111111111", "Server path", "Guild-curated path", "server");
+    const globalTrailId = await saveArchiveTrail(collectionGuild, "111111111111111111", "Global path", "Global-curated path", "global");
+    await addEntryToTrail(collectionGuild, "111111111111111111", serverTrailId, serverEntry.id, "Server entry");
+    await addEntryToTrail(collectionGuild, "111111111111111111", serverTrailId, globalCollectionEntry.id, "Global entry");
+    await addEntryToTrail(collectionGuild, "111111111111111111", globalTrailId, globalCollectionEntry.id, "Global entry");
     await query(
       "INSERT INTO archive_trail_steps (trail_id,step_number,entry_id,explanation,added_by) VALUES ($1,3,$2,'stale hidden reference',$3),($4,2,$5,'stale server reference',$3)",
-      [serverTrailId, otherGuildEntry.id, "101", globalTrailId, serverEntry.id],
+      [serverTrailId, otherGuildEntry.id, "111111111111111111", globalTrailId, serverEntry.id],
     );
     const serverTrailSteps = await getArchiveTrailSteps(collectionGuild, serverTrailId);
     const globalTrailSteps = await getArchiveTrailSteps(collectionGuild, globalTrailId);
@@ -537,7 +537,7 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     const collectionSpotlightEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     const serverCollectionSpotlight = await createArchiveCollectionSpotlight({
       guildId: collectionGuild,
-      curatorId: "101",
+      curatorId: "111111111111111111",
       collectionId: serverCollectionId,
       visibility: "server",
       startsAt: new Date(),
@@ -548,7 +548,7 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     });
     const globalCollectionSpotlight = await createArchiveCollectionSpotlight({
       guildId: collectionGuild,
-      curatorId: "101",
+      curatorId: "111111111111111111",
       collectionId: globalCollectionId,
       visibility: "global",
       startsAt: new Date(),
@@ -569,7 +569,7 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     }), /owner or an Archive moderator/i);
     await assert.rejects(createArchiveCollectionSpotlight({
       guildId: collectionGuild,
-      curatorId: "101",
+      curatorId: "111111111111111111",
       collectionId: serverCollectionId,
       visibility: "global",
       startsAt: new Date(),
@@ -585,8 +585,8 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       cancelArchiveCollectionSpotlight(collectionGuild, serverCollectionSpotlight, "202", false, false),
       /not found in your moderation scope/i,
     );
-    await cancelArchiveCollectionSpotlight(collectionGuild, serverCollectionSpotlight, "101", false, false);
-    await cancelArchiveCollectionSpotlight(collectionGuild, globalCollectionSpotlight, "101", false, true);
+    await cancelArchiveCollectionSpotlight(collectionGuild, serverCollectionSpotlight, "111111111111111111", false, false);
+    await cancelArchiveCollectionSpotlight(collectionGuild, globalCollectionSpotlight, "111111111111111111", false, true);
     assert.equal((await listArchiveCollectionSpotlights(collectionGuild)).length, 0);
 
     const tournamentGuild = "987654321098765432";
@@ -697,7 +697,7 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
 
     const seasonSpotlightId = await createArchiveSpotlight({
       guildId: tournamentGuild,
-      curatorId: "101",
+      curatorId: "111111111111111111",
       entryId: serverEntry.id,
       visibility: "server",
       startsAt: new Date(),
