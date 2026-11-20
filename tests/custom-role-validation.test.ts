@@ -93,8 +93,8 @@ test("saved Custom Role restoration fails closed on permissions, managed roles a
   const safeRole = { id: "223456789012345678", position: 4, managed: false } as Role;
   assert.equal(customRoleAssignmentProblem(guildId, safeRole, 5, true), null);
   assert.match(customRoleAssignmentProblem(guildId, safeRole, 5, false) ?? "", /Manage Roles/);
-  assert.match(customRoleAssignmentProblem(guildId, { ...safeRole, managed: true }, 5, true) ?? "", /Discord-managed/);
-  assert.match(customRoleAssignmentProblem(guildId, { ...safeRole, id: guildId }, 5, true) ?? "", /@everyone/);
+  assert.match(customRoleAssignmentProblem(guildId, { id: safeRole.id, position: safeRole.position, managed: true }, 5, true) ?? "", /Discord-managed/);
+  assert.match(customRoleAssignmentProblem(guildId, { id: guildId, position: safeRole.position, managed: false }, 5, true) ?? "", /@everyone/);
   assert.match(customRoleAssignmentProblem(guildId, { ...safeRole, position: 5 }, 5, true) ?? "", /highest role/);
   assert.match(customRoleAssignmentProblem(guildId, safeRole, null, true) ?? "", /resolve my highest/);
 });
