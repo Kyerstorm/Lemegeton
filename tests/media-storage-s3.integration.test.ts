@@ -250,6 +250,12 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
     assert.deepEqual(remainingLegacyLink, { asset_id: String(legacyPrimary), position: 1 }, "legacy primary relation must be normalized");
     assert.ok(remainingLegacyPrimary, "legacy primary asset must remain registered");
     assert.equal(removedLegacySecondary, null, "removed secondary asset must be deleted");
+    // Remove the fixture's preserved primary after proving it survived secondary removal.
+    await removeArchiveEntryAsset(guildId, userId, legacyEntry, 1);
+    assert.equal(await queryOne(
+      'SELECT id FROM "' + schema + '".media_assets WHERE id = $1',
+      [legacyPrimary],
+    ), null, "removing the final legacy attachment also cleans the retained primary");
 
     // Report removal updates the report, entry and asset references as one transition.
     const reportedEntry = await submitArchiveEntry({
