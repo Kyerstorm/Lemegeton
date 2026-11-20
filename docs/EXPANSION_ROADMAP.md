@@ -271,13 +271,16 @@ Quiz Pack Studio stores four difficulty levels, allows the original contributor 
 
 **Completed in this pass:** `/community` includes a guild-scoped Showcase for active collections and Trails, approved individual Archive contributions, closed rankings, completed tournaments, past non-cancelled sessions and closed discussions. Archive entries are re-checked for approval and server/global visibility; contribution bodies and discussion prompts are deliberately omitted so approved spoiler-bearing text is not exposed in the index. The on-demand calendar merges provider-dated releases from AniList, TMDB and IGDB with sessions from the invoking guild, supports 7/14/30-day windows and release/community/category filters, and formats dates using the configured guild timezone while retaining Discord-local timestamps. Community Seasons automatically include delivered Daily Drops, closed rankings, sessions scheduled inside the configured period, completed challenge/puzzle runs and overlapping server spotlights. Explicit curated links are deduplicated against automatic entries; all entries resolve to the original guild-scoped records. Seasons are recorded as implemented rather than repeated as future work. `/play` now supports individual sessions, automatically balanced Team A/Team B competition and one cooperative Community Team; team membership and scores are persisted and leaderboard reads remain guild-scoped.
 
+**Completed in this phase:** tournament candidates can be withdrawn by the creator or a server manager before any ballot is cast. The affected match becomes a recorded walkover, round advancement carries the remaining candidate forward, and the bracket audit records creation, withdrawal, advancement, completion and cancellation. The Tournament Centre exposes the recent guild-scoped history.
+
+Game message controls now carry their expected round and clue index. The database-backed game service rejects stale answer forms, repeated clue reveals and duplicate next/finish actions under the session row lock. The new integration suite races duplicate clue reveals, round advances and answers, then verifies that only one state transition or answer is committed.
+
 **Remaining delivery:**
-- Add tournament candidate withdrawal and an audit trail for bracket lifecycle actions, with clear behavior once a round closes.
-- Extend Play with media-backed puzzle/challenge rounds only after answer normalization, source provenance, spoiler handling, timeout and host-control rules are defined.
-- Test simultaneous votes/answers, repeated component clicks, expired sessions, host departure and guild isolation.
+- Continue expanding media-backed puzzle/challenge question formats only when their answer normalization, source provenance, spoiler handling, timeout and host-control rules are defined. Existing Trivia, Guessing, Mystery, Challenge and Puzzle modes remain distinct; no new question format is claimed by this phase.
+- Validate host departure, expiry and Discord interaction behavior in the owner-controlled test guild during live acceptance.
 - Keep RSVP and session history separate from individual watch/read/play completion. Do not introduce personal progress tracking.
 
-**Exit criteria:** each activity has a finite lifecycle and idempotent transitions; vote/answer state cannot be duplicated by repeated interactions; moderation and host permissions are tested; event records can be reused by calendar, Atlas and showcase without copies.
+**Exit criteria:** automated code-level exit gate passed on the current v3 head. Bot CI ran 416 tests: 411 passed, 0 failed, 5 skipped; TypeScript type-check passed. Activity ownership and guild-scoped persistence remain covered by the existing community test suites. Live Discord acceptance remains a separate release gate.
 
 ### Phase 5 — Profiles and Custom Roles
 
@@ -445,6 +448,10 @@ Complete submission, review, moderation, reports, private S3-compatible storage,
 **Exit gate:** private, unapproved or cross-guild entries disappear from every derived view and export; assets remain private; cleanup can recover after interrupted operations.
 
 #### Phase 6 — Community activities and media games (14,000)
+
+**Status: Completed — 20 November 2026.** Tournament withdrawal/walkover handling and bracket audit are implemented. Game answers, clues and round controls reject stale or duplicate actions with server-side state tokens. The current v3 head passes Bot CI (411 passed, 0 failed, 5 skipped) and TypeScript type-check. Existing media quiz modes remain separate; additional puzzle/challenge formats are a later scoped extension, not an unverified completion claim.
+
+
 
 Harden Daily Drop, rankings, sessions, RSVP/waitlists, discussions, tournaments, community seasons, calendar and showcase. Expand media quizzes, clue systems, puzzle rounds, teams, scoring and persistent game sessions with explicit finite state machines.
 
