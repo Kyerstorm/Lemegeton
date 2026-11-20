@@ -114,12 +114,11 @@ Register commands with `npm run deploy:commands`. The optional dashboard require
   <img src="https://img.shields.io/github/last-commit/Kyerstorm/Lemegeton/lemegeton-v3?style=flat-square&label=last%20commit&color=111111" alt="Last commit" />
 </p>
 
-<!-- REPO-STATS:START -->
+                        <!-- REPO-STATS:START -->
 | Tracked files | Lines of code | Text characters |
 |--:|--:|--:|
 | 269 | 45,950 | 3,197,119 |
 
-<sub>Tracked files after generated/cache exclusions · non-blank lines across source files · characters across tracked text files, excluding line breaks · refreshed 2026-11-20 15:52 UTC.</sub>
 <!-- REPO-STATS:END -->
 
 <div align="center">
