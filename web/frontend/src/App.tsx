@@ -17,10 +17,28 @@ type Confirmation = { title: string; message: string; actionLabel: string; run: 
 type Bootstrap = { user: User; guilds: Guild[]; csrf_token: string; selected_guild_id?: string };
 type CommandResponse = { commands: Command[] };
 type ListResponse<T> = { entries?: T[] };
-type AtlasRelation = { title: string; category: string; url: string | null; relationType: string; source: string; sourceKind: "provider" | "recommendation" | "community" };
-type AtlasGraphNode = { id: string; title: string; category: string; url: string | null; depth: number; sourceKind?: AtlasRelation["sourceKind"]; sourceLabel?: string; relationType?: string };
-type AtlasGraphEdge = { from: string; to: string; relationType: string; sourceLabel: string; sourceKind: AtlasRelation["sourceKind"] };
-type AtlasResponse = { root: { title: string; category: string; url: string | null }; relationships: AtlasRelation[]; graph?: { rootId: string; nodes: AtlasGraphNode[]; edges: AtlasGraphEdge[]; truncated: boolean } };
+type AtlasRelation = {
+  title: string; category: string; url: string | null; relationType: string;
+  source: string; sourceKind: "provider" | "recommendation" | "community";
+  provider?: string | null; providerId?: string | null; evidence?: string | null;
+};
+type AtlasGraphNode = {
+  id: string; title: string; category: string; url: string | null; depth: number;
+  provider?: string | null; providerId?: string | null; imageUrl?: string | null;
+  sourceKind?: AtlasRelation["sourceKind"]; sourceLabel?: string; relationType?: string;
+};
+type AtlasGraphEdge = {
+  from: string; to: string; relationType: string; sourceLabel: string;
+  sourceKind: AtlasRelation["sourceKind"]; evidence?: string | null;
+};
+type AtlasResponse = {
+  root: { title: string; category: string; url: string | null; provider?: string | null; providerId?: string | null };
+  relationships: AtlasRelation[];
+  graph?: { rootId: string; nodes: AtlasGraphNode[]; edges: AtlasGraphEdge[]; truncated: boolean };
+  clusters?: { category: string; nodeIds: string[]; count: number }[];
+  path?: { nodes: AtlasGraphNode[]; edges: AtlasGraphEdge[] } | null;
+  export?: { filename: string; mimeType: string; base64: string };
+};
 
 const PAGES: { id: Page; label: string; glyph: string; eyebrow: string; subtitle: string }[] = [
   { id: "overview", label: "Overview", glyph: "◫", eyebrow: "LIVE CONTROL / 01", subtitle: "A clear view of bot health and the current server configuration." },
@@ -194,6 +212,11 @@ export default function App() {
   const [atlasError, setAtlasError] = useState("");
   const [atlasCategoryFilter, setAtlasCategoryFilter] = useState("All");
   const [atlasSourceFilter, setAtlasSourceFilter] = useState("All");
+  const [atlasProviderFilter, setAtlasProviderFilter] = useState("All");
+  const [atlasRelationshipFilter, setAtlasRelationshipFilter] = useState("All");
+  const [atlasEvidenceFilter, setAtlasEvidenceFilter] = useState("");
+  const [atlasPathTarget, setAtlasPathTarget] = useState("");
+  const [atlasExportBusy, setAtlasExportBusy] = useState("");
   const [atlasZoom, setAtlasZoom] = useState(100);
   const refreshGeneration = useRef(0);
   const atlasRequestGeneration = useRef(0);
@@ -440,6 +463,7 @@ export default function App() {
     title = atlasTitle,
     mediaCategory = atlasCategory,
     mediaUrl?: string | null,
+    extra: Record<string, string> = {},
   ) => {
     const cleanTitle = title.trim();
     if (!guildId || !cleanTitle) {
@@ -450,6 +474,9 @@ export default function App() {
     const requestId = ++atlasRequestGeneration.current;
     const params = new URLSearchParams({ title: cleanTitle, category: mediaCategory });
     if (mediaUrl) params.set("url", mediaUrl);
+    for (const [key, value] of Object.entries(extra)) {
+      if (value.trim()) params.set(key, value.trim());
+    }
     setAtlasTitle(cleanTitle);
     setAtlasCategory(mediaCategory);
     setAtlasLoading(true);
@@ -469,6 +496,70 @@ export default function App() {
       if (requestId === atlasRequestGeneration.current) setAtlasLoading(false);
     }
   }, [atlasCategory, atlasTitle, csrf, guildId]);
+
+  const atlasFilters = () => ({
+    filter_category: atlasCategoryFilter === "All" ? "" : atlasCategoryFilter,
+    source_kind: atlasSourceFilter === "All" ? "" : atlasSourceFilter,
+    provider_filter: atlasProviderFilter === "All" ? "" : atlasProviderFilter,
+    relationship_type: atlasRelationshipFilter === "All" ? "" : atlasRelationshipFilter,
+    evidence: atlasEvidenceFilter,
+  });
+
+  const downloadAtlas = async (format: "json" | "svg" | "png") => {
+    if (!atlasResult || !guildId || atlasExportBusy) return;
+    setAtlasExportBusy(format);
+    try {
+      const params = new URLSearchParams({
+        title: atlasResult.root.title,
+        category: atlasResult.root.category,
+        export: format,
+        max_depth: "3",
+        max_nodes: "40",
+        ...atlasFilters(),
+      });
+      if (atlasResult.root.url) params.set("url", atlasResult.root.url);
+      if (atlasResult.root.provider) params.set("provider", atlasResult.root.provider);
+      if (atlasResult.root.providerId) params.set("provider_id", atlasResult.root.providerId);
+      if (atlasPathTarget) {
+        const target = atlasGraphNodes.find(node => node.id === atlasPathTarget);
+        if (target) {
+          params.set("target_title", target.title);
+          params.set("target_category", target.category);
+          if (target.url) params.set("target_url", target.url);
+          if (target.provider) params.set("target_provider", target.provider);
+          if (target.providerId) params.set("target_provider_id", target.providerId);
+        }
+      }
+      const payload = await api<AtlasResponse>(
+        "/api/guilds/" + encodeURIComponent(guildId) + "/atlas?" + params.toString(),
+        csrf,
+      );
+      let blob: Blob;
+      let filename = "lemegeton-atlas.json";
+      if (format === "json") {
+        blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      } else {
+        if (!payload.export?.base64) throw new Error("The Atlas export did not return an image.");
+        const binary = window.atob(payload.export.base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+        blob = new Blob([bytes], { type: payload.export.mimeType });
+        filename = payload.export.filename;
+      }
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      pushToast(errorMessage(error), true);
+    } finally {
+      setAtlasExportBusy("");
+    }
+  };
 
   useEffect(() => {
     if (!guildId || !csrf || isLogin || atlasDeepLinkConsumed.current) return;
@@ -521,20 +612,31 @@ export default function App() {
         ...atlasResult.relationships.map((item, index) => ({
           id: "direct-" + index, title: item.title, category: item.category, url: item.url,
           depth: 1, sourceKind: item.sourceKind, sourceLabel: item.source, relationType: item.relationType,
+          provider: item.provider, providerId: item.providerId,
         })),
       ]
     : [];
   const atlasCategories = Array.from(new Set(atlasGraphNodes.filter(item => item.depth > 0).map(item => item.category))).sort();
+  const atlasProviders = Array.from(new Set(atlasGraphNodes.map(item => item.provider).filter((value): value is string => Boolean(value)))).sort();
   const atlasCandidateNodes = atlasGraphNodes.filter(item =>
-    item.depth > 0 && (atlasCategoryFilter === "All" || item.category === atlasCategoryFilter),
+    item.depth > 0
+    && (atlasCategoryFilter === "All" || item.category === atlasCategoryFilter)
+    && (atlasProviderFilter === "All" || item.provider === atlasProviderFilter),
   );
   const atlasCandidateIds = new Set([atlasRootId, ...atlasCandidateNodes.map(item => item.id)]);
   const atlasVisibleEdges = (atlasResult?.graph?.edges ?? (atlasResult?.relationships ?? []).map((item, index) => ({
     from: atlasRootId, to: "direct-" + index, relationType: item.relationType, sourceLabel: item.source, sourceKind: item.sourceKind,
-  }))).filter(edge =>
-    (atlasSourceFilter === "All" || edge.sourceKind === atlasSourceFilter)
-    && atlasCandidateIds.has(edge.from) && atlasCandidateIds.has(edge.to),
-  );
+    evidence: item.evidence,
+  }))).filter(edge => {
+    const from = atlasGraphNodes.find(node => node.id === edge.from);
+    const to = atlasGraphNodes.find(node => node.id === edge.to);
+    const evidenceQuery = atlasEvidenceFilter.trim().toLocaleLowerCase("en-US");
+    return (atlasSourceFilter === "All" || edge.sourceKind === atlasSourceFilter)
+      && (atlasRelationshipFilter === "All" || edge.relationType.toLocaleLowerCase("en-US").includes(atlasRelationshipFilter.toLocaleLowerCase("en-US")))
+      && (!evidenceQuery || (edge.evidence ?? "").toLocaleLowerCase("en-US").includes(evidenceQuery))
+      && (atlasProviderFilter === "All" || from?.provider === atlasProviderFilter || to?.provider === atlasProviderFilter)
+      && atlasCandidateIds.has(edge.from) && atlasCandidateIds.has(edge.to);
+  });
   const atlasConnectedIds = new Set([atlasRootId]);
   for (const edge of atlasVisibleEdges) { atlasConnectedIds.add(edge.from); atlasConnectedIds.add(edge.to); }
   const atlasVisibleNodes = atlasCandidateNodes.filter(item => atlasConnectedIds.has(item.id));
@@ -554,7 +656,10 @@ export default function App() {
   }));
   const atlasVisibleRelationships = (atlasResult?.relationships ?? []).filter(item =>
     (atlasCategoryFilter === "All" || item.category === atlasCategoryFilter)
-    && (atlasSourceFilter === "All" || item.sourceKind === atlasSourceFilter),
+    && (atlasSourceFilter === "All" || item.sourceKind === atlasSourceFilter)
+    && (atlasProviderFilter === "All" || item.provider === atlasProviderFilter)
+    && (atlasRelationshipFilter === "All" || item.relationType.toLocaleLowerCase("en-US").includes(atlasRelationshipFilter.toLocaleLowerCase("en-US")))
+    && (!atlasEvidenceFilter.trim() || (item.evidence ?? "").toLocaleLowerCase("en-US").includes(atlasEvidenceFilter.trim().toLocaleLowerCase("en-US"))),
   );
 
   if (initialLoading) return <main className="boot-screen"><span className="boot-mark">L.</span><span className="spinner" /><p>Establishing a secure session</p><small>LEMEGETON / CONTROL PLANE</small></main>;
@@ -687,6 +792,19 @@ export default function App() {
             <div className="atlas-tools">
               <label className="filter-control"><span>MEDIA TYPE</span><select value={atlasCategoryFilter} onChange={(event) => setAtlasCategoryFilter(event.target.value)}><option value="All">All categories</option>{atlasCategories.map((item) => <option key={item} value={item}>{item.replaceAll("_", " ")}</option>)}</select></label>
               <label className="filter-control"><span>PROVENANCE</span><select value={atlasSourceFilter} onChange={(event) => setAtlasSourceFilter(event.target.value)}><option value="All">All sources</option><option value="provider">Provider</option><option value="recommendation">Recommendation</option><option value="community">Community</option></select></label>
+              <label className="filter-control"><span>PROVIDER IDENTITY</span><select value={atlasProviderFilter} onChange={(event) => setAtlasProviderFilter(event.target.value)}><option value="All">All providers</option>{atlasProviders.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+              <label className="filter-control"><span>RELATIONSHIP</span><select value={atlasRelationshipFilter} onChange={(event) => setAtlasRelationshipFilter(event.target.value)}><option value="All">All relations</option><option value="adaptation">Adaptation</option><option value="franchise">Franchise</option><option value="sequel">Sequel</option><option value="prequel">Prequel</option><option value="related">Related</option><option value="discussed in">Discussed in</option><option value="included in">Included in</option></select></label>
+              <label className="filter-control atlas-evidence-filter"><span>EDGE EVIDENCE</span><input type="search" value={atlasEvidenceFilter} onChange={(event) => setAtlasEvidenceFilter(event.target.value)} maxLength={200} placeholder="Search evidence or source text" /></label>
+              <div className="atlas-path-tools"><label className="filter-control"><span>FIND PATH TO</span><select value={atlasPathTarget} onChange={(event) => setAtlasPathTarget(event.target.value)}><option value="">Choose a connected node</option>{atlasVisibleNodes.map(node => <option key={node.id} value={node.id}>{node.title}</option>)}</select></label><Button disabled={!atlasPathTarget || atlasLoading} onClick={() => {
+                const target = atlasVisibleNodes.find(node => node.id === atlasPathTarget);
+                if (target) void searchAtlas(atlasResult.root.title, atlasResult.root.category, atlasResult.root.url, {
+                  provider: atlasResult.root.provider ?? "", provider_id: atlasResult.root.providerId ?? "",
+                  target_title: target.title, target_category: target.category, target_url: target.url ?? "",
+                  target_provider: target.provider ?? "", target_provider_id: target.providerId ?? "",
+                  ...atlasFilters(),
+                });
+              }}>Find shortest path</Button></div>
+              <div className="atlas-export-tools"><span>EXPORT GRAPH</span><Button disabled={Boolean(atlasExportBusy)} onClick={() => void downloadAtlas("json")}>{atlasExportBusy === "json" ? "Preparing…" : "JSON"}</Button><Button disabled={Boolean(atlasExportBusy)} onClick={() => void downloadAtlas("svg")}>{atlasExportBusy === "svg" ? "Preparing…" : "SVG"}</Button><Button disabled={Boolean(atlasExportBusy)} onClick={() => void downloadAtlas("png")}>{atlasExportBusy === "png" ? "Preparing…" : "PNG"}</Button></div>
               <div className="atlas-zoom"><span>ZOOM</span><Button onClick={() => setAtlasZoom((value) => Math.max(80, value - 10))} disabled={atlasZoom <= 80} aria-label="Zoom out">−</Button><strong>{atlasZoom}%</strong><Button onClick={() => setAtlasZoom((value) => Math.min(140, value + 10))} disabled={atlasZoom >= 140} aria-label="Zoom in">+</Button><Button onClick={() => setAtlasZoom(100)}>Fit</Button></div>
             </div>
             {atlasNodes.length ? <div className="atlas-graph" role="group" aria-label={"Multi-hop media relationships connected to " + atlasResult.root.title}>
@@ -711,7 +829,7 @@ export default function App() {
                   className={"atlas-node " + (node.sourceKind || "provider")}
                   style={{ left: node.x + "%", top: node.y + "%" }}
                   title={node.title + " · " + (node.relationType || "Connected media")}
-                  onClick={() => void searchAtlas(node.title, node.category, node.url)}
+                  onClick={() => void searchAtlas(node.title, node.category, node.url, { provider: node.provider ?? "", provider_id: node.providerId ?? "" })}
                   disabled={atlasLoading}
                 >
                   <span>LEVEL {node.depth} · {node.category.replaceAll("_", " ")}</span>
@@ -719,6 +837,8 @@ export default function App() {
                 </button>)}
               </div>
             </div> : <Empty>{atlasResult.graph?.truncated ? "The graph was bounded before any visible nodes remained. Adjust the filters or explore another title." : atlasResult.relationships.length ? "No connections match these filters." : "No connections have been recorded for this title yet. Explore another title or check back after supported provider relationships are indexed."}</Empty>}
+            {atlasResult.clusters?.length ? <div className="atlas-clusters"><span>MEDIA CLUSTERS</span>{atlasResult.clusters.map(cluster => <button type="button" key={cluster.category} onClick={() => setAtlasCategoryFilter(cluster.category)}>{cluster.category.replaceAll("_", " ")} <strong>{cluster.count}</strong></button>)}</div> : null}
+            {atlasResult.path?.edges.length ? <p className="atlas-path-summary">Shortest path: {atlasResult.path.nodes.map(node => node.title).join(" → ")}</p> : null}
             {atlasResult.graph?.truncated ? <p className="footnote compact">This graph reached its node limit. Explore a connected node to inspect its neighborhood.</p> : null}
             <div className="atlas-legend">
               <span><i className="provider" /> Provider-confirmed</span>
@@ -734,6 +854,8 @@ export default function App() {
                   <strong>{relation.title}</strong>
                   <small>{relation.category.replaceAll("_", " ")} · {relation.relationType}</small>
                   <small>Source: {relation.source}</small>
+                  {relation.provider && relation.providerId ? <small>Provider ID: {relation.provider}:{relation.providerId}</small> : null}
+                  {relation.evidence ? <small>Evidence: {relation.evidence}</small> : null}
                 </div>
                 <div className="atlas-connection-actions">
                   <Button onClick={() => void searchAtlas(relation.title, relation.category, relation.url)} disabled={atlasLoading}>Open node ↗</Button>
