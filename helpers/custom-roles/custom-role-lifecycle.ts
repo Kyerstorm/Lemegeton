@@ -1,5 +1,6 @@
 import { PermissionFlagsBits, type Guild, type GuildMember, type PartialGuildMember, type Role } from "discord.js";
 import { logger } from "../runtime/logger.js";
+import { customRoleAssignmentProblem } from "./custom-role-validation.js";
 import {
   HOLOGRAPHIC_COLORS,
   clearCustomRoleSnoozes,
@@ -266,17 +267,31 @@ async function restoreSavedRole(member: GuildMember): Promise<boolean> {
   return withLock(guild.id, member.id, async () => {
     const record = await getCustomRoleRecord(guild.id, member.id);
     if (!record || (record.status !== "saved" && record.status !== "missing")) return false;
+    const botMember = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
     const existing = record.role_id ? await guild.roles.fetch(record.role_id).catch(error => {
       if (isMissing(error)) return null;
       throw error;
     }) : null;
     if (existing) {
-      if (!member.roles.cache.has(existing.id)) await member.roles.add(existing, "Custom Roles: restore eligibility");
+      if (!member.roles.cache.has(existing.id)) {
+        const problem = customRoleAssignmentProblem(
+          guild.id,
+          existing,
+          botMember?.roles.highest.position ?? null,
+          Boolean(botMember?.permissions.has(PermissionFlagsBits.ManageRoles)),
+        );
+        if (problem) {
+          logger.warn("Skipped saved Custom Role restoration because Discord permissions or role hierarchy are unsafe", {
+            guildId: guild.id, userId: member.id, roleId: existing.id, reason: problem,
+          });
+          return false;
+        }
+        await member.roles.add(existing, "Custom Roles: restore eligibility");
+      }
       await updateCustomRole(guild.id, member.id, { status: "active", name: existing.name });
       return true;
     }
 
-    const botMember = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
     const anchor = await guild.roles.fetch(anchorRoleId).catch(() => null);
     if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageRoles) || !anchor
       || anchor.position >= botMember.roles.highest.position || guild.roles.cache.size >= 250) return false;

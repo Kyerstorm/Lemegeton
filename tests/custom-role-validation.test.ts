@@ -4,6 +4,7 @@ import type { Guild, GuildMember, Role } from "discord.js";
 import type { CustomRoleRecord, CustomRoleSettings } from "../helpers/custom-roles/custom-roles.js";
 import { legacyRoleTakeoverProblem } from "../helpers/custom-roles/custom-roles.js";
 import {
+  customRoleAssignmentProblem,
   customRoleChannelAllowed,
   customRoleCooldownMessage,
   customRoleEligibility,
@@ -85,6 +86,17 @@ test("custom-role command channel allows its configured channel and category par
   assert.equal(customRoleChannelAllowed("thread-1", "channel-1", settings), true);
   assert.equal(customRoleChannelAllowed("other", "category-1", settings), false);
   assert.equal(customRoleChannelAllowed("any", null, { ...settings, command_channel_id: null }), true);
+});
+
+test("saved Custom Role restoration fails closed on permissions, managed roles and hierarchy", () => {
+  const guildId = "123456789012345678";
+  const safeRole = { id: "223456789012345678", position: 4, managed: false } as Role;
+  assert.equal(customRoleAssignmentProblem(guildId, safeRole, 5, true), null);
+  assert.match(customRoleAssignmentProblem(guildId, safeRole, 5, false) ?? "", /Manage Roles/);
+  assert.match(customRoleAssignmentProblem(guildId, { ...safeRole, managed: true }, 5, true) ?? "", /Discord-managed/);
+  assert.match(customRoleAssignmentProblem(guildId, { ...safeRole, id: guildId }, 5, true) ?? "", /@everyone/);
+  assert.match(customRoleAssignmentProblem(guildId, { ...safeRole, position: 5 }, 5, true) ?? "", /highest role/);
+  assert.match(customRoleAssignmentProblem(guildId, safeRole, null, true) ?? "", /resolve my highest/);
 });
 
 test("anchor validation rejects everyone and roles at or above the bot role", () => {

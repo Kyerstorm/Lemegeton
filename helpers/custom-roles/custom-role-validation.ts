@@ -135,6 +135,20 @@ export function customRoleChannelAllowed(channelId: string, parentId: string | n
   return !settings.command_channel_id || settings.command_channel_id === channelId || settings.command_channel_id === parentId;
 }
 
+export function customRoleAssignmentProblem(
+  guildId: string,
+  role: Pick<Role, "id" | "position" | "managed">,
+  botHighestPosition: number | null,
+  canManageRoles: boolean,
+): string | null {
+  if (!canManageRoles) return "I need Manage Roles permission before I can assign a saved Custom Role.";
+  if (role.id === guildId) return "@everyone cannot be assigned as a Custom Role.";
+  if (role.managed) return "Discord-managed roles cannot be assigned as Custom Roles.";
+  if (botHighestPosition === null) return "I couldn't resolve my highest server role. Try again shortly.";
+  if (role.position >= botHighestPosition) return "My highest role must be above the saved Custom Role before I can assign it.";
+  return null;
+}
+
 export function validateCustomRoleAnchor(guild: Guild, role: Role): string | null {
   if (role.id === guild.id) return "@everyone can't be the anchor.";
   const botMember = guild.members.me;

@@ -1163,6 +1163,45 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
        VALUES ($1, $2, $3, $4), ($1, $5, $6, $7)`,
       [profileUser, primaryGuild, "76561198000000001", "primary-steam", otherGuild, "76561198000000002", "other-steam"],
     );
+    await updateProfilePreferences(primaryGuild, profileUser, { show_anilist: false, show_steam: false });
+    let aniListProfileReads = 0;
+    let steamProfileReads = 0;
+    const profileAniList = {
+      getUser: async (username: string) => {
+        aniListProfileReads += 1;
+        return { name: username };
+      },
+    } as unknown as AniListClient;
+    const profileSteam = {
+      getProfile: async (steamId: string) => {
+        steamProfileReads += 1;
+        return { steamId, personaName: "Primary Steam", profileUrl: "https://steamcommunity.com/profiles/" + steamId };
+      },
+    } as unknown as SteamClient;
+
+    const hiddenProviders = await getLinkedProfile(primaryGuild, profileUser, "same-member", profileAniList, profileSteam);
+    assert.ok(hiddenProviders);
+    assert.equal(hiddenProviders.anilistUsername, "primary-profile");
+    assert.equal(hiddenProviders.steamId, "76561198000000001");
+    assert.equal(hiddenProviders.anilist, null);
+    assert.equal(hiddenProviders.steam, null);
+    assert.equal(aniListProfileReads, 0);
+    assert.equal(steamProfileReads, 0);
+
+    await updateProfilePreferences(primaryGuild, profileUser, { show_anilist: true, show_steam: true });
+    const visibleProviders = await getLinkedProfile(primaryGuild, profileUser, "same-member", profileAniList, profileSteam);
+    assert.ok(visibleProviders);
+    assert.equal(visibleProviders.anilist?.name, "primary-profile");
+    assert.equal(visibleProviders.steam?.personaName, "Primary Steam");
+    assert.equal(aniListProfileReads, 1);
+    assert.equal(steamProfileReads, 1);
+
+    await updateProfilePreferences(primaryGuild, profileUser, { public_profile: false });
+    assert.equal(await getLinkedProfile(primaryGuild, profileUser, "same-member", profileAniList, profileSteam), null);
+    const privatePreview = await getLinkedProfile(primaryGuild, profileUser, "same-member", profileAniList, profileSteam, true);
+    assert.ok(privatePreview);
+    await updateProfilePreferences(primaryGuild, profileUser, { public_profile: true });
+
     assert.equal(await unlinkAniListAccount(primaryGuild, profileUser), true);
     assert.equal(
       (await queryOne<{ anilist_username: string | null }>(
@@ -1193,6 +1232,14 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       ),
       { steam_id: "76561198000000002" },
     );
+    const unlinkedProfile = await getLinkedProfile(primaryGuild, profileUser, "same-member", profileAniList, profileSteam);
+    assert.ok(unlinkedProfile);
+    assert.equal(unlinkedProfile.anilistUsername, null);
+    assert.equal(unlinkedProfile.steamId, null);
+    assert.equal(unlinkedProfile.anilist, null);
+    assert.equal(unlinkedProfile.steam, null);
+    assert.equal(aniListProfileReads, 2);
+    assert.equal(steamProfileReads, 2);
 
     const legacyGuild = "987654321098765432";
     const legacyIds = {
