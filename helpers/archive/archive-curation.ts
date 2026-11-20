@@ -1,5 +1,6 @@
 import { query, queryOne } from "../../database.js";
 import { cleanText } from "../security/security.js";
+import { isGlobalArchiveModerator } from "./archive-access.js";
 import { ARCHIVE_CATEGORIES, getArchiveEntry, type ArchiveCategory, type ArchiveVisibility } from "./archive.js";
 
 export interface ArchiveSpotlight {
@@ -81,6 +82,10 @@ export async function createArchiveCollectionSpotlight(input: {
   isGlobalModerator: boolean;
 }): Promise<string> {
   validateSpotlightWindow(input.startsAt, input.endsAt);
+  const globalModerator = isGlobalArchiveModerator(input.curatorId);
+  if (input.visibility === "global" && !globalModerator) {
+    throw new Error("Only configured global Archive moderators can feature a collection globally.");
+  }
   const collection = await queryOne<{ guild_id: string; owner_id: string; visibility: ArchiveVisibility }>(
     "SELECT guild_id::text, owner_id::text, visibility FROM archive_collections " +
     "WHERE id = $1 AND status = 'active' AND (visibility = 'global' OR guild_id = $2)",
@@ -93,7 +98,7 @@ export async function createArchiveCollectionSpotlight(input: {
     input.curatorId,
     input.visibility,
     input.canModerateServer,
-    input.isGlobalModerator,
+    globalModerator,
   )) {
     throw new Error(input.visibility === "global"
       ? "Only configured global Archive moderators can feature a global collection."
@@ -140,6 +145,9 @@ export async function cancelArchiveCollectionSpotlight(
   canModerateServer: boolean,
   isGlobalModerator: boolean,
 ): Promise<void> {
+  if (isGlobalModerator && !isGlobalArchiveModerator(actorId)) {
+    throw new Error("Only configured global Archive moderators can cancel a global collection feature.");
+  }
   const changed = await queryOne<{ id: string }>(
     "UPDATE community_archive_collection_spotlights SET status = 'cancelled' " +
     "WHERE id = $1 AND status = 'published' " +
@@ -174,6 +182,9 @@ export async function createArchiveSpotlight(input: {
 }): Promise<string> {
   validateSpotlightWindow(input.startsAt, input.endsAt);
   const global = input.visibility === "global";
+  if (global && !isGlobalArchiveModerator(input.curatorId)) {
+    throw new Error("Only configured global Archive moderators can feature a global Archive entry.");
+  }
   const entry = await getArchiveEntry(input.guildId, input.entryId, false, global);
   if (!entry || entry.status !== "approved") {
     throw new Error("Only an approved Archive entry in the selected visibility scope can be featured.");
@@ -221,6 +232,9 @@ export async function cancelArchiveSpotlight(
   canModerateServer: boolean,
   isGlobalModerator: boolean,
 ): Promise<void> {
+  if (isGlobalModerator && !isGlobalArchiveModerator(actorId)) {
+    throw new Error("Only configured global Archive moderators can cancel a global spotlight.");
+  }
   const changed = await queryOne<{ id: string }>(
     `UPDATE community_archive_spotlights
         SET status = 'cancelled'

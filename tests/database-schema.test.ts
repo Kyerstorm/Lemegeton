@@ -10,6 +10,7 @@ import { getCustomRoleOwnerForRole, getCustomRoleRecord, getLegacyBoosterRoleId,
 import type { Guild } from "discord.js";
 import type { DatabaseConfig } from "../helpers/runtime/config.js";
 import { getPanelOfTheDay } from "../helpers/archive/archive.js";
+import { configureArchiveAccess } from "../helpers/archive/archive-access.js";
 import {
   createArchiveSpotlight,
   listArchiveSpotlights,
@@ -63,6 +64,7 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
   const schema = "lemegeton_migration_" + randomUUID().replaceAll("-", "");
 
   try {
+    configureArchiveAccess(["101"]);
     await admin.query(`CREATE SCHEMA "${schema}"`);
 
     await admin.query(`
@@ -1497,6 +1499,7 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       [retryGuild],
     ))?.deleted_at instanceof Date);
   } finally {
+    configureArchiveAccess([]);
     await closeDatabase();
     await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => undefined);
     await admin.end();
