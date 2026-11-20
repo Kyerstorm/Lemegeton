@@ -427,6 +427,12 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
     );
     assert.equal(Number(queued?.attempts), 1);
 
+    // Keep the expected failed-upload orphan out of this test's concurrent claim window.
+    await admin.query(
+      'UPDATE "' + schema + '".media_asset_cleanup_queue SET next_attempt_at = NOW() + INTERVAL \'1 day\' WHERE asset_id <> $1',
+      [assetId],
+    );
+
     await admin.query(
       'UPDATE "' + schema + '".media_asset_cleanup_queue SET next_attempt_at = NOW() WHERE asset_id = $1',
       [assetId],
