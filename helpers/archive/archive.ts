@@ -760,57 +760,67 @@ export async function removeArchiveEntryAsset(
     if (!entry || entry.created_by !== userId || !["pending", "approved"].includes(entry.status)) {
       throw new Error("Only your pending or approved Archive entry can have an attachment removed.");
     }
-    const allAssets = await database.query<{ asset_id: string; position: number }>(
-      "SELECT asset_id::text, position FROM community_archive_entry_assets WHERE entry_id = $1 ORDER BY position ASC FOR UPDATE",
-      [entryId],
-    );
-    const selected = allAssets.rows.find(item => Number(item.position) === position);
-    const removedId = selected ? Number(selected.asset_id)
-      : position === 1 && entry.media_asset_id ? Number(entry.media_asset_id) : null;
-    if (removedId === null) throw new Error("That attachment position does not exist on this entry.");
 
-    if (selected) {
-      await database.query(
-        "DELETE FROM community_archive_entry_assets WHERE entry_id = $1 AND asset_id = $2",
-        [entryId, removedId],
-      );
-    }
-    const remaining = allAssets.rows
-      .filter(item => Number(item.asset_id) !== removedId)
-      .map(item => Number(item.asset_id));
-    await database.query(
-      "UPDATE community_archive_entry_assets SET position = -position - 1000 WHERE entry_id = $1",
+    const linked = await database.query<{ asset_id: string; position: number; uploaded_by: string }>(
+      "SELECT asset_id::text, position, uploaded_by::text FROM community_archive_entry_assets " +
+      "WHERE entry_id = $1 ORDER BY position ASC FOR UPDATE",
       [entryId],
     );
-    for (const [index, remainingId] of remaining.entries()) {
+    const ordered = linked.rows.map(item => ({
+      assetId: Number(item.asset_id),
+      uploadedBy: item.uploaded_by,
+    }));
+
+    // Older entries may have only the direct media_asset_id pointer and no relation row.
+    if (entry.media_asset_id && !ordered.some(item => item.assetId === Number(entry.media_asset_id))) {
+      const legacy = await database.query<{ uploaded_by: string }>(
+        "SELECT uploaded_by::text FROM media_assets WHERE id = $1 AND guild_id = $2 " +
+        "AND namespace = $3 AND is_private = TRUE FOR SHARE",
+        [entry.media_asset_id, guildId, "archive/" + guildId],
+      );
+      const owner = legacy.rows[0]?.uploaded_by;
+      if (!owner) throw new Error("The primary private attachment could not be verified in this server.");
+      ordered.unshift({ assetId: Number(entry.media_asset_id), uploadedBy: owner });
+    }
+
+    const selected = ordered[position - 1];
+    if (!selected) throw new Error("That attachment position does not exist on this entry.");
+    const remaining = ordered.filter((item, index) => index !== position - 1);
+
+    // Rebuild the relation rows in display order, normalizing legacy direct-only entries.
+    await database.query("DELETE FROM community_archive_entry_assets WHERE entry_id = $1", [entryId]);
+    for (const [index, item] of remaining.entries()) {
       await database.query(
-        "UPDATE community_archive_entry_assets SET position = $1 WHERE entry_id = $2 AND asset_id = $3",
-        [index + 1, entryId, remainingId],
+        "INSERT INTO community_archive_entry_assets (entry_id, asset_id, position, uploaded_by) VALUES ($1, $2, $3, $4)",
+        [entryId, item.assetId, index + 1, item.uploadedBy],
       );
     }
 
     const nextAsset = remaining.length
-      ? await database.query<{ content_type: string; object_key: string }>(
-          "SELECT content_type, object_key FROM media_assets WHERE id = $1 AND guild_id = $2 AND is_private = TRUE",
-          [remaining[0], guildId],
+      ? await database.query<{ content_type: string }>(
+          "SELECT content_type FROM media_assets WHERE id = $1 AND guild_id = $2 " +
+          "AND namespace = $3 AND is_private = TRUE",
+          [remaining[0]!.assetId, guildId, "archive/" + guildId],
         )
       : null;
     const next = nextAsset?.rows[0];
+    const keepFilename = remaining[0]?.assetId === Number(entry.media_asset_id);
     await database.query(
-      "UPDATE community_archive_entries SET media_asset_id = $1, attachment_filename = $2, " +
+      "UPDATE community_archive_entries SET media_asset_id = $1, " +
+      "attachment_filename = CASE WHEN $2 THEN attachment_filename ELSE NULL END, " +
       "attachment_content_type = $3, status = CASE WHEN status = 'approved' THEN 'pending' ELSE status END, " +
       "moderation_reason = NULL, updated_at = NOW() WHERE id = $4 AND created_guild_id = $5",
-      [remaining[0] ?? null, next ? next.object_key.split("/").at(-1) ?? null : null,
-        next?.content_type ?? null, entryId, guildId],
+      [remaining[0]?.assetId ?? null, keepFilename, next?.content_type ?? null, entryId, guildId],
     );
     await database.query(
       "INSERT INTO media_asset_cleanup_queue (asset_id) VALUES ($1) ON CONFLICT (asset_id) DO NOTHING",
-      [removedId],
+      [selected.assetId],
     );
-    return removedId;
+    return selected.assetId;
   });
   await deleteArchiveAsset(removedAssetId, client).catch(() => undefined);
 }
+
 
 export async function updateArchiveEntry(
   guildId: string,
