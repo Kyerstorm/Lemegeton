@@ -1,6 +1,6 @@
 # VPS deployment: systemd + Nginx
 
-This setup runs the Discord bot and Rust dashboard under separate unprivileged systemd users. Nginx is the public TLS endpoint; the Rust dashboard, bot bridge, and custom-role picker remain on loopback. It is designed for a single VPS instance.
+This setup runs the Discord bot and Rust dashboard under separate unprivileged systemd users. Nginx is the public TLS endpoint; Rust dashboard workers, bot bridge, and custom-role picker remain on loopback. The default systemd unit starts one Rust instance; an optional three-worker local load-balanced topology is documented below. PostgreSQL remains the bot data store; SQLite is a secondary same-host dashboard coordination store.
 
 ## Install and build
 
@@ -55,6 +55,7 @@ DASHBOARD_PUBLIC_URL=https://dashboard.example.com
 DASHBOARD_REDIRECT_URI=https://dashboard.example.com/oauth/callback
 DASHBOARD_COOKIE_SECURE=true
 DASHBOARD_SESSION_TTL=28800
+DASHBOARD_SESSION_DB_PATH=/var/lib/lemegeton-dashboard/sessions.sqlite
 DASHBOARD_OWNER_IDS=replace-with-discord-user-ids
 DASHBOARD_BRIDGE_URL=http://127.0.0.1:8091
 DASHBOARD_PICKER_URL=http://127.0.0.1:8092
@@ -85,6 +86,26 @@ sudo systemctl status lemegeton-bot.service lemegeton-dashboard.service
 ```
 
 Review logs with `journalctl -u lemegeton-bot -u lemegeton-dashboard`. A missing or weak bridge secret intentionally leaves bridge calls unavailable.
+
+## Optional local dashboard load balancing
+
+Use this option when the VPS has enough CPU and memory for three Rust dashboard workers. It scales only the Rust/Axum dashboard; **do not** start multiple bot services or scale the combined Docker bot-plus-dashboard container.
+
+Install the instance template and replace the single dashboard unit with three loopback instances:
+
+```sh
+sudo install -o root -g root -m 0644 deploy/vps/systemd/lemegeton-dashboard@.service /etc/systemd/system/
+sudo systemctl disable --now lemegeton-dashboard.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now lemegeton-dashboard@8080.service lemegeton-dashboard@8081.service lemegeton-dashboard@8082.service
+sudo systemctl status 'lemegeton-dashboard@*'
+```
+
+All three units set `DASHBOARD_SESSION_DB_PATH=/var/lib/lemegeton-dashboard/sessions.sqlite` and share the private `StateDirectory=lemegeton-dashboard`. SQLite uses WAL and a busy timeout to coordinate sessions, single-use OAuth states, rate windows and Discord refresh-token leases across local processes. Keep this database on a local persistent filesystem on this VPS; WAL is not supported for sharing over NFS/network filesystems or between hosts.
+
+Use a SQLite-aware backup procedure (for example, the SQLite backup API) or checkpoint and stop all three dashboard workers before copying the database files directly. Never copy only the main database while WAL writes are active.
+
+The Nginx upstream uses `least_conn` and passive `max_fails`/`fail_timeout` failure handling. `/health/ready` checks SQLite readiness, but open-source Nginx does not actively probe it; monitor the endpoint externally. Ports 8080–8082 must remain firewalled from public access.
 
 ## Nginx and HTTPS
 
