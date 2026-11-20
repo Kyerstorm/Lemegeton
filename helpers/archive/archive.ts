@@ -514,42 +514,56 @@ export async function handleArchiveUploadMessage(message: Message, client: Clien
     [message.guildId, message.author.id],
   );
   if (!pending) {
-    await message.reply({ content: "There is no pending Archive submission waiting for an upload from you.", allowedMentions: { parse: [] } });
+    try {
+      await message.reply({ content: "There is no pending Archive submission waiting for an upload from you.", allowedMentions: { parse: [] } });
+    } finally {
+      await message.delete().catch(() => undefined);
+    }
     return true;
   }
   let stored = 0;
-  for (const attachment of [...message.attachments.values()].slice(0, 5)) {
-    const upload = {
-      name: attachment.name,
-      contentType: attachment.contentType ?? "application/octet-stream",
-      bytes: Buffer.alloc(0),
-    };
-    if (!archiveUploadAllowed(pending.archive_type, settings.uploadTypes, upload)
-      || attachment.size > getArchiveUploadMaxBytes()) continue;
-    const bytes = await downloadArchiveUpload(attachment.url);
-    if (!archiveUploadAllowed(pending.archive_type, settings.uploadTypes, { ...upload, bytes })) continue;
-    const assetId = await storeArchiveUpload(
-      message.guildId,
-      message.author.id,
-      pending.archive_type,
-      { ...upload, bytes },
-      settings.uploadTypes,
-      { client, legacyStorageChannelId: settings.legacyStorageChannelId },
-    );
-    await attachArchiveAssetToEntry(message.guildId, message.author.id, pending.id, assetId, attachment.name, client);
-    stored += 1;
-  }
-  if (stored) {
+  let rejected = 0;
+  try {
+    for (const attachment of [...message.attachments.values()].slice(0, 5)) {
+      try {
+        const upload = {
+          name: attachment.name,
+          contentType: attachment.contentType ?? "application/octet-stream",
+          bytes: Buffer.alloc(0),
+        };
+        if (!archiveUploadAllowed(pending.archive_type, settings.uploadTypes, upload)
+          || attachment.size > getArchiveUploadMaxBytes()) {
+          rejected += 1;
+          continue;
+        }
+        const bytes = await downloadArchiveUpload(attachment.url);
+        if (!archiveUploadAllowed(pending.archive_type, settings.uploadTypes, { ...upload, bytes })) {
+          rejected += 1;
+          continue;
+        }
+        const assetId = await storeArchiveUpload(
+          message.guildId,
+          message.author.id,
+          pending.archive_type,
+          { ...upload, bytes },
+          settings.uploadTypes,
+          { client, legacyStorageChannelId: settings.legacyStorageChannelId },
+        );
+        await attachArchiveAssetToEntry(message.guildId, message.author.id, pending.id, assetId, attachment.name, client);
+        stored += 1;
+      } catch {
+        rejected += 1;
+      }
+    }
     await message.reply({
-      content: `Saved ${stored} private upload(s) for Archive submission #${pending.id}. Press **Finish upload** when you are done.`,
+      content: stored
+        ? `Saved ${stored} private upload(s) for Archive submission #${pending.id}.${rejected ? " " + rejected + " file(s) were not accepted." : ""} Press **Finish upload** when you are done.`
+        : "No attachments were accepted. Check the category, enabled media types, supported file extension and size limit.",
       allowedMentions: { parse: [] },
     });
+  } finally {
+    // The intake channel is private; copied source messages are still removed after processing.
     await message.delete().catch(() => undefined);
-  } else {
-    await message.reply({
-      content: "No attachments were accepted. Check the category, enabled media types, supported file extension and size limit.",
-      allowedMentions: { parse: [] },
-    });
   }
   return true;
 }

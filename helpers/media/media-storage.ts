@@ -224,14 +224,21 @@ export async function storeArchiveUpload(
     }
     const digest = createHash("sha256").update(upload.bytes).digest("hex");
     try {
-      const inserted = await queryOne<{ id: string }>(
-        `INSERT INTO media_assets
-         (provider, namespace, bucket_name, object_key, content_type, size_bytes, sha256, is_private, uploaded_by, guild_id)
-         VALUES ('discord', $1, $2, $3, $4, $5, $6, TRUE, $7, $8) RETURNING id`,
-        [`archive/${guildId}`, channel.id, `${message.id}/${attachment.id}`, contentType, upload.bytes.byteLength, digest, userId, guildId],
-      );
-      if (!inserted) throw new Error("Legacy Archive asset registry insert returned no ID.");
-      return Number(inserted.id);
+      return await transaction(async database => {
+        const inserted = await database.query<{ id: string }>(
+          `INSERT INTO media_assets
+           (provider, namespace, bucket_name, object_key, content_type, size_bytes, sha256, is_private, uploaded_by, guild_id)
+           VALUES ('discord', $1, $2, $3, $4, $5, $6, TRUE, $7, $8) RETURNING id`,
+          [`archive/${guildId}`, channel.id, `${message.id}/${attachment.id}`, contentType, upload.bytes.byteLength, digest, userId, guildId],
+        );
+        const id = inserted.rows[0]?.id;
+        if (!id) throw new Error("Legacy Archive asset registry insert returned no ID.");
+        await database.query(
+          "INSERT INTO media_asset_cleanup_queue (asset_id, next_attempt_at) VALUES ($1, NOW() + INTERVAL '1 hour')",
+          [id],
+        );
+        return Number(id);
+      });
     } catch (error) {
       await message.delete().catch(() => undefined);
       throw error;
