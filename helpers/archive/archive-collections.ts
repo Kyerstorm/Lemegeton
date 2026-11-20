@@ -1,5 +1,6 @@
 import { query, queryOne, transaction } from "../../database.js";
 import { cleanText } from "../security/security.js";
+import { isGlobalArchiveModerator } from "./archive-access.js";
 import { canChangeArchiveVisibility, getArchiveEntry, parseTags, type ArchiveEntry, type ArchiveVisibility } from "./archive.js";
 
 export function canCollectionShowEntry(
@@ -116,8 +117,10 @@ export async function changeArchiveCollectionVisibility(
   collectionId: string,
   visibility: ArchiveVisibility,
   canModerateServer: boolean,
-  isGlobalModerator: boolean,
 ): Promise<void> {
+  if (visibility === "global" && !isGlobalArchiveModerator(userId)) {
+    throw new Error("Only configured global Archive moderators can publish a collection globally.");
+  }
   await transaction(async client => {
     const selected = await client.query<{ owner_id: string; visibility: ArchiveVisibility }>(
       "SELECT owner_id::text, visibility FROM archive_collections " +
@@ -126,7 +129,7 @@ export async function changeArchiveCollectionVisibility(
     );
     const collection = selected.rows[0];
     if (!collection) throw new Error("That active collection was not found in this server.");
-    if (!canChangeArchiveVisibility(collection.visibility, visibility, collection.owner_id, userId, canModerateServer, isGlobalModerator)) {
+    if (!canChangeArchiveVisibility(collection.visibility, visibility, collection.owner_id, userId, canModerateServer, isGlobalArchiveModerator(userId))) {
       throw new Error(visibility === "global"
         ? "Only configured global Archive moderators can publish a collection globally."
         : "Only the collection owner or an Archive moderator can change this collection's visibility.");
@@ -165,7 +168,7 @@ export async function changeArchiveTrailVisibility(
     );
     const trail = selected.rows[0];
     if (!trail) throw new Error("That active Archive Trail was not found in this server.");
-    if (!canChangeArchiveVisibility(trail.visibility, visibility, trail.owner_id, userId, canModerateServer, isGlobalModerator)) {
+    if (!canChangeArchiveVisibility(trail.visibility, visibility, trail.owner_id, userId, canModerateServer, isGlobalArchiveModerator(userId))) {
       throw new Error(visibility === "global"
         ? "Only configured global Archive moderators can publish an Archive Trail globally."
         : "Only the Trail owner or an Archive moderator can change this Trail's visibility.");
@@ -197,6 +200,9 @@ export async function saveArchiveCollection(
 ): Promise<string> {
   const cleanTitle = cleanText(title, 160);
   if (!cleanTitle) throw new Error("A collection title is required.");
+  if (visibility === "global" && !isGlobalArchiveModerator(ownerId)) {
+    throw new Error("Only configured global Archive moderators can create global collections.");
+  }
   const row = await queryOne<{ id: string }>(
     `INSERT INTO archive_collections (guild_id, owner_id, title, description, visibility)
      VALUES ($1, $2, $3, $4, $5) RETURNING id`,
@@ -294,6 +300,11 @@ export async function saveArchiveTrail(
   introduction: string,
   visibility: ArchiveVisibility,
 ): Promise<string> {
+  const cleanTitle = cleanText(title, 160);
+  if (!cleanTitle) throw new Error("An Archive Trail title is required.");
+  if (visibility === "global" && !isGlobalArchiveModerator(ownerId)) {
+    throw new Error("Only configured global Archive moderators can create global Archive Trails.");
+  }
   const row = await queryOne<{ id: string }>(
     `INSERT INTO archive_trails (guild_id, owner_id, title, introduction, visibility)
      VALUES ($1, $2, $3, $4, $5) RETURNING id`,

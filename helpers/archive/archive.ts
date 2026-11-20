@@ -502,6 +502,8 @@ export async function handleArchiveUploadMessage(message: Message, client: Clien
   const everyonePermissions = channel.permissionsFor(guild.roles.everyone);
   if (!archiveUploadChannelIsPrivate(
     everyonePermissions?.has(PermissionFlagsBits.ViewChannel) ?? true,
+    botPermissions?.has(PermissionFlagsBits.ViewChannel) ?? false,
+    botPermissions?.has(PermissionFlagsBits.SendMessages) ?? false,
     botPermissions?.has(PermissionFlagsBits.ManageMessages) ?? false,
   )) {
     throw new Error("The Archive upload channel must be hidden from @everyone and grant the bot Manage Messages.");

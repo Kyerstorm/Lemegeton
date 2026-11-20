@@ -48,9 +48,11 @@ test("Archive media upload limit follows typed runtime configuration", () => {
 });
 
 test("Archive upload channels must hide the source attachments from everyone and allow the bot to delete uploads", () => {
-  assert.equal(archiveUploadChannelIsPrivate(false, true), true);
-  assert.equal(archiveUploadChannelIsPrivate(true, true), false);
-  assert.equal(archiveUploadChannelIsPrivate(false, false), false);
+  assert.equal(archiveUploadChannelIsPrivate(false, true, true, true), true);
+  assert.equal(archiveUploadChannelIsPrivate(true, true, true, true), false);
+  assert.equal(archiveUploadChannelIsPrivate(false, false, true, true), false);
+  assert.equal(archiveUploadChannelIsPrivate(false, true, false, true), false);
+  assert.equal(archiveUploadChannelIsPrivate(false, true, true, false), false);
 });
 
 test("Archive attachment downloads accept only the Discord CDN and reject redirects or oversized streams", async () => {

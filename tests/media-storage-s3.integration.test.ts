@@ -15,6 +15,7 @@ import {
   queryOne,
 } from "../database.js";
 import type { DatabaseConfig } from "../helpers/runtime/config.js";
+import { configureArchiveAccess } from "../helpers/archive/archive-access.js";
 import {
   addArchiveReport,
   reviewArchiveReport,
@@ -29,6 +30,8 @@ import {
   submitArchiveEntry,
 } from "../helpers/archive/archive.js";
 import {
+  saveArchiveCollection,
+  saveArchiveTrail,
   changeArchiveCollectionVisibility,
   changeArchiveTrailVisibility,
 } from "../helpers/archive/archive-collections.js";
@@ -235,6 +238,17 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
     assert.deepEqual(await processArchiveAssetCleanup(10), { attempted: 1, failed: 0 });
     assert.equal(await queryOne("SELECT id FROM media_assets WHERE id = $1", [reportedAsset]), null);
 
+    // Global collection/Trail creation is enforced by the configured moderator set.
+    await assert.rejects(
+      saveArchiveCollection(guildId, userId, "Unauthorized global collection", "", "global"),
+      /configured global Archive moderators/,
+    );
+    await assert.rejects(
+      saveArchiveTrail(guildId, userId, "Unauthorized global Trail", "", "global"),
+      /configured global Archive moderators/,
+    );
+    configureArchiveAccess([userId]);
+
     // Publication scope transitions cannot promote collections or Trails containing server-only entries.
     await admin.query(
       'UPDATE "' + schema + '".community_archive_entries SET status = \'approved\', media_asset_id = NULL, visibility = \'server\' WHERE id = $1',
@@ -250,7 +264,7 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
       [collection.rows[0]!.id, lifecycleEntry, userId],
     );
     await assert.rejects(
-      changeArchiveCollectionVisibility(guildId, userId, collection.rows[0]!.id, "global", true, true),
+      changeArchiveCollectionVisibility(guildId, userId, collection.rows[0]!.id, "global", true),
       /server-only entries/,
     );
     const trail = await admin.query<{ id: string }>(
@@ -263,15 +277,15 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
       [trail.rows[0]!.id, lifecycleEntry, userId],
     );
     await assert.rejects(
-      changeArchiveTrailVisibility(guildId, userId, trail.rows[0]!.id, "global", true, true),
+      changeArchiveTrailVisibility(guildId, userId, trail.rows[0]!.id, "global", true),
       /server-only entries/,
     );
     await admin.query(
       'UPDATE "' + schema + '".community_archive_entries SET visibility = \'global\' WHERE id = $1',
       [lifecycleEntry],
     );
-    await changeArchiveCollectionVisibility(guildId, userId, collection.rows[0]!.id, "global", false, true);
-    await changeArchiveTrailVisibility(guildId, userId, trail.rows[0]!.id, "global", false, true);
+    await changeArchiveCollectionVisibility(guildId, userId, collection.rows[0]!.id, "global", false);
+    await changeArchiveTrailVisibility(guildId, userId, trail.rows[0]!.id, "global", false);
     assert.equal((await queryOne<{ visibility: string }>(
       'SELECT visibility FROM "' + schema + '".archive_collections WHERE id = $1',
       [collection.rows[0]!.id],
@@ -350,6 +364,7 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
     const leftover = await objectClient.send(new ListObjectsV2Command({ Bucket: bucket }));
     assert.equal(leftover.KeyCount ?? 0, 0);
   } finally {
+    configureArchiveAccess([]);
     configureMediaStorage(goodConfig);
     await closeDatabase().catch(() => undefined);
     if (bucketCreated) {

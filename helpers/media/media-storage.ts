@@ -31,8 +31,13 @@ export function configureMediaStorage(config: MediaStorageConfig): void {
 export function getArchiveUploadMaxBytes(): number {
   return runtimeConfig.archiveUploadMaxBytes;
 }
-export function archiveUploadChannelIsPrivate(everyoneCanView: boolean, botCanManageMessages: boolean): boolean {
-  return !everyoneCanView && botCanManageMessages;
+export function archiveUploadChannelIsPrivate(
+  everyoneCanView: boolean,
+  botCanView: boolean,
+  botCanSendMessages: boolean,
+  botCanManageMessages: boolean,
+): boolean {
+  return !everyoneCanView && botCanView && botCanSendMessages && botCanManageMessages;
 }
 
 export async function downloadArchiveUpload(
@@ -177,9 +182,9 @@ export function archiveStorageProvider(legacyStorageChannelId: string | null): "
 }
 
 async function legacyStorageChannel(client: Client, guildId: string, channelId: string): Promise<TextChannel> {
-  if (!/^\\d{17,20}$/.test(channelId)) throw new Error("The configured legacy storage channel ID is invalid.");
+  if (!/^\d{17,20}$/.test(channelId)) throw new Error("The configured legacy storage channel ID is invalid.");
   const channel = await client.channels.fetch(channelId).catch(() => null);
-  if (!channel || channel.type !== ChannelType.GuildText) {
+  if (!channel || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)) {
     throw new Error("The configured legacy Archive storage channel is unavailable. Ask a server manager to repair it; storage will not switch automatically.");
   }
   const textChannel = channel as TextChannel;
@@ -326,7 +331,8 @@ export async function signedArchiveAssetUrl(
     const [messageId, attachmentId] = asset.object_key.split("/", 2);
     if (typeof messageId !== "string" || typeof attachmentId !== "string" || !/^\d{17,20}$/.test(messageId) || !/^\d{17,20}$/.test(attachmentId)) return null;
     const channel = await client.channels.fetch(asset.bucket_name).catch(() => null);
-    if (!channel || channel.type !== ChannelType.GuildText || (channel as TextChannel).guildId !== asset.guild_id) return null;
+    if (!channel || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)
+      || (channel as TextChannel).guildId !== asset.guild_id) return null;
     const message = await (channel as TextChannel).messages.fetch(messageId).catch(() => null);
     if (!message || message.guildId !== asset.guild_id || message.channelId !== asset.bucket_name) return null;
     return message.attachments.get(attachmentId)?.url ?? null;
@@ -386,7 +392,8 @@ export async function deleteArchiveAsset(assetId: number, client?: Client): Prom
         throw error;
       });
       if (channel) {
-        if (channel.type !== ChannelType.GuildText || (channel as TextChannel).guildId !== asset.guild_id) {
+        if ((channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)
+          || (channel as TextChannel).guildId !== asset.guild_id) {
           throw new Error("Legacy Archive asset channel no longer matches its source server.");
         }
         const message = await (channel as TextChannel).messages.fetch(messageId).catch(error => {

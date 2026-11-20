@@ -517,20 +517,19 @@ export class ArchiveCommand implements FeatureCommand {
           const chapterInput = interaction.options.getString("chapter_caption");
           const member = await interaction.guild!.members.fetch(userId);
           const canModerateServer = await canModerateArchive(member, guildId, "server");
-          const globalModerator = isGlobalArchiveModerator(userId);
 
           if (collectionId || trailId) {
             if (!visibility || Boolean(collectionId) === Boolean(trailId) || entryId || decision) {
               throw new Error("Provide exactly one collection_id or trail_id with a new visibility.");
             }
             if (collectionId) {
-              await changeArchiveCollectionVisibility(guildId, userId, collectionId, visibility, canModerateServer, globalModerator);
+              await changeArchiveCollectionVisibility(guildId, userId, collectionId, visibility, canModerateServer);
               await interaction.reply({
                 content: `Collection #${collectionId} is now ${visibility === "global" ? "globally visible" : "visible only in this server"}.`,
                 flags: MessageFlags.Ephemeral,
               });
             } else {
-              await changeArchiveTrailVisibility(guildId, userId, trailId!, visibility, canModerateServer, globalModerator);
+              await changeArchiveTrailVisibility(guildId, userId, trailId!, visibility, canModerateServer);
               await interaction.reply({
                 content: `Archive Trail #${trailId} is now ${visibility === "global" ? "globally visible" : "visible only in this server"}.`,
                 flags: MessageFlags.Ephemeral,
@@ -940,11 +939,9 @@ export class ArchiveCommand implements FeatureCommand {
       if (action === "configure-upload") {
         if (!archiveUploadChannelIsPrivate(
           everyoneCanView,
-          Boolean(botPermissions?.has([
-            PermissionsBitField.Flags.ViewChannel,
-            PermissionsBitField.Flags.SendMessages,
-            PermissionsBitField.Flags.ManageMessages,
-          ])),
+          Boolean(botPermissions?.has(PermissionsBitField.Flags.ViewChannel)),
+          Boolean(botPermissions?.has(PermissionsBitField.Flags.SendMessages)),
+          Boolean(botPermissions?.has(PermissionsBitField.Flags.ManageMessages)),
         )) {
           throw new Error("The upload channel must be hidden from @everyone and let the bot view, reply to, and delete raw uploads.");
         }
