@@ -1756,7 +1756,7 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     // Atlas provider IDs remain canonical when provider slugs or display names change.
     const atlasGuild = "333333333333333342";
     const atlasSource = {
-      sourceTitle: "Old IGDB Slug",
+      sourceTitle: "Old IGDB Game",
       sourceCategory: "GAME",
       sourceUrl: "https://www.igdb.com/games/old-slug",
       sourceProvider: "IGDB:GAME",
@@ -1768,25 +1768,25 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
       targetProviderId: "900002",
       relationshipType: "developer credit",
       sourceKind: "provider" as const,
-      sourceLabel: "IGDB company workography",
+      sourceLabel: "IGDB game relationship",
     };
     assert.equal(await recordAtlasRelationship(atlasSource), true);
     assert.equal(await recordAtlasRelationship({
       ...atlasSource,
-      sourceTitle: "Renamed IGDB Company",
-      sourceUrl: "https://www.igdb.com/companies/new-slug",
+      sourceTitle: "Renamed IGDB Game",
+      sourceUrl: "https://www.igdb.com/games/new-slug",
       targetTitle: "Renamed Game",
       targetUrl: "https://www.igdb.com/games/new-slug",
     }), false, "provider ID pairs deduplicate records after source title and URL changes");
     const renamedAtlasEdges = await findAtlasRelationships(
-      atlasGuild, "Renamed IGDB Company", "GAME", "https://www.igdb.com/companies/new-slug", 20, "igdb:game", "900001",
+      atlasGuild, "Renamed IGDB Game", "GAME", "https://www.igdb.com/companies/new-slug", 20, "igdb:game", "900001",
     );
     assert.equal(renamedAtlasEdges.length, 1);
     assert.equal(renamedAtlasEdges[0]?.provider, "igdb:game");
     assert.equal(renamedAtlasEdges[0]?.providerId, "900002");
     assert.equal(renamedAtlasEdges[0]?.title, "Old credited game");
     assert.equal(
-      (await findAtlasRelationships(atlasGuild, "Renamed IGDB Company", "ANIME", undefined, 20, "igdb:game", "900001")).length,
+      (await findAtlasRelationships(atlasGuild, "Renamed IGDB Game", "ANIME", undefined, 20, "igdb:game", "900001")).length,
       0,
       "same provider ID under a different category must not resolve a game node",
     );

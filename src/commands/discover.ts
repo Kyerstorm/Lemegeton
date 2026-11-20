@@ -1962,7 +1962,8 @@ fields: { description:item.description, releaseDate:item.latestUpdate, creators:
     const creators=await this.anilist.searchCreators(query);
     if(!creators.length){await interaction.editReply({content:"AniList returned no matching creators.",embeds:[],components:[]});return;}
     await Promise.allSettled(creators.map(creator=>recordProviderRelationships({
-      sourceTitle:creator.name,sourceCategory:"CREATOR",sourceUrl:creator.url,sourceImageUrl:creator.image,
+      sourceTitle:creator.name,sourceCategory:"CREATOR",sourceUrl:creator.url,
+      sourceProvider:"anilist:staff",sourceProviderId:String(creator.id),sourceImageUrl:creator.image,
       sourceLabel:"AniList staff and creator credits",
       relations:creator.media.map(item=>({
         title:item.title,category:item.type==="ANIME"?"ANIME":"MANGA",url:item.url,
