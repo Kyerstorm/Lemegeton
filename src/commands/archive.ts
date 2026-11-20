@@ -91,6 +91,7 @@ import {
   signedArchiveAssetUrl,
   storeArchiveUpload,
   classifyArchiveUpload,
+  getArchiveUploadMaxBytes,
 } from "../../helpers/media/media-storage.js";
 import { cleanText, isGuildManager, isValidHttpsUrl, safeDisplay } from "../../helpers/security/security.js";
 import { logger } from "../../helpers/runtime/logger.js";
@@ -555,6 +556,7 @@ export class ArchiveCommand implements FeatureCommand {
               });
               return;
             }
+
             const attachment = interaction.options.getAttachment("file");
             if (!attachment) throw new Error("Attach the replacement file using the file option.");
             const settings = await getArchiveSettings(guildId);
@@ -568,11 +570,7 @@ export class ArchiveCommand implements FeatureCommand {
             if (attachment.size > getArchiveUploadMaxBytes()) throw new Error("Archive uploads exceed this server's configured size limit.");
             const bytes = await downloadArchiveUpload(attachment.url);
             const assetId = await storeArchiveUpload(
-              guildId,
-              userId,
-              entry.archive_type,
-              { ...metadata, bytes },
-              settings.uploadTypes,
+              guildId, userId, entry.archive_type, { ...metadata, bytes }, settings.uploadTypes,
               { client: interaction.client, legacyStorageChannelId: settings.legacyStorageChannelId },
             );
             await replaceArchiveEntryAsset(guildId, userId, entryId, position, assetId, attachment.name, interaction.client);
@@ -609,19 +607,8 @@ export class ArchiveCommand implements FeatureCommand {
             return;
           }
 
-          if (!entryId) throw new Error("Provide entry_id.");
           const chapterEdit = chapterInput !== null ? parsePanelChapterCaption(chapterInput) : null;
           await updateArchiveEntry(guildId, userId, entryId, {
-            title: interaction.options.getString("title") ?? undefined,
-            content: chapterEdit?.caption ?? interaction.options.getString("content") ?? undefined,
-            sourceTitle: interaction.options.getString("source_title") ?? undefined,
-            creator: interaction.options.getString("creator") ?? undefined,
-            sourceUrl: interaction.options.getString("source_url") ?? undefined,
-            tags: interaction.options.getString("tags")?.split(","),
-            spoiler: interaction.options.getBoolean("spoiler") ?? undefined,
-            chapterNumber: chapterEdit?.chapterNumber,
-          });
-
             title: interaction.options.getString("title") ?? undefined,
             content: chapterEdit?.caption ?? interaction.options.getString("content") ?? undefined,
             sourceTitle: interaction.options.getString("source_title") ?? undefined,
