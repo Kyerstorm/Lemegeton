@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  archiveMediaTypesForCategory, createAtlasDiscordUrl,
+  archiveMediaTypesForCategory, clusterAtlasGraph, createAtlasDiscordUrl,
   atlasNodeIdentity, atlasProviderIdentity, buildAtlasGraph, filterAtlasGraph, filterAtlasRelations, findAtlasPath,
   normalizeAtlasCategory, normalizeAtlasTitle, safeAtlasUrl,
   type AtlasRelation,
@@ -212,4 +212,34 @@ test("Atlas image URL validation accepts only HTTPS metadata-provider assets", a
   assert.equal(safeAtlasImageUrl("https://images.igdb.com/igdb/image/upload/t_cover_big/game.jpg"), "https://images.igdb.com/igdb/image/upload/t_cover_big/game.jpg");
   assert.equal(safeAtlasImageUrl("https://evil.example/poster.jpg"), null);
   assert.equal(safeAtlasImageUrl("http://image.tmdb.org/poster.jpg"), null);
+});
+
+test("Atlas provider and evidence filters operate on endpoints and keep clusters deterministic", async () => {
+  const graph = await buildAtlasGraph(
+    { title: "Root", category: "ANIME", provider: "anilist:anime", providerId: "1" },
+    async () => [
+      {
+        title: "Manga One", category: "MANGA", provider: "anilist:manga", providerId: "2",
+        url: "https://anilist.co/manga/2", relationType: "adaptation", source: "AniList",
+        sourceKind: "provider", evidence: "Provider relation type: ADAPTATION",
+      },
+      {
+        title: "Game One", category: "GAME", provider: "igdb:game", providerId: "9001",
+        url: null, relationType: "inspired by", source: "IGDB",
+        sourceKind: "provider", evidence: "IGDB external game reference 9001",
+      },
+    ],
+    { maxDepth: 1, maxNodes: 8, perNodeLimit: 8 },
+  );
+  const providerFiltered = filterAtlasGraph(graph, { provider: "anilist:manga", providerId: "2" });
+  assert.equal(providerFiltered.edges.length, 1);
+  assert.equal(providerFiltered.directRelationships[0]?.title, "Manga One");
+  const evidenceFiltered = filterAtlasGraph(graph, { evidence: "external game reference" });
+  assert.equal(evidenceFiltered.edges.length, 1);
+  assert.equal(evidenceFiltered.directRelationships[0]?.title, "Game One");
+  assert.deepEqual(filterAtlasRelations(graph.directRelationships, { provider: "igdb:game" }).map(item => item.title), ["Game One"]);
+  assert.deepEqual(filterAtlasRelations(graph.directRelationships, { providerId: "2", evidence: "adaptation" }).map(item => item.title), ["Manga One"]);
+  assert.deepEqual(clusterAtlasGraph(graph).map(cluster => [cluster.category, cluster.count]), [
+    ["ANIME", 1], ["GAME", 1], ["MANGA", 1],
+  ]);
 });

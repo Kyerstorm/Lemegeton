@@ -441,7 +441,13 @@ export function findAtlasGraph(
 ): Promise<AtlasGraphResult> {
   return buildAtlasGraph(
     root,
-    (node, limit) => findAtlasRelationships(guildId, node.title, node.category, node.url, limit, node.provider, node.providerId),
+    async (node, limit) => {
+      const [providerRelations, communityRelations] = await Promise.all([
+        findAtlasRelationships(guildId, node.title, node.category, node.url, limit, node.provider, node.providerId),
+        findAtlasCommunityLinks(guildId, node.title, node.category, node.url, node.providerId, limit),
+      ]);
+      return [...providerRelations, ...communityRelations].slice(0, limit);
+    },
     options,
   );
 }
@@ -451,6 +457,9 @@ export interface AtlasGraphFilters {
   category?: string;
   relationshipType?: string;
   sourceKind?: RelationshipSource;
+  provider?: string;
+  providerId?: string;
+  evidence?: string;
 }
 
 function matchesAtlasRelationshipFilter(value: string, filter: string): boolean {
@@ -476,15 +485,46 @@ export function filterAtlasRelations(
     if (filters.sourceKind && relation.sourceKind !== filters.sourceKind) return false;
     if (category && relation.category !== category) return false;
     if (relationship && !matchesAtlasRelationshipFilter(relation.relationType, relationship)) return false;
+    if (filters.provider && relation.provider?.toLocaleLowerCase("en-US") !== filters.provider.trim().toLocaleLowerCase("en-US")) return false;
+    if (filters.providerId && relation.providerId !== filters.providerId.trim()) return false;
+    if (filters.evidence && !normalizeAtlasTitle(relation.evidence ?? "").includes(normalizeAtlasTitle(filters.evidence))) return false;
     if (search) {
-      const searchable = [relation.title, relation.category, relation.relationType, relation.source, relation.evidence ?? ""]
-        .map(value => normalizeAtlasTitle(value));
+      const searchable = [
+        relation.title, relation.category, relation.relationType, relation.source,
+        relation.provider ?? "", relation.providerId ?? "", relation.evidence ?? "",
+      ].map(value => normalizeAtlasTitle(value));
       if (!searchable.some(value => value.includes(search))) return false;
     }
     return true;
   });
 }
 
+
+export interface AtlasGraphCluster {
+  category: MediaCategory;
+  nodeIds: string[];
+  count: number;
+}
+
+export function clusterAtlasGraph(graph: AtlasGraphResult): AtlasGraphCluster[] {
+  const groups = new Map<MediaCategory, string[]>();
+  for (const node of graph.nodes) {
+    const group = groups.get(node.category) ?? [];
+    group.push(node.id);
+    groups.set(node.category, group);
+  }
+  return [...groups.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([category, nodeIds]) => ({
+      category,
+      nodeIds: nodeIds.sort((left, right) => {
+        const leftNode = graph.nodes.find(node => node.id === left);
+        const rightNode = graph.nodes.find(node => node.id === right);
+        return (leftNode?.title ?? "").localeCompare(rightNode?.title ?? "");
+      }),
+      count: nodeIds.length,
+    }));
+}
 
 export interface AtlasGraphPath {
   nodes: AtlasGraphNode[];
@@ -503,11 +543,18 @@ export function filterAtlasGraph(graph: AtlasGraphResult, filters: AtlasGraphFil
       if (from?.category !== category && to?.category !== category) return false;
     }
     if (relationship && !matchesAtlasRelationshipFilter(edge.relationType, relationship)) return false;
+    const from = graph.nodes.find(node => node.id === edge.from);
+    const to = graph.nodes.find(node => node.id === edge.to);
+    const identityNodes = [from, to].filter((node): node is AtlasGraphNode => Boolean(node));
+    if (filters.provider && !identityNodes.some(node =>
+      node.provider?.toLocaleLowerCase("en-US") === filters.provider!.trim().toLocaleLowerCase("en-US"),
+    )) return false;
+    if (filters.providerId && !identityNodes.some(node => node.providerId === filters.providerId!.trim())) return false;
+    if (filters.evidence && !normalizeAtlasTitle(edge.evidence ?? "").includes(normalizeAtlasTitle(filters.evidence))) return false;
     if (search) {
-      const from = graph.nodes.find(node => node.id === edge.from);
-      const to = graph.nodes.find(node => node.id === edge.to);
       const fields = [
-        from?.title, to?.title, edge.relationType, edge.sourceLabel,
+        from?.title, to?.title, edge.relationType, edge.sourceLabel, edge.evidence,
+        from?.provider, from?.providerId, to?.provider, to?.providerId,
       ].map(value => normalizeAtlasTitle(value ?? ""));
       if (!fields.some(value => value.includes(search))) return false;
     }
