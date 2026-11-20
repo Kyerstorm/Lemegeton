@@ -223,22 +223,33 @@ test("private S3 upload, signed retrieval, and failed-delete recovery", {
       [legacyEntry, secondaryAsset, userId],
     );
     await removeArchiveEntryAsset(guildId, userId, legacyEntry, 2);
-    assert.equal((await queryOne<{ media_asset_id: string }>(
+    const remainingLegacyEntry = await queryOne<{ media_asset_id: string }>(
       'SELECT media_asset_id::text FROM "' + schema + '".community_archive_entries WHERE id = $1',
       [legacyEntry],
-    ))?.media_asset_id, String(legacyPrimary));
-    assert.deepEqual(await queryOne<{ asset_id: string; position: number }>(
+    );
+    const remainingLegacyLink = await queryOne<{ asset_id: string; position: number }>(
       'SELECT asset_id::text, position FROM "' + schema + '".community_archive_entry_assets WHERE entry_id = $1',
       [legacyEntry],
-    ), { asset_id: String(legacyPrimary), position: 1 });
-    assert.equal(await queryOne(
+    );
+    const remainingLegacyPrimary = await queryOne(
       'SELECT id FROM "' + schema + '".media_assets WHERE id = $1',
       [legacyPrimary],
-    ) !== null, true);
-    assert.equal(await queryOne(
+    );
+    const removedLegacySecondary = await queryOne(
       'SELECT id FROM "' + schema + '".media_assets WHERE id = $1',
       [secondaryAsset],
-    ), null);
+    );
+    console.info("Legacy Archive attachment cleanup", {
+      expectedPrimary: String(legacyPrimary),
+      pointer: remainingLegacyEntry?.media_asset_id ?? null,
+      relation: remainingLegacyLink,
+      primaryStillRegistered: remainingLegacyPrimary !== null,
+      secondaryStillRegistered: removedLegacySecondary !== null,
+    });
+    assert.equal(remainingLegacyEntry?.media_asset_id, String(legacyPrimary), "legacy primary pointer must remain");
+    assert.deepEqual(remainingLegacyLink, { asset_id: String(legacyPrimary), position: 1 }, "legacy primary relation must be normalized");
+    assert.ok(remainingLegacyPrimary, "legacy primary asset must remain registered");
+    assert.equal(removedLegacySecondary, null, "removed secondary asset must be deleted");
 
     // Report removal updates the report, entry and asset references as one transition.
     const reportedEntry = await submitArchiveEntry({
