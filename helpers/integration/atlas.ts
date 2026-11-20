@@ -2,10 +2,16 @@ import { query, queryOne } from "../../database.js";
 
 export type MediaCategory = "ANIME" | "MANGA" | "LIGHT_NOVEL" | "WEBNOVEL" | "BOOK" | "MOVIE" | "TV" | "GAME" | "CREATOR" | "FRANCHISE" | "ARCHIVE_ENTRY" | "ARCHIVE_COLLECTION" | "DISCUSSION" | "ACTIVITY";
 export type RelationshipSource = "provider" | "recommendation" | "community";
+export interface AtlasProviderReference {
+  provider: string;
+  providerId: string;
+}
 export interface AtlasRelationInput {
   title: string;
   category: MediaCategory | string;
   url?: string | null;
+  provider?: string | null;
+  providerId?: string | null;
   relationshipType: string;
   imageUrl?: string | null;
 }
@@ -13,6 +19,8 @@ export interface AtlasRelation {
   title: string;
   category: MediaCategory;
   url: string | null;
+  provider?: string | null;
+  providerId?: string | null;
   imageUrl?: string | null;
   relationType: string;
   source: string;
@@ -21,7 +29,9 @@ export interface AtlasRelation {
 }
 interface AtlasRow {
   source_title: string; source_title_key: string; source_category: string; source_url: string | null; source_image_url: string | null;
+  source_provider: string | null; source_provider_id: string | null;
   target_title: string; target_title_key: string; target_category: string; target_url: string | null; target_image_url: string | null;
+  target_provider: string | null; target_provider_id: string | null;
   relationship_type: string; source_kind: RelationshipSource; source_label: string; evidence: string | null;
 }
 export interface AtlasGraphNode {
@@ -29,6 +39,8 @@ export interface AtlasGraphNode {
   title: string;
   category: MediaCategory;
   url: string | null;
+  provider?: string | null;
+  providerId?: string | null;
   imageUrl?: string | null;
   depth: number;
   sourceKind?: RelationshipSource;
@@ -98,9 +110,82 @@ export function safeAtlasImageUrl(value: string | null | undefined): string | nu
     ? safe : null;
 }
 
+const ATLAS_PROVIDER_PATTERN = /^[a-z0-9][a-z0-9._-]{0,31}(?::[a-z0-9][a-z0-9._-]{0,31})?$/;
+const ATLAS_PROVIDER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+
+export function normalizeAtlasProviderReference(
+  provider?: string | null,
+  providerId?: string | null,
+): AtlasProviderReference | null {
+  if (provider == null && providerId == null) return null;
+  const normalizedProvider = String(provider ?? "").trim().toLocaleLowerCase("en-US");
+  const normalizedId = String(providerId ?? "").trim();
+  if (!ATLAS_PROVIDER_PATTERN.test(normalizedProvider) || !ATLAS_PROVIDER_ID_PATTERN.test(normalizedId)) return null;
+  return { provider: normalizedProvider, providerId: normalizedId };
+}
+
+export function atlasProviderReference(
+  category: string,
+  value?: string | null,
+  provider?: string | null,
+  providerId?: string | null,
+): AtlasProviderReference | null {
+  if (provider != null || providerId != null) return normalizeAtlasProviderReference(provider, providerId);
+  const normalizedCategory = normalizeAtlasCategory(category);
+  const safeUrl = safeAtlasUrl(value);
+  if (!normalizedCategory || !safeUrl) return null;
+  const url = new URL(safeUrl);
+  const host = url.hostname.toLowerCase().replace(/^www\./, "");
+  const path = url.pathname;
+  if (host === "anilist.co") {
+    const match = /^\/(anime|manga)\/(\d+)(?:\/|$)/i.exec(path);
+    if (match && ((match[1]?.toLowerCase() === "anime" && normalizedCategory === "ANIME")
+      || (match[1]?.toLowerCase() === "manga" && ["MANGA", "LIGHT_NOVEL", "WEBNOVEL"].includes(normalizedCategory)))) {
+      return { provider: "anilist:" + match[1]!.toLowerCase(), providerId: match[2]! };
+    }
+  }
+  if (host === "themoviedb.org") {
+    const match = /^\/(movie|tv|person|collection)\/(\d+)(?:[-/]|$)/i.exec(path);
+    if (match) {
+      const type = match[1]!.toLowerCase();
+      const valid = (type === "movie" && normalizedCategory === "MOVIE")
+        || (type === "tv" && normalizedCategory === "TV")
+        || (type === "person" && normalizedCategory === "CREATOR")
+        || (type === "collection" && normalizedCategory === "FRANCHISE");
+      if (valid) return { provider: "tmdb:" + type, providerId: match[2]! };
+    }
+  }
+  if (host === "store.steampowered.com" && normalizedCategory === "GAME") {
+    const match = /^\/app\/(\d+)(?:\/|$)/i.exec(path);
+    if (match) return { provider: "steam:app", providerId: match[1]! };
+  }
+  if (host === "books.google.com" && normalizedCategory === "BOOK" && path.startsWith("/books")) {
+    const id = url.searchParams.get("id")?.trim();
+    if (id && /^[A-Za-z0-9_-]{1,80}$/.test(id)) return { provider: "google-books:volume", providerId: id };
+  }
+  if (host === "mangadex.org" && normalizedCategory === "MANGA") {
+    const match = /^\/title\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(?:\/|$)/i.exec(path);
+    if (match) return { provider: "mangadex:title", providerId: match[1]!.toLowerCase() };
+  }
+  if (host === "kitsu.io") {
+    const match = /^\/(anime|manga)\/([A-Za-z0-9_-]{1,40})(?:\/|$)/i.exec(path);
+    const type = match?.[1]?.toLowerCase();
+    if (match && ((type === "anime" && normalizedCategory === "ANIME") || (type === "manga" && normalizedCategory === "MANGA"))) {
+      return { provider: "kitsu:" + type, providerId: match[2]! };
+    }
+  }
+  if (host === "openlibrary.org" && normalizedCategory === "BOOK") {
+    const match = /^\/(works|books)\/(OL[0-9]+[WM])(?:\/|$)/i.exec(path);
+    if (match) return { provider: "open-library:" + match[1]!.toLowerCase(), providerId: match[2]! };
+  }
+  return null;
+}
+
 export async function recordAtlasRelationship(input: {
   sourceTitle: string; sourceCategory: string; sourceUrl?: string | null; sourceImageUrl?: string | null;
+  sourceProvider?: string | null; sourceProviderId?: string | null;
   targetTitle: string; targetCategory: string; targetUrl?: string | null; targetImageUrl?: string | null;
+  targetProvider?: string | null; targetProviderId?: string | null;
   relationshipType: string; sourceKind: RelationshipSource; sourceLabel: string;
   guildId?: string | null; evidence?: string | null; createdBy?: string | null;
 }): Promise<boolean> {
@@ -110,21 +195,29 @@ export async function recordAtlasRelationship(input: {
   const targetKey = normalizeAtlasTitle(targetTitle);
   const sourceCategory = normalizeAtlasCategory(input.sourceCategory);
   const targetCategory = normalizeAtlasCategory(input.targetCategory);
+  const sourceExplicit = input.sourceProvider != null || input.sourceProviderId != null;
+  const targetExplicit = input.targetProvider != null || input.targetProviderId != null;
+  const sourceRef = atlasProviderReference(input.sourceCategory, input.sourceUrl, input.sourceProvider, input.sourceProviderId);
+  const targetRef = atlasProviderReference(input.targetCategory, input.targetUrl, input.targetProvider, input.targetProviderId);
   const relationshipType = input.relationshipType.replace(/_/g, " ").replace(/\s+/g, " ").trim().toLocaleLowerCase("en-US").slice(0, 64) || "related";
   if (!sourceTitle || !targetTitle || !sourceKey || !targetKey || !sourceCategory || !targetCategory
-    || (sourceKey === targetKey && sourceCategory === targetCategory) || !SOURCES.has(input.sourceKind)) return false;
+    || (sourceExplicit && !sourceRef) || (targetExplicit && !targetRef)
+    || (sourceKey === targetKey && sourceCategory === targetCategory && !sourceRef && !targetRef)
+    || (sourceRef && targetRef && sourceRef.provider === targetRef.provider && sourceRef.providerId === targetRef.providerId
+      && sourceCategory === targetCategory)
+    || !SOURCES.has(input.sourceKind)) return false;
   const guildId = input.sourceKind === "community" ? input.guildId?.trim() : null;
   if (input.sourceKind === "community" && !guildId) return false;
 
   const inserted = await queryOne<{ id: string }>(
     `INSERT INTO media_relationship_graph
-      (source_title, source_title_key, source_category, source_url, source_image_url,
-       target_title, target_title_key, target_category, target_url, target_image_url,
+      (source_title, source_title_key, source_category, source_url, source_image_url, source_provider, source_provider_id,
+       target_title, target_title_key, target_category, target_url, target_image_url, target_provider, target_provider_id,
        relationship_type, source_kind, source_label, guild_id, evidence, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
      ON CONFLICT DO NOTHING RETURNING id`,
-    [sourceTitle,sourceKey,sourceCategory,safeAtlasUrl(input.sourceUrl),safeAtlasImageUrl(input.sourceImageUrl),
-      targetTitle,targetKey,targetCategory,safeAtlasUrl(input.targetUrl),safeAtlasImageUrl(input.targetImageUrl),
+    [sourceTitle,sourceKey,sourceCategory,safeAtlasUrl(input.sourceUrl),safeAtlasImageUrl(input.sourceImageUrl),sourceRef?.provider ?? null,sourceRef?.providerId ?? null,
+      targetTitle,targetKey,targetCategory,safeAtlasUrl(input.targetUrl),safeAtlasImageUrl(input.targetImageUrl),targetRef?.provider ?? null,targetRef?.providerId ?? null,
       relationshipType,input.sourceKind,input.sourceLabel.trim().slice(0,100) || input.sourceKind,
       guildId,input.evidence?.trim().slice(0,1500) || null,input.createdBy ?? null],
   );
@@ -133,11 +226,14 @@ export async function recordAtlasRelationship(input: {
 
 export async function recordProviderRelationships(input: {
   sourceTitle: string; sourceCategory: string; sourceUrl?: string | null; sourceImageUrl?: string | null;
+  sourceProvider?: string | null; sourceProviderId?: string | null;
   relations: AtlasRelationInput[]; sourceLabel: string;
 }): Promise<number> {
   const saved = await Promise.all(input.relations.slice(0, 20).map((relation) => recordAtlasRelationship({
     sourceTitle: input.sourceTitle, sourceCategory: input.sourceCategory, sourceUrl: input.sourceUrl, sourceImageUrl: input.sourceImageUrl,
+    sourceProvider: input.sourceProvider, sourceProviderId: input.sourceProviderId,
     targetTitle: relation.title, targetCategory: relation.category, targetUrl: relation.url, targetImageUrl: relation.imageUrl,
+    targetProvider: relation.provider, targetProviderId: relation.providerId,
     relationshipType: relation.relationshipType, sourceKind: "provider", sourceLabel: input.sourceLabel,
   })));
   return saved.filter(Boolean).length;
@@ -145,33 +241,46 @@ export async function recordProviderRelationships(input: {
 
 export async function findAtlasRelationships(
   guildId: string | null, title: string, category: string, url?: string | null, limit = 20,
+  provider?: string | null, providerId?: string | null,
 ): Promise<AtlasRelation[]> {
   const titleKey = normalizeAtlasTitle(title);
   const normalizedCategory = normalizeAtlasCategory(category);
-  if (!titleKey || !normalizedCategory) return [];
+  const providerRef = atlasProviderReference(category, url, provider, providerId);
+  if (!titleKey || !normalizedCategory || ((provider != null || providerId != null) && !providerRef)) return [];
   const safeUrl = safeAtlasUrl(url) ?? "";
   const visibility = guildId ? "(guild_id IS NULL OR guild_id = $1)" : "guild_id IS NULL";
   const offset = guildId ? 1 : 0;
+  const titleParam = offset + 1, categoryParam = offset + 2, urlParam = offset + 3;
+  const providerParam = offset + 4, providerIdParam = offset + 5, limitParam = offset + 6;
   const rows = await query<AtlasRow>(
-`SELECT source_title,source_title_key,source_category,source_url,source_image_url,target_title,target_title_key,
-            target_category,target_url,target_image_url,relationship_type,source_kind,source_label,evidence
+`SELECT source_title,source_title_key,source_category,source_url,source_image_url,source_provider,source_provider_id,
+            target_title,target_title_key,target_category,target_url,target_image_url,target_provider,target_provider_id,
+            relationship_type,source_kind,source_label,evidence
        FROM media_relationship_graph
       WHERE ${visibility}
-        AND ((source_category = $${offset+2} AND ((source_title_key = $${offset+1} AND ($${offset+3} = '' OR source_url = $${offset+3}))
-              OR ($${offset+3} <> '' AND source_url = $${offset+3})))
-          OR (target_category = $${offset+2} AND ((target_title_key = $${offset+1} AND ($${offset+3} = '' OR target_url = $${offset+3}))
-              OR ($${offset+3} <> '' AND target_url = $${offset+3}))))
+        AND ((source_category = $${categoryParam} AND (
+                (source_title_key = $${titleParam} AND ($${urlParam} = '' OR source_url = $${urlParam}))
+                OR ($${urlParam} <> '' AND source_url = $${urlParam})
+                OR ($${providerParam}::text IS NOT NULL AND source_provider = $${providerParam} AND source_provider_id = $${providerIdParam})
+              ))
+          OR (target_category = $${categoryParam} AND (
+                (target_title_key = $${titleParam} AND ($${urlParam} = '' OR target_url = $${urlParam}))
+                OR ($${urlParam} <> '' AND target_url = $${urlParam})
+                OR ($${providerParam}::text IS NOT NULL AND target_provider = $${providerParam} AND target_provider_id = $${providerIdParam})
+              )))
       ORDER BY CASE source_kind WHEN 'provider' THEN 0 WHEN 'recommendation' THEN 1 ELSE 2 END,
                created_at DESC
-      LIMIT $${offset+4}`,
-    guildId ? [guildId,titleKey,normalizedCategory,safeUrl,Math.max(1,Math.min(limit,30))]
-      : [titleKey,normalizedCategory,safeUrl,Math.max(1,Math.min(limit,30))],
+      LIMIT $${limitParam}`,
+    guildId
+      ? [guildId,titleKey,normalizedCategory,safeUrl,providerRef?.provider ?? null,providerRef?.providerId ?? null,Math.max(1,Math.min(limit,30))]
+      : [titleKey,normalizedCategory,safeUrl,providerRef?.provider ?? null,providerRef?.providerId ?? null,Math.max(1,Math.min(limit,30))],
   );
   const seen = new Set<string>();
   const result: AtlasRelation[] = [];
   for (const row of rows) {
+    const sourceByProvider = Boolean(providerRef && row.source_provider === providerRef.provider && row.source_provider_id === providerRef.providerId);
     const outgoing = row.source_category === normalizedCategory
-      && (safeUrl ? row.source_url === safeUrl : row.source_title_key === titleKey);
+      && (sourceByProvider || (safeUrl ? row.source_url === safeUrl : row.source_title_key === titleKey));
     const relatedTitle = outgoing ? row.target_title : row.source_title;
     const relatedCategory = normalizeAtlasCategory(outgoing ? row.target_category : row.source_category);
     if (!relatedTitle || !relatedCategory) continue;
@@ -182,57 +291,40 @@ export async function findAtlasRelationships(
     const relation: AtlasRelation = {
       title: relatedTitle, category: relatedCategory,
       url: safeAtlasUrl(outgoing ? row.target_url : row.source_url),
+      provider: outgoing ? row.target_provider : row.source_provider,
+      providerId: outgoing ? row.target_provider_id : row.source_provider_id,
       imageUrl: safeAtlasImageUrl(outgoing ? row.target_image_url : row.source_image_url),
       relationType, source: row.source_label, sourceKind: row.source_kind, evidence: row.evidence,
     };
-    const key = [normalizeAtlasTitle(relation.title),relation.category,relation.url ?? "",relation.relationType].join("|");
+    const key = [relation.provider ?? "",relation.providerId ?? "",normalizeAtlasTitle(relation.title),relation.category,relation.url ?? "",relation.relationType].join("|");
     if (!seen.has(key)) { seen.add(key); result.push(relation); }
   }
   return result;
 }
 
-
-/** Stable identity for one category-aware work/edition node in a bounded graph. */
-export function atlasProviderIdentity(category: string, value?: string | null): string | null {
+/** Stable provider identity for one category-aware work, edition or creator node. */
+export function atlasProviderIdentity(
+  category: string,
+  value?: string | null,
+  provider?: string | null,
+  providerId?: string | null,
+): string | null {
   const normalizedCategory = normalizeAtlasCategory(category);
-  const safeUrl = safeAtlasUrl(value);
-  if (!normalizedCategory || !safeUrl) return null;
-  let url: URL;
-  try {
-    url = new URL(safeUrl);
-  } catch {
-    return null;
-  }
-  const host = url.hostname.toLowerCase().replace(/^www\./, "");
-  const path = url.pathname;
-  if (host === "anilist.co") {
-    const match = /^\/(anime|manga)\/(\d+)(?:\/|$)/i.exec(path);
-    if (match && ((match[1]?.toLowerCase() === "anime" && normalizedCategory === "ANIME")
-      || (match[1]?.toLowerCase() === "manga" && ["MANGA", "LIGHT_NOVEL", "WEBNOVEL"].includes(normalizedCategory)))) {
-      return JSON.stringify(["anilist", match[1]!.toLowerCase(), normalizedCategory, match[2]]);
-    }
-  }
-  if (host === "themoviedb.org") {
-    const match = /^\/(movie|tv)\/(\d+)(?:[-/]|$)/i.exec(path);
-    if (match && ((match[1]?.toLowerCase() === "movie" && normalizedCategory === "MOVIE")
-      || (match[1]?.toLowerCase() === "tv" && normalizedCategory === "TV"))) {
-      return JSON.stringify(["tmdb", match[1]!.toLowerCase(), normalizedCategory, match[2]]);
-    }
-  }
-  if (host === "store.steampowered.com" && normalizedCategory === "GAME") {
-    const match = /^\/app\/(\d+)(?:\/|$)/i.exec(path);
-    if (match) return JSON.stringify(["steam", "app", match[1]]);
-  }
-  if (host === "books.google.com" && normalizedCategory === "BOOK" && path.startsWith("/books")) {
-    const id = url.searchParams.get("id")?.trim();
-    if (id && /^[A-Za-z0-9_-]{1,80}$/.test(id)) return JSON.stringify(["google-books", id]);
-  }
-  return null;
+  const reference = atlasProviderReference(category, value, provider, providerId);
+  return normalizedCategory && reference
+    ? JSON.stringify([reference.provider, normalizedCategory, reference.providerId])
+    : null;
 }
 
-export function atlasNodeIdentity(title: string, category: string, url?: string | null): string {
+export function atlasNodeIdentity(
+  title: string,
+  category: string,
+  url?: string | null,
+  provider?: string | null,
+  providerId?: string | null,
+): string {
   const normalizedCategory = normalizeAtlasCategory(category);
-  const providerIdentity = atlasProviderIdentity(category, url);
+  const providerIdentity = atlasProviderIdentity(category, url, provider, providerId);
   if (providerIdentity) return JSON.stringify(["provider", providerIdentity]);
   return JSON.stringify([normalizedCategory, normalizeAtlasTitle(title), safeAtlasUrl(url)]);
 }
@@ -243,13 +335,13 @@ export function atlasNodeIdentity(title: string, category: string, url?: string 
  * displacing the root's direct connections.
  */
 export async function buildAtlasGraph(
-  root: { title: string; category: string; url?: string | null; imageUrl?: string | null },
+  root: { title: string; category: string; url?: string | null; provider?: string | null; providerId?: string | null; imageUrl?: string | null },
   loadRelationships: (node: AtlasGraphNode, limit: number) => Promise<AtlasRelation[]>,
   options: AtlasGraphOptions = {},
 ): Promise<AtlasGraphResult> {
   const category = normalizeAtlasCategory(root.category);
   const title = root.title.replace(/\s+/g, " ").trim().slice(0, 256);
-  const rootId = atlasNodeIdentity(title, root.category, root.url);
+  const rootId = atlasNodeIdentity(title, root.category, root.url, root.provider, root.providerId);
   if (!category || !normalizeAtlasTitle(title) || rootId.startsWith("[null")) {
     return { rootId: "", nodes: [], edges: [], directRelationships: [], truncated: false };
   }
@@ -258,7 +350,10 @@ export async function buildAtlasGraph(
   const maxNodes = Math.max(2, Math.min(40, Math.floor(options.maxNodes ?? 24)));
   const perNodeLimit = Math.max(1, Math.min(16, Math.floor(options.perNodeLimit ?? 8)));
   const rootNode: AtlasGraphNode = {
-    id: rootId, title, category, url: safeAtlasUrl(root.url), imageUrl: safeAtlasImageUrl(root.imageUrl), depth: 0,
+    id: rootId, title, category, url: safeAtlasUrl(root.url),
+    provider: atlasProviderReference(root.category, root.url, root.provider, root.providerId)?.provider ?? null,
+    providerId: atlasProviderReference(root.category, root.url, root.provider, root.providerId)?.providerId ?? null,
+    imageUrl: safeAtlasImageUrl(root.imageUrl), depth: 0,
   };
   const nodes = new Map<string, AtlasGraphNode>([[rootId, rootNode]]);
   const parentByNode = new Map<string, string | null>([[rootId, null]]);
@@ -289,7 +384,7 @@ export async function buildAtlasGraph(
         const targetCategory = normalizeAtlasCategory(relation.category);
         const targetTitle = relation.title.replace(/\s+/g, " ").trim().slice(0, 256);
         if (!targetCategory || !normalizeAtlasTitle(targetTitle)) continue;
-        const targetId = atlasNodeIdentity(targetTitle, targetCategory, relation.url);
+        const targetId = atlasNodeIdentity(targetTitle, targetCategory, relation.url, relation.provider, relation.providerId);
         if (!targetId || targetId === batch.node.id) continue;
 
         let target = nodes.get(targetId);
@@ -304,6 +399,8 @@ export async function buildAtlasGraph(
             title: targetTitle,
             category: targetCategory,
             url: safeAtlasUrl(relation.url),
+            provider: relation.provider ?? null,
+            providerId: relation.providerId ?? null,
             imageUrl: safeAtlasImageUrl(relation.imageUrl),
             depth: batch.node.depth + 1,
             sourceKind: relation.sourceKind,
@@ -339,12 +436,12 @@ export async function buildAtlasGraph(
 /** Multi-hop expansion always reuses the guild-scoped relationship query at every hop. */
 export function findAtlasGraph(
   guildId: string | null,
-  root: { title: string; category: string; url?: string | null; imageUrl?: string | null },
+  root: { title: string; category: string; url?: string | null; provider?: string | null; providerId?: string | null; imageUrl?: string | null },
   options: AtlasGraphOptions = {},
 ): Promise<AtlasGraphResult> {
   return buildAtlasGraph(
     root,
-    (node, limit) => findAtlasRelationships(guildId, node.title, node.category, node.url, limit),
+    (node, limit) => findAtlasRelationships(guildId, node.title, node.category, node.url, limit, node.provider, node.providerId),
     options,
   );
 }
@@ -425,7 +522,7 @@ export function filterAtlasGraph(graph: AtlasGraphResult, filters: AtlasGraphFil
     JSON.stringify([edge.to, edge.relationType, edge.sourceKind, edge.sourceLabel])));
   const directRelationships = filterAtlasRelations(graph.directRelationships, filters).filter((relation) =>
     directEdges.has(JSON.stringify([
-      atlasNodeIdentity(relation.title, relation.category, relation.url),
+      atlasNodeIdentity(relation.title, relation.category, relation.url, relation.provider, relation.providerId),
       relation.relationType, relation.sourceKind, relation.source,
     ])));
   return {
@@ -438,13 +535,14 @@ export function filterAtlasGraph(graph: AtlasGraphResult, filters: AtlasGraphFil
 
 export function findAtlasPath(
   graph: AtlasGraphResult,
-  target: { title: string; category: string; url?: string | null },
+  target: { title: string; category: string; url?: string | null; provider?: string | null; providerId?: string | null },
 ): AtlasGraphPath | null {
   const category = normalizeAtlasCategory(target.category);
   const titleKey = normalizeAtlasTitle(target.title);
   if (!category || !titleKey || !graph.rootId) return null;
-  const targetId = target.url
-    ? atlasNodeIdentity(target.title, target.category, target.url)
+  const targetIdentityProvided = target.provider != null || target.providerId != null;
+  const targetId = target.url || targetIdentityProvided
+    ? atlasNodeIdentity(target.title, target.category, target.url, target.provider, target.providerId)
     : graph.nodes.find(node => node.category === category && normalizeAtlasTitle(node.title) === titleKey)?.id;
   if (!targetId || targetId === graph.rootId || !graph.nodes.some(node => node.id === targetId)) return null;
   const visited = new Set<string>([graph.rootId]);
