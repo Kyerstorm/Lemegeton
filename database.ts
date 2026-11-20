@@ -738,9 +738,22 @@ const schemaStatements = [
   )`,
   "ALTER TABLE media_relationship_graph ADD COLUMN IF NOT EXISTS source_image_url TEXT",
   "ALTER TABLE media_relationship_graph ADD COLUMN IF NOT EXISTS target_image_url TEXT",
+  "ALTER TABLE media_relationship_graph ADD COLUMN IF NOT EXISTS source_provider VARCHAR(40)",
+  "ALTER TABLE media_relationship_graph ADD COLUMN IF NOT EXISTS source_provider_id VARCHAR(128)",
+  "ALTER TABLE media_relationship_graph ADD COLUMN IF NOT EXISTS target_provider VARCHAR(40)",
+  "ALTER TABLE media_relationship_graph ADD COLUMN IF NOT EXISTS target_provider_id VARCHAR(128)",
   "CREATE INDEX IF NOT EXISTS media_relationship_graph_source_idx ON media_relationship_graph (source_title_key, source_category, created_at DESC)",
   "CREATE INDEX IF NOT EXISTS media_relationship_graph_target_idx ON media_relationship_graph (target_title_key, target_category, created_at DESC)",
   "CREATE INDEX IF NOT EXISTS media_relationship_graph_guild_idx ON media_relationship_graph (guild_id, source_kind, created_at DESC)",
+  "CREATE INDEX IF NOT EXISTS media_relationship_graph_source_provider_idx ON media_relationship_graph (source_category, source_provider, source_provider_id) WHERE source_provider IS NOT NULL AND source_provider_id IS NOT NULL",
+  "CREATE INDEX IF NOT EXISTS media_relationship_graph_target_provider_idx ON media_relationship_graph (target_category, target_provider, target_provider_id) WHERE target_provider IS NOT NULL AND target_provider_id IS NOT NULL",
+  `CREATE UNIQUE INDEX IF NOT EXISTS media_relationship_graph_provider_identity_idx
+    ON media_relationship_graph (
+      source_category,source_provider,source_provider_id,target_category,target_provider,target_provider_id,
+      relationship_type,source_kind,COALESCE(guild_id,0)
+    )
+    WHERE source_provider IS NOT NULL AND source_provider_id IS NOT NULL
+      AND target_provider IS NOT NULL AND target_provider_id IS NOT NULL`,
   `CREATE UNIQUE INDEX IF NOT EXISTS media_relationship_graph_identity_idx
     ON media_relationship_graph (
       source_title_key,source_category,COALESCE(source_url,''),target_title_key,target_category,

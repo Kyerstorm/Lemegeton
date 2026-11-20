@@ -45,6 +45,7 @@ import { deleteGuildData, retryDepartedGuildDeletions } from "../helpers/runtime
 import { claimDueReadingReminders } from "../helpers/community/community-reading.js";
 import { claimDueMediaNightResults } from "../helpers/community/community-rankings.js";
 import { followAniListAnime, getGuildMediaFollows, unfollowAniListAnime } from "../helpers/media/media-notifications.js";
+import { findAtlasRelationships, recordAtlasRelationship } from "../helpers/integration/atlas.js";
 import {
   claimDueMediaAutomationDeliveries,
   claimDueMediaAutomationRules,
@@ -1751,6 +1752,44 @@ test("PostgreSQL initialization preserves legacy guild data and is repeatable", 
     assert.equal((await getReleaseSchedule(pausedDigestGuild))?.enabled, true);
     assert.equal((await dueReleaseDeliveries()).some(delivery => delivery.guild_id === pausedDigestGuild), false,
       "resume does not silently requeue deliveries that were explicitly failed during pause");
+
+    // Atlas provider IDs remain canonical when provider slugs or display names change.
+    const atlasGuild = "333333333333333342";
+    const atlasSource = {
+      sourceTitle: "Old IGDB Slug",
+      sourceCategory: "GAME",
+      sourceUrl: "https://www.igdb.com/games/old-slug",
+      sourceProvider: "IGDB:GAME",
+      sourceProviderId: "900001",
+      targetTitle: "Old credited game",
+      targetCategory: "GAME",
+      targetUrl: "https://www.igdb.com/games/old-credit",
+      targetProvider: "igdb:game",
+      targetProviderId: "900002",
+      relationshipType: "developer credit",
+      sourceKind: "provider" as const,
+      sourceLabel: "IGDB company workography",
+    };
+    assert.equal(await recordAtlasRelationship(atlasSource), true);
+    assert.equal(await recordAtlasRelationship({
+      ...atlasSource,
+      sourceTitle: "Renamed IGDB Company",
+      sourceUrl: "https://www.igdb.com/companies/new-slug",
+      targetTitle: "Renamed Game",
+      targetUrl: "https://www.igdb.com/games/new-slug",
+    }), false, "provider ID pairs deduplicate records after source title and URL changes");
+    const renamedAtlasEdges = await findAtlasRelationships(
+      atlasGuild, "Renamed IGDB Company", "GAME", "https://www.igdb.com/companies/new-slug", 20, "igdb:game", "900001",
+    );
+    assert.equal(renamedAtlasEdges.length, 1);
+    assert.equal(renamedAtlasEdges[0]?.provider, "igdb:game");
+    assert.equal(renamedAtlasEdges[0]?.providerId, "900002");
+    assert.equal(renamedAtlasEdges[0]?.title, "Old credited game");
+    assert.equal(
+      (await findAtlasRelationships(atlasGuild, "Renamed IGDB Company", "ANIME", undefined, 20, "igdb:game", "900001")).length,
+      0,
+      "same provider ID under a different category must not resolve a game node",
+    );
 
     const retentionGuild = "333333333333333333";
     const retentionOtherGuild = "333333333333333334";

@@ -100,11 +100,42 @@ test("Atlas canonicalizes stable provider identities without merging different w
     atlasNodeIdentity("Example", "ANIME", "https://anilist.co/anime/123"),
     atlasNodeIdentity("Example", "MANGA", "https://anilist.co/manga/123"),
   );
-  assert.equal(atlasProviderIdentity("MOVIE", "https://www.themoviedb.org/movie/550-example"), JSON.stringify(["tmdb","movie","MOVIE","550"]));
-  assert.equal(atlasProviderIdentity("TV", "https://www.themoviedb.org/tv/1399-example"), JSON.stringify(["tmdb","tv","TV","1399"]));
-  assert.equal(atlasProviderIdentity("GAME", "https://store.steampowered.com/app/620/portal/"), JSON.stringify(["steam","app","620"]));
-  assert.equal(atlasProviderIdentity("BOOK", "https://books.google.com/books?id=abc_123&printsec=frontcover"), JSON.stringify(["google-books","abc_123"]));
+  assert.equal(atlasProviderIdentity("MOVIE", "https://www.themoviedb.org/movie/550-example"), JSON.stringify(["tmdb:movie","MOVIE","550"]));
+  assert.equal(atlasProviderIdentity("TV", "https://www.themoviedb.org/tv/1399-example"), JSON.stringify(["tmdb:tv","TV","1399"]));
+  assert.equal(atlasProviderIdentity("GAME", "https://store.steampowered.com/app/620/portal/"), JSON.stringify(["steam:app","GAME","620"]));
+  assert.equal(atlasProviderIdentity("BOOK", "https://books.google.com/books?id=abc_123&printsec=frontcover"), JSON.stringify(["google-books:volume","BOOK","abc_123"]));
   assert.equal(atlasProviderIdentity("BOOK", "https://example.com/book/123"), null);
+  assert.equal(atlasProviderIdentity("CREATOR", "https://www.themoviedb.org/person/456-someone"), JSON.stringify(["tmdb:person","CREATOR","456"]));
+  assert.equal(atlasProviderIdentity("FRANCHISE", "https://www.themoviedb.org/collection/789-series"), JSON.stringify(["tmdb:collection","FRANCHISE","789"]));
+  assert.equal(atlasProviderIdentity("MANGA", "https://mangadex.org/title/01234567-89ab-4cde-8fab-0123456789ab/example"),
+    JSON.stringify(["mangadex:title","MANGA","01234567-89ab-4cde-8fab-0123456789ab"]));
+  assert.equal(atlasProviderIdentity("ANIME", "https://kitsu.io/anime/12345-title"), JSON.stringify(["kitsu:anime","ANIME","12345"]));
+});
+
+test("Atlas provider IDs preserve canonical nodes across title and URL changes", () => {
+  const oldRecord = atlasNodeIdentity("Old game title", "GAME", "https://old.example/games/old-title", "igdb:game", "9001");
+  const renamedRecord = atlasNodeIdentity("New game title", "GAME", "https://new.example/games/new-title", "igdb:game", "9001");
+  assert.equal(oldRecord, renamedRecord);
+  assert.notEqual(oldRecord, atlasNodeIdentity("New game title", "GAME", "https://new.example/games/new-title", "igdb:game", "9002"));
+  assert.notEqual(oldRecord, atlasNodeIdentity("New game title", "ANIME", "https://new.example/games/new-title", "igdb:game", "9001"));
+  assert.equal(atlasProviderIdentity("GAME", undefined, "IGDB:GAME", " 9001 "), JSON.stringify(["igdb:game","GAME","9001"]));
+  assert.equal(atlasProviderIdentity("GAME", undefined, "igdb:game", ""), null);
+  assert.equal(atlasProviderIdentity("GAME", undefined, "bad provider", "9001"), null);
+});
+
+test("Atlas graph traversal preserves provider IDs on root and related nodes", async () => {
+  const graph = await buildAtlasGraph(
+    { title: "Old root", category: "GAME", provider: "igdb:game", providerId: "10" },
+    async () => [{
+      title: "Renamed target", category: "GAME", url: null, provider: "igdb:game", providerId: "20",
+      relationType: "developer credit", source: "IGDB", sourceKind: "provider",
+    }],
+    { maxDepth: 1, maxNodes: 4, perNodeLimit: 4 },
+  );
+  assert.equal(graph.nodes[0]?.provider, "igdb:game");
+  assert.equal(graph.nodes[0]?.providerId, "10");
+  assert.equal(graph.nodes[1]?.providerId, "20");
+  assert.equal(graph.nodes[1]?.id, atlasNodeIdentity("Different display name", "GAME", null, "igdb:game", "20"));
 });
 
 test("Atlas filtering keeps only matching category, relationship and provenance edges", async () => {
