@@ -919,7 +919,7 @@ export class PlayCommand implements FeatureCommand {
     if (!session) throw new Error("That game session was not found.");
     if (session.host_id !== interaction.user.id) throw new Error("Only the host can advance or finish the game.");
     const current = await getCurrentGameQuestion(interaction.guildId!, sessionId);
-    const result = await advanceGame(interaction.guildId!, sessionId, interaction.user.id, finish, expectedRound);
+    const result = await advanceGame(interaction.guildId!, sessionId, interaction.user.id, finish, session.current_round);
     const leaderboard = result.finished ? await getGameLeaderboard(interaction.guildId!, sessionId) : [];
     await interaction.reply({
       embeds: [homeEmbed(result.finished ? "Game finished" : "Round advanced", [
@@ -941,7 +941,7 @@ export class PlayCommand implements FeatureCommand {
       return;
     }
     const current = await getCurrentGameQuestion(interaction.guildId!, sessionId);
-    const result = await advanceGame(interaction.guildId!, sessionId, interaction.user.id, finish);
+    const result = await advanceGame(interaction.guildId!, sessionId, interaction.user.id, finish, expectedRound);
     if (result.finished) {
       const leaderboard = await getGameLeaderboard(interaction.guildId!, sessionId);
       const embed = homeEmbed("Game finished", [
