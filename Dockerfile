@@ -15,6 +15,7 @@ COPY bot.ts database.ts ./
 COPY src ./src
 COPY helpers ./helpers
 COPY tests ./tests
+COPY web/frontend/src/Components/CustomRoles/picker-utils.ts ./web/frontend/src/Components/CustomRoles/picker-utils.ts
 RUN npm install --no-audit --no-fund \
     && npm test \
     && npm prune --omit=dev --no-audit --no-fund
