@@ -100,18 +100,28 @@ export function hsvToRgb({ h, s, v }: HSV): RGB {
   return [channel(5), channel(3), channel(1)];
 }
 
-export function luminance(hex: string): number {
-  const [red, green, blue] = hexToRgb(hex).map(channel => {
-    const normalized = channel / 255;
-    return normalized <= 0.03928
-      ? normalized / 12.92
-      : ((normalized + 0.055) / 1.055) ** 2.4;
-  });
+function linearize(channel: number): number {
+  const normalized = channel / 255;
+  return normalized <= 0.03928
+    ? normalized / 12.92
+    : ((normalized + 0.055) / 1.055) ** 2.4;
+}
 
-  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+export function luminance(hex: string): number {
+  const [red, green, blue] = hexToRgb(hex);
+
+  return (
+    0.2126 * linearize(red) +
+    0.7152 * linearize(green) +
+    0.0722 * linearize(blue)
+  );
 }
 
 export function contrast(first: string, second: string): number {
-  const [high, low] = [luminance(first), luminance(second)].sort((a, b) => b - a);
+  const firstLuminance = luminance(first);
+  const secondLuminance = luminance(second);
+  const high = Math.max(firstLuminance, secondLuminance);
+  const low = Math.min(firstLuminance, secondLuminance);
+
   return (high + 0.05) / (low + 0.05);
 }
