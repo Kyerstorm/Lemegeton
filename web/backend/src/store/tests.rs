@@ -1,6 +1,4 @@
-use super::*;
-use crate::state::{DashboardUser, OAuthState, Session};
-use uuid::Uuid;
+use crate::state::OAuthState;
 
 use super::*;
     use crate::state::{DashboardUser, Session};
