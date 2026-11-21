@@ -178,6 +178,8 @@ web/
 │       │   ├── commands.rs                 # Command settings and access policy endpoints
 │       │   └── picker.rs                   # Private Custom Roles API proxy
 │       ├── api.rs                          # Common endpoints and API module exports
+│       ├── auth/
+│       │   └── tests.rs                    # OAuth and authenticated guild route tests
 │       ├── auth.rs                         # Discord OAuth, sessions and authenticated slug routes
 │       ├── config.rs                       # Environment parsing and deployment validation
 │       ├── errors.rs                       # Shared API errors
@@ -186,6 +188,8 @@ web/
 │       ├── rate_limit.rs                   # SQLite request limits and trusted proxy IP resolution
 │       ├── routes.rs                       # Axum router composition
 │       ├── security.rs                     # Security headers and consent enforcement middleware
+│       ├── state/
+│       │   └── tests.rs                    # Session, CSRF, bridge and config tests
 │       ├── state.rs                        # Shared session and bridge state
 │       ├── store.rs                        # SQLite persistence and coordination
 │       └── ui.rs                           # Static assets and UI route responses
