@@ -11,7 +11,7 @@ export const PICKER_STYLES = String.raw`
   color-scheme: dark;
   /* Shared tokens are aligned with dashboard-frontend/src/styles.ts. */
   --cr-soft: #b8beb5;
-  --cr-bg-glow: #1b2117;
+  --cr-bg-glow: #1b1b1b;
   --cr-mark-tracking: -.08em;
   --cr-brand-tracking: .19em;
   --cr-brand-tracking-small: .15em;
@@ -21,18 +21,18 @@ export const PICKER_STYLES = String.raw`
   --cr-eyebrow-tracking: .13em;
   --cr-hero-tracking: -.065em;
   --cr-font-size-hero-responsive: clamp(2rem, 5vw, 3.75rem);
-  --cr-line-soft: #202420;
-  --cr-line-strong: #4a5047;
+  --cr-line-soft: #202020;
+  --cr-line-strong: #4a4a4a;
   --cr-brand-mark: 41px;
-  --cr-brand-line: #4c5940;
-  --cr-brand-top: #222b1b;
+  --cr-brand-line: #4c4c4c;
+  --cr-brand-top: #222222;
   --cr-font-size-brand: 20px;
   --cr-font-size-micro: 9px;
   --cr-status-led: 6px;
   --cr-glow-size: 14px;
   --cr-glow-hover: 22px;
-  --cr-glow-color: #d9ff7255;
-  --cr-glow-soft: #d9ff7222;
+  --cr-glow-color: #ffffff22;
+  --cr-glow-soft: #ffffff12;
   --cr-font-size-hero-min: 2rem;
   --cr-font-size-hero: 3.75rem;
   --cr-font-size-hero-mobile: 2.5rem;
@@ -58,11 +58,11 @@ export const PICKER_STYLES = String.raw`
   /* text boxes */
   --cr-input-border: #282d28;
   /* text box and swatch outlines */
-  --cr-accent: #d9ff72;
+  --cr-accent: #f5f5f5;
   /* main buttons, selected tab and style (Discord blurple) */
-  --cr-accent-hover: #e5ffa4;
+  --cr-accent-hover: #ffffff;
   /* main buttons when hovered */
-  --cr-accent-text: #161b11;
+  --cr-accent-text: #111111;
   /* text on accent */
   --cr-secondary-bg: #151815;
   /* secondary buttons (Reset, Done) */
@@ -72,7 +72,7 @@ export const PICKER_STYLES = String.raw`
   /* disabled buttons */
   --cr-disabled-text: #687064;
   /* text on disabled buttons */
-  --cr-focus: #d9ff72;
+  --cr-focus: #ffffff;
   /* keyboard focus outline */
   --cr-selected-ring: #eff1ed;
   /* ring around the picked palette swatch */
