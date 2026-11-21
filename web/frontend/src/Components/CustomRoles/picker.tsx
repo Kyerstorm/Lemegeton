@@ -440,14 +440,12 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
       icon = { type: "emoji", value: iconEdit.emoji };
     }
     all<HTMLImageElement>("[data-icon-img]").forEach((img) => {
-      const isImage = icon?.type === "image";
-      if (isImage) img.src = icon.url;
-      show(img, isImage);
+      if (icon?.type === "image") img.src = icon.url;
+      show(img, icon?.type === "image");
     });
     all("[data-icon-emoji]").forEach((el) => {
-      const isEmoji = icon?.type === "emoji";
-      el.textContent = isEmoji ? icon.value : "";
-      show(el, isEmoji);
+      el.textContent = icon?.type === "emoji" ? icon.value : "";
+      show(el, icon?.type === "emoji");
     });
   }
 
