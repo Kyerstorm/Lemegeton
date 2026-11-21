@@ -46,7 +46,7 @@ There is no Next.js API server. OAuth callbacks, protected configuration writes,
 
 ## 2. Current tracked web structure
 
-This is the actual **web/** tree after the first dashboard foundation changes on `lemegeton-v3`.
+This is the current tracked web/ tree on lemegeton-v3.
 
 ~~~text
 web/
@@ -61,67 +61,71 @@ web/
 │       ├── store.rs
 │       └── ui.rs
 ├── favicon.svg
-├── frontend/
-│   ├── app/
-│   │   ├── error.tsx
-│   │   ├── global-error.tsx
-│   │   ├── globals.css
-│   │   ├── layout.tsx
-│   │   ├── loading.tsx
-│   │   ├── login/
-│   │   │   └── page.tsx
-│   │   ├── not-found.tsx
-│   │   └── page.tsx
-│   ├── next-env.d.ts
-│   ├── next.config.ts
-│   ├── package.json
-│   ├── public/
-│   │   └── brand/
-│   │       └── lemegeton.svg
-│   ├── src/
-│   │   ├── App.tsx
-│   │   └── Components/
-│   │       ├── Brand/
-│   │       │   └── BrandMark.tsx
-│   │       ├── Icons/
-│   │       │   ├── Icon.tsx
-│   │       │   ├── IconRegistry.ts
-│   │       │   └── index.ts
-│   │       └── Feedback/
-│   │           ├── ErrorState.tsx
-│   │           └── NotFoundState.tsx
-│   └── tsconfig.json
-├── picker.css
-├── picker.html
-├── picker.js
-└── theme.css
+└── frontend/
+    ├── app/
+    │   ├── custom-roles/
+    │   │   └── page.tsx
+    │   ├── error.tsx
+    │   ├── global-error.tsx
+    │   ├── layout.tsx
+    │   ├── loading.tsx
+    │   ├── login/
+    │   │   └── page.tsx
+    │   ├── not-found.tsx
+    │   └── page.tsx
+    ├── next-env.d.ts
+    ├── next.config.ts
+    ├── package.json
+    ├── public/
+    │   └── brand/
+    │       └── lemegeton.svg
+    ├── src/
+    │   ├── App.tsx
+    │   ├── Components/
+    │   │   ├── Brand/
+    │   │   │   └── BrandMark.tsx
+    │   │   ├── CustomRoles/
+    │   │   │   ├── CustomRolesClient.tsx
+    │   │   │   ├── PickerMarkup.tsx
+    │   │   │   ├── PickerStyles.tsx
+    │   │   │   └── picker.tsx
+    │   │   ├── Feedback/
+    │   │   │   ├── ErrorState.tsx
+    │   │   │   └── NotFoundState.tsx
+    │   │   ├── Icons/
+    │   │   │   ├── Icon.tsx
+    │   │   │   ├── IconRegistry.ts
+    │   │   │   └── index.ts
+    │   │   └── Three/
+    │   │       ├── SceneCanvas.tsx
+    │   │       ├── SceneFallback.tsx
+    │   │       └── SceneLoader.tsx
+    │   └── DesignSystem/
+    │       └── GlobalStyles.tsx
+    └── tsconfig.json
 ~~~
 
-### Existing file responsibilities
+### Current file responsibilities
 
-| Path | Responsibility / status |
+| Path | Responsibility |
 |:--|:--|
-| backend/src/main.rs | Axum startup; browser fallback serves the exported custom 404 and API fallback returns JSON 404 |
-| backend/src/ui.rs | Static export and asset serving, including the generated 404 document |
-| backend/src/api.rs | Dashboard API handlers and private Custom Roles service proxy |
+| backend/src/main.rs | Axum routes, security headers, trusted-proxy handling and SQLite-backed request limits |
+| backend/src/ui.rs | Generated Next.js page and asset serving, including custom 404 and Custom Roles route |
+| backend/src/api.rs | Dashboard APIs, revision-checked batch writes, command access API and private picker API proxy |
 | backend/src/auth.rs | Discord OAuth start/callback, session creation, bootstrap and logout |
 | backend/src/state.rs | Shared configuration, sessions, guild authorization and bridge helpers |
-| backend/src/store.rs | SQLite WAL session and coordination persistence |
-| frontend/src/App.tsx | Existing dashboard; navigation now uses shared animated SVG icons and the Lemegeton brand mark |
-| frontend/src/Components/Brand/BrandMark.tsx | Shared web-owned Lemegeton logo component |
-| frontend/src/Components/Icons/Icon.tsx | Animated SVG renderer with reduced-motion handling |
-| frontend/src/Components/Icons/IconRegistry.ts | Typed icon-name registry |
-| frontend/src/Components/Icons/index.ts | Shared icon exports |
-| frontend/src/Components/Feedback/NotFoundState.tsx | Branded 404 presentation |
-| frontend/src/Components/Feedback/ErrorState.tsx | Recoverable dashboard failure presentation |
-| frontend/app/not-found.tsx | Next.js custom not-found entry |
-| frontend/app/error.tsx | Next.js route error boundary |
-| frontend/app/global-error.tsx | Root-level Next.js error boundary |
-| frontend/app/loading.tsx | Next.js route loading state |
-| frontend/public/brand/lemegeton.svg | Web-owned copy of the existing Lemegeton logo |
-| picker.html, picker.js, picker.css, theme.css | Still-tracked migration inputs; port behavior to TSX/TypeScript before deleting |
+| backend/src/store.rs | SQLite WAL sessions, OAuth state, rate events and refresh coordination |
+| frontend/src/App.tsx | Dashboard shell, local command drafts and role/channel access editor |
+| frontend/src/Components/Brand/BrandMark.tsx | Shared Lemegeton brand component |
+| frontend/src/Components/Icons/* | Shared animated SVG icon registry and renderer |
+| frontend/src/Components/CustomRoles/* | Migrated picker markup, styles, mount and behavior |
+| frontend/src/DesignSystem/GlobalStyles.tsx | Global dashboard styles embedded in TypeScript |
+| frontend/src/Components/Three/* | Lazy monochrome React Three Fiber scene and fallback |
+| frontend/app/custom-roles/page.tsx | Static Next route served by Rust at /custom-roles/ |
+| frontend/app/not-found.tsx and error boundaries | Branded not-found and recoverable error states |
+| helpers/runtime/command-access.ts | Guild-scoped PostgreSQL policy persistence and access checks |
 
-The custom 404 is generated by Next.js as build output and served by Rust with HTTP 404. No authored HTML page was added. The existing global and picker CSS files remain migration work; this first implementation does not claim the CSS-to-TSX migration is complete.
+No authored HTML, JavaScript or CSS files remain in the web frontend source. The old picker and global CSS files were removed after migrating their content into TSX/TypeScript. The picker controller retains a temporary @ts-nocheck while its original imperative behavior receives a full explicit type pass.
 
 ---
 
@@ -403,61 +407,36 @@ Only add a file when its responsibility is needed. This tree is the intended ful
 
 ---
 
-## 4. Legacy picker and theme migration
+## 4. Custom Roles picker and theme migration
 
-The existing standalone picker must become a normal part of the Next.js/React interface.
+The standalone picker is now part of the statically exported Next.js application.
 
-| Current file | Target | Final action |
+| Previous source | Current implementation | Status |
 |:--|:--|:--|
-| web/picker.html | frontend/app/custom-roles/page.tsx | Remove old HTML after route parity |
-| web/picker.js | frontend/src/Features/CustomRoles/*.tsx and *.ts | Move behavior into typed React components and TypeScript utilities, then remove |
-| web/picker.css | Styled Components inside the picker components | Move visual rules to TSX, then remove |
-| web/theme.css | frontend/src/DesignSystem/Tokens.ts and ThemeProvider.tsx | Move tokens to TypeScript, then remove |
-| frontend/app/globals.css | frontend/src/DesignSystem/GlobalStyles.tsx | Migrate global styling, then remove the CSS file |
-| web/favicon.svg | frontend/public/brand/favicon.svg | Move and update references |
-| assets/icons/lemegeton.svg | frontend/public/brand/lemegeton.svg | Move or copy after checking every existing consumer |
+| web/picker.html | frontend/app/custom-roles/page.tsx and CustomRoles/PickerMarkup.tsx | Migrated; old HTML deleted |
+| web/picker.js | frontend/src/Components/CustomRoles/picker.tsx | Existing interaction controller preserved; explicit type pass remains |
+| web/picker.css + web/theme.css | CustomRoles/PickerStyles.tsx | Theme and picker styles moved into TypeScript |
+| frontend/app/globals.css | frontend/src/DesignSystem/GlobalStyles.tsx | Global dashboard styles moved into TSX |
 
-### Custom Roles parity requirements
+The TSX route retains color normalization and previews, role-name editing, gradient and enhanced-style checks, emoji and image icons, upload validation, crop controls, expiry/cooldown status and existing error/loading states.
 
-The TSX implementation must preserve the existing picker behavior before the old files are deleted:
+The short-lived picker token is read from the URL fragment, removed from the visible address, held in tab-local session storage and sent only through the Authorization header. It is never sent in a query string, and the dashboard session cookie is never forwarded to the picker service.
 
-- Color entry, normalization, preview and validation.
-- Dark and light Discord message previews.
-- Role name editing.
-- Gradient and enhanced-style capability checks.
-- Role icon emoji and image selection.
-- Image upload, crop and size validation.
-- Existing access/error banners and loading states.
-- Private picker-token handling.
+Rust serves the generated /custom-roles/ page from the Next export. Only /custom-roles/api/* is proxied to the private picker service; all other picker-service paths are rejected. The service remains loopback-only.
 
-The current picker receives its short-lived token after the URL fragment. The migration must preserve the important security properties: consume the fragment, remove it from the visible address, keep the token tab-local, send it only in the Authorization header, never put it in a query string, and never forward the dashboard session cookie to the picker service.
-
-The current Rust proxy owns the /custom-roles path. During migration, the browser page will own /custom-roles/ and the Rust proxy will move to an API-only namespace such as /api/custom-roles/. Keep the picker service private until its functionality has been migrated and verified. Do not expose its internal port publicly.
-
-### SVG and pasted input safety
-
-SVG is an accepted asset format, but an SVG upload is still untrusted input. Do not inject pasted markup into the DOM or render arbitrary SVG strings directly. Validate the file type and size, reject scripts, event attributes, foreignObject and external references, and use a trusted sanitizing/rasterization path before preview or storage. Server-side checks remain authoritative.
+SVG and uploaded image safety remains server-authoritative. Never inject pasted markup or arbitrary user SVG into the page; retain file-size/type checks, sanitization and safe preview handling.
 
 ---
 
 ## 5. Styling: TSX only
 
-The final authored frontend source should contain:
+The authored frontend source contains TypeScript, TSX, JSON configuration and SVG assets; standalone HTML, JavaScript and CSS files are not used.
 
-- TypeScript: .ts
-- React components: .tsx
-- Static vector assets: .svg
-- Configuration and metadata: .json, .toml and other required non-HTML source formats
+Global dashboard styles are held in src/DesignSystem/GlobalStyles.tsx. The Custom Roles theme and component rules are held in src/Components/CustomRoles/PickerStyles.tsx. Both render fixed, repository-owned style strings from TSX components. Never construct either style string from user input.
 
-Do not add authored .html, .css or .js files.
+The picker route has an inline-style CSP allowance for its fixed TSX stylesheet and Next.js bootstrap. The dashboard also permits the fixed global style block; script execution remains constrained to the same-origin static Next.js runtime and its required inline bootstrap.
 
-Use Styled Components for component styles and global styles. Global tokens belong in Tokens.ts; the shared theme belongs in ThemeProvider.tsx; GlobalStyles.tsx defines the reset, base typography, focus behavior, scrollbars and global layout. StyledComponentsRegistry.tsx integrates style collection with the Next.js App Router.
-
-The current globals.css, picker.css and theme.css are migration inputs only. They are not part of the target tree.
-
-### Generated output is different from authored source
-
-Next.js static export necessarily emits HTML documents and browser assets into its build output directory. Those are generated build artifacts, not manually authored project files. Do not commit generated out/, .next/ or node_modules/ directories unless a deployment process explicitly requires them.
+Next.js still generates HTML documents and browser assets in its export output. Those generated files are build artifacts, not authored source. Do not commit generated out/, .next/ or node_modules/ directories unless deployment explicitly requires them.
 
 ---
 
@@ -698,6 +677,25 @@ Rate limiting is enforced by Rust, not only by frontend button disabling.
 
 Return HTTP 429 with a meaningful Retry-After value. Do not ban accounts merely because they hit a temporary threshold. Keep separate policies for OAuth, reads, writes, search, uploads and resource-intensive operations.
 
+### Active implementation
+
+The Rust security_headers middleware applies SQLite-backed rolling-window limits through DashboardStore::allow_rate_event:
+
+| Scope | Limit |
+|:--|:--:|
+| OAuth start per IP | 20/min |
+| OAuth callback per IP | 30/min |
+| General dashboard API per IP | 150/min |
+| Dashboard write per IP | 35/min |
+| Dashboard write per Discord account | 30/min |
+| Dashboard write per guild | 45/min |
+| Atlas requests per IP | 18/min |
+| Custom Roles API per IP | 120 reads/min; 35 writes/min |
+
+Excess requests return HTTP 429 with Retry-After: 60. SQLite coordination failures fail closed with HTTP 503. Picker tokens also keep their existing per-link read/write limits, and upload request bodies remain capped by the Rust proxy.
+
+Set DASHBOARD_TRUSTED_PROXY_IPS to a comma-separated list of exact direct proxy peer IPs. Forwarded headers are ignored unless the direct socket peer is in this list. Configure each trusted hop when the forwarding chain contains multiple proxies.
+
 ### Storage and deployment boundary
 
 The current dashboard store uses SQLite WAL for session, OAuth-state and coordination data. Same-host Rust workers can coordinate through the same local database file and atomic transactions.
@@ -705,10 +703,6 @@ The current dashboard store uses SQLite WAL for session, OAuth-state and coordin
 Do not place a SQLite WAL database on NFS or treat it as a multi-host distributed database. Multi-host scaling needs an explicit shared atomic rate-limit store decision. Do not silently introduce Redis or another PostgreSQL service.
 
 The Discord gateway remains a single bot runtime. Load balancing applies to the Rust dashboard service; it does not mean running multiple competing gateway clients with the same bot token.
-
-### Existing and planned implementation
-
-OAuth-start throttling already exists in the Rust authentication/state path. The planned rate_limit.rs module will centralize endpoint-specific policies and reusable middleware without duplicating existing checks. Keep SQLite transaction handling and busy-timeout behavior consistent with store.rs.
 
 ---
 
@@ -761,18 +755,17 @@ Before moving the current root assets/icons/lemegeton.svg, search all bot, docs 
 
 ### Current frontend dependencies
 
-The existing frontend package currently contains Next.js, React, React DOM and TypeScript. The Three.js and CSS-in-JS dependencies below are planned additions, not installed dependencies.
+The frontend uses Next.js, React 19, React DOM, TypeScript, Three.js and React Three Fiber. Scene dependencies are installed and pinned in web/frontend/package.json.
 
-### Planned additions
+### Installed visual dependencies
 
 | Package | Why |
 |:--|:--|
-| styled-components | Component and global styling authored in TSX |
-| three | Three.js core |
-| @types/three | Three.js type definitions |
-| @react-three/fiber v9 | React renderer for Three.js, paired with React 19 |
+| three@0.187.0 | Three.js core |
+| @types/three@0.187.0 | Three.js type definitions |
+| @react-three/fiber@9.8.2 | React renderer for Three.js, paired with React 19 |
 
-Add a test library only when the focused component tests are introduced. Avoid installing a large UI kit, multiple animation libraries or state libraries for features that can be handled with the existing React stack.
+No additional UI kit or styling dependency was introduced.
 
 ### Authored source format policy
 
@@ -825,7 +818,8 @@ Run the Rust dashboard service with the repository's configured environment. Kee
 - Direct user/guild URL navigation and refresh through Rust routing.
 - Cross-account and cross-guild access denial.
 - Guild permission loss and bot removal.
-- Command role/channel include and exclude rules.
+- Command role/channel include and exclude rules; empty include lists deny access.
+- Revision conflicts for concurrent command and access-policy edits.
 - Discord-native command permission synchronization and failure recovery.
 - Save, reset, double-submit and stale-revision conflicts.
 - Custom Roles picker parity, token-fragment handling, upload validation and crop behavior.
