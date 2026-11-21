@@ -211,7 +211,7 @@ mod tests {
             port: 8080,
             secure_cookie: false,
             session_ttl: 3600,
-            owner_ids: HashSet::new(), session_db_path: ":memory:".to_string(),
+            owner_ids: HashSet::new(), session_db_path: ":memory:".to_string(), trusted_proxy_ips: HashSet::new(),
         };
         let mut state = AppState::new(config);
         state.discord_api_base = mock_url;

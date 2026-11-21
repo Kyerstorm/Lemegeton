@@ -1,7 +1,7 @@
 use axum::{http::{header, HeaderMap, Method, StatusCode}, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{collections::{HashMap, HashSet}, env, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{collections::{HashMap, HashSet}, env, net::IpAddr, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
 use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
 use crate::store::DashboardStore;
@@ -17,6 +17,7 @@ pub struct AppConfig {
     pub bridge_url: String, pub atlas_bridge_url: String, pub bridge_secret: String, pub picker_url: String, pub bind_host: String,
     pub port: u16, pub secure_cookie: bool, pub session_ttl: u64, pub owner_ids: HashSet<String>,
     pub session_db_path: String,
+    pub trusted_proxy_ips: HashSet<IpAddr>,
 }
 impl AppConfig {
     pub fn from_env() -> Self {
@@ -33,6 +34,8 @@ impl AppConfig {
         let mut owner_ids: HashSet<String> = env::var("DASHBOARD_OWNER_IDS").unwrap_or_default()
             .split(',').map(str::trim).filter(|s| !s.is_empty()).map(ToOwned::to_owned).collect();
         if let Ok(id) = env::var("ADMIN_DISCORD_ID") { if !id.trim().is_empty() { owner_ids.insert(id.trim().to_string()); } }
+        let trusted_proxy_ips = env::var("DASHBOARD_TRUSTED_PROXY_IPS").unwrap_or_default()
+            .split(',').filter_map(|value| value.trim().parse::<IpAddr>().ok()).collect();
         Self {
             client_id, client_secret: env::var("DASHBOARD_CLIENT_SECRET").unwrap_or_default(), redirect_uri, public_origin,
             bridge_url: loopback_url(env::var("DASHBOARD_BRIDGE_URL").unwrap_or_else(|_| "http://127.0.0.1:8091".to_string()), "http://127.0.0.1:8091"),
@@ -44,6 +47,7 @@ impl AppConfig {
             session_ttl: env::var("DASHBOARD_SESSION_TTL").ok().and_then(|v| v.parse().ok()).unwrap_or(28_800).max(300),
             owner_ids,
             session_db_path: env::var("DASHBOARD_SESSION_DB_PATH").unwrap_or_else(|_| "./data/dashboard/sessions.sqlite".to_string()),
+            trusted_proxy_ips,
         }
     }
     pub fn oauth_ready(&self) -> bool { !self.client_id.is_empty() && !self.client_secret.is_empty() && !self.redirect_uri.is_empty() }
@@ -373,7 +377,7 @@ mod tests {
             bridge_url: "http://127.0.0.1:8091".to_string(), atlas_bridge_url: "http://127.0.0.1:8093".to_string(), bridge_secret: "bridge".to_string(),
             picker_url: "http://127.0.0.1:8092".to_string(), bind_host: "127.0.0.1".to_string(),
             port: 8080, secure_cookie: true, session_ttl: 3600,
-            owner_ids: HashSet::new(), session_db_path: ":memory:".to_string(),
+            owner_ids: HashSet::new(), session_db_path: ":memory:".to_string(), trusted_proxy_ips: HashSet::new(),
         })
     }
     fn test_session(csrf: &str, expires_at: u64) -> Session {
