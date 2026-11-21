@@ -1117,7 +1117,7 @@ export default function App() {
       </section> : null}
 
       {page === "extensions" ? <section className="page">
-        <SectionHeading eyebrow={selectedPage.eyebrow} title={<>Loaded <span>extensions.</span></>} subtitle={selectedPage.subtitle} actions={<Button onClick={() => void loadSystem()} disabled={refreshing}>Refresh status ↻</Button>} />
+        <SectionHeading eyebrow={selectedPage.eyebrow} title={<>Loaded <span>extensions.</span></>} subtitle={selectedPage.subtitle} actions={<Button onClick={() => void loadSystem()} disabled={refreshing}>Refresh status <Icon name="refresh" size={13} /></Button>} />
         <Panel eyebrow="ACTIVE PROCESS" title="Extension inventory" index={(system.extensions || []).length + " REPORTED"}>
           {system.extensions?.length ? <div className="extension-list">{system.extensions.map((name) => <div className="extension-row" key={name}><code>{name}</code><StatusPill ok>Loaded / live process</StatusPill></div>)}</div> : <Empty loading={refreshing}>{system.status === "unknown" ? "The live extension inventory is unavailable." : "No loaded extensions were reported."}</Empty>}
         </Panel>
@@ -1125,22 +1125,22 @@ export default function App() {
       </section> : null}
 
       {page === "audit" ? <section className="page">
-        <SectionHeading eyebrow={selectedPage.eyebrow} title={<>Nothing <span>unaccounted.</span></>} subtitle={selectedPage.subtitle} actions={<Button onClick={() => void loadAudit(guildId)} disabled={refreshing}>Refresh history ↻</Button>} />
+        <SectionHeading eyebrow={selectedPage.eyebrow} title={<>Nothing <span>unaccounted.</span></>} subtitle={selectedPage.subtitle} actions={<Button onClick={() => void loadAudit(guildId)} disabled={refreshing}>Refresh history <Icon name="refresh" size={13} /></Button>} />
         <Panel eyebrow="PERSISTED EVENTS" title="Audit trail" index="25 MOST RECENT"><ActivityList entries={audit} /></Panel>
       </section> : null}
 
       {page === "diagnostics" ? <section className="page">
-        <SectionHeading eyebrow={selectedPage.eyebrow} title={<>Under the <span>surface.</span></>} subtitle={selectedPage.subtitle} actions={<Button onClick={() => void loadSystem()} disabled={refreshing}>Check now ↻</Button>} />
+        <SectionHeading eyebrow={selectedPage.eyebrow} title={<>Under the <span>surface.</span></>} subtitle={selectedPage.subtitle} actions={<Button onClick={() => void loadSystem()} disabled={refreshing}>Check now <Icon name="refresh" size={13} /></Button>} />
         <div className="content-grid"><Panel eyebrow="STATUS SNAPSHOT" title="Runtime details" index="LIVE"><dl className="definition-list diagnostic-list"><div><dt>Dashboard bridge</dt><dd><StatusPill ok={system.status !== "unknown"}>{system.status === "unknown" ? "Unreachable" : "Responding"}</StatusPill></dd></div><div><dt>Discord gateway</dt><dd>{system.ready ? "Connected" : "Not ready"}</dd></div><div><dt>Gateway latency</dt><dd>{system.latency_ms == null ? "Unavailable" : Math.round(system.latency_ms) + " ms"}</dd></div><div><dt>Connected bot guilds</dt><dd>{number(system.guild_count)}</dd></div><div><dt>Registered commands</dt><dd>{number(system.extensions?.length ?? 0)}</dd></div><div><dt>Node runtime</dt><dd>{system.node_version || "Unavailable"}</dd></div><div><dt>Process uptime</dt><dd>{duration(system.uptime_seconds)}</dd></div><div><dt>Observation time</dt><dd>{timestamp(system.observed_at)}</dd></div>{lastKnown ? <><div><dt>Last-known status</dt><dd>{String(lastKnown.status || "Unknown")}</dd></div><div><dt>Last-known observation</dt><dd>{timestamp(Number(lastKnown.observed_at))}</dd></div></> : null}</dl></Panel><Panel eyebrow="BOUNDARIES" title="Service availability"><div className="note-block"><strong>Two separate signals.</strong><p>Dashboard HTTP availability does not mean the Discord gateway is connected. Cached observations are labelled and never presented as live status.</p></div><div className="note-block"><strong>Control operations require the bot.</strong><p>When the bridge or Discord synchronization is unavailable, command changes fail safely rather than showing false success.</p></div></Panel></div>
       </section> : null}
 
       {page === "logs" ? <section className="page">
-        <SectionHeading eyebrow={selectedPage.eyebrow} title={<>Logs, without <span>guesswork.</span></>} subtitle={selectedPage.subtitle} actions={<Button onClick={() => void loadLogs(logFile)} disabled={refreshing}>Refresh log ↻</Button>} />
+        <SectionHeading eyebrow={selectedPage.eyebrow} title={<>Logs, without <span>guesswork.</span></>} subtitle={selectedPage.subtitle} actions={<Button onClick={() => void loadLogs(logFile)} disabled={refreshing}>Refresh log <Icon name="refresh" size={13} /></Button>} />
         <Panel eyebrow="FILE READER" title={logName} className="log-panel" action={<label className="filter-control"><span>LOG SOURCE</span><select value={logFile} onChange={(event) => setLogFile(event.target.value)}><option value="bot.log">bot.log</option><option value="dashboard.log">dashboard.log</option></select></label>}><pre className="log-output" tabIndex={0}>{logText || "Loading log output…"}</pre></Panel>
       </section> : null}
 
       {page === "integrations" ? <section className="page">
-        <SectionHeading eyebrow={selectedPage.eyebrow} title={<>Integration <span>status.</span></>} subtitle={selectedPage.subtitle} actions={<Button onClick={() => void loadIntegrations()} disabled={refreshing}>Refresh ↻</Button>} />
+        <SectionHeading eyebrow={selectedPage.eyebrow} title={<>Integration <span>status.</span></>} subtitle={selectedPage.subtitle} actions={<Button onClick={() => void loadIntegrations()} disabled={refreshing}>Refresh <Icon name="refresh" size={13} /></Button>} />
         <Panel eyebrow="BOT-WIDE CONFIGURATION" title="Provider availability" index="OWNER ONLY">
           {integrations.length ? <div className="extension-list">{integrations.map((item, index) => <div className="extension-row" key={(item.name || "integration") + index}><div><code>{item.name || "Integration"}</code><p className="command-description">{item.detail || "No additional details."}</p></div><StatusPill ok={Boolean(item.configured)}>{item.configured ? "Configured" : "Not configured"}</StatusPill></div>)}</div> : <Empty>Integration information is unavailable, or no services were reported.</Empty>}
         </Panel>
@@ -1148,7 +1148,7 @@ export default function App() {
       </section> : null}
 
       {page === "database" ? <section className="page">
-        <SectionHeading eyebrow={selectedPage.eyebrow} title={<>State that <span>survives.</span></>} subtitle={selectedPage.subtitle} actions={<Button onClick={() => void loadDatabase()} disabled={refreshing}>Refresh ↻</Button>} />
+        <SectionHeading eyebrow={selectedPage.eyebrow} title={<>State that <span>survives.</span></>} subtitle={selectedPage.subtitle} actions={<Button onClick={() => void loadDatabase()} disabled={refreshing}>Refresh <Icon name="refresh" size={13} /></Button>} />
         <Panel eyebrow="PERSISTED RESOURCES" title="Storage overview"><div className="table-scroll"><table><thead><tr><th>RESOURCE</th><th>PURPOSE / DETAILS</th><th>STATE</th></tr></thead><tbody>{resources.length ? resources.map((row, index) => <tr key={(row.name || "resource") + index}><td>{row.name || "—"}</td><td>{row.purpose || "—"}<small>{row.detail || ""}</small></td><td><StatusPill ok={String(row.state || "").toLowerCase() === "available"}>{row.state || "Unknown"}</StatusPill></td></tr>) : <tr><td colSpan={3}><Empty>Persistence resources are unavailable or none were reported.</Empty></td></tr>}</tbody></table></div></Panel>
       </section> : null}
 
