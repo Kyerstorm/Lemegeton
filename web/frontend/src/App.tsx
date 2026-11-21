@@ -226,7 +226,6 @@ export default function App() {
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [logText, setLogText] = useState("");
   const [logName, setLogName] = useState("bot.log");
-  const [logFile, setLogFile] = useState("bot.log");
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
   const [commandState, setCommandState] = useState("All");
@@ -393,13 +392,13 @@ export default function App() {
     } catch (error) { pushToast(errorMessage(error), true); setIntegrations([]); }
   }, [csrf, pushToast]);
 
-  const loadLogs = useCallback(async (file = logFile) => {
+  const loadLogs = useCallback(async () => {
     try {
-      const data = await api<{ name?: string; content?: string }>("/api/logs?file=" + encodeURIComponent(file), csrf);
-      setLogName(data.name || file);
-      setLogText(data.content || "No log entries found.");
+      const data = await api<{ name?: string; content?: string }>("/api/logs", csrf);
+      setLogName(data.name || "Recent runtime logs");
+      setLogText(data.content || "No runtime log entries found.");
     } catch (error) { setLogText(errorMessage(error)); }
-  }, [csrf, logFile]);
+  }, [csrf]);
 
   useEffect(() => {
     if (isLogin) { setInitialLoading(false); return; }
@@ -457,9 +456,9 @@ export default function App() {
     if (page === "audit") void loadAudit(guildId, true);
     if (page === "extensions" || page === "diagnostics") void loadSystem();
     if (page === "database") void loadDatabase();
-    if (page === "logs") void loadLogs(logFile);
+    if (page === "logs") void loadLogs();
     if (page === "integrations") void loadIntegrations();
-  }, [page, guildId, isLogin, logFile, loadAudit, loadSystem, loadDatabase, loadLogs, loadIntegrations]);
+  }, [page, guildId, isLogin, loadAudit, loadSystem, loadDatabase, loadLogs, loadIntegrations]);
 
   const settleConfirmation = (confirmed: boolean) => {
     const item = confirmation;
@@ -1135,8 +1134,8 @@ export default function App() {
       </section> : null}
 
       {page === "logs" ? <section className="page">
-        <SectionHeading eyebrow={selectedPage.eyebrow} title={<>Logs, without <span>guesswork.</span></>} subtitle={selectedPage.subtitle} actions={<Button onClick={() => void loadLogs(logFile)} disabled={refreshing}>Refresh log <Icon name="refresh" size={13} /></Button>} />
-        <Panel eyebrow="FILE READER" title={logName} className="log-panel" action={<label className="filter-control"><span>LOG SOURCE</span><select value={logFile} onChange={(event) => setLogFile(event.target.value)}><option value="bot.log">bot.log</option><option value="dashboard.log">dashboard.log</option></select></label>}><pre className="log-output" tabIndex={0}>{logText || "Loading log output…"}</pre></Panel>
+        <SectionHeading eyebrow={selectedPage.eyebrow} title={<>Logs, without <span>guesswork.</span></>} subtitle={selectedPage.subtitle} actions={<Button onClick={() => void loadLogs()} disabled={refreshing}>Refresh log <Icon name="refresh" size={13} /></Button>} />
+        <Panel eyebrow="IN-MEMORY RUNTIME BUFFER" title={logName} className="log-panel" action={<span className="tag">LATEST 250 EVENTS</span>}><pre className="log-output" tabIndex={0}>{logText || "Loading log output…"}</pre></Panel>
       </section> : null}
 
       {page === "integrations" ? <section className="page">
