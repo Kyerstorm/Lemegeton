@@ -90,15 +90,15 @@ export function PickerMarkup(): JSX.Element {
           </h2>
           <div className="preview-grid">
             <div className="msg msg-dark" aria-label="Dark theme preview" role="group">
-              <img className="avatar" data-avatar={true} alt="" referrerPolicy="no-referrer" />
+              <img className="avatar" data-avatar="" alt="" referrerPolicy="no-referrer" />
               <div className="msg-body">
                 <div className="name-line">
-                  <span className="name" data-name={true}>
+                  <span className="name" data-name="">
                   </span>
-                  <img className="role-icon hidden" data-icon-img={true} alt="Role icon" referrerPolicy="no-referrer" />
-                  <span className="role-icon-emoji hidden" data-icon-emoji={true}>
+                  <img className="role-icon hidden" data-icon-img="" alt="Role icon" referrerPolicy="no-referrer" />
+                  <span className="role-icon-emoji hidden" data-icon-emoji="">
                   </span>
-                  <span className="time" data-time={true}>
+                  <span className="time" data-time="">
                   </span>
                 </div>
                 <div className="msg-text">
@@ -107,15 +107,15 @@ export function PickerMarkup(): JSX.Element {
               </div>
             </div>
             <div className="msg msg-light" aria-label="Light theme preview" role="group">
-              <img className="avatar" data-avatar={true} alt="" referrerPolicy="no-referrer" />
+              <img className="avatar" data-avatar="" alt="" referrerPolicy="no-referrer" />
               <div className="msg-body">
                 <div className="name-line">
-                  <span className="name" data-name={true}>
+                  <span className="name" data-name="">
                   </span>
-                  <img className="role-icon hidden" data-icon-img={true} alt="Role icon" referrerPolicy="no-referrer" />
-                  <span className="role-icon-emoji hidden" data-icon-emoji={true}>
+                  <img className="role-icon hidden" data-icon-img="" alt="Role icon" referrerPolicy="no-referrer" />
+                  <span className="role-icon-emoji hidden" data-icon-emoji="">
                   </span>
-                  <span className="time" data-time={true}>
+                  <span className="time" data-time="">
                   </span>
                 </div>
                 <div className="msg-text">
@@ -264,7 +264,7 @@ export function PickerMarkup(): JSX.Element {
                   {"Icon from"}
                 </legend>
                 <div className="segments">
-                  <input type="radio" name="icon-source" id="source-upload" value="upload" checked={true} />
+                  <input type="radio" name="icon-source" id="source-upload" value="upload" defaultChecked={true} />
                   <label htmlFor="source-upload">
                     {"Upload"}
                   </label>
@@ -286,7 +286,7 @@ export function PickerMarkup(): JSX.Element {
                   </span>
                   <span id="dropzone-hint" className="hint">
                     {"PNG or JPEG · up to"}
-                    <span data-source-max={true}>
+                    <span data-source-max="">
                     </span>
                   </span>
                 </label>
@@ -298,13 +298,13 @@ export function PickerMarkup(): JSX.Element {
                   </label>
                   <div className="color-row">
                     <input id="icon-url" className="text-input url-input" type="url" inputMode="url" autoComplete="off" spellCheck="false" placeholder="https://…" aria-describedby="icon-url-help" />
-                    <button id="icon-load" className="btn btn-secondary" type="button" data-icon-action={true}>
+                    <button id="icon-load" className="btn btn-secondary" type="button" data-icon-action="">
                       {"Load"}
                     </button>
                   </div>
                   <p id="icon-url-help" className="hint">
                     {"A direct link to a PNG or JPEG, up to"}
-                    <span data-source-max={true}>
+                    <span data-source-max="">
                     </span>
                     {". Links that redirect won't work, so paste the image's own address."}
                   </p>
@@ -350,13 +350,13 @@ export function PickerMarkup(): JSX.Element {
               </div>
             </div>
             <div className="toolbar">
-              <button id="set-icon" className="btn btn-primary" type="button" data-icon-action={true}>
+              <button id="set-icon" className="btn btn-primary" type="button" data-icon-action="">
                 {"Set icon"}
               </button>
-              <button id="edit-crop" className="btn btn-secondary" type="button" data-icon-action={true}>
+              <button id="edit-crop" className="btn btn-secondary" type="button" data-icon-action="">
                 {"Edit current crop"}
               </button>
-              <button id="remove-icon" className="btn btn-secondary" type="button" data-icon-action={true}>
+              <button id="remove-icon" className="btn btn-secondary" type="button" data-icon-action="">
                 {"Remove current icon"}
               </button>
             </div>
