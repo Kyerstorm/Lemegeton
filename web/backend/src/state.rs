@@ -342,7 +342,7 @@ mod tests {
     #[test]
     fn internal_service_targets_cannot_be_repointed_to_public_hosts() {
         let fallback = "http://127.0.0.1:8091";
-        assert_eq!(crate::config::crate::config::loopback_url("http://127.0.0.1:8091".to_string(), fallback), fallback);
+        assert_eq!(crate::config::loopback_url("http://127.0.0.1:8091".to_string(), fallback), fallback);
         assert_eq!(crate::config::loopback_url("http://localhost:8091".to_string(), fallback), "http://localhost:8091");
         assert_eq!(crate::config::loopback_url("https://attacker.example/steal".to_string(), fallback), fallback);
         assert_eq!(crate::config::loopback_url("http://127.0.0.1.evil.test:8091".to_string(), fallback), fallback);
