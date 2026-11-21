@@ -59,6 +59,8 @@ web/
 │       │   ├── commands.rs
 │       │   └── picker.rs
 │       ├── api.rs
+│       ├── auth/
+│       │   └── tests.rs
 │       ├── auth.rs
 │       ├── config.rs
 │       ├── errors.rs
@@ -67,7 +69,15 @@ web/
 │       ├── rate_limit.rs
 │       ├── routes.rs
 │       ├── security.rs
+│       ├── state/
+│       │   └── tests.rs
 │       ├── state.rs
+│       ├── store/
+│       │   ├── oauth.rs
+│       │   ├── rate_limit.rs
+│       │   ├── refresh.rs
+│       │   ├── sessions.rs
+│       │   └── tests.rs
 │       ├── store.rs
 │       └── ui.rs
 ├── favicon.svg
@@ -132,9 +142,14 @@ web/
 | backend/src/api/commands.rs | Revision-checked command writes and command-access policy endpoints |
 | backend/src/api/atlas.rs | Knowledge Atlas request validation and bridge forwarding |
 | backend/src/api/picker.rs | Custom Roles static route serving and private picker API proxy |
-| backend/src/auth.rs | Discord OAuth start/callback, session creation, bootstrap and logout |
-| backend/src/state.rs | Session/token refresh, Discord and bot bridge helpers, guild authorization re-export |
-| backend/src/store.rs | SQLite WAL sessions, OAuth state, rate events and refresh coordination |
+| backend/src/auth.rs + auth/tests.rs | Discord OAuth start/callback, session creation, authenticated guild slug routes, bootstrap, logout and OAuth route tests |
+| backend/src/state.rs + state/tests.rs | Shared session/token refresh, Discord and bot bridge helpers, configuration state and helper tests |
+| backend/src/store.rs | SQLite connection, schema and shared worker |
+| backend/src/store/sessions.rs | Session persistence and cleanup |
+| backend/src/store/oauth.rs | OAuth state persistence and one-time state consumption |
+| backend/src/store/rate_limit.rs | SQLite request-event windows |
+| backend/src/store/refresh.rs | Session refresh leases and atomic refresh coordination |
+| backend/src/store/tests.rs | Store schema, session and rate-limit tests |
 | backend/src/ui.rs | Generated Next.js page and asset serving, including custom 404 and Custom Roles route |
 | frontend/src/App.tsx | Dashboard shell, local command drafts and role/channel access editor |
 | frontend/src/Components/Brand/BrandMark.tsx | Shared Lemegeton brand component |
