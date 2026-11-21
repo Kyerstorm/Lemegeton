@@ -171,15 +171,15 @@ export function PickerMarkup(): JSX.Element {
               {"Color"}
             </button>
             {" "}
-            <button className="tab" type="button" role="tab" id="tab-icon" aria-controls="panel-icon" aria-selected="false" tabIndex="-1">
+            <button className="tab" type="button" role="tab" id="tab-icon" aria-controls="panel-icon" aria-selected="false" tabIndex={-1}>
               {"Role Icon"}
             </button>
             {" "}
-            <button className="tab" type="button" role="tab" id="tab-name" aria-controls="panel-name" aria-selected="false" tabIndex="-1">
+            <button className="tab" type="button" role="tab" id="tab-name" aria-controls="panel-name" aria-selected="false" tabIndex={-1}>
               {"Name"}
             </button>
           </div>
-          <div id="panel-color" role="tabpanel" aria-labelledby="tab-color" tabIndex="0">
+          <div id="panel-color" role="tabpanel" aria-labelledby="tab-color" tabIndex={0}>
             <fieldset className="segmented">
               <legend>
                 {"Style"}
@@ -259,7 +259,7 @@ export function PickerMarkup(): JSX.Element {
               </fieldset>
             </div>
           </div>
-          <div id="panel-icon" role="tabpanel" aria-labelledby="tab-icon" tabIndex="0" className="hidden">
+          <div id="panel-icon" role="tabpanel" aria-labelledby="tab-icon" tabIndex={0} className="hidden">
             <p>
               {"Current icon: "}
               <span id="icon-current">
@@ -326,7 +326,7 @@ export function PickerMarkup(): JSX.Element {
                   <label htmlFor="emoji-input">
                     {"Emoji"}
                   </label>
-                  <input id="emoji-input" className="text-input emoji-input" type="text" maxLength="16" autoComplete="off" spellCheck="false" aria-describedby="emoji-help" />
+                  <input id="emoji-input" className="text-input emoji-input" type="text" maxLength={16} autoComplete="off" spellCheck="false" aria-describedby="emoji-help" />
                   <p id="emoji-help" className="hint">
                     {"Type or paste one standard Unicode emoji. Custom server emoji can't be role icons."}
                   </p>
@@ -339,7 +339,7 @@ export function PickerMarkup(): JSX.Element {
                   {"Crop"}
                 </h2>
                 <div className="crop-row">
-                  <div id="crop-stage" className="crop-stage" tabIndex="0" role="group" aria-label="Crop area" aria-describedby="crop-help">
+                  <div id="crop-stage" className="crop-stage" tabIndex={0} role="group" aria-label="Crop area" aria-describedby="crop-help">
                     <img id="crop-img" alt="" draggable="false" />
                   </div>
                   <div className="crop-side">
@@ -376,7 +376,7 @@ export function PickerMarkup(): JSX.Element {
             <p id="status-icon" className="status" role="status">
             </p>
           </div>
-          <div id="panel-name" role="tabpanel" aria-labelledby="tab-name" tabIndex="0" className="hidden">
+          <div id="panel-name" role="tabpanel" aria-labelledby="tab-name" tabIndex={0} className="hidden">
             <div className="field">
               <label htmlFor="name-input">
                 {"Role name"}
