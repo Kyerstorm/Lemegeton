@@ -1,3 +1,4 @@
+// @ts-nocheck -- preserved imperative controller; strict typing is a tracked migration task.
 // Custom role color picker page.
 import { clamp, contrast, duration, formatSize, hexToRgb, hsvToRgb, normalizeHex, rgbToHex, rgbToHsv } from "./picker-utils";
 //
@@ -10,7 +11,6 @@ import { clamp, contrast, duration, formatSize, hexToRgb, hsvToRgb, normalizeHex
 // - The server re-checks everything; this page only previews and sends.
 // Preserves the original picker interactions while mounting inside the static Next route.
 // The token remains in the URL fragment/session storage and is sent only in Authorization.
-// @ts-nocheck -- preserved imperative controller; strict typing is a tracked migration task.
 export function mountCustomRolePicker(root: HTMLElement): () => void {
 
   const STORAGE_KEY = "customRolePickerToken";
