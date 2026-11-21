@@ -169,7 +169,8 @@ web/
 | frontend/src/Components/Brand/BrandMark.tsx | Shared Lemegeton brand component |
 | frontend/src/Components/Legal/PolicyConsentGate.tsx | Explicit three-policy gate using the bot's existing versioned consent record |
 | frontend/src/Components/Icons/{actions,dashboard,media,navigation,security,status}/* | Individual SVG icon components grouped by interface purpose, each with a category barrel |
-| frontend/src/Components/Icons/IconGlyphs.ts | Exhaustive typed mapping from icon names to grouped components |\n| frontend/src/Components/Icons/Icon.tsx | Shared SVG wrapper preserving the `<Icon name="…"/>` API, sizing and animation classes |
+| frontend/src/Components/Icons/IconGlyphs.ts | Exhaustive typed mapping from icon names to grouped components |
+| frontend/src/Components/Icons/Icon.tsx | Shared SVG wrapper preserving the `<Icon name="…"/>` API, sizing and animation classes |
 | frontend/src/Components/CustomRoles/PickerMarkup.tsx | React-rendered picker interface; no raw HTML string injection |
 | frontend/src/Components/CustomRoles/PickerStyles.tsx | Picker theme and component styles authored in TypeScript |
 | frontend/src/Components/CustomRoles/picker-utils.ts | Strictly typed color conversion, contrast and display helpers |
