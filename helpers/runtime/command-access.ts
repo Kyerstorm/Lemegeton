@@ -75,7 +75,11 @@ export async function saveCommandAccessPolicy(
   const row = await queryOne<{ revision: string }>(
     `INSERT INTO guild_command_access
        (guild_id,command_name,role_mode,role_ids,channel_mode,channel_ids,updated_by,revision)
-     VALUES ($1,$2,$3,$4::jsonb,$5,$6::jsonb,$7,1)
+     SELECT $1,$2,$3,$4::jsonb,$5,$6::jsonb,$7,1
+     WHERE $8=0 OR EXISTS (
+       SELECT 1 FROM guild_command_access
+        WHERE guild_id=$1 AND command_name=$2
+     )
      ON CONFLICT (guild_id,command_name) DO UPDATE SET
        role_mode=EXCLUDED.role_mode, role_ids=EXCLUDED.role_ids,
        channel_mode=EXCLUDED.channel_mode, channel_ids=EXCLUDED.channel_ids,
