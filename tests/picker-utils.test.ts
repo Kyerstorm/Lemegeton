@@ -10,7 +10,7 @@ import {
   normalizeHex,
   rgbToHex,
   rgbToHsv,
-} from "../web/frontend/src/Components/CustomRoles/picker-utils.js";
+} from "../web/frontend/src/Components/CustomRoles/picker-utils.ts";
 
 test("picker hex normalization matches the bot's accepted color formats", () => {
   assert.equal(normalizeHex("#abc"), "#AABBCC");

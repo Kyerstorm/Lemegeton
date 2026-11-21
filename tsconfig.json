@@ -13,7 +13,9 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "verbatimModuleSyntax": true,
-    "noEmitOnError": true
+    "noEmitOnError": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true
   },
   "include": ["bot.ts", "database.ts", "src/**/*.ts", "helpers/**/*.ts", "tests/**/*.ts"],
   "exclude": ["dist", "node_modules", "bot"]
