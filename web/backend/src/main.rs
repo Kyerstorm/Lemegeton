@@ -43,8 +43,12 @@ async fn readiness(State(state): State<AppState>) -> Response {
         Err(_) => (axum::http::StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({"status":"unavailable"}))).into_response(),
     }
 }
-async fn not_found() -> Response {
-    (axum::http::StatusCode::NOT_FOUND, axum::Json(serde_json::json!({"error":"Route not found."}))).into_response()
+async fn not_found(request: Request<Body>) -> Response {
+    if request.uri().path().starts_with("/api/") {
+        return (axum::http::StatusCode::NOT_FOUND,
+            axum::Json(serde_json::json!({"error":"Route not found."}))).into_response();
+    }
+    ui::not_found_html().await
 }
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

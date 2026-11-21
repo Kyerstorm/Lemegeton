@@ -55,3 +55,15 @@ pub async fn next_asset(Path(path): Path<String>) -> Response {
         .body(Body::from(contents))
         .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Could not serve dashboard asset").into_response())
 }
+
+pub async fn not_found_html() -> Response {
+    match tokio::fs::read("web/frontend/out/404.html").await {
+        Ok(contents) => Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+            .header(header::CACHE_CONTROL, "no-store")
+            .body(Body::from(contents))
+            .unwrap_or_else(|_| (StatusCode::NOT_FOUND, "Page not found").into_response()),
+        Err(_) => (StatusCode::NOT_FOUND, "Page not found").into_response(),
+    }
+}

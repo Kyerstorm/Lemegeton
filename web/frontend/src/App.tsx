@@ -2,6 +2,8 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
+import { Icon, type IconName } from "./Components/Icons";
+import { BrandMark } from "./Components/Brand/BrandMark";
 
 type Page = "overview" | "commands" | "atlas" | "extensions" | "audit" | "diagnostics" | "logs" | "integrations" | "database";
 type User = { id: string; username: string; global_name?: string | null; avatar?: string | null };
@@ -40,16 +42,16 @@ type AtlasResponse = {
   export?: { filename: string; mimeType: string; base64: string };
 };
 
-const PAGES: { id: Page; label: string; glyph: string; eyebrow: string; subtitle: string }[] = [
-  { id: "overview", label: "Overview", glyph: "◫", eyebrow: "LIVE CONTROL / 01", subtitle: "A clear view of bot health and the current server configuration." },
-  { id: "commands", label: "Commands", glyph: "⌘", eyebrow: "COMMAND REGISTRY / 02", subtitle: "Control registered slash commands, scoped to the selected Discord server." },
-  { id: "atlas", label: "Knowledge Atlas", glyph: "⌘", eyebrow: "MEDIA GRAPH / 03", subtitle: "Explore source-attributed media relationships and the connections approved by this server." },
-  { id: "extensions", label: "Extensions", glyph: "▦", eyebrow: "BOT MODULES / 03", subtitle: "Review the extension inventory reported by the live bot process." },
-  { id: "audit", label: "Audit history", glyph: "◷", eyebrow: "CHANGE RECORD / 04", subtitle: "Review recorded dashboard configuration changes for this server." },
-  { id: "diagnostics", label: "Diagnostics", glyph: "⌁", eyebrow: "HEALTH & TELEMETRY / 05", subtitle: "Inspect the bot gateway, runtime version, uptime, and last-known status." },
-  { id: "logs", label: "Runtime logs", glyph: "≡", eyebrow: "RUNTIME OUTPUT / 06", subtitle: "Read recent operational logs. This view is restricted to dashboard owners." },
-  { id: "integrations", label: "Integrations", glyph: "⟷", eyebrow: "CONNECTED SERVICES / 07", subtitle: "Check configuration presence without exposing credential values." },
-  { id: "database", label: "Persistence", glyph: "▤", eyebrow: "PERSISTENCE / 08", subtitle: "Inspect the saved resources supporting per-guild command settings." }
+const PAGES: { id: Page; label: string; icon: IconName; eyebrow: string; subtitle: string }[] = [
+  { id: "overview", label: "Overview", icon: "overview", eyebrow: "LIVE CONTROL / 01", subtitle: "A clear view of bot health and the current server configuration." },
+  { id: "commands", label: "Commands", icon: "commands", eyebrow: "COMMAND REGISTRY / 02", subtitle: "Control registered slash commands, scoped to the selected Discord server." },
+  { id: "atlas", label: "Knowledge Atlas", icon: "atlas", eyebrow: "MEDIA GRAPH / 03", subtitle: "Explore source-attributed media relationships and the connections approved by this server." },
+  { id: "extensions", label: "Extensions", icon: "extensions", eyebrow: "BOT MODULES / 03", subtitle: "Review the extension inventory reported by the live bot process." },
+  { id: "audit", label: "Audit history", icon: "audit", eyebrow: "CHANGE RECORD / 04", subtitle: "Review recorded dashboard configuration changes for this server." },
+  { id: "diagnostics", label: "Diagnostics", icon: "diagnostics", eyebrow: "HEALTH & TELEMETRY / 05", subtitle: "Inspect the bot gateway, runtime version, uptime, and last-known status." },
+  { id: "logs", label: "Runtime logs", icon: "logs", eyebrow: "RUNTIME OUTPUT / 06", subtitle: "Read recent operational logs. This view is restricted to dashboard owners." },
+  { id: "integrations", label: "Integrations", icon: "integrations", eyebrow: "CONNECTED SERVICES / 07", subtitle: "Check configuration presence without exposing credential values." },
+  { id: "database", label: "Persistence", icon: "database", eyebrow: "PERSISTENCE / 08", subtitle: "Inspect the saved resources supporting per-guild command settings." }
 ];
 
 async function api<T>(path: string, csrf = "", init: RequestInit = {}): Promise<T> {
@@ -163,7 +165,7 @@ function LoginPage() {
   return <main className="login-wrap">
     <div className="login-orbit orbit-one" aria-hidden="true" /><div className="login-orbit orbit-two" aria-hidden="true" />
     <section className="login-card">
-      <a className="brand login-brand" href="/" aria-label="Lemegeton home"><span className="brand-mark">L.</span><span className="brand-copy"><strong>LEMEGETON</strong><small>CONTROL PLANE</small></span></a>
+      <a className="brand login-brand" href="/" aria-label="Lemegeton home"><BrandMark /><span className="brand-copy"><strong>LEMEGETON</strong><small>CONTROL PLANE</small></span></a>
       <div className="login-kicker"><span className="signal-dot online" /> PRIVATE ADMINISTRATION <span className="braille-mini" aria-hidden="true">⠿⠗⠿⠿⠿</span></div>
       <h1>Control the<br /><span>moving parts.</span></h1>
       <p className="login-copy">Manage command access, review server activity, and inspect runtime health through your existing Discord permissions.</p>
@@ -675,7 +677,7 @@ export default function App() {
       <p className="nav-label">WORKSPACE <span>/ 01</span></p>
       <nav className="main-nav" aria-label="Dashboard navigation">
         {PAGES.map((item) => <button key={item.id} type="button" className={"nav-item" + (page === item.id ? " active" : "")} onClick={() => navigate(item.id)} aria-current={page === item.id ? "page" : undefined}>
-          <span className="nav-glyph" aria-hidden="true">{item.glyph}</span><span>{item.label}</span>
+          <span className="nav-glyph" aria-hidden="true"><Icon name={item.icon} size={17} /></span><span>{item.label}</span>
           {item.id === "commands" ? <span className="nav-count">{commands.length || "—"}</span> : null}
           {item.id === "atlas" ? <span className="nav-count">↗</span> : null}
         </button>)}
@@ -687,13 +689,13 @@ export default function App() {
     <button className={"mobile-scrim" + (mobileNav ? " active" : "")} aria-label="Close navigation" onClick={() => setMobileNav(false)} />
     <main className="main">
       <header className="topbar">
-        <button className="icon-button mobile-menu" type="button" aria-label="Open navigation" aria-expanded={mobileNav} onClick={() => setMobileNav((value) => !value)}>☰</button>
+        <button className="icon-button mobile-menu" type="button" aria-label="Open navigation" aria-expanded={mobileNav} onClick={() => setMobileNav((value) => !value)}><Icon name="menu" size={17} /></button>
         <div className="breadcrumb"><span>CONTROL</span><span className="breadcrumb-divider">/</span><strong>{selectedPage.label}</strong></div>
         <div className="topbar-right">
           <label className="guild-control"><span>SERVER</span><select value={guildId} onChange={(event) => selectGuild(event.target.value)} aria-label="Select Discord server" disabled={!guilds.length}>
             {!guilds.length ? <option value="">No manageable servers</option> : guilds.map((guild) => <option key={guild.id} value={guild.id}>{guild.name}</option>)}
           </select></label>
-          <button className={"icon-button" + (refreshing ? " spinning" : "")} type="button" onClick={() => void refreshData(guildId)} aria-label="Refresh dashboard" title="Refresh dashboard" disabled={!guildId || refreshing}>↻</button>
+          <button className={"icon-button" + (refreshing ? " spinning" : "")} type="button" onClick={() => void refreshData(guildId)} aria-label="Refresh dashboard" title="Refresh dashboard" disabled={!guildId || refreshing}><Icon name="refresh" size={17} /></button>
           <div className="account" aria-label="Signed-in Discord account"><span className="avatar">{(user?.global_name || user?.username || "?").slice(0, 1).toUpperCase()}</span><span className="account-copy"><strong>{user?.global_name || user?.username || "Discord account"}</strong><small>DISCORD / VERIFIED</small></span></div>
         </div>
       </header>
