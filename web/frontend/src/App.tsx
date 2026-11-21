@@ -18,6 +18,18 @@ type Toast = { id: number; message: string; error: boolean };
 type Confirmation = { title: string; message: string; actionLabel: string; run: () => Promise<void> };
 type Bootstrap = { user: User; guilds: Guild[]; csrf_token: string; selected_guild_id?: string };
 type CommandResponse = { commands: Command[]; revision: string };
+type CommandAccessPolicy = {
+  role_mode: "everyone" | "include" | "exclude";
+  role_ids: string[];
+  channel_mode: "all" | "include" | "exclude";
+  channel_ids: string[];
+  revision: number;
+};
+type CommandAccessResponse = {
+  roles: { id: string; name: string }[];
+  channels: { id: string; name: string; type: number }[];
+  policies: Record<string, CommandAccessPolicy>;
+};
 type ListResponse<T> = { entries?: T[] };
 type AtlasRelation = {
   title: string; category: string; url: string | null; relationType: string;
@@ -193,6 +205,12 @@ export default function App() {
   const [commandRevision, setCommandRevision] = useState("");
   const [savingCommands, setSavingCommands] = useState(false);
   const [commandError, setCommandError] = useState("");
+  const [accessTarget, setAccessTarget] = useState("");
+  const [accessOptions, setAccessOptions] = useState<CommandAccessResponse | null>(null);
+  const [accessDraft, setAccessDraft] = useState<CommandAccessPolicy | null>(null);
+  const [accessOriginal, setAccessOriginal] = useState<CommandAccessPolicy | null>(null);
+  const [accessLoading, setAccessLoading] = useState(false);
+  const [accessSaving, setAccessSaving] = useState(false);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
@@ -242,6 +260,13 @@ export default function App() {
   }, [commands, savedCommands]);
   const commandDraftDirtyRef = useRef(false);
   useEffect(() => { commandDraftDirtyRef.current = commandDraftDirty; }, [commandDraftDirty]);
+  const accessDraftDirty = useMemo(() => {
+    if (!accessDraft || !accessOriginal) return false;
+    return accessDraft.role_mode !== accessOriginal.role_mode
+      || accessDraft.channel_mode !== accessOriginal.channel_mode
+      || accessDraft.role_ids.join(",") !== accessOriginal.role_ids.join(",")
+      || accessDraft.channel_ids.join(",") !== accessOriginal.channel_ids.join(",");
+  }, [accessDraft, accessOriginal]);
   const selectGuild = useCallback((nextId: string) => {
     if (!guilds.some((guild) => String(guild.id) === String(nextId))) return;
     if (commandDraftDirtyRef.current && !window.confirm("Discard unsaved command changes before switching servers?")) return;
@@ -259,6 +284,12 @@ export default function App() {
     setSavedCommands([]);
     setCommandRevision("");
     setCommandError("");
+    setAccessTarget("");
+    setAccessOptions(null);
+    setAccessDraft(null);
+    setAccessOriginal(null);
+    setAccessLoading(false);
+    setAccessSaving(false);
     setAudit([]);
     setResources([]);
     setUpdatedAt(null);
@@ -486,6 +517,77 @@ export default function App() {
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [commandDraftDirty]);
+
+  const openCommandAccess = async (command: Command) => {
+    if (!guildId || command.protected || accessLoading || accessSaving) return;
+    const requestedGuild = guildId;
+    setAccessTarget(command.fullname);
+    setAccessLoading(true);
+    setAccessOptions(null);
+    setAccessDraft(null);
+    setAccessOriginal(null);
+    try {
+      const result = await api<CommandAccessResponse>(
+        "/api/guilds/" + encodeURIComponent(requestedGuild) + "/command-access", csrf,
+      );
+      if (activeGuildIdRef.current !== requestedGuild) return;
+      const policy = result.policies?.[command.fullname] || {
+        role_mode: "everyone", role_ids: [], channel_mode: "all", channel_ids: [], revision: 0,
+      };
+      setAccessOptions(result);
+      setAccessDraft({ ...policy, role_ids: [...policy.role_ids], channel_ids: [...policy.channel_ids] });
+      setAccessOriginal({ ...policy, role_ids: [...policy.role_ids], channel_ids: [...policy.channel_ids] });
+    } catch (error) {
+      pushToast(errorMessage(error), true);
+    } finally {
+      if (activeGuildIdRef.current === requestedGuild) setAccessLoading(false);
+    }
+  };
+
+  const closeCommandAccess = () => {
+    if (accessDraftDirty && !window.confirm("Discard unsaved access rules?")) return;
+    setAccessTarget("");
+    setAccessOptions(null);
+    setAccessDraft(null);
+    setAccessOriginal(null);
+  };
+
+  const resetCommandAccess = () => {
+    if (!accessOriginal) return;
+    setAccessDraft({ ...accessOriginal, role_ids: [...accessOriginal.role_ids], channel_ids: [...accessOriginal.channel_ids] });
+  };
+
+  const saveCommandAccess = async () => {
+    if (!guildId || !accessTarget || !accessDraft || !accessDraftDirty || accessSaving) return;
+    const requestedGuild = guildId;
+    const target = accessTarget;
+    setAccessSaving(true);
+    try {
+      const result = await api<{ policy: CommandAccessPolicy }>(
+        "/api/guilds/" + encodeURIComponent(requestedGuild) + "/command-access/" + encodeURIComponent(target),
+        csrf,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            expected_revision: accessDraft.revision,
+            role_mode: accessDraft.role_mode,
+            role_ids: accessDraft.role_ids,
+            channel_mode: accessDraft.channel_mode,
+            channel_ids: accessDraft.channel_ids,
+          }),
+        },
+      );
+      if (activeGuildIdRef.current !== requestedGuild) return;
+      setAccessDraft(result.policy);
+      setAccessOriginal(result.policy);
+      pushToast("Access rules saved for /" + target + ".");
+      void loadAudit(requestedGuild, true);
+    } catch (error) {
+      pushToast(errorMessage(error), true);
+    } finally {
+      if (activeGuildIdRef.current === requestedGuild) setAccessSaving(false);
+    }
+  };
 
   const copyCommandInvocation = async (command: Command) => {
     const invocation = "/" + (command.fullname || command.name || "").trim();
@@ -788,11 +890,23 @@ export default function App() {
         <div className="command-toolbar"><label className="search-field"><span aria-hidden="true">⌕</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, description, category…" autoComplete="off" /></label><label className="filter-control"><span>CATEGORY</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option value="All">All categories</option>{categories.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label className="filter-control"><span>STATE</span><select value={commandState} onChange={(event) => setCommandState(event.target.value)}><option value="All">All states</option><option value="Enabled">Enabled</option><option value="Disabled">Disabled</option><option value="Protected">Protected</option></select></label></div>
         <div className="command-summary"><span>{filteredCommands.length} of {commands.length} registered commands</span><span>PER-GUILD CONFIGURATION</span></div>
         <div className="command-list">{commands.length === 0 ? (commandError ? <Empty>{commandError}</Empty> : refreshing ? <Empty loading>Reading the live command registry…</Empty> : <Empty>No dashboard-managed commands were returned.</Empty>) : filteredCommands.length === 0 ? <Empty>No commands match this search and filter.</Empty> : filteredCommands.map((command) => <article className="command-row" key={command.fullname}>
-          <div className="command-main"><a className="command-name command-name-link" href={commandGuideUrl(command)} target="_blank" rel="noreferrer" aria-label={"Open usage guide for /" + (command.fullname || command.name)} title="Open the relevant command guide"><span className="command-prefix">/</span>{command.fullname || command.name}<span className="command-link-glyph" aria-hidden="true">↗</span></a><p className="command-description">{command.description || "No description provided."}</p><div className="command-tags"><span className="tag">{command.section || "Other"}</span><span className="tag">{command.type || "slash"}</span><span className="tag">{command.scope || "guild"}</span>{command.protected ? <span className="tag tag-protected">Protected</span> : null}{command.required_permissions ? <span className="tag">Discord permission gate</span> : null}</div><div className="command-actions"><button className="command-copy" type="button" onClick={() => void copyCommandInvocation(command)} title={"Copy /" + (command.fullname || command.name)} aria-label={"Copy invocation for /" + (command.fullname || command.name)}>▣ <span>Copy command</span></button><a className="command-guide" href={commandGuideUrl(command)} target="_blank" rel="noreferrer">Usage guide <span aria-hidden="true">↗</span></a></div></div>
+          <div className="command-main"><a className="command-name command-name-link" href={commandGuideUrl(command)} target="_blank" rel="noreferrer" aria-label={"Open usage guide for /" + (command.fullname || command.name)} title="Open the relevant command guide"><span className="command-prefix">/</span>{command.fullname || command.name}<span className="command-link-glyph" aria-hidden="true">↗</span></a><p className="command-description">{command.description || "No description provided."}</p><div className="command-tags"><span className="tag">{command.section || "Other"}</span><span className="tag">{command.type || "slash"}</span><span className="tag">{command.scope || "guild"}</span>{command.protected ? <span className="tag tag-protected">Protected</span> : null}{command.required_permissions ? <span className="tag">Discord permission gate</span> : null}</div><div className="command-actions"><button className="command-copy" type="button" onClick={() => void copyCommandInvocation(command)} title={"Copy /" + (command.fullname || command.name)} aria-label={"Copy invocation for /" + (command.fullname || command.name)}>▣ <span>Copy command</span></button><a className="command-guide" href={commandGuideUrl(command)} target="_blank" rel="noreferrer">Usage guide <span aria-hidden="true">↗</span></a><button className="command-access-open" type="button" onClick={() => void openCommandAccess(command)} disabled={Boolean(command.protected) || accessLoading || accessSaving} aria-label={"Configure access for /" + command.fullname}><span aria-hidden="true">◇</span> Access rules</button></div></div>
           <div className="command-state"><StatusPill ok={command.enabled && !command.protected}>{command.protected ? "Protected / always on" : command.enabled ? "Enabled" : "Disabled"}</StatusPill></div>
           <button className={"switch" + (command.enabled ? " checked" : "")} role="switch" type="button" aria-checked={Boolean(command.enabled)} aria-label={"Toggle " + command.fullname} disabled={Boolean(command.protected) || savingCommands || operationBusy} onClick={() => toggleCommand(command)}><span /></button>
         </article>)}</div>
         <p className="footnote">Changes remain local until saved. The bot rechecks the server revision before publishing; protected commands cannot be changed.</p>
+        {accessTarget ? <div className="access-overlay">
+          <section className="access-dialog" role="dialog" aria-modal="true" aria-labelledby="command-access-title">
+            <div className="access-heading"><div><p className="eyebrow">COMMAND POLICY</p><h2 id="command-access-title">Access for <span>/{accessTarget}</span></h2><p>Rules are checked by the bot on every command and component interaction.</p></div><button type="button" className="access-close" onClick={closeCommandAccess} aria-label="Close access editor">×</button></div>
+            {accessLoading ? <Empty loading>Loading this server’s roles and channels…</Empty> : accessOptions && accessDraft ? <>
+              <div className="access-grid">
+                <div className="access-field"><label htmlFor="access-role-mode">WHO CAN USE IT</label><select id="access-role-mode" value={accessDraft.role_mode} onChange={event => setAccessDraft(current => current ? { ...current, role_mode: event.target.value as CommandAccessPolicy["role_mode"] } : current)}><option value="everyone">Everyone</option><option value="include">Only selected roles</option><option value="exclude">Everyone except selected roles</option></select><select aria-label="Select roles" multiple size={7} value={accessDraft.role_ids} onChange={event => setAccessDraft(current => current ? { ...current, role_ids: Array.from(event.currentTarget.selectedOptions, option => option.value) } : current)}>{accessOptions.roles.map(role => <option key={role.id} value={role.id}>{role.name}</option>)}</select><small>With “Only selected roles”, an empty selection blocks everyone. Excluded roles are denied.</small></div>
+                <div className="access-field"><label htmlFor="access-channel-mode">WHERE CAN IT RUN</label><select id="access-channel-mode" value={accessDraft.channel_mode} onChange={event => setAccessDraft(current => current ? { ...current, channel_mode: event.target.value as CommandAccessPolicy["channel_mode"] } : current)}><option value="all">All supported channels</option><option value="include">Only selected channels</option><option value="exclude">All except selected channels</option></select><select aria-label="Select channels" multiple size={7} value={accessDraft.channel_ids} onChange={event => setAccessDraft(current => current ? { ...current, channel_ids: Array.from(event.currentTarget.selectedOptions, option => option.value) } : current)}>{accessOptions.channels.map(channel => <option key={channel.id} value={channel.id}>#{channel.name}</option>)}</select><small>Only server text-capable channels are listed. An empty include list denies all channels.</small></div>
+              </div>
+              <div className="access-footer"><span>{accessDraftDirty ? "Unsaved policy changes" : "Policy is up to date"}</span><div><button type="button" className="command-reset" onClick={resetCommandAccess} disabled={!accessDraftDirty || accessSaving}>Reset</button><button type="button" className="command-save" onClick={() => void saveCommandAccess()} disabled={!accessDraftDirty || accessSaving}>{accessSaving ? "Saving…" : "Save Changes"}</button></div></div>
+            </> : <div className="access-load-error"><p>Role and channel settings could not be loaded.</p><button type="button" className="command-reset" onClick={closeCommandAccess}>Close</button></div>}
+          </section>
+        </div> : null}
         {commandDraftDirty ? <div className="command-savebar" role="region" aria-label="Unsaved command changes">
           <span><strong>Unsaved changes</strong><small>{commands.filter(item => !item.protected && savedCommands.find(saved => saved.fullname === item.fullname)?.enabled !== item.enabled).length} command settings changed</small></span>
           <div><button type="button" className="command-reset" onClick={resetCommandDraft} disabled={savingCommands}>Reset</button><button type="button" className="command-save" onClick={() => void saveCommandDraft()} disabled={savingCommands || !commandRevision}>{savingCommands ? "Saving…" : "Save Changes"}</button></div>
