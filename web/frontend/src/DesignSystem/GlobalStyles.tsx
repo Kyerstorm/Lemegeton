@@ -3316,6 +3316,318 @@ button:hover .icon-svg.icon-close .icon-glyph, a:hover .icon-svg.icon-close .ico
 button:hover .icon-svg.icon-alert-circle .icon-glyph, a:hover .icon-svg.icon-alert-circle .icon-glyph {
   animation: icon-alert-nudge 340ms ease both;
 }
+
+.icon-svg .icon-glyph > * {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+button:hover .icon-svg.icon-commands path:first-child,
+a:hover .icon-svg.icon-commands path:first-child {
+  animation: icon-command-shift 380ms ease both;
+}
+
+button:hover .icon-svg.icon-commands path:nth-child(2),
+a:hover .icon-svg.icon-commands path:nth-child(2) {
+  animation: icon-command-shift 380ms 45ms ease both reverse;
+}
+
+button:hover .icon-svg.icon-atlas circle,
+a:hover .icon-svg.icon-atlas circle {
+  animation: icon-node-pop 420ms cubic-bezier(.2,.8,.2,1) both;
+}
+
+button:hover .icon-svg.icon-atlas circle:nth-of-type(2),
+a:hover .icon-svg.icon-atlas circle:nth-of-type(2) {
+  animation-delay: 35ms;
+}
+
+button:hover .icon-svg.icon-atlas circle:nth-of-type(3),
+a:hover .icon-svg.icon-atlas circle:nth-of-type(3) {
+  animation-delay: 70ms;
+}
+
+button:hover .icon-svg.icon-atlas circle:nth-of-type(4),
+a:hover .icon-svg.icon-atlas circle:nth-of-type(4) {
+  animation-delay: 105ms;
+}
+
+button:hover .icon-svg.icon-atlas circle:nth-of-type(5),
+a:hover .icon-svg.icon-atlas circle:nth-of-type(5) {
+  animation-delay: 140ms;
+}
+
+button:hover .icon-svg.icon-extensions rect,
+a:hover .icon-svg.icon-extensions rect {
+  animation: icon-tile-pop 390ms cubic-bezier(.2,.8,.2,1) both;
+}
+
+button:hover .icon-svg.icon-extensions rect:nth-child(2),
+a:hover .icon-svg.icon-extensions rect:nth-child(2) {
+  animation-delay: 40ms;
+}
+
+button:hover .icon-svg.icon-extensions rect:nth-child(3),
+a:hover .icon-svg.icon-extensions rect:nth-child(3) {
+  animation-delay: 80ms;
+}
+
+button:hover .icon-svg.icon-extensions path,
+a:hover .icon-svg.icon-extensions path {
+  animation: icon-node-pop 390ms 120ms ease both;
+}
+
+button:hover .icon-svg.icon-audit path,
+a:hover .icon-svg.icon-audit path {
+  animation: icon-audit-sweep 460ms cubic-bezier(.2,.8,.2,1) both;
+}
+
+button:hover .icon-svg.icon-logs path,
+a:hover .icon-svg.icon-logs path {
+  animation: icon-row-slide 360ms ease both;
+}
+
+button:hover .icon-svg.icon-logs path:nth-child(2),
+a:hover .icon-svg.icon-logs path:nth-child(2) {
+  animation-delay: 45ms;
+}
+
+button:hover .icon-svg.icon-logs path:nth-child(3),
+a:hover .icon-svg.icon-logs path:nth-child(3) {
+  animation-delay: 90ms;
+}
+
+button:hover .icon-svg.icon-integrations circle,
+a:hover .icon-svg.icon-integrations circle {
+  animation: icon-node-pop 420ms cubic-bezier(.2,.8,.2,1) both;
+}
+
+button:hover .icon-svg.icon-integrations circle:nth-of-type(2),
+a:hover .icon-svg.icon-integrations circle:nth-of-type(2) {
+  animation-delay: 65ms;
+}
+
+button:hover .icon-svg.icon-menu .icon-glyph,
+a:hover .icon-svg.icon-menu .icon-glyph {
+  animation: icon-menu-sweep 340ms cubic-bezier(.2,.8,.2,1) both;
+}
+
+button:hover .icon-svg.icon-home .icon-glyph,
+a:hover .icon-svg.icon-home .icon-glyph {
+  animation: icon-home-rise 420ms cubic-bezier(.2,.8,.2,1) both;
+}
+
+button:hover .icon-svg.icon-save path:nth-child(2),
+a:hover .icon-svg.icon-save path:nth-child(2) {
+  animation: icon-save-press 420ms ease both;
+}
+
+button:hover .icon-svg.icon-reset .icon-glyph,
+a:hover .icon-svg.icon-reset .icon-glyph {
+  animation: icon-rotate 520ms cubic-bezier(.2,.8,.2,1);
+}
+
+button:hover .icon-svg.icon-shield-check .icon-glyph,
+a:hover .icon-svg.icon-shield-check .icon-glyph,
+button:hover .icon-svg.icon-shield .icon-glyph,
+a:hover .icon-svg.icon-shield .icon-glyph {
+  animation: icon-shield-pulse 480ms ease both;
+}
+
+button:hover .icon-svg.icon-upload path:first-child,
+a:hover .icon-svg.icon-upload path:first-child {
+  animation: icon-arrow-lift 380ms cubic-bezier(.2,.8,.2,1) both;
+}
+
+button:hover .icon-svg.icon-image circle,
+a:hover .icon-svg.icon-image circle {
+  animation: icon-node-pop 380ms ease both;
+}
+
+button:hover .icon-svg.icon-image path,
+a:hover .icon-svg.icon-image path {
+  animation: icon-image-pan 420ms ease both;
+}
+
+button:hover .icon-svg.icon-palette circle,
+a:hover .icon-svg.icon-palette circle {
+  animation: icon-node-pop 360ms ease both;
+}
+
+button:hover .icon-svg.icon-palette circle:nth-of-type(2),
+a:hover .icon-svg.icon-palette circle:nth-of-type(2) {
+  animation-delay: 45ms;
+}
+
+button:hover .icon-svg.icon-palette circle:nth-of-type(3),
+a:hover .icon-svg.icon-palette circle:nth-of-type(3) {
+  animation-delay: 90ms;
+}
+
+button:hover .icon-svg.icon-role circle,
+a:hover .icon-svg.icon-role circle {
+  animation: icon-node-pop 360ms ease both;
+}
+
+button:hover .icon-svg.icon-channel path,
+a:hover .icon-svg.icon-channel path {
+  animation: icon-channel-slide 420ms cubic-bezier(.2,.8,.2,1) both;
+}
+
+button:hover .icon-svg.icon-lock path,
+a:hover .icon-svg.icon-lock path {
+  animation: icon-shackle-open 380ms cubic-bezier(.2,.8,.2,1) both;
+}
+
+button:hover .icon-svg.icon-server rect,
+a:hover .icon-svg.icon-server rect {
+  animation: icon-server-rack 420ms ease both;
+}
+
+button:hover .icon-svg.icon-server rect:nth-child(2),
+a:hover .icon-svg.icon-server rect:nth-child(2) {
+  animation-delay: 65ms;
+}
+
+button:hover .icon-svg.icon-chevron-right .icon-glyph,
+a:hover .icon-svg.icon-chevron-right .icon-glyph {
+  animation: icon-chevron-slide 300ms cubic-bezier(.2,.8,.2,1) both;
+}
+
+button:focus-visible .icon-svg.icon-refresh .icon-glyph,
+a:focus-visible .icon-svg.icon-refresh .icon-glyph,
+button:hover .icon-svg.icon-retry .icon-glyph,
+a:hover .icon-svg.icon-retry .icon-glyph {
+  animation: icon-rotate 650ms cubic-bezier(.2,.8,.2,1);
+}
+
+@keyframes icon-command-shift {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(1px);
+  }
+}
+
+@keyframes icon-node-pop {
+  0% {
+    transform: scale(.82);
+    opacity: .55;
+  }
+  70% {
+    transform: scale(1.12);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes icon-audit-sweep {
+  from {
+    transform: rotate(-12deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+@keyframes icon-row-slide {
+  from {
+    transform: translateX(-1.5px);
+    opacity: .65;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes icon-menu-sweep {
+  0% {
+    transform: scaleX(1);
+  }
+  55% {
+    transform: scaleX(.78);
+  }
+  100% {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes icon-home-rise {
+  from {
+    transform: translateY(1px);
+  }
+  to {
+    transform: translateY(-1px);
+  }
+}
+
+@keyframes icon-save-press {
+  0%,100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-1px);
+  }
+}
+
+@keyframes icon-arrow-lift {
+  from {
+    transform: translateY(1px);
+  }
+  to {
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes icon-image-pan {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(1px);
+  }
+}
+
+@keyframes icon-channel-slide {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(1px);
+  }
+}
+
+@keyframes icon-shackle-open {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-1px);
+  }
+}
+
+@keyframes icon-server-rack {
+  0%,100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-1px);
+  }
+}
+
+@keyframes icon-chevron-slide {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(1.5px);
+  }
+}
+
 @keyframes icon-rotate {
   from {
     transform: rotate(0deg);
