@@ -1,5 +1,5 @@
 use axum::http::{HeaderMap, Method};
-use std::net::IpAddr;
+use std::{collections::HashSet, net::IpAddr};
 
 use crate::state::{now_secs, session_from_headers, AppState};
 
@@ -16,9 +16,9 @@ struct RateRule {
     maximum: usize,
 }
 
-fn client_ip(state: &AppState, headers: &HeaderMap, peer: Option<IpAddr>) -> String {
+fn client_ip(trusted_proxies: &HashSet<IpAddr>, headers: &HeaderMap, peer: Option<IpAddr>) -> String {
     let forwarded = peer
-        .filter(|address| state.config.trusted_proxy_ips.contains(address))
+        .filter(|address| trusted_proxies.contains(address))
         .and_then(|_| {
             headers
                 .get("x-forwarded-for")
@@ -28,7 +28,7 @@ fn client_ip(state: &AppState, headers: &HeaderMap, peer: Option<IpAddr>) -> Str
                         .split(',')
                         .rev()
                         .filter_map(|part| part.trim().parse::<IpAddr>().ok())
-                        .find(|address| !state.config.trusted_proxy_ips.contains(address))
+                        .find(|address| !trusted_proxies.contains(address))
                 })
                 .or_else(|| {
                     headers
@@ -47,7 +47,7 @@ async fn request_rules(
     headers: &HeaderMap,
     peer: Option<IpAddr>,
 ) -> Vec<RateRule> {
-    let ip = client_ip(state, headers, peer);
+    let ip = client_ip(&state.config.trusted_proxy_ips, headers, peer);
     let writes = matches!(method.as_str(), "POST" | "PUT" | "PATCH" | "DELETE");
     let mut rules = Vec::new();
 
@@ -106,11 +106,25 @@ mod tests {
 
     #[test]
     fn forwarded_ip_is_ignored_when_peer_is_not_trusted() {
-        let mut config = crate::config::AppConfig::from_env();
-        config.trusted_proxy_ips.clear();
-        let state = crate::state::AppState::new(config);
         let mut headers = HeaderMap::new();
         headers.insert("x-forwarded-for", "198.51.100.42".parse().unwrap());
-        assert_eq!(client_ip(&state, &headers, Some("203.0.113.4".parse().unwrap())), "203.0.113.4");
+        assert_eq!(
+            client_ip(&HashSet::new(), &headers, Some("203.0.113.4".parse().unwrap())),
+            "203.0.113.4"
+        );
+    }
+
+    #[test]
+    fn trusted_proxy_chain_resolves_to_the_nearest_untrusted_address() {
+        let trusted = HashSet::from([
+            "10.0.0.1".parse().unwrap(),
+            "10.0.0.2".parse().unwrap(),
+        ]);
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", "198.51.100.42, 10.0.0.2".parse().unwrap());
+        assert_eq!(
+            client_ip(&trusted, &headers, Some("10.0.0.1".parse().unwrap())),
+            "198.51.100.42"
+        );
     }
 }

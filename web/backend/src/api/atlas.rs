@@ -1,4 +1,4 @@
-use axum::{extract::{Path, Query, State}, http::StatusCode, Json};
+use axum::{extract::{Path, Query, State}, Json};
 use serde::Deserialize;
 use serde_json::Value;
 use crate::state::{authorized_guild, atlas_bridge_json, ApiError, ApiResult, AppState};
@@ -180,7 +180,7 @@ mod tests {
             };
             assert!(validate_atlas_query(&valid).is_ok());
         }
-    
+
         #[test]
         fn atlas_query_rejects_unknown_categories_and_unsafe_urls() {
             let unknown = AtlasQuery { title: "Example".to_string(), category: "OTHER".to_string(), url: None, ..AtlasQuery::default() };
@@ -196,8 +196,8 @@ mod tests {
             };
             assert!(validate_atlas_query(&oversized).is_err());
         }
-    
-    
+
+
         #[test]
         fn atlas_query_accepts_dashboard_categories_filters_and_bounded_exports() {
             let collection = AtlasQuery {
@@ -214,7 +214,7 @@ mod tests {
             };
             assert!(validate_atlas_query(&collection).is_ok());
         }
-    
+
         #[test]
         fn atlas_query_rejects_unbounded_exports_partial_provider_ids_and_private_categories() {
             let oversized = AtlasQuery {
