@@ -154,7 +154,7 @@ web/
 | frontend/src/App.tsx | Dashboard shell, local command drafts and role/channel access editor |
 | frontend/src/Components/Brand/BrandMark.tsx | Shared Lemegeton brand component |
 | frontend/src/Components/Legal/PolicyConsentGate.tsx | Explicit three-policy gate using the bot's existing versioned consent record |
-| frontend/src/Components/Icons/* | Shared animated SVG icon registry and renderer |
+| frontend/src/Components/Icons/* | Shared SVG icon registry with hover/focus micro-animations and reduced-motion support |
 | frontend/src/Components/CustomRoles/* | Migrated picker markup, styles, mount and behavior |
 | frontend/src/DesignSystem/GlobalStyles.tsx | Global dashboard styles embedded in TypeScript |
 | frontend/src/Components/Three/* | Lazy monochrome React Three Fiber scene and fallback |
@@ -488,7 +488,7 @@ SVG and uploaded image safety remains server-authoritative. Never inject pasted 
 
 The authored frontend source contains TypeScript, TSX, JSON configuration and SVG assets; standalone HTML, JavaScript and CSS files are not used.
 
-Global dashboard styles are held in src/DesignSystem/GlobalStyles.tsx. The Custom Roles theme and component rules are held in src/Components/CustomRoles/PickerStyles.tsx. Both render fixed, repository-owned style strings from TSX components. Never construct either style string from user input.
+Global dashboard styles are held in src/DesignSystem/GlobalStyles.tsx as formatted multi-line source. Shared SVG icon motion is defined alongside the design-system motion tokens. The Custom Roles theme and component rules are held in src/Components/CustomRoles/PickerStyles.tsx. Both render fixed, repository-owned style strings from TSX components. Never construct either style string from user input.
 
 The picker route has an inline-style CSP allowance for its fixed TSX stylesheet and Next.js bootstrap. The dashboard also permits the fixed global style block; script execution remains constrained to the same-origin static Next.js runtime and its required inline bootstrap.
 

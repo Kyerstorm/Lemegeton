@@ -1,1 +1,947 @@
-export const PICKER_STYLES = "/* Custom role color picker theme.\n   Every color, radius, font, spacing and size the picker uses is defined here, and picker.css\n   only refers to these variables. To restyle the page, edit this file only.\n\n   Not covered here (on purpose):\n   - favicon.svg has its own two colors, because a favicon can't read CSS variables.\n   - The color square's white/black overlays and the hue slider's rainbow are drawn by\n     picker.js. They show the colors being picked, so they aren't part of the theme. */\n:root {\n  color-scheme: dark;\n\n  /* Shared tokens are aligned with dashboard-frontend/src/styles.ts. */\n  --cr-soft: #b8beb5;\n  --cr-bg-glow: #1b2117;\n  --cr-mark-tracking: -.08em;\n  --cr-brand-tracking: .19em;\n  --cr-brand-tracking-small: .15em;\n  --cr-brand-tracking-mobile: .12em;\n  --cr-status-tracking: .08em;\n  --cr-status-tracking-small: .045em;\n  --cr-eyebrow-tracking: .13em;\n  --cr-hero-tracking: -.065em;\n  --cr-font-size-hero-responsive: clamp(2rem, 5vw, 3.75rem);\n  --cr-line-soft: #202420;\n  --cr-line-strong: #4a5047;\n  --cr-brand-mark: 41px;\n  --cr-brand-line: #4c5940;\n  --cr-brand-top: #222b1b;\n  --cr-font-size-brand: 20px;\n  --cr-font-size-micro: 9px;\n  --cr-status-led: 6px;\n  --cr-glow-size: 14px;\n  --cr-glow-hover: 22px;\n  --cr-glow-color: #d9ff7255;\n  --cr-glow-soft: #d9ff7222;\n  --cr-font-size-hero-min: 2rem;\n  --cr-font-size-hero: 3.75rem;\n  --cr-font-size-hero-mobile: 2.5rem;\n  --cr-lede-width: 660px;\n  --cr-card-shadow: #0f110f;\n  --cr-card-top: #151815;\n  --cr-heading-tracking: -.025em;\n\n  /* ---- Page ---- */\n  --cr-bg: #090a09;                 /* page background */\n  --cr-card: #101210;               /* cards and the tab panel */\n  --cr-card-border: #282d28;        /* card and divider lines */\n  --cr-raised: #1b1f1b;             /* popover and hovered controls */\n  --cr-text: #eff1ed;               /* main text */\n  --cr-muted: #8c948a;              /* labels, hints, timestamps */\n\n  /* ---- Controls ---- */\n  --cr-input-bg: #0b0d0b;           /* text boxes */\n  --cr-input-border: #282d28;       /* text box and swatch outlines */\n  --cr-accent: #d9ff72;             /* main buttons, selected tab and style (Discord blurple) */\n  --cr-accent-hover: #e5ffa4;       /* main buttons when hovered */\n  --cr-accent-text: #161b11;        /* text on accent */\n  --cr-secondary-bg: #151815;       /* secondary buttons (Reset, Done) */\n  --cr-secondary-hover: #20251e;    /* secondary buttons when hovered */\n  --cr-disabled-bg: #1b1f1b;        /* disabled buttons */\n  --cr-disabled-text: #687064;      /* text on disabled buttons */\n  --cr-focus: #d9ff72;              /* keyboard focus outline */\n  --cr-selected-ring: #eff1ed;      /* ring around the picked palette swatch */\n\n  /* ---- Messages ---- */\n  --cr-error: #ff8585;              /* error text */\n  --cr-error-bg: #241817;           /* error banner background */\n  --cr-success: #d9ff72;            /* success text */\n  --cr-warning: #e8c875;            /* \"heads up\" text and banners */\n  --cr-warning-bg: #211f16;         /* warning banner background */\n\n  /* ---- Preview cards (meant to look like Discord's own themes) ---- */\n  --cr-preview-dark-bg: #313338;    /* dark theme message background */\n  --cr-preview-dark-text: #DBDEE1;  /* dark theme message text and uncolored names */\n  --cr-preview-dark-muted: #949BA4; /* dark theme timestamp */\n  --cr-preview-light-bg: #FFFFFF;   /* light theme message background */\n  --cr-preview-light-text: #313338; /* light theme message text and uncolored names */\n  --cr-preview-light-muted: #5C5E66;/* light theme timestamp */\n  --cr-chip-bg: #0b0d0b;            /* role name chip under the preview */\n\n  /* ---- Role icon upload and crop ---- */\n  --cr-dropzone-border: #41483b;    /* dashed outline of the drop zone */\n  --cr-dropzone-bg: #0d100d;        /* drop zone background */\n  --cr-dropzone-active: #171b16;    /* drop zone while a file is dragged over it */\n  --cr-stage-bg: #090a09;           /* behind the image in the crop area */\n\n  /* ---- Holographic preview (Discord's fixed preset colors) ---- */\n  --cr-holo-1: #d9ff72;             /* first holographic color */\n  --cr-holo-2: #eff1ed;             /* second holographic color */\n  --cr-holo-3: #8c948a;             /* third holographic color */\n  --cr-holo-speed: 6s;              /* one loop of the holographic shimmer */\n\n  /* ---- Marker on the color square (two rings so it shows on any color) ---- */\n  --cr-marker-inner: #FFFFFF;       /* inner ring of the marker */\n  --cr-marker-outer: #000000;       /* outer ring of the marker */\n\n  /* ---- Shape ---- */\n  --cr-radius: 15px;                /* cards */\n  --cr-radius-small: 9px;           /* buttons, inputs, swatches */\n  --cr-radius-round: 50%;           /* avatars, the color marker, dots */\n  --cr-border-width: 1px;           /* every outline */\n  --cr-focus-width: 2px;            /* keyboard focus outline thickness */\n  --cr-focus-offset: 2px;           /* gap between a control and its focus outline */\n  --cr-ring-width: 2px;             /* ring around the picked swatch */\n\n  /* ---- Type ---- */\n  --cr-font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;/* page font (system fonts only, nothing downloaded) */\n  --cr-font-mono: \"SFMono-Regular\", Consolas, \"Liberation Mono\", monospace;/* hex codes and commands */\n  --cr-font-size: 1rem;             /* body text */\n  --cr-font-size-small: 0.875rem;   /* hints, labels, timestamps */\n  --cr-font-size-title: 1.5rem;     /* page title */\n  --cr-font-size-heading: 1.0625rem;/* card headings */\n  --cr-line-height: 1.45;           /* line spacing for all text */\n  --cr-weight-bold: 600;            /* headings, labels, names and buttons */\n\n  /* ---- Spacing ---- */\n  --cr-space-1: 4px;                /* tightest gap (inside chips) */\n  --cr-space-2: 8px;                /* small gap (between related controls) */\n  --cr-space-3: 12px;               /* medium gap (inside cards) */\n  --cr-space-4: 16px;               /* standard gap (card padding, between fields) */\n  --cr-space-6: 24px;               /* large gap (page top padding) */\n  --cr-space-8: 32px;               /* largest gap (page bottom padding) */\n\n  /* ---- Sizes ---- */\n  --cr-width: 600px;                /* page column */\n  --cr-avatar-size: 40px;           /* preview avatars */\n  --cr-icon-size: 20px;             /* role icon next to the name */\n  --cr-dot-size: 12px;              /* color dot in the role chip */\n  --cr-control-height: 40px;        /* buttons, inputs, color buttons */\n  --cr-hex-width: 7.5rem;           /* hex text boxes */\n  --cr-swatch-size: 32px;           /* palette swatches */\n  --cr-square-size: 200px;          /* the saturation/brightness square */\n  --cr-hue-width: 20px;             /* the hue slider */\n  --cr-marker-size: 14px;           /* marker on the square */\n  --cr-gradient-bar-height: 24px;   /* gradient preview bar */\n  --cr-stage-size: 240px;           /* the square crop area */\n  --cr-crop-preview-size: 64px;     /* the cropped icon preview next to it */\n  --cr-dropzone-height: 120px;      /* drop zone height */\n  --cr-emoji-input-width: 6rem;     /* emoji text box */\n  --cr-dash-width: 2px;             /* drop zone dashed outline thickness */\n  --cr-hidden-size: 1px;            /* screen-reader-only helpers and hidden radios (keep at 1px) */\n}\n\n/* Layout and components for the color picker.\n   Every color, radius, font, spacing and size comes from theme.css; this file must not\n   contain color values or px/rem/em lengths (a test checks). */\n* { box-sizing: border-box; }\n\nbody {\n  margin: 0;\n  background: var(--cr-bg);\n  color: var(--cr-text);\n  font-family: var(--cr-font);\n  font-size: var(--cr-font-size);\n  line-height: var(--cr-line-height);\n}\n\nmain {\n  max-width: var(--cr-width);\n  margin: 0 auto;\n  padding: var(--cr-space-6) var(--cr-space-4) var(--cr-space-8);\n}\n\nh1 { font-size: var(--cr-font-size-title); margin: 0 0 var(--cr-space-4); }\nh2 { font-size: var(--cr-font-size-heading); margin: 0 0 var(--cr-space-3); }\np { margin: 0 0 var(--cr-space-3); }\n\n.hidden { display: none !important; }\n\n.visually-hidden {\n  position: absolute;\n  width: var(--cr-hidden-size);\n  height: var(--cr-hidden-size);\n  margin: calc(var(--cr-hidden-size) * -1);\n  padding: 0;\n  overflow: hidden;\n  clip: rect(0 0 0 0);\n  white-space: nowrap;\n  border: 0;\n}\n\n.muted, .hint { color: var(--cr-muted); font-size: var(--cr-font-size-small); }\n\ncode { font-family: var(--cr-font-mono); font-size: var(--cr-font-size-small); }\n\n:focus-visible {\n  outline: var(--cr-focus-width) solid var(--cr-focus);\n  outline-offset: var(--cr-focus-offset);\n}\n\n/* ---------------------------------------------------------------- cards and banners */\n\n.card {\n  background: var(--cr-card);\n  border: var(--cr-border-width) solid var(--cr-card-border);\n  border-radius: var(--cr-radius);\n  padding: var(--cr-space-4);\n  margin-bottom: var(--cr-space-4);\n}\n\n.banner {\n  border: var(--cr-border-width) solid currentColor;\n  border-radius: var(--cr-radius-small);\n  padding: var(--cr-space-3) var(--cr-space-4);\n  margin-bottom: var(--cr-space-4);\n}\n.banner-error { color: var(--cr-error); background: var(--cr-error-bg); }\n.banner-warning { color: var(--cr-warning); background: var(--cr-warning-bg); }\n.banner p { margin: 0; }\n.banner strong { display: block; margin-bottom: var(--cr-space-1); }\n\n/* ---------------------------------------------------------------- preview */\n\n.preview-grid {\n  display: grid;\n  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--cr-width) / 2 - var(--cr-space-6))), 1fr));\n  gap: var(--cr-space-3);\n}\n\n.msg {\n  display: flex;\n  gap: var(--cr-space-3);\n  padding: var(--cr-space-3);\n  border-radius: var(--cr-radius-small);\n  min-width: 0;\n}\n.msg-dark { background: var(--cr-preview-dark-bg); color: var(--cr-preview-dark-text); }\n.msg-light { background: var(--cr-preview-light-bg); color: var(--cr-preview-light-text); }\n.msg-dark .time { color: var(--cr-preview-dark-muted); }\n.msg-light .time { color: var(--cr-preview-light-muted); }\n\n.avatar {\n  width: var(--cr-avatar-size);\n  height: var(--cr-avatar-size);\n  border-radius: var(--cr-radius-round);\n  flex: none;\n}\n\n.msg-body { min-width: 0; }\n.name-line { display: flex; align-items: center; flex-wrap: wrap; gap: var(--cr-space-1) var(--cr-space-2); }\n.name { font-weight: var(--cr-weight-bold); overflow-wrap: anywhere; }\n.time { font-size: var(--cr-font-size-small); }\n.msg-text { overflow-wrap: anywhere; }\n\n.role-icon { width: var(--cr-icon-size); height: var(--cr-icon-size); object-fit: contain; }\n.role-icon-emoji { font-size: var(--cr-icon-size); line-height: 1; }\n\n.chip-line { margin-top: var(--cr-space-3); display: flex; flex-wrap: wrap; align-items: center; gap: var(--cr-space-2); }\n.chip {\n  display: inline-flex;\n  align-items: center;\n  gap: var(--cr-space-2);\n  max-width: 100%;\n  padding: var(--cr-space-1) var(--cr-space-2);\n  border-radius: var(--cr-radius-small);\n  background: var(--cr-chip-bg);\n  font-size: var(--cr-font-size-small);\n}\n.chip-name { overflow-wrap: anywhere; }\n.dot {\n  width: var(--cr-dot-size);\n  height: var(--cr-dot-size);\n  border-radius: var(--cr-radius-round);\n  flex: none;\n  background: var(--cr-preview-dark-text);\n}\n\n.gradient-text,\n.holo-text {\n  -webkit-background-clip: text;\n  background-clip: text;\n  color: transparent;\n}\n\n.holo-text,\n.holo-fill {\n  background-image: linear-gradient(90deg, var(--cr-holo-1), var(--cr-holo-2), var(--cr-holo-3), var(--cr-holo-1));\n  background-size: 300% 100%;\n  animation: holo var(--cr-holo-speed) linear infinite;\n}\n\n@keyframes holo {\n  from { background-position: 0% 50%; }\n  to { background-position: 300% 50%; }\n}\n\n@media (prefers-reduced-motion: reduce) {\n  .holo-text, .holo-fill { animation: none; }\n}\n\n.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--cr-space-3); margin-top: var(--cr-space-3); }\n\n/* ---------------------------------------------------------------- tabs */\n\n.tabs {\n  display: flex;\n  gap: var(--cr-space-1);\n  border-bottom: var(--cr-border-width) solid var(--cr-card-border);\n  margin-bottom: var(--cr-space-4);\n  overflow-x: auto;\n}\n\n.tab {\n  font: inherit;\n  color: var(--cr-muted);\n  background: none;\n  border: 0;\n  border-bottom: var(--cr-focus-width) solid transparent;\n  padding: var(--cr-space-2) var(--cr-space-3);\n  cursor: pointer;\n  white-space: nowrap;\n}\n.tab:hover { color: var(--cr-text); }\n.tab[aria-selected=\"true\"] { color: var(--cr-text); border-bottom-color: var(--cr-accent); }\n\n/* ---------------------------------------------------------------- style switch (radios) */\n\n.segmented { border: 0; padding: 0; margin: 0 0 var(--cr-space-2); }\n.segmented legend { padding: 0; margin-bottom: var(--cr-space-2); font-weight: var(--cr-weight-bold); }\n.segments { display: flex; flex-wrap: wrap; gap: var(--cr-space-2); }\n.segments input { position: absolute; opacity: 0; width: var(--cr-hidden-size); height: var(--cr-hidden-size); }\n.segments label {\n  display: inline-flex;\n  align-items: center;\n  min-height: var(--cr-control-height);\n  padding: 0 var(--cr-space-4);\n  border-radius: var(--cr-radius-small);\n  border: var(--cr-border-width) solid var(--cr-input-border);\n  cursor: pointer;\n}\n.segments label:hover { background: var(--cr-raised); }\n.segments input:checked + label { background: var(--cr-accent); border-color: var(--cr-accent); color: var(--cr-accent-text); }\n.segments input:focus-visible + label { outline: var(--cr-focus-width) solid var(--cr-focus); outline-offset: var(--cr-focus-offset); }\n.segments input:disabled + label { color: var(--cr-disabled-text); background: var(--cr-disabled-bg); border-color: var(--cr-disabled-bg); cursor: not-allowed; }\n\n.mode-panel { margin-top: var(--cr-space-4); }\n\n/* ---------------------------------------------------------------- color fields */\n\n.field { margin-bottom: var(--cr-space-4); position: relative; }\n.field > label, .field-label { display: block; font-weight: var(--cr-weight-bold); margin-bottom: var(--cr-space-2); }\n\n.color-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--cr-space-2); }\n\n.color-button {\n  width: var(--cr-control-height);\n  height: var(--cr-control-height);\n  border-radius: var(--cr-radius-small);\n  border: var(--cr-border-width) solid var(--cr-input-border);\n  background: var(--cr-input-bg);\n  cursor: pointer;\n  padding: 0;\n}\n\n.text-input {\n  font: inherit;\n  color: var(--cr-text);\n  background: var(--cr-input-bg);\n  border: var(--cr-border-width) solid var(--cr-input-border);\n  border-radius: var(--cr-radius-small);\n  min-height: var(--cr-control-height);\n  padding: 0 var(--cr-space-3);\n}\n.text-input[aria-invalid=\"true\"] { border-color: var(--cr-error); }\n.hex-input { width: var(--cr-hex-width); font-family: var(--cr-font-mono); }\n.name-input { width: 100%; }\n\n.field-error { color: var(--cr-error); font-size: var(--cr-font-size-small); margin-top: var(--cr-space-1); }\n\n.gradient-bar {\n  height: var(--cr-gradient-bar-height);\n  border-radius: var(--cr-radius-small);\n  border: var(--cr-border-width) solid var(--cr-input-border);\n  margin-bottom: var(--cr-space-4);\n}\n\n/* ---------------------------------------------------------------- color popover */\n\n.popover {\n  position: absolute;\n  z-index: 10;\n  top: 100%;\n  left: 0;\n  margin-top: var(--cr-space-2);\n  padding: var(--cr-space-3);\n  background: var(--cr-raised);\n  border: var(--cr-border-width) solid var(--cr-card-border);\n  border-radius: var(--cr-radius);\n  max-width: 100%;\n}\n\n.picker-body { display: flex; gap: var(--cr-space-3); }\n\n.square {\n  position: relative;\n  width: min(var(--cr-square-size), calc(100vw - var(--cr-space-8) * 2 - var(--cr-hue-width)));\n  aspect-ratio: 1;\n  border-radius: var(--cr-radius-small);\n  cursor: crosshair;\n  touch-action: none;\n}\n\n.marker {\n  position: absolute;\n  width: var(--cr-marker-size);\n  height: var(--cr-marker-size);\n  margin: calc(var(--cr-marker-size) / -2) 0 0 calc(var(--cr-marker-size) / -2);\n  border-radius: var(--cr-radius-round);\n  border: var(--cr-ring-width) solid var(--cr-marker-inner);\n  outline: var(--cr-border-width) solid var(--cr-marker-outer);\n  pointer-events: none;\n}\n\n.hue {\n  -webkit-appearance: none;\n  appearance: none;\n  writing-mode: vertical-lr;\n  direction: rtl;\n  width: var(--cr-hue-width);\n  margin: 0;\n  border-radius: var(--cr-radius-small);\n  cursor: pointer;\n}\n.hue::-webkit-slider-thumb {\n  -webkit-appearance: none;\n  appearance: none;\n  width: var(--cr-hue-width);\n  height: var(--cr-marker-size);\n  border-radius: var(--cr-radius-small);\n  background: var(--cr-marker-inner);\n  border: var(--cr-ring-width) solid var(--cr-marker-outer);\n}\n.hue::-moz-range-thumb {\n  width: var(--cr-hue-width);\n  height: var(--cr-marker-size);\n  border-radius: var(--cr-radius-small);\n  background: var(--cr-marker-inner);\n  border: var(--cr-ring-width) solid var(--cr-marker-outer);\n}\n.hue::-moz-range-track { background: transparent; }\n\n.popover-actions { display: flex; justify-content: flex-end; margin-top: var(--cr-space-3); }\n\n/* ---------------------------------------------------------------- palette swatches (radios) */\n\n.palette-group { border: 0; padding: 0; margin: 0 0 var(--cr-space-3); }\n.palette-group legend { padding: 0; margin-bottom: var(--cr-space-2); font-size: var(--cr-font-size-small); color: var(--cr-muted); }\n.swatches { display: flex; flex-wrap: wrap; gap: var(--cr-space-2); }\n.swatches input { position: absolute; opacity: 0; width: var(--cr-hidden-size); height: var(--cr-hidden-size); }\n.swatches label {\n  display: block;\n  width: var(--cr-swatch-size);\n  height: var(--cr-swatch-size);\n  border-radius: var(--cr-radius-small);\n  border: var(--cr-border-width) solid var(--cr-input-border);\n  cursor: pointer;\n}\n.swatches input:checked + label { outline: var(--cr-ring-width) solid var(--cr-selected-ring); outline-offset: var(--cr-focus-offset); }\n.swatches input:focus-visible + label { outline: var(--cr-focus-width) solid var(--cr-focus); outline-offset: var(--cr-focus-offset); }\n\n/* ---------------------------------------------------------------- buttons and status */\n\n.btn {\n  font: inherit;\n  font-weight: var(--cr-weight-bold);\n  min-height: var(--cr-control-height);\n  padding: 0 var(--cr-space-4);\n  border: 0;\n  border-radius: var(--cr-radius-small);\n  cursor: pointer;\n}\n.btn-primary { background: var(--cr-accent); color: var(--cr-accent-text); }\n.btn-primary:hover { background: var(--cr-accent-hover); }\n.btn-secondary { background: var(--cr-secondary-bg); color: var(--cr-text); }\n.btn-secondary:hover { background: var(--cr-secondary-hover); }\n.btn:disabled, .btn:disabled:hover { background: var(--cr-disabled-bg); color: var(--cr-disabled-text); cursor: not-allowed; }\n\n.status { margin-top: var(--cr-space-2); font-size: var(--cr-font-size-small); min-height: calc(var(--cr-font-size-small) * var(--cr-line-height)); }\n.status-ok { color: var(--cr-success); }\n.status-error { color: var(--cr-error); }\n.status-note { color: var(--cr-warning); display: block; margin-top: var(--cr-space-1); }\n\ndl { display: grid; grid-template-columns: max-content 1fr; gap: var(--cr-space-1) var(--cr-space-4); margin: 0; }\ndt { color: var(--cr-muted); }\ndd { margin: 0; overflow-wrap: anywhere; }\n\n/* ---------------------------------------------------------------- role icon */\n\n.dropzone {\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  justify-content: center;\n  gap: var(--cr-space-1);\n  min-height: var(--cr-dropzone-height);\n  padding: var(--cr-space-4);\n  text-align: center;\n  border: var(--cr-dash-width) dashed var(--cr-dropzone-border);\n  border-radius: var(--cr-radius);\n  background: var(--cr-dropzone-bg);\n  cursor: pointer;\n}\n.dropzone:hover, .dropzone.drag-over { background: var(--cr-dropzone-active); }\n#icon-file:focus-visible + .dropzone { outline: var(--cr-focus-width) solid var(--cr-focus); outline-offset: var(--cr-focus-offset); }\n\n.url-input { flex: 1 1 auto; min-width: 0; }\n.emoji-input { width: var(--cr-emoji-input-width); font-size: var(--cr-font-size-heading); }\n\n.crop-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--cr-space-4); margin-bottom: var(--cr-space-3); }\n.crop-stage {\n  position: relative;\n  width: min(var(--cr-stage-size), 100%);\n  aspect-ratio: 1;\n  overflow: hidden;\n  border-radius: var(--cr-radius-small);\n  background: var(--cr-stage-bg);\n  cursor: grab;\n  touch-action: none;\n}\n.crop-stage:active { cursor: grabbing; }\n.crop-stage img {\n  position: absolute;\n  top: 0;\n  left: 0;\n  max-width: none;\n  transform-origin: 0 0;\n  user-select: none;\n  pointer-events: none;\n}\n.crop-side { display: flex; flex-direction: column; align-items: center; gap: var(--cr-space-1); }\n.crop-preview {\n  width: var(--cr-crop-preview-size);\n  height: var(--cr-crop-preview-size);\n  border-radius: var(--cr-radius-small);\n  background: var(--cr-stage-bg);\n}\n.zoom { width: min(var(--cr-stage-size), 100%); }\n\n/* Lemegeton dashboard visual language */\nhtml { min-height: 100%; background: var(--cr-bg); }\nbody { min-height: 100vh; background: radial-gradient(ellipse at 74% -12%, var(--cr-bg-glow) 0%, transparent 43%), var(--cr-bg); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }\n.picker-topbar { display:flex; justify-content:space-between; align-items:center; gap:var(--cr-space-4); padding:0 0 var(--cr-space-5); margin-bottom:var(--cr-space-6); border-bottom:var(--cr-border-width) solid var(--cr-line-soft); }\n.brand-lockup { display:inline-flex; align-items:center; gap:var(--cr-space-3); min-width:0; }\n.brand-mark { display:grid; place-items:center; width:var(--cr-brand-mark); height:var(--cr-brand-mark); border:var(--cr-border-width) solid var(--cr-brand-line); border-radius:var(--cr-radius); background:linear-gradient(145deg,var(--cr-brand-top),var(--cr-card)); color:var(--cr-accent); font-size:var(--cr-font-size-brand); font-weight:750; letter-spacing:var(--cr-mark-tracking); }\n.brand-copy { display:flex; flex-direction:column; gap:var(--cr-space-1); }\n.brand-copy strong { color:var(--cr-text); font-size:var(--cr-font-size-small); font-weight:750; letter-spacing:var(--cr-brand-tracking); }\n.brand-copy small { color:var(--cr-muted); font:var(--cr-font-size-micro) var(--cr-font-mono); letter-spacing:var(--cr-brand-tracking-small); }\n.topbar-status { display:inline-flex; align-items:center; gap:var(--cr-space-2); padding:var(--cr-space-2) var(--cr-space-3); border:var(--cr-border-width) solid var(--cr-card-border); border-radius:var(--cr-radius-small); background:var(--cr-card); }\n.topbar-status>span:last-child { display:flex; flex-direction:column; gap:var(--cr-space-1); }\n.topbar-status strong { color:var(--cr-soft); font:var(--cr-font-size-micro) var(--cr-font-mono); letter-spacing:var(--cr-status-tracking); }\n.topbar-status small { color:var(--cr-muted); font:var(--cr-font-size-micro) var(--cr-font-mono); letter-spacing:var(--cr-status-tracking-small); }\n.status-led { width:var(--cr-status-led); height:var(--cr-status-led); border-radius:var(--cr-radius-round); background:var(--cr-accent); box-shadow:0 0 var(--cr-glow-size) var(--cr-glow-color); }\n.picker-hero { margin:0 0 var(--cr-space-6); }\n.eyebrow { display:flex; align-items:center; gap:var(--cr-space-2); margin:0 0 var(--cr-space-3); color:var(--cr-muted); font:var(--cr-font-size-micro) var(--cr-font-mono); letter-spacing:var(--cr-eyebrow-tracking); }\n.eyebrow-divider { color:var(--cr-line-strong); }\n.picker-hero h1 { margin:0; font-size:var(--cr-font-size-hero-responsive); line-height:1.03; letter-spacing:var(--cr-hero-tracking); font-weight:650; }\n.picker-hero h1 span { color:var(--cr-accent); font-weight:450; }\n.picker-hero .lede { max-width:var(--cr-lede-width); margin:var(--cr-space-3) 0 0; color:var(--cr-muted); font-size:var(--cr-font-size-small); line-height:1.8; }\n.card { background:linear-gradient(145deg,var(--cr-card),var(--cr-card-shadow)); border-color:var(--cr-card-border); box-shadow:inset 0 var(--cr-border-width) 0 var(--cr-card-top); transition:border-color .18s ease,background .18s ease; }\n.card h2 { letter-spacing:var(--cr-heading-tracking); }\n.btn-primary { font-weight:700; box-shadow:0 0 var(--cr-glow-size) var(--cr-glow-soft); }\n.btn-primary:hover:not(:disabled) { box-shadow:0 0 var(--cr-glow-hover) var(--cr-glow-soft); }\ninput, select, textarea { accent-color:var(--cr-accent); }\n@media (max-width:640px) { .picker-topbar { align-items:flex-start; } .topbar-status { padding:var(--cr-space-2); } .topbar-status small { display:none; } .brand-copy strong { letter-spacing:var(--cr-brand-tracking-mobile); } .picker-hero h1 { font-size:var(--cr-font-size-hero-mobile); } }\n@media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; scroll-behavior:auto !important; transition-duration:.01ms !important; } }\n";
+export const PICKER_STYLES = String.raw`
+/* Custom role color picker theme.
+   Every color, radius, font, spacing and size the picker uses is defined here, and PickerStyles.tsx
+   only refers to these variables. To restyle the page, edit this file only.
+
+   Not covered here (on purpose):
+   - favicon.svg has its own two colors, because a favicon can't read CSS variables.
+   - The color square's white/black overlays and the hue slider's rainbow are drawn by
+     picker.tsx. They show the colors being picked, so they aren't part of the theme. */
+:root {
+  color-scheme: dark;
+  /* Shared tokens are aligned with dashboard-frontend/src/styles.ts. */
+  --cr-soft: #b8beb5;
+  --cr-bg-glow: #1b2117;
+  --cr-mark-tracking: -.08em;
+  --cr-brand-tracking: .19em;
+  --cr-brand-tracking-small: .15em;
+  --cr-brand-tracking-mobile: .12em;
+  --cr-status-tracking: .08em;
+  --cr-status-tracking-small: .045em;
+  --cr-eyebrow-tracking: .13em;
+  --cr-hero-tracking: -.065em;
+  --cr-font-size-hero-responsive: clamp(2rem, 5vw, 3.75rem);
+  --cr-line-soft: #202420;
+  --cr-line-strong: #4a5047;
+  --cr-brand-mark: 41px;
+  --cr-brand-line: #4c5940;
+  --cr-brand-top: #222b1b;
+  --cr-font-size-brand: 20px;
+  --cr-font-size-micro: 9px;
+  --cr-status-led: 6px;
+  --cr-glow-size: 14px;
+  --cr-glow-hover: 22px;
+  --cr-glow-color: #d9ff7255;
+  --cr-glow-soft: #d9ff7222;
+  --cr-font-size-hero-min: 2rem;
+  --cr-font-size-hero: 3.75rem;
+  --cr-font-size-hero-mobile: 2.5rem;
+  --cr-lede-width: 660px;
+  --cr-card-shadow: #0f110f;
+  --cr-card-top: #151815;
+  --cr-heading-tracking: -.025em;
+  /* ---- Page ---- */
+  --cr-bg: #090a09;
+  /* page background */
+  --cr-card: #101210;
+  /* cards and the tab panel */
+  --cr-card-border: #282d28;
+  /* card and divider lines */
+  --cr-raised: #1b1f1b;
+  /* popover and hovered controls */
+  --cr-text: #eff1ed;
+  /* main text */
+  --cr-muted: #8c948a;
+  /* labels, hints, timestamps */
+  /* ---- Controls ---- */
+  --cr-input-bg: #0b0d0b;
+  /* text boxes */
+  --cr-input-border: #282d28;
+  /* text box and swatch outlines */
+  --cr-accent: #d9ff72;
+  /* main buttons, selected tab and style (Discord blurple) */
+  --cr-accent-hover: #e5ffa4;
+  /* main buttons when hovered */
+  --cr-accent-text: #161b11;
+  /* text on accent */
+  --cr-secondary-bg: #151815;
+  /* secondary buttons (Reset, Done) */
+  --cr-secondary-hover: #20251e;
+  /* secondary buttons when hovered */
+  --cr-disabled-bg: #1b1f1b;
+  /* disabled buttons */
+  --cr-disabled-text: #687064;
+  /* text on disabled buttons */
+  --cr-focus: #d9ff72;
+  /* keyboard focus outline */
+  --cr-selected-ring: #eff1ed;
+  /* ring around the picked palette swatch */
+  /* ---- Messages ---- */
+  --cr-error: #ff8585;
+  /* error text */
+  --cr-error-bg: #241817;
+  /* error banner background */
+  --cr-success: #d9ff72;
+  /* success text */
+  --cr-warning: #e8c875;
+  /* "heads up" text and banners */
+  --cr-warning-bg: #211f16;
+  /* warning banner background */
+  /* ---- Preview cards (meant to look like Discord's own themes) ---- */
+  --cr-preview-dark-bg: #313338;
+  /* dark theme message background */
+  --cr-preview-dark-text: #DBDEE1;
+  /* dark theme message text and uncolored names */
+  --cr-preview-dark-muted: #949BA4;
+  /* dark theme timestamp */
+  --cr-preview-light-bg: #FFFFFF;
+  /* light theme message background */
+  --cr-preview-light-text: #313338;
+  /* light theme message text and uncolored names */
+  --cr-preview-light-muted: #5C5E66;
+  /* light theme timestamp */
+  --cr-chip-bg: #0b0d0b;
+  /* role name chip under the preview */
+  /* ---- Role icon upload and crop ---- */
+  --cr-dropzone-border: #41483b;
+  /* dashed outline of the drop zone */
+  --cr-dropzone-bg: #0d100d;
+  /* drop zone background */
+  --cr-dropzone-active: #171b16;
+  /* drop zone while a file is dragged over it */
+  --cr-stage-bg: #090a09;
+  /* behind the image in the crop area */
+  /* ---- Holographic preview (Discord's fixed preset colors) ---- */
+  --cr-holo-1: #d9ff72;
+  /* first holographic color */
+  --cr-holo-2: #eff1ed;
+  /* second holographic color */
+  --cr-holo-3: #8c948a;
+  /* third holographic color */
+  --cr-holo-speed: 6s;
+  /* one loop of the holographic shimmer */
+  /* ---- Marker on the color square (two rings so it shows on any color) ---- */
+  --cr-marker-inner: #FFFFFF;
+  /* inner ring of the marker */
+  --cr-marker-outer: #000000;
+  /* outer ring of the marker */
+  /* ---- Shape ---- */
+  --cr-radius: 15px;
+  /* cards */
+  --cr-radius-small: 9px;
+  /* buttons, inputs, swatches */
+  --cr-radius-round: 50%;
+  /* avatars, the color marker, dots */
+  --cr-border-width: 1px;
+  /* every outline */
+  --cr-focus-width: 2px;
+  /* keyboard focus outline thickness */
+  --cr-focus-offset: 2px;
+  /* gap between a control and its focus outline */
+  --cr-ring-width: 2px;
+  /* ring around the picked swatch */
+  /* ---- Type ---- */
+  --cr-font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  /* page font (system fonts only, nothing downloaded) */
+  --cr-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  /* hex codes and commands */
+  --cr-font-size: 1rem;
+  /* body text */
+  --cr-font-size-small: 0.875rem;
+  /* hints, labels, timestamps */
+  --cr-font-size-title: 1.5rem;
+  /* page title */
+  --cr-font-size-heading: 1.0625rem;
+  /* card headings */
+  --cr-line-height: 1.45;
+  /* line spacing for all text */
+  --cr-weight-bold: 600;
+  /* headings, labels, names and buttons */
+  /* ---- Spacing ---- */
+  --cr-space-1: 4px;
+  /* tightest gap (inside chips) */
+  --cr-space-2: 8px;
+  /* small gap (between related controls) */
+  --cr-space-3: 12px;
+  /* medium gap (inside cards) */
+  --cr-space-4: 16px;
+  /* standard gap (card padding, between fields) */
+  --cr-space-6: 24px;
+  /* large gap (page top padding) */
+  --cr-space-8: 32px;
+  /* largest gap (page bottom padding) */
+  /* ---- Sizes ---- */
+  --cr-width: 600px;
+  /* page column */
+  --cr-avatar-size: 40px;
+  /* preview avatars */
+  --cr-icon-size: 20px;
+  /* role icon next to the name */
+  --cr-dot-size: 12px;
+  /* color dot in the role chip */
+  --cr-control-height: 40px;
+  /* buttons, inputs, color buttons */
+  --cr-hex-width: 7.5rem;
+  /* hex text boxes */
+  --cr-swatch-size: 32px;
+  /* palette swatches */
+  --cr-square-size: 200px;
+  /* the saturation/brightness square */
+  --cr-hue-width: 20px;
+  /* the hue slider */
+  --cr-marker-size: 14px;
+  /* marker on the square */
+  --cr-gradient-bar-height: 24px;
+  /* gradient preview bar */
+  --cr-stage-size: 240px;
+  /* the square crop area */
+  --cr-crop-preview-size: 64px;
+  /* the cropped icon preview next to it */
+  --cr-dropzone-height: 120px;
+  /* drop zone height */
+  --cr-emoji-input-width: 6rem;
+  /* emoji text box */
+  --cr-dash-width: 2px;
+  /* drop zone dashed outline thickness */
+  --cr-hidden-size: 1px;
+  /* screen-reader-only helpers and hidden radios (keep at 1px) */
+}
+/* Layout and components for the color picker.
+   Every color, radius, font, spacing and size comes from theme.css; this file must not
+   contain color values or px/rem/em lengths (a test checks). */
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--cr-bg);
+  color: var(--cr-text);
+  font-family: var(--cr-font);
+  font-size: var(--cr-font-size);
+  line-height: var(--cr-line-height);
+}
+main {
+  max-width: var(--cr-width);
+  margin: 0 auto;
+  padding: var(--cr-space-6) var(--cr-space-4) var(--cr-space-8);
+}
+h1 {
+  font-size: var(--cr-font-size-title);
+  margin: 0 0 var(--cr-space-4);
+}
+h2 {
+  font-size: var(--cr-font-size-heading);
+  margin: 0 0 var(--cr-space-3);
+}
+p {
+  margin: 0 0 var(--cr-space-3);
+}
+.hidden {
+  display: none !important;
+}
+.visually-hidden {
+  position: absolute;
+  width: var(--cr-hidden-size);
+  height: var(--cr-hidden-size);
+  margin: calc(var(--cr-hidden-size) * -1);
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.muted, .hint {
+  color: var(--cr-muted);
+  font-size: var(--cr-font-size-small);
+}
+code {
+  font-family: var(--cr-font-mono);
+  font-size: var(--cr-font-size-small);
+}
+:focus-visible {
+  outline: var(--cr-focus-width) solid var(--cr-focus);
+  outline-offset: var(--cr-focus-offset);
+}
+/* ---------------------------------------------------------------- cards and banners */
+.card {
+  background: var(--cr-card);
+  border: var(--cr-border-width) solid var(--cr-card-border);
+  border-radius: var(--cr-radius);
+  padding: var(--cr-space-4);
+  margin-bottom: var(--cr-space-4);
+}
+.banner {
+  border: var(--cr-border-width) solid currentColor;
+  border-radius: var(--cr-radius-small);
+  padding: var(--cr-space-3) var(--cr-space-4);
+  margin-bottom: var(--cr-space-4);
+}
+.banner-error {
+  color: var(--cr-error);
+  background: var(--cr-error-bg);
+}
+.banner-warning {
+  color: var(--cr-warning);
+  background: var(--cr-warning-bg);
+}
+.banner p {
+  margin: 0;
+}
+.banner strong {
+  display: block;
+  margin-bottom: var(--cr-space-1);
+}
+/* ---------------------------------------------------------------- preview */
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--cr-width) / 2 - var(--cr-space-6))), 1fr));
+  gap: var(--cr-space-3);
+}
+.msg {
+  display: flex;
+  gap: var(--cr-space-3);
+  padding: var(--cr-space-3);
+  border-radius: var(--cr-radius-small);
+  min-width: 0;
+}
+.msg-dark {
+  background: var(--cr-preview-dark-bg);
+  color: var(--cr-preview-dark-text);
+}
+.msg-light {
+  background: var(--cr-preview-light-bg);
+  color: var(--cr-preview-light-text);
+}
+.msg-dark .time {
+  color: var(--cr-preview-dark-muted);
+}
+.msg-light .time {
+  color: var(--cr-preview-light-muted);
+}
+.avatar {
+  width: var(--cr-avatar-size);
+  height: var(--cr-avatar-size);
+  border-radius: var(--cr-radius-round);
+  flex: none;
+}
+.msg-body {
+  min-width: 0;
+}
+.name-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--cr-space-1) var(--cr-space-2);
+}
+.name {
+  font-weight: var(--cr-weight-bold);
+  overflow-wrap: anywhere;
+}
+.time {
+  font-size: var(--cr-font-size-small);
+}
+.msg-text {
+  overflow-wrap: anywhere;
+}
+.role-icon {
+  width: var(--cr-icon-size);
+  height: var(--cr-icon-size);
+  object-fit: contain;
+}
+.role-icon-emoji {
+  font-size: var(--cr-icon-size);
+  line-height: 1;
+}
+.chip-line {
+  margin-top: var(--cr-space-3);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cr-space-2);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cr-space-2);
+  max-width: 100%;
+  padding: var(--cr-space-1) var(--cr-space-2);
+  border-radius: var(--cr-radius-small);
+  background: var(--cr-chip-bg);
+  font-size: var(--cr-font-size-small);
+}
+.chip-name {
+  overflow-wrap: anywhere;
+}
+.dot {
+  width: var(--cr-dot-size);
+  height: var(--cr-dot-size);
+  border-radius: var(--cr-radius-round);
+  flex: none;
+  background: var(--cr-preview-dark-text);
+}
+.gradient-text, .holo-text {
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.holo-text, .holo-fill {
+  background-image: linear-gradient(90deg, var(--cr-holo-1), var(--cr-holo-2), var(--cr-holo-3), var(--cr-holo-1));
+  background-size: 300% 100%;
+  animation: holo var(--cr-holo-speed) linear infinite;
+}
+@keyframes holo {
+  from {
+    background-position: 0% 50%;
+  }
+  to {
+    background-position: 300% 50%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .holo-text, .holo-fill {
+    animation: none;
+  }
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cr-space-3);
+  margin-top: var(--cr-space-3);
+}
+/* ---------------------------------------------------------------- tabs */
+.tabs {
+  display: flex;
+  gap: var(--cr-space-1);
+  border-bottom: var(--cr-border-width) solid var(--cr-card-border);
+  margin-bottom: var(--cr-space-4);
+  overflow-x: auto;
+}
+.tab {
+  font: inherit;
+  color: var(--cr-muted);
+  background: none;
+  border: 0;
+  border-bottom: var(--cr-focus-width) solid transparent;
+  padding: var(--cr-space-2) var(--cr-space-3);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tab:hover {
+  color: var(--cr-text);
+}
+.tab[aria-selected="true"] {
+  color: var(--cr-text);
+  border-bottom-color: var(--cr-accent);
+}
+/* ---------------------------------------------------------------- style switch (radios) */
+.segmented {
+  border: 0;
+  padding: 0;
+  margin: 0 0 var(--cr-space-2);
+}
+.segmented legend {
+  padding: 0;
+  margin-bottom: var(--cr-space-2);
+  font-weight: var(--cr-weight-bold);
+}
+.segments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cr-space-2);
+}
+.segments input {
+  position: absolute;
+  opacity: 0;
+  width: var(--cr-hidden-size);
+  height: var(--cr-hidden-size);
+}
+.segments label {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--cr-control-height);
+  padding: 0 var(--cr-space-4);
+  border-radius: var(--cr-radius-small);
+  border: var(--cr-border-width) solid var(--cr-input-border);
+  cursor: pointer;
+}
+.segments label:hover {
+  background: var(--cr-raised);
+}
+.segments input:checked + label {
+  background: var(--cr-accent);
+  border-color: var(--cr-accent);
+  color: var(--cr-accent-text);
+}
+.segments input:focus-visible + label {
+  outline: var(--cr-focus-width) solid var(--cr-focus);
+  outline-offset: var(--cr-focus-offset);
+}
+.segments input:disabled + label {
+  color: var(--cr-disabled-text);
+  background: var(--cr-disabled-bg);
+  border-color: var(--cr-disabled-bg);
+  cursor: not-allowed;
+}
+.mode-panel {
+  margin-top: var(--cr-space-4);
+}
+/* ---------------------------------------------------------------- color fields */
+.field {
+  margin-bottom: var(--cr-space-4);
+  position: relative;
+}
+.field > label, .field-label {
+  display: block;
+  font-weight: var(--cr-weight-bold);
+  margin-bottom: var(--cr-space-2);
+}
+.color-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cr-space-2);
+}
+.color-button {
+  width: var(--cr-control-height);
+  height: var(--cr-control-height);
+  border-radius: var(--cr-radius-small);
+  border: var(--cr-border-width) solid var(--cr-input-border);
+  background: var(--cr-input-bg);
+  cursor: pointer;
+  padding: 0;
+}
+.text-input {
+  font: inherit;
+  color: var(--cr-text);
+  background: var(--cr-input-bg);
+  border: var(--cr-border-width) solid var(--cr-input-border);
+  border-radius: var(--cr-radius-small);
+  min-height: var(--cr-control-height);
+  padding: 0 var(--cr-space-3);
+}
+.text-input[aria-invalid="true"] {
+  border-color: var(--cr-error);
+}
+.hex-input {
+  width: var(--cr-hex-width);
+  font-family: var(--cr-font-mono);
+}
+.name-input {
+  width: 100%;
+}
+.field-error {
+  color: var(--cr-error);
+  font-size: var(--cr-font-size-small);
+  margin-top: var(--cr-space-1);
+}
+.gradient-bar {
+  height: var(--cr-gradient-bar-height);
+  border-radius: var(--cr-radius-small);
+  border: var(--cr-border-width) solid var(--cr-input-border);
+  margin-bottom: var(--cr-space-4);
+}
+/* ---------------------------------------------------------------- color popover */
+.popover {
+  position: absolute;
+  z-index: 10;
+  top: 100%;
+  left: 0;
+  margin-top: var(--cr-space-2);
+  padding: var(--cr-space-3);
+  background: var(--cr-raised);
+  border: var(--cr-border-width) solid var(--cr-card-border);
+  border-radius: var(--cr-radius);
+  max-width: 100%;
+}
+.picker-body {
+  display: flex;
+  gap: var(--cr-space-3);
+}
+.square {
+  position: relative;
+  width: min(var(--cr-square-size), calc(100vw - var(--cr-space-8) * 2 - var(--cr-hue-width)));
+  aspect-ratio: 1;
+  border-radius: var(--cr-radius-small);
+  cursor: crosshair;
+  touch-action: none;
+}
+.marker {
+  position: absolute;
+  width: var(--cr-marker-size);
+  height: var(--cr-marker-size);
+  margin: calc(var(--cr-marker-size) / -2) 0 0 calc(var(--cr-marker-size) / -2);
+  border-radius: var(--cr-radius-round);
+  border: var(--cr-ring-width) solid var(--cr-marker-inner);
+  outline: var(--cr-border-width) solid var(--cr-marker-outer);
+  pointer-events: none;
+}
+.hue {
+  -webkit-appearance: none;
+  appearance: none;
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: var(--cr-hue-width);
+  margin: 0;
+  border-radius: var(--cr-radius-small);
+  cursor: pointer;
+}
+.hue::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: var(--cr-hue-width);
+  height: var(--cr-marker-size);
+  border-radius: var(--cr-radius-small);
+  background: var(--cr-marker-inner);
+  border: var(--cr-ring-width) solid var(--cr-marker-outer);
+}
+.hue::-moz-range-thumb {
+  width: var(--cr-hue-width);
+  height: var(--cr-marker-size);
+  border-radius: var(--cr-radius-small);
+  background: var(--cr-marker-inner);
+  border: var(--cr-ring-width) solid var(--cr-marker-outer);
+}
+.hue::-moz-range-track {
+  background: transparent;
+}
+.popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--cr-space-3);
+}
+/* ---------------------------------------------------------------- palette swatches (radios) */
+.palette-group {
+  border: 0;
+  padding: 0;
+  margin: 0 0 var(--cr-space-3);
+}
+.palette-group legend {
+  padding: 0;
+  margin-bottom: var(--cr-space-2);
+  font-size: var(--cr-font-size-small);
+  color: var(--cr-muted);
+}
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cr-space-2);
+}
+.swatches input {
+  position: absolute;
+  opacity: 0;
+  width: var(--cr-hidden-size);
+  height: var(--cr-hidden-size);
+}
+.swatches label {
+  display: block;
+  width: var(--cr-swatch-size);
+  height: var(--cr-swatch-size);
+  border-radius: var(--cr-radius-small);
+  border: var(--cr-border-width) solid var(--cr-input-border);
+  cursor: pointer;
+}
+.swatches input:checked + label {
+  outline: var(--cr-ring-width) solid var(--cr-selected-ring);
+  outline-offset: var(--cr-focus-offset);
+}
+.swatches input:focus-visible + label {
+  outline: var(--cr-focus-width) solid var(--cr-focus);
+  outline-offset: var(--cr-focus-offset);
+}
+/* ---------------------------------------------------------------- buttons and status */
+.btn {
+  font: inherit;
+  font-weight: var(--cr-weight-bold);
+  min-height: var(--cr-control-height);
+  padding: 0 var(--cr-space-4);
+  border: 0;
+  border-radius: var(--cr-radius-small);
+  cursor: pointer;
+}
+.btn-primary {
+  background: var(--cr-accent);
+  color: var(--cr-accent-text);
+}
+.btn-primary:hover {
+  background: var(--cr-accent-hover);
+}
+.btn-secondary {
+  background: var(--cr-secondary-bg);
+  color: var(--cr-text);
+}
+.btn-secondary:hover {
+  background: var(--cr-secondary-hover);
+}
+.btn:disabled, .btn:disabled:hover {
+  background: var(--cr-disabled-bg);
+  color: var(--cr-disabled-text);
+  cursor: not-allowed;
+}
+.status {
+  margin-top: var(--cr-space-2);
+  font-size: var(--cr-font-size-small);
+  min-height: calc(var(--cr-font-size-small) * var(--cr-line-height));
+}
+.status-ok {
+  color: var(--cr-success);
+}
+.status-error {
+  color: var(--cr-error);
+}
+.status-note {
+  color: var(--cr-warning);
+  display: block;
+  margin-top: var(--cr-space-1);
+}
+dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--cr-space-1) var(--cr-space-4);
+  margin: 0;
+}
+dt {
+  color: var(--cr-muted);
+}
+dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+/* ---------------------------------------------------------------- role icon */
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--cr-space-1);
+  min-height: var(--cr-dropzone-height);
+  padding: var(--cr-space-4);
+  text-align: center;
+  border: var(--cr-dash-width) dashed var(--cr-dropzone-border);
+  border-radius: var(--cr-radius);
+  background: var(--cr-dropzone-bg);
+  cursor: pointer;
+}
+.dropzone:hover, .dropzone.drag-over {
+  background: var(--cr-dropzone-active);
+}
+#icon-file:focus-visible + .dropzone {
+  outline: var(--cr-focus-width) solid var(--cr-focus);
+  outline-offset: var(--cr-focus-offset);
+}
+.url-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.emoji-input {
+  width: var(--cr-emoji-input-width);
+  font-size: var(--cr-font-size-heading);
+}
+.crop-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--cr-space-4);
+  margin-bottom: var(--cr-space-3);
+}
+.crop-stage {
+  position: relative;
+  width: min(var(--cr-stage-size), 100%);
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: var(--cr-radius-small);
+  background: var(--cr-stage-bg);
+  cursor: grab;
+  touch-action: none;
+}
+.crop-stage:active {
+  cursor: grabbing;
+}
+.crop-stage img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: none;
+  transform-origin: 0 0;
+  user-select: none;
+  pointer-events: none;
+}
+.crop-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--cr-space-1);
+}
+.crop-preview {
+  width: var(--cr-crop-preview-size);
+  height: var(--cr-crop-preview-size);
+  border-radius: var(--cr-radius-small);
+  background: var(--cr-stage-bg);
+}
+.zoom {
+  width: min(var(--cr-stage-size), 100%);
+}
+/* Lemegeton dashboard visual language */
+html {
+  min-height: 100%;
+  background: var(--cr-bg);
+}
+body {
+  min-height: 100vh;
+  background: radial-gradient(ellipse at 74% -12%, var(--cr-bg-glow) 0%, transparent 43%), var(--cr-bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+.picker-topbar {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:var(--cr-space-4);
+  padding:0 0 var(--cr-space-5);
+  margin-bottom:var(--cr-space-6);
+  border-bottom:var(--cr-border-width) solid var(--cr-line-soft);
+}
+.brand-lockup {
+  display:inline-flex;
+  align-items:center;
+  gap:var(--cr-space-3);
+  min-width:0;
+}
+.brand-mark {
+  display:grid;
+  place-items:center;
+  width:var(--cr-brand-mark);
+  height:var(--cr-brand-mark);
+  border:var(--cr-border-width) solid var(--cr-brand-line);
+  border-radius:var(--cr-radius);
+  background:linear-gradient(145deg,var(--cr-brand-top),var(--cr-card));
+  color:var(--cr-accent);
+  font-size:var(--cr-font-size-brand);
+  font-weight:750;
+  letter-spacing:var(--cr-mark-tracking);
+}
+.brand-copy {
+  display:flex;
+  flex-direction:column;
+  gap:var(--cr-space-1);
+}
+.brand-copy strong {
+  color:var(--cr-text);
+  font-size:var(--cr-font-size-small);
+  font-weight:750;
+  letter-spacing:var(--cr-brand-tracking);
+}
+.brand-copy small {
+  color:var(--cr-muted);
+  font:var(--cr-font-size-micro) var(--cr-font-mono);
+  letter-spacing:var(--cr-brand-tracking-small);
+}
+.topbar-status {
+  display:inline-flex;
+  align-items:center;
+  gap:var(--cr-space-2);
+  padding:var(--cr-space-2) var(--cr-space-3);
+  border:var(--cr-border-width) solid var(--cr-card-border);
+  border-radius:var(--cr-radius-small);
+  background:var(--cr-card);
+}
+.topbar-status>span:last-child {
+  display:flex;
+  flex-direction:column;
+  gap:var(--cr-space-1);
+}
+.topbar-status strong {
+  color:var(--cr-soft);
+  font:var(--cr-font-size-micro) var(--cr-font-mono);
+  letter-spacing:var(--cr-status-tracking);
+}
+.topbar-status small {
+  color:var(--cr-muted);
+  font:var(--cr-font-size-micro) var(--cr-font-mono);
+  letter-spacing:var(--cr-status-tracking-small);
+}
+.status-led {
+  width:var(--cr-status-led);
+  height:var(--cr-status-led);
+  border-radius:var(--cr-radius-round);
+  background:var(--cr-accent);
+  box-shadow:0 0 var(--cr-glow-size) var(--cr-glow-color);
+}
+.picker-hero {
+  margin:0 0 var(--cr-space-6);
+}
+.eyebrow {
+  display:flex;
+  align-items:center;
+  gap:var(--cr-space-2);
+  margin:0 0 var(--cr-space-3);
+  color:var(--cr-muted);
+  font:var(--cr-font-size-micro) var(--cr-font-mono);
+  letter-spacing:var(--cr-eyebrow-tracking);
+}
+.eyebrow-divider {
+  color:var(--cr-line-strong);
+}
+.picker-hero h1 {
+  margin:0;
+  font-size:var(--cr-font-size-hero-responsive);
+  line-height:1.03;
+  letter-spacing:var(--cr-hero-tracking);
+  font-weight:650;
+}
+.picker-hero h1 span {
+  color:var(--cr-accent);
+  font-weight:450;
+}
+.picker-hero .lede {
+  max-width:var(--cr-lede-width);
+  margin:var(--cr-space-3) 0 0;
+  color:var(--cr-muted);
+  font-size:var(--cr-font-size-small);
+  line-height:1.8;
+}
+.card {
+  background:linear-gradient(145deg,var(--cr-card),var(--cr-card-shadow));
+  border-color:var(--cr-card-border);
+  box-shadow:inset 0 var(--cr-border-width) 0 var(--cr-card-top);
+  transition:border-color .18s ease,background .18s ease;
+}
+.card h2 {
+  letter-spacing:var(--cr-heading-tracking);
+}
+.btn-primary {
+  font-weight:700;
+  box-shadow:0 0 var(--cr-glow-size) var(--cr-glow-soft);
+}
+.btn-primary:hover:not(:disabled) {
+  box-shadow:0 0 var(--cr-glow-hover) var(--cr-glow-soft);
+}
+input, select, textarea {
+  accent-color:var(--cr-accent);
+}
+@media (max-width:640px) {
+  .picker-topbar {
+    align-items:flex-start;
+  }
+  .topbar-status {
+    padding:var(--cr-space-2);
+  }
+  .topbar-status small {
+    display:none;
+  }
+  .brand-copy strong {
+    letter-spacing:var(--cr-brand-tracking-mobile);
+  }
+  .picker-hero h1 {
+    font-size:var(--cr-font-size-hero-mobile);
+  }
+}
+@media (prefers-reduced-motion:reduce) {
+  *,*::before,*::after {
+    animation-duration:.01ms !important;
+    animation-iteration-count:1 !important;
+    scroll-behavior:auto !important;
+    transition-duration:.01ms !important;
+  }
+}
+`;

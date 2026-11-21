@@ -189,7 +189,7 @@ function LoginPage() {
       <h1>Control the<br /><span>moving parts.</span></h1>
       <p className="login-copy">Manage command access, review server activity, and inspect runtime health through your existing Discord permissions.</p>
       {cancelled ? <div className="inline-notice">Sign-in was cancelled. Nothing has been changed.</div> : null}
-      <a className="button primary login-button" href="/oauth/start">Continue with Discord <span aria-hidden="true">↗</span></a>
+      <a className="button primary login-button" href="/oauth/start">Continue with Discord <Icon name="arrow-up-right" size={14} /></a>
       <div className="login-separator"><span />SECURE DISCORD SIGN-IN<span /></div>
       <div className="login-assurances"><span><b>01</b> Server permissions checked on every request</span><span><b>02</b> Configuration scoped per guild</span><span><b>03</b> Secret values stay server-side</span></div>
       <div className="login-foot"><span>LEMEGETON / ACCESS</span><span>SESSION PROTECTED</span></div>
@@ -905,12 +905,12 @@ export default function App() {
         {PAGES.map((item) => <button key={item.id} type="button" className={"nav-item" + (page === item.id ? " active" : "")} onClick={() => navigate(item.id)} aria-current={page === item.id ? "page" : undefined}>
           <span className="nav-glyph" aria-hidden="true"><Icon name={item.icon} size={17} /></span><span>{item.label}</span>
           {item.id === "commands" ? <span className="nav-count">{commands.length || "—"}</span> : null}
-          {item.id === "atlas" ? <span className="nav-count">↗</span> : null}
+          {item.id === "atlas" ? <span className="nav-count"><Icon name="arrow-up-right" size={12} /></span> : null}
         </button>)}
       </nav>
       <div className="sidebar-spacer" />
       <div className="sidebar-system"><span className={"signal-dot" + (runtimeOnline ? " online" : "")} /><div><strong>{system.status === "unknown" ? "Bot signal unavailable" : bot.ready ? "Gateway connected" : "Bot connecting"}</strong><small>{system.status === "unknown" ? "STATUS / UNKNOWN" : "SYSTEM / " + runtimeStatus}</small></div></div>
-      <button className="signout" type="button" onClick={() => void logout()}>Sign out <span aria-hidden="true">↗</span></button>
+      <button className="signout" type="button" onClick={() => void logout()}>Sign out <Icon name="arrow-up-right" size={13} /></button>
     </aside>
     <button className={"mobile-scrim" + (mobileNav ? " active" : "")} aria-label="Close navigation" onClick={() => setMobileNav(false)} />
     <main className="main">
@@ -931,7 +931,7 @@ export default function App() {
 
       {guildId ? <>
       {page === "overview" ? <section className="page">
-        <SectionHeading eyebrow={selectedPage.eyebrow} title={<>Bot <span>overview.</span></>} subtitle={selectedPage.subtitle} actions={<><Button onClick={() => navigate("audit")}>View activity <span aria-hidden="true">↗</span></Button><Button tone="primary" onClick={() => void synchronizeCommands()} disabled={operationBusy || !guildId}>Publish commands <span aria-hidden="true">↗</span></Button></>} />
+        <SectionHeading eyebrow={selectedPage.eyebrow} title={<>Bot <span>overview.</span></>} subtitle={selectedPage.subtitle} actions={<><Button onClick={() => navigate("audit")}>View activity <Icon name="arrow-up-right" size={13} /></Button><Button tone="primary" onClick={() => void synchronizeCommands()} disabled={operationBusy || !guildId}>Publish commands <Icon name="arrow-up-right" size={13} /></Button></>} />
         <div className="overview-scene" aria-hidden="true"><SceneLoader /></div>
         <div className="status-strip"><span className="strip-signal" /><span>STATUS / {runtimeStatus}</span><span className="strip-separator">—</span><span>{system.status === "unknown" ? (system.reason || "Live bot data is unavailable.") : bot.ready ? "The Discord gateway reports a live connection." : "The bot process is reachable and waiting for gateway readiness."}</span><time>{updatedAt ? new Date(updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "NOT CHECKED"}</time></div>
         <div className="metric-grid">
@@ -946,7 +946,7 @@ export default function App() {
             <div className="runtime-data"><div><small>PROCESS UPTIME</small><strong>{duration(system.uptime_seconds)}</strong></div><div><small>NODE RUNTIME</small><strong>{system.node_version || "Unavailable"}</strong></div><div><small>COMMAND REGISTRY</small><strong>{number(system.extensions?.length ?? 0)}</strong></div></div>
             {system.status === "unknown" && lastKnown?.observed_at ? <p className="footnote compact">Last observed {timestamp(Number(lastKnown.observed_at))}. This is cached status, not a live reading.</p> : null}
           </Panel>
-          <Panel eyebrow="RECENT CHANGES" title="Audit history" action={<button className="text-button" type="button" onClick={() => navigate("audit")}>All events ↗</button>}>
+          <Panel eyebrow="RECENT CHANGES" title="Audit history" action={<button className="text-button" type="button" onClick={() => navigate("audit")}>All events <Icon name="arrow-up-right" size={13} /></button>}>
             <ActivityList entries={audit.slice(0, 5)} />
           </Panel>
           <Panel eyebrow="EFFECTIVE CONFIGURATION" title="Command access">
@@ -959,11 +959,11 @@ export default function App() {
       </section> : null}
 
       {page === "commands" ? <section className="page">
-        <SectionHeading eyebrow={selectedPage.eyebrow} title={<>Command <span>access.</span></>} subtitle="Changes apply to this guild and are confirmed only after the live bot synchronizes with Discord. Protected system commands stay enabled." actions={<><Button onClick={() => void resetCommands()} disabled={operationBusy || !guildId}>Server defaults</Button><Button tone="primary" onClick={() => void synchronizeCommands()} disabled={operationBusy || !guildId}>Publish commands ↗</Button></>} />
-        <div className="command-toolbar"><label className="search-field"><span aria-hidden="true">⌕</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, description, category…" autoComplete="off" /></label><label className="filter-control"><span>CATEGORY</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option value="All">All categories</option>{categories.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label className="filter-control"><span>STATE</span><select value={commandState} onChange={(event) => setCommandState(event.target.value)}><option value="All">All states</option><option value="Enabled">Enabled</option><option value="Disabled">Disabled</option><option value="Protected">Protected</option></select></label></div>
+        <SectionHeading eyebrow={selectedPage.eyebrow} title={<>Command <span>access.</span></>} subtitle="Changes apply to this guild and are confirmed only after the live bot synchronizes with Discord. Protected system commands stay enabled." actions={<><Button onClick={() => void resetCommands()} disabled={operationBusy || !guildId}>Server defaults</Button><Button tone="primary" onClick={() => void synchronizeCommands()} disabled={operationBusy || !guildId}>Publish commands <Icon name="arrow-up-right" size={13} /></Button></>} />
+        <div className="command-toolbar"><label className="search-field"><Icon name="search" size={15} /><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, description, category…" autoComplete="off" /></label><label className="filter-control"><span>CATEGORY</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option value="All">All categories</option>{categories.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label className="filter-control"><span>STATE</span><select value={commandState} onChange={(event) => setCommandState(event.target.value)}><option value="All">All states</option><option value="Enabled">Enabled</option><option value="Disabled">Disabled</option><option value="Protected">Protected</option></select></label></div>
         <div className="command-summary"><span>{filteredCommands.length} of {commands.length} registered commands</span><span>PER-GUILD CONFIGURATION</span></div>
         <div className="command-list">{commands.length === 0 ? (commandError ? <Empty>{commandError}</Empty> : refreshing ? <Empty loading>Reading the live command registry…</Empty> : <Empty>No dashboard-managed commands were returned.</Empty>) : filteredCommands.length === 0 ? <Empty>No commands match this search and filter.</Empty> : filteredCommands.map((command) => <article className="command-row" key={command.fullname}>
-          <div className="command-main"><a className="command-name command-name-link" href={commandGuideUrl(command)} target="_blank" rel="noreferrer" aria-label={"Open usage guide for /" + (command.fullname || command.name)} title="Open the relevant command guide"><span className="command-prefix">/</span>{command.fullname || command.name}<span className="command-link-glyph" aria-hidden="true">↗</span></a><p className="command-description">{command.description || "No description provided."}</p><div className="command-tags"><span className="tag">{command.section || "Other"}</span><span className="tag">{command.type || "slash"}</span><span className="tag">{command.scope || "guild"}</span>{command.protected ? <span className="tag tag-protected">Protected</span> : null}{command.required_permissions ? <span className="tag">Discord permission gate</span> : null}</div><div className="command-actions"><button className="command-copy" type="button" onClick={() => void copyCommandInvocation(command)} title={"Copy /" + (command.fullname || command.name)} aria-label={"Copy invocation for /" + (command.fullname || command.name)}>▣ <span>Copy command</span></button><a className="command-guide" href={commandGuideUrl(command)} target="_blank" rel="noreferrer">Usage guide <span aria-hidden="true">↗</span></a><button className="command-access-open" type="button" onClick={() => void openCommandAccess(command)} disabled={Boolean(command.protected) || accessLoading || accessSaving} aria-label={"Configure access for /" + command.fullname}><Icon name="shield-check" size={14} /> Access rules</button></div></div>
+          <div className="command-main"><a className="command-name command-name-link" href={commandGuideUrl(command)} target="_blank" rel="noreferrer" aria-label={"Open usage guide for /" + (command.fullname || command.name)} title="Open the relevant command guide"><span className="command-prefix">/</span>{command.fullname || command.name}<span className="command-link-glyph"><Icon name="arrow-up-right" size={12} /></span></a><p className="command-description">{command.description || "No description provided."}</p><div className="command-tags"><span className="tag">{command.section || "Other"}</span><span className="tag">{command.type || "slash"}</span><span className="tag">{command.scope || "guild"}</span>{command.protected ? <span className="tag tag-protected">Protected</span> : null}{command.required_permissions ? <span className="tag">Discord permission gate</span> : null}</div><div className="command-actions"><button className="command-copy" type="button" onClick={() => void copyCommandInvocation(command)} title={"Copy /" + (command.fullname || command.name)} aria-label={"Copy invocation for /" + (command.fullname || command.name)}><Icon name="copy" size={13} /><span>Copy command</span></button><a className="command-guide" href={commandGuideUrl(command)} target="_blank" rel="noreferrer">Usage guide <Icon name="arrow-up-right" size={12} /></a><button className="command-access-open" type="button" onClick={() => void openCommandAccess(command)} disabled={Boolean(command.protected) || accessLoading || accessSaving} aria-label={"Configure access for /" + command.fullname}><Icon name="shield-check" size={14} /> Access rules</button></div></div>
           <div className="command-state"><StatusPill ok={command.enabled && !command.protected}>{command.protected ? "Protected / always on" : command.enabled ? "Enabled" : "Disabled"}</StatusPill></div>
           <button className={"switch" + (command.enabled ? " checked" : "")} role="switch" type="button" aria-checked={Boolean(command.enabled)} aria-label={"Toggle " + command.fullname} disabled={Boolean(command.protected) || !command.configurable || savingCommands || operationBusy} onClick={() => toggleCommand(command)}><span /></button>
         </article>)}</div>
@@ -1027,7 +1027,7 @@ export default function App() {
               </select>
             </label>
             <Button tone="primary" type="submit" disabled={atlasLoading || !guildId}>
-              {atlasLoading ? "Mapping…" : "Explore connections ↗"}
+              {atlasLoading ? "Mapping…" : <>Explore connections <Icon name="arrow-up-right" size={13} /></>}
             </Button>
           </form>
           {atlasError ? <p className="atlas-error" role="alert">{atlasError}</p> : null}
@@ -1070,7 +1070,7 @@ export default function App() {
                 <div className="atlas-root-node">
                   <span className="atlas-node-category">{atlasResult.root.category.replaceAll("_", " ")}</span>
                   <strong>{atlasResult.root.title}</strong>
-                  {atlasResult.root.url ? <a href={atlasResult.root.url} target="_blank" rel="noreferrer">Provider ↗</a> : null}
+                  {atlasResult.root.url ? <a href={atlasResult.root.url} target="_blank" rel="noreferrer">Provider <Icon name="arrow-up-right" size={12} /></a> : null}
                 </div>
                 {atlasNodes.map((node) => <button
                   key={node.id}
@@ -1087,7 +1087,7 @@ export default function App() {
               </div>
             </div> : <Empty>{atlasResult.graph?.truncated ? "The graph was bounded before any visible nodes remained. Adjust the filters or explore another title." : atlasResult.relationships.length ? "No connections match these filters." : "No connections have been recorded for this title yet. Explore another title or check back after supported provider relationships are indexed."}</Empty>}
             {atlasResult.clusters?.length ? <div className="atlas-clusters"><span>MEDIA CLUSTERS</span>{atlasResult.clusters.map(cluster => <button type="button" key={cluster.category} onClick={() => setAtlasCategoryFilter(cluster.category)}>{cluster.category.replaceAll("_", " ")} <strong>{cluster.count}</strong></button>)}</div> : null}
-            {atlasResult.path?.edges.length ? <p className="atlas-path-summary">Shortest path: {atlasResult.path.nodes.map(node => node.title).join(" → ")}</p> : null}
+            {atlasResult.path?.edges.length ? <p className="atlas-path-summary">Shortest path: {atlasResult.path.nodes.map(node => node.title).join(" / ")}</p> : null}
             {atlasResult.graph?.truncated ? <p className="footnote compact">This graph reached its node limit. Explore a connected node to inspect its neighborhood.</p> : null}
             <div className="atlas-legend">
               <span><i className="provider" /> Provider-confirmed</span>
@@ -1107,8 +1107,8 @@ export default function App() {
                   {relation.evidence ? <small>Evidence: {relation.evidence}</small> : null}
                 </div>
                 <div className="atlas-connection-actions">
-                  <Button onClick={() => void searchAtlas(relation.title, relation.category, relation.url)} disabled={atlasLoading}>Open node ↗</Button>
-                  {relation.url ? <a className="atlas-provider-link" href={relation.url} target="_blank" rel="noreferrer">Source record ↗</a> : null}
+                  <Button onClick={() => void searchAtlas(relation.title, relation.category, relation.url)} disabled={atlasLoading}>Open node <Icon name="arrow-up-right" size={13} /></Button>
+                  {relation.url ? <a className="atlas-provider-link" href={relation.url} target="_blank" rel="noreferrer">Source record <Icon name="arrow-up-right" size={12} /></a> : null}
                 </div>
               </article>)}
             </div>
@@ -1161,7 +1161,7 @@ export default function App() {
       </section>}
       <footer className="page-footer"><span>LEMEGETON / CONTROL PLANE</span><span>{system.status === "unknown" ? "LIVE BOT DATA UNAVAILABLE" : "PRIVATE SESSION · DATA REFRESHED"}</span></footer>
     </main>
-    <div className="toast-stack" role="status" aria-live="polite" aria-atomic="false">{toasts.map((toast) => <div key={toast.id} className={"toast" + (toast.error ? " error" : "")}><span>{toast.error ? "!" : "✓"}</span>{toast.message}<button type="button" aria-label="Dismiss notification" onClick={() => setToasts((items) => items.filter((item) => item.id !== toast.id))}>×</button></div>)}</div>
+    <div className="toast-stack" role="status" aria-live="polite" aria-atomic="false">{toasts.map((toast) => <div key={toast.id} className={"toast" + (toast.error ? " error" : "")}><Icon name={toast.error ? "alert-circle" : "check-circle"} size={15} />{toast.message}<button type="button" aria-label="Dismiss notification" onClick={() => setToasts((items) => items.filter((item) => item.id !== toast.id))}><Icon name="close" size={13} /></button></div>)}</div>
     {serverPickerOpen ? <div className="access-overlay" onClick={(event) => { if (event.target === event.currentTarget) setServerPickerOpen(false); }}>
       <section className="access-dialog server-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="server-picker-title">
         <div className="access-heading"><div><p className="eyebrow">DISCORD / YOUR SERVERS</p><h2 id="server-picker-title">Choose a <span>server.</span></h2><p>Connected servers are ready to configure. Dimmed servers can be invited to.</p></div><button type="button" className="access-close" onClick={() => setServerPickerOpen(false)} aria-label="Close server picker"><Icon name="close" size={16} /></button></div>
@@ -1170,7 +1170,7 @@ export default function App() {
             <span className="server-picker-icon"><Icon name="server" size={17} /></span><span className="server-picker-name"><strong>{guild.name}</strong><small>{guild.administrator ? "Administrator" : "Manage Server"} · {guild.id}</small></span><span className="server-picker-connected"><i className="server-state-mark" />Connected</span>
           </button> : <div className="server-picker-option is-uninstalled" key={guild.id}>
             <span className="server-picker-icon"><Icon name="server" size={17} /></span><span className="server-picker-name"><strong>{guild.name}</strong><small>{guild.administrator ? "Administrator" : "Manage Server"} · {guild.id}</small></span>
-            {guild.invite_url ? <a className="server-invite-link" href={guild.invite_url} target="_blank" rel="noopener noreferrer">Invite bot <span aria-hidden="true">↗</span></a> : <span className="server-picker-missing">Not installed</span>}
+            {guild.invite_url ? <a className="server-invite-link" href={guild.invite_url} target="_blank" rel="noopener noreferrer">Invite bot <Icon name="arrow-up-right" size={12} /></a> : <span className="server-picker-missing">Not installed</span>}
           </div>) : <Empty>No Discord servers were returned where your account has Manage Server or Administrator permission.</Empty>}
         </div>
         <div className="access-footer"><span>{guilds.filter(guild => guild.bot_installed).length} connected / {guilds.length} manageable servers</span><button type="button" className="command-reset" onClick={() => setServerPickerOpen(false)}>Close</button></div>
@@ -1182,5 +1182,5 @@ export default function App() {
 
 function ActivityList(props: { entries: AuditEntry[] }) {
   if (!props.entries.length) return <Empty>No audit events have been recorded for this server yet.</Empty>;
-  return <div className="activity-list">{props.entries.map((entry, index) => <div className="activity-row" key={(entry.ts || "event") + index}><span className="activity-glyph" aria-hidden="true">·</span><div className="activity-copy"><strong>{String(entry.action || "Administrative action").replaceAll("_", " ")}</strong><small>{entry.details || "No additional details"} · by {entry.actor_name || entry.actor_id || "Unknown account"}</small></div><time className="activity-time" title={entry.ts || ""}>{timeAgo(entry.ts)}</time></div>)}</div>;
+  return <div className="activity-list">{props.entries.map((entry, index) => <div className="activity-row" key={(entry.ts || "event") + index}><span className="activity-glyph"><Icon name="activity" size={14} /></span><div className="activity-copy"><strong>{String(entry.action || "Administrative action").replaceAll("_", " ")}</strong><small>{entry.details || "No additional details"} · by {entry.actor_name || entry.actor_id || "Unknown account"}</small></div><time className="activity-time" title={entry.ts || ""}>{timeAgo(entry.ts)}</time></div>)}</div>;
 }
