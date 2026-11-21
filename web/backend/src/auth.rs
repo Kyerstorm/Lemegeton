@@ -1,7 +1,7 @@
-use axum::{extract::{Query, State}, http::{header, HeaderMap, HeaderValue, StatusCode}, response::{IntoResponse, Redirect, Response}, Json};
+use axum::{extract::{Path, Query, State}, http::{header, HeaderMap, HeaderValue, StatusCode}, response::{IntoResponse, Redirect, Response}, Json};
 use serde_json::{json, Value};
 use crate::ui;
-use crate::state::{access_token, allow_oauth_start, cookie_value, is_owner, manageable_guilds, new_token, now_secs, session_from_headers, token_response_cookie,
+use crate::state::{access_token, allow_oauth_start, authorized_guild, cookie_value, is_owner, manageable_guilds, new_token, now_secs, session_from_headers, token_response_cookie,
     expired_cookie, oauth_state_cookie, expired_oauth_state_cookie, ApiError, ApiResult, AppState, DashboardUser, DiscordTokenResponse, DiscordUserResponse, OAuthCallback, OAuthState, Session};
 use subtle::ConstantTimeEq;
 
@@ -116,6 +116,26 @@ pub async fn oauth_callback(State(state): State<AppState>, headers: HeaderMap, Q
     }
     response
 }
+
+pub async fn guild_page(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((user_id, guild_id)): Path<(String, String)>,
+) -> Response {
+    let (_, session) = match session_from_headers(&state, &headers).await {
+        Ok(session) => session,
+        Err(_) => return Redirect::to("/login").into_response(),
+    };
+    if session.user.id != user_id {
+        return Redirect::to("/login").into_response();
+    }
+    match authorized_guild(&state, &headers, &guild_id).await {
+        Ok(_) => ui::dashboard_html().await,
+        Err(error) if error.status == StatusCode::FORBIDDEN => Redirect::to("/").into_response(),
+        Err(error) => error.into_response(),
+    }
+}
+
 pub async fn bootstrap(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Json<Value>> {
     let (session_id, session) = session_from_headers(&state, &headers).await?;
     access_token(&state, &session_id).await?;

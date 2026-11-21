@@ -194,6 +194,9 @@ function LoginPage() {
 export default function App() {
   const pathname = usePathname();
   const isLogin = pathname === "/login";
+  const routeSegments = (pathname || "").split("/").filter(Boolean);
+  const routeUserId = routeSegments.length === 2 ? routeSegments[0] : "";
+  const routeGuildId = routeSegments.length === 2 ? routeSegments[1] : "";
   const [user, setUser] = useState<User | null>(null);
   const [guilds, setGuilds] = useState<Guild[]>([]);
   const [guildId, setGuildId] = useState("");
@@ -280,6 +283,7 @@ export default function App() {
     setAtlasLoading(false);
     try { window.localStorage.setItem("lemegeton:selected-guild", String(nextId)); } catch { /* storage may be disabled */ }
     setGuildId(String(nextId));
+    if (user?.id) window.history.pushState({}, "", "/" + encodeURIComponent(user.id) + "/" + encodeURIComponent(nextId) + "/");
     setConfirmation(null);
     setOverview({});
     setCommands([]);
@@ -296,7 +300,7 @@ export default function App() {
     setResources([]);
     setUpdatedAt(null);
     setRefreshing(false);
-  }, [guilds]);
+  }, [guilds, user?.id]);
   const categories = useMemo(() => Array.from(new Set(commands.map((item) => item.section || "Other"))).sort((a, b) => a.localeCompare(b)), [commands]);
   const filteredCommands = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -400,8 +404,19 @@ export default function App() {
       let rememberedGuild = "";
       try { rememberedGuild = window.localStorage.getItem("lemegeton:selected-guild") || ""; } catch { /* storage may be disabled */ }
       const canSelect = (candidate: unknown) => candidate != null && availableGuilds.some((guild) => String(guild.id) === String(candidate) && guild.bot_installed);
-      const selected = String([rememberedGuild, data.selected_guild_id, availableGuilds.find(guild => guild.bot_installed)?.id].find(canSelect) || "");
-      if (availableGuilds.length) setServerPickerOpen(true);
+      if (routeUserId && data.user.id !== routeUserId) {
+        window.location.assign("/login");
+        return;
+      }
+      const deepLinkedGuild = routeGuildId && routeUserId === data.user.id
+        ? availableGuilds.find(guild => String(guild.id) === routeGuildId && guild.bot_installed)
+        : undefined;
+      if (routeGuildId && routeUserId && !deepLinkedGuild) {
+        window.location.assign("/");
+        return;
+      }
+      const selected = String([deepLinkedGuild?.id, rememberedGuild, data.selected_guild_id, availableGuilds.find(guild => guild.bot_installed)?.id].find(canSelect) || "");
+      if (availableGuilds.length && !routeGuildId) setServerPickerOpen(true);
       activeGuildIdRef.current = selected;
       setGuildId(selected);
       if (!selected && availableGuilds.length) pushToast("Lemegeton is not installed in any server you can manage yet. Choose a server to invite it.");
@@ -410,7 +425,7 @@ export default function App() {
       if (active) pushToast(errorMessage(error), true);
     }).finally(() => { if (active) setInitialLoading(false); });
     return () => { active = false; };
-  }, [isLogin, pushToast]);
+  }, [isLogin, pushToast, routeUserId, routeGuildId]);
 
   useEffect(() => {
     if (!guildId || isLogin || !csrf) return;

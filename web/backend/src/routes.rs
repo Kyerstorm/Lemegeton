@@ -29,6 +29,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/health/ready", get(readiness))
         .route("/", get(auth::home))
         .route("/login", get(auth::login_page))
+        .route("/{user_id}/{guild_id}", get(auth::guild_page))
+        .route("/{user_id}/{guild_id}/", get(auth::guild_page))
         .route("/oauth/start", get(auth::oauth_start))
         .route("/oauth/callback", get(auth::oauth_callback))
         .route("/api/bootstrap", get(auth::bootstrap))
