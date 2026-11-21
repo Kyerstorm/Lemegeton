@@ -88,7 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/bootstrap", get(auth::bootstrap)).route("/api/logout", post(auth::logout))
         .route("/api/system", get(api::system)).route("/api/integrations", get(api::integrations)).route("/api/logs", get(api::logs))
         .route("/api/guilds/{guild_id}/overview", get(api::overview))
-        .route("/api/guilds/{guild_id}/commands", get(api::commands))
+        .route("/api/guilds/{guild_id}/commands", get(api::commands).put(api::save_commands))
         .route("/api/guilds/{guild_id}/commands/{*fullname}", put(api::set_command))
         .route("/api/guilds/{guild_id}/sync", post(api::sync_guild)).route("/api/guilds/{guild_id}/reset", post(api::reset_guild))
         .route("/api/guilds/{guild_id}/audit", get(api::audit)).route("/api/guilds/{guild_id}/database", get(api::database))

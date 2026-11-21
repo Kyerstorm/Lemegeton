@@ -1,7 +1,7 @@
 use axum::{body::{to_bytes, Body}, extract::{Path, Query, State}, http::{HeaderMap, Method, Request, StatusCode}, response::{IntoResponse, Response}, Json};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use crate::state::{authorized_guild, atlas_bridge_json, bridge_json, is_owner, session_from_headers, write_session, protected_command, ApiError, ApiResult, AppState};
 
 pub async fn system(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Json<Value>> {
@@ -28,6 +28,57 @@ pub async fn commands(State(state): State<AppState>, headers: HeaderMap, Path(gu
     let _ = authorized_guild(&state, &headers, &guild_id).await?;
     Ok(Json(bridge_json(&state, Method::GET, &format!("/guilds/{guild_id}/commands"), None).await?))
 }
+
+#[derive(Deserialize)]
+pub struct CommandSettingUpdate { fullname: String, enabled: bool }
+#[derive(Deserialize)]
+pub struct SaveCommandsRequest { expected_revision: String, updates: Vec<CommandSettingUpdate> }
+pub async fn save_commands(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(guild_id): Path<String>,
+    Json(body): Json<SaveCommandsRequest>,
+) -> ApiResult<Json<Value>> {
+    let (_, session) = write_session(&state, &headers).await?;
+    let _ = authorized_guild(&state, &headers, &guild_id).await?;
+    if !protected_revision(&body.expected_revision) || body.updates.len() > 6 {
+        return Err(ApiError::bad_request("The command revision or update list is invalid."));
+    }
+    let live = bridge_json(&state, Method::GET, &format!("/guilds/{guild_id}/commands"), None).await?;
+    let available = live.get("commands").and_then(Value::as_array).into_iter().flatten();
+    let by_name: HashMap<&str, &Value> = available
+        .filter_map(|item| item.get("fullname").and_then(Value::as_str).map(|name| (name, item)))
+        .collect();
+    let mut seen = HashSet::new();
+    for update in &body.updates {
+        if update.fullname.trim().is_empty() || update.fullname.len() > 100 || !seen.insert(update.fullname.as_str()) {
+            return Err(ApiError::bad_request("A command name is invalid or appears more than once."));
+        }
+        let item = by_name.get(update.fullname.as_str())
+            .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "A command is not available for dashboard management."))?;
+        if item.get("protected").and_then(Value::as_bool).unwrap_or(false)
+            || item.get("name").and_then(Value::as_str).is_some_and(protected_command) {
+            return Err(ApiError::forbidden("A protected system command cannot be changed."));
+        }
+    }
+    Ok(Json(bridge_json(
+        &state,
+        Method::PUT,
+        &format!("/guilds/{guild_id}/commands"),
+        Some(json!({
+            "actor_id": session.user.id,
+            "expected_revision": body.expected_revision,
+            "updates": body.updates.iter().map(|update| json!({
+                "fullname": update.fullname,
+                "enabled": update.enabled
+            })).collect::<Vec<_>>()
+        })),
+    ).await?))
+}
+fn protected_revision(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 #[derive(Deserialize)]
 pub struct ToggleRequest { enabled: bool }
 pub async fn set_command(State(state): State<AppState>, headers: HeaderMap, Path((guild_id, fullname)): Path<(String, String)>, Json(body): Json<ToggleRequest>) -> ApiResult<Json<Value>> {

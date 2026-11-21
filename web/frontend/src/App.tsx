@@ -17,7 +17,7 @@ type Integration = { name?: string; detail?: string; configured?: boolean };
 type Toast = { id: number; message: string; error: boolean };
 type Confirmation = { title: string; message: string; actionLabel: string; run: () => Promise<void> };
 type Bootstrap = { user: User; guilds: Guild[]; csrf_token: string; selected_guild_id?: string };
-type CommandResponse = { commands: Command[] };
+type CommandResponse = { commands: Command[]; revision: string };
 type ListResponse<T> = { entries?: T[] };
 type AtlasRelation = {
   title: string; category: string; url: string | null; relationType: string;
@@ -189,6 +189,9 @@ export default function App() {
   const [overview, setOverview] = useState<Overview>({});
   const [system, setSystem] = useState<SystemStatus>({});
   const [commands, setCommands] = useState<Command[]>([]);
+  const [savedCommands, setSavedCommands] = useState<Command[]>([]);
+  const [commandRevision, setCommandRevision] = useState("");
+  const [savingCommands, setSavingCommands] = useState(false);
   const [commandError, setCommandError] = useState("");
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
@@ -201,7 +204,6 @@ export default function App() {
   const [commandState, setCommandState] = useState("All");
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [busyCommand, setBusyCommand] = useState("");
   const [mobileNav, setMobileNav] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -233,8 +235,16 @@ export default function App() {
   }, []);
 
   const currentGuild = useMemo(() => guilds.find((item) => String(item.id) === String(guildId)), [guilds, guildId]);
+  const commandDraftDirty = useMemo(() => {
+    if (commands.length !== savedCommands.length) return true;
+    const saved = new Map(savedCommands.map((item) => [item.fullname, item.enabled]));
+    return commands.some(item => saved.get(item.fullname) !== item.enabled);
+  }, [commands, savedCommands]);
+  const commandDraftDirtyRef = useRef(false);
+  useEffect(() => { commandDraftDirtyRef.current = commandDraftDirty; }, [commandDraftDirty]);
   const selectGuild = useCallback((nextId: string) => {
     if (!guilds.some((guild) => String(guild.id) === String(nextId))) return;
+    if (commandDraftDirtyRef.current && !window.confirm("Discard unsaved command changes before switching servers?")) return;
     activeGuildIdRef.current = String(nextId);
     refreshGeneration.current += 1;
     atlasRequestGeneration.current += 1;
@@ -246,8 +256,9 @@ export default function App() {
     setConfirmation(null);
     setOverview({});
     setCommands([]);
+    setSavedCommands([]);
+    setCommandRevision("");
     setCommandError("");
-    setBusyCommand("");
     setAudit([]);
     setResources([]);
     setUpdatedAt(null);
@@ -292,7 +303,11 @@ export default function App() {
     if (overviewResult.status === "fulfilled") setOverview(overviewResult.value || {});
     else if (!quiet) pushToast(errorMessage(overviewResult.reason), true);
     if (commandsResult.status === "fulfilled") {
-      setCommands(commandsResult.value.commands || []);
+      if (!commandDraftDirtyRef.current || commandsResult.value.revision === commandRevision) {
+        setCommands(commandsResult.value.commands || []);
+        setSavedCommands(commandsResult.value.commands || []);
+        setCommandRevision(commandsResult.value.revision || "");
+      }
       setCommandError("");
     } else {
       setCommandError(errorMessage(commandsResult.reason));
@@ -304,7 +319,7 @@ export default function App() {
     else if (!quiet) pushToast(errorMessage(auditResult.reason), true);
     setUpdatedAt(Date.now());
     setRefreshing(false);
-  }, [csrf, guildId, pushToast]);
+  }, [csrf, guildId, pushToast, commandRevision]);
 
   const loadSystem = useCallback(async () => {
     try { setSystem(await api<SystemStatus>("/api/system", csrf)); }
@@ -424,22 +439,53 @@ export default function App() {
     });
   };
 
-  const toggleCommand = async (command: Command) => {
-    if (!guildId || command.protected || busyCommand) return;
+  const toggleCommand = (command: Command) => {
+    if (!guildId || command.protected || savingCommands) return;
+    setCommands((items) => items.map((item) =>
+      item.fullname === command.fullname ? { ...item, enabled: !item.enabled } : item
+    ));
+  };
+
+  const resetCommandDraft = () => {
+    setCommands(savedCommands.map(item => ({ ...item })));
+  };
+
+  const saveCommandDraft = async () => {
+    if (!guildId || !commandDraftDirty || savingCommands || !commandRevision) return;
     const requestedGuild = guildId;
-    setBusyCommand(command.fullname);
-    const desired = !command.enabled;
+    const baseline = new Map(savedCommands.map(item => [item.fullname, item.enabled]));
+    const updates = commands
+      .filter(item => !item.protected && baseline.get(item.fullname) !== item.enabled)
+      .map(item => ({ fullname: item.fullname, enabled: item.enabled }));
+    if (!updates.length) return;
+    setSavingCommands(true);
     try {
-      const result = await api<{ enabled?: boolean }>("/api/guilds/" + encodeURIComponent(requestedGuild) + "/commands/" + encodeURIComponent(command.fullname), csrf, {
-        method: "PUT", body: JSON.stringify({ enabled: desired })
+      const result = await api<CommandResponse>("/api/guilds/" + encodeURIComponent(requestedGuild) + "/commands", csrf, {
+        method: "PUT",
+        body: JSON.stringify({ expected_revision: commandRevision, updates }),
       });
       if (activeGuildIdRef.current !== requestedGuild) return;
-      setCommands((items) => items.map((item) => item.fullname === command.fullname ? { ...item, enabled: result.enabled == null ? desired : Boolean(result.enabled) } : item));
-      pushToast("/" + command.fullname + " " + (result.enabled == null ? (desired ? "enabled" : "disabled") : (result.enabled ? "enabled" : "disabled")) + " and synchronized.");
+      setCommands(result.commands || []);
+      setSavedCommands(result.commands || []);
+      setCommandRevision(result.revision || "");
+      pushToast("Saved and synchronized " + updates.length + " command change" + (updates.length === 1 ? "" : "s") + ".");
       void loadAudit(requestedGuild, true);
-    } catch (error) { pushToast(errorMessage(error), true); }
-    finally { if (activeGuildIdRef.current === requestedGuild) setBusyCommand(""); }
+    } catch (error) {
+      pushToast(errorMessage(error), true);
+    } finally {
+      if (activeGuildIdRef.current === requestedGuild) setSavingCommands(false);
+    }
   };
+
+  useEffect(() => {
+    if (!commandDraftDirty) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [commandDraftDirty]);
 
   const copyCommandInvocation = async (command: Command) => {
     const invocation = "/" + (command.fullname || command.name || "").trim();
@@ -597,7 +643,12 @@ export default function App() {
     void searchAtlas(title, requestedCategory, params.get("atlas_url"));
   }, [atlasCategory, atlasTitle, csrf, guildId, guilds, isLogin, searchAtlas, selectGuild]);
 
-  const navigate = (next: Page) => { setPage(next); setMobileNav(false); };
+  const navigate = (next: Page) => {
+    if (commandDraftDirty && next !== "commands"
+      && !window.confirm("Discard unsaved command changes before leaving this page?")) return;
+    setPage(next);
+    setMobileNav(false);
+  };
   const selectedPage = PAGES.find((item) => item.id === page) || PAGES[0];
 
   if (isLogin) return <LoginPage />;
@@ -733,15 +784,19 @@ export default function App() {
       </section> : null}
 
       {page === "commands" ? <section className="page">
-        <SectionHeading eyebrow={selectedPage.eyebrow} title={<>Command <span>access.</span></>} subtitle="Changes apply to this guild and are confirmed only after the live bot synchronizes with Discord. Protected system commands stay enabled." actions={<><Button onClick={() => void resetCommands()} disabled={operationBusy || !guildId}>Reset overrides</Button><Button tone="primary" onClick={() => void synchronizeCommands()} disabled={operationBusy || !guildId}>Publish commands ↗</Button></>} />
+        <SectionHeading eyebrow={selectedPage.eyebrow} title={<>Command <span>access.</span></>} subtitle="Changes apply to this guild and are confirmed only after the live bot synchronizes with Discord. Protected system commands stay enabled." actions={<><Button onClick={() => void resetCommands()} disabled={operationBusy || !guildId}>Server defaults</Button><Button tone="primary" onClick={() => void synchronizeCommands()} disabled={operationBusy || !guildId}>Publish commands ↗</Button></>} />
         <div className="command-toolbar"><label className="search-field"><span aria-hidden="true">⌕</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, description, category…" autoComplete="off" /></label><label className="filter-control"><span>CATEGORY</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option value="All">All categories</option>{categories.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label className="filter-control"><span>STATE</span><select value={commandState} onChange={(event) => setCommandState(event.target.value)}><option value="All">All states</option><option value="Enabled">Enabled</option><option value="Disabled">Disabled</option><option value="Protected">Protected</option></select></label></div>
         <div className="command-summary"><span>{filteredCommands.length} of {commands.length} registered commands</span><span>PER-GUILD CONFIGURATION</span></div>
         <div className="command-list">{commands.length === 0 ? (commandError ? <Empty>{commandError}</Empty> : refreshing ? <Empty loading>Reading the live command registry…</Empty> : <Empty>No dashboard-managed commands were returned.</Empty>) : filteredCommands.length === 0 ? <Empty>No commands match this search and filter.</Empty> : filteredCommands.map((command) => <article className="command-row" key={command.fullname}>
           <div className="command-main"><a className="command-name command-name-link" href={commandGuideUrl(command)} target="_blank" rel="noreferrer" aria-label={"Open usage guide for /" + (command.fullname || command.name)} title="Open the relevant command guide"><span className="command-prefix">/</span>{command.fullname || command.name}<span className="command-link-glyph" aria-hidden="true">↗</span></a><p className="command-description">{command.description || "No description provided."}</p><div className="command-tags"><span className="tag">{command.section || "Other"}</span><span className="tag">{command.type || "slash"}</span><span className="tag">{command.scope || "guild"}</span>{command.protected ? <span className="tag tag-protected">Protected</span> : null}{command.required_permissions ? <span className="tag">Discord permission gate</span> : null}</div><div className="command-actions"><button className="command-copy" type="button" onClick={() => void copyCommandInvocation(command)} title={"Copy /" + (command.fullname || command.name)} aria-label={"Copy invocation for /" + (command.fullname || command.name)}>▣ <span>Copy command</span></button><a className="command-guide" href={commandGuideUrl(command)} target="_blank" rel="noreferrer">Usage guide <span aria-hidden="true">↗</span></a></div></div>
           <div className="command-state"><StatusPill ok={command.enabled && !command.protected}>{command.protected ? "Protected / always on" : command.enabled ? "Enabled" : "Disabled"}</StatusPill></div>
-          <button className={"switch" + (command.enabled ? " checked" : "")} role="switch" type="button" aria-checked={Boolean(command.enabled)} aria-label={"Toggle " + command.fullname} disabled={Boolean(command.protected) || busyCommand === command.fullname || operationBusy} onClick={() => void toggleCommand(command)}><span /></button>
+          <button className={"switch" + (command.enabled ? " checked" : "")} role="switch" type="button" aria-checked={Boolean(command.enabled)} aria-label={"Toggle " + command.fullname} disabled={Boolean(command.protected) || savingCommands || operationBusy} onClick={() => toggleCommand(command)}><span /></button>
         </article>)}</div>
-        <p className="footnote">Only explicitly registered dashboard-managed application commands appear here. Prefix commands and extension load/unload operations are not implied to be manageable.</p>
+        <p className="footnote">Changes remain local until saved. The bot rechecks the server revision before publishing; protected commands cannot be changed.</p>
+        {commandDraftDirty ? <div className="command-savebar" role="region" aria-label="Unsaved command changes">
+          <span><strong>Unsaved changes</strong><small>{commands.filter(item => !item.protected && savedCommands.find(saved => saved.fullname === item.fullname)?.enabled !== item.enabled).length} command settings changed</small></span>
+          <div><button type="button" className="command-reset" onClick={resetCommandDraft} disabled={savingCommands}>Reset</button><button type="button" className="command-save" onClick={() => void saveCommandDraft()} disabled={savingCommands || !commandRevision}>{savingCommands ? "Saving…" : "Save Changes"}</button></div>
+        </div> : null}
       </section> : null}
 
             {page === "atlas" ? <section className="page">

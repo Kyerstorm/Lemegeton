@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
 import { ApplicationIntegrationType, InteractionContextType, type Client, type Guild } from "discord.js";
 import type { FeatureCommand } from "../commands/command.js";
@@ -237,7 +237,11 @@ async function overview(
 }
 
 async function commandList(commands: FeatureCommand[], guildId: string): Promise<Record<string, unknown>> {
-  return { commands: dashboardCommandRows(commands, await getFeatureSettings(guildId)) };
+  const settings = await getFeatureSettings(guildId);
+  const revision = createHash("sha256")
+    .update(JSON.stringify(FEATURE_NAMES.map(feature => [feature, settings[feature]])))
+    .digest("hex");
+  return { commands: dashboardCommandRows(commands, settings), revision };
 }
 
 async function setCommand(
@@ -295,6 +299,94 @@ async function setCommand(
       return;
     }
     jsonResponse(response, 200, { fullname, enabled: body.enabled, synced: true });
+  });
+}
+
+
+async function saveCommandSettings(
+  request: IncomingMessage,
+  response: ServerResponse,
+  client: Client,
+  commands: FeatureCommand[],
+  guild: Guild,
+): Promise<void> {
+  await withGuildLock(guild.id, async () => {
+    let body: Record<string, unknown>;
+    try { body = await readJson(request); }
+    catch (error) {
+      errorResponse(response, 400, error instanceof Error ? error.message : "Invalid request body.");
+      return;
+    }
+    const actorId = String(body.actor_id ?? "");
+    const expectedRevision = String(body.expected_revision ?? "");
+    const updates = body.updates;
+    if (!isDashboardGuildId(actorId) || !/^[a-f0-9]{64}$/.test(expectedRevision)
+      || !Array.isArray(updates) || updates.length > FEATURE_NAMES.length) {
+      errorResponse(response, 400, "A valid actor, revision, and command update list are required.");
+      return;
+    }
+    const requested = new Map<string, boolean>();
+    for (const item of updates) {
+      if (!item || typeof item !== "object" || typeof (item as Record<string, unknown>).fullname !== "string"
+        || typeof (item as Record<string, unknown>).enabled !== "boolean") {
+        errorResponse(response, 400, "Each command update needs a name and enabled state.");
+        return;
+      }
+      const value = item as Record<string, unknown>;
+      const fullname = String(value.fullname);
+      if (!isFeatureName(fullname) || !commands.some(command => command.data.name === fullname)) {
+        errorResponse(response, 404, "A command is not registered for dashboard management.");
+        return;
+      }
+      if (PROTECTED_COMMANDS.has(fullname)) {
+        errorResponse(response, 403, "A protected system command cannot be changed.");
+        return;
+      }
+      if (requested.has(fullname)) {
+        errorResponse(response, 400, "A command may only appear once in a save operation.");
+        return;
+      }
+      requested.set(fullname, value.enabled as boolean);
+    }
+    const before = await getFeatureSettings(guild.id);
+    const liveRevision = createHash("sha256")
+      .update(JSON.stringify(FEATURE_NAMES.map(feature => [feature, before[feature]])))
+      .digest("hex");
+    if (liveRevision !== expectedRevision) {
+      errorResponse(response, 409, "The server configuration changed elsewhere. Refresh the command list before saving these drafts.");
+      return;
+    }
+    const changed = [...requested.entries()].filter(([feature, enabled]) => before[feature as FeatureName] !== enabled);
+    if (!changed.length) {
+      jsonResponse(response, 200, { ok: true, commands: dashboardCommandRows(commands, before), revision: liveRevision });
+      return;
+    }
+    try {
+      for (const [feature, enabled] of changed) {
+        await setFeatureEnabled(guild.id, feature as FeatureName, enabled, actorId);
+      }
+      await syncGlobalCommands(client, commands);
+      await recordAudit(guild.id, actorId, "save_command_settings",
+        changed.map(([feature, enabled]) => feature + " -> " + (enabled ? "enabled" : "disabled")).join("; "));
+    } catch (error) {
+      for (const feature of FEATURE_NAMES) {
+        if (before[feature] !== await getFeatureSettings(guild.id).then(current => current[feature]).catch(() => before[feature])) {
+          await setFeatureEnabled(guild.id, feature, before[feature], actorId).catch(() => undefined);
+        }
+      }
+      await syncGlobalCommands(client, commands).catch(() => undefined);
+      logger.error("Dashboard command batch save failed", {
+        guildId: guild.id,
+        reason: error instanceof Error ? error.message : "Unknown error",
+      });
+      errorResponse(response, 503, "The command changes could not be synchronized. The previous configuration was restored where possible.");
+      return;
+    }
+    const saved = await getFeatureSettings(guild.id);
+    const revision = createHash("sha256")
+      .update(JSON.stringify(FEATURE_NAMES.map(feature => [feature, saved[feature]])))
+      .digest("hex");
+    jsonResponse(response, 200, { ok: true, commands: dashboardCommandRows(commands, saved), revision });
   });
 }
 
@@ -592,10 +684,14 @@ async function handleRequest(
     return;
   }
   match = /^\/guilds\/(\d{17,20})\/commands$/.exec(url.pathname);
-  if (request.method === "GET" && match) {
+  if (match && (request.method === "GET" || request.method === "PUT")) {
     const guild = guildFor(client, match[1]!);
     if (!guild) { errorResponse(response, 404, "The bot is no longer in this server."); return; }
-    jsonResponse(response, 200, await commandList(commands, guild.id));
+    if (request.method === "GET") {
+      jsonResponse(response, 200, await commandList(commands, guild.id));
+    } else {
+      await saveCommandSettings(request, response, client, commands, guild);
+    }
     return;
   }
   match = /^\/guilds\/(\d{17,20})\/commands\/(.+)$/.exec(url.pathname);
