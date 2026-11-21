@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { PickerMarkup } from "./PickerMarkup";
+import { PICKER_MARKUP } from "./PickerMarkup";
 import { PICKER_STYLES } from "./PickerStyles";
 import { mountCustomRolePicker } from "./picker";
 
@@ -10,11 +10,11 @@ export function CustomRolesClient() {
 
   useEffect(() => {
     if (!root.current) return;
-    return mountCustomRolePicker(root.current);
+    return mountCustomRolePicker();
   }, []);
 
   return <>
     <style dangerouslySetInnerHTML={{ __html: PICKER_STYLES }} />
-    <div ref={root}><PickerMarkup /></div>
+    <div ref={root} dangerouslySetInnerHTML={{ __html: PICKER_MARKUP }} />
   </>;
 }

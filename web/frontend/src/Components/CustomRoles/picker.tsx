@@ -10,7 +10,7 @@
 // Preserves the original picker interactions while mounting inside the static Next route.
 // The token remains in the URL fragment/session storage and is sent only in Authorization.
 // @ts-nocheck -- preserved imperative controller; strict typing is a tracked migration task.
-export function mountCustomRolePicker() {
+export function mountCustomRolePicker(root: HTMLElement): () => void {
 
   const STORAGE_KEY = "customRolePickerToken";
   const HEX_HELP = "Enter a hex color like #FF66AA.";
@@ -45,8 +45,8 @@ export function mountCustomRolePicker() {
 
   // ------------------------------------------------------------------ helpers
 
-  const $ = (id) => document.getElementById(id);
-  const all = (selector, root) => Array.from((root || document).querySelectorAll(selector));
+  const $ = (id: string) => root.querySelector<HTMLElement>("#" + id);
+  const all = <T extends Element = Element>(selector: string, scope: ParentNode = root): T[] => Array.from(scope.querySelectorAll<T>(selector));
   const show = (el, visible) => el.classList.toggle("hidden", !visible);
   const make = (tag, className, attrs) => {
     const el = document.createElement(tag);
@@ -151,7 +151,7 @@ export function mountCustomRolePicker() {
   };
   const nameDirty = () => saved !== null && edit.name.trim() !== savedEdit().name;
   const iconSource = () => {
-    const checked = document.querySelector('input[name="icon-source"]:checked');
+    const checked = root.querySelector<HTMLInputElement>('input[name="icon-source"]:checked');
     return checked ? checked.value : "upload";
   };
   const iconPending = () => {
