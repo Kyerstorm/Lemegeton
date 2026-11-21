@@ -91,7 +91,7 @@ pub async fn check_request(
     let rules = request_rules(state, path, method, headers, peer).await;
     let now = now_secs();
     for rule in rules {
-        match state.store.allow_rate_event(&rule.scope, &rule.subject, now, 60, rule.maximum).await {
+        match state.store.allow_rate_event(rule.scope, &rule.subject, now, 60, rule.maximum).await {
             Ok(true) => {}
             Ok(false) => return Err(RateLimitError::Limited),
             Err(_) => return Err(RateLimitError::Unavailable),
