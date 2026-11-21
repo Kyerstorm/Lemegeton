@@ -18,7 +18,9 @@ async fn security_headers(State(state): State<AppState>, request: Request<Body>,
     let peer = request.extensions().get::<ConnectInfo<SocketAddr>>().map(|value| value.0.ip());
     let forwarded_ip = peer.filter(|address| state.config.trusted_proxy_ips.contains(address)).and_then(|_| {
         headers_in.get("x-forwarded-for").and_then(|value| value.to_str().ok())
-            .and_then(|value| value.split(',').rev().find_map(|part| part.trim().parse::<IpAddr>().ok()))
+            .and_then(|value| value.split(',').rev()
+                .filter_map(|part| part.trim().parse::<IpAddr>().ok())
+                .find(|address| !state.config.trusted_proxy_ips.contains(address)))
             .or_else(|| headers_in.get("x-real-ip").and_then(|value| value.to_str().ok()).and_then(|value| value.parse().ok()))
     });
     let client_ip = forwarded_ip.or(peer).map(|address| address.to_string()).unwrap_or_else(|| "unknown".to_string());
@@ -26,6 +28,8 @@ async fn security_headers(State(state): State<AppState>, request: Request<Body>,
     let mut limits: Vec<(&str, String, usize)> = Vec::new();
     if path == "/oauth/start" {
         limits.push(("oauth-ip", client_ip.clone(), 20));
+    } else if path == "/oauth/callback" {
+        limits.push(("oauth-callback-ip", client_ip.clone(), 30));
     } else if path.starts_with("/api/") {
         limits.push(("api-ip", client_ip.clone(), 150));
         if writes {

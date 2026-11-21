@@ -370,10 +370,8 @@ async function saveCommandSettings(
       await recordAudit(guild.id, actorId, "save_command_settings",
         changed.map(([feature, enabled]) => feature + " -> " + (enabled ? "enabled" : "disabled")).join("; "));
     } catch (error) {
-      for (const feature of FEATURE_NAMES) {
-        if (before[feature] !== await getFeatureSettings(guild.id).then(current => current[feature]).catch(() => before[feature])) {
-          await setFeatureEnabled(guild.id, feature, before[feature], actorId).catch(() => undefined);
-        }
+      for (const [feature] of changed) {
+        await setFeatureEnabled(guild.id, feature as FeatureName, before[feature as FeatureName], actorId).catch(() => undefined);
       }
       await syncGlobalCommands(client, commands).catch(() => undefined);
       logger.error("Dashboard command batch save failed", {
@@ -543,7 +541,11 @@ async function saveCommandAccess(
       errorResponse(response, 409, "This command's access rules changed elsewhere. Refresh before saving.");
       return;
     }
-    await recordAudit(guild.id, actorId, "save_command_access", "/" + fullname + " access rules updated.");
+    await recordAudit(guild.id, actorId, "save_command_access", "/" + fullname + " access rules updated.")
+      .catch(error => logger.warn("Command access policy was saved but its audit event could not be recorded", {
+        guildId: guild.id, command: fullname,
+        reason: error instanceof Error ? error.message : "Unknown error",
+      }));
     jsonResponse(response, 200, { ok: true, policy: result });
   } catch (error) {
     logger.error("Command access policy save failed", {

@@ -295,7 +295,7 @@ async function routeInteraction(interaction:Interaction):Promise<void>{
   if(interaction.isButton()&&await handleConsentButton(interaction))return;
   const accessCommand=interaction.isChatInputCommand()||interaction.isAutocomplete()
    ?interaction.commandName
-   :interaction.isMessageComponent()?interaction.customId.split(":",1)[0]??"":"";
+   :(interaction.isMessageComponent()||interaction.isModalSubmit())?interaction.customId.split(":",1)[0]??"":"";
   if(accessCommand&&commandByName.has(accessCommand)
    &&!await isCommandAccessAllowed(interaction.guildId,accessCommand,interaction.channelId,interaction.member)){
    if(interaction.isAutocomplete()){await interaction.respond([]);return;}

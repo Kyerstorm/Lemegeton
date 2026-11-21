@@ -24,9 +24,30 @@ function supportsWebGL(): boolean {
   }
 }
 
+type SceneMode = "hidden" | "static" | "webgl";
+
 export function SceneLoader() {
-  const [available, setAvailable] = useState(false);
-  useEffect(() => setAvailable(supportsWebGL()), []);
-  if (!available) return <SceneFallback />;
+  const [mode, setMode] = useState<SceneMode>("hidden");
+  useEffect(() => {
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => {
+      if (!window.matchMedia("(min-width: 801px)").matches) {
+        setMode("hidden");
+      } else if (motion.matches || !supportsWebGL()) {
+        setMode("static");
+      } else {
+        setMode("webgl");
+      }
+    };
+    update();
+    window.addEventListener("resize", update);
+    motion.addEventListener("change", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      motion.removeEventListener("change", update);
+    };
+  }, []);
+  if (mode === "hidden") return null;
+  if (mode === "static") return <SceneFallback />;
   return <SceneErrorBoundary><SceneCanvas /></SceneErrorBoundary>;
 }
