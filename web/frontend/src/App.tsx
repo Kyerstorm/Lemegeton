@@ -401,7 +401,7 @@ export default function App() {
       try { rememberedGuild = window.localStorage.getItem("lemegeton:selected-guild") || ""; } catch { /* storage may be disabled */ }
       const canSelect = (candidate: unknown) => candidate != null && availableGuilds.some((guild) => String(guild.id) === String(candidate) && guild.bot_installed);
       const selected = String([rememberedGuild, data.selected_guild_id, availableGuilds.find(guild => guild.bot_installed)?.id].find(canSelect) || "");
-      if (availableGuilds.length && !availableGuilds.some(guild => guild.bot_installed)) setServerPickerOpen(true);
+      if (availableGuilds.length) setServerPickerOpen(true);
       activeGuildIdRef.current = selected;
       setGuildId(selected);
       if (!selected && availableGuilds.length) pushToast("Lemegeton is not installed in any server you can manage yet. Choose a server to invite it.");
