@@ -101,7 +101,7 @@ impl DashboardStore {
                 .map_err(|error| error.to_string())
         }).await
     }
-
+}
 
 mod oauth;
 mod rate_limit;
