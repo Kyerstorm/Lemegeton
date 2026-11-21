@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { emoji } from "../helpers/emoji.js";
 import { withFakeLoading } from "../helpers/runtime/fake-loading.js";
 
 function makeMessage() {
@@ -31,7 +32,7 @@ test("reply mode uses one deferred message for loading and the final response", 
     return true;
   });
 
-  assert.deepEqual(events, ["defer", "edit:Fetching media…", "edit:Results ready."]);
+  assert.deepEqual(events, ["defer", "edit:" + emoji.loading + " Fetching media…", "edit:Results ready."]);
 });
 
 test("embed-only replies clear the temporary loading text", async () => {
@@ -71,14 +72,14 @@ test("private component work uses one ephemeral loading response without changin
 
   await withFakeLoading(target, "Fetching media results…", "reply", async current => {
     await (current as typeof target & { reply(payload: { content: string }): Promise<unknown> })
-      .reply({ content: "Fetching media results…" });
+      .reply({ content: emoji.loading + " Fetching media results…" });
     await current.editReply({ content: "Private results ready." });
     return true;
   });
 
   assert.deepEqual(events, [
     "defer-reply",
-    "edit:Fetching media results…",
+    "edit:" + emoji.loading + " Fetching media results…",
     "edit:Private results ready.",
   ]);
 });
@@ -101,7 +102,7 @@ test("component updates edit the original interaction message in place", async (
     return true;
   });
 
-  assert.deepEqual(events, ["defer-update", "edit:Fetching Archive entries…", "edit:"]);
+  assert.deepEqual(events, ["defer-update", "edit:" + emoji.loading + " Fetching Archive entries…", "edit:"]);
 });
 
 test("component replies restore the original panel and send only the final reply separately", async () => {
@@ -127,7 +128,7 @@ test("component replies restore the original panel and send only the final reply
 
   assert.deepEqual(events, [
     "defer-update",
-    "edit:Saving your vote…",
+    "edit:" + emoji.loading + " Saving your vote…",
     "follow-up:Your vote was saved.",
     "edit:Original panel",
   ]);
@@ -150,7 +151,7 @@ test("unhandled component actions restore the original panel", async () => {
   assert.equal(handled, false);
   assert.deepEqual(events, [
     "defer-update",
-    "edit:Updating settings…",
+    "edit:" + emoji.loading + " Updating settings…",
     "edit:Original panel",
   ]);
 });
@@ -176,7 +177,7 @@ test("component failures restore the original panel before the error response", 
 
   assert.deepEqual(events, [
     "defer-update",
-    "edit:Updating role configuration…",
+    "edit:" + emoji.loading + " Updating role configuration…",
     "edit:Original panel",
   ]);
 });

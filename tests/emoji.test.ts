@@ -1,23 +1,27 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { customEmoji, emoji, loadingMessage, providerEmoji, providerFooter, withEmoji } from "../helpers/emoji.js";
+import { emoji, providerEmoji, providerFooter } from "../helpers/emoji.js";
 
-test("legacy palette names remain available without decorative emoji output", () => {
-  assert.ok(Object.keys(emoji).length >= 100);
-  assert.ok(Object.values(emoji).every(value => value === ""));
-  assert.equal(customEmoji("check", "123456789012345678"), "");
-  assert.equal(providerEmoji("Steam Store"), "");
-  assert.equal(providerEmoji("Not A Provider"), "");
+test("provider emoji mapping resolves the central Steam, AniList and media provider icons", () => {
+  assert.equal(providerEmoji("Steam Store"), emoji.steam);
+  assert.equal(providerEmoji("AniList"), emoji.anilist);
+  assert.equal(providerEmoji("Google Books"), emoji.GoogleBooks);
+  assert.equal(providerEmoji("YouTube Music"), emoji.Youtube);
+  assert.equal(providerEmoji("TMDB"), emoji.TMDB);
 });
 
-test("response helpers preserve readable text without adding symbols", () => {
-  assert.equal(withEmoji("idea", "A useful suggestion"), "A useful suggestion");
-  assert.equal(loadingMessage("Fetching media…"), "Fetching media…");
-  assert.equal(providerFooter("Steam", "Ireland store metadata"), "Steam · Ireland store metadata");
-  assert.ok(providerFooter("Steam", "Ireland store metadata").length <= 2_048);
+test("the shared palette exposes an idea symbol for feedback surfaces", () => {
+  assert.equal(emoji.idea, "💡");
 });
 
-test("provider footer fallback remains bounded and readable", () => {
-  assert.equal(providerFooter(" ", ""), "Metadata provider");
-  assert.ok(providerFooter("Steam", "x".repeat(3_000)).length <= 2_048);
+test("provider emoji mapping normalizes punctuation and has a safe fallback", () => {
+  assert.equal(providerEmoji("Noveli.to"), emoji.NoveliTo);
+  assert.equal(providerEmoji("Novel Archive"), emoji.NovelArchive);
+  assert.equal(providerEmoji("Not A Provider"), emoji.link);
+});
+
+test("provider footers include the provider icon, source and context", () => {
+  const footer = providerFooter("Steam", "Ireland store metadata");
+  assert.equal(footer, emoji.steam + " Steam · Ireland store metadata");
+  assert.ok(footer.length <= 2_048);
 });
