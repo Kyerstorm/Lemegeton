@@ -1,6 +1,5 @@
-// @ts-nocheck -- preserved imperative controller; strict typing is a tracked migration task.
 // Custom role color picker page.
-import { clamp, contrast, duration, formatSize, hexToRgb, hsvToRgb, normalizeHex, rgbToHex, rgbToHsv } from "./picker-utils";
+import { clamp, contrast, duration, formatSize, hexToRgb, hsvToRgb, normalizeHex, rgbToHex, rgbToHsv, type HSV } from "./picker-utils";
 //
 // - The link token arrives after '#', so it's never sent to a server in a URL. It's moved
 //   into this tab's sessionStorage, removed from the address bar, and sent only in the
@@ -11,6 +10,88 @@ import { clamp, contrast, duration, formatSize, hexToRgb, hsvToRgb, normalizeHex
 // - The server re-checks everything; this page only previews and sends.
 // Preserves the original picker interactions while mounting inside the static Next route.
 // The token remains in the URL fragment/session storage and is sent only in Authorization.
+
+type PickerMode = "solid" | "gradient" | "holographic";
+type ColorKey = "primary" | "secondary";
+type SaveKind = PickerMode | "name";
+type PickerPart = "color" | "name" | "icon";
+
+interface Crop {
+  x: number;
+  y: number;
+  size: number;
+}
+
+type RoleIcon =
+  | { type: "image"; url: string; crop?: Crop | null; has_source?: boolean }
+  | { type: "emoji"; value: string }
+  | null;
+
+interface PickerState {
+  role: {
+    mode: PickerMode;
+    primary: string | null;
+    secondary: string | null;
+    name: string;
+    icon: RoleIcon;
+  };
+  user: { name: string; avatar_url?: string | null };
+  guild: {
+    gradient?: boolean;
+    preview_enhanced?: boolean;
+    icons?: boolean;
+    preview_icons?: boolean;
+  };
+  icon_source_max: number;
+  name_max?: number;
+  next_change_at: number | null;
+}
+
+interface PickerReply {
+  ok?: boolean;
+  message?: string;
+  error?: string;
+  state?: PickerState;
+  notes?: string[];
+  retry_at?: number;
+  colors?: string[];
+  expires_at?: number | string;
+  max_expires_at?: number | string;
+}
+
+interface PickerRequestOptions {
+  body?: Record<string, unknown>;
+  form?: FormData;
+  method?: string;
+}
+
+interface ColorField {
+  key: ColorKey;
+  sync(fromThisField: boolean): void;
+  close(focusButton?: boolean): void;
+  setError(message: string): void;
+  pop: HTMLElement;
+  button: HTMLButtonElement;
+  container: HTMLElement;
+  fromHex(value: string): void;
+}
+
+interface PickerEdit {
+  mode: PickerMode;
+  primary: string | null;
+  secondary: string | null;
+  name: string;
+}
+
+interface IconEdit {
+  blob: Blob | null;
+  url: string | null;
+  img: HTMLImageElement | null;
+  w: number;
+  h: number;
+  crop: Crop | null;
+  emoji: string;
+}
 export function mountCustomRolePicker(root: HTMLElement): () => void {
 
   const STORAGE_KEY = "customRolePickerToken";
@@ -31,7 +112,7 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
     try { window.sessionStorage.removeItem(STORAGE_KEY); } catch (e) { /* storage blocked */ }
   };
   const token = readToken();
-  const cleanups = [];
+  const cleanups: Array<() => void> = [];
 
   // A newer link opened in this same tab only changes the part after '#', which doesn't
   // reload the page. Store the new token and reload so the page uses it.
@@ -46,44 +127,44 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
 
   // ------------------------------------------------------------------ helpers
 
-  const $ = (id: string) => root.querySelector<HTMLElement>("#" + id);
-  const all = <T extends Element = Element>(selector: string, scope: ParentNode = root): T[] => Array.from(scope.querySelectorAll<T>(selector));
-  const show = (el, visible) => el.classList.toggle("hidden", !visible);
-  const make = (tag, className, attrs) => {
+  const $ = <T extends HTMLElement = HTMLElement>(id: string): T => root.querySelector<T>("#" + id)!;
+  const all = <T extends Element = HTMLElement>(selector: string, scope: ParentNode = root): T[] => Array.from(scope.querySelectorAll<T>(selector));
+  const show = (el: Element, visible: boolean): void => el.classList.toggle("hidden", !visible);
+  const make = <K extends keyof HTMLElementTagNameMap>(tag: K, className = "", attrs: Record<string, string> = {}): HTMLElementTagNameMap[K] => {
     const el = document.createElement(tag);
     if (className) { el.className = className; }
     Object.entries(attrs || {}).forEach(([key, value]) => el.setAttribute(key, value));
     return el;
   };
   let uid = 0;
-  const nextId = (prefix) => `${prefix}-${++uid}`;
+  const nextId = (prefix: string): string => `${prefix}-${++uid}`;
 
   // Color conversion and contrast helpers live in picker-utils.ts.
 
-  const themeColor = (name) => normalizeHex(getComputedStyle(document.documentElement).getPropertyValue(name));
+  const themeColor = (name: string): string | null => normalizeHex(getComputedStyle(document.documentElement).getPropertyValue(name));
 
   // ------------------------------------------------------------------ state
 
-  let saved = null;            // the role as the server last reported it
-  const edit = { mode: "solid", primary: null, secondary: null, name: "" };
+  let saved: PickerState | null = null;            // the role as the server last reported it
+  const edit: PickerEdit = { mode: "solid", primary: null, secondary: null, name: "" };
   let modesAllowed = false;    // Gradient/Holographic selectable (server has them, or the test switch)
   let iconsUsable = false;     // Role Icon tab usable (server has Role Icons, or the test switch)
   let busy = false;
   let writable = true;
   let expiresAt = 0;           // closes this soon without use (the server resets it on every successful call)
   let maxExpiresAt = 0;        // and this at the latest
-  let nextChangeAt = null;
-  let palette = [];
-  const fields = [];
+  let nextChangeAt: number | null = null;
+  let palette: string[] = [];
+  const fields: ColorField[] = [];
 
   // A role icon being prepared: an image (the original file, never re-encoded here) with its crop
   // square in the image's own pixels, and/or an emoji. Which one is pending depends on the
   // "Icon from" switch.
-  const iconEdit = { blob: null, url: null, img: null, w: 0, h: 0, crop: null, emoji: "" };
-  let previewUrl = null;       // data: URL of the current crop, for the preview cards
+  const iconEdit: IconEdit = { blob: null, url: null, img: null, w: 0, h: 0, crop: null, emoji: "" };
+  let previewUrl: string | null = null;       // data: URL of the current crop, for the preview cards
 
   const savedEdit = () => {
-    const role = saved.role;
+    const role = saved!.role;
     return {
       mode: role.mode,
       primary: role.primary ? normalizeHex(role.primary) : null,
@@ -99,11 +180,11 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
     return false;
   };
   const nameDirty = () => saved !== null && edit.name.trim() !== savedEdit().name;
-  const iconSource = () => {
+  const iconSource = (): "upload" | "link" | "emoji" => {
     const checked = root.querySelector<HTMLInputElement>('input[name="icon-source"]:checked');
     return checked ? checked.value : "upload";
   };
-  const iconPending = () => {
+  const iconPending = (): "emoji" | "image" | null => {
     if (iconSource() === "emoji") { return iconEdit.emoji ? "emoji" : null; }
     return iconEdit.url ? "image" : null;
   };
@@ -111,28 +192,28 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
 
   // ------------------------------------------------------------------ banners and problems
 
-  const fatal = (title, text) => {
+  const fatal = (title: string, text: string): void => {
     $("problem-title").textContent = title;
     $("problem-text").textContent = text;
     show($("loading"), false);
     show($("app"), false);
     show($("problem"), true);
   };
-  const lockPage = (title, text) => {
+  const lockPage = (title: string, text: string): void => {
     writable = false;
     $("banner-access-title").textContent = title;
     $("banner-access-text").textContent = text;
     show($("banner-access"), true);
     refreshButtons();
   };
-  const expired = (message) => {
+  const expired = (message?: string): void => {
     forgetToken();
     lockPage("This link expired", message || "Run /custom-role in Discord and press Color picker for a new one. Your edits are still shown below.");
   };
 
   // ------------------------------------------------------------------ API
 
-  const noteExpiry = (expires, latest) => {
+  const noteExpiry = (expires: string | number | null, latest: string | number | null): void => {
     if (expires) {
       expiresAt = Number(expires);
       maxExpiresAt = Number(latest) || maxExpiresAt;
@@ -140,10 +221,11 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
   };
 
   // options: {body} = JSON POST, {form} = multipart POST, {method} = e.g. DELETE
-  const request = (path, options) => {
+  const request = (path: string, options: PickerRequestOptions = {}): Promise<Response> => {
     const opts = options || {};
-    const init = {
-      headers: { "Authorization": "Bearer " + token },
+    const headers = new Headers({ Authorization: "Bearer " + token });
+    const init: RequestInit = {
+      headers,
       credentials: "omit",
       cache: "no-store",
       referrerPolicy: "no-referrer",
@@ -151,7 +233,7 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
     if (opts.method) { init.method = opts.method; }
     if (opts.body !== undefined) {
       init.method = "POST";
-      init.headers["Content-Type"] = "application/json";
+      headers.set("Content-Type", "application/json");
       init.body = JSON.stringify(opts.body);
     }
     if (opts.form) {
@@ -163,17 +245,18 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
       return response;
     });
   };
-  const readJson = (response) => response.json().catch(() => ({})).then((body) => {
-    if (body) { noteExpiry(body.expires_at, body.max_expires_at); }
+  const readJson = async (response: Response): Promise<{ status: number; body: PickerReply }> => {
+    const body = await response.json().catch(() => ({})) as PickerReply;
+    noteExpiry(body.expires_at ?? null, body.max_expires_at ?? null);
     return { status: response.status, body };
-  });
-  const api = (path, options) => request(path, options).then(readJson);
+  };
+  const api = (path: string, options: PickerRequestOptions = {}): Promise<{ status: number; body: PickerReply }> => request(path, options).then(readJson);
 
   // ------------------------------------------------------------------ color fields
 
-  function makeColorField(container) {
-    const key = container.dataset.colorField;          // "primary" or "secondary"
-    const label = container.dataset.label;
+  function makeColorField(container: HTMLElement): ColorField {
+    const key = container.dataset.colorField as ColorKey; // "primary" or "secondary"
+    const label = container.dataset.label || "Color";
     const ids = { label: nextId("lbl"), hex: nextId("hex"), error: nextId("err"), pop: nextId("pop") };
     let hsv = { h: 0, s: 0, v: 1 };
     let dragging = false;
@@ -212,7 +295,7 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
     pop.append(body, actions);
     container.append(title, row, error, pop);
 
-    const setError = (message) => {
+    const setError = (message: string): void => {
       error.textContent = message || "";
       show(error, Boolean(message));
       hex.setAttribute("aria-invalid", message ? "true" : "false");
@@ -232,7 +315,7 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
     };
 
     // Called when the color changed somewhere else (palette, reset, the other field, typing here).
-    const sync = (fromThisField) => {
+    const sync = (fromThisField: boolean): void => {
       const value = edit[key];
       if (value && !fromThisField) {
         const next = rgbToHsv(hexToRgb(value));
@@ -246,7 +329,7 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
 
     const fromHsv = () => setColor(key, rgbToHex(hsvToRgb(hsv)), field);
 
-    const open = (visible) => {
+    const open = (visible: boolean): void => {
       show(pop, visible);
       button.setAttribute("aria-expanded", visible ? "true" : "false");
       if (visible) {
@@ -255,13 +338,13 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
         square.focus();
       }
     };
-    const close = (focusButton) => {
+    const close = (focusButton = false): void => {
       if (pop.classList.contains("hidden")) { return; }
       open(false);
       if (focusButton) { button.focus(); }
     };
 
-    const pointTo = (event) => {
+    const pointTo = (event: PointerEvent): void => {
       const rect = square.getBoundingClientRect();
       hsv.s = clamp((event.clientX - rect.left) / rect.width, 0, 1);
       hsv.v = 1 - clamp((event.clientY - rect.top) / rect.height, 0, 1);
@@ -283,7 +366,7 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
     square.addEventListener("pointercancel", () => { dragging = false; });
     square.addEventListener("keydown", (event) => {
       const step = event.shiftKey ? 0.1 : 0.01;
-      const moves = { ArrowLeft: ["s", -step], ArrowRight: ["s", step], ArrowDown: ["v", -step], ArrowUp: ["v", step] };
+      const moves: Record<string, ["s" | "v", number]> = { ArrowLeft: ["s", -step], ArrowRight: ["s", step], ArrowDown: ["v", -step], ArrowUp: ["v", step] };
       const move = moves[event.key];
       if (!move) { return; }
       event.preventDefault();
@@ -300,9 +383,9 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
       if (value) { hex.value = value; setError(""); } else if (hex.value.trim()) { setError(HEX_HELP); }
     });
 
-    const field = {
+    const field: ColorField = {
       key, sync, close, setError, pop, button, container,
-      fromHex: (value) => {
+      fromHex: (value: string): void => {
         const next = rgbToHsv(hexToRgb(value));
         if (next.s === 0 || next.v === 0) { next.h = hsv.h; }
         hsv = next;
@@ -313,7 +396,7 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
   }
 
   // setColor: the one way a color changes. source = the field that made the change (or null).
-  function setColor(key, value, source, typed) {
+  function setColor(key: ColorKey, value: string | null, source: ColorField | null, typed = false): void {
     edit[key] = value;
     fields.forEach((f) => {
       if (f.key !== key) { return; }
@@ -330,7 +413,7 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
 
   // ------------------------------------------------------------------ preview
 
-  function styleName(el) {
+  function styleName(el: HTMLElement): void {
     el.classList.remove("gradient-text", "holo-text");
     el.style.color = "";
     el.style.backgroundImage = "";
@@ -346,14 +429,14 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
 
   // The icon shown next to the name: what's being prepared, or else the saved one.
   function renderPreviewIcon() {
-    let icon = saved.role.icon;
+    let icon: RoleIcon = saved!.role.icon;
     const pending = iconPending();
     if (pending === "image" && previewUrl) {
       icon = { type: "image", url: previewUrl };
     } else if (pending === "emoji") {
       icon = { type: "emoji", value: iconEdit.emoji };
     }
-    all("[data-icon-img]").forEach((img) => {
+    all<HTMLImageElement>("[data-icon-img]").forEach((img) => {
       const isImage = Boolean(icon && icon.type === "image");
       if (isImage) { img.src = icon.url; }
       show(img, isImage);
@@ -390,11 +473,11 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
       ? `linear-gradient(90deg, ${edit.primary}, ${edit.secondary})` : "";
 
     // Readability on Discord's two themes
-    const colors = edit.mode === "solid" ? [edit.primary] : edit.mode === "gradient" ? [edit.primary, edit.secondary] : [];
+    const colors: Array<string | null> = edit.mode === "solid" ? [edit.primary] : edit.mode === "gradient" ? [edit.primary, edit.secondary] : [];
     const dark = themeColor("--cr-preview-dark-bg");
     const light = themeColor("--cr-preview-light-bg");
     const hard = [];
-    colors.filter(Boolean).forEach((c) => {
+    colors.filter((color): color is string => Boolean(color)).forEach((c) => {
       if (dark && contrast(c, dark) < 3) { hard.push("dark"); }
       if (light && contrast(c, light) < 3) { hard.push("light"); }
     });
@@ -412,7 +495,7 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
   }
 
   function showIcon() {
-    const icon = saved.role.icon;
+    const icon = saved!.role.icon;
     const current = $("icon-current");
     current.textContent = "";
     if (icon && icon.type === "image") {
@@ -430,7 +513,7 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
   // ------------------------------------------------------------------ style switch and palette
 
   function showMode() {
-    all('input[name="mode"]').forEach((input) => { input.checked = input.value === edit.mode; });
+    all<HTMLInputElement>('input[name="mode"]').forEach((input) => { input.checked = input.value === edit.mode; });
     ["solid", "gradient", "holographic"].forEach((mode) => show($(`panel-${mode}`), edit.mode === mode));
     show($("palette"), edit.mode !== "holographic");
     $("palette-primary-legend").textContent = edit.mode === "gradient" ? "Primary" : "Color";
@@ -481,7 +564,7 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
   // decompression bomb (a small file with huge dimensions) is refused without being opened.
   // JPEG sizes are as displayed (a phone photo's EXIF rotation applied), like the server's.
   // Returns null if no size header was found in the bytes given.
-  function headerSize(bytes, isPng) {
+  function headerSize(bytes: Uint8Array, isPng: boolean): { w: number; h: number } | null {
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     if (isPng) {
       return bytes.length >= 24 ? { w: view.getUint32(16), h: view.getUint32(20) } : null;
@@ -508,7 +591,7 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
   }
 
   // The EXIF orientation tag from an APP1 segment (bytes start..end), or 0 if there isn't one.
-  function exifOrientation(bytes, view, start, end) {
+  function exifOrientation(bytes: Uint8Array, view: DataView, start: number, end: number): number {
     const exif = [0x45, 0x78, 0x69, 0x66, 0, 0];  // "Exif\0\0"
     if (end - start < 16 || !exif.every((byte, k) => bytes[start + k] === byte)) { return 0; }
     const tiff = start + 6;
@@ -524,8 +607,8 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
   }
 
   // HEIC/HEIF (iPhone photos) by their "ftyp" box; AVIF uses the same container and isn't counted.
-  function isHeif(bytes) {
-    const text = (from, to) => String.fromCharCode(...bytes.subarray(from, to));
+  function isHeif(bytes: Uint8Array): boolean {
+    const text = (from: number, to: number): string => String.fromCharCode(...bytes.subarray(from, to));
     if (bytes.length < 12 || text(4, 8) !== "ftyp") { return false; }
     const boxEnd = Math.min(Math.max(new DataView(bytes.buffer, bytes.byteOffset).getUint32(0), 16), 256, bytes.length);
     const brands = [text(8, 12)];
@@ -534,7 +617,7 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
   }
 
   // The refusal for an image too large in pixels, naming the limit hit (same wording as the server).
-  function pixelLimitError(w, h) {
+  function pixelLimitError(w: number, h: number): string | null {
     const overTotal = w * h > MAX_PIXELS;
     let message;
     if (w > MAX_SIDE && h > MAX_SIDE) {
@@ -552,7 +635,7 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
     return overTotal ? `${message} ${PHOTO_HINT}` : message;
   }
 
-  const validCrop = (crop, w, h) => crop && [crop.x, crop.y, crop.size].every(Number.isInteger)
+  const validCrop = (crop: Crop | null | undefined, w: number, h: number): crop is Crop => Boolean(crop) && [crop.x, crop.y, crop.size].every(Number.isInteger)
     && crop.size >= MIN_CROP && crop.x >= 0 && crop.y >= 0 && crop.x + crop.size <= w && crop.y + crop.size <= h;
 
   function clearIconImage() {
@@ -560,13 +643,13 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
     Object.assign(iconEdit, { blob: null, url: null, img: null, w: 0, h: 0, crop: null });
     previewUrl = null;
     show($("crop"), false);
-    $("crop-img").removeAttribute("src");
-    $("crop-preview").removeAttribute("src");
+    $<HTMLImageElement>("crop-img").removeAttribute("src");
+    $<HTMLImageElement>("crop-preview").removeAttribute("src");
   }
 
   // Check a chosen or downloaded image like the server will, then open it in the crop editor.
-  async function loadImageBlob(blob, crop) {
-    const max = saved.icon_source_max;
+  async function loadImageBlob(blob: Blob, crop: Crop | null = null): Promise<void> {
+    const max = saved!.icon_source_max;
     if (blob.size > max) {
       throw new Error(`That image is ${formatSize(blob.size)}. Images can be at most ${formatSize(max)}.`);
     }
@@ -589,7 +672,7 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
     const probe = new Image();
     try {
       // load/error events, not decode(): decode() can wait forever in a hidden or background tab.
-      await new Promise((resolve, reject) => {
+      await new Promise<void>((resolve, reject) => {
         probe.addEventListener("load", resolve, { once: true });
         probe.addEventListener("error", reject, { once: true });
         probe.src = url;
@@ -613,34 +696,37 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
         ? { x: crop.x, y: crop.y, size: crop.size }
         : { x: Math.floor((w - side) / 2), y: Math.floor((h - side) / 2), size: side },
     });
-    $("crop-img").src = url;
-    $("crop-zoom").max = String(Math.max(1, Math.min(10, side / MIN_CROP)));
+    $<HTMLImageElement>("crop-img").src = url;
+    $<HTMLInputElement>("crop-zoom").max = String(Math.max(1, Math.min(10, side / MIN_CROP)));
     show($("crop"), true);
     layoutCrop();
     updatePreview();
   }
 
-  function clampCrop() {
+  function clampCrop(): void {
     const c = iconEdit.crop;
+    if (!c) return;
     const side = Math.min(iconEdit.w, iconEdit.h);
     c.size = clamp(c.size, MIN_CROP, side);
     c.x = clamp(c.x, 0, iconEdit.w - c.size);
     c.y = clamp(c.y, 0, iconEdit.h - c.size);
   }
 
-  function stageScale() {
-    return ($("crop-stage").clientWidth || 240) / iconEdit.crop.size;
+  function stageScale(): number {
+    const crop = iconEdit.crop;
+    if (!crop) return 1;
+    return ($("crop-stage").clientWidth || 240) / crop.size;
   }
 
-  function layoutCrop() {
-    if (!iconEdit.url) { return; }
+  function layoutCrop(): void {
+    if (!iconEdit.url || !iconEdit.crop) { return; }
     clampCrop();
     const scale = stageScale();
-    const img = $("crop-img");
+    const img = $<HTMLImageElement>("crop-img");
     img.style.width = `${iconEdit.w * scale}px`;
     img.style.height = `${iconEdit.h * scale}px`;
     img.style.transform = `translate(${-iconEdit.crop.x * scale}px, ${-iconEdit.crop.y * scale}px)`;
-    $("crop-zoom").value = String(Math.min(iconEdit.w, iconEdit.h) / iconEdit.crop.size);
+    $<HTMLInputElement>("crop-zoom").value = String(Math.min(iconEdit.w, iconEdit.h) / iconEdit.crop.size);
     const c = iconEdit.crop;
     $("crop-stage").setAttribute("aria-label",
       `Crop area: ${Math.round(c.size)} by ${Math.round(c.size)} pixels from the ${iconEdit.w} by ${iconEdit.h} image`);
@@ -648,34 +734,37 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
   }
 
   // A short timer, not requestAnimationFrame: frames pause in hidden or throttled tabs.
-  function schedulePreview() {
+  function schedulePreview(): void {
     if (previewFrame) { return; }
     previewFrame = window.setTimeout(() => {
       previewFrame = 0;
-      if (!iconEdit.url) { return; }
+      if (!iconEdit.url || !iconEdit.img || !iconEdit.crop) { return; }
       const canvas = document.createElement("canvas");
       canvas.width = PREVIEW_SIDE;
       canvas.height = PREVIEW_SIDE;
       const ctx = canvas.getContext("2d");
+      if (!ctx) return;
       ctx.imageSmoothingQuality = "high";
       const c = iconEdit.crop;
       ctx.drawImage(iconEdit.img, c.x, c.y, c.size, c.size, 0, 0, PREVIEW_SIDE, PREVIEW_SIDE);
       previewUrl = canvas.toDataURL("image/png");
-      $("crop-preview").src = previewUrl;
+      $<HTMLImageElement>("crop-preview").src = previewUrl;
       updatePreview();
     }, 30);
   }
 
-  function moveCrop(dx, dy) {
+  function moveCrop(dx: number, dy: number): void {
+    if (!iconEdit.crop) return;
     iconEdit.crop.x += dx;
     iconEdit.crop.y += dy;
     layoutCrop();
   }
 
-  function zoomCrop(zoom) {
+  function zoomCrop(zoom: number): void {
     const c = iconEdit.crop;
+    if (!c) return;
     const side = Math.min(iconEdit.w, iconEdit.h);
-    const size = side / clamp(zoom, 1, Number($("crop-zoom").max));
+    const size = side / clamp(zoom, 1, Number($<HTMLInputElement>("crop-zoom").max));
     const cx = c.x + c.size / 2;
     const cy = c.y + c.size / 2;
     c.size = size;
@@ -704,30 +793,31 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
     stage.addEventListener("wheel", (event) => {
       if (!iconEdit.url) { return; }
       event.preventDefault();
-      zoomCrop(Number($("crop-zoom").value) * (event.deltaY < 0 ? 1.1 : 1 / 1.1));
+      zoomCrop(Number($<HTMLInputElement>("crop-zoom").value) * (event.deltaY < 0 ? 1.1 : 1 / 1.1));
     }, { passive: false });
     stage.addEventListener("keydown", (event) => {
       if (!iconEdit.url) { return; }
-      const step = iconEdit.crop.size * (event.shiftKey ? 0.1 : 0.02);
+      const step = (iconEdit.crop?.size || 0) * (event.shiftKey ? 0.1 : 0.02);
       // Arrow keys move the image (so the crop square moves the other way).
-      const moves = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] };
-      if (moves[event.key]) {
+      const moves: Record<string, [number, number]> = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] };
+      const movement = moves[event.key];
+      if (movement) {
         event.preventDefault();
-        moveCrop(...moves[event.key]);
+        moveCrop(...movement);
       } else if (event.key === "+" || event.key === "=") {
         event.preventDefault();
-        zoomCrop(Number($("crop-zoom").value) * 1.1);
+        zoomCrop(Number($<HTMLInputElement>("crop-zoom").value) * 1.1);
       } else if (event.key === "-" || event.key === "_") {
         event.preventDefault();
-        zoomCrop(Number($("crop-zoom").value) / 1.1);
+        zoomCrop(Number($<HTMLInputElement>("crop-zoom").value) / 1.1);
       }
     });
-    $("crop-zoom").addEventListener("input", () => { if (iconEdit.url) { zoomCrop(Number($("crop-zoom").value)); } });
+    $<HTMLInputElement>("crop-zoom").addEventListener("input", () => { if (iconEdit.url) { zoomCrop(Number($<HTMLInputElement>("crop-zoom").value)); } });
     window.addEventListener("resize", layoutCrop);
     cleanups.push(() => window.removeEventListener("resize", layoutCrop));
   }
 
-  function handleFile(file) {
+  function handleFile(file: File | null | undefined): void {
     if (!file) { return; }
     setStatus("icon-load-status", true, "Checking the image…");
     loadImageBlob(file).then(() => {
@@ -736,15 +826,15 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
   }
 
   // A non-image reply from the icon endpoints: show why (and lock the page if access ended).
-  function iconLoadProblem(status, body) {
-    const message = (body && body.message) || "Something went wrong. Try again in a moment.";
+  function iconLoadProblem(status: number, body: PickerReply): void {
+    const message = body.message || "Something went wrong. Try again in a moment.";
     if (status === 401) { expired(message); } else if (status === 403 && body && body.error === "not_allowed") {
       lockPage("You can't change this role right now", message);
     }
     setStatus("icon-load-status", false, message);
   }
 
-  function loadFromServer(button, path, options, crop, success) {
+  function loadFromServer(button: HTMLButtonElement, path: string, options: PickerRequestOptions, crop: Crop | null, success: string): void {
     if (busy || !writable) { return; }
     busy = true;
     const label = button.textContent;
@@ -780,12 +870,12 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
   }
 
   function setupIconTab() {
-    all("[data-source-max]").forEach((el) => { el.textContent = formatSize(saved.icon_source_max); });
+    all<HTMLElement>("[data-source-max]").forEach((el) => { el.textContent = formatSize(saved!.icon_source_max); });
     show($("icon-tools"), iconsUsable);
     show($("icon-unavailable"), !iconsUsable);
-    all('input[name="icon-source"]').forEach((input) => input.addEventListener("change", showIconSource));
+    all<HTMLInputElement>('input[name="icon-source"]').forEach((input) => input.addEventListener("change", showIconSource));
 
-    const fileInput = $("icon-file");
+    const fileInput = $<HTMLInputElement>("icon-file");
     fileInput.addEventListener("change", () => {
       handleFile(fileInput.files && fileInput.files[0]);
       fileInput.value = "";
@@ -799,17 +889,17 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
       handleFile(event.dataTransfer && event.dataTransfer.files[0]);
     });
 
-    $("icon-load").addEventListener("click", () => {
-      const url = $("icon-url").value.trim();
+    $<HTMLButtonElement>("icon-load").addEventListener("click", () => {
+      const url = $<HTMLInputElement>("icon-url").value.trim();
       if (!url) { setStatus("icon-load-status", false, "Paste a link first."); return; }
-      loadFromServer($("icon-load"), "icon/fetch", { body: { url } }, null,
+      loadFromServer($<HTMLButtonElement>("icon-load"), "icon/fetch", { body: { url } }, null,
         "Loaded. Drag and zoom to crop it, then press Set icon.");
     });
-    $("icon-url").addEventListener("keydown", (event) => {
-      if (event.key === "Enter") { event.preventDefault(); $("icon-load").click(); }
+    $<HTMLInputElement>("icon-url").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") { event.preventDefault(); $<HTMLButtonElement>("icon-load").click(); }
     });
 
-    const emojiInput = $("emoji-input");
+    const emojiInput = $<HTMLInputElement>("emoji-input");
     emojiInput.addEventListener("input", () => {
       iconEdit.emoji = emojiInput.value.trim();
       let note = "";
@@ -821,15 +911,15 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
       updatePreview();
     });
 
-    $("edit-crop").addEventListener("click", () => {
+    $<HTMLButtonElement>("edit-crop").addEventListener("click", () => {
       const icon = saved.role.icon;
-      $("source-upload").checked = true;
+      $<HTMLInputElement>("source-upload").checked = true;
       showIconSource();
-      loadFromServer($("edit-crop"), "icon/source", {}, icon && icon.crop,
+      loadFromServer($<HTMLButtonElement>("edit-crop"), "icon/source", {}, icon && icon.crop,
         "Loaded your current icon. Adjust the crop, then press Set icon.");
     });
-    $("set-icon").addEventListener("click", () => {
-      const button = $("set-icon");
+    $<HTMLButtonElement>("set-icon").addEventListener("click", () => {
+      const button = $<HTMLButtonElement>("set-icon");
       if (iconSource() === "emoji") {
         if (!iconEdit.emoji) { setStatus("status-icon", false, "Type or paste an emoji first."); return; }
         submit(button, "status-icon", "icon/emoji", { body: { emoji: iconEdit.emoji } }, "icon");
@@ -845,8 +935,8 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
       form.append("crop", JSON.stringify({ x, y, size }));
       submit(button, "status-icon", "icon", { form }, "icon");
     });
-    $("remove-icon").addEventListener("click", () => {
-      submit($("remove-icon"), "status-icon", "icon", { method: "DELETE" }, "icon");
+    $<HTMLButtonElement>("remove-icon").addEventListener("click", () => {
+      submit($<HTMLButtonElement>("remove-icon"), "status-icon", "icon", { method: "DELETE" }, "icon");
     });
     setupCropEditor();
     showIconSource();
@@ -859,11 +949,11 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
   }
 
   function refreshButtons() {
-    all("[data-set]").forEach((button) => {
+    all<HTMLButtonElement>("[data-set]").forEach((button) => {
       button.disabled = busy || !writable || cooling();
     });
-    const icon = saved && saved.role.icon;
-    all("[data-icon-action]").forEach((button) => {
+    const icon = saved?.role.icon;
+    all<HTMLButtonElement>("[data-icon-action]").forEach((button) => {
       const changes = button.id === "set-icon" || button.id === "remove-icon";
       let off = busy || !writable || (changes && cooling());
       if (button.id !== "remove-icon" && !iconsUsable) { off = true; }
@@ -873,7 +963,7 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
     });
   }
 
-  function setStatus(id, ok, message, notes) {
+  function setStatus(id: string, ok: boolean, message: string, notes: string[] = []): void {
     const el = $(id);
     el.className = "status " + (ok ? "status-ok" : "status-error");
     el.textContent = message || "";
@@ -884,7 +974,7 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
     });
   }
 
-  function applySaved(state, part) {
+  function applySaved(state: PickerState, part: PickerPart): void {
     saved = state;
     nextChangeAt = state.next_change_at;
     const fresh = savedEdit();
@@ -894,12 +984,12 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
       edit.secondary = fresh.secondary || edit.secondary;
     } else if (part === "name") {
       edit.name = fresh.name;
-      $("name-input").value = fresh.name;
+      $<HTMLInputElement>("name-input").value = fresh.name;
       updateNameCount();
     } else if (part === "icon") {
       clearIconImage();
       iconEdit.emoji = "";
-      $("emoji-input").value = "";
+      $<HTMLInputElement>("emoji-input").value = "";
       setStatus("icon-load-status", true, "");
     }
     fields.forEach((f) => f.sync(false));
@@ -911,7 +1001,7 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
   }
 
   // Send a change and show the result. part = what the reply's state should refresh.
-  function submit(button, statusId, path, options, part) {
+  function submit(button: HTMLButtonElement, statusId: string, path: string, options: PickerRequestOptions, part: PickerPart): void {
     if (busy || !writable) { return; }
     busy = true;
     const label = button.textContent;
@@ -921,7 +1011,7 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
     setStatus(statusId, true, "");
 
     api(path, options).then(({ status, body: reply }) => {
-      const message = (reply && reply.message) || "Something went wrong. Try again in a moment.";
+      const message = reply.message || "Something went wrong. Try again in a moment.";
       if (status === 401) { expired(message); setStatus(statusId, false, message); return; }
       if (status === 403) { lockPage("You can't change this role right now", message); setStatus(statusId, false, message); return; }
       if (status !== 200) { setStatus(statusId, false, message); return; }
@@ -931,7 +1021,7 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
         const err = $("name-error");
         err.textContent = reply.ok ? "" : message;
         show(err, !reply.ok);
-        $("name-input").setAttribute("aria-invalid", reply.ok ? "false" : "true");
+        $<HTMLInputElement>("name-input").setAttribute("aria-invalid", reply.ok ? "false" : "true");
       }
       if (reply.ok && reply.state) { applySaved(reply.state, part); }
     }).catch(() => {
@@ -944,9 +1034,9 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
     });
   }
 
-  function save(kind, button) {
+  function save(kind: SaveKind, button: HTMLButtonElement): void {
     if (kind === "name") {
-      submit(button, "status-name", "name", { body: { name: $("name-input").value } }, "name");
+      submit(button, "status-name", "name", { body: { name: $<HTMLInputElement>("name-input").value } }, "name");
       return;
     }
     if (kind === "holographic") {
@@ -954,21 +1044,21 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
       return;
     }
     const statusId = `status-${kind}`;
-    const needed = kind === "gradient" ? ["primary", "secondary"] : ["primary"];
-    const missing = needed.filter((key) => !edit[key]);
+    const needed: ColorKey[] = kind === "gradient" ? ["primary", "secondary"] : ["primary"];
+    const missing = needed.filter((key): key is ColorKey => !edit[key]);
     if (missing.length) {
       fields.filter((f) => missing.includes(f.key) && !f.container.closest(".hidden")).forEach((f) => f.setError(HEX_HELP));
       setStatus(statusId, false, kind === "gradient" ? "Pick both colors first." : "Pick a color first.");
       return;
     }
-    const body = { mode: kind, primary: edit.primary };
+    const body: Record<string, unknown> = { mode: kind, primary: edit.primary };
     if (kind === "gradient") { body.secondary = edit.secondary; }
     submit(button, statusId, "color", { body }, "color");
   }
 
   // ------------------------------------------------------------------ timers
 
-  let cooldownTimer = null;
+  let cooldownTimer: number | null = null;
   function tickCooldown() {
     window.clearTimeout(cooldownTimer);
     const note = $("cooldown-note");
@@ -1001,12 +1091,13 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
 
   function setupTabs() {
     const tabs = all('[role="tab"]');
-    const select = (tab, focus) => {
+    const select = (tab: HTMLElement, focus: boolean): void => {
       tabs.forEach((t) => {
         const on = t === tab;
         t.setAttribute("aria-selected", on ? "true" : "false");
         t.tabIndex = on ? 0 : -1;
-        show($(t.getAttribute("aria-controls")), on);
+        const panelId = t.getAttribute("aria-controls");
+        if (panelId) show($(panelId), on);
       });
       fields.forEach((f) => f.close(false));
       if (tab.id === "tab-icon") { layoutCrop(); }
@@ -1015,28 +1106,29 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
     tabs.forEach((tab, index) => {
       tab.addEventListener("click", () => select(tab, false));
       tab.addEventListener("keydown", (event) => {
-        const moves = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: tabs.length - 1 };
-        if (!(event.key in moves)) { return; }
+        const moves: Record<string, number> = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: tabs.length - 1 };
+        const nextIndex = moves[event.key];
+        if (nextIndex === undefined) { return; }
         event.preventDefault();
-        select(tabs[(moves[event.key] + tabs.length) % tabs.length], true);
+        select(tabs[(nextIndex + tabs.length) % tabs.length], true);
       });
     });
   }
 
   function updateNameCount() {
-    const input = $("name-input");
+    const input = $<HTMLInputElement>("name-input");
     $("name-count").textContent = `${input.value.length}/${input.maxLength} characters`;
   }
 
   function reset() {
     Object.assign(edit, savedEdit());
-    $("name-input").value = edit.name;
-    $("name-input").setAttribute("aria-invalid", "false");
+    $<HTMLInputElement>("name-input").value = edit.name;
+    $<HTMLInputElement>("name-input").setAttribute("aria-invalid", "false");
     show($("name-error"), false);
     updateNameCount();
     clearIconImage();
     iconEdit.emoji = "";
-    $("emoji-input").value = "";
+    $<HTMLInputElement>("emoji-input").value = "";
     setStatus("icon-load-status", true, "");
     fields.forEach((f) => { f.setError(""); f.sync(false); });
     showMode();
@@ -1047,7 +1139,7 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
 
   // ------------------------------------------------------------------ start
 
-  function render(data) {
+  function render(data: { state: PickerState }): void {
     saved = data.state;
     nextChangeAt = saved.next_change_at;
     Object.assign(edit, savedEdit());
@@ -1058,18 +1150,18 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
     show($("banner-debug"), Boolean(guild.preview_enhanced));
     show($("banner-debug-icons"), Boolean(guild.preview_icons));
     show($("mode-hint"), !guild.gradient);
-    ["gradient", "holographic"].forEach((mode) => { $(`mode-${mode}`).disabled = !modesAllowed; });
+    ["gradient", "holographic"].forEach((mode) => { $<HTMLInputElement>(`mode-${mode}`).disabled = !modesAllowed; });
 
-    all("[data-avatar]").forEach((img) => {
+    all<HTMLImageElement>("[data-avatar]").forEach((img) => {
       if (saved.user.avatar_url) { img.src = saved.user.avatar_url; }
     });
     const time = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
     all("[data-time]").forEach((el) => { el.textContent = `Today at ${time}`; });
 
-    all("[data-color-field]").forEach((container) => fields.push(makeColorField(container)));
+    all<HTMLElement>("[data-color-field]").forEach((container) => fields.push(makeColorField(container)));
     fields.forEach((f) => f.sync(false));
 
-    const nameInput = $("name-input");
+    const nameInput = $<HTMLInputElement>("name-input");
     nameInput.maxLength = saved.name_max || 100;
     nameInput.value = edit.name;
     updateNameCount();
@@ -1081,17 +1173,18 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
       updatePreview();
     });
 
-    all('input[name="mode"]').forEach((input) => input.addEventListener("change", () => {
+    all<HTMLInputElement>('input[name="mode"]').forEach((input) => input.addEventListener("change", () => {
       if (input.checked) { edit.mode = input.value; showMode(); updatePalette(); updatePreview(); }
     }));
-    all("[data-set]").forEach((button) => button.addEventListener("click", () => save(button.dataset.set, button)));
+    all<HTMLButtonElement>("[data-set]").forEach((button) => button.addEventListener("click", () => save(button.dataset.set, button)));
     $("reset").addEventListener("click", reset);
-    const handleOutsidePointerDown = (event) => {
+    const handleOutsidePointerDown = (event: PointerEvent): void => {
+      if (!(event.target instanceof Node)) return;
       fields.forEach((f) => {
         if (!f.pop.contains(event.target) && !f.button.contains(event.target)) { f.close(false); }
       });
     };
-    const handleBeforeUnload = (event) => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent): void => {
       if (isDirty()) { event.preventDefault(); event.returnValue = ""; }
     };
     document.addEventListener("pointerdown", handleOutsidePointerDown);
@@ -1111,8 +1204,8 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
 
     api("palette").then(({ status, body }) => {
       const statusEl = $("palette-status");
-      if (status === 200 && body.ok && body.colors.length) {
-        palette = body.colors.map(normalizeHex).filter(Boolean);
+      if (status === 200 && body.ok && body.colors?.length) {
+        palette = body.colors.map(normalizeHex).filter((color): color is string => Boolean(color));
         statusEl.textContent = "Pick one to fill in the color, then press Set.";
       } else {
         statusEl.textContent = (body && body.message) || "Couldn't read colors from your avatar.";
@@ -1122,13 +1215,13 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
     }).catch(() => { $("palette-status").textContent = "Couldn't load colors from your avatar."; });
   }
 
-  function start() {
+  function start(): void {
     if (!token) {
       fatal("No link found", "Open this page from the Color picker button in /custom-role in Discord.");
       return;
     }
     api("state").then(({ status, body }) => {
-      if (status === 200 && body.ok) { render(body); return; }
+      if (status === 200 && body.ok && body.state) { render({ state: body.state }); return; }
       const message = (body && body.message) || "Something went wrong. Try again in a moment.";
       if (status === 401) { forgetToken(); fatal("This link expired", message); return; }
       fatal("Can't open the picker", message);
@@ -1136,5 +1229,5 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
   }
 
   start();
-  return () => { cleanups.splice(0).forEach(cleanup => cleanup()); };
+  return () => { cleanups.splice(0).forEach((cleanup) => cleanup()); };
 }
