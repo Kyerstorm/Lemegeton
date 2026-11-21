@@ -9,7 +9,7 @@ import { SceneLoader } from "./Components/Three/SceneLoader";
 type Page = "overview" | "commands" | "atlas" | "extensions" | "audit" | "diagnostics" | "logs" | "integrations" | "database";
 type User = { id: string; username: string; global_name?: string | null; avatar?: string | null };
 type Guild = { id: string; name: string; icon?: string | null; administrator?: boolean; member_count?: number | null };
-type Command = { fullname: string; name?: string; description?: string; section?: string; type?: string; scope?: string; enabled: boolean; protected?: boolean; required_permissions?: string | boolean | null };
+type Command = { fullname: string; name?: string; description?: string; section?: string; type?: string; scope?: string; enabled: boolean; configurable?: boolean; protected?: boolean; required_permissions?: string | boolean | null };
 type AuditEntry = { action?: string; details?: string; actor_name?: string; actor_id?: string; ts?: string };
 type Overview = { bot?: { ready?: boolean; status?: string; latency_ms?: number | null; member_count?: number | null; guild_count?: number | null; extension_count?: number | null } };
 type SystemStatus = { status?: string; ready?: boolean; reason?: string; observed_at?: number; last_known?: Record<string, any> | null; uptime_seconds?: number | null; node_version?: string; extensions?: string[]; latency_ms?: number | null; guild_count?: number | null; extension_count?: number | null };
@@ -472,7 +472,7 @@ export default function App() {
   };
 
   const toggleCommand = (command: Command) => {
-    if (!guildId || command.protected || savingCommands) return;
+    if (!guildId || command.protected || !command.configurable || savingCommands) return;
     setCommands((items) => items.map((item) =>
       item.fullname === command.fullname ? { ...item, enabled: !item.enabled } : item
     ));
@@ -487,7 +487,7 @@ export default function App() {
     const requestedGuild = guildId;
     const baseline = new Map(savedCommands.map(item => [item.fullname, item.enabled]));
     const updates = commands
-      .filter(item => !item.protected && baseline.get(item.fullname) !== item.enabled)
+      .filter(item => !item.protected && item.configurable && baseline.get(item.fullname) !== item.enabled)
       .map(item => ({ fullname: item.fullname, enabled: item.enabled }));
     if (!updates.length) return;
     setSavingCommands(true);
@@ -894,7 +894,7 @@ export default function App() {
         <div className="command-list">{commands.length === 0 ? (commandError ? <Empty>{commandError}</Empty> : refreshing ? <Empty loading>Reading the live command registry…</Empty> : <Empty>No dashboard-managed commands were returned.</Empty>) : filteredCommands.length === 0 ? <Empty>No commands match this search and filter.</Empty> : filteredCommands.map((command) => <article className="command-row" key={command.fullname}>
           <div className="command-main"><a className="command-name command-name-link" href={commandGuideUrl(command)} target="_blank" rel="noreferrer" aria-label={"Open usage guide for /" + (command.fullname || command.name)} title="Open the relevant command guide"><span className="command-prefix">/</span>{command.fullname || command.name}<span className="command-link-glyph" aria-hidden="true">↗</span></a><p className="command-description">{command.description || "No description provided."}</p><div className="command-tags"><span className="tag">{command.section || "Other"}</span><span className="tag">{command.type || "slash"}</span><span className="tag">{command.scope || "guild"}</span>{command.protected ? <span className="tag tag-protected">Protected</span> : null}{command.required_permissions ? <span className="tag">Discord permission gate</span> : null}</div><div className="command-actions"><button className="command-copy" type="button" onClick={() => void copyCommandInvocation(command)} title={"Copy /" + (command.fullname || command.name)} aria-label={"Copy invocation for /" + (command.fullname || command.name)}>▣ <span>Copy command</span></button><a className="command-guide" href={commandGuideUrl(command)} target="_blank" rel="noreferrer">Usage guide <span aria-hidden="true">↗</span></a><button className="command-access-open" type="button" onClick={() => void openCommandAccess(command)} disabled={Boolean(command.protected) || accessLoading || accessSaving} aria-label={"Configure access for /" + command.fullname}><Icon name="shield-check" size={14} /> Access rules</button></div></div>
           <div className="command-state"><StatusPill ok={command.enabled && !command.protected}>{command.protected ? "Protected / always on" : command.enabled ? "Enabled" : "Disabled"}</StatusPill></div>
-          <button className={"switch" + (command.enabled ? " checked" : "")} role="switch" type="button" aria-checked={Boolean(command.enabled)} aria-label={"Toggle " + command.fullname} disabled={Boolean(command.protected) || savingCommands || operationBusy} onClick={() => toggleCommand(command)}><span /></button>
+          <button className={"switch" + (command.enabled ? " checked" : "")} role="switch" type="button" aria-checked={Boolean(command.enabled)} aria-label={"Toggle " + command.fullname} disabled={Boolean(command.protected) || !command.configurable || savingCommands || operationBusy} onClick={() => toggleCommand(command)}><span /></button>
         </article>)}</div>
         <p className="footnote">Changes remain local until saved. The bot rechecks the server revision before publishing; protected commands cannot be changed.</p>
         {accessTarget ? <div className="access-overlay">

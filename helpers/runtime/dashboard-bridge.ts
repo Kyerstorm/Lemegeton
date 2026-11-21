@@ -110,6 +110,7 @@ export function dashboardCommandRows(commands: FeatureCommand[], settings: Await
       aliases: [],
       required_permissions: definition.default_member_permissions ?? null,
       protected: PROTECTED_COMMANDS.has(name),
+      configurable: feature !== null,
       enabled: feature ? settings[feature] : true,
     };
   });
