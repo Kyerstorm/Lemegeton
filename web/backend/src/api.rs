@@ -24,6 +24,43 @@ pub async fn overview(State(state): State<AppState>, headers: HeaderMap, Path(gu
     let _ = authorized_guild(&state, &headers, &guild_id).await?;
     Ok(Json(bridge_json(&state, Method::GET, &format!("/guilds/{guild_id}/overview"), None).await?))
 }
+
+pub async fn command_access(State(state): State<AppState>, headers: HeaderMap, Path(guild_id): Path<String>) -> ApiResult<Json<Value>> {
+    let _ = authorized_guild(&state, &headers, &guild_id).await?;
+    Ok(Json(bridge_json(&state, Method::GET, &format!("/guilds/{guild_id}/command-access"), None).await?))
+}
+pub async fn set_command_access(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((guild_id, fullname)): Path<(String, String)>,
+    Json(mut body): Json<Value>,
+) -> ApiResult<Json<Value>> {
+    let (_, session) = write_session(&state, &headers).await?;
+    let _ = authorized_guild(&state, &headers, &guild_id).await?;
+    if fullname.trim().is_empty() || fullname.len() > 100 {
+        return Err(ApiError::bad_request("Invalid command name."));
+    }
+    let data = bridge_json(&state, Method::GET, &format!("/guilds/{guild_id}/commands"), None).await?;
+    let item = data.get("commands").and_then(Value::as_array).into_iter().flatten()
+        .find(|item| item.get("fullname").and_then(Value::as_str) == Some(fullname.as_str()))
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "Command is not available for access management."))?;
+    if item.get("protected").and_then(Value::as_bool).unwrap_or(false)
+        || item.get("name").and_then(Value::as_str).is_some_and(protected_command) {
+        return Err(ApiError::forbidden("This system command is protected."));
+    }
+    if !body.is_object()
+        || !body.get("expected_revision").is_some_and(Value::is_u64)
+        || !body.get("role_mode").and_then(Value::as_str).is_some_and(|mode| ["everyone","include","exclude"].contains(&mode))
+        || !body.get("channel_mode").and_then(Value::as_str).is_some_and(|mode| ["all","include","exclude"].contains(&mode))
+        || !body.get("role_ids").and_then(Value::as_array).is_some_and(|ids| ids.len() <= 100 && ids.iter().all(Value::is_string))
+        || !body.get("channel_ids").and_then(Value::as_array).is_some_and(|ids| ids.len() <= 100 && ids.iter().all(Value::is_string)) {
+        return Err(ApiError::bad_request("Choose valid role and channel access rules."));
+    }
+    body["actor_id"] = json!(session.user.id);
+    let encoded = urlencoding::encode(&fullname);
+    Ok(Json(bridge_json(&state, Method::PUT, &format!("/guilds/{guild_id}/command-access/{encoded}"), Some(body)).await?))
+}
+
 pub async fn commands(State(state): State<AppState>, headers: HeaderMap, Path(guild_id): Path<String>) -> ApiResult<Json<Value>> {
     let _ = authorized_guild(&state, &headers, &guild_id).await?;
     Ok(Json(bridge_json(&state, Method::GET, &format!("/guilds/{guild_id}/commands"), None).await?))
