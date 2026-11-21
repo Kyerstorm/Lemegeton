@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import "./globals.css";
+import { GlobalStyles } from "../src/DesignSystem/GlobalStyles";
 
 export const metadata: Metadata = {
   title: "Lemegeton / Control",
@@ -8,5 +8,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body>{children}</body></html>;
+  return <html lang="en"><body><GlobalStyles />{children}</body></html>;
 }
