@@ -778,17 +778,15 @@ async function handleRequest(
     return;
   }
   if (request.method === "GET" && url.pathname === "/logs") {
-    const file = url.searchParams.get("file") ?? "bot.log";
-    if (!["bot.log", "dashboard.log", "error.log"].includes(file)) {
-      errorResponse(response, 400, "That log file is not available.");
-      return;
-    }
     const entries = readRecentLogs(250);
     const content = entries.map(entry => {
       const context = entry.context ? " " + JSON.stringify(entry.context) : "";
       return entry.timestamp + " " + entry.level.toUpperCase() + " " + entry.message + context;
     }).join("\n");
-    jsonResponse(response, 200, { name: file, content: content || "No in-memory log entries are available yet." });
+    jsonResponse(response, 200, {
+      name: "Recent runtime events",
+      content: content || "No in-memory log entries are available yet.",
+    });
     return;
   }
 

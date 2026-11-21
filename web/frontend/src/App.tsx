@@ -225,7 +225,7 @@ export default function App() {
   const [resources, setResources] = useState<Resource[]>([]);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [logText, setLogText] = useState("");
-  const [logName, setLogName] = useState("bot.log");
+  const [logName, setLogName] = useState("Recent runtime events");
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
   const [commandState, setCommandState] = useState("All");
