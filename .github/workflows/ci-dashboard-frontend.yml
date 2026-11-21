@@ -41,4 +41,10 @@ jobs:
           test -s web/frontend/out/index.html
           test -s web/frontend/out/login/index.html
           find web/frontend/out/_next/static -type f -name '*.js' -print -quit | grep -q .
-          find web/frontend/out/_next/static -type f -name '*.css' -print -quit | grep -q .
+          if find web/frontend/out/_next/static -type f -name '*.css' -print -quit | grep -q .; then
+            echo "Standalone build CSS detected."
+          else
+            grep -q '<style' web/frontend/out/index.html
+            grep -q '<style' web/frontend/out/custom-roles/index.html
+            echo "TSX-owned global and picker styles are present in the static routes."
+          fi
