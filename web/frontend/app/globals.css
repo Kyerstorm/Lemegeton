@@ -417,3 +417,42 @@ body{background:radial-gradient(ellipse at 72% -18%,#171717 0%,transparent 45%),
 
 .atlas-path-tools .filter-control,.atlas-tools .filter-control{min-width:170px}
 .atlas-provider-id-filter input{max-width:190px}
+
+.command-savebar{position:sticky;bottom:12px;z-index:45;display:flex;align-items:center;justify-content:space-between;gap:18px;margin:18px 0 0;padding:12px 14px;border:1px solid #343434;border-radius:12px;background:rgba(17,17,17,.96);box-shadow:0 14px 38px #0009;backdrop-filter:blur(16px)}
+.command-savebar>span{display:grid;gap:3px;min-width:0}
+.command-savebar strong{font-size:11px;font-weight:650;color:#f1f1f1}
+.command-savebar small{font-size:10px;color:#929292}
+.command-savebar>div,.access-footer>div{display:flex;align-items:center;gap:8px}
+.command-reset,.command-save{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;padding:0 13px;border:1px solid transparent;border-radius:8px;font-size:11px;font-weight:650;cursor:pointer;transition:background .16s,border-color .16s,transform .16s}
+.command-reset{background:#4e5054;border-color:#5e6065;color:#f0f0f0}
+.command-reset:hover:not(:disabled){background:#61646a;border-color:#777a80}
+.command-save{background:#248046;border-color:#2b9653;color:#fff}
+.command-save:hover:not(:disabled){background:#2b9653;border-color:#35a962}
+.command-reset:disabled,.command-save:disabled{opacity:.45;cursor:not-allowed}
+.command-access-open{display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border:1px solid #333;border-radius:7px;background:#111;color:#aaa;font-size:10px;cursor:pointer}
+.command-access-open:hover:not(:disabled){border-color:#5d5d5d;color:#f3f3f3;background:#1b1b1b}
+.access-overlay{position:fixed;inset:0;z-index:95;display:grid;place-items:center;padding:20px;background:#000c;backdrop-filter:blur(9px)}
+.access-dialog{width:min(760px,100%);max-height:min(760px,calc(100vh - 40px));overflow:auto;padding:23px;border:1px solid #393939;border-radius:15px;background:#101010;box-shadow:0 24px 90px #000d}
+.access-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:22px}
+.access-heading .eyebrow{margin-bottom:7px}
+.access-heading h2{margin:0;font-size:21px;letter-spacing:-.04em}
+.access-heading h2 span{color:#aaa;font-weight:450}
+.access-heading p:not(.eyebrow){margin:8px 0 0;color:#919191;font-size:11px;line-height:1.7}
+.access-close{display:grid;place-items:center;width:34px;height:34px;flex:none;border:1px solid #333;border-radius:8px;background:#181818;color:#aaa;cursor:pointer}
+.access-close:hover{color:#fff;border-color:#555}
+.access-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}
+.access-field{display:flex;flex-direction:column;gap:9px;min-width:0}
+.access-field>label{color:#999;font:9px var(--mono);letter-spacing:.1em}
+.access-field>select{width:100%;max-width:none;min-height:38px;padding:7px 9px;border:1px solid #333;border-radius:8px;background:#141414;color:#eee;font-size:11px}
+.access-field>select[multiple]{height:176px;overflow:auto;padding:5px}
+.access-field>select[multiple] option{padding:6px;border-radius:4px}
+.access-field>select[multiple] option:checked{background:#393939 linear-gradient(0deg,#393939,#393939);color:#fff}
+.access-field>small{color:#777;font-size:10px;line-height:1.6}
+.access-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:22px;padding-top:15px;border-top:1px solid #292929}
+.access-footer>span{color:#929292;font-size:10px}
+.access-load-error{padding:15px;border:1px solid #392b2b;border-radius:9px;color:#bbb;font-size:12px}
+.access-load-error p{margin:0 0 12px}
+.overview-scene{position:relative;height:0;z-index:0;pointer-events:none}
+.overview-scene>div{position:absolute;right:clamp(12px,9vw,130px);top:-118px;width:136px;height:132px;opacity:.58}
+@media(max-width:800px){.overview-scene{display:none}.access-dialog{padding:17px}.access-grid{grid-template-columns:1fr}}
+@media(max-width:480px){.command-savebar{align-items:flex-start;flex-direction:column}.command-savebar>div{width:100%}.command-savebar button{flex:1}.access-footer{align-items:flex-start;flex-direction:column}.access-footer>div{width:100%}.access-footer button{flex:1}}
