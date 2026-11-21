@@ -383,7 +383,7 @@ export function buildUserFavoritesEmbed(userValue: unknown): EmbedBuilder {
 }
 
 function statusEmbed(title: string, description: string, color: number, prefix: string): EmbedBuilder {
-  return new EmbedBuilder().setColor(color).setTitle((prefix + " " + title).slice(0,256)).setDescription(description.slice(0,4_000));
+  return new EmbedBuilder().setColor(color).setTitle(((prefix ? prefix + " " : "") + title).slice(0,256)).setDescription(description.slice(0,4_000));
 }
 export function buildErrorEmbed(title: string, description: string): EmbedBuilder {
   return statusEmbed(title, description, EMBED_COLOURS.danger, emoji.cross);

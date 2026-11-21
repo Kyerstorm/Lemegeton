@@ -216,9 +216,9 @@ test("AniList detail parser rejects adult media and invalid IDs", async () => {
 });
 
 test("shared embed builders produce consistent titled status and profile embeds", () => {
-  assert.ok(buildErrorEmbed("Failure", "Try again").data.title?.startsWith("❌"));
-  assert.ok(buildSuccessEmbed("Saved", "Done").data.title?.startsWith("✅"));
-  assert.ok(buildInfoEmbed("Details", "Info").data.title?.startsWith("ℹ️"));
+  assert.equal(buildErrorEmbed("Failure", "Try again").data.title, "Failure");
+  assert.equal(buildSuccessEmbed("Saved", "Done").data.title, "Saved");
+  assert.equal(buildInfoEmbed("Details", "Info").data.title, "Details");
   const user = {
     id: 7,
     name: "ExampleUser",
