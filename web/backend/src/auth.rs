@@ -102,7 +102,7 @@ pub async fn oauth_callback(State(state): State<AppState>, headers: HeaderMap, Q
         Ok(guilds) if !guilds.is_empty() || is_owner(&state, &session.user.id) => {}
         Ok(_) => {
             let _ = state.store.remove_session(&session_id).await;
-            return ApiError::new(StatusCode::FORBIDDEN, "No manageable servers found. The bot must be present in a server where your account has Manage Server or Administrator permission.").into_response();
+            return ApiError::new(StatusCode::FORBIDDEN, "No Discord servers were found where your account has Manage Server or Administrator permission.").into_response();
         }
         Err(error) => { let _ = state.store.remove_session(&session_id).await; return error.into_response(); }
     }
@@ -120,7 +120,7 @@ pub async fn bootstrap(State(state): State<AppState>, headers: HeaderMap) -> Api
     let (session_id, session) = session_from_headers(&state, &headers).await?;
     access_token(&state, &session_id).await?;
     let guilds = manageable_guilds(&state, &session_id, &session).await?;
-    let selected = guilds.first().map(|guild| guild.id.clone());
+    let selected = guilds.iter().find(|guild| guild.bot_installed).map(|guild| guild.id.clone());
     Ok(Json(json!({"user":session.user,"guilds":guilds,"selected_guild_id":selected,"csrf_token":session.csrf})))
 }
 pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Response> {
@@ -195,11 +195,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn oauth_callback_intersects_manageable_discord_guilds_with_bot_membership() {
+    async fn oauth_callback_lists_manageable_servers_and_marks_bot_membership() {
         use axum::http::header;
         let (mock_url, server) = mock_discord_server().await;
         let config = crate::state::AppConfig {
-            client_id: "acceptance-client".to_string(),
+            client_id: "555555555555555555".to_string(),
             client_secret: "acceptance-secret".to_string(),
             redirect_uri: "http://localhost:8080/oauth/callback".to_string(),
             public_origin: "http://localhost:8080".to_string(),
@@ -224,7 +224,7 @@ mod tests {
         assert_eq!(authorize_url.scheme(), "https");
         assert_eq!(authorize_url.host_str(), Some("discord.com"));
         assert_eq!(authorize_url.path(), "/oauth2/authorize");
-        assert_eq!(authorize_url.query_pairs().find(|(key, _)| key == "client_id").unwrap().1, "acceptance-client");
+        assert_eq!(authorize_url.query_pairs().find(|(key, _)| key == "client_id").unwrap().1, "555555555555555555");
         assert_eq!(authorize_url.query_pairs().find(|(key, _)| key == "redirect_uri").unwrap().1, "http://localhost:8080/oauth/callback");
         assert_eq!(authorize_url.query_pairs().find(|(key, _)| key == "response_type").unwrap().1, "code");
         assert_eq!(authorize_url.query_pairs().find(|(key, _)| key == "scope").unwrap().1, "identify guilds");
@@ -257,16 +257,22 @@ mod tests {
         assert_eq!(session.user.id, "555555555555555555");
 
         let guilds = manageable_guilds(&state, session_id, &session).await.unwrap();
-        assert_eq!(guilds.len(), 2);
-        assert!(guilds.iter().any(|guild| guild.id == "111111111111111111" && !guild.administrator));
-        assert!(guilds.iter().any(|guild| guild.id == "222222222222222222" && guild.administrator));
+        assert_eq!(guilds.len(), 3);
+        assert!(guilds.iter().any(|guild| guild.id == "111111111111111111" && !guild.administrator && guild.bot_installed));
+        assert!(guilds.iter().any(|guild| guild.id == "222222222222222222" && guild.administrator && guild.bot_installed));
         assert!(!guilds.iter().any(|guild| guild.id == "333333333333333333"));
-        assert!(!guilds.iter().any(|guild| guild.id == "444444444444444444"));
+        let uninstalled = guilds.iter().find(|guild| guild.id == "444444444444444444").unwrap();
+        assert!(!uninstalled.bot_installed);
+        assert!(uninstalled.invite_url.as_deref().is_some_and(|url| url.contains("guild_id=444444444444444444")));
 
         assert!(crate::state::authorized_guild(&state, &session_headers, "111111111111111111").await.is_ok());
         assert!(matches!(
             crate::state::authorized_guild(&state, &session_headers, "333333333333333333").await,
             Err(error) if error.status == StatusCode::FORBIDDEN
+        ));
+        assert!(matches!(
+            crate::state::authorized_guild(&state, &session_headers, "444444444444444444").await,
+            Err(error) if error.status == StatusCode::FORBIDDEN && error.message.contains("not installed")
         ));
 
         let replay = oauth_callback(State(state.clone()), callback_headers, Query(OAuthCallback {

@@ -1,7 +1,7 @@
 use axum::http::{header, HeaderMap, Method, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::HashMap, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
 #[cfg(test)]
 use std::collections::HashSet;
 #[cfg(test)]
@@ -10,6 +10,7 @@ use axum::{response::IntoResponse, Json};
 use serde_json::json;
 pub use crate::config::AppConfig;
 pub use crate::errors::{ApiError, ApiResult};
+pub use crate::guilds::{authorized_guild, manageable_guilds};
 use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
 use crate::store::DashboardStore;
@@ -27,7 +28,15 @@ pub struct Session {
     pub access_expires_at: u64, pub expires_at: u64, pub csrf: String,
 }
 #[derive(Clone, Serialize)]
-pub struct DashboardGuild { pub id: String, pub name: String, pub icon: Option<String>, pub administrator: bool, pub member_count: Option<u64> }
+pub struct DashboardGuild {
+    pub id: String,
+    pub name: String,
+    pub icon: Option<String>,
+    pub administrator: bool,
+    pub member_count: Option<u64>,
+    pub bot_installed: bool,
+    pub invite_url: Option<String>,
+}
 #[derive(Clone)]
 pub struct OAuthState { pub expires_at: u64, pub browser_nonce: String }
 #[derive(Clone)]
@@ -186,36 +195,6 @@ async fn bridge_json_at(
         return Err(ApiError::new(safe_status, message));
     }
     Ok(data)
-}
-pub async fn manageable_guilds(state: &AppState, session_id: &str, _session: &Session) -> ApiResult<Vec<DashboardGuild>> {
-    let token = access_token(state, session_id).await?;
-    let user_guilds = discord_json(state, "/users/@me/guilds", &token).await?;
-    let bot_guilds = bridge_json(state, Method::GET, "/guilds", None).await?;
-    let bot_map: HashMap<String, Value> = bot_guilds.as_array().into_iter().flatten()
-        .filter_map(|g| g.get("id").and_then(Value::as_str).map(|id| (id.to_string(), g.clone()))).collect();
-    let mut result = Vec::new();
-    for guild in user_guilds.as_array().into_iter().flatten() {
-        let id = match guild.get("id").and_then(Value::as_str) { Some(id) => id, None => continue };
-        let bot_guild = match bot_map.get(id) { Some(guild) => guild, None => continue };
-        let permissions = guild.get("permissions").and_then(Value::as_str).and_then(|v| v.parse::<u64>().ok())
-            .or_else(|| guild.get("permissions").and_then(Value::as_u64)).unwrap_or(0);
-        let administrator = permissions & ADMINISTRATOR != 0;
-        if !can_manage_guild(permissions) { continue; }
-        result.push(DashboardGuild { id: id.to_string(),
-            name: bot_guild.get("name").and_then(Value::as_str).unwrap_or("Discord server").to_string(),
-            icon: bot_guild.get("icon").and_then(Value::as_str).map(ToOwned::to_owned),
-            member_count: bot_guild.get("member_count").and_then(Value::as_u64), administrator });
-    }
-    result.sort_by_key(|a| a.name.to_lowercase());
-    Ok(result)
-}
-pub async fn authorized_guild(state: &AppState, headers: &HeaderMap, guild_id: &str) -> ApiResult<(String, Session, DashboardGuild)> {
-    if guild_id.is_empty() || !guild_id.bytes().all(|c| c.is_ascii_digit()) { return Err(ApiError::bad_request("Invalid guild identifier.")); }
-    let (id, session) = session_from_headers(state, headers).await?;
-    let guilds = manageable_guilds(state, &id, &session).await?;
-    let guild = guilds.into_iter().find(|g| g.id == guild_id)
-        .ok_or_else(|| ApiError::forbidden("You no longer have permission to manage this server, or the bot is no longer a member."))?;
-    Ok((id, session, guild))
 }
 #[derive(Deserialize)]
 pub struct DiscordTokenResponse { pub access_token: Option<String>, pub refresh_token: Option<String>, pub expires_in: Option<u64> }

@@ -2,6 +2,7 @@ mod api;
 mod auth;
 mod config;
 mod errors;
+mod guilds;
 mod rate_limit;
 mod routes;
 mod security;

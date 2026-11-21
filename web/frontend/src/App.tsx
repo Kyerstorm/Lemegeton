@@ -8,7 +8,7 @@ import { SceneLoader } from "./Components/Three/SceneLoader";
 
 type Page = "overview" | "commands" | "atlas" | "extensions" | "audit" | "diagnostics" | "logs" | "integrations" | "database";
 type User = { id: string; username: string; global_name?: string | null; avatar?: string | null };
-type Guild = { id: string; name: string; icon?: string | null; administrator?: boolean; member_count?: number | null };
+type Guild = { id: string; name: string; icon?: string | null; administrator?: boolean; member_count?: number | null; bot_installed: boolean; invite_url?: string | null };
 type Command = { fullname: string; name?: string; description?: string; section?: string; type?: string; scope?: string; enabled: boolean; configurable?: boolean; protected?: boolean; required_permissions?: string | boolean | null };
 type AuditEntry = { action?: string; details?: string; actor_name?: string; actor_id?: string; ts?: string };
 type Overview = { bot?: { ready?: boolean; status?: string; latency_ms?: number | null; member_count?: number | null; guild_count?: number | null; extension_count?: number | null } };
@@ -224,6 +224,7 @@ export default function App() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
+  const [serverPickerOpen, setServerPickerOpen] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
@@ -269,7 +270,7 @@ export default function App() {
       || accessDraft.channel_ids.join(",") !== accessOriginal.channel_ids.join(",");
   }, [accessDraft, accessOriginal]);
   const selectGuild = useCallback((nextId: string) => {
-    if (!guilds.some((guild) => String(guild.id) === String(nextId))) return;
+    if (!guilds.some((guild) => String(guild.id) === String(nextId) && guild.bot_installed)) return;
     if (commandDraftDirtyRef.current && !window.confirm("Discard unsaved command changes before switching servers?")) return;
     activeGuildIdRef.current = String(nextId);
     refreshGeneration.current += 1;
@@ -398,11 +399,13 @@ export default function App() {
       setCsrf(data.csrf_token || "");
       let rememberedGuild = "";
       try { rememberedGuild = window.localStorage.getItem("lemegeton:selected-guild") || ""; } catch { /* storage may be disabled */ }
-      const canSelect = (candidate: unknown) => candidate != null && availableGuilds.some((guild) => String(guild.id) === String(candidate));
-      const selected = String([rememberedGuild, data.selected_guild_id, availableGuilds[0]?.id].find(canSelect) || "");
+      const canSelect = (candidate: unknown) => candidate != null && availableGuilds.some((guild) => String(guild.id) === String(candidate) && guild.bot_installed);
+      const selected = String([rememberedGuild, data.selected_guild_id, availableGuilds.find(guild => guild.bot_installed)?.id].find(canSelect) || "");
+      if (availableGuilds.length && !availableGuilds.some(guild => guild.bot_installed)) setServerPickerOpen(true);
       activeGuildIdRef.current = selected;
       setGuildId(selected);
-      if (!selected) pushToast("No server is available where the bot is present and you have Manage Server or Administrator permission.", true);
+      if (!selected && availableGuilds.length) pushToast("Lemegeton is not installed in any server you can manage yet. Choose a server to invite it.");
+      else if (!selected) pushToast("No server is available where you have Manage Server or Administrator permission.", true);
     }).catch((error) => {
       if (active) pushToast(errorMessage(error), true);
     }).finally(() => { if (active) setInitialLoading(false); });
@@ -846,9 +849,7 @@ export default function App() {
         <button className="icon-button mobile-menu" type="button" aria-label="Open navigation" aria-expanded={mobileNav} onClick={() => setMobileNav((value) => !value)}><Icon name="menu" size={17} /></button>
         <div className="breadcrumb"><span>CONTROL</span><span className="breadcrumb-divider">/</span><strong>{selectedPage.label}</strong></div>
         <div className="topbar-right">
-          <label className="guild-control"><span>SERVER</span><select value={guildId} onChange={(event) => selectGuild(event.target.value)} aria-label="Select Discord server" disabled={!guilds.length}>
-            {!guilds.length ? <option value="">No manageable servers</option> : guilds.map((guild) => <option key={guild.id} value={guild.id}>{guild.name}</option>)}
-          </select></label>
+          <div className="guild-control"><span>SERVER</span><button className="server-picker-trigger" type="button" onClick={() => setServerPickerOpen(true)} aria-haspopup="dialog" aria-expanded={serverPickerOpen}><Icon name="server" size={15} /><strong>{currentGuild?.name || "Choose a server"}</strong>{currentGuild?.bot_installed ? <i className="server-state-mark" aria-label="Lemegeton connected" /> : null}<span className="server-picker-caret">⌄</span></button></div>
           <button className={"icon-button" + (refreshing ? " spinning" : "")} type="button" onClick={() => void refreshData(guildId)} aria-label="Refresh dashboard" title="Refresh dashboard" disabled={!guildId || refreshing}><Icon name="refresh" size={17} /></button>
           <div className="account" aria-label="Signed-in Discord account"><span className="avatar">{(user?.global_name || user?.username || "?").slice(0, 1).toUpperCase()}</span><span className="account-copy"><strong>{user?.global_name || user?.username || "Discord account"}</strong><small>DISCORD / VERIFIED</small></span></div>
         </div>
@@ -859,6 +860,7 @@ export default function App() {
         <span className="braille-track braille-track-b">⠿⠿⠷⠿⠿⠿⠿⠗⠿⠿⠶⠿⠿⠿⠾⠿⠿</span>
       </div>
 
+      {guildId ? <>
       {page === "overview" ? <section className="page">
         <SectionHeading eyebrow={selectedPage.eyebrow} title={<>Bot <span>overview.</span></>} subtitle={selectedPage.subtitle} actions={<><Button onClick={() => navigate("audit")}>View activity <span aria-hidden="true">↗</span></Button><Button tone="primary" onClick={() => void synchronizeCommands()} disabled={operationBusy || !guildId}>Publish commands <span aria-hidden="true">↗</span></Button></>} />
         <div className="overview-scene" aria-hidden="true"><SceneLoader /></div>
@@ -1081,9 +1083,30 @@ export default function App() {
         <Panel eyebrow="PERSISTED RESOURCES" title="Storage overview"><div className="table-scroll"><table><thead><tr><th>RESOURCE</th><th>PURPOSE / DETAILS</th><th>STATE</th></tr></thead><tbody>{resources.length ? resources.map((row, index) => <tr key={(row.name || "resource") + index}><td>{row.name || "—"}</td><td>{row.purpose || "—"}<small>{row.detail || ""}</small></td><td><StatusPill ok={String(row.state || "").toLowerCase() === "available"}>{row.state || "Unknown"}</StatusPill></td></tr>) : <tr><td colSpan={3}><Empty>Persistence resources are unavailable or none were reported.</Empty></td></tr>}</tbody></table></div></Panel>
       </section> : null}
 
+      </> : <section className="page server-empty-state">
+        <div className="server-empty-mark"><Icon name="server" size={24} /></div>
+        <p className="eyebrow">SERVER CONNECTION / READY</p>
+        <h1>Choose a server<br /><span>to get started.</span></h1>
+        <p>Your Discord servers are listed with their current Lemegeton connection status. Servers without the bot are dimmed and can be invited directly.</p>
+        <button className="command-save" type="button" onClick={() => setServerPickerOpen(true)}><Icon name="server" size={15} />View your servers</button>
+      </section>}
       <footer className="page-footer"><span>LEMEGETON / CONTROL PLANE</span><span>{system.status === "unknown" ? "LIVE BOT DATA UNAVAILABLE" : "PRIVATE SESSION · DATA REFRESHED"}</span></footer>
     </main>
     <div className="toast-stack" role="status" aria-live="polite" aria-atomic="false">{toasts.map((toast) => <div key={toast.id} className={"toast" + (toast.error ? " error" : "")}><span>{toast.error ? "!" : "✓"}</span>{toast.message}<button type="button" aria-label="Dismiss notification" onClick={() => setToasts((items) => items.filter((item) => item.id !== toast.id))}>×</button></div>)}</div>
+    {serverPickerOpen ? <div className="access-overlay" onClick={(event) => { if (event.target === event.currentTarget) setServerPickerOpen(false); }}>
+      <section className="access-dialog server-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="server-picker-title">
+        <div className="access-heading"><div><p className="eyebrow">DISCORD / YOUR SERVERS</p><h2 id="server-picker-title">Choose a <span>server.</span></h2><p>Connected servers are ready to configure. Dimmed servers can be invited to.</p></div><button type="button" className="access-close" onClick={() => setServerPickerOpen(false)} aria-label="Close server picker"><Icon name="close" size={16} /></button></div>
+        <div className="server-picker-list">
+          {guilds.length ? guilds.map(guild => guild.bot_installed ? <button className="server-picker-option" type="button" key={guild.id} onClick={() => { selectGuild(guild.id); setServerPickerOpen(false); }}>
+            <span className="server-picker-icon"><Icon name="server" size={17} /></span><span className="server-picker-name"><strong>{guild.name}</strong><small>{guild.administrator ? "Administrator" : "Manage Server"} · {guild.id}</small></span><span className="server-picker-connected"><i className="server-state-mark" />Connected</span>
+          </button> : <div className="server-picker-option is-uninstalled" key={guild.id}>
+            <span className="server-picker-icon"><Icon name="server" size={17} /></span><span className="server-picker-name"><strong>{guild.name}</strong><small>{guild.administrator ? "Administrator" : "Manage Server"} · {guild.id}</small></span>
+            {guild.invite_url ? <a className="server-invite-link" href={guild.invite_url} target="_blank" rel="noopener noreferrer">Invite bot <span aria-hidden="true">↗</span></a> : <span className="server-picker-missing">Not installed</span>}
+          </div>) : <Empty>No Discord servers were returned where your account has Manage Server or Administrator permission.</Empty>}
+        </div>
+        <div className="access-footer"><span>{guilds.filter(guild => guild.bot_installed).length} connected / {guilds.length} manageable servers</span><button type="button" className="command-reset" onClick={() => setServerPickerOpen(false)}>Close</button></div>
+      </section>
+    </div> : null}
     {confirmation ? <div className="modal-scrim" role="presentation"><section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><p className="eyebrow">CONFIRM ACTION</p><h2 id="confirm-title">{confirmation.title}</h2><p>{confirmation.message}</p><div className="dialog-actions"><Button onClick={() => settleConfirmation(false)}>Cancel</Button><Button tone="primary" onClick={() => settleConfirmation(true)} disabled={operationBusy}>{confirmation.actionLabel}</Button></div></section></div> : null}
   </div>;
 }
