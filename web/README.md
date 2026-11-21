@@ -142,7 +142,7 @@ web/
     │   ├── login/
     │   │   └── page.tsx                    # Extend: Discord login screen
     │   ├── custom-roles/
-    │   │   └── page.tsx                    # Planned: React/TSX replacement for picker.html
+    │   │   └── page.tsx                    # Planned: React/TSX replacement for the legacy picker
     │   ├── terms/
     │   │   └── page.tsx                    # Planned: existing Terms document viewer
     │   ├── privacy/
