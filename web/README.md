@@ -54,9 +54,19 @@ web/
 ├── backend/
 │   ├── Cargo.toml
 │   └── src/
+│       ├── api/
+│       │   ├── atlas.rs
+│       │   ├── commands.rs
+│       │   └── picker.rs
 │       ├── api.rs
 │       ├── auth.rs
+│       ├── config.rs
+│       ├── errors.rs
+│       ├── guilds.rs
 │       ├── main.rs
+│       ├── rate_limit.rs
+│       ├── routes.rs
+│       ├── security.rs
 │       ├── state.rs
 │       ├── store.rs
 │       └── ui.rs
@@ -109,12 +119,21 @@ web/
 
 | Path | Responsibility |
 |:--|:--|
-| backend/src/main.rs | Axum routes, security headers, trusted-proxy handling and SQLite-backed request limits |
-| backend/src/ui.rs | Generated Next.js page and asset serving, including custom 404 and Custom Roles route |
-| backend/src/api.rs | Dashboard APIs, revision-checked batch writes, command access API and private picker API proxy |
+| backend/src/main.rs | Process startup, config loading, bind safety and graceful shutdown |
+| backend/src/config.rs | Environment parsing, public-origin validation and loopback-only service URL validation |
+| backend/src/errors.rs | Shared API error response types |
+| backend/src/routes.rs | Axum route assembly, readiness endpoint and fallback routing |
+| backend/src/security.rs | Security headers, CSP and request middleware |
+| backend/src/rate_limit.rs | Trusted proxy IP resolution and endpoint/IP/account/guild rate policies |
+| backend/src/guilds.rs | Discord guild discovery, Manage Server/Admin filtering, bot membership and server-specific invite URLs |
+| backend/src/api.rs | Common dashboard endpoints and focused API submodule exports |
+| backend/src/api/commands.rs | Revision-checked command writes and command-access policy endpoints |
+| backend/src/api/atlas.rs | Knowledge Atlas request validation and bridge forwarding |
+| backend/src/api/picker.rs | Custom Roles static route serving and private picker API proxy |
 | backend/src/auth.rs | Discord OAuth start/callback, session creation, bootstrap and logout |
-| backend/src/state.rs | Shared configuration, sessions, guild authorization and bridge helpers |
+| backend/src/state.rs | Session/token refresh, Discord and bot bridge helpers, guild authorization re-export |
 | backend/src/store.rs | SQLite WAL sessions, OAuth state, rate events and refresh coordination |
+| backend/src/ui.rs | Generated Next.js page and asset serving, including custom 404 and Custom Roles route |
 | frontend/src/App.tsx | Dashboard shell, local command drafts and role/channel access editor |
 | frontend/src/Components/Brand/BrandMark.tsx | Shared Lemegeton brand component |
 | frontend/src/Components/Icons/* | Shared animated SVG icon registry and renderer |
@@ -128,6 +147,10 @@ web/
 No authored HTML, JavaScript or CSS files remain in the web frontend source. The old picker and global CSS files were removed after migrating their content into TSX/TypeScript. The picker controller retains a temporary @ts-nocheck while its original imperative behavior receives a full explicit type pass.
 
 ---
+
+### Server selection and installation
+
+After Discord OAuth, the Rust guild discovery module lists all servers where the user has Manage Server or Administrator permission. Each entry includes bot membership state. Connected servers can be opened; missing-bot servers are displayed in a dimmed state with an invite URL constrained to that guild. Rust revalidates bot membership on every guild API request, so a visible invite target cannot be used to bypass configuration authorization.
 
 ## 3. Complete target project structure
 
