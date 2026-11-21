@@ -3,7 +3,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::HashMap, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
 #[cfg(test)]
-use std::collections::HashSet;
+use std::{collections::HashSet, response::IntoResponse};
+#[cfg(test)]
+use axum::Json;
+#[cfg(test)]
+use serde_json::json;
 pub use crate::config::AppConfig;
 pub use crate::errors::{ApiError, ApiResult};
 use subtle::ConstantTimeEq;
@@ -359,7 +363,7 @@ mod tests {
     #[test]
     fn internal_service_targets_cannot_be_repointed_to_public_hosts() {
         let fallback = "http://127.0.0.1:8091";
-        assert_eq!(loopback_url("http://127.0.0.1:8091".to_string(), fallback), fallback);
+        assert_eq!(crate::config::loopback_url("http://127.0.0.1:8091".to_string(), fallback), fallback);
         assert_eq!(loopback_url("http://localhost:8091".to_string(), fallback), "http://localhost:8091");
         assert_eq!(loopback_url("https://attacker.example/steal".to_string(), fallback), fallback);
         assert_eq!(loopback_url("http://127.0.0.1.evil.test:8091".to_string(), fallback), fallback);

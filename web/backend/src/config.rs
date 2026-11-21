@@ -72,7 +72,7 @@ impl AppConfig {
         Ok(())
     }
 }
-fn loopback_url(value: String, fallback: &str) -> String {
+pub(crate) fn loopback_url(value: String, fallback: &str) -> String {
     let allowed = ["http://127.0.0.1:", "http://localhost:", "http://[::1]:"].iter().any(|prefix| {
         value.strip_prefix(*prefix).and_then(|tail| tail.split('/').next())
             .and_then(|port| port.parse::<u16>().ok()).is_some_and(|port| port > 0)

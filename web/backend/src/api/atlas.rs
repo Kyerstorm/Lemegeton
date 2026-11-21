@@ -1,4 +1,4 @@
-use axum::{extract::{Path, Query, State}, Json};
+use axum::{extract::{Path, Query, State}, http::HeaderMap, Json};
 use serde::Deserialize;
 use serde_json::Value;
 use crate::state::{authorized_guild, atlas_bridge_json, ApiError, ApiResult, AppState};
@@ -168,8 +168,6 @@ pub async fn atlas(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::*;
-        use axum::http::header;
         #[test]
         fn atlas_query_accepts_supported_categories_and_public_https_urls() {
             let valid = AtlasQuery {
