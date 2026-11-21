@@ -92,6 +92,8 @@ web/
     ├── src/
     │   ├── App.tsx
     │   ├── Components/
+    │   │   ├── Legal/
+    │   │   │   └── PolicyConsentGate.tsx
     │   │   ├── Brand/
     │   │   │   └── BrandMark.tsx
     │   │   ├── CustomRoles/
