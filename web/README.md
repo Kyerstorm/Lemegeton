@@ -110,6 +110,7 @@ web/
     │   │   │   ├── CustomRolesClient.tsx
     │   │   │   ├── PickerMarkup.tsx
     │   │   │   ├── PickerStyles.tsx
+    │   │   │   ├── picker-utils.ts
     │   │   │   └── picker.tsx
     │   │   ├── Feedback/
     │   │   │   ├── ErrorState.tsx
@@ -155,7 +156,11 @@ web/
 | frontend/src/Components/Brand/BrandMark.tsx | Shared Lemegeton brand component |
 | frontend/src/Components/Legal/PolicyConsentGate.tsx | Explicit three-policy gate using the bot's existing versioned consent record |
 | frontend/src/Components/Icons/* | Shared SVG icon registry with hover/focus micro-animations and reduced-motion support |
-| frontend/src/Components/CustomRoles/* | Migrated picker markup, styles, mount and behavior |
+| frontend/src/Components/CustomRoles/PickerMarkup.tsx | React-rendered picker interface; no raw HTML string injection |
+| frontend/src/Components/CustomRoles/PickerStyles.tsx | Picker theme and component styles authored in TypeScript |
+| frontend/src/Components/CustomRoles/picker-utils.ts | Strictly typed color conversion, contrast and display helpers |
+| frontend/src/Components/CustomRoles/picker.tsx | Existing picker interaction controller, scoped to its React root; strict typing remains in progress |
+| frontend/src/Components/CustomRoles/CustomRolesClient.tsx | React mount point and picker lifecycle cleanup |
 | frontend/src/DesignSystem/GlobalStyles.tsx | Global dashboard styles embedded in TypeScript |
 | frontend/src/Components/Three/* | Lazy monochrome React Three Fiber scene and fallback |
 | frontend/app/custom-roles/page.tsx | Static Next route served by Rust at /custom-roles/ |
