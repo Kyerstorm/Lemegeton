@@ -8,6 +8,7 @@ export function PickerMarkup(): JSX.Element {
           <span className="brand-mark" aria-hidden="true">
             {"L."}
           </span>
+          {" "}
           <span className="brand-copy">
             <strong>
               {"LEMEGETON"}
@@ -20,6 +21,7 @@ export function PickerMarkup(): JSX.Element {
         <div className="topbar-status" aria-label="Private role editing link">
           <span className="status-led" aria-hidden="true">
           </span>
+          {" "}
           <span>
             <strong>
               {"PRIVATE SESSION"}
@@ -43,7 +45,7 @@ export function PickerMarkup(): JSX.Element {
           </span>
         </p>
         <h1 id="picker-title">
-          {"Make it"}
+          {"Make it "}
           <span>
             {"yours."}
           </span>
@@ -95,9 +97,11 @@ export function PickerMarkup(): JSX.Element {
                 <div className="name-line">
                   <span className="name" data-name="">
                   </span>
+                  {" "}
                   <img className="role-icon hidden" data-icon-img="" alt="Role icon" referrerPolicy="no-referrer" />
                   <span className="role-icon-emoji hidden" data-icon-emoji="">
                   </span>
+                  {" "}
                   <span className="time" data-time="">
                   </span>
                 </div>
@@ -112,9 +116,11 @@ export function PickerMarkup(): JSX.Element {
                 <div className="name-line">
                   <span className="name" data-name="">
                   </span>
+                  {" "}
                   <img className="role-icon hidden" data-icon-img="" alt="Role icon" referrerPolicy="no-referrer" />
                   <span className="role-icon-emoji hidden" data-icon-emoji="">
                   </span>
+                  {" "}
                   <span className="time" data-time="">
                   </span>
                 </div>
@@ -128,6 +134,7 @@ export function PickerMarkup(): JSX.Element {
             <span className="muted">
               {"Role"}
             </span>
+            {" "}
             <span className="chip">
               <span className="dot" id="chip-dot">
               </span>
@@ -141,18 +148,19 @@ export function PickerMarkup(): JSX.Element {
             <button id="reset" className="btn btn-secondary" type="button" disabled={true}>
               {"Reset to saved"}
             </button>
+            {" "}
             <span id="dirty-note" className="hint">
               {"No unsaved changes."}
             </span>
           </div>
           <p className="hint">
-            {"This link closes"}
+            {"This link closes "}
             <span id="expires">
             </span>
-            {"without use (saving or reloading counts as use), and"}
+            {" without use (saving or reloading counts as use), and "}
             <span id="expires-max">
             </span>
-            {"at the latest. Don't share it: anyone with it can change your role."}
+            {" at the latest. Don't share it: anyone with it can change your role."}
           </p>
           <p id="cooldown-note" className="hint hidden">
           </p>
@@ -162,9 +170,11 @@ export function PickerMarkup(): JSX.Element {
             <button className="tab" type="button" role="tab" id="tab-color" aria-controls="panel-color" aria-selected="true">
               {"Color"}
             </button>
+            {" "}
             <button className="tab" type="button" role="tab" id="tab-icon" aria-controls="panel-icon" aria-selected="false" tabIndex="-1">
               {"Role Icon"}
             </button>
+            {" "}
             <button className="tab" type="button" role="tab" id="tab-name" aria-controls="panel-name" aria-selected="false" tabIndex="-1">
               {"Name"}
             </button>
@@ -251,7 +261,7 @@ export function PickerMarkup(): JSX.Element {
           </div>
           <div id="panel-icon" role="tabpanel" aria-labelledby="tab-icon" tabIndex="0" className="hidden">
             <p>
-              {"Current icon:"}
+              {"Current icon: "}
               <span id="icon-current">
               </span>
             </p>
@@ -284,8 +294,9 @@ export function PickerMarkup(): JSX.Element {
                   <span>
                     {"Drop an image here, or click to browse"}
                   </span>
+                  {" "}
                   <span id="dropzone-hint" className="hint">
-                    {"PNG or JPEG · up to"}
+                    {"PNG or JPEG · up to "}
                     <span data-source-max="">
                     </span>
                   </span>
@@ -303,7 +314,7 @@ export function PickerMarkup(): JSX.Element {
                     </button>
                   </div>
                   <p id="icon-url-help" className="hint">
-                    {"A direct link to a PNG or JPEG, up to"}
+                    {"A direct link to a PNG or JPEG, up to "}
                     <span data-source-max="">
                     </span>
                     {". Links that redirect won't work, so paste the image's own address."}
@@ -353,9 +364,11 @@ export function PickerMarkup(): JSX.Element {
               <button id="set-icon" className="btn btn-primary" type="button" data-icon-action="">
                 {"Set icon"}
               </button>
+              {" "}
               <button id="edit-crop" className="btn btn-secondary" type="button" data-icon-action="">
                 {"Edit current crop"}
               </button>
+              {" "}
               <button id="remove-icon" className="btn btn-secondary" type="button" data-icon-action="">
                 {"Remove current icon"}
               </button>
