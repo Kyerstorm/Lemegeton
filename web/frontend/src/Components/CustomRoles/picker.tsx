@@ -9,7 +9,6 @@
 // - The server re-checks everything; this page only previews and sends.
 // Preserves the original picker interactions while mounting inside the static Next route.
 // The token remains in the URL fragment/session storage and is sent only in Authorization.
-// @ts-nocheck
 export function mountCustomRolePicker() {
 
   const STORAGE_KEY = "customRolePickerToken";
