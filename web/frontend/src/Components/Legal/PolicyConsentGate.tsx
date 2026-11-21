@@ -48,7 +48,7 @@ export function PolicyConsentGate({
           <div className="policy-links">
             {consent.policies.map(policy => (
               <a key={policy.label} href={policy.url} target="_blank" rel="noopener noreferrer">
-                <span>{policy.label}</span><Icon name="home" size={14} />
+                <span>{policy.label}</span><Icon name="external-link" size={14} />
               </a>
             ))}
           </div>

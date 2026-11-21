@@ -123,7 +123,7 @@ web/
 | backend/src/config.rs | Environment parsing, public-origin validation and loopback-only service URL validation |
 | backend/src/errors.rs | Shared API error response types |
 | backend/src/routes.rs | Axum route assembly, readiness endpoint and fallback routing |
-| backend/src/security.rs | Security headers, CSP and request middleware |
+| backend/src/security.rs | Security headers, CSP, rate-limit and consent middleware |
 | backend/src/rate_limit.rs | Trusted proxy IP resolution and endpoint/IP/account/guild rate policies |
 | backend/src/guilds.rs | Discord guild discovery, Manage Server/Admin filtering, bot membership and server-specific invite URLs |
 | backend/src/api.rs | Common dashboard endpoints and focused API submodule exports |
@@ -136,6 +136,7 @@ web/
 | backend/src/ui.rs | Generated Next.js page and asset serving, including custom 404 and Custom Roles route |
 | frontend/src/App.tsx | Dashboard shell, local command drafts and role/channel access editor |
 | frontend/src/Components/Brand/BrandMark.tsx | Shared Lemegeton brand component |
+| frontend/src/Components/Legal/PolicyConsentGate.tsx | Explicit three-policy gate using the bot's existing versioned consent record |
 | frontend/src/Components/Icons/* | Shared animated SVG icon registry and renderer |
 | frontend/src/Components/CustomRoles/* | Migrated picker markup, styles, mount and behavior |
 | frontend/src/DesignSystem/GlobalStyles.tsx | Global dashboard styles embedded in TypeScript |
@@ -170,13 +171,22 @@ web/
 ├── backend/
 │   ├── Cargo.toml
 │   └── src/
-│       ├── main.rs                         # Existing: Axum startup and route registration
-│       ├── api.rs                          # Existing: API handlers and bot bridge proxy
-│       ├── auth.rs                         # Existing: Discord OAuth and sessions
-│       ├── state.rs                        # Existing: app state and authorization helpers
-│       ├── store.rs                        # Existing: SQLite persistence and coordination
-│       ├── ui.rs                           # Existing: static assets and UI route responses
-│       └── rate_limit.rs                   # Planned: shared endpoint policies and middleware
+│       ├── api/
+│       │   ├── atlas.rs                    # Knowledge Atlas validation and bridge forwarding
+│       │   ├── commands.rs                 # Command settings and access policy endpoints
+│       │   └── picker.rs                   # Private Custom Roles API proxy
+│       ├── api.rs                          # Common endpoints and API module exports
+│       ├── auth.rs                         # Discord OAuth, sessions and authenticated slug routes
+│       ├── config.rs                       # Environment parsing and deployment validation
+│       ├── errors.rs                       # Shared API errors
+│       ├── guilds.rs                       # Manageable guild discovery and bot invite URLs
+│       ├── main.rs                         # Startup, bind safety and shutdown
+│       ├── rate_limit.rs                   # SQLite request limits and trusted proxy IP resolution
+│       ├── routes.rs                       # Axum router composition
+│       ├── security.rs                     # Security headers and consent enforcement middleware
+│       ├── state.rs                        # Shared session and bridge state
+│       ├── store.rs                        # SQLite persistence and coordination
+│       └── ui.rs                           # Static assets and UI route responses
 │
 └── frontend/
     ├── app/
@@ -201,6 +211,8 @@ web/
     │   ├── App.tsx                         # Existing: progressively split into feature views
     │   │
     │   ├── Components/
+    │   │   ├── Legal/
+    │   │   │   └── PolicyConsentGate.tsx  # Existing: explicit versioned policy agreement
     │   │   ├── Icons/
     │   │   │   ├── index.ts
     │   │   │   ├── Icon.tsx
@@ -560,9 +572,13 @@ The current login flow is handled by Rust:
 - GET /oauth/start
 - GET /oauth/callback
 - GET /api/bootstrap
+- GET /api/consent
+- POST /api/consent
 - POST /api/logout
 
 The normal login uses only the required Discord scopes. Request command-permission authorization separately when a server manager opens the command access editor and needs native command permission synchronization.
+
+After OAuth, the browser loads the active policy versions through the private bot bridge. Existing acceptance is reused; otherwise the user must separately confirm the Terms of Service, Privacy Policy and Community Guidelines before protected dashboard features are available. Declining signs out.
 
 ### Required policy acceptance
 
@@ -571,7 +587,9 @@ After login, the user must complete the required acceptance flow for the current
 - Privacy Policy
 - Community Guidelines
 
-Use the existing policy documents and versioned consent storage. Do not create a second consent system or treat privacy-policy acknowledgement as the legal basis for every form of personal-data processing.
+Use the existing policy documents and versioned consent storage. The current version tuple is Terms `2026-11-12`, Privacy `2026-11-12`, and Community Guidelines `2026-11-12`. The dashboard reuses the PostgreSQL `bot_user_consents` row queried by the bot's `requireCurrentConsent` gate; it does not create a second acceptance table. A successful explicit acceptance stores all three versions and the timestamp against the authenticated Discord user ID. A policy version change therefore requires acceptance again in both the bot and dashboard.
+
+Rust exempts only `/api/bootstrap`, `/api/consent` and `/api/logout` from the protected API consent check. Other protected API routes require a current consent record before execution and return HTTP 428 when acceptance is missing. A consent-verification bridge failure returns HTTP 503 and fails closed. Do not create a second consent system or treat policy acceptance as the legal basis for every form of personal-data processing.
 
 ### Guild picker
 
@@ -702,7 +720,7 @@ Return HTTP 429 with a meaningful Retry-After value. Do not ban accounts merely 
 
 ### Active implementation
 
-The Rust security_headers middleware applies SQLite-backed rolling-window limits through DashboardStore::allow_rate_event:
+The Rust `security::security_headers` middleware applies SQLite-backed rolling-window limits through DashboardStore::allow_rate_event:
 
 | Scope | Limit |
 |:--|:--:|
