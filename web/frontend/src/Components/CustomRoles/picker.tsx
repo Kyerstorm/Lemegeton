@@ -1,4 +1,5 @@
 // Custom role color picker page.
+import { clamp, contrast, duration, formatSize, hexToRgb, hsvToRgb, normalizeHex, rgbToHex, rgbToHsv } from "./picker-utils";
 //
 // - The link token arrives after '#', so it's never sent to a server in a URL. It's moved
 //   into this tab's sessionStorage, removed from the address bar, and sent only in the
@@ -57,60 +58,8 @@ export function mountCustomRolePicker(root: HTMLElement): () => void {
   let uid = 0;
   const nextId = (prefix) => `${prefix}-${++uid}`;
 
-  const duration = (seconds) => {
-    seconds = Math.max(0, Math.round(seconds));
-    const parts = [];
-    [[86400, "d"], [3600, "h"], [60, "m"], [1, "s"]].forEach(([size, unit]) => {
-      if (seconds >= size) { parts.push(Math.floor(seconds / size) + unit); seconds %= size; }
-    });
-    return parts.join(" ") || "0s";
-  };
-  const formatSize = (bytes) => (bytes >= 1048576
-    ? `${(bytes / 1048576).toFixed(1).replace(/\.0$/, "")} MB`
-    : `${Math.max(1, Math.floor(bytes / 1024))} KB`);
-  const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
+  // Color conversion and contrast helpers live in picker-utils.ts.
 
-  // ------------------------------------------------------------------ color math
-
-  // Same rules as the bot: #RRGGBB, RRGGBB, #RGB, RGB; pure black becomes #010101.
-  const normalizeHex = (text) => {
-    let value = String(text || "").trim().replace(/^#/, "");
-    if (/^[0-9a-f]{3}$/i.test(value)) { value = value.replace(/./g, (c) => c + c); }
-    if (!/^[0-9a-f]{6}$/i.test(value)) { return null; }
-    value = value.toUpperCase();
-    return "#" + (value === "000000" ? "010101" : value);
-  };
-  const hexToRgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
-  const rgbToHex = (rgb) => normalizeHex(rgb.map((c) => Math.round(c).toString(16).padStart(2, "0")).join(""));
-  const rgbToHsv = ([r, g, b]) => {
-    r /= 255; g /= 255; b /= 255;
-    const max = Math.max(r, g, b);
-    const d = max - Math.min(r, g, b);
-    let h = 0;
-    if (d) {
-      if (max === r) { h = ((g - b) / d) % 6; } else if (max === g) { h = (b - r) / d + 2; } else { h = (r - g) / d + 4; }
-      h = (h * 60 + 360) % 360;
-    }
-    return { h, s: max ? d / max : 0, v: max };
-  };
-  const hsvToRgb = ({ h, s, v }) => {
-    const f = (n) => {
-      const k = (n + h / 60) % 6;
-      return (v - v * s * Math.max(0, Math.min(k, 4 - k, 1))) * 255;
-    };
-    return [f(5), f(3), f(1)];
-  };
-  const luminance = (hex) => {
-    const [r, g, b] = hexToRgb(hex).map((c) => {
-      c /= 255;
-      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    });
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  };
-  const contrast = (a, b) => {
-    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
-    return (hi + 0.05) / (lo + 0.05);
-  };
   const themeColor = (name) => normalizeHex(getComputedStyle(document.documentElement).getPropertyValue(name));
 
   // ------------------------------------------------------------------ state
