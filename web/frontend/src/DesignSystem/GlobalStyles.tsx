@@ -3251,6 +3251,13 @@ body {
   transform-box: fill-box;
   transform-origin: center;
 }
+.icon-svg.icon-chevron-down .icon-glyph {
+  transition: transform 220ms cubic-bezier(.2,.8,.2,1);
+}
+button:hover .icon-svg.icon-chevron-down .icon-glyph,
+button[aria-expanded="true"] .icon-svg.icon-chevron-down .icon-glyph {
+  transform: translateY(1.5px);
+}
 button:hover .icon-svg.icon-animated, a:hover .icon-svg.icon-animated, button:focus-visible .icon-svg.icon-animated, a:focus-visible .icon-svg.icon-animated {
   transform: translateY(-1px) scale(1.04);
 }

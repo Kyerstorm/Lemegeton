@@ -168,13 +168,15 @@ web/
 | frontend/src/App.tsx | Dashboard shell, local command drafts and role/channel access editor |
 | frontend/src/Components/Brand/BrandMark.tsx | Shared Lemegeton brand component |
 | frontend/src/Components/Legal/PolicyConsentGate.tsx | Explicit three-policy gate using the bot's existing versioned consent record |
-| frontend/src/Components/Icons/{actions,dashboard,media,navigation,security,status}/* | Individual SVG icon components grouped by interface purpose, each with a category barrel |\n| frontend/src/Components/Icons/IconGlyphs.ts | Exhaustive typed mapping from icon names to grouped components |\n| frontend/src/Components/Icons/Icon.tsx | Shared SVG wrapper preserving the `<Icon name="…"/>` API, sizing and animation classes |
+| frontend/src/Components/Icons/{actions,dashboard,media,navigation,security,status}/* | Individual SVG icon components grouped by interface purpose, each with a category barrel |
+| frontend/src/Components/Icons/IconGlyphs.ts | Exhaustive typed mapping from icon names to grouped components |\n| frontend/src/Components/Icons/Icon.tsx | Shared SVG wrapper preserving the `<Icon name="…"/>` API, sizing and animation classes |
 | frontend/src/Components/CustomRoles/PickerMarkup.tsx | React-rendered picker interface; no raw HTML string injection |
 | frontend/src/Components/CustomRoles/PickerStyles.tsx | Picker theme and component styles authored in TypeScript |
 | frontend/src/Components/CustomRoles/picker-utils.ts | Strictly typed color conversion, contrast and display helpers |
 | frontend/src/Components/CustomRoles/picker.tsx | Strictly typed picker interaction controller, scoped to its React root and cleaned up on unmount |
 | frontend/src/Components/CustomRoles/CustomRolesClient.tsx | React mount point and picker lifecycle cleanup |
-| frontend/src/Components/UI/* | Shared button, empty-state, panel, section-heading and status-pill primitives |\n| frontend/src/DesignSystem/GlobalStyles.tsx | Global dashboard styles embedded in TypeScript |
+| frontend/src/Components/UI/* | Shared button, empty-state, panel, section-heading and status-pill primitives |
+| frontend/src/DesignSystem/GlobalStyles.tsx | Global dashboard styles embedded in TypeScript |
 | frontend/src/Components/Three/* | Lazy monochrome React Three Fiber scene and fallback |
 | frontend/app/custom-roles/page.tsx | Static Next route served by Rust at /custom-roles/ |
 | frontend/app/not-found.tsx and error boundaries | Branded not-found and recoverable error states |
@@ -257,6 +259,7 @@ web/
     │   │   │   ├── Icon.tsx
     │   │   │   ├── IconButton.tsx
     │   │   │   ├── IconRegistry.ts
+    │   │   │   ├── index.ts
     │   │   │   ├── Actions/
     │   │   │   │   ├── SaveIcon.tsx
     │   │   │   │   ├── ResetIcon.tsx
