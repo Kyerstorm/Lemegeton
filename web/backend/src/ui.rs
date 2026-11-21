@@ -22,6 +22,10 @@ pub async fn login_html() -> Response {
     export_page("web/frontend/out/login/index.html").await
 }
 
+pub async fn custom_roles_html() -> Response {
+    export_page("web/frontend/out/custom-roles/index.html").await
+}
+
 pub async fn next_asset(Path(path): Path<String>) -> Response {
     if path.is_empty() || path.split('/').any(|part| part.is_empty() || part == "." || part == "..") {
         return (StatusCode::NOT_FOUND, "Asset not found").into_response();

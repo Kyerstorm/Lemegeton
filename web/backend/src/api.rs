@@ -333,8 +333,14 @@ fn picker_forward_headers(incoming: &HeaderMap) -> HeaderMap {
 
 pub async fn custom_roles_proxy(State(state): State<AppState>, request: Request<Body>) -> Response {
     let (parts, body) = request.into_parts();
+    let request_path = parts.uri.path();
     let path = parts.uri.path_and_query().map(|v| v.as_str()).unwrap_or("/custom-roles");
-    if !path.starts_with("/custom-roles") || path.contains("..") { return ApiError::new(StatusCode::NOT_FOUND, "Route not found.").into_response(); }
+    if parts.method == Method::GET && (request_path == "/custom-roles" || request_path == "/custom-roles/") {
+        return crate::ui::custom_roles_html().await;
+    }
+    if !request_path.starts_with("/custom-roles/api/") || path.contains("..") {
+        return ApiError::new(StatusCode::NOT_FOUND, "Route not found.").into_response();
+    }
     let body = match to_bytes(body, 12 * 1024 * 1024).await {
         Ok(body) => body, Err(_) => return ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "The uploaded request is too large.").into_response(),
     };

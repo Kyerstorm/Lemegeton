@@ -1,6 +1,4 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
 import { isIP } from "node:net";
 import type { Client } from "discord.js";
 import type { BotConfig } from "../runtime/config.js";
@@ -42,13 +40,6 @@ const MAX_TRACKED = 10_000;
 const IMAGE_CONCURRENCY = 3;
 const EXPIRED_MESSAGE = "This link expired. Run /custom-role and press Color picker to make a new one.";
 const BUSY_MESSAGE = "I'm handling a lot of images right now. Try again in a few seconds.";
-const STATIC_TYPES: Record<string, string> = {
-  "picker.css": "text/css; charset=utf-8",
-  "picker.js": "application/javascript; charset=utf-8",
-  "theme.css": "text/css; charset=utf-8",
-  "favicon.svg": "image/svg+xml",
-};
-
 const failedAttempts = new Map<string, number[]>();
 const linkFetches = new Map<string, number[]>();
 let imageInFlight = 0;
@@ -341,34 +332,6 @@ async function handleRequest(
   const method = request.method ?? "GET";
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
   const path = url.pathname;
-
-  if ((path === BASE || path === BASE + "/") && method === "GET") {
-    try {
-      const page = await readFile(resolve(process.cwd(), "web", "picker.html"));
-      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": String(page.length) });
-      response.end(page);
-    } catch {
-      errorResponse(response, 503, "unavailable", "The Custom Roles picker page is not installed.");
-    }
-    return;
-  }
-
-  if (path.startsWith(BASE + "/static/") && method === "GET") {
-    const filename = path.slice((BASE + "/static/").length);
-    const contentType = STATIC_TYPES[filename];
-    if (!contentType) {
-      errorResponse(response, 404, "not_found", "Not found.");
-      return;
-    }
-    try {
-      const asset = await readFile(resolve(process.cwd(), "web", filename));
-      response.writeHead(200, { "Content-Type": contentType, "Content-Length": String(asset.length) });
-      response.end(asset);
-    } catch {
-      errorResponse(response, 404, "not_found", "Not found.");
-    }
-    return;
-  }
 
   if (!path.startsWith(BASE + "/api/")) {
     errorResponse(response, 404, "not_found", "Not found.");

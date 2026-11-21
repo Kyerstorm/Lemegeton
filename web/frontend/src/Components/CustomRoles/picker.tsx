@@ -7,8 +7,10 @@
 //   textContent, never as HTML. Colors are only used after normalizeHex() has checked them.
 // - Images are only ever data: or blob: URLs (the page's CSP allows nothing remote).
 // - The server re-checks everything; this page only previews and sends.
-(() => {
-  "use strict";
+// Preserves the original picker interactions while mounting inside the static Next route.
+// The token remains in the URL fragment/session storage and is sent only in Authorization.
+// @ts-nocheck
+export function mountCustomRolePicker() {
 
   const STORAGE_KEY = "customRolePickerToken";
   const HEX_HELP = "Enter a hex color like #FF66AA.";
@@ -28,15 +30,18 @@
     try { window.sessionStorage.removeItem(STORAGE_KEY); } catch (e) { /* storage blocked */ }
   };
   const token = readToken();
+  const cleanups = [];
 
   // A newer link opened in this same tab only changes the part after '#', which doesn't
   // reload the page. Store the new token and reload so the page uses it.
-  window.addEventListener("hashchange", () => {
+  const handleHashChange = () => {
     if (window.location.hash.length > 1) {
       readToken();
       window.location.reload();
     }
-  });
+  };
+  window.addEventListener("hashchange", handleHashChange);
+  cleanups.push(() => window.removeEventListener("hashchange", handleHashChange));
 
   // ------------------------------------------------------------------ helpers
 
@@ -770,6 +775,7 @@
     });
     $("crop-zoom").addEventListener("input", () => { if (iconEdit.url) { zoomCrop(Number($("crop-zoom").value)); } });
     window.addEventListener("resize", layoutCrop);
+    cleanups.push(() => window.removeEventListener("resize", layoutCrop));
   }
 
   function handleFile(file) {
@@ -1131,14 +1137,18 @@
     }));
     all("[data-set]").forEach((button) => button.addEventListener("click", () => save(button.dataset.set, button)));
     $("reset").addEventListener("click", reset);
-    document.addEventListener("pointerdown", (event) => {
+    const handleOutsidePointerDown = (event) => {
       fields.forEach((f) => {
         if (!f.pop.contains(event.target) && !f.button.contains(event.target)) { f.close(false); }
       });
-    });
-    window.addEventListener("beforeunload", (event) => {
+    };
+    const handleBeforeUnload = (event) => {
       if (isDirty()) { event.preventDefault(); event.returnValue = ""; }
-    });
+    };
+    document.addEventListener("pointerdown", handleOutsidePointerDown);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    cleanups.push(() => document.removeEventListener("pointerdown", handleOutsidePointerDown));
+    cleanups.push(() => window.removeEventListener("beforeunload", handleBeforeUnload));
 
     setupTabs();
     setupIconTab();
@@ -1176,5 +1186,6 @@
     }).catch(() => fatal("Can't reach the bot", "Check your connection and reload the page."));
   }
 
-  document.addEventListener("DOMContentLoaded", start);
-})();
+  start();
+  return () => { cleanups.splice(0).forEach(cleanup => cleanup()); };
+}
