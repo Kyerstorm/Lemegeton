@@ -27,6 +27,7 @@ export const ICON_NAMES = [
   "activity",
   "arrow-up-right",
   "chevron-right",
+  "chevron-down",
   "close",
   "role",
   "channel",

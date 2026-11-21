@@ -2855,9 +2855,10 @@ body {
   color:#aaa
 }
 .server-picker-caret {
+  display:flex;
+  align-items:center;
   margin-left:auto;
-  color:#777;
-  font-size:15px
+  color:#777
 }
 .server-state-mark {
   display:inline-block;

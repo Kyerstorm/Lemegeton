@@ -116,8 +116,21 @@ web/
     │   │   │   ├── ErrorState.tsx
     │   │   │   └── NotFoundState.tsx
     │   │   ├── Icons/
+    │   │   │   ├── actions/
+    │   │   │   ├── dashboard/
+    │   │   │   ├── media/
+    │   │   │   ├── navigation/
+    │   │   │   ├── security/
+    │   │   │   ├── status/
     │   │   │   ├── Icon.tsx
-    │   │   │   ├── IconRegistry.ts
+    │   │   │   ├── IconGlyphs.ts
+    │   │   │   └── IconRegistry.ts
+    │   │   ├── UI/
+    │   │   │   ├── Button.tsx
+    │   │   │   ├── Empty.tsx
+    │   │   │   ├── Panel.tsx
+    │   │   │   ├── SectionHeading.tsx
+    │   │   │   ├── StatusPill.tsx
     │   │   │   └── index.ts
     │   │   └── Three/
     │   │       ├── SceneCanvas.tsx
@@ -155,19 +168,19 @@ web/
 | frontend/src/App.tsx | Dashboard shell, local command drafts and role/channel access editor |
 | frontend/src/Components/Brand/BrandMark.tsx | Shared Lemegeton brand component |
 | frontend/src/Components/Legal/PolicyConsentGate.tsx | Explicit three-policy gate using the bot's existing versioned consent record |
-| frontend/src/Components/Icons/* | Shared SVG icon registry with hover/focus micro-animations and reduced-motion support |
+| frontend/src/Components/Icons/{actions,dashboard,media,navigation,security,status}/* | Individual SVG icon components grouped by interface purpose, each with a category barrel |\n| frontend/src/Components/Icons/IconGlyphs.ts | Exhaustive typed mapping from icon names to grouped components |\n| frontend/src/Components/Icons/Icon.tsx | Shared SVG wrapper preserving the `<Icon name="…"/>` API, sizing and animation classes |
 | frontend/src/Components/CustomRoles/PickerMarkup.tsx | React-rendered picker interface; no raw HTML string injection |
 | frontend/src/Components/CustomRoles/PickerStyles.tsx | Picker theme and component styles authored in TypeScript |
 | frontend/src/Components/CustomRoles/picker-utils.ts | Strictly typed color conversion, contrast and display helpers |
-| frontend/src/Components/CustomRoles/picker.tsx | Existing picker interaction controller, scoped to its React root; strict typing remains in progress |
+| frontend/src/Components/CustomRoles/picker.tsx | Strictly typed picker interaction controller, scoped to its React root and cleaned up on unmount |
 | frontend/src/Components/CustomRoles/CustomRolesClient.tsx | React mount point and picker lifecycle cleanup |
-| frontend/src/DesignSystem/GlobalStyles.tsx | Global dashboard styles embedded in TypeScript |
+| frontend/src/Components/UI/* | Shared button, empty-state, panel, section-heading and status-pill primitives |\n| frontend/src/DesignSystem/GlobalStyles.tsx | Global dashboard styles embedded in TypeScript |
 | frontend/src/Components/Three/* | Lazy monochrome React Three Fiber scene and fallback |
 | frontend/app/custom-roles/page.tsx | Static Next route served by Rust at /custom-roles/ |
 | frontend/app/not-found.tsx and error boundaries | Branded not-found and recoverable error states |
 | helpers/runtime/command-access.ts | Guild-scoped PostgreSQL policy persistence and access checks |
 
-No authored HTML, JavaScript or CSS files remain in the web frontend source. The old picker and global CSS files were removed after migrating their content into TSX/TypeScript. The picker controller retains a temporary @ts-nocheck while its original imperative behavior receives a full explicit type pass.
+No authored HTML, JavaScript or CSS files remain in the web frontend source. The old picker and global CSS files were removed after migrating their content into TSX/TypeScript. The Custom Roles controller keeps its original scoped DOM interactions, now with explicit TypeScript types for API responses, role state, crop state, events and element references.
 
 ---
 

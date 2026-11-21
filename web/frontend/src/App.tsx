@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Icon, type IconName } from "./Components/Icons";
+import { Button, Empty, Panel, SectionHeading, StatusPill } from "./Components/UI";
 import { BrandMark } from "./Components/Brand/BrandMark";
 import { SceneLoader } from "./Components/Three/SceneLoader";
 import { PolicyConsentGate } from "./Components/Legal/PolicyConsentGate";
@@ -150,34 +151,6 @@ function commandGuideUrl(command: Command): string {
   return readmeGuide;
 }
 
-function SectionHeading(props: { eyebrow: string; title: React.ReactNode; subtitle: string; actions?: React.ReactNode }) {
-  return <div className="page-heading">
-    <div className="page-heading-copy">
-      <p className="eyebrow">{props.eyebrow}</p>
-      <h1>{props.title}</h1>
-      <p className="lede">{props.subtitle}</p>
-    </div>
-    {props.actions ? <div className="heading-actions">{props.actions}</div> : null}
-  </div>;
-}
-function Panel(props: { eyebrow?: string; title: string; index?: string; action?: React.ReactNode; className?: string; children: React.ReactNode }) {
-  return <article className={"panel " + (props.className || "")}>
-    {props.eyebrow || props.index || props.action ? <div className="panel-heading">
-      <div>{props.eyebrow ? <p className="eyebrow">{props.eyebrow}</p> : null}<h2>{props.title}</h2></div>
-      {props.action || (props.index ? <span className="panel-index">{props.index}</span> : null)}
-    </div> : <div className="panel-heading"><h2>{props.title}</h2></div>}
-    {props.children}
-  </article>;
-}
-function Empty(props: { children: React.ReactNode; loading?: boolean }) {
-  return <div className={"empty-state" + (props.loading ? " loading-state" : "")}>{props.loading ? <span className="spinner" aria-hidden="true" /> : null}{props.children}</div>;
-}
-function StatusPill(props: { ok?: boolean; children: React.ReactNode }) {
-  return <span className={"status-pill " + (props.ok === true ? "is-good" : props.ok === false ? "is-bad" : "is-neutral")}><i aria-hidden="true" />{props.children}</span>;
-}
-function Button({ tone = "secondary", className, children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { tone?: "primary" | "secondary" | "quiet" }) {
-  return <button {...props} className={"button " + tone + (className ? " " + className : "")}>{children}</button>;
-}
 function LoginPage() {
   const [cancelled, setCancelled] = useState(false);
   useEffect(() => setCancelled(new URLSearchParams(window.location.search).get("error") === "cancelled"), []);
@@ -917,7 +890,7 @@ export default function App() {
         <button className="icon-button mobile-menu" type="button" aria-label="Open navigation" aria-expanded={mobileNav} onClick={() => setMobileNav((value) => !value)}><Icon name="menu" size={17} /></button>
         <div className="breadcrumb"><span>CONTROL</span><span className="breadcrumb-divider">/</span><strong>{selectedPage.label}</strong></div>
         <div className="topbar-right">
-          <div className="guild-control"><span>SERVER</span><button className="server-picker-trigger" type="button" onClick={() => setServerPickerOpen(true)} aria-haspopup="dialog" aria-expanded={serverPickerOpen}><Icon name="server" size={15} /><strong>{currentGuild?.name || "Choose a server"}</strong>{currentGuild?.bot_installed ? <i className="server-state-mark" aria-label="Lemegeton connected" /> : null}<span className="server-picker-caret">⌄</span></button></div>
+          <div className="guild-control"><span>SERVER</span><button className="server-picker-trigger" type="button" onClick={() => setServerPickerOpen(true)} aria-haspopup="dialog" aria-expanded={serverPickerOpen}><Icon name="server" size={15} /><strong>{currentGuild?.name || "Choose a server"}</strong>{currentGuild?.bot_installed ? <i className="server-state-mark" aria-label="Lemegeton connected" /> : null}<span className="server-picker-caret"><Icon name="chevron-down" size={13} /></span></button></div>
           <button className={"icon-button" + (refreshing ? " spinning" : "")} type="button" onClick={() => void refreshData(guildId)} aria-label="Refresh dashboard" title="Refresh dashboard" disabled={!guildId || refreshing}><Icon name="refresh" size={17} /></button>
           <div className="account" aria-label="Signed-in Discord account"><span className="avatar">{(user?.global_name || user?.username || "?").slice(0, 1).toUpperCase()}</span><span className="account-copy"><strong>{user?.global_name || user?.username || "Discord account"}</strong><small>DISCORD / VERIFIED</small></span></div>
         </div>

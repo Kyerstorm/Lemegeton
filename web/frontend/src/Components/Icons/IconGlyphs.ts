@@ -1,7 +1,7 @@
 import type { ComponentType } from "react";
 import { OverviewIcon, CommandsIcon, AtlasIcon, ExtensionsIcon, AuditIcon, DiagnosticsIcon, LogsIcon, IntegrationsIcon, DatabaseIcon } from "./dashboard";
 import { RefreshIcon, RetryIcon, SaveIcon, ResetIcon, UploadIcon, CopyIcon, CloseIcon, ArrowUpRightIcon, ExternalLinkIcon } from "./actions";
-import { MenuIcon, HomeIcon, ChevronRightIcon, SearchIcon } from "./navigation";
+import { MenuIcon, HomeIcon, ChevronRightIcon, ChevronDownIcon, SearchIcon } from "./navigation";
 import { ShieldCheckIcon, ShieldIcon, LockIcon } from "./security";
 import { CheckIcon, CheckCircleIcon, AlertCircleIcon, ActivityIcon } from "./status";
 import { ImageIcon, PaletteIcon, RoleIcon, ChannelIcon, ServerIcon, SparklesIcon } from "./media";
@@ -29,6 +29,7 @@ export const ICON_GLYPHS: Record<IconName, ComponentType> = {
   "menu": MenuIcon,
   "home": HomeIcon,
   "chevron-right": ChevronRightIcon,
+  "chevron-down": ChevronDownIcon,
   "search": SearchIcon,
   "shield-check": ShieldCheckIcon,
   "shield": ShieldIcon,
