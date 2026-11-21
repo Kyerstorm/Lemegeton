@@ -57,7 +57,15 @@ export async function userHasCurrentConsent(userId:string):Promise<boolean>{
  return row!==null;
 }
 
-async function saveCurrentConsent(userId:string):Promise<void>{
+export async function dashboardConsentStatus(userId:string) {
+ return {
+  accepted: await userHasCurrentConsent(userId),
+  versions: CONSENT_POLICY_VERSIONS,
+  policies: POLICY_LINKS,
+ };
+}
+
+export async function saveCurrentConsent(userId:string):Promise<void>{
  await query(`INSERT INTO bot_user_consents(user_id,terms_version,privacy_version,guidelines_version,accepted_at)
   VALUES($1,$2,$3,$4,NOW())
   ON CONFLICT(user_id) DO UPDATE SET terms_version=EXCLUDED.terms_version,

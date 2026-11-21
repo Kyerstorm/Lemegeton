@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Icon, type IconName } from "./Components/Icons";
 import { BrandMark } from "./Components/Brand/BrandMark";
 import { SceneLoader } from "./Components/Three/SceneLoader";
+import { PolicyConsentGate } from "./Components/Legal/PolicyConsentGate";
 
 type Page = "overview" | "commands" | "atlas" | "extensions" | "audit" | "diagnostics" | "logs" | "integrations" | "database";
 type User = { id: string; username: string; global_name?: string | null; avatar?: string | null };
@@ -18,6 +19,11 @@ type Integration = { name?: string; detail?: string; configured?: boolean };
 type Toast = { id: number; message: string; error: boolean };
 type Confirmation = { title: string; message: string; actionLabel: string; run: () => Promise<void> };
 type Bootstrap = { user: User; guilds: Guild[]; csrf_token: string; selected_guild_id?: string };
+type DashboardConsent = {
+  accepted: boolean;
+  versions: { terms: string; privacy: string; guidelines: string };
+  policies: { label: string; url: string }[];
+};
 type CommandResponse = { commands: Command[]; revision: string };
 type CommandAccessPolicy = {
   role_mode: "everyone" | "include" | "exclude";
@@ -228,6 +234,9 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [serverPickerOpen, setServerPickerOpen] = useState(false);
+  const [consent, setConsent] = useState<DashboardConsent | null>(null);
+  const [consentSaving, setConsentSaving] = useState(false);
+  const [consentError, setConsentError] = useState("");
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
@@ -395,12 +404,16 @@ export default function App() {
   useEffect(() => {
     if (isLogin) { setInitialLoading(false); return; }
     let active = true;
-    api<Bootstrap>("/api/bootstrap").then((data) => {
+    api<Bootstrap>("/api/bootstrap").then(async (data) => {
       if (!active) return;
       setUser(data.user);
       const availableGuilds = data.guilds || [];
       setGuilds(availableGuilds);
       setCsrf(data.csrf_token || "");
+      const consentStatus = await api<DashboardConsent>("/api/consent");
+      if (!active) return;
+      setConsent(consentStatus);
+      setConsentError("");
       let rememberedGuild = "";
       try { rememberedGuild = window.localStorage.getItem("lemegeton:selected-guild") || ""; } catch { /* storage may be disabled */ }
       const canSelect = (candidate: unknown) => candidate != null && availableGuilds.some((guild) => String(guild.id) === String(candidate) && guild.bot_installed);
@@ -422,7 +435,10 @@ export default function App() {
       if (!selected && availableGuilds.length) pushToast("Lemegeton is not installed in any server you can manage yet. Choose a server to invite it.");
       else if (!selected) pushToast("No server is available where you have Manage Server or Administrator permission.", true);
     }).catch((error) => {
-      if (active) pushToast(errorMessage(error), true);
+      if (active) {
+        setConsentError(errorMessage(error));
+        pushToast(errorMessage(error), true);
+      }
     }).finally(() => { if (active) setInitialLoading(false); });
     return () => { active = false; };
   }, [isLogin, pushToast, routeUserId, routeGuildId]);
@@ -608,6 +624,34 @@ export default function App() {
     }
   };
 
+
+  const retryConsent = async () => {
+    setConsentError("");
+    try {
+      const result = await api<DashboardConsent>("/api/consent");
+      setConsent(result);
+    } catch (error) {
+      setConsentError(errorMessage(error));
+    }
+  };
+
+  const acceptConsent = async () => {
+    if (!csrf || consentSaving) return;
+    setConsentSaving(true);
+    setConsentError("");
+    try {
+      const result = await api<DashboardConsent>("/api/consent", csrf, {
+        method: "POST",
+        body: JSON.stringify({ accepted: true }),
+      });
+      setConsent(result);
+    } catch (error) {
+      setConsentError(errorMessage(error));
+    } finally {
+      setConsentSaving(false);
+    }
+  };
+
   const copyCommandInvocation = async (command: Command) => {
     const invocation = "/" + (command.fullname || command.name || "").trim();
     if (invocation.length < 2) {
@@ -773,6 +817,16 @@ export default function App() {
   const selectedPage = PAGES.find((item) => item.id === page) || PAGES[0];
 
   if (isLogin) return <LoginPage />;
+  if (!initialLoading && (!consent || !consent.accepted)) {
+    return <PolicyConsentGate
+      consent={consent}
+      saving={consentSaving}
+      error={consentError}
+      onRetry={() => void retryConsent()}
+      onAccept={() => void acceptConsent()}
+      onDecline={() => void logout()}
+    />;
+  }
 
   const bot = overview.bot || {};
   const enabled = commands.filter((item) => item.enabled).length;

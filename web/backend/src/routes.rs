@@ -34,6 +34,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/oauth/start", get(auth::oauth_start))
         .route("/oauth/callback", get(auth::oauth_callback))
         .route("/api/bootstrap", get(auth::bootstrap))
+        .route("/api/consent", get(api::policy_consent).post(api::accept_policy_consent))
         .route("/api/logout", post(auth::logout))
         .route("/api/system", get(api::system))
         .route("/api/integrations", get(api::integrations))

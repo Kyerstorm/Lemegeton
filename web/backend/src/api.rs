@@ -1,7 +1,7 @@
 use axum::{extract::{Path, Query, State}, http::{HeaderMap, Method}, Json};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use crate::state::{authorized_guild, bridge_json, is_owner, session_from_headers, ApiError, ApiResult, AppState};
+use crate::state::{authorized_guild, bridge_json, is_owner, session_from_headers, write_session, ApiError, ApiResult, AppState};
 
 mod atlas;
 mod commands;
@@ -10,6 +10,37 @@ mod picker;
 pub use atlas::atlas;
 pub use commands::*;
 pub use picker::custom_roles_proxy;
+
+
+#[derive(Deserialize)]
+pub struct ConsentAcceptance { accepted: bool }
+
+pub async fn policy_consent(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Json<Value>> {
+    let (_, session) = session_from_headers(&state, &headers).await?;
+    Ok(Json(bridge_json(
+        &state,
+        Method::GET,
+        &format!("/users/{}/consent", session.user.id),
+        None,
+    ).await?))
+}
+
+pub async fn accept_policy_consent(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<ConsentAcceptance>,
+) -> ApiResult<Json<Value>> {
+    let (_, session) = write_session(&state, &headers).await?;
+    if !body.accepted {
+        return Err(ApiError::bad_request("Explicit acceptance of all current policies is required."));
+    }
+    Ok(Json(bridge_json(
+        &state,
+        Method::POST,
+        &format!("/users/{}/consent", session.user.id),
+        Some(json!({"accepted": true})),
+    ).await?))
+}
 
 pub async fn system(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Json<Value>> {
     let _ = session_from_headers(&state, &headers).await?;

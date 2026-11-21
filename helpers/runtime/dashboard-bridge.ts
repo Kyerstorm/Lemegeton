@@ -9,6 +9,7 @@ import { query, queryOne } from "../../database.js";
 import { isGuildSetupComplete } from "./guild-retention.js";
 import { logger, readRecentLogs } from "./logger.js";
 import { getCommandAccessPolicies, saveCommandAccessPolicy, type RoleAccessMode, type ChannelAccessMode } from "./command-access.js";
+import { dashboardConsentStatus, saveCurrentConsent } from "../security/terms-consent.js";
 import {
   atlasNodeIdentity,
   atlasProviderReference,
@@ -625,6 +626,26 @@ async function handleRequest(
     return;
   }
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
+  const consentRoute = /^\/users\/(\d{17,20})\/consent$/.exec(url.pathname);
+  if (consentRoute && request.method === "GET") {
+    jsonResponse(response, 200, await dashboardConsentStatus(consentRoute[1]!));
+    return;
+  }
+  if (consentRoute && request.method === "POST") {
+    let body: Record<string, unknown>;
+    try { body = await readJson(request); }
+    catch (error) {
+      errorResponse(response, 400, error instanceof Error ? error.message : "Invalid request body.");
+      return;
+    }
+    if (body.accepted !== true) {
+      errorResponse(response, 400, "Explicit acceptance of the current policies is required.");
+      return;
+    }
+    await saveCurrentConsent(consentRoute[1]!);
+    jsonResponse(response, 200, await dashboardConsentStatus(consentRoute[1]!));
+    return;
+  }
   const guildRoute = /^\/guilds\/(\d{17,20})(?:\/|$)/.exec(url.pathname);
   if (guildRoute && !await isGuildSetupComplete(guildRoute[1]!)) {
     errorResponse(response, 423, "Required server data-retention and language setup must be completed before dashboard features can be used.");

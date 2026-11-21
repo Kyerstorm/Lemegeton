@@ -1,14 +1,14 @@
 use axum::{
     body::Body,
     extract::{ConnectInfo, State},
-    http::{header, Request, StatusCode},
+    http::{header, Method, Request, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
     Json,
 };
 use std::net::SocketAddr;
 
-use crate::{rate_limit::{check_request, RateLimitError}, state::AppState};
+use crate::{rate_limit::{check_request, RateLimitError}, state::{bridge_json, session_from_headers, AppState}};
 
 pub async fn security_headers(
     State(state): State<AppState>,
@@ -21,8 +21,11 @@ pub async fn security_headers(
     let headers_in = request.headers().clone();
     let peer = request.extensions().get::<ConnectInfo<SocketAddr>>().map(|value| value.0.ip());
 
+    let consent_exempt = matches!(path.as_str(), "/api/bootstrap" | "/api/consent" | "/api/logout");
+    let consent_required = (path.starts_with("/api/") && !consent_exempt)
+        || path.starts_with("/custom-roles/api/");
+
     let mut response = match check_request(&state, &path, &method, &headers_in, peer).await {
-        Ok(()) => next.run(request).await,
         Err(RateLimitError::Unavailable) => (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(serde_json::json!({"error":"Rate limiting is temporarily unavailable."})),
@@ -35,6 +38,30 @@ pub async fn security_headers(
             response.headers_mut().insert(header::RETRY_AFTER, "60".parse().unwrap());
             response
         }
+        Ok(()) if consent_required => {
+            match session_from_headers(&state, &headers_in).await {
+                Err(_) => next.run(request).await,
+                Ok((_, session)) => {
+                    match bridge_json(
+                        &state,
+                        Method::GET,
+                        &format!("/users/{}/consent", session.user.id),
+                        None,
+                    ).await {
+                        Ok(consent) if consent.get("accepted").and_then(serde_json::Value::as_bool) == Some(true) => next.run(request).await,
+                        Ok(_) => (
+                            StatusCode::PRECONDITION_REQUIRED,
+                            Json(serde_json::json!({"error":"Review and accept the current Terms of Service, Privacy Policy and Community Guidelines before using the dashboard."})),
+                        ).into_response(),
+                        Err(_) => (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            Json(serde_json::json!({"error":"The current policy agreement could not be verified. Dashboard access is locked until verification is available."})),
+                        ).into_response(),
+                    }
+                }
+            }
+        }
+        Ok(()) => next.run(request).await,
     };
 
     let headers = response.headers_mut();
