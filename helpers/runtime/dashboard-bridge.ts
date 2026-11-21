@@ -475,8 +475,9 @@ async function commandAccessOptions(guild: Guild): Promise<Record<string, unknow
       .map(role => ({ id: role.id, name: role.name }))
       .sort((a, b) => a.name.localeCompare(b.name)),
     channels: [...channels.values()]
-      .filter(channel => channel && channel.isTextBased() && "name" in channel)
-      .map(channel => ({ id: channel.id, name: channel.name, type: channel.type }))
+      .flatMap(channel => channel && channel.isTextBased() && "name" in channel
+        ? [{ id: channel.id, name: channel.name, type: channel.type }]
+        : [])
       .sort((a, b) => a.name.localeCompare(b.name)),
     policies,
   };
