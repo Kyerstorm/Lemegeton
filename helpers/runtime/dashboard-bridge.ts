@@ -8,6 +8,7 @@ import { FEATURE_NAMES, getFeatureSettings, isFeatureName, setFeatureEnabled, ty
 import { query, queryOne } from "../../database.js";
 import { isGuildSetupComplete } from "./guild-retention.js";
 import { logger, readRecentLogs } from "./logger.js";
+import { getCommandAccessPolicies, saveCommandAccessPolicy, type RoleAccessMode, type ChannelAccessMode } from "./command-access.js";
 import {
   atlasNodeIdentity,
   atlasProviderReference,
@@ -463,6 +464,96 @@ async function resetGuild(
   });
 }
 
+
+async function commandAccessOptions(guild: Guild): Promise<Record<string, unknown>> {
+  const [roles, channels, policies] = await Promise.all([
+    guild.roles.fetch(),
+    guild.channels.fetch(),
+    getCommandAccessPolicies(guild.id),
+  ]);
+  return {
+    roles: [...roles.values()]
+      .filter(role => role.id !== guild.id && !role.managed)
+      .map(role => ({ id: role.id, name: role.name }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    channels: [...channels.values()]
+      .filter(channel => channel && channel.isTextBased() && "name" in channel)
+      .map(channel => ({ id: channel.id, name: channel.name, type: channel.type }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    policies,
+  };
+}
+
+async function saveCommandAccess(
+  request: IncomingMessage,
+  response: ServerResponse,
+  commands: FeatureCommand[],
+  guild: Guild,
+  fullname: string,
+): Promise<void> {
+  let body: Record<string, unknown>;
+  try { body = await readJson(request); }
+  catch (error) {
+    errorResponse(response, 400, error instanceof Error ? error.message : "Invalid request body.");
+    return;
+  }
+  const actorId = String(body.actor_id ?? "");
+  const expectedRevision = Number(body.expected_revision);
+  const roleMode = body.role_mode;
+  const channelMode = body.channel_mode;
+  const roleIds = body.role_ids;
+  const channelIds = body.channel_ids;
+  if (!isDashboardGuildId(actorId) || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0
+    || !["everyone", "include", "exclude"].includes(String(roleMode))
+    || !["all", "include", "exclude"].includes(String(channelMode))
+    || !Array.isArray(roleIds) || roleIds.length > 100
+    || !Array.isArray(channelIds) || channelIds.length > 100
+    || [...roleIds, ...channelIds].some(id => typeof id !== "string" || !/^\d{17,20}$/.test(id))) {
+    errorResponse(response, 400, "Choose valid role and channel access rules.");
+    return;
+  }
+  if (!commands.some(command => command.data.name === fullname) || PROTECTED_COMMANDS.has(fullname)
+    || MODERATOR_COMMANDS.has(fullname)) {
+    errorResponse(response, 403, "This command's access is managed by the bot and cannot be changed here.");
+    return;
+  }
+  const uniqueRoles = [...new Set(roleIds as string[])];
+  const uniqueChannels = [...new Set(channelIds as string[])];
+  if (uniqueRoles.length !== roleIds.length || uniqueChannels.length !== channelIds.length) {
+    errorResponse(response, 400, "A role or channel was selected more than once.");
+    return;
+  }
+  try {
+    const [roles, channels] = await Promise.all([guild.roles.fetch(), guild.channels.fetch()]);
+    if (uniqueRoles.some(id => !roles.has(id) || roles.get(id)?.managed || id === guild.id)
+      || uniqueChannels.some(id => !channels.has(id) || !channels.get(id)?.isTextBased())) {
+      errorResponse(response, 400, "Every selected role and channel must still belong to this server.");
+      return;
+    }
+    const result = await saveCommandAccessPolicy(
+      guild.id, fullname, actorId, expectedRevision,
+      {
+        role_mode: roleMode as RoleAccessMode,
+        role_ids: uniqueRoles,
+        channel_mode: channelMode as ChannelAccessMode,
+        channel_ids: uniqueChannels,
+      },
+    );
+    if (!result) {
+      errorResponse(response, 409, "This command's access rules changed elsewhere. Refresh before saving.");
+      return;
+    }
+    await recordAudit(guild.id, actorId, "save_command_access", "/" + fullname + " access rules updated.");
+    jsonResponse(response, 200, { ok: true, policy: result });
+  } catch (error) {
+    logger.error("Command access policy save failed", {
+      guildId: guild.id, command: fullname,
+      reason: error instanceof Error ? error.message : "Unknown error",
+    });
+    errorResponse(response, 503, "Command access rules could not be saved.");
+  }
+}
+
 async function auditEntries(guildId: string): Promise<Record<string, unknown>[]> {
   const rows = await query<{
     id: string;
@@ -681,6 +772,23 @@ async function handleRequest(
     const guild = guildFor(client, match[1]!);
     if (!guild) { errorResponse(response, 404, "The bot is no longer in this server."); return; }
     jsonResponse(response, 200, await overview(client, commands, guild));
+    return;
+  }
+  match = /^\/guilds\/(\d{17,20})\/command-access$/.exec(url.pathname);
+  if (request.method === "GET" && match) {
+    const guild = guildFor(client, match[1]!);
+    if (!guild) { errorResponse(response, 404, "The bot is no longer in this server."); return; }
+    jsonResponse(response, 200, await commandAccessOptions(guild));
+    return;
+  }
+  match = /^\/guilds\/(\d{17,20})\/command-access\/(.+)$/.exec(url.pathname);
+  if (request.method === "PUT" && match) {
+    const guild = guildFor(client, match[1]!);
+    if (!guild) { errorResponse(response, 404, "The bot is no longer in this server."); return; }
+    let fullname: string;
+    try { fullname = decodeURIComponent(match[2]!); }
+    catch { errorResponse(response, 400, "Invalid command name."); return; }
+    await saveCommandAccess(request, response, commands, guild, fullname);
     return;
   }
   match = /^\/guilds\/(\d{17,20})\/commands$/.exec(url.pathname);

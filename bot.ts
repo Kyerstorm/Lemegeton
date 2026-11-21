@@ -23,6 +23,7 @@ import {claimDueReadingReminders,markReadingReminderSent} from "./helpers/commun
 import {claimDueMediaAutomationRules,claimDueMediaAutomationDeliveries,createMediaAutomationDiscussion,markMediaAutomationDelivery,queueMediaAutomationRelease,releaseMediaAutomationRuleClaim} from "./helpers/community/community-automation.js";
 import {createCommandRegistry} from "./src/registry.js";
 import {isFeatureEnabled} from "./helpers/runtime/settings.js";
+import {initCommandAccessSchema,isCommandAccessAllowed} from "./helpers/runtime/command-access.js";
 import {deleteGuildData,ensureGuildRetentionSettings,getGuildRetentionSettings,isGuildRetentionConfigured,isGuildSetupComplete,recordGuildInviter,retryDepartedGuildDeletions} from "./helpers/runtime/guild-retention.js";
 import {isGuildLanguageConfigured} from "./helpers/runtime/languages.js";
 import {homeEmbed} from "./helpers/runtime/discord.js";
@@ -292,6 +293,15 @@ async function routeInteraction(interaction:Interaction):Promise<void>{
  }
  try{
   if(interaction.isButton()&&await handleConsentButton(interaction))return;
+  const accessCommand=interaction.isChatInputCommand()||interaction.isAutocomplete()
+   ?interaction.commandName
+   :interaction.isMessageComponent()?interaction.customId.split(":",1)[0]??"":"";
+  if(accessCommand&&commandByName.has(accessCommand)
+   &&!await isCommandAccessAllowed(interaction.guildId,accessCommand,interaction.channelId,interaction.member)){
+   if(interaction.isAutocomplete()){await interaction.respond([]);return;}
+   if(interaction.isRepliable())await interaction.reply({content:"You can't use this command in this channel or with your current server roles.",flags:MessageFlags.Ephemeral});
+   return;
+  }
   if(!await requireCurrentConsent(interaction))return;
   const retentionConfigured=await isGuildRetentionConfigured(interaction.guildId);
   const languageConfigured=await isGuildLanguageConfigured(interaction.guildId);
@@ -811,7 +821,7 @@ async function shutdown(signal:NodeJS.Signals):Promise<void>{
  await closeDatabase().catch(error=>logger.error("Database shutdown failed",{reason:error instanceof Error?error.message:"Unknown error"}));
 }
 async function start():Promise<void>{
- await initDatabase(config.database);await initUserConsentSchema();await startAtlasBridge();await client.login(config.discordToken);
+ await initDatabase(config.database);await initUserConsentSchema();await initCommandAccessSchema();await startAtlasBridge();await client.login(config.discordToken);
  dailyWorkerTimer=setInterval(()=>scheduleDailyDrops(),30_000);dailyWorkerTimer.unref();
  scheduleDailyDrops();
 }
