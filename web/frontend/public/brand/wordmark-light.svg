@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="112" viewBox="0 0 520 112" role="img" aria-labelledby="title description">
+  <title id="title">Lemegeton — light wordmark</title>
+  <desc id="description">The Lemegeton sigil beside the Discord control plane wordmark for light surfaces.</desc>
+  <image href="/brand/lemegeton.svg" x="6" y="6" width="100" height="100" preserveAspectRatio="xMidYMid meet"/>
+  <g fill="#111111">
+    <text x="126" y="59" font-family="Arial, Helvetica, sans-serif" font-size="31" font-weight="700" letter-spacing="5">LEMEGETON</text>
+    <text x="129" y="84" font-family="Arial, Helvetica, sans-serif" font-size="10" font-weight="600" letter-spacing="3.2">DISCORD / CONTROL PLANE</text>
+  </g>
+</svg>

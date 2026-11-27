@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1250" viewBox="0 0 2400 1250" role="img" aria-labelledby="title desc">
+<title id="title">RSS &amp; Feed Integrations / Three Separate Paths</title><desc id="desc">Three RSS/XML feed adapters have distinct scope and access requirements: Comic Book Herald is a non-commercial, allowlist- and confirmation-gated editorial feed; Royal Road is a user-selected story-specific feed; SoundCloud feeds are release polling after credentialed identity resolution.</desc><defs><style>
+.bg{fill:#050505}.panel{fill:#0b0b0b;stroke:#626262;stroke-width:1.5}.inner{fill:#111;stroke:#3e3e3e;stroke-width:1}
+.rule{stroke:#3b3b3b;stroke-width:1}.line{fill:none;stroke:#e6e6e6;stroke-width:2;marker-end:url(#arrow)}
+.eyebrow{fill:#a1a1a1;font:600 15px Arial,sans-serif;letter-spacing:3px}.title{fill:#fff;font:700 43px Arial,sans-serif;letter-spacing:4px}
+.heading{fill:#f4f4f4;font:700 23px Arial,sans-serif}.sub{fill:#eee;font:700 16px Arial,sans-serif;letter-spacing:1px}
+.body{fill:#c4c4c4;font:15px Arial,sans-serif}.small{fill:#929292;font:13px Arial,sans-serif}
+.mono{fill:#fff;font:700 14px 'SFMono-Regular',Consolas,monospace}.name{fill:#ededed;font:14px Arial,sans-serif}
+.pill{fill:#151515;stroke:#686868;stroke-width:1}.pillmuted{fill:#101010;stroke:#454545;stroke-width:1}
+.pilltext{fill:#ddd;font:600 10px Arial,sans-serif;letter-spacing:.25px}.count{fill:#fff;font:700 15px 'SFMono-Regular',Consolas,monospace}
+</style><marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9Z" fill="#e6e6e6"/></marker></defs>
+<rect class="bg" width="2400" height="1250"/><text x="64" y="62" class="eyebrow" text-anchor="start">LEMEGETON / MEDIA SYSTEM</text><text x="64" y="119" class="title" text-anchor="start">RSS &amp; FEED INTEGRATIONS / THREE SEPARATE PATHS</text><path class="rule" d="M64 154H2336"/>
+
+<text x="64" y="210" class="eyebrow" text-anchor="start">01 / CURRENT FEED ADAPTERS</text>
+<rect class="panel" x="64" y="242" width="720" height="620" rx="12"/>
+<text x="96" y="286" class="heading" text-anchor="start">Comic Book Herald</text>
+<text x="96" y="328" class="mono" text-anchor="start">Manual reference · Feed route</text>
+<text x="96" y="380" class="body" text-anchor="start">Only the unmodified RSS feed is eligible.</text><text x="96" y="422" class="body" text-anchor="start">Requires source ID in MEDIA_SOURCE_SCRAPE_ALLOWLIST.</text><text x="96" y="464" class="body" text-anchor="start">Also requires explicit non-commercial confirmation.</text><text x="96" y="506" class="body" text-anchor="start">Does not scrape or automate site pages.</text><text x="96" y="548" class="body" text-anchor="start">Feed response: 512 KiB cap · 10 s timeout · no retries.</text><text x="96" y="590" class="body" text-anchor="start">Returned item links and source attribution are retained.</text>
+<rect class="panel" x="840" y="242" width="720" height="620" rx="12"/>
+<text x="872" y="286" class="heading" text-anchor="start">Royal Road</text>
+<text x="872" y="328" class="mono" text-anchor="start">Story-specific public RSS · outside 64-source registry</text>
+<text x="872" y="380" class="body" text-anchor="start">Member supplies a valid fiction ID or supported HTTPS URL.</text><text x="872" y="422" class="body" text-anchor="start">Uses that fiction&apos;s official RSS syndication URL.</text><text x="872" y="464" class="body" text-anchor="start">Shows story title, author, up to five recent chapter titles/links.</text><text x="872" y="506" class="body" text-anchor="start">Keeps publication timestamps when provided.</text><text x="872" y="548" class="body" text-anchor="start">This is not global search, catalogue discovery or trending.</text><text x="872" y="590" class="body" text-anchor="start">Metadata only; chapter body contents are never fetched.</text>
+<rect class="panel" x="1616" y="242" width="720" height="620" rx="12"/>
+<text x="1648" y="286" class="heading" text-anchor="start">SoundCloud</text>
+<text x="1648" y="328" class="mono" text-anchor="start">Release RSS after API identity resolution</text>
+<text x="1648" y="380" class="body" text-anchor="start">SoundCloud API credentials resolve the artist/user identity.</text><text x="1648" y="422" class="body" text-anchor="start">Tracker polls the user&apos;s public sounds.rss feed.</text><text x="1648" y="464" class="body" text-anchor="start">Parser accepts at most five RSS items per request.</text><text x="1648" y="506" class="body" text-anchor="start">Release links must be HTTPS on soundcloud.com.</text><text x="1648" y="548" class="body" text-anchor="start">Guild tracker deduplicates by provider + release ID.</text><text x="1648" y="590" class="body" text-anchor="start">No audio retrieval, download or stream ripping.</text>
+<path class="rule" d="M64 912H2336"/>
+<text x="64" y="962" class="eyebrow" text-anchor="start">02 / FEEDS ARE NOT A GENERIC SCRAPING PERMISSION</text>
+<rect class="inner" x="64" y="992" width="2272" height="172" rx="12"/>
+<text x="96" y="1038" class="body" text-anchor="start">Each feed has its own source permission, format, identity and usage boundary. A feed&apos;s public availability is not a blanket grant to scrape the matching website.</text><text x="96" y="1080" class="body" text-anchor="start">Comic Book Herald remains manual-reference/conditional; Royal Road requires an explicit story target; SoundCloud feed polling is tied to a validated guild tracker.</text>
+<text x="2336" y="1212" class="small" text-anchor="end">LEMEGETON / FEED INTEGRATIONS — V3</text>
+
+</svg>

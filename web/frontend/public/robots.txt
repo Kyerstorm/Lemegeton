@@ -1,0 +1,15 @@
+# Only public, indexable pages are allowed for crawlers.
+# Robots rules are crawler guidance, not access control.
+
+User-agent: *
+Disallow: /
+Allow: /status$
+Allow: /how-it-works$
+Allow: /privacy-policy$
+Allow: /terms-of-service$
+Allow: /community-guidelines$
+Allow: /copyright-complaints$
+Allow: /dmca$
+Allow: /sitemap.xml$
+
+Sitemap: https://example.invalid/sitemap.xml

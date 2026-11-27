@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1240" viewBox="0 0 1600 1240" role="img" aria-labelledby="title description">
+  <title id="title">Lemegeton dashboard font map</title>
+  <desc id="description">Geist is used for interface text, Geist Mono for technical data, DejaVu Sans for numerical readouts and Unicode fallback, and Geist Pixel for short decorative accents.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#171717"/>
+      <stop offset="1" stop-color="#050505"/>
+    </linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#ffffff" stroke-opacity=".045" stroke-width="1"/>
+    </pattern>
+    <style>
+      .label{font:600 16px Arial,sans-serif;letter-spacing:3px;fill:#858585}
+      .name{font:600 46px Arial,sans-serif;letter-spacing:-1.5px;fill:#f4f4f4}
+      .role{font:400 22px Arial,sans-serif;fill:#b6b6b6}
+      .detail{font:400 16px Arial,sans-serif;fill:#777}
+      .index{font:500 14px Arial,sans-serif;letter-spacing:2px;fill:#666}
+      .mono{font:500 24px monospace;fill:#ededed}
+      .pixel{font:700 25px monospace;letter-spacing:4px;fill:#ededed}
+    </style>
+  </defs>
+  <rect width="1600" height="1240" rx="26" fill="url(#background)"/>
+  <rect width="1600" height="1240" rx="26" fill="url(#grid)"/>
+  <text x="88" y="98" class="label">LEMEGETON / LOCAL TYPOGRAPHY</text>
+  <text x="88" y="170" font-family="Arial,sans-serif" font-size="60" font-weight="600" letter-spacing="-3" fill="#fff">One type system.</text>
+  <text x="88" y="220" font-family="Arial,sans-serif" font-size="25" fill="#929292">Every dashboard surface uses the same locally hosted font map.</text>
+  <path d="M88 260H1512" stroke="#353535"/>
+  <g transform="translate(88 310)">
+    <text y="0" class="index">01 / PRIMARY UI</text>
+    <text y="70" class="name">Geist</text>
+    <text y="112" class="role">Headings · Body copy · Buttons · Inputs · Navigation</text>
+    <text y="150" class="detail">Default typeface for the dashboard and Custom Roles interface.</text>
+    <rect x="1020" y="-20" width="404" height="190" rx="15" fill="#ffffff" fill-opacity=".035" stroke="#ffffff" stroke-opacity=".12"/>
+    <text x="1050" y="43" font-family="Arial,sans-serif" font-size="28" font-weight="600" fill="#f4f4f4">Aa Bb Gg 0123</text>
+    <text x="1050" y="85" font-family="Arial,sans-serif" font-size="18" fill="#a2a2a2">Clear hierarchy at every size</text>
+    <text x="1050" y="128" class="detail">Variable weight · Regular through Black</text>
+  </g>
+  <path d="M88 500H1512" stroke="#292929"/>
+  <g transform="translate(88 550)">
+    <text y="0" class="index">02 / TECHNICAL DATA</text>
+    <text y="68" class="name">Geist Mono</text>
+    <text y="110" class="role">Identifiers · Timestamps · Hashes · Code · Technical labels</text>
+    <text y="148" class="detail">Technical data stays clear and aligned; an italic face is available for emphasis.</text>
+    <rect x="1020" y="-20" width="404" height="170" rx="15" fill="#ffffff" fill-opacity=".035" stroke="#ffffff" stroke-opacity=".12"/>
+    <text x="1050" y="48" class="mono">ID  0048  12:45</text>
+    <text x="1050" y="91" class="mono">SHA  a93f...7c2e</text>
+  </g>
+  <path d="M88 710H1512" stroke="#292929"/>
+  <g transform="translate(88 760)">
+    <text y="0" class="index">03 / NUMERICAL READOUTS</text>
+    <text y="68" class="name">DejaVu Sans</text>
+    <text y="110" class="role">Metrics · Animated counters · Percentages · Tabular values</text>
+    <text y="148" class="detail">Nothing OS-inspired numerical hierarchy for dashboard values and live counters.</text>
+    <rect x="1020" y="-20" width="404" height="170" rx="15" fill="#ffffff" fill-opacity=".035" stroke="#ffffff" stroke-opacity=".12"/>
+    <text x="1050" y="50" font-family="DejaVu Sans,sans-serif" font-size="32" font-weight="700" fill="#f4f4f4">0123456789</text>
+    <text x="1050" y="95" class="detail">Tabular lining figures · Bold and regular</text>
+  </g>
+  <path d="M88 930H1512" stroke="#292929"/>
+  <g transform="translate(88 980)">
+    <text y="0" class="index">04 / SHORT-FORM ACCENTS</text>
+    <text y="56" class="name">Geist Pixel</text>
+    <text y="94" class="role">Circle · Grid · Line · Square · Triangle</text>
+    <text y="126" class="detail">Small signal labels and decorative marks only; never long-form content.</text>
+    <rect x="1020" y="-28" width="404" height="150" rx="15" fill="#ffffff" fill-opacity=".035" stroke="#ffffff" stroke-opacity=".12"/>
+    <g transform="translate(1050 18)" fill="#d8d8d8">
+      <rect x="0" y="0" width="12" height="12"/><rect x="18" y="0" width="12" height="12"/><rect x="36" y="0" width="12" height="12"/>
+      <rect x="0" y="18" width="12" height="12"/><rect x="18" y="18" width="12" height="12"/><rect x="36" y="18" width="12" height="12"/>
+      <rect x="0" y="36" width="12" height="12"/><rect x="18" y="36" width="12" height="12"/><rect x="36" y="36" width="12" height="12"/>
+    </g>
+    <text x="1120" y="38" class="pixel">SIGNAL / 03</text>
+    <text x="1120" y="76" class="detail">Five variant families mapped in fonts.css</text>
+  </g>
+  <path d="M88 1150H1512" stroke="#292929"/>
+  <g transform="translate(88 1190)">
+    <text y="0" class="index">05 / GLYPH FALLBACK</text>
+    <text x="300" y="0" class="role">DejaVu Sans provides broad Unicode coverage, including Braille when the display face has no glyph.</text>
+  </g>
+</svg>

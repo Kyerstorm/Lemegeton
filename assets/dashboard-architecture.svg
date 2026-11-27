@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1320" viewBox="0 0 2000 1320" role="img" aria-labelledby="title desc">
+  <title id="title">Lemegeton dashboard request and data flow</title>
+  <desc id="desc">Browser requests pass through a statically exported Next.js frontend and the Rust Axum security boundary. Rust validates OAuth sessions, CSRF, rate limits and guild permissions before approved operations reach the private bot bridge. Bot and Rust share libSQL, while RocksDB stores private media objects.</desc>
+  <defs>
+    <style>
+      .bg{fill:#050505}.panel{fill:#0b0b0b;stroke:#686868;stroke-width:1.5}.inner{fill:#111;stroke:#414141;stroke-width:1}
+      .line{fill:none;stroke:#e6e6e6;stroke-width:2.2;marker-end:url(#arrow)}
+      .dash{fill:none;stroke:#aaa;stroke-width:2;stroke-dasharray:8 8;marker-end:url(#arrow)}
+      .rule{stroke:#3e3e3e;stroke-width:1}
+      .eyebrow{fill:#a0a0a0;font:600 15px Arial,sans-serif;letter-spacing:3px}
+      .title{fill:#fff;font:700 43px Arial,sans-serif;letter-spacing:4px}
+      .heading{fill:#f4f4f4;font:700 24px Arial,sans-serif}
+      .sub{fill:#eee;font:700 16px Arial,sans-serif;letter-spacing:1px}
+      .body{fill:#c4c4c4;font:16px Arial,sans-serif}
+      .mono{fill:#fff;font:700 16px 'SFMono-Regular',Consolas,monospace}
+      .small{fill:#929292;font:14px Arial,sans-serif}
+      .tag{fill:#151515;stroke:#555;stroke-width:1}.tagtext{fill:#ddd;font:14px Arial,sans-serif}
+    </style>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9Z" fill="#e6e6e6"/></marker>
+  </defs>
+  <rect class="bg" width="2000" height="1320"/>
+  <text x="64" y="66" class="eyebrow">LEMEGETON / WEB</text>
+  <text x="64" y="122" class="title">DASHBOARD CONTROL FLOW</text>
+  <text x="1936" y="70" class="eyebrow" text-anchor="end">STATIC FRONTEND / SERVER AUTHORITY</text>
+  <path class="rule" d="M64 156H1936"/>
+
+  <text x="64" y="214" class="eyebrow">01 — REQUEST PATH</text>
+  <rect class="panel" x="64" y="240" width="400" height="338" rx="12"/>
+  <text x="96" y="284" class="heading">Browser</text>
+  <path class="rule" d="M96 304H432"/>
+  <text x="96" y="348" class="sub">Next.js static export</text>
+  <text x="96" y="385" class="body">React · TypeScript · local assets</text>
+  <text x="96" y="431" class="mono">/login · /status</text>
+  <text x="96" y="465" class="mono">/user-id/guild-id/</text>
+  <text x="96" y="512" class="body">Guild tools · Atlas · public policy</text>
+  <text x="96" y="550" class="small">No bot token, DB credential or bridge secret.</text>
+
+  <path class="line" d="M464 408H520"/>
+  <rect class="panel" x="520" y="240" width="450" height="338" rx="12"/>
+  <text x="552" y="284" class="heading">Rust / Axum</text>
+  <path class="rule" d="M552 304H938"/>
+  <text x="552" y="348" class="sub">Authentication</text>
+  <text x="552" y="382" class="body">Discord OAuth · one-use state · sessions</text>
+  <text x="552" y="427" class="sub">Request protection</text>
+  <text x="552" y="461" class="body">Same-origin · CSRF · rate limits</text>
+  <text x="552" y="506" class="sub">Authorization</text>
+  <text x="552" y="540" class="body">Current guild and caller permissions</text>
+
+  <path class="line" d="M970 408H1026"/>
+  <rect class="panel" x="1026" y="240" width="370" height="338" rx="12"/>
+  <text x="1058" y="284" class="heading">Private bridge</text>
+  <path class="rule" d="M1058 304H1364"/>
+  <text x="1058" y="348" class="mono">Loopback only</text>
+  <text x="1058" y="390" class="body">Server-signed requests</text>
+  <text x="1058" y="426" class="body">Allow-listed operations</text>
+  <text x="1058" y="462" class="body">Guild-scoped payloads</text>
+  <text x="1058" y="535" class="small">Not a public endpoint.</text>
+
+  <path class="line" d="M1396 408H1452"/>
+  <rect class="panel" x="1452" y="240" width="484" height="338" rx="12"/>
+  <text x="1484" y="284" class="heading">TypeScript bot</text>
+  <path class="rule" d="M1484 304H1904"/>
+  <text x="1484" y="348" class="mono">bot.ts · src/registry.ts</text>
+  <text x="1484" y="390" class="body">Re-checks guild and action authority</text>
+  <text x="1484" y="426" class="body">Calls shared helpers and integrations</text>
+  <text x="1484" y="462" class="body">Uses the existing Discord gateway</text>
+  <text x="1484" y="535" class="small">No second bot client or command registry.</text>
+
+  <text x="64" y="658" class="eyebrow">02 — SHARED STATE AND STORAGE</text>
+  <path class="dash" d="M745 578V690H340V724"/>
+  <path class="dash" d="M745 690H1640V724"/>
+  <path class="dash" d="M1694 578V690H1040V724"/>
+  <rect class="panel" x="64" y="724" width="560" height="286" rx="12"/>
+  <text x="96" y="770" class="heading">Shared libSQL</text>
+  <path class="rule" d="M96 791H592"/>
+  <text x="96" y="835" class="mono">LIBSQL_PATH</text>
+  <text x="96" y="878" class="body">Guild configuration · profiles · archives</text>
+  <text x="96" y="912" class="body">Sessions · OAuth state · consent · audit</text>
+  <text x="96" y="965" class="small">One authoritative database for bot and Rust.</text>
+
+  <rect class="panel" x="664" y="724" width="560" height="286" rx="12"/>
+  <text x="696" y="770" class="heading">Private RocksDB</text>
+  <path class="rule" d="M696 791H1192"/>
+  <text x="696" y="835" class="mono">ROCKSDB_PATH</text>
+  <text x="696" y="878" class="body">Media and Custom Roles object bytes</text>
+  <text x="696" y="912" class="body">Chunked objects and SHA-256 metadata</text>
+  <text x="696" y="965" class="small">Ownership and access metadata remain in libSQL.</text>
+
+  <rect class="panel" x="1264" y="724" width="672" height="286" rx="12"/>
+  <text x="1296" y="770" class="heading">Static public surface</text>
+  <path class="rule" d="M1296 791H1904"/>
+  <text x="1296" y="835" class="mono">/how-it-works · /status · policy pages</text>
+  <text x="1296" y="878" class="body">Safe aggregate health projection</text>
+  <text x="1296" y="912" class="body">Canonical legal pages from docs/legal/</text>
+  <text x="1296" y="965" class="small">No sessions, guild records or private diagnostics.</text>
+
+  <text x="64" y="1090" class="eyebrow">03 — SECURITY INVARIANTS</text>
+  <rect class="tag" x="64" y="1120" width="430" height="78" rx="8"/>
+  <text x="88" y="1152" class="tagtext">OAuth tokens stay server-side</text>
+  <text x="88" y="1178" class="small">Only opaque session identifiers reach cookies.</text>
+  <rect class="tag" x="520" y="1120" width="430" height="78" rx="8"/>
+  <text x="544" y="1152" class="tagtext">CSRF and origin checks</text>
+  <text x="544" y="1178" class="small">Every protected mutation is validated.</text>
+  <rect class="tag" x="976" y="1120" width="430" height="78" rx="8"/>
+  <text x="1000" y="1152" class="tagtext">Guild authority is re-checked</text>
+  <text x="1000" y="1178" class="small">Browser claims never grant permission.</text>
+  <rect class="tag" x="1432" y="1120" width="504" height="78" rx="8"/>
+  <text x="1456" y="1152" class="tagtext">No public bridge or second database</text>
+  <text x="1456" y="1178" class="small">Bot and Rust share the same libSQL store.</text>
+  <text x="1936" y="1270" class="small" text-anchor="end">LEMEGETON / DASHBOARD BOUNDARY — V3</text>
+</svg>

@@ -1,0 +1,21 @@
+export const designTokens = {
+  color: {
+    background: "#050505",
+    surface: "#0b0b0b",
+    surfaceRaised: "#111111",
+    surfaceHover: "#181818",
+    border: "#2a2a2a",
+    borderSubtle: "#1d1d1d",
+    text: "#f5f5f5",
+    muted: "#9a9a9a",
+    subtle: "#c9c9c9",
+    accent: "#ffffff",
+    accentMuted: "#bdbdbd",
+    success: "#b8dfc2",
+    warning: "#e7cf98",
+    danger: "#efaaaa",
+  },
+  radius: { compact: "7px", control: "10px", panel: "14px", pill: "999px" },
+  spacing: { compact: "8px", control: "12px", section: "20px", page: "36px" },
+  interaction: { minimumTarget: "44px" },
+} as const;

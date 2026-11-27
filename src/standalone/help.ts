@@ -1,0 +1,22 @@
+import { EmbedBuilder, MessageFlags, SlashCommandBuilder, type ChatInputCommandInteraction } from "discord.js";
+import type { FeatureCommand } from "../../helpers/commands/command.js";
+import { emoji } from "../../helpers/emoji.js";
+import { EMBED_COLOURS } from "../../helpers/embeds/core.js";
+
+export class HelpCommand implements FeatureCommand {
+  readonly data = new SlashCommandBuilder().setName("help").setDescription("Explore Lemegeton's commands and features");
+  async execute(interaction: ChatInputCommandInteraction): Promise<void> {
+    const embed = new EmbedBuilder().setColor(EMBED_COLOURS.primary).setTitle(emoji.info + " Lemegeton · Help")
+      .setDescription("A media discovery and community bot. Open a feature command, then use its controls to explore the available workflows.")
+      .addFields(
+        { name: emoji.globe + " Media", value: "`/discover` — Search and explore anime, manga, novels, books, films, television and games.\n`/timeline` — Build cross-media release, publication and in-universe timelines.\n`/industry` — Browse media industry and market information.\n`/identify` — Identify an existing work from supported clues and metadata.", inline: false },
+        { name: emoji.tools + " Collaborative features", value: "`/exchange` — Request and shortlist community recommendations.\n`/relay` — Build a sequential collaborative story.\n`/workshop` — Collaborate on structured projects.\n`/capsule` — Collect contributions for a scheduled reveal.\n`/council` — Propose, amend and vote on server decisions.\n`/expedition` — Create persistent multi-stage challenges.\n`/casebook` — Build and solve fictional evidence-based mysteries.", inline: false },
+        { name: emoji.community + " Community", value: "`/archive` — Browse and contribute to the community archive.\n`/community` — Daily Drops, rankings, sessions and discussions.", inline: false },
+        { name: emoji.game + " Games & profiles", value: "`/play` — Source-backed media games.\n`/profile` — Connect AniList and Steam, manage privacy and compare interests.", inline: false },
+        { name: emoji.settings + " Server tools", value: "`/custom-role` — Member custom roles and server configuration.\n`/settings` — Enable or disable supported features.\n`/music` — Track artist releases across music providers.\n`/language` — Set this server's required language.\n`/moderators` — Manage bot-wide moderators (restricted to the moderator server).", inline: false },
+        { name: emoji.tools + " Utilities", value: "`/invite` — Get a server invite link.\n`/timestamp` — Create a Discord timestamp.\n`/convertlinks` — Convert AniList profiles to numeric URLs.", inline: false },
+        { name: emoji.info + " Support", value: "`/feedback` — Send an idea or bug report; include an issue reference when one was shown.\n`/privacy` — Read the data-use notice.\n`/planned` — Browse the development plan (bot moderators only).\n`/log` — Inspect issue diagnostics (bot moderators only).", inline: false },
+      ).setFooter({ text: emoji.globe + " Lemegeton · Use commands in a server" });
+    await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+  }
+}

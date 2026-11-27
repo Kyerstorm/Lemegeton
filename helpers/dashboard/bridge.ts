@@ -1,0 +1,1075 @@
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { isIP } from "node:net";
+import { ApplicationIntegrationType, InteractionContextType, type Client, type Guild } from "discord.js";
+import type { FeatureCommand } from "../commands/command.js";
+import type { BotConfig } from "../runtime/config.js";
+import { FEATURE_NAMES, getFeatureSettings, isFeatureName, setFeatureEnabled, type FeatureName } from "../runtime/settings.js";
+import { query, queryOne } from "../../src/utility/database/libsql/database.js";
+import { isGuildSetupComplete } from "../runtime/guild-retention.js";
+
+
+import { logger, readRecentLogs } from "../runtime/logger.js";
+import { createIssueLog } from "../runtime/issue-logs.js";
+import { getCommandAccessPolicies, saveCommandAccessPolicy, type RoleAccessMode, type ChannelAccessMode } from "../runtime/command-access.js";
+import { isBotModerator } from "../commands/moderation.js";
+import { dashboardConsentStatus, saveCurrentConsent } from "../security/terms-consent.js";
+import {
+  atlasProviderReference,
+  clusterAtlasGraph,
+  filterAtlasGraph,
+  findAtlasGraph,
+  findAtlasPath,
+  normalizeAtlasCategory,
+  normalizeAtlasProviderReference,
+  safeAtlasUrl,
+  type RelationshipSource,
+} from "../integration/atlas.js";
+import { renderAtlasGraphSnapshot, renderAtlasGraphSvgSnapshot } from "../media/atlas-renderer.js";
+import { DashboardBridgeError, isDashboardActorId } from "./permissions.js";
+import { getDashboardServerSettings, saveDashboardServerSettings, invitedDashboardGuildIds } from "./server-settings.js";
+import { getDashboardArchiveSettings, saveDashboardArchiveSettings } from "./archive-settings.js";
+
+
+const MAX_BODY_BYTES = 64 * 1024;
+const PROTECTED_COMMANDS = new Set(["settings", "language"]);
+const MODERATOR_COMMANDS = new Set(["log", "moderators", "planned", "adminlogin", "convertlinks"]);
+const SECTIONS: Record<string, string> = {
+  discover: "Discovery",
+  archive: "Archive",
+  community: "Community",
+  expedition: "Community",
+  casebook: "Community",
+  play: "Games",
+  profile: "Profile",
+  "custom-role": "Custom Roles",
+  music: "Music",
+  settings: "Server settings",
+};
+
+let server: Server | null = null;
+let startedAt = Date.now();
+const guildLocks = new Map<string, Promise<void>>();
+let hasBeenReady = false;
+
+export function isDashboardGuildId(value: unknown): value is string {
+  return typeof value === "string" && /^\d{17,20}$/.test(value);
+}
+
+function errorResponse(response: ServerResponse, status: number, message: string): void {
+  const body = Buffer.from(JSON.stringify({ error: message }));
+  response.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Length": String(body.length),
+    "Cache-Control": "no-store",
+  });
+  response.end(body);
+}
+
+function jsonResponse(response: ServerResponse, status: number, value: unknown): void {
+  const body = Buffer.from(JSON.stringify(value));
+  response.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Length": String(body.length),
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+  });
+  response.end(body);
+}
+
+export function dashboardSecretMatches(supplied: string, expected: string): boolean {
+  const left = Buffer.from(supplied, "utf8");
+  const right = Buffer.from(expected, "utf8");
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
+  const type = String(request.headers["content-type"] ?? "").split(";")[0]?.trim().toLowerCase();
+  if (type !== "application/json") throw new Error("Expected application/json.");
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += bytes.length;
+    if (size > MAX_BODY_BYTES) throw new Error("Request body is too large.");
+    chunks.push(bytes);
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(Buffer.concat(chunks, size).toString("utf8"));
+  } catch {
+    throw new Error("Invalid JSON body.");
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Expected a JSON object.");
+  return value as Record<string, unknown>;
+}
+
+export function dashboardCommandRows(commands: FeatureCommand[], settings: Awaited<ReturnType<typeof getFeatureSettings>>) {
+  return commands.filter(command => !MODERATOR_COMMANDS.has(command.data.name)).map(command => {
+    const definition = command.data.toJSON();
+    const name = command.data.name;
+    const feature = isFeatureName(name) ? name : null;
+    return {
+      fullname: name,
+      name,
+      description: definition.description || "No description provided.",
+      section: SECTIONS[name] ?? "Other",
+      type: "slash",
+      scope: "guild",
+      aliases: [],
+      required_permissions: definition.default_member_permissions ?? null,
+      protected: PROTECTED_COMMANDS.has(name),
+      configurable: feature !== null,
+      enabled: feature ? settings[feature] : true,
+    };
+  });
+}
+
+function guildFor(client: Client, guildId: string): Guild | null {
+  if (!isDashboardGuildId(guildId)) return null;
+  return client.guilds.cache.get(guildId) ?? null;
+}
+
+async function recordAudit(guildId: string, actorId: string, action: string, details: string): Promise<void> {
+  await query(
+    "INSERT INTO dashboard_audit_log (guild_id, actor_id, action, details) VALUES ($1,$2,$3,$4)",
+    [guildId, actorId, action.slice(0, 64), details.slice(0, 2000)],
+  );
+}
+
+export function dashboardGlobalCommandPayload(commands: FeatureCommand[]) {
+  return commands
+    .filter(command => !MODERATOR_COMMANDS.has(command.data.name))
+    .map(command => ({
+      ...command.data.toJSON(),
+      contexts: [InteractionContextType.Guild],
+      integration_types: [ApplicationIntegrationType.GuildInstall],
+    }));
+}
+
+async function syncGlobalCommands(client: Client, commands: FeatureCommand[]): Promise<number> {
+  if (!client.application) throw new Error("The Discord application is not ready.");
+  const registered = await client.application.commands.set(dashboardGlobalCommandPayload(commands));
+  return registered.size;
+}
+
+async function withGuildLock<T>(guildId: string, operation: () => Promise<T>): Promise<T> {
+  const prior = guildLocks.get(guildId) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>(resolve => { release = resolve; });
+  const chain = prior.then(() => current);
+  guildLocks.set(guildId, chain);
+  await prior;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (guildLocks.get(guildId) === chain) guildLocks.delete(guildId);
+  }
+}
+
+export async function collectRuntimeHealth(
+  client: Client,
+  commands: FeatureCommand[],
+  databasePing: () => Promise<void> = async () => {
+    await queryOne<{ ready: number }>("SELECT 1 AS ready");
+  },
+): Promise<Record<string, unknown>> {
+  const ready = client.isReady();
+  if (ready) hasBeenReady = true;
+  const latency = ready && client.ws.ping >= 0 ? client.ws.ping : null;
+  let databaseStatus: "online" | "offline" = "offline";
+  let databaseLatency: number | null = null;
+  const databaseStartedAt = Date.now();
+  try {
+    await databasePing();
+    databaseStatus = "online";
+    databaseLatency = Math.max(0, Date.now() - databaseStartedAt);
+  } catch {
+    // Report dependency state, not driver errors or connection details.
+  }
+  const status = ready
+    ? latency !== null && latency >= 500 || databaseStatus === "offline" ? "degraded" : "online"
+    : hasBeenReady ? "offline" : "connecting";
+  return {
+    status,
+    ready,
+    latency_ms: latency,
+    database: {
+      status: databaseStatus,
+      latency_ms: databaseLatency,
+    },
+    guild_count: client.guilds.cache.size,
+    command_count: commands.length,
+    commands: commands.map(command => command.data.name),
+    uptime_seconds: Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
+    node_version: process.versions.node,
+    checked_at: Math.floor(Date.now() / 1000),
+  };
+}
+
+async function guilds(client: Client): Promise<Record<string, unknown>[]> {
+  return [...client.guilds.cache.values()]
+    .map(guild => ({
+      id: guild.id,
+      name: guild.name,
+      icon: guild.iconURL({ extension: "png", size: 64 }),
+      member_count: guild.memberCount ?? null,
+    }))
+    .sort((left, right) => String(left.name).localeCompare(String(right.name)));
+}
+
+async function overview(
+  client: Client,
+  commands: FeatureCommand[],
+  guild: Guild,
+): Promise<Record<string, unknown>> {
+  const settings = await getFeatureSettings(guild.id);
+  const rows = dashboardCommandRows(commands, settings);
+  const state = await collectRuntimeHealth(client, commands);
+  return {
+    guild: { id: guild.id, name: guild.name },
+    bot: {
+      ready: state.ready,
+      status: state.status,
+      latency_ms: state.latency_ms,
+      database: state.database,
+      guild_count: state.guild_count,
+      member_count: guild.memberCount ?? null,
+      command_count: commands.length,
+      commands: commands.map(command => command.data.name),
+    },
+    commands: {
+      total: rows.length,
+      enabled: rows.filter(row => row.enabled).length,
+      disabled: rows.filter(row => !row.enabled).length,
+    },
+  };
+}
+
+async function commandList(commands: FeatureCommand[], guildId: string): Promise<Record<string, unknown>> {
+  const settings = await getFeatureSettings(guildId);
+  const revision = createHash("sha256")
+    .update(JSON.stringify(FEATURE_NAMES.map(feature => [feature, settings[feature]])))
+    .digest("hex");
+  return { commands: dashboardCommandRows(commands, settings), revision };
+}
+
+async function setCommand(
+  request: IncomingMessage,
+  response: ServerResponse,
+  client: Client,
+  commands: FeatureCommand[],
+  guild: Guild,
+  fullname: string,
+): Promise<void> {
+  await withGuildLock(guild.id, async () => {
+    let body: Record<string, unknown>;
+    try {
+      body = await readJson(request);
+    } catch (error) {
+      errorResponse(response, 400, error instanceof Error ? error.message : "Invalid request body.");
+      return;
+    }
+    if (typeof body.enabled !== "boolean" || !isDashboardGuildId(String(body.actor_id ?? ""))) {
+      errorResponse(response, 400, "enabled must be a boolean and actor_id must be a valid Discord ID.");
+      return;
+    }
+    const feature = fullname as FeatureName;
+    if (!isFeatureName(fullname) || !commands.some(command => command.data.name === fullname)) {
+      errorResponse(response, 404, "Command is not registered for dashboard management.");
+      return;
+    }
+    if (PROTECTED_COMMANDS.has(fullname)) {
+      errorResponse(response, 403, "This system command is protected.");
+      return;
+    }
+    const before = await getFeatureSettings(guild.id);
+    const previous = before[feature];
+    if (previous === body.enabled) {
+      jsonResponse(response, 200, { fullname, enabled: previous, synced: true });
+      return;
+    }
+    try {
+      await setFeatureEnabled(guild.id, feature, body.enabled, String(body.actor_id));
+      await syncGlobalCommands(client, commands);
+      await recordAudit(
+        guild.id,
+        String(body.actor_id),
+        "toggle_command",
+        fullname + " -> " + (body.enabled ? "enabled" : "disabled"),
+      );
+    } catch (error) {
+      await setFeatureEnabled(guild.id, feature, previous, String(body.actor_id)).catch(() => undefined);
+      logger.error("Dashboard command toggle failed", {
+        guildId: guild.id,
+        command: fullname,
+        reason: error instanceof Error ? error.message : "Unknown error",
+      });
+      errorResponse(response, 503, "The command change failed. The previous configuration was restored where possible.");
+      return;
+    }
+    jsonResponse(response, 200, { fullname, enabled: body.enabled, synced: true });
+  });
+}
+
+
+async function saveCommandSettings(
+  request: IncomingMessage,
+  response: ServerResponse,
+  client: Client,
+  commands: FeatureCommand[],
+  guild: Guild,
+): Promise<void> {
+  await withGuildLock(guild.id, async () => {
+    let body: Record<string, unknown>;
+    try { body = await readJson(request); }
+    catch (error) {
+      errorResponse(response, 400, error instanceof Error ? error.message : "Invalid request body.");
+      return;
+    }
+    const actorId = String(body.actor_id ?? "");
+    const expectedRevision = String(body.expected_revision ?? "");
+    const updates = body.updates;
+    if (!isDashboardGuildId(actorId) || !/^[a-f0-9]{64}$/.test(expectedRevision)
+      || !Array.isArray(updates) || updates.length > FEATURE_NAMES.length) {
+      errorResponse(response, 400, "A valid actor, revision, and command update list are required.");
+      return;
+    }
+    const requested = new Map<string, boolean>();
+    for (const item of updates) {
+      if (!item || typeof item !== "object" || typeof (item as Record<string, unknown>).fullname !== "string"
+        || typeof (item as Record<string, unknown>).enabled !== "boolean") {
+        errorResponse(response, 400, "Each command update needs a name and enabled state.");
+        return;
+      }
+      const value = item as Record<string, unknown>;
+      const fullname = String(value.fullname);
+      if (!isFeatureName(fullname) || !commands.some(command => command.data.name === fullname)) {
+        errorResponse(response, 404, "A command is not registered for dashboard management.");
+        return;
+      }
+      if (PROTECTED_COMMANDS.has(fullname)) {
+        errorResponse(response, 403, "A protected system command cannot be changed.");
+        return;
+      }
+      if (requested.has(fullname)) {
+        errorResponse(response, 400, "A command may only appear once in a save operation.");
+        return;
+      }
+      requested.set(fullname, value.enabled as boolean);
+    }
+    const before = await getFeatureSettings(guild.id);
+    const liveRevision = createHash("sha256")
+      .update(JSON.stringify(FEATURE_NAMES.map(feature => [feature, before[feature]])))
+      .digest("hex");
+    if (liveRevision !== expectedRevision) {
+      errorResponse(response, 409, "The server configuration changed elsewhere. Refresh the command list before saving these drafts.");
+      return;
+    }
+    const changed = [...requested.entries()].filter(([feature, enabled]) => before[feature as FeatureName] !== enabled);
+    if (!changed.length) {
+      jsonResponse(response, 200, { ok: true, commands: dashboardCommandRows(commands, before), revision: liveRevision });
+      return;
+    }
+    try {
+      for (const [feature, enabled] of changed) {
+        await setFeatureEnabled(guild.id, feature as FeatureName, enabled, actorId);
+      }
+      await syncGlobalCommands(client, commands);
+      await recordAudit(guild.id, actorId, "save_command_settings",
+        changed.map(([feature, enabled]) => feature + " -> " + (enabled ? "enabled" : "disabled")).join("; "));
+    } catch (error) {
+      for (const [feature] of changed) {
+        await setFeatureEnabled(guild.id, feature as FeatureName, before[feature as FeatureName], actorId).catch(() => undefined);
+      }
+      await syncGlobalCommands(client, commands).catch(() => undefined);
+      logger.error("Dashboard command batch save failed", {
+        guildId: guild.id,
+        reason: error instanceof Error ? error.message : "Unknown error",
+      });
+      errorResponse(response, 503, "The command changes could not be synchronized. The previous configuration was restored where possible.");
+      return;
+    }
+    const saved = await getFeatureSettings(guild.id);
+    const revision = createHash("sha256")
+      .update(JSON.stringify(FEATURE_NAMES.map(feature => [feature, saved[feature]])))
+      .digest("hex");
+    jsonResponse(response, 200, { ok: true, commands: dashboardCommandRows(commands, saved), revision });
+  });
+}
+
+async function syncGuild(
+  request: IncomingMessage,
+  response: ServerResponse,
+  client: Client,
+  commands: FeatureCommand[],
+  guild: Guild,
+): Promise<void> {
+  await withGuildLock(guild.id, async () => {
+    let body: Record<string, unknown>;
+    try {
+      body = await readJson(request);
+    } catch (error) {
+      errorResponse(response, 400, error instanceof Error ? error.message : "Invalid request body.");
+      return;
+    }
+    if (!isDashboardGuildId(String(body.actor_id ?? ""))) {
+      errorResponse(response, 400, "Invalid dashboard actor.");
+      return;
+    }
+    try {
+      const count = await syncGlobalCommands(client, commands);
+      await recordAudit(guild.id, String(body.actor_id), "sync_commands", "Published the v3 slash command registry.");
+      jsonResponse(response, 200, { synced: count, ok: true });
+    } catch (error) {
+      logger.error("Dashboard command synchronization failed", {
+        guildId: guild.id,
+        reason: error instanceof Error ? error.message : "Unknown error",
+      });
+      errorResponse(response, 502, "Discord did not confirm command synchronization.");
+    }
+  });
+}
+
+async function resetGuild(
+  request: IncomingMessage,
+  response: ServerResponse,
+  client: Client,
+  commands: FeatureCommand[],
+  guild: Guild,
+): Promise<void> {
+  await withGuildLock(guild.id, async () => {
+    let body: Record<string, unknown>;
+    try {
+      body = await readJson(request);
+    } catch (error) {
+      errorResponse(response, 400, error instanceof Error ? error.message : "Invalid request body.");
+      return;
+    }
+    if (!isDashboardGuildId(String(body.actor_id ?? ""))) {
+      errorResponse(response, 400, "Invalid dashboard actor.");
+      return;
+    }
+    const actorId = String(body.actor_id);
+    const before = await getFeatureSettings(guild.id);
+    try {
+      for (const feature of FEATURE_NAMES) await setFeatureEnabled(guild.id, feature, true, actorId);
+      await syncGlobalCommands(client, commands);
+      await recordAudit(guild.id, actorId, "reset_dashboard", "Reset v3 feature settings to their enabled defaults.");
+    } catch (error) {
+      for (const feature of FEATURE_NAMES) {
+        await setFeatureEnabled(guild.id, feature, before[feature], actorId).catch(() => undefined);
+      }
+      logger.error("Dashboard reset failed", {
+        guildId: guild.id,
+        reason: error instanceof Error ? error.message : "Unknown error",
+      });
+      errorResponse(response, 503, "Reset failed. The previous configuration was restored where possible.");
+      return;
+    }
+    jsonResponse(response, 200, { ok: true, reset: true });
+  });
+}
+
+
+async function commandAccessOptions(guild: Guild): Promise<Record<string, unknown>> {
+  const [roles, channels, policies] = await Promise.all([
+    guild.roles.fetch(),
+    guild.channels.fetch(),
+    getCommandAccessPolicies(guild.id),
+  ]);
+  return {
+    roles: [...roles.values()]
+      .filter(role => role.id !== guild.id && !role.managed)
+      .map(role => ({ id: role.id, name: role.name }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    channels: [...channels.values()]
+      .flatMap(channel => channel && channel.isTextBased() && "name" in channel
+        ? [{ id: channel.id, name: channel.name, type: channel.type }]
+        : [])
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    policies,
+  };
+}
+
+async function saveCommandAccess(
+  request: IncomingMessage,
+  response: ServerResponse,
+  commands: FeatureCommand[],
+  guild: Guild,
+  fullname: string,
+): Promise<void> {
+  let body: Record<string, unknown>;
+  try { body = await readJson(request); }
+  catch (error) {
+    errorResponse(response, 400, error instanceof Error ? error.message : "Invalid request body.");
+    return;
+  }
+  const actorId = String(body.actor_id ?? "");
+  const expectedRevision = Number(body.expected_revision);
+  const roleMode = body.role_mode;
+  const channelMode = body.channel_mode;
+  const roleIds = body.role_ids;
+  const channelIds = body.channel_ids;
+  if (!isDashboardGuildId(actorId) || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0
+    || !["everyone", "include", "exclude"].includes(String(roleMode))
+    || !["all", "include", "exclude"].includes(String(channelMode))
+    || !Array.isArray(roleIds) || roleIds.length > 100
+    || !Array.isArray(channelIds) || channelIds.length > 100
+    || [...roleIds, ...channelIds].some(id => typeof id !== "string" || !/^\d{17,20}$/.test(id))) {
+    errorResponse(response, 400, "Choose valid role and channel access rules.");
+    return;
+  }
+  if (!commands.some(command => command.data.name === fullname) || PROTECTED_COMMANDS.has(fullname)
+    || MODERATOR_COMMANDS.has(fullname)) {
+    errorResponse(response, 403, "This command's access is managed by the bot and cannot be changed here.");
+    return;
+  }
+  const uniqueRoles = [...new Set(roleIds as string[])];
+  const uniqueChannels = [...new Set(channelIds as string[])];
+  if (uniqueRoles.length !== roleIds.length || uniqueChannels.length !== channelIds.length) {
+    errorResponse(response, 400, "A role or channel was selected more than once.");
+    return;
+  }
+  try {
+    const [roles, channels] = await Promise.all([guild.roles.fetch(), guild.channels.fetch()]);
+    if (uniqueRoles.some(id => !roles.has(id) || roles.get(id)?.managed || id === guild.id)
+      || uniqueChannels.some(id => !channels.has(id) || !channels.get(id)?.isTextBased())) {
+      errorResponse(response, 400, "Every selected role and channel must still belong to this server.");
+      return;
+    }
+    const result = await saveCommandAccessPolicy(
+      guild.id, fullname, actorId, expectedRevision,
+      {
+        role_mode: roleMode as RoleAccessMode,
+        role_ids: uniqueRoles,
+        channel_mode: channelMode as ChannelAccessMode,
+        channel_ids: uniqueChannels,
+      },
+    );
+    if (!result) {
+      errorResponse(response, 409, "This command's access rules changed elsewhere. Refresh before saving.");
+      return;
+    }
+    await recordAudit(guild.id, actorId, "save_command_access", "/" + fullname + " access rules updated.")
+      .catch(error => logger.warn("Command access policy was saved but its audit event could not be recorded", {
+        guildId: guild.id, command: fullname,
+        reason: error instanceof Error ? error.message : "Unknown error",
+      }));
+    jsonResponse(response, 200, { ok: true, policy: result });
+  } catch (error) {
+    logger.error("Command access policy save failed", {
+      guildId: guild.id, command: fullname,
+      reason: error instanceof Error ? error.message : "Unknown error",
+    });
+    errorResponse(response, 503, "Command access rules could not be saved.");
+  }
+}
+
+async function auditEntries(
+  guildId: string,
+  limit: number,
+  cursor: string | null,
+): Promise<{ entries: Record<string, unknown>[]; next_cursor: string | null; has_more: boolean }> {
+  const rows = await query<{
+    id: string;
+    actor_id: string;
+    action: string;
+    details: string;
+    created_at: Date | string;
+  }>(
+    "SELECT id::text AS id,actor_id::text,action,details,created_at FROM dashboard_audit_log WHERE guild_id=$1 AND ($2 IS NULL OR id<CAST($2 AS BIGINT)) ORDER BY id DESC LIMIT $3",
+    [guildId, cursor, limit + 1],
+  );
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  return {
+    entries: page.map(row => ({
+      id: row.id,
+      ts: row.created_at instanceof Date ? row.created_at.toISOString() : new Date(row.created_at).toISOString(),
+      actor_id: row.actor_id,
+      action: row.action,
+      details: row.details,
+    })),
+    next_cursor: hasMore ? page.at(-1)?.id ?? null : null,
+    has_more: hasMore,
+  };
+}
+
+async function databaseResources(guildId: string): Promise<Record<string, unknown>[]> {
+  const [features, archives, customRoles, users, assets] = await Promise.all([
+    queryOne<{ count: string }>("SELECT COUNT(*)::text AS count FROM guild_feature_settings WHERE guild_id=$1", [guildId]),
+    queryOne<{ count: string }>("SELECT COUNT(*)::text AS count FROM community_archive_entries WHERE created_guild_id=$1", [guildId]),
+    queryOne<{ count: string }>("SELECT COUNT(*)::text AS count FROM custom_role_records WHERE guild_id=$1", [guildId]),
+    queryOne<{ count: string }>("SELECT COUNT(*)::text AS count FROM users WHERE guild_id=$1", [guildId]),
+    queryOne<{ count: string }>("SELECT COUNT(*)::text AS count FROM media_assets WHERE guild_id=$1", [guildId]),
+  ]);
+  return [
+    { name: "Guild feature settings", purpose: "Per-server v3 command availability", state: "Available", detail: String(features?.count ?? "0") + " feature overrides" },
+    { name: "Community archive", purpose: "Guild-scoped archive entries", state: "Available", detail: String(archives?.count ?? "0") + " entries" },
+    { name: "Custom Roles", purpose: "Member role settings and restoration state", state: "Available", detail: String(customRoles?.count ?? "0") + " member records" },
+    { name: "Media profiles", purpose: "Guild-scoped AniList and Steam connections", state: "Available", detail: String(users?.count ?? "0") + " linked profiles" },
+    { name: "Media assets", purpose: "Private RocksDB asset registry", state: "Available", detail: String(assets?.count ?? "0") + " registered assets" },
+  ];
+}
+
+function integrations(config: BotConfig): Record<string, unknown>[] {
+  return [
+    { name: "AniList", configured: Boolean(config.anilistApiUrl), detail: "Anime, manga and light-novel metadata" },
+    { name: "Steam", configured: Boolean(config.steamApiKey), detail: "Game and player metadata" },
+    { name: "IGDB", configured: Boolean(config.igdbClientId && config.igdbClientSecret), detail: "Video-game metadata and artwork" },
+    { name: "TMDB", configured: Boolean(config.tmdbBearerToken), detail: "Film and television metadata" },
+    { name: "Google Books", configured: Boolean(config.googleBooksApiKey), detail: "Book and edition metadata" },
+    { name: "Private RocksDB storage", configured: Boolean(config.rocksDbPath), detail: "Private archive and role-icon assets" },
+  ];
+}
+
+async function handleRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  client: Client,
+  commands: FeatureCommand[],
+  config: BotConfig,
+  secret: string,
+): Promise<void> {
+  const authorization = String(request.headers.authorization ?? "");
+  const supplied = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+  if (!dashboardSecretMatches(supplied, secret)) {
+    errorResponse(response, 401, "Unauthorized internal dashboard request.");
+    return;
+  }
+  if (request.method === "GET" && request.url === "/health") {
+    jsonResponse(response, 200, await collectRuntimeHealth(client, commands));
+    return;
+  }
+  const url = new URL(request.url ?? "/", "http://127.0.0.1");
+  if (request.method === "POST" && url.pathname === "/issues") {
+    let body: Record<string, unknown>;
+    try { body = await readJson(request); }
+    catch {
+      errorResponse(response, 400, "The diagnostic report could not be accepted.");
+      return;
+    }
+
+    const guildId = typeof body.guild_id === "string" ? body.guild_id : "";
+    const userId = typeof body.user_id === "string" ? body.user_id : "";
+    const username = typeof body.username === "string" ? body.username.slice(0, 120) : "Dashboard user";
+    const component = typeof body.component === "string" ? body.component : "";
+    const path = typeof body.path === "string" ? body.path : "";
+    const message = typeof body.message === "string" ? body.message : "";
+    const stack = typeof body.stack === "string" ? body.stack : "";
+
+    if (!isDashboardGuildId(guildId) || !isDashboardActorId(userId)
+      || !/^[a-z0-9._-]{1,80}$/i.test(component)
+      || !path.startsWith("/") || path.length > 512 || /[?#]/.test(path)
+      || !message.trim() || message.length > 2_000 || stack.length > 12_000) {
+      errorResponse(response, 400, "The diagnostic report contains invalid fields.");
+      return;
+    }
+
+    const diagnostic = new Error(message);
+    diagnostic.name = "DashboardError";
+    if (stack) diagnostic.stack = stack;
+
+    try {
+      const issueReference = await createIssueLog({
+        guildId,
+        userId,
+        username,
+        interactionId: randomUUID(),
+        channelId: null,
+        command: "dashboard." + component,
+        details: { source: "dashboard", component, path },
+        error: diagnostic,
+      });
+      jsonResponse(response, 201, { issue_reference: issueReference });
+    } catch (error) {
+      logger.error("Could not persist dashboard issue diagnostic record", {
+        component,
+        path,
+        reason: error instanceof Error ? error.message : "Unknown logging error",
+      });
+      errorResponse(response, 503, "The diagnostic record could not be saved.");
+    }
+    return;
+  }
+  const consentRoute = /^\/users\/(\d{17,20})\/consent$/.exec(url.pathname);
+  if (consentRoute && request.method === "GET") {
+    jsonResponse(response, 200, await dashboardConsentStatus(consentRoute[1]!));
+    return;
+  }
+  if (consentRoute && request.method === "POST") {
+    let body: Record<string, unknown>;
+    try { body = await readJson(request); }
+    catch (error) {
+      errorResponse(response, 400, error instanceof Error ? error.message : "Invalid request body.");
+      return;
+    }
+    if (body.accepted !== true) {
+      errorResponse(response, 400, "Explicit acceptance of the current policies is required.");
+      return;
+    }
+    await saveCurrentConsent(consentRoute[1]!);
+    jsonResponse(response, 200, await dashboardConsentStatus(consentRoute[1]!));
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/guilds") {
+    jsonResponse(response, 200, [...client.guilds.cache.values()].map(guild => ({
+      id: guild.id,
+      name: guild.name,
+      icon: guild.iconURL(),
+      member_count: guild.memberCount,
+    })));
+    return;
+  }
+
+  const moderatorRoute = /^\/moderators\/(\d{17,20})$/.exec(url.pathname);
+  if (request.method === "GET" && moderatorRoute) {
+    jsonResponse(response, 200, {
+      moderator: await isBotModerator(moderatorRoute[1]!, config.adminDiscordId),
+    });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/atlas") {
+    const guildId = url.searchParams.get("guild_id") ?? "";
+    const title = (url.searchParams.get("title") ?? "").trim();
+    const category = normalizeAtlasCategory(url.searchParams.get("category") ?? "");
+    const rawUrl = url.searchParams.get("url");
+    const safeUrl = safeAtlasUrl(rawUrl);
+    if (!isDashboardActorId(guildId) || !title || title.length > 256 || !category || (rawUrl && !safeUrl)) {
+      errorResponse(response, 400, "A valid server ID, title, category and public HTTPS media URL are required.");
+      return;
+    }
+
+    const provider = url.searchParams.get("provider");
+    const providerId = url.searchParams.get("provider_id");
+    const identity = normalizeAtlasProviderReference(provider, providerId);
+    if ((provider !== null || providerId !== null) && !identity) {
+      errorResponse(response, 400, "The Atlas provider identity is invalid.");
+      return;
+    }
+    const inferredIdentity = identity ?? atlasProviderReference(category, safeUrl);
+    const root = {
+      title,
+      category,
+      url: safeUrl,
+      provider: inferredIdentity?.provider ?? null,
+      providerId: inferredIdentity?.providerId ?? null,
+    };
+
+    const maxDepth = Number(url.searchParams.get("max_depth") ?? 2);
+    const maxNodes = Number(url.searchParams.get("max_nodes") ?? 24);
+    if (!Number.isInteger(maxDepth) || maxDepth < 1 || maxDepth > 3
+      || !Number.isInteger(maxNodes) || maxNodes < 1 || maxNodes > 40) {
+      errorResponse(response, 400, "Atlas graph depth is limited to 3 and graph size to 40 nodes.");
+      return;
+    }
+
+    const filterCategoryRaw = url.searchParams.get("filter_category");
+    const filterCategory = filterCategoryRaw ? normalizeAtlasCategory(filterCategoryRaw) : null;
+    const sourceKindRaw = url.searchParams.get("source_kind");
+    const sourceKind = sourceKindRaw === "provider" || sourceKindRaw === "recommendation" || sourceKindRaw === "community"
+      ? sourceKindRaw as RelationshipSource : null;
+    const providerFilter = url.searchParams.get("provider_filter");
+    const providerIdFilter = url.searchParams.get("provider_id_filter");
+    const filterIdentity = normalizeAtlasProviderReference(providerFilter, providerIdFilter);
+    if ((filterCategoryRaw && !filterCategory) || (sourceKindRaw && !sourceKind)
+      || ((providerFilter !== null || providerIdFilter !== null) && !filterIdentity)) {
+      errorResponse(response, 400, "One or more Atlas filters are invalid.");
+      return;
+    }
+
+    const graph = await findAtlasGraph(guildId, root, { maxDepth, maxNodes });
+    const filtered = filterAtlasGraph(graph, {
+      query: url.searchParams.get("query") ?? "",
+      category: filterCategory ?? undefined,
+      relationshipType: url.searchParams.get("relationship_type") ?? "",
+      sourceKind: sourceKind ?? undefined,
+      provider: filterIdentity?.provider,
+      providerId: filterIdentity?.providerId,
+      evidence: url.searchParams.get("evidence") ?? "",
+    });
+
+    let pathResult: Awaited<ReturnType<typeof findAtlasPath>> = null;
+    const targetTitle = url.searchParams.get("target_title");
+    const targetCategoryRaw = url.searchParams.get("target_category");
+    if (targetTitle !== null || targetCategoryRaw !== null) {
+      const targetCategory = normalizeAtlasCategory(targetCategoryRaw ?? "");
+      const targetUrlRaw = url.searchParams.get("target_url");
+      const targetUrl = safeAtlasUrl(targetUrlRaw);
+      const targetProvider = url.searchParams.get("target_provider");
+      const targetProviderId = url.searchParams.get("target_provider_id");
+      const targetIdentity = normalizeAtlasProviderReference(targetProvider, targetProviderId);
+      if (!targetTitle?.trim() || targetTitle.length > 256 || !targetCategory
+        || (targetUrlRaw && !targetUrl)
+        || ((targetProvider !== null || targetProviderId !== null) && !targetIdentity)) {
+        errorResponse(response, 400, "The Atlas path target is invalid.");
+        return;
+      }
+      pathResult = findAtlasPath(filtered, {
+        title: targetTitle.trim(),
+        category: targetCategory,
+        url: targetUrl,
+        provider: targetIdentity?.provider,
+        providerId: targetIdentity?.providerId,
+      });
+    }
+
+    const clusters = clusterAtlasGraph(filtered);
+    let exportData: { filename: string; mimeType: string; base64: string } | undefined;
+    const exportFormat = url.searchParams.get("export");
+    if (exportFormat && exportFormat !== "json" && exportFormat !== "svg" && exportFormat !== "png") {
+      errorResponse(response, 400, "Atlas exports support JSON, SVG and PNG.");
+      return;
+    }
+    if (exportFormat === "svg" || exportFormat === "png") {
+      const image = exportFormat === "svg"
+        ? await renderAtlasGraphSvgSnapshot(title, category, filtered, pathResult)
+        : await renderAtlasGraphSnapshot(title, category, filtered, pathResult);
+      const slug = title.toLocaleLowerCase("en-US").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "media";
+      exportData = {
+        filename: "lemegeton-atlas-" + slug + "." + exportFormat,
+        mimeType: exportFormat === "svg" ? "image/svg+xml" : "image/png",
+        base64: image.toString("base64"),
+      };
+    }
+
+    jsonResponse(response, 200, {
+      root,
+      relationships: filtered.directRelationships,
+      graph: {
+        rootId: filtered.rootId,
+        nodes: filtered.nodes,
+        edges: filtered.edges,
+        truncated: filtered.truncated,
+      },
+      clusters,
+      path: pathResult,
+      ...(exportData ? { export: exportData } : {}),
+    });
+    return;
+  }
+
+  const guildRoute = /^\/guilds\/(\d{17,20})(?:\/|$)/.exec(url.pathname);
+  const invitedGuildRoute = /^\/invited-guilds\/(\d{17,20})$/.exec(url.pathname);
+  if (request.method === "GET" && invitedGuildRoute) {
+    jsonResponse(response, 200, { guild_ids: await invitedDashboardGuildIds(invitedGuildRoute[1]!) });
+    return;
+  }
+
+  const setupRoute = /^\/guilds\/(\d{17,20})\/settings$/.exec(url.pathname);
+  if (guildRoute && !setupRoute && !await isGuildSetupComplete(guildRoute[1]!)) {
+    errorResponse(response, 423, "Required server data-retention and language setup must be completed before dashboard features can be used.");
+    return;
+  }
+
+  let match = /^\/guilds\/(\d{17,20})\/settings$/.exec(url.pathname);
+  if (match && (request.method === "GET" || request.method === "PUT")) {
+    const guild = guildFor(client, match[1]!);
+    if (!guild) { errorResponse(response, 404, "The bot is no longer in this server."); return; }
+    const actorId = url.searchParams.get("actor_id") ?? "";
+    if (!isDashboardActorId(actorId)) { errorResponse(response, 400, "A valid dashboard actor is required."); return; }
+    if (request.method === "GET") {
+      try {
+        jsonResponse(response, 200, await getDashboardServerSettings(guild, actorId));
+      } catch (error) {
+        errorResponse(response, error instanceof DashboardBridgeError ? error.status : 503,
+          error instanceof Error ? error.message : "Server settings could not be loaded.");
+      }
+      return;
+    }
+
+    await withGuildLock(guild.id, async () => {
+      let body: Record<string, unknown>;
+      try { body = await readJson(request); }
+      catch (error) {
+        errorResponse(response, 400, error instanceof Error ? error.message : "Invalid request body.");
+        return;
+      }
+      try {
+        const settings = await saveDashboardServerSettings(guild, actorId, body);
+        await recordAudit(guild.id, actorId, "save_server_setup", "Updated server data-retention and language settings.");
+        jsonResponse(response, 200, settings);
+      } catch (error) {
+        errorResponse(response, error instanceof DashboardBridgeError ? error.status : 400,
+          error instanceof Error ? error.message : "Server settings could not be saved.");
+      }
+    });
+    return;
+  }
+
+  match = /^\/guilds\/(\d{17,20})\/archive-settings$/.exec(url.pathname);
+  if (match && (request.method === "GET" || request.method === "PUT")) {
+    const guild = guildFor(client, match[1]!);
+    if (!guild) { errorResponse(response, 404, "The bot is no longer in this server."); return; }
+    if (request.method === "GET") {
+      try {
+        jsonResponse(response, 200, await getDashboardArchiveSettings(guild));
+      } catch (error) {
+        errorResponse(response, error instanceof DashboardBridgeError ? error.status : 503,
+          error instanceof Error ? error.message : "Archive settings could not be loaded.");
+      }
+      return;
+    }
+
+    await withGuildLock(guild.id, async () => {
+      let body: Record<string, unknown>;
+      try { body = await readJson(request); }
+      catch (error) {
+        errorResponse(response, 400, error instanceof Error ? error.message : "Invalid request body.");
+        return;
+      }
+      const actorId = String(body.actor_id ?? "");
+      try {
+        const settings = await saveDashboardArchiveSettings(guild, actorId, body.settings);
+        await recordAudit(guild.id, actorId, "save_archive_settings", "Updated Archive categories, uploads and channel settings.");
+        jsonResponse(response, 200, { settings });
+      } catch (error) {
+        errorResponse(response, error instanceof DashboardBridgeError ? error.status : 400,
+          error instanceof Error ? error.message : "Archive settings could not be saved.");
+      }
+    });
+    return;
+  }
+
+  match = /^\/guilds\/(\d{17,20})\/overview$/.exec(url.pathname);
+  if (request.method === "GET" && match) {
+    const guild = guildFor(client, match[1]!);
+    if (!guild) { errorResponse(response, 404, "The bot is no longer in this server."); return; }
+    jsonResponse(response, 200, await overview(client, commands, guild));
+    return;
+  }
+  match = /^\/guilds\/(\d{17,20})\/command-access$/.exec(url.pathname);
+  if (request.method === "GET" && match) {
+    const guild = guildFor(client, match[1]!);
+    if (!guild) { errorResponse(response, 404, "The bot is no longer in this server."); return; }
+    jsonResponse(response, 200, await commandAccessOptions(guild));
+    return;
+  }
+  match = /^\/guilds\/(\d{17,20})\/command-access\/(.+)$/.exec(url.pathname);
+  if (request.method === "PUT" && match) {
+    const guild = guildFor(client, match[1]!);
+    if (!guild) { errorResponse(response, 404, "The bot is no longer in this server."); return; }
+    let fullname: string;
+    try { fullname = decodeURIComponent(match[2]!); }
+    catch { errorResponse(response, 400, "Invalid command name."); return; }
+    await saveCommandAccess(request, response, commands, guild, fullname);
+    return;
+  }
+  match = /^\/guilds\/(\d{17,20})\/commands$/.exec(url.pathname);
+  if (match && (request.method === "GET" || request.method === "PUT")) {
+    const guild = guildFor(client, match[1]!);
+    if (!guild) { errorResponse(response, 404, "The bot is no longer in this server."); return; }
+    if (request.method === "GET") {
+      jsonResponse(response, 200, await commandList(commands, guild.id));
+    } else {
+      await saveCommandSettings(request, response, client, commands, guild);
+    }
+    return;
+  }
+  match = /^\/guilds\/(\d{17,20})\/commands\/(.+)$/.exec(url.pathname);
+  if (request.method === "PUT" && match) {
+    const guild = guildFor(client, match[1]!);
+    if (!guild) { errorResponse(response, 404, "The bot is no longer in this server."); return; }
+    let fullname: string;
+    try { fullname = decodeURIComponent(match[2]!); } catch { errorResponse(response, 400, "Invalid command name."); return; }
+    await setCommand(request, response, client, commands, guild, fullname);
+    return;
+  }
+  match = /^\/guilds\/(\d{17,20})\/sync$/.exec(url.pathname);
+  if (request.method === "POST" && match) {
+    const guild = guildFor(client, match[1]!);
+    if (!guild) { errorResponse(response, 404, "The bot is no longer in this server."); return; }
+    await syncGuild(request, response, client, commands, guild);
+    return;
+  }
+  match = /^\/guilds\/(\d{17,20})\/reset$/.exec(url.pathname);
+  if (request.method === "POST" && match) {
+    const guild = guildFor(client, match[1]!);
+    if (!guild) { errorResponse(response, 404, "The bot is no longer in this server."); return; }
+    await resetGuild(request, response, client, commands, guild);
+    return;
+  }
+  match = /^\/guilds\/(\d{17,20})\/audit$/.exec(url.pathname);
+  if (request.method === "GET" && match) {
+    const guild = guildFor(client, match[1]!);
+    if (!guild) { errorResponse(response, 404, "The bot is no longer in this server."); return; }
+    const rawLimit = url.searchParams.get("limit");
+    const limit = rawLimit === null ? 25 : Number(rawLimit);
+    const cursor = url.searchParams.get("cursor");
+    const validCursor = cursor === null || (
+      /^\d{1,19}$/.test(cursor)
+      && BigInt(cursor) > 0n
+      && BigInt(cursor) <= 9223372036854775807n
+    );
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100 || !validCursor) {
+      errorResponse(response, 400, "Audit pagination requires a limit from 1 to 100 and a valid cursor.");
+      return;
+    }
+    const page = await auditEntries(guild.id, limit, cursor);
+    jsonResponse(response, 200, page);
+    return;
+  }
+  match = /^\/guilds\/(\d{17,20})\/database$/.exec(url.pathname);
+  if (request.method === "GET" && match) {
+    const guild = guildFor(client, match[1]!);
+    if (!guild) { errorResponse(response, 404, "The bot is no longer in this server."); return; }
+    jsonResponse(response, 200, { resources: await databaseResources(guild.id) });
+    return;
+  }
+  errorResponse(response, 404, "Dashboard bridge route not found.");
+}
+
+export async function startDashboardBridge(
+  client: Client,
+  commands: FeatureCommand[],
+  config: BotConfig,
+): Promise<void> {
+  if (server) return;
+  const secret = config.dashboardBridgeSecret;
+  if (Buffer.byteLength(secret, "utf8") < 32) {
+    logger.warn("Dashboard bot bridge disabled; DASHBOARD_BRIDGE_SECRET must contain at least 32 bytes.");
+    return;
+  }
+  const hostRaw = config.dashboardBridgeHost;
+  const host = hostRaw === "[::1]" ? "::1" : hostRaw;
+  const hostParts = host.split(".").map(Number);
+  const loopbackV4 = isIP(host) === 4 && hostParts.length === 4 && hostParts[0] === 127;
+  if (!(host === "localhost" || host === "::1" || loopbackV4)) {
+    throw new Error("DASHBOARD_BRIDGE_HOST must be a loopback address.");
+  }
+  const port = config.dashboardBridgePort;
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("DASHBOARD_BRIDGE_PORT must be a valid TCP port.");
+  startedAt = Date.now();
+  hasBeenReady = client.isReady();
+  const next = createServer((request, response) => {
+    void handleRequest(request, response, client, commands, config, secret).catch(error => {
+      logger.error("Dashboard bridge request failed", {
+        path: request.url?.split("?")[0] ?? "/",
+        reason: error instanceof Error ? error.message : "Unknown error",
+      });
+      if (!response.headersSent) errorResponse(response, 500, "The bot could not complete this request.");
+      else response.destroy();
+    });
+  });
+  await new Promise<void>((resolveListen, reject) => {
+    const failed = (error: Error) => reject(error);
+    next.once("error", failed);
+    next.listen(port, host, () => {
+      next.off("error", failed);
+      resolveListen();
+    });
+  });
+  server = next;
+  logger.info("Private dashboard bot bridge listening on loopback", { host, port });
+}
+
+export async function stopDashboardBridge(): Promise<void> {
+  const current = server;
+  server = null;
+  guildLocks.clear();
+  if (!current) return;
+  await new Promise<void>(resolveClose => current.close(() => resolveClose()));
+}

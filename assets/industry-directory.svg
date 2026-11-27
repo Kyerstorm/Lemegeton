@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1380" viewBox="0 0 2400 1380" role="img" aria-labelledby="title desc">
+<title id="title">Industry Directory / Provider Evidence Map</title>
+<desc id="desc">The Industry directory uses source-backed organization records from AniList, IGDB, TMDB, MusicBrainz, Wikidata, Google Books and BookBrainz. Provider identities stay separate until reviewed; guild correction and identity-link queues do not turn an association into proof of ownership.</desc>
+<defs>
+<style>
+.bg{fill:#050505}.panel{fill:#0b0b0b;stroke:#626262;stroke-width:1.5}.inner{fill:#111;stroke:#3e3e3e;stroke-width:1}
+.rule{stroke:#3b3b3b;stroke-width:1}.line{fill:none;stroke:#e6e6e6;stroke-width:2;marker-end:url(#arrow)}
+.dash{fill:none;stroke:#8d8d8d;stroke-width:2;stroke-dasharray:8 8;marker-end:url(#arrow)}
+.eyebrow{fill:#a1a1a1;font:600 15px Arial,sans-serif;letter-spacing:3px}
+.title{fill:#fff;font:700 43px Arial,sans-serif;letter-spacing:4px}
+.heading{fill:#f4f4f4;font:700 23px Arial,sans-serif}
+.sub{fill:#eee;font:700 16px Arial,sans-serif;letter-spacing:1px}
+.body{fill:#c4c4c4;font:15px Arial,sans-serif}
+.small{fill:#929292;font:13px Arial,sans-serif}
+.tiny{fill:#808080;font:11px Arial,sans-serif;letter-spacing:1px}
+.mono{fill:#fff;font:700 14px 'SFMono-Regular',Consolas,monospace}
+.name{fill:#ededed;font:14px Arial,sans-serif}
+.pill{fill:#151515;stroke:#686868;stroke-width:1}.pill-muted{fill:#101010;stroke:#454545;stroke-width:1}
+.pilltext{fill:#ddd;font:600 11px Arial,sans-serif;letter-spacing:.35px}
+.count{fill:#fff;font:700 15px 'SFMono-Regular',Consolas,monospace}
+</style>
+<marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9Z" fill="#e6e6e6"/></marker>
+</defs>
+<rect class="bg" width="2400" height="1380"/>
+<text x="64" y="62" class="eyebrow" text-anchor="start">LEMEGETON / MEDIA SYSTEM</text>
+<text x="64" y="119" class="title" text-anchor="start">INDUSTRY DIRECTORY / PROVIDER EVIDENCE MAP</text>
+<path class="rule" d="M64 154H2336"/>
+
+<text x="64" y="210" class="eyebrow" text-anchor="start">01 / PROVIDER RECORDS</text>
+<rect class="panel" x="64" y="238" width="700" height="156" rx="12"/><text x="96" y="280" class="heading" text-anchor="start">AniList</text><text x="96" y="324" class="body" text-anchor="start">Animation studios · anime credits</text>
+<rect class="panel" x="794" y="238" width="700" height="156" rx="12"/><text x="826" y="280" class="heading" text-anchor="start">IGDB</text><text x="826" y="324" class="body" text-anchor="start">Game developers · publishers · games</text>
+<rect class="panel" x="1524" y="238" width="812" height="156" rx="12"/><text x="1556" y="280" class="heading" text-anchor="start">TMDB</text><text x="1556" y="324" class="body" text-anchor="start">Screen production companies · TV networks</text>
+<rect class="panel" x="64" y="418" width="700" height="156" rx="12"/><text x="96" y="460" class="heading" text-anchor="start">MusicBrainz</text><text x="96" y="504" class="body" text-anchor="start">Record labels · release relationships</text>
+<rect class="panel" x="794" y="418" width="700" height="156" rx="12"/><text x="826" y="460" class="heading" text-anchor="start">Wikidata</text><text x="826" y="504" class="body" text-anchor="start">Cross-domain identity and sourced edges</text>
+<rect class="panel" x="1524" y="418" width="812" height="156" rx="12"/><text x="1556" y="460" class="heading" text-anchor="start">Google Books + BookBrainz</text><text x="1556" y="504" class="body" text-anchor="start">Publisher names · publisher entities</text>
+<text x="64" y="644" class="eyebrow" text-anchor="start">02 / NORMALIZED DIRECTORY VIEW</text>
+<rect class="inner" x="64" y="674" width="1100" height="322" rx="12"/><text x="96" y="718" class="heading" text-anchor="start">Organization profile</text>
+<text x="96" y="768" class="body" text-anchor="start">Canonical name and aliases</text><text x="96" y="808" class="body" text-anchor="start">Category / organization type</text><text x="96" y="848" class="body" text-anchor="start">Country and dates when a provider supplies them</text><text x="96" y="888" class="body" text-anchor="start">Provider IDs + source profile URLs</text><text x="96" y="928" class="body" text-anchor="start">Linked works and typed relationships</text>
+<path class="line" d="M1164 835L1226 835" marker-end="url(#arrow)"/>
+<rect class="inner" x="1226" y="674" width="1110" height="322" rx="12"/><text x="1258" y="718" class="heading" text-anchor="start">Explicit relationship types</text>
+<text x="1258" y="768" class="body" text-anchor="start">Developer → game · publisher → edition</text><text x="1258" y="808" class="body" text-anchor="start">Studio → production credit · network → TV title</text><text x="1258" y="848" class="body" text-anchor="start">Label → release · parent / subsidiary / successor</text><text x="1258" y="888" class="body" text-anchor="start">Every edge retains source and relation type</text>
+<text x="64" y="1060" class="eyebrow" text-anchor="start">03 / GUILD REVIEW WITHOUT MERGING SOURCE RECORDS</text>
+<rect class="panel" x="64" y="1090" width="720" height="208" rx="12"/><text x="96" y="1134" class="sub" text-anchor="start">Correction requests</text><text x="96" y="1178" class="body" text-anchor="start">Guild-scoped review queue</text><text x="96" y="1210" class="body" text-anchor="start">Self-review is blocked</text><text x="96" y="1242" class="body" text-anchor="start">Evidence URL required</text>
+<rect class="panel" x="814" y="1090" width="720" height="208" rx="12"/><text x="846" y="1134" class="sub" text-anchor="start">Identity-link proposals</text><text x="846" y="1178" class="body" text-anchor="start">Keep both provider IDs</text><text x="846" y="1210" class="body" text-anchor="start">Approved link = association only</text><text x="846" y="1242" class="body" text-anchor="start">No automatic provider-record merge</text>
+<rect class="panel" x="1564" y="1090" width="772" height="208" rx="12"/><text x="1596" y="1134" class="sub" text-anchor="start">Evidence boundary</text><text x="1596" y="1178" class="body" text-anchor="start">Parent / subsidiary claims need direct evidence</text><text x="1596" y="1210" class="body" text-anchor="start">A studio or label credit is not ownership</text><text x="1596" y="1242" class="body" text-anchor="start">Unknown relationships stay unknown</text>
+<text x="2336" y="1350" class="small" text-anchor="end">LEMEGETON / INDUSTRY DIRECTORY — V3</text>
+
+</svg>

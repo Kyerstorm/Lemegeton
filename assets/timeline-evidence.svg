@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1480" viewBox="0 0 2400 1480" role="img" aria-labelledby="title desc">
+<title id="title">Timeline / Order Types &amp; Evidence</title>
+<desc id="desc">The current Timeline model keeps in-universe, publication, release, adaptation and continuity sequences distinct. Events retain date precision, region, platform, continuity and source provenance; provider release data is never silently converted into fictional-world chronology.</desc>
+<defs>
+<style>
+.bg{fill:#050505}.panel{fill:#0b0b0b;stroke:#626262;stroke-width:1.5}.inner{fill:#111;stroke:#3e3e3e;stroke-width:1}
+.rule{stroke:#3b3b3b;stroke-width:1}.line{fill:none;stroke:#e6e6e6;stroke-width:2;marker-end:url(#arrow)}
+.dash{fill:none;stroke:#8d8d8d;stroke-width:2;stroke-dasharray:8 8;marker-end:url(#arrow)}
+.eyebrow{fill:#a1a1a1;font:600 15px Arial,sans-serif;letter-spacing:3px}
+.title{fill:#fff;font:700 43px Arial,sans-serif;letter-spacing:4px}
+.heading{fill:#f4f4f4;font:700 23px Arial,sans-serif}
+.sub{fill:#eee;font:700 16px Arial,sans-serif;letter-spacing:1px}
+.body{fill:#c4c4c4;font:15px Arial,sans-serif}
+.small{fill:#929292;font:13px Arial,sans-serif}
+.tiny{fill:#808080;font:11px Arial,sans-serif;letter-spacing:1px}
+.mono{fill:#fff;font:700 14px 'SFMono-Regular',Consolas,monospace}
+.name{fill:#ededed;font:14px Arial,sans-serif}
+.pill{fill:#151515;stroke:#686868;stroke-width:1}.pill-muted{fill:#101010;stroke:#454545;stroke-width:1}
+.pilltext{fill:#ddd;font:600 11px Arial,sans-serif;letter-spacing:.35px}
+.count{fill:#fff;font:700 15px 'SFMono-Regular',Consolas,monospace}
+</style>
+<marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9Z" fill="#e6e6e6"/></marker>
+</defs>
+<rect class="bg" width="2400" height="1480"/>
+<text x="64" y="62" class="eyebrow" text-anchor="start">LEMEGETON / MEDIA SYSTEM</text>
+<text x="64" y="119" class="title" text-anchor="start">TIMELINE / ORDER TYPES &amp; EVIDENCE</text>
+<path class="rule" d="M64 154H2336"/>
+
+<text x="64" y="210" class="eyebrow" text-anchor="start">01 / DISTINCT SEQUENCE TYPES</text><text x="2336" y="210" class="count" text-anchor="end">TIMELINE STORE: libSQL</text>
+<rect class="panel" x="64" y="244" width="430" height="276" rx="12"/><text x="92" y="288" class="sub" text-anchor="start">IN-UNIVERSE</text><text x="92" y="340" class="body" text-anchor="start">Events inside a stated fictional</text><text x="92" y="374" class="body" text-anchor="start">continuity, only when a source</text><text x="92" y="408" class="body" text-anchor="start">supplies direct event-order evidence.</text>
+<rect class="panel" x="524" y="244" width="430" height="276" rx="12"/><text x="552" y="288" class="sub" text-anchor="start">PUBLICATION</text><text x="552" y="340" class="body" text-anchor="start">Book, volume, issue or edition</text><text x="552" y="374" class="body" text-anchor="start">publication dates. Preserve ISBN,</text><text x="552" y="408" class="body" text-anchor="start">edition and date precision.</text>
+<rect class="panel" x="984" y="244" width="430" height="276" rx="12"/><text x="1012" y="288" class="sub" text-anchor="start">RELEASE</text><text x="1012" y="340" class="body" text-anchor="start">Original film, episode, game or</text><text x="1012" y="374" class="body" text-anchor="start">music release dates. Keep region,</text><text x="1012" y="408" class="body" text-anchor="start">platform and broadcast context.</text>
+<rect class="panel" x="1444" y="244" width="430" height="276" rx="12"/><text x="1472" y="288" class="sub" text-anchor="start">ADAPTATION</text><text x="1472" y="340" class="body" text-anchor="start">Provider-declared or reviewed</text><text x="1472" y="374" class="body" text-anchor="start">cross-media relationship. A link</text><text x="1472" y="408" class="body" text-anchor="start">does not create an event date.</text>
+<rect class="panel" x="1904" y="244" width="432" height="276" rx="12"/><text x="1932" y="288" class="sub" text-anchor="start">CONTINUITY</text><text x="1932" y="340" class="body" text-anchor="start">Separate universe, edition or</text><text x="1932" y="374" class="body" text-anchor="start">continuity ordering. Relative order</text><text x="1932" y="408" class="body" text-anchor="start">does not prove an in-world date.</text>
+<text x="64" y="590" class="eyebrow" text-anchor="start">02 / SOURCE EVIDENCE</text>
+<rect class="inner" x="64" y="620" width="430" height="286" rx="12"/><text x="92" y="664" class="heading" text-anchor="start">Primary references</text><text x="92" y="710" class="body" text-anchor="start">Official franchise timelines</text><text x="92" y="746" class="body" text-anchor="start">Official episode guides</text><text x="92" y="782" class="body" text-anchor="start">Official novel-series guides</text><text x="92" y="818" class="body" text-anchor="start">Publisher / rights-holder pages</text>
+<rect class="inner" x="524" y="620" width="430" height="286" rx="12"/><text x="552" y="664" class="heading" text-anchor="start">Chronology references</text><text x="552" y="710" class="body" text-anchor="start">The Canonicle · Chronelines</text><text x="552" y="746" class="body" text-anchor="start">Order of Book Series</text><text x="552" y="782" class="body" text-anchor="start">Comic Book Herald (editorial)</text><text x="552" y="818" class="body" text-anchor="start">ChronoCanon / Chronologeek*</text>
+<rect class="inner" x="984" y="620" width="430" height="286" rx="12"/><text x="1012" y="664" class="heading" text-anchor="start">Franchise wikis</text><text x="1012" y="710" class="body" text-anchor="start">15 explicit MediaWiki endpoints</text><text x="1012" y="746" class="body" text-anchor="start">Community-maintained evidence</text><text x="1012" y="782" class="body" text-anchor="start">Revision / source links retained</text><text x="1012" y="818" class="body" text-anchor="start">Access is conditional per wiki</text>
+<rect class="inner" x="1444" y="620" width="430" height="286" rx="12"/><text x="1472" y="664" class="heading" text-anchor="start">Metadata APIs</text><text x="1472" y="710" class="body" text-anchor="start">AniList · TMDB · IGDB</text><text x="1472" y="746" class="body" text-anchor="start">Google Books · Open Library</text><text x="1472" y="782" class="body" text-anchor="start">MusicBrainz · source-linked dates</text><text x="1472" y="818" class="body" text-anchor="start">Wikidata is supplementary</text>
+<rect class="inner" x="1904" y="620" width="432" height="286" rx="12"/><text x="1932" y="664" class="heading" text-anchor="start">Community context</text><text x="1932" y="710" class="body" text-anchor="start">Reddit: correction leads</text><text x="1932" y="746" class="body" text-anchor="start">TV Tropes: narrative context</text><text x="1932" y="782" class="body" text-anchor="start">Neither is primary chronology</text><text x="1932" y="818" class="body" text-anchor="start">Manual review retains attribution</text>
+<path class="rule" d="M64 952H2336"/>
+<text x="64" y="1000" class="eyebrow" text-anchor="start">03 / EVENT RECORD AND REVIEW</text>
+<rect class="panel" x="64" y="1030" width="1450" height="300" rx="12"/><text x="96" y="1074" class="heading" text-anchor="start">Store the evidence with the event</text>
+<text x="96" y="1126" class="body" text-anchor="start">Provider + stable external ID · source name + canonical HTTPS URL · retrieval timestamp</text><text x="96" y="1166" class="body" text-anchor="start">Source date value and precision (year / month / day) · event type · sequence type</text><text x="96" y="1206" class="body" text-anchor="start">Region · platform · continuity · source revision or edition where available</text>
+<rect class="panel" x="1544" y="1030" width="792" height="300" rx="12"/><text x="1576" y="1074" class="heading" text-anchor="start">Never manufacture an order</text>
+<text x="1576" y="1126" class="body" text-anchor="start">Unknown dates remain unknown.</text><text x="1576" y="1166" class="body" text-anchor="start">Conflicting sources remain visible.</text><text x="1576" y="1206" class="body" text-anchor="start">Release order is not story chronology.</text><text x="1576" y="1246" class="body" text-anchor="start">Title similarity is not an adaptation.</text>
+<text x="64" y="1400" class="small" text-anchor="start">* ChronoCanon and Chronologeek remain without verified canonical homepages; do not guess endpoints.</text>
+<text x="2336" y="1440" class="small" text-anchor="end">LEMEGETON / TIMELINE EVIDENCE — V3</text>
+
+</svg>

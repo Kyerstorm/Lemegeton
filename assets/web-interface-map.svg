@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1520" viewBox="0 0 2400 1520" role="img" aria-labelledby="title desc">
+  <title id="title">Lemegeton web interface and source map</title>
+  <desc id="desc">A visual map of the Lemegeton dashboard from Next.js route entry points through the React dashboard shell, feature components, design system, forms, icons and feedback, to the Rust Axum API and private bot bridge.</desc>
+  <defs>
+    <style>
+      .bg{fill:#050505}.panel{fill:#0b0b0b;stroke:#5d5d5d;stroke-width:1.5}.inner{fill:#111;stroke:#3d3d3d;stroke-width:1}
+      .rule{stroke:#3b3b3b;stroke-width:1}.link{fill:none;stroke:#8b8b8b;stroke-width:2;stroke-dasharray:7 8}
+      .eyebrow{fill:#a0a0a0;font:600 15px Arial,sans-serif;letter-spacing:3px}
+      .title{fill:#fff;font:700 43px Arial,sans-serif;letter-spacing:4px}
+      .heading{fill:#f4f4f4;font:700 23px Arial,sans-serif}
+      .path{fill:#fff;font:700 16px 'SFMono-Regular',Consolas,monospace}
+      .body{fill:#c3c3c3;font:15px Arial,sans-serif}
+      .small{fill:#909090;font:13px Arial,sans-serif}
+      .tag{fill:#151515;stroke:#606060;stroke-width:1}
+      .tagtext{fill:#ddd;font:14px Arial,sans-serif}
+    </style>
+  </defs>
+  <rect class="bg" width="2400" height="1520"/>
+  <text x="64" y="66" class="eyebrow">LEMEGETON / WEB</text>
+  <text x="64" y="122" class="title">INTERFACE AND SOURCE MAP</text>
+  <text x="2336" y="70" class="eyebrow" text-anchor="end">ROUTES / COMPONENTS / SERVER EDGE</text>
+  <path class="rule" d="M64 156H2336"/>
+
+  <text x="64" y="214" class="eyebrow">01 — ROUTE ENTRY POINTS</text>
+  <rect class="panel" x="64" y="238" width="548" height="246" rx="12"/>
+  <text x="96" y="282" class="heading">Next.js App Router</text>
+  <path class="rule" d="M96 302H580"/>
+  <text x="96" y="343" class="path">frontend/app/</text>
+  <text x="96" y="380" class="body">Dashboard · login · custom roles</text>
+  <text x="96" y="414" class="body">How It Works · status · policy pages</text>
+  <text x="96" y="454" class="small">Static export · trailingSlash: false</text>
+
+  <path class="link" d="M612 360H676"/>
+  <rect class="panel" x="676" y="238" width="500" height="246" rx="12"/>
+  <text x="708" y="282" class="heading">Dashboard orchestration</text>
+  <path class="rule" d="M708 302H1144"/>
+  <text x="708" y="343" class="path">frontend/src/App.tsx</text>
+  <text x="708" y="380" class="body">App state · selected guild · route shell</text>
+  <text x="708" y="414" class="body">Coordinates navigation and feature screens</text>
+  <text x="708" y="454" class="small">Presentation layer; not an authority boundary.</text>
+
+  <path class="link" d="M1176 360H1240"/>
+  <rect class="panel" x="1240" y="238" width="1096" height="246" rx="12"/>
+  <text x="1272" y="282" class="heading">Dashboard shell</text>
+  <path class="rule" d="M1272 302H2304"/>
+  <rect class="inner" x="1272" y="328" width="300" height="108" rx="8"/>
+  <text x="1296" y="366" class="path">Layout/</text>
+  <text x="1296" y="400" class="body">Sidebar · topbar · guild switcher</text>
+  <rect class="inner" x="1592" y="328" width="300" height="108" rx="8"/>
+  <text x="1616" y="366" class="path">Features/</text>
+  <text x="1616" y="400" class="body">Selected screen and feature state</text>
+  <rect class="inner" x="1912" y="328" width="392" height="108" rx="8"/>
+  <text x="1936" y="366" class="path">Public routes</text>
+  <text x="1936" y="400" class="body">Guide · status · legal pages</text>
+
+  <path class="link" d="M900 484V550H420V582M900 550H900V582M900 550H1380V582M900 550H1860V582"/>
+  <text x="64" y="550" class="eyebrow">02 — SHARED COMPONENT DOMAINS</text>
+
+  <rect class="panel" x="64" y="582" width="700" height="356" rx="12"/>
+  <text x="96" y="626" class="eyebrow">FEATURE SURFACES</text>
+  <text x="96" y="666" class="heading">Components/Features/</text>
+  <path class="rule" d="M96 686H732"/>
+  <text x="96" y="728" class="path">Overview · Guilds · Commands · Archive</text>
+  <text x="96" y="765" class="path">KnowledgeAtlas · Activity · Integrations</text>
+  <text x="96" y="802" class="path">Diagnostics · Logs · Settings · Status</text>
+  <text x="96" y="855" class="body">Feature-owned screens, loading and error states,</text>
+  <text x="96" y="883" class="body">data presentation and action composition.</text>
+
+  <rect class="panel" x="784" y="582" width="700" height="356" rx="12"/>
+  <text x="816" y="626" class="eyebrow">DESIGN PRIMITIVES</text>
+  <text x="816" y="666" class="heading">DesignSystem/ · UI/ · Forms/</text>
+  <path class="rule" d="M816 686H1452"/>
+  <text x="816" y="728" class="path">Tokens · Typography · ThemeProvider · Motion</text>
+  <text x="816" y="765" class="path">Button · Input · Select · Tabs · Cards · Tables</text>
+  <text x="816" y="802" class="path">FormField · SaveChangesBar · Dialogs</text>
+  <text x="816" y="855" class="body">Shared visual language, control behavior and</text>
+  <text x="816" y="883" class="body">save/reset patterns. No one-off token systems.</text>
+
+  <rect class="panel" x="1504" y="582" width="400" height="356" rx="12"/>
+  <text x="1536" y="626" class="eyebrow">ICONOGRAPHY</text>
+  <text x="1536" y="666" class="heading">Icons/</text>
+  <path class="rule" d="M1536 686H1872"/>
+  <text x="1536" y="728" class="path">Icon.tsx</text>
+  <text x="1536" y="765" class="path">IconRegistry.ts</text>
+  <text x="1536" y="802" class="path">IconGlyphs.ts</text>
+  <text x="1536" y="855" class="body">Typed first-party SVG glyphs</text>
+  <text x="1536" y="883" class="body">and a consistent stroke system.</text>
+
+  <rect class="panel" x="1924" y="582" width="412" height="356" rx="12"/>
+  <text x="1956" y="626" class="eyebrow">BEHAVIOR AND VISUALS</text>
+  <text x="1956" y="666" class="heading">Hooks/ · Feedback/ · Three/</text>
+  <path class="rule" d="M1956 686H2304"/>
+  <text x="1956" y="728" class="path">Focus · reduced motion · dirty state</text>
+  <text x="1956" y="765" class="path">Loading · empty · error · offline</text>
+  <text x="1956" y="802" class="path">WebGL scene · shaders · fallback</text>
+  <text x="1956" y="855" class="body">Interaction recovery and optional visuals.</text>
+  <text x="1956" y="883" class="small">No WebGL dependency for core tasks.</text>
+
+  <text x="64" y="1002" class="eyebrow">03 — API AND TRUST BOUNDARY</text>
+  <rect class="panel" x="64" y="1030" width="500" height="250" rx="12"/>
+  <text x="96" y="1074" class="heading">Frontend API client</text>
+  <path class="rule" d="M96 1094H532"/>
+  <text x="96" y="1136" class="path">frontend/src/Lib/</text>
+  <text x="96" y="1174" class="body">API · routes · validation · errors</text>
+  <text x="96" y="1230" class="small">Browser calls same-origin Rust endpoints.</text>
+
+  <path class="link" d="M564 1155H628"/>
+  <rect class="panel" x="628" y="1030" width="600" height="250" rx="12"/>
+  <text x="660" y="1074" class="heading">Rust / Axum service</text>
+  <path class="rule" d="M660 1094H1196"/>
+  <text x="660" y="1136" class="path">web/backend/src/</text>
+  <text x="660" y="1174" class="body">API · auth · store · routes · security · UI</text>
+  <text x="660" y="1230" class="small">Session and permission checks happen server-side.</text>
+
+  <path class="link" d="M1228 1155H1292"/>
+  <rect class="panel" x="1292" y="1030" width="500" height="250" rx="12"/>
+  <text x="1324" y="1074" class="heading">Private bot bridge</text>
+  <path class="rule" d="M1324 1094H1760"/>
+  <text x="1324" y="1136" class="path">helpers/dashboard/</text>
+  <text x="1324" y="1174" class="body">Allow-listed operations · loopback only</text>
+  <text x="1324" y="1230" class="small">Bot re-checks guild and operation authority.</text>
+
+  <path class="link" d="M1792 1155H1856"/>
+  <rect class="panel" x="1856" y="1030" width="480" height="250" rx="12"/>
+  <text x="1888" y="1074" class="heading">Discord bot</text>
+  <path class="rule" d="M1888 1094H2304"/>
+  <text x="1888" y="1136" class="path">bot.ts · helpers/ · libSQL</text>
+  <text x="1888" y="1174" class="body">Existing gateway and domain services</text>
+  <text x="1888" y="1230" class="small">The browser never talks directly to storage.</text>
+
+  <text x="64" y="1360" class="eyebrow">04 — SOURCE AND DATA OWNERSHIP</text>
+  <rect class="tag" x="64" y="1390" width="520" height="72" rx="8"/>
+  <text x="88" y="1420" class="tagtext">frontend/public/</text><text x="88" y="1446" class="small">Local brand, fonts and public assets.</text>
+  <rect class="tag" x="604" y="1390" width="520" height="72" rx="8"/>
+  <text x="628" y="1420" class="tagtext">frontend/tests/</text><text x="628" y="1446" class="small">Unit, component and browser coverage.</text>
+  <rect class="tag" x="1144" y="1390" width="520" height="72" rx="8"/>
+  <text x="1168" y="1420" class="tagtext">Shared libSQL</text><text x="1168" y="1446" class="small">Guild records, sessions and metadata.</text>
+  <rect class="tag" x="1684" y="1390" width="652" height="72" rx="8"/>
+  <text x="1708" y="1420" class="tagtext">Private RocksDB</text><text x="1708" y="1446" class="small">Media object bytes; never browser-accessible.</text>
+  <text x="2336" y="1494" class="small" text-anchor="end">LEMEGETON / WEB SOURCE MAP — V3</text>
+</svg>

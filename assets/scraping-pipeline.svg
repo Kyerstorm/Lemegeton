@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1600" viewBox="0 0 2400 1600" role="img" aria-labelledby="title desc">
+<title id="title">Source Access &amp; Scraping Pipeline</title>
+<desc id="desc">The implemented source-selection and safe extraction path: registry and allowlist gates, public URL and DNS validation, pinned and bounded network requests, optional Botasaurus browser rendering with Chromium fallback, metadata-only extraction, and provenance. Access challenges stop rather than being bypassed.</desc>
+<defs>
+<style>
+.bg{fill:#050505}.panel{fill:#0b0b0b;stroke:#626262;stroke-width:1.5}.inner{fill:#111;stroke:#3e3e3e;stroke-width:1}
+.rule{stroke:#3b3b3b;stroke-width:1}.line{fill:none;stroke:#e6e6e6;stroke-width:2;marker-end:url(#arrow)}
+.dash{fill:none;stroke:#8d8d8d;stroke-width:2;stroke-dasharray:8 8;marker-end:url(#arrow)}
+.eyebrow{fill:#a1a1a1;font:600 15px Arial,sans-serif;letter-spacing:3px}
+.title{fill:#fff;font:700 43px Arial,sans-serif;letter-spacing:4px}
+.heading{fill:#f4f4f4;font:700 23px Arial,sans-serif}
+.sub{fill:#eee;font:700 16px Arial,sans-serif;letter-spacing:1px}
+.body{fill:#c4c4c4;font:15px Arial,sans-serif}
+.small{fill:#929292;font:13px Arial,sans-serif}
+.tiny{fill:#808080;font:11px Arial,sans-serif;letter-spacing:1px}
+.mono{fill:#fff;font:700 14px 'SFMono-Regular',Consolas,monospace}
+.name{fill:#ededed;font:14px Arial,sans-serif}
+.pill{fill:#151515;stroke:#686868;stroke-width:1}.pill-muted{fill:#101010;stroke:#454545;stroke-width:1}
+.pilltext{fill:#ddd;font:600 11px Arial,sans-serif;letter-spacing:.35px}
+.count{fill:#fff;font:700 15px 'SFMono-Regular',Consolas,monospace}
+</style>
+<marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9Z" fill="#e6e6e6"/></marker>
+</defs>
+<rect class="bg" width="2400" height="1600"/>
+<text x="64" y="62" class="eyebrow" text-anchor="start">LEMEGETON / MEDIA SYSTEM</text>
+<text x="64" y="119" class="title" text-anchor="start">SOURCE ACCESS &amp; SCRAPING PIPELINE</text>
+<path class="rule" d="M64 154H2336"/>
+
+<text x="64" y="210" class="eyebrow" text-anchor="start">01 / SELECT THE PERMITTED ACCESS METHOD</text>
+<rect class="panel" x="64" y="238" width="426" height="350" rx="12"/>
+<text x="94" y="282" class="heading" text-anchor="start">Source registry</text><text x="94" y="319" class="mono" text-anchor="start">64 targets · status + route</text>
+<text x="94" y="365" class="body" text-anchor="start">API / credentialled / licensed API</text><text x="94" y="393" class="body" text-anchor="start">MediaWiki API · feed · dataset</text><text x="94" y="421" class="body" text-anchor="start">Manual / citation-only reference</text><text x="94" y="449" class="body" text-anchor="start">Public-page extraction (when permitted)</text>
+<text x="94" y="556" class="small" text-anchor="start">Registry coverage does not enable every source.</text>
+<path class="line" d="M490 410L522 410" marker-end="url(#arrow)"/>
+<rect class="panel" x="522" y="238" width="426" height="350" rx="12"/>
+<text x="552" y="282" class="heading" text-anchor="start">Policy gate</text><text x="552" y="319" class="mono" text-anchor="start">Source-specific access review</text>
+<text x="552" y="365" class="body" text-anchor="start">Check current terms and licence</text><text x="552" y="400" class="body" text-anchor="start">Preserve attribution and source IDs</text><text x="552" y="435" class="body" text-anchor="start">Four webnovel parsers require</text><text x="552" y="470" class="body" text-anchor="start">MEDIA_SOURCE_SCRAPE_ALLOWLIST</text><text x="552" y="505" class="body" text-anchor="start">Manual sources are not auto-scraped</text>
+<path class="line" d="M948 410L980 410" marker-end="url(#arrow)"/>
+<rect class="panel" x="980" y="238" width="426" height="350" rx="12"/>
+<text x="1010" y="282" class="heading" text-anchor="start">URL + DNS validation</text><text x="1010" y="319" class="mono" text-anchor="start">Public HTTP(S) only</text>
+<text x="1010" y="365" class="body" text-anchor="start">Reject embedded credentials</text><text x="1010" y="400" class="body" text-anchor="start">Reject local / private / reserved hosts</text><text x="1010" y="435" class="body" text-anchor="start">Allow only standard HTTP(S) ports</text><text x="1010" y="470" class="body" text-anchor="start">Resolve all addresses and pin DNS</text><text x="1010" y="505" class="body" text-anchor="start">Validate redirect destinations again</text>
+<path class="line" d="M1406 410L1438 410" marker-end="url(#arrow)"/>
+<rect class="panel" x="1438" y="238" width="426" height="350" rx="12"/>
+<text x="1468" y="282" class="heading" text-anchor="start">Bounded transport</text><text x="1468" y="319" class="mono" text-anchor="start">Controlled request limits</text>
+<text x="1468" y="365" class="body" text-anchor="start">5 MiB default response limit</text><text x="1468" y="400" class="body" text-anchor="start">20 s default timeout · 60 s cap</text><text x="1468" y="435" class="body" text-anchor="start">Up to 5 redirects · revalidate each</text><text x="1468" y="470" class="body" text-anchor="start">Bounded retries and Retry-After</text><text x="1468" y="505" class="body" text-anchor="start">fetchMany concurrency capped at 8</text>
+<path class="line" d="M1864 410L1896 410" marker-end="url(#arrow)"/>
+<rect class="panel" x="1896" y="238" width="440" height="350" rx="12"/>
+<text x="1926" y="282" class="heading" text-anchor="start">Extract + attribute</text><text x="1926" y="319" class="mono" text-anchor="start">Metadata, not content mirroring</text>
+<text x="1926" y="365" class="body" text-anchor="start">Titles · IDs · people · dates</text><text x="1926" y="400" class="body" text-anchor="start">Editions · relationships · source links</text><text x="1926" y="435" class="body" text-anchor="start">Bounded text and structured fields</text><text x="1926" y="470" class="body" text-anchor="start">Keep canonical URL and provider ID</text><text x="1926" y="505" class="body" text-anchor="start">Store retrieval and evidence provenance</text>
+<path class="rule" d="M64 640H2336"/>
+<text x="64" y="690" class="eyebrow" text-anchor="start">02 / OPTIONAL BROWSER-RENDERED PATH</text>
+<rect class="panel" x="64" y="720" width="690" height="360" rx="12"/>
+<text x="96" y="764" class="heading" text-anchor="start">TypeScript Botasaurus bridge</text><text x="96" y="804" class="mono" text-anchor="start">helpers/integration/botasaurus-bridge.ts</text>
+<text x="96" y="852" class="body" text-anchor="start">auto / local / remote / disabled modes</text><text x="96" y="888" class="body" text-anchor="start">Remote worker requires HTTPS</text><text x="96" y="924" class="body" text-anchor="start">Jobs carry guild_id + user_id scope</text><text x="96" y="960" class="body" text-anchor="start">Queue, status, cancellation and exports</text><text x="96" y="996" class="body" text-anchor="start">Worker results are validated before use</text>
+<path class="line" d="M754 900L794 900" marker-end="url(#arrow)"/>
+<rect class="panel" x="794" y="720" width="690" height="360" rx="12"/>
+<text x="826" y="764" class="heading" text-anchor="start">Isolated browser worker</text><text x="826" y="804" class="mono" text-anchor="start">workers/botasaurus.py</text>
+<text x="826" y="852" class="body" text-anchor="start">Obscura browser engine is preferred</text><text x="826" y="888" class="body" text-anchor="start">Chromium is the configured fallback</text><text x="826" y="924" class="body" text-anchor="start">Worker validates public URLs and host</text><text x="826" y="960" class="body" text-anchor="start">Scoped cache and bounded job lifetime</text><text x="826" y="996" class="body" text-anchor="start">Blocked challenges return a blocked state</text>
+<path class="line" d="M1484 900L1524 900" marker-end="url(#arrow)"/>
+<rect class="panel" x="1524" y="720" width="812" height="360" rx="12"/>
+<text x="1556" y="764" class="heading" text-anchor="start">Fallback and result control</text><text x="1556" y="804" class="mono" text-anchor="start">Playwright / Chromium when worker unavailable</text>
+<text x="1556" y="852" class="body" text-anchor="start">Same-host navigation policy stays enforced</text><text x="1556" y="888" class="body" text-anchor="start">Botasaurus access challenges propagate as blocked</text><text x="1556" y="924" class="body" text-anchor="start">Worker outage may fall back to local Chromium</text><text x="1556" y="960" class="body" text-anchor="start">Extraction follows the same metadata bounds</text><text x="1556" y="996" class="body" text-anchor="start">No credential, CAPTCHA or access-control bypass</text>
+<path class="rule" d="M64 1128H2336"/>
+<text x="64" y="1178" class="eyebrow" text-anchor="start">03 / NON-NEGOTIABLE ACCESS BOUNDARIES</text>
+<rect class="inner" x="64" y="1208" width="1090" height="250" rx="12"/>
+<text x="96" y="1252" class="sub" text-anchor="start">STOP ON ACCESS CHALLENGES</text>
+<text x="96" y="1294" class="body" text-anchor="start">401 / 403, CAPTCHA and detected challenge pages become blocked results.</text><text x="96" y="1332" class="body" text-anchor="start">Do not retry through alternate fingerprints, sessions or proxy rotation.</text>
+<rect class="inner" x="1178" y="1208" width="1158" height="250" rx="12"/>
+<text x="1210" y="1252" class="sub" text-anchor="start">MINIMUM METADATA COLLECTION</text>
+<text x="1210" y="1294" class="body" text-anchor="start">Extract factual metadata and canonical references only. Do not retrieve or redistribute chapter bodies, books, comics, scripts, artwork or audio.</text><text x="1210" y="1332" class="body" text-anchor="start">The shared scraper does not fetch or parse robots.txt; source-specific terms and access restrictions still require review.</text>
+<text x="2336" y="1530" class="small" text-anchor="end">LEMEGETON / SOURCE ACCESS — V3</text>
+
+</svg>

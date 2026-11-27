@@ -1,0 +1,149 @@
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/geist/woff2/Geist[wght].woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/fonts/geist-mono/woff2/GeistMono[wght].woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/fonts/geist-mono/variable-ttf/GeistMono-Italic[wght].ttf") format("truetype");
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Pixel";
+  src: url("/fonts/geist-pixel/woff2/GeistPixelVF.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Pixel Circle";
+  src: url("/fonts/geist-pixel/woff2/GeistPixel-Circle.woff2") format("woff2"),
+    url("/fonts/geist-pixel/variable-ttf/GeistPixel-Circle.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Pixel Grid";
+  src: url("/fonts/geist-pixel/woff2/GeistPixel-Grid.woff2") format("woff2"),
+    url("/fonts/geist-pixel/variable-ttf/GeistPixel-Grid.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Pixel Line";
+  src: url("/fonts/geist-pixel/woff2/GeistPixel-Line.woff2") format("woff2"),
+    url("/fonts/geist-pixel/variable-ttf/GeistPixel-Line.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Pixel Square";
+  src: url("/fonts/geist-pixel/woff2/GeistPixel-Square.woff2") format("woff2"),
+    url("/fonts/geist-pixel/variable-ttf/GeistPixel-Square.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Pixel Triangle";
+  src: url("/fonts/geist-pixel/woff2/GeistPixel-Triangle.woff2") format("woff2"),
+    url("/fonts/geist-pixel/variable-ttf/GeistPixel-Triangle.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "DejaVu Sans";
+  src: url("/fonts/dejavu/DejaVuSans.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "DejaVu Sans";
+  src: url("/fonts/dejavu/DejaVuSans-Bold.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+
+:root {
+  --font-ui: "Geist", "DejaVu Sans", sans-serif;
+  --font-display: "Geist", "DejaVu Sans", sans-serif;
+  --font-mono: "Geist Mono", "DejaVu Sans", monospace;
+  --font-numeric: "DejaVu Sans", "Geist", sans-serif;
+  --font-pixel: "Geist Pixel", "DejaVu Sans", sans-serif;
+  --font-pixel-circle: "Geist Pixel Circle", "Geist Pixel", "DejaVu Sans", sans-serif;
+  --font-pixel-grid: "Geist Pixel Grid", "Geist Pixel", "DejaVu Sans", sans-serif;
+  --font-pixel-line: "Geist Pixel Line", "Geist Pixel", "DejaVu Sans", sans-serif;
+  --font-pixel-square: "Geist Pixel Square", "Geist Pixel", "DejaVu Sans", sans-serif;
+  --font-pixel-triangle: "Geist Pixel Triangle", "Geist Pixel", "DejaVu Sans", sans-serif;
+  --font-braille: "Geist Pixel", "DejaVu Sans", sans-serif;
+}
+
+.font-ui {
+  font-family: var(--font-ui);
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.font-pixel {
+  font-family: var(--font-pixel);
+}
+
+.font-pixel-circle {
+  font-family: var(--font-pixel-circle);
+}
+
+.font-pixel-grid {
+  font-family: var(--font-pixel-grid);
+}
+
+.font-pixel-line {
+  font-family: var(--font-pixel-line);
+}
+
+.font-pixel-square {
+  font-family: var(--font-pixel-square);
+}
+
+.font-pixel-triangle {
+  font-family: var(--font-pixel-triangle);
+}
+
+.font-numeric {
+  font-family: var(--font-numeric);
+  font-variant-numeric: lining-nums tabular-nums;
+  font-feature-settings: "lnum" 1, "tnum" 1;
+}

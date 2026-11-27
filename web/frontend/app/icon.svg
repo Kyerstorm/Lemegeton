@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">Lemegeton</title>
+  <rect x="1" y="1" width="62" height="62" rx="15" fill="#080808" stroke="#777777" stroke-width="1"/>
+  <path d="M18 13h9v29h21v8H18z" fill="#F5F5F5"/>
+  <circle cx="49" cy="47" r="3.4" fill="#F5F5F5"/>
+</svg>

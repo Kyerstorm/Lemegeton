@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1560" viewBox="0 0 2400 1560" role="img" aria-labelledby="title desc">
+  <title id="title">Lemegeton web visual system</title>
+  <desc id="desc">The implemented dashboard design system: a monochrome theme with tokenised surfaces, local Geist and DejaVu typography, consistent spacing and radii, first-party SVG icons, 44 pixel interaction targets, responsive layouts and reduced-motion behavior.</desc>
+  <defs>
+    <style>
+      .bg{fill:#050505}.panel{fill:#0b0b0b;stroke:#5a5a5a;stroke-width:1.5}.inner{fill:#111;stroke:#393939;stroke-width:1}
+      .rule{stroke:#393939;stroke-width:1}.eyebrow{fill:#a1a1a1;font:600 15px Arial,sans-serif;letter-spacing:3px}
+      .title{fill:#fff;font:700 44px Arial,sans-serif;letter-spacing:4px}
+      .heading{fill:#f5f5f5;font:700 24px Arial,sans-serif}
+      .label{fill:#eee;font:700 16px Arial,sans-serif}
+      .body{fill:#c4c4c4;font:15px Arial,sans-serif}
+      .small{fill:#929292;font:13px Arial,sans-serif}
+      .mono{fill:#fff;font:700 15px 'SFMono-Regular',Consolas,monospace}
+      .value{fill:#fff;font:700 18px 'SFMono-Regular',Consolas,monospace}
+      .sample{fill:#f5f5f5;font:700 37px Arial,sans-serif}
+      .tiny{fill:#898989;font:12px Arial,sans-serif;letter-spacing:1px}
+      .swatchline{stroke:#777;stroke-width:1}
+    </style>
+  </defs>
+  <rect class="bg" width="2400" height="1560"/>
+  <text x="64" y="66" class="eyebrow">LEMEGETON / WEB</text>
+  <text x="64" y="124" class="title">VISUAL SYSTEM / MONOCHROME BY DESIGN</text>
+  <text x="2336" y="72" class="eyebrow" text-anchor="end">IMPLEMENTED TOKENS / COMPONENT RULES</text>
+  <path class="rule" d="M64 158H2336"/>
+
+  <rect class="panel" x="64" y="194" width="1070" height="432" rx="12"/>
+  <text x="96" y="238" class="eyebrow">01 / COLOUR TOKENS</text>
+  <text x="96" y="278" class="heading">One monochrome theme, semantic status colours</text>
+  <path class="rule" d="M96 298H1102"/>
+  <rect x="96" y="326" width="140" height="112" rx="8" fill="#050505" stroke="#555"/>
+  <text x="96" y="470" class="label">Background</text><text x="96" y="496" class="mono">#050505</text>
+  <rect x="256" y="326" width="140" height="112" rx="8" fill="#0b0b0b" stroke="#555"/>
+  <text x="256" y="470" class="label">Surface</text><text x="256" y="496" class="mono">#0b0b0b</text>
+  <rect x="416" y="326" width="140" height="112" rx="8" fill="#111111" stroke="#555"/>
+  <text x="416" y="470" class="label">Raised</text><text x="416" y="496" class="mono">#111111</text>
+  <rect x="576" y="326" width="140" height="112" rx="8" fill="#181818" stroke="#555"/>
+  <text x="576" y="470" class="label">Hover</text><text x="576" y="496" class="mono">#181818</text>
+  <rect x="736" y="326" width="140" height="112" rx="8" fill="#2a2a2a" stroke="#777"/>
+  <text x="736" y="470" class="label">Border</text><text x="736" y="496" class="mono">#2a2a2a</text>
+  <rect x="896" y="326" width="140" height="112" rx="8" fill="#f5f5f5" stroke="#777"/>
+  <text x="896" y="470" class="label">Text</text><text x="896" y="496" class="mono">#f5f5f5</text>
+  <text x="96" y="555" class="small">Muted copy: #9a9a9a · softer copy: #c9c9c9 · accent: #ffffff</text>
+  <text x="96" y="586" class="small">Status tokens: success #b8dfc2 · warning #e7cf98 · danger #efaaaa</text>
+
+  <rect class="panel" x="1164" y="194" width="1172" height="432" rx="12"/>
+  <text x="1196" y="238" class="eyebrow">02 / TYPOGRAPHY</text>
+  <text x="1196" y="278" class="heading">Local fonts, distinct roles</text>
+  <path class="rule" d="M1196 298H2304"/>
+  <text x="1196" y="360" class="sample">Lemegeton / Geist</text>
+  <text x="1196" y="390" class="small">GEIST — UI AND DISPLAY</text>
+  <text x="1196" y="445" class="mono">guild_id  ·  0123456789  ·  LIBSQL_PATH</text>
+  <text x="1196" y="474" class="small">GEIST MONO — TECHNICAL LABELS AND TABULAR VALUES</text>
+  <text x="1196" y="527" class="label">Aa  0123456789  ·  DejaVu Sans</text>
+  <text x="1196" y="555" class="small">DEJAVU SANS — NUMERIC / FALLBACK COVERAGE</text>
+  <text x="1815" y="360" class="sample" style="font-family:Arial,sans-serif">LEMEGETON</text>
+  <text x="1815" y="390" class="small">GEIST PIXEL — SELECTIVE DISPLAY ACCENTS</text>
+  <text x="1815" y="446" class="label">Caption 10px</text>
+  <text x="1815" y="477" class="body">Small 12px · Body 14px</text>
+  <text x="1815" y="521" class="heading">Heading 29–42px</text>
+  <text x="1815" y="555" class="small">Fonts are served from frontend/public/fonts/.</text>
+
+  <rect class="panel" x="64" y="658" width="700" height="370" rx="12"/>
+  <text x="96" y="702" class="eyebrow">03 / SPACING AND SHAPE</text>
+  <text x="96" y="742" class="heading">Shared layout scale</text>
+  <path class="rule" d="M96 762H732"/>
+  <rect class="inner" x="96" y="792" width="104" height="54" rx="7"/><text x="148" y="825" class="value" text-anchor="middle">8</text>
+  <text x="216" y="825" class="label">Compact</text>
+  <rect class="inner" x="96" y="858" width="156" height="54" rx="7"/><text x="174" y="891" class="value" text-anchor="middle">12</text>
+  <text x="268" y="891" class="label">Control</text>
+  <rect class="inner" x="96" y="924" width="218" height="54" rx="7"/><text x="205" y="957" class="value" text-anchor="middle">20</text>
+  <text x="330" y="957" class="label">Section</text>
+  <text x="460" y="825" class="small">Radii</text>
+  <rect x="460" y="844" width="68" height="45" rx="7" fill="#171717" stroke="#777"/>
+  <rect x="540" y="844" width="68" height="45" rx="10" fill="#171717" stroke="#777"/>
+  <rect x="620" y="844" width="68" height="45" rx="14" fill="#171717" stroke="#777"/>
+  <text x="494" y="914" class="small" text-anchor="middle">7</text>
+  <text x="574" y="914" class="small" text-anchor="middle">10</text>
+  <text x="654" y="914" class="small" text-anchor="middle">14</text>
+  <text x="460" y="957" class="small">Pill: 999px · Page gap: 36px</text>
+
+  <rect class="panel" x="794" y="658" width="700" height="370" rx="12"/>
+  <text x="826" y="702" class="eyebrow">04 / INTERACTION</text>
+  <text x="826" y="742" class="heading">Controls are designed as states</text>
+  <path class="rule" d="M826 762H1462"/>
+  <rect x="826" y="790" width="180" height="56" rx="10" fill="#f5f5f5"/>
+  <text x="916" y="825" fill="#111" font-family="Arial,sans-serif" font-size="15" font-weight="700" text-anchor="middle">Primary action</text>
+  <rect x="1022" y="790" width="180" height="56" rx="10" fill="#111" stroke="#555"/>
+  <text x="1112" y="825" class="label" text-anchor="middle">Secondary</text>
+  <rect x="1218" y="790" width="180" height="56" rx="10" fill="#111" stroke="#777" opacity=".55"/>
+  <text x="1308" y="825" class="small" text-anchor="middle">Disabled</text>
+  <text x="826" y="895" class="body">Default · hover · focus · pressed · loading · disabled</text>
+  <text x="826" y="933" class="body">Empty · success · error · offline · partial / degraded</text>
+  <text x="826" y="981" class="small">Minimum target: 44px · Focus ring remains visible · No colour-only meaning</text>
+
+  <rect class="panel" x="1524" y="658" width="812" height="370" rx="12"/>
+  <text x="1556" y="702" class="eyebrow">05 / MOTION AND RESPONSIVE RULES</text>
+  <text x="1556" y="742" class="heading">Small, purposeful movement</text>
+  <path class="rule" d="M1556 762H2304"/>
+  <text x="1556" y="808" class="mono">140ms</text><text x="1688" y="808" class="body">Fast</text>
+  <text x="1556" y="850" class="mono">180ms</text><text x="1688" y="850" class="body">Normal</text>
+  <text x="1556" y="892" class="mono">260ms</text><text x="1688" y="892" class="body">Slow</text>
+  <text x="1556" y="950" class="small">Reduced-motion preference disables or minimises nonessential motion.</text>
+  <path class="rule" d="M1930 790V984"/>
+  <text x="1960" y="808" class="label">Responsive checkpoints</text>
+  <text x="1960" y="850" class="body">1250 · 960 · 760 · 480px</text>
+  <text x="1960" y="892" class="small">Navigation becomes a drawer;</text>
+  <text x="1960" y="914" class="small">grids collapse and controls reflow.</text>
+  <text x="1960" y="958" class="small">Three.js stays optional and has a</text>
+  <text x="1960" y="980" class="small">static fallback when WebGL is unavailable.</text>
+
+  <rect class="panel" x="64" y="1060" width="2272" height="410" rx="12"/>
+  <text x="96" y="1104" class="eyebrow">06 / HOW THE SYSTEM IS APPLIED</text>
+  <text x="96" y="1144" class="heading">A component consumes the system; it does not invent its own</text>
+  <path class="rule" d="M96 1164H2304"/>
+  <rect class="inner" x="96" y="1200" width="360" height="202" rx="9"/>
+  <text x="124" y="1240" class="mono">Tokens.ts</text>
+  <text x="124" y="1280" class="body">Colour · spacing · radius</text>
+  <text x="124" y="1314" class="body">Minimum target size</text>
+  <text x="124" y="1360" class="small">Single source for shared values.</text>
+  <path class="rule" d="M456 1300H520"/>
+  <rect class="inner" x="520" y="1200" width="360" height="202" rx="9"/>
+  <text x="548" y="1240" class="mono">Typography.ts / Motion.ts</text>
+  <text x="548" y="1280" class="body">Font roles · type scale</text>
+  <text x="548" y="1314" class="body">Durations · easing curves</text>
+  <text x="548" y="1360" class="small">Shared type and motion contract.</text>
+  <path class="rule" d="M880 1300H944"/>
+  <rect class="inner" x="944" y="1200" width="360" height="202" rx="9"/>
+  <text x="972" y="1240" class="mono">GlobalStyles.tsx</text>
+  <text x="972" y="1280" class="body">CSS variables · primitives</text>
+  <text x="972" y="1314" class="body">Responsive and state rules</text>
+  <text x="972" y="1360" class="small">Tokens become usable styles.</text>
+  <path class="rule" d="M1304 1300H1368"/>
+  <rect class="inner" x="1368" y="1200" width="360" height="202" rx="9"/>
+  <text x="1396" y="1240" class="mono">Components/</text>
+  <text x="1396" y="1280" class="body">Layout · Features · UI · Forms</text>
+  <text x="1396" y="1314" class="body">Icons · Feedback · Three</text>
+  <text x="1396" y="1360" class="small">Feature UI reuses the primitives.</text>
+  <path class="rule" d="M1728 1300H1792"/>
+  <rect class="inner" x="1792" y="1200" width="512" height="202" rx="9"/>
+  <text x="1820" y="1240" class="mono">Accessible experience</text>
+  <text x="1820" y="1280" class="body">Keyboard · touch · focus</text>
+  <text x="1820" y="1314" class="body">Error recovery · reduced motion</text>
+  <text x="1820" y="1360" class="small">Consistent states across devices.</text>
+  <text x="2304" y="1438" class="small" text-anchor="end">SOURCE: frontend/src/Components/DesignSystem/</text>
+</svg>

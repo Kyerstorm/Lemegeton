@@ -2,15 +2,21 @@
 
 This guide documents the provider-backed media discovery features. Providers remain authoritative for their own metadata; the bot does not infer release dates, adaptation arcs, ratings, or chapter-to-episode mappings that the source does not supply.
 
+> **Current v3 source authority:** see [Media Sources & Scraping](MEDIA_SOURCES.md) for the 64-target registry, active/disabled provider distinction and current safe extraction architecture. Later sections in this guide include predecessor-era storage and command notes; current v3 storage uses shared libSQL and private RocksDB objects, not the PostgreSQL/S3 arrangement described in those historical notes.
+
 ## Browse filters
+
+Title results are relevance-ranked across the selected providers using their returned primary, alternate, synonym, and subtitle titles. A provider failure does not discard other providers’ results; the response names the sources that could not be reached. A missing result is not treated as proof that a title does not exist.
+
+The current v3 webnovel search provider array contains NovelFire, Noveli.to, Novel Archive and Wuxia Click. All four are registry-marked `terms-review` and disabled unless the deployment operator confirms current terms and adds the source ID to `MEDIA_SOURCE_SCRAPE_ALLOWLIST`. Novel Updates has parser code but remains `needs-review` and is not an active provider; ScribbleHub parser helpers exist but it is not in the 64-source registry or active provider list. Royal Road is a separate story-specific RSS integration. Same-title records remain attributed to their own provider IDs and are not merged automatically.
 
 Use **/browse** with a media category and a title for a detailed record. For TMDB movie/TV discovery, leave the title blank to receive a filtered list instead.
 
 | Category | Supported filters |
 | --- | --- |
-| Anime and manga | Genre, AniList theme/tag, provider status, year range. Manga supports manga (Japan), manhwa (Korea), manhua (China), and provider-tagged webtoon subtypes using AniList origin/format metadata. Author and artist filters are available for manga/light-novel records when AniList staff roles expose the credit. Adult-flagged titles are excluded unless the user explicitly opts in from a Discord channel marked NSFW. |
-| General novels and books | Genre/subject, author, publisher, language code, publication year range through Google Books query parameters. |
-| Webnovels | Genre, author and status when available from Novel Updates, Novel Phoenix, NovelFire, or Novelist. |
+| Anime and manga | Anime search combines AniList and Kitsu when AniList-specific filters are not selected. Manga search combines AniList `type:MANGA, format:MANGA`, safe-rated Kitsu and safe-rated MangaDex metadata when AniList-only filters are not selected. Kitsu results require an explicit `G` or `PG` rating and retain their genres and categories. Light novels use AniList `type:MANGA, format:NOVEL` only and are excluded from ordinary manga results. MangaDex adds creators, tags, language, demographic and cover metadata, without retrieving chapters. |
+| General novels and books | Title and subject search through Google Books and low-volume Open Library APIs, plus Google Books volume lookup and exact Open Library ISBN-to-work lookup. |
+| Webnovels | Four terms-review metadata parsers (NovelFire, Noveli.to, Novel Archive and Wuxia Click) are gated by `MEDIA_SOURCE_SCRAPE_ALLOWLIST`; Royal Road is a separate story-specific RSS lookup. Novel Updates and ScribbleHub are not active providers. |
 | Movies and TV | TMDB genre, keyword/theme, original language code, status, release year range, runtime, director and cast filters. |
 
 A filter that the selected metadata provider cannot support is rejected instead of silently returning unfiltered results. Browse applies filters to the provider's best matching title; when the title fails one of the filters, try a broader title or fewer filters.
@@ -32,13 +38,13 @@ No chapter-to-episode or volume-to-season mapping is guessed. Release-order and 
 
 ## Cross-media similarity
 
-**/similar** resolves a title through AniList, Novel Updates, Google Books or TMDB, then searches anime, manga, light novels, webnovels, general books, movies and television for candidates with overlapping provider-reported genres.
+**/similar** resolves supported titles through AniList, Kitsu, MangaDex, Google Books, Open Library, TMDB or IGDB, then searches across anime, manga, light novels, books, games, films and television. IGDB game candidates are found by resolving provider genre names to IGDB genre IDs and filtering the games endpoint by those IDs; genre labels are not submitted as fuzzy title searches. Search relevance includes AniList synonym titles, TMDB original-language titles, Open Library alternate titles, Kitsu and MangaDex alternate titles, IGDB alternative names and Google Books subtitles. Similarity keeps each provider's genres, tags, subjects and book categories in their native fields; Kitsu category lookups use its categories relationship. Generic catalogue labels such as "Fiction" are ignored. AniList light-novel pools remain `format:NOVEL`; ordinary manga pools remain `format:MANGA`. Provider-generated recommendations are displayed separately from local metadata-overlap matches.
 
 The result has separate sections for:
-- **Provider-generated recommendations**, where AniList or TMDB supplies them.
-- **Local genre-overlap matches**, ranked using a transparent set intersection and accompanied by the shared genre names.
+- **Provider-generated recommendations**, where AniList, TMDB or IGDB supplies them.
+- **Local metadata-overlap matches**, ranked using transparent provider-reported genres, tags, subjects or book categories and accompanied by the source-labelled overlaps.
 
-The local ranking is a heuristic, not an AI-generated recommendation score. Providers with missing genre metadata may not yield local matches.
+The local ranking is a transparent metadata heuristic, not an AI-generated recommendation score. It uses normalized Dice overlap so providers with larger metadata lists do not win simply by returning more labels. It compares source labels without relabelling tags or subjects as genres. Each match records both sides of the overlap (for example, a candidate subject matched against a seed genre), and the saved Atlas relationship retains that overlap evidence alongside provider provenance. Providers with missing comparable metadata may not yield local matches; generic catalogue labels are ignored.
 
 ## TV season and episode guide
 
@@ -51,6 +57,18 @@ The local ranking is a heuristic, not an AI-generated recommendation score. Prov
 Run **/release-calendar** to open one interactive menu for the seven-day preview and this server's digest settings. Use **Preview next 7 days** to inspect provider-backed dates, **Configure digests** to open a modal for channel, frequency, categories, and region, or **Disable digests** to stop delivery for the current server. Configuration and disable actions require Manage Server permission.
 
 Currently supported sources are AniList airing schedules for anime, TMDB upcoming movie dates (using the configured region), and TMDB TV next-episode dates. The feed has a short in-memory cache and bounded request timeouts, and each entry names its source. Adult-flagged anime is excluded. The calendar does not claim to contain manga chapter or novel volume announcements because the configured providers do not expose a dependable, unified release schedule for those categories.
+
+## Media Follow and Alert Centres
+
+Use **/settings → Media Follow Centre** to manage guild-wide AniList follows. The existing anime episode follow remains available. The additional follow action supports:
+- **Title**: an AniList anime or manga ID; monitors provider metadata such as status, episode/chapter/volume counts, dates, genres and scheduled anime episode metadata.
+- **Creator**: an AniList STAFF or STUDIO ID; monitors credited works and provider-reported roles/active years.
+- **Franchise**: an AniList anime or manga ID; monitors the provider-declared relation list without inferring story chronology.
+- **Category**: an AniList genre plus ANIME or MANGA; watches the bounded set of matching catalogue results returned by AniList.
+
+Manage Server permission is required. Subscriptions are scoped to the current guild, limited to 25 additional targets per server, and checked by the existing 15-minute media worker. Metadata changes are sent to the configured media notification channel. The server’s Anime/Manga notification toggles also control the corresponding title, franchise and genre follow checks; creator follows are checked while media notifications are enabled.
+
+The **Media notifications** settings also include Films, TV and Games toggles. Those alerts use provider-reported release dates from TMDB and IGDB, plus AniList airing schedules for anime. The scanner checks a short due window and deduplicates by guild and provider event. Availability depends on the relevant provider credentials and returned data. Book publication dates and general manga chapter schedules remain unavailable unless a configured provider supplies a reliable date.
 
 ## Reading Hub
 
@@ -72,11 +90,13 @@ The family-friendly option is a best-effort metadata filter, not a parental-rati
 
 ## Comparison
 
-**/compare** compares two to four selected entries side by side, including mixed categories such as a webnovel, anime, film, and TV series in the same comparison. Choose a default category and use the per-title category overrides when needed. Ratings retain their provider/scale labels; fields differ by category rather than assuming that every media type has the same attributes.
+**/compare** compares two to four selected entries side by side, including mixed categories such as a webnovel, anime, film, and TV series in the same comparison. Choose a default category and use the per-title category overrides when needed. Each selection remains its own source-backed provider record: missing fields stay unavailable, and different rating scales are not converted into a shared score or ranked against one another. Fields differ by media category rather than assuming that every media type has the same attributes.
 
 ## Configuration and operational notes
 
-- Configure TMDB_BEARER_TOKEN for movie/TV search, franchise lookups, TV guides and TMDB-backed release-calendar categories.
+- Kitsu uses its public read-only JSON:API and needs no credential; discovery accepts only explicit G/PG age ratings and does not request R18 data.
+- Configure TMDB_BEARER_TOKEN for movie/TV search, franchise lookups, TV guides, runtime and regional content-rating lookups, and TMDB-backed release-calendar categories.
+- Exact book edition lookup uses Crossref's public ISBN-filtered works endpoint and a rate-limited Open Library ISBN/edition lookup. Webnovel parsers for NovelFire, Noveli.to, Novel Archive and Wuxia Click are disabled by default and run only after source-specific terms review and operator allowlisting. Novel Updates and ScribbleHub parser helpers are not active search providers. Royal Road supports a direct story-specific RSS lookup. Browser-rendered pages use the optional Botasaurus worker (Obscura preferred, Chromium fallback) or the TypeScript Playwright/Chromium fallback when the worker is unavailable.
 - Google Books and AniList use the existing helpers already used elsewhere in the bot.
 - Release-calendar settings, Reading Club nominations/votes, and Media Night sessions are persisted in the shared database and keyed by guild/channel as appropriate.
 - Provider failures, unavailable metadata and missing release dates are treated as missing data. The bot does not make a failed source appear operational or manufacture metadata to fill gaps.
@@ -101,7 +121,7 @@ Lemegeton uses a shared PostgreSQL relationship graph to connect the systems it 
 - Missing optional archive tables do not take down the discovery command. Existing provider metadata remains the source of truth, and exact-title matches or recommendations are never promoted to confirmed adaptations.
 - The graph schema is created idempotently through the existing PostgreSQL access layer. It uses indexes and a uniqueness constraint to avoid repeatedly adding the same relationship.
 
-The graph is intentionally an integration layer, not a promise that every provider exposes every category or relation. AniList, TMDB, Google Books, Novel Updates, Novel Phoenix, Steam/IGDB, and community archives keep their own authoritative metadata and limitations.
+The graph is intentionally an integration layer, not a promise that every provider exposes every category or relation. AniList, TMDB, Google Books, Crossref, Open Library, Royal Road RSS, Steam/IGDB, and community archives keep their own authoritative metadata and limitations.
 
 ## Connected media commands and community archives
 
@@ -115,9 +135,9 @@ The interactive /discovery-hub command is the entry point for media navigation a
 - /trailers uses the documented movie/TV videos endpoints and constructs links only for returned YouTube or Vimeo keys. Provider-returned video types and official flags are retained.
 - /collection-guide resolves a movie, loads its belongs_to_collection reference, then displays TMDB collection parts by release date. This is not an assertion of in-universe chronology.
 - /author-works queries Google Books by author. Results may include co-authored works and editions; this is not presented as a universal cross-provider bibliography.
-- `/webnovel-updates` and `/browse` query live public search pages from Novel Updates and Novel Phoenix. Each provider is isolated so one provider failure does not discard results returned by the other.
-- The scraper returns title links and available public metadata only; it does not fetch chapter text. Results explicitly marked as adult-rated or sexually explicit are filtered out.
-- Provider markup and availability can change. A scraper timeout, access challenge, or unsupported layout is treated as a provider failure rather than proof that a title does not exist.
+- **/discover category:Webnovels** accepts a Royal Road fiction ID or an HTTPS fiction/syndication URL on `www.royalroad.com`, then requests that story's official public RSS feed.
+- The RSS result shows only the feed's story title/link, author when present, up to five recent chapter titles/links and publication timestamps. The integration never retrieves chapter bodies or scrapes site search/catalogue pages.
+- Royal Road's feed is story-specific, not a global search or trending API. A missing feed entry is reported as missing metadata; it is not proof that a story or chapter does not exist. Other discovery providers use their own title-search interfaces.
 
 
 TMDB watch-provider data is powered by JustWatch. /where-to-watch labels the queried region and links to the provider-details URL when supplied; it does not manufacture direct streaming links. TMDB requests require TMDB_BEARER_TOKEN. Availability changes and should be verified with the provider.
@@ -135,17 +155,21 @@ TMDB watch-provider data is powered by JustWatch. /where-to-watch labels the que
 **/archive** is the single entry point for Manga Panels and community collections. Its modal keeps archive, related media, and action choices together. Each server can enable or hide Manga Panels, Quotes, Fanworks, Moodboards, Soundtracks, Scenes, Recommendations, and Theories from the selector.
 
 Server admins choose **Configure archive** for two focused settings groups:
-- **Categories & uploads** — choose visible archive categories and accepted image, audio, and video uploads. Images remain enabled by default for the existing Panels workflow; audio and video are opt-in. Supported files are limited to 20 MiB each.
-- **Storage & moderation** — configure a private media-storage channel fallback, moderation log, moderator role, and whether approved community entries are visible globally or only in the current server. Private S3-compatible storage can be used without a Discord storage channel.
+- **Categories & uploads** — choose visible Archive categories and accepted image, audio, and video uploads. Images remain enabled by default for the existing Panels workflow; audio and video are opt-in. Supported files are limited to 20 MiB each.
+- **Storage & moderation** — configure a private upload-intake channel, an optional private Discord storage fallback, a moderation channel and moderator role. The primary S3-compatible bucket remains private; a Discord storage channel is only needed for guilds using the legacy fallback.
 
-Community attachments are optional, stored privately, and remain pending until moderator approval. Soundtrack entries require either an HTTPS platform link or an enabled audio/video attachment; an upload-only soundtrack does not enter the moderation queue until the attachment is saved. Approved images appear in the archive entry; audio and video are linked from it. Rejected or removed entries have their stored attachments deleted.
+The upload-intake channel must deny **View Channel** to @everyone and allow the bot to view, send messages and manage messages. A configured legacy storage channel must also be hidden from @everyone and allow the bot to attach files. The bot validates those permissions when the channels are selected and rechecks the intake channel when an upload arrives. It copies accepted attachments into the private asset store, then deletes the original intake message. Downloads are restricted to Discord's attachment CDN and the configured byte limit is enforced while streaming the body.
+
+Community attachments remain pending until moderator approval. Soundtrack entries require either an HTTPS platform link or an enabled audio/video attachment; an upload-only soundtrack does not enter the moderation queue until the attachment is saved. Approved images appear in the Archive entry; audio and video are linked from it. Contributor attachment replacement/removal returns an approved entry to moderation review. Rejected or removed entries have their stored attachments detached and queued for cleanup.
+
+Asset registration and cleanup are durable: a cleanup lease is written before an object is uploaded and is removed only when the asset is linked to an Archive entry. Interrupted uploads therefore leave a retryable cleanup record instead of an untracked private object. Failed object deletion stays in the retry queue with bounded backoff.
 
 Manga Panels retain their specialised AniList, chapter, tag, and age-gating fields, while their category visibility and image-upload permission follow the shared archive settings. This keeps the data models specialised without splitting the server configuration.
 - **/archive → Manga Panels** — browse and search manga panels, view personal uploads, choose a random panel, add panels, configure shared storage/moderation, and open the panel moderation log.
 - **/panel-of-the-day** — selects a non-NSFW record from the existing Panels table and persists one selection per server per date instead of maintaining a second panel database.
 - **/media-bracket**, **/adaptation-vote**, and **/media-quiz** — persist server-scoped votes, polls, trivia questions, and user quiz sessions.
 
-New community archive submissions start pending. Approval takes place in the originating guild; approved entries are shared across servers. Moderation and votes remain guild-scoped. Fanworks submissions require HTTPS source links. Soundtrack submissions can use an HTTPS platform link or an admin-enabled audio/video attachment. Uploaders must confirm they own the media or have permission to share it. Quotes are limited to 280 characters; do not submit lyrics or long copyrighted passages. User-supplied links are not treated as proof of a media relationship.
+New community Archive submissions start pending. Approval takes place in the originating guild; approved entries are shared across servers. Moderation and votes remain guild-scoped. Contributors can edit approved server-only entries; metadata edits and attachment changes return the entry to the pending review queue. Publication visibility can be changed by the contributor or a server moderator when demoting to server-only, while promotion to global scope requires a configured global moderator. Collections and Trails cannot be promoted while they contain pending, removed, or server-only entries. Report review locks the report and entry together, so a report cannot be marked actioned without its removal transition committing. Fanworks submissions require HTTPS source links. Soundtrack submissions can use an HTTPS platform link or an admin-enabled audio/video attachment. Uploaders must confirm they own the media or have permission to share it. Quotes are limited to 280 characters; do not submit lyrics or long copyrighted passages. User-supplied links are not treated as proof of a media relationship.
 
 ### Database changes
 
