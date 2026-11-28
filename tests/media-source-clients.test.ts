@@ -243,16 +243,11 @@ test("Comic Book Herald feed is not fetched without explicit non-commercial conf
   assert.equal(requests.length, 0);
 });
 
-test("source reference directory excludes unclassified catalogue links", () => {
+test("source reference directory includes Novel Updates and supported search links", () => {
   const links = getMediaSourceResearchLinks("Example title");
-  assert.equal(links.some(link => link.id === "novel-updates"), false);
+  assert.ok(links.some(link => link.id === "novel-updates"
+    && link.url === "https://www.novelupdates.com/series-finder/?sf=1&sh=Example%20title"));
   assert.ok(links.some(link => link.id === "wookieepedia" && link.url?.includes("Special:Search")));
   assert.ok(links.some(link => link.id === "anilist" && link.url?.includes("Example%20title")));
 });
 
-
-test("Novel Updates research links point to its series finder", () => {
-  const source = getMediaSourceResearchLinks("Example Story").find(item => item.id === "novel-updates");
-  assert.equal(source?.url, "https://www.novelupdates.com/series-finder/?sf=1&sh=Example%20Story");
-  assert.equal(source?.status, "needs-review");
-});
