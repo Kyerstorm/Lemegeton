@@ -72,6 +72,7 @@ retries?: number;
 headers?: Record<string, string>;
 method?: "GET" | "POST";
 body?: BodyInit | null;
+cfBypass?: boolean;
 /** Test-only transport injection; leave unset in production to enforce DNS pinning. */
 fetchImpl?: typeof fetch;
 }
