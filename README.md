@@ -176,7 +176,7 @@ Lemegeton keeps source identity, access method, readiness and provenance separat
 |:--|:--|
 | Anime and manga | AniList, Kitsu, MangaDex and Shikimori; other catalogue targets have separate credential or review requirements. |
 | Books and novels | Google Books, Open Library, BookBrainz and Crossref ISBN matching. |
-| Webnovels | Four metadata parsers are terms-review gated behind `MEDIA_SOURCE_SCRAPE_ALLOWLIST`; Royal Road provides story-specific RSS metadata. Novel Updates and ScribbleHub are not active search providers. |
+| Webnovels | Five metadata search providers are gated behind `MEDIA_SOURCE_SCRAPE_ALLOWLIST`, including Novel Updates with a targeted Botasaurus Cloudflare-challenge retry. Royal Road provides story-specific RSS metadata; ScribbleHub remains inactive. |
 | Film and television | TMDB, with additional TV/database sources explicitly marked as credential, licence or review dependent. |
 | Video games | IGDB and Steam. |
 | Music | MusicBrainz, plus credentialed Last.fm, setlist.fm, Spotify, YouTube Data API and SoundCloud integrations. |
@@ -195,7 +195,7 @@ See the [Media Sources & Scraping guide](docs/MEDIA_SOURCES.md) for all 64 targe
 </p>
 
 <p align="center">
-  <img src="assets/webnovel-discovery.svg" alt="Webnovel discovery source states showing four gated parsers and inactive Novel Updates and ScribbleHub helpers" width="100%" />
+  <img src="assets/webnovel-discovery.svg" alt="Five allowlist-gated webnovel metadata providers, with Novel Updates Cloudflare challenge handling and inactive ScribbleHub helper" width="100%" />
 </p>
 
 <p align="center">
