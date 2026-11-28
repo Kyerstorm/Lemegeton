@@ -176,7 +176,7 @@ Lemegeton keeps source identity, access method, readiness and provenance separat
 |:--|:--|
 | Anime and manga | AniList, Kitsu, MangaDex and Shikimori; other catalogue targets have separate credential or review requirements. |
 | Books and novels | Google Books, Open Library, BookBrainz and Crossref ISBN matching. |
-| Webnovels | Five metadata search providers are gated behind `MEDIA_SOURCE_SCRAPE_ALLOWLIST`, including Novel Updates with a targeted Botasaurus Cloudflare-challenge retry. Royal Road provides story-specific RSS metadata; ScribbleHub remains inactive. |
+| Webnovels | Novel Updates metadata search is always included, with a targeted Botasaurus Cloudflare-challenge retry; four additional parsers remain `MEDIA_SOURCE_SCRAPE_ALLOWLIST`-gated. Mature-labelled entries are filtered. Royal Road provides story-specific RSS metadata; ScribbleHub remains inactive. |
 | Film and television | TMDB, with additional TV/database sources explicitly marked as credential, licence or review dependent. |
 | Video games | IGDB and Steam. |
 | Music | MusicBrainz, plus credentialed Last.fm, setlist.fm, Spotify, YouTube Data API and SoundCloud integrations. |
