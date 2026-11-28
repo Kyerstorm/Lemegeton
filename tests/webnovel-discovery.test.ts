@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { configureBotasaurusBridgeForTests } from "../helpers/integration/botasaurus-bridge.js";
 import {
+  parseNovelUpdatesSearch,
+  searchNovelUpdates,
   WebNovelDiscoveryClient,
   type WebNovelMedia,
   type WebNovelSearchProvider,
@@ -134,4 +137,101 @@ test("webnovel discovery skips short queries without calling providers", async (
   }], ["novelfire"]);
   assert.deepEqual(await client.searchDetailed(" x "), { results: [], unavailableProviders: [], disabledProviders: [] });
   assert.equal(calls, 0);
+});
+
+
+test("Novel Updates parses submitted series metadata without chapter content", () => {
+  const results = parseNovelUpdatesSearch(`
+    <article class="search_main_box_nu">
+      <a href="/series/123/">Community Submitted Story</a>
+      <div class="search_body">A synopsis submitted by a community member.</div>
+      <div class="search_author">Example Author</div>
+      <div class="search_genres"><a>Fantasy</a></div>
+      <span>24 chapters</span>
+    </article>
+  `, "https://www.novelupdates.com/series-finder/");
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0]?.provider, "Novel Updates");
+  assert.equal(results[0]?.title, "Community Submitted Story");
+  assert.equal(results[0]?.author, "Example Author");
+  assert.equal(results[0]?.chapterCount, 24);
+  assert.deepEqual(results[0]?.genres, ["Fantasy"]);
+  assert.equal(results[0]?.latestChapters.length, 0);
+});
+
+test("Novel Updates retries only Cloudflare challenges through Botasaurus", async () => {
+  const submitted: Array<{ url: string; options: Record<string, unknown> }> = [];
+  let requestedUrl = "";
+  const resultHtml = `
+    <div class="search_main_box_nu">
+      <a href="/series/123/">Cloudflare Retry Story</a>
+      <div class="search_body">Community-submitted catalogue summary.</div>
+    </div>
+  `;
+  const workerFetch: typeof fetch = async (input, init) => {
+    const target = new URL(String(input));
+    if (target.pathname === "/v1/jobs") {
+      const body = JSON.parse(String(init?.body)) as {
+        url: string;
+        options: Record<string, unknown>;
+      };
+      requestedUrl = body.url;
+      submitted.push(body);
+      return new Response(JSON.stringify({ jobId: "novel-updates-job", status: "queued" }), {
+        status: 202,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (target.pathname === "/v1/jobs/novel-updates-job") {
+      return new Response(JSON.stringify({
+        jobId: "novel-updates-job",
+        status: "succeeded",
+        result: {
+          url: requestedUrl,
+          canonicalUrl: requestedUrl,
+          title: "Series Finder",
+          description: "",
+          fields: {},
+          statusCode: 200,
+          engine: "obscura",
+          html: resultHtml,
+        },
+      }), { headers: { "content-type": "application/json" } });
+    }
+    return new Response(JSON.stringify({ error: "Unexpected worker request." }), {
+      status: 404,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  const fetchImpl: typeof fetch = async () => new Response("<html>challenge</html>", {
+    status: 403,
+    headers: {
+      "content-type": "text/html",
+      "cf-mitigated": "challenge",
+    },
+  });
+
+  configureBotasaurusBridgeForTests({
+    mode: "remote",
+    workerUrl: "https://scraper.example.test",
+    token: "n".repeat(32),
+    fetchImpl: workerFetch,
+  });
+  try {
+    const results = await searchNovelUpdates("Cloudflare Retry Story", { fetchImpl });
+    assert.equal(results[0]?.title, "Cloudflare Retry Story");
+    assert.equal(submitted.length, 1);
+    assert.equal(submitted[0]?.options.cfBypass, true);
+    assert.match(submitted[0]?.url ?? "", /^https:\/\/www\.novelupdates\.com\//);
+  } finally {
+    configureBotasaurusBridgeForTests(null);
+  }
+});
+
+test("Novel Updates is registered but remains disabled without the source allowlist", async () => {
+  const result = await new WebNovelDiscoveryClient().searchDetailed("Example Story");
+  assert.ok(result.disabledProviders.includes("Novel Updates"));
+  assert.ok(!result.unavailableProviders.includes("Novel Updates"));
+  assert.deepEqual(result.results, []);
 });
