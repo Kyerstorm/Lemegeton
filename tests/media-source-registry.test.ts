@@ -30,6 +30,8 @@ test("implemented and restricted sources are explicitly distinguished", () => {
   assert.equal(getMediaSource("setlist-fm")?.status, "credential-required");
   assert.equal(getMediaSource("shikimori")?.status, "implemented");
   assert.equal(getMediaSource("bookbrainz")?.status, "implemented");
+  assert.equal(getMediaSource("novel-updates")?.status, "needs-review");
+  assert.equal(getMediaSourceIntegrationMode("novel-updates"), "scrape");
   assert.equal(getMediaSource("novelfire")?.status, "terms-review");
   assert.equal(getMediaSource("novel-archive")?.status, "terms-review");
   assert.equal(getMediaSource("wuxia-click")?.status, "terms-review");
