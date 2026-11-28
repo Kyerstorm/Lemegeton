@@ -216,7 +216,7 @@ def _bounded_options(raw: Any) -> dict[str, Any]:
             "includeLinks": raw.get("includeLinks") is True,
             "includeHtml": raw.get("includeHtml") is True,
             "timeoutMs": timeout,
-            "cfBypass": raw.get("cfBypass") is True,
+            "cfBypass": raw.get("cfBypass") is not False,
         }
 
 
