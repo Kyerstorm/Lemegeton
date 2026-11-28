@@ -88,7 +88,7 @@ export function getMediaSourceResearchLinks(
   categories?: readonly MediaSourceCategory[],
 ): MediaSourceResearchLink[] {
   const term = query.trim().replace(/\s+/g, " ").slice(0, 100);
-  const selected = (categories?.length
+  const selected = categories?.length
     ? MEDIA_SOURCES.filter(source => categories.includes(source.category))
     : [...MEDIA_SOURCES];
 
