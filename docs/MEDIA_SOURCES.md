@@ -60,7 +60,7 @@ The browser-rendered path is optional and isolated from the Discord runtime:
 
 - `helpers/integration/botasaurus-bridge.ts` manages local, remote, automatic or disabled worker mode and scopes jobs by guild and user.
 - `workers/botasaurus.py` runs the separate browser worker. Obscura is the preferred browser engine; Chromium is the configured fallback.
-- The TypeScript scraper can fall back to its local Playwright/Chromium route when the Botasaurus worker is unavailable. That fallback does not solve challenges; Cloudflare handling is available only through the explicit Botasaurus `cfBypass: true` request option.
+- The TypeScript scraper can fall back to its local Playwright/Chromium route when the Botasaurus worker is unavailable. That fallback does not solve challenges; Cloudflare handling defaults on for Botasaurus requests and can be disabled with `cfBypass: false`.
 - A remote worker must use HTTPS. The local worker can use a private loopback/container HTTP endpoint.
 
 #### Opt-in Cloudflare and Turnstile handling
