@@ -303,13 +303,22 @@ test("Novel Updates retries only Cloudflare challenges through Botasaurus", asyn
       headers: { "content-type": "application/json" },
     });
   };
-  const fetchImpl: typeof fetch = async () => new Response("<html>challenge</html>", {
-    status: 403,
-    headers: {
-      "content-type": "text/html",
-      "cf-mitigated": "challenge",
-    },
-  });
+  const fetchImpl: typeof fetch = async input => {
+    const url = new URL(String(input));
+    if (url.pathname === "/series/123/") {
+      return new Response("<div class='seriestitlenu'>Cloudflare Retry Story</div>", {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    }
+    return new Response("<html>challenge</html>", {
+      status: 403,
+      headers: {
+        "content-type": "text/html",
+        "cf-mitigated": "challenge",
+      },
+    });
+  };
 
   configureBotasaurusBridgeForTests({
     mode: "remote",
