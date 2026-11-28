@@ -681,9 +681,9 @@ export function parseNovelUpdatesDetails(
   const genres = $("#seriesgenre a.genre").map((_, node) => clean($(node).text(), 80) ?? "").get().filter(Boolean);
   const author = $("#showauthors a").map((_, node) => clean($(node).text(), 160) ?? "").get().filter(Boolean).join(", ");
   const format = clean($("#showtype a").first().text(), 80);
-  const language = $("#showtype").text().match(/\\(([^)]+)\\)/)?.[1]?.trim() ?? null;
+  const language = $("#showtype").text().match(/\(([^)]+)\)/)?.[1]?.trim() ?? null;
   const yearText = clean($("#edityear").text(), 8);
-  const publicationYear = yearText && /^\\d{4}$/.test(yearText) ? Number(yearText) : null;
+  const publicationYear = yearText && /^\d{4}$/.test(yearText) ? Number(yearText) : null;
   const publisher = (selector: string) => $(selector).find("a").map((_, node) => clean($(node).text(), 160) ?? "").get().filter(Boolean).join(", ");
   const ratingText = $('meta[property="ratingValue"]').attr("content");
   const rating = ratingText ? Number(ratingText) : null;
