@@ -235,3 +235,35 @@ test("Novel Updates is registered but remains disabled without the source allowl
   assert.ok(!result.unavailableProviders.includes("Novel Updates"));
   assert.deepEqual(result.results, []);
 });
+
+
+test("Novel Updates does not send unrelated CAPTCHA challenges to Botasaurus", async () => {
+  let workerRequests = 0;
+  const workerFetch: typeof fetch = async () => {
+    workerRequests += 1;
+    return new Response(JSON.stringify({ error: "Unexpected worker request." }), {
+      status: 404,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  const fetchImpl: typeof fetch = async () => new Response("<html>verify you are human</html>", {
+    status: 403,
+    headers: { "content-type": "text/html" },
+  });
+
+  configureBotasaurusBridgeForTests({
+    mode: "remote",
+    workerUrl: "https://scraper.example.test",
+    token: "u".repeat(32),
+    fetchImpl: workerFetch,
+  });
+  try {
+    await assert.rejects(
+      () => searchNovelUpdates("Example Story", { fetchImpl }),
+      /access challenge/i,
+    );
+    assert.equal(workerRequests, 0);
+  } finally {
+    configureBotasaurusBridgeForTests(null);
+  }
+});
