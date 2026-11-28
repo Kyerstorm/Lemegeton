@@ -51,7 +51,7 @@ The primary protections are part of the actual request path:
 - URL validation rejects embedded credentials, local/internal hostnames, private or reserved addresses and non-standard ports.
 - DNS answers are checked for public unicast addresses and pinned for the request. Redirect targets are revalidated and DNS-pinned again.
 - Response bytes, text extraction, selectors, links, timeout, retries, redirects, concurrency and crawl page counts are bounded.
-- 401/403 responses and detected CAPTCHA/challenge pages become blocked results. A blocked source is not routed through an evasion path.
+- Generic 401/403 responses, login/paywall gates, explicit denials, IP/network blocks, and rate limits remain blocked. A detected Cloudflare challenge may use the Botasaurus challenge flow only when that individual scrape explicitly sets `cfBypass: true` and the source-specific review permits it. Other CAPTCHA types remain blocked. The optional Turnstile solver runs only when `CAPTCHA_SOLVER_PROVIDER` is `twocaptcha` or `capsolver` and an API key is configured.
 - The shared scraper does **not** fetch or parse `robots.txt`; this does not remove the need to review each source's terms, access restrictions, licence, attribution and permitted reuse.
 
 ### Optional browser worker
@@ -60,8 +60,22 @@ The browser-rendered path is optional and isolated from the Discord runtime:
 
 - `helpers/integration/botasaurus-bridge.ts` manages local, remote, automatic or disabled worker mode and scopes jobs by guild and user.
 - `workers/botasaurus.py` runs the separate browser worker. Obscura is the preferred browser engine; Chromium is the configured fallback.
-- The TypeScript scraper can fall back to its local Playwright/Chromium route when the Botasaurus worker is unavailable. Access challenges remain blocked.
+- The TypeScript scraper can fall back to its local Playwright/Chromium route when the Botasaurus worker is unavailable. That fallback does not solve challenges; Cloudflare handling is available only through the explicit Botasaurus `cfBypass: true` request option.
 - A remote worker must use HTTPS. The local worker can use a private loopback/container HTTP endpoint.
+
+#### Opt-in Cloudflare and Turnstile handling
+
+`cfBypass` is false unless an integration sets it for an individual eligible scrape. It is passed to the isolated Botasaurus worker; it is not a global bypass switch. The worker uses these bounded settings:
+
+| Variable | Default | Enforced range |
+|:--|--:|:--:|
+| `BOTASAURUS_CF_CHALLENGE_WAIT_MS` | `30000` ms | `5000..120000` ms |
+| `BOTASAURUS_CF_CHALLENGE_POLL_MS` | `1000` ms | `500..5000` ms |
+| `CAPTCHA_SOLVER_TIMEOUT_MS` | `120000` ms | `30000..300000` ms |
+
+`CAPTCHA_SOLVER_PROVIDER` is unset by default, which disables external solving. Set it to `twocaptcha` or `capsolver` and provide `CAPTCHA_SOLVER_API_KEY` to enable the optional Cloudflare Turnstile solver. The selected solver receives the public challenge page URL, Turnstile site key, and operator API credential; its returned token is used transiently by the worker. Do not include sensitive query parameters in challenge URLs, persist solver tokens, or log API keys. Review the selected solver's privacy terms and processing role before enabling it.
+
+This path resolves only an eligible Cloudflare/Turnstile anti-bot challenge. It does not authorize access to authenticated, paywalled, private, or otherwise restricted resources, nor does it override source terms, explicit denials, IP/network blocks, or rate limits. Unsupported or unresolved challenges remain blocked.
 
 The optional Python worker is a browser service only. The primary Lemegeton bot runtime remains TypeScript/Node.js.
 
