@@ -20,6 +20,7 @@ export interface BotasaurusBridgeOptions {
     guildId?: string;
     userId?: string;
   };
+  cfBypass?: boolean;
 }
 
 export interface BotasaurusPageResult {
@@ -353,6 +354,7 @@ function encodeOptions(options: BotasaurusBridgeOptions): Record<string, unknown
     includeArticle: options.includeArticle === true,
     includeLinks: options.includeLinks === true,
     includeHtml: options.includeHtml === true,
+    cfBypass: options.cfBypass === true,
   };
 }
 
@@ -720,8 +722,6 @@ export async function downloadBotasaurusJobExport(
     data: new Uint8Array(await response.arrayBuffer()),
   };
 }
-
-export async function stopBotasaurusWorker(): Promise<void> {
 
 export async function stopBotasaurusWorker(): Promise<void> {
   const worker = localWorker;

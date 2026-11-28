@@ -30,6 +30,11 @@ class WorkerSettings:
     chromium_fallback: bool = os.getenv("BOTASAURUS_CHROMIUM_FALLBACK", "true").strip().lower() not in ("0", "false", "no", "off")
     proxy_url: str = os.getenv("BOTASAURUS_PROXY_URL", "").strip()
     log_level: str = os.getenv("BOTASAURUS_LOG_LEVEL", "INFO")
+    cf_challenge_wait_ms: int = _integer("BOTASAURUS_CF_CHALLENGE_WAIT_MS", 30000, 5000, 120000)
+    cf_challenge_poll_ms: int = _integer("BOTASAURUS_CF_CHALLENGE_POLL_MS", 1000, 500, 5000)
+    captcha_solver_provider: str = os.getenv("CAPTCHA_SOLVER_PROVIDER", "").strip().lower()
+    captcha_solver_api_key: str = os.getenv("CAPTCHA_SOLVER_API_KEY", "").strip()
+    captcha_solver_timeout_ms: int = _integer("CAPTCHA_SOLVER_TIMEOUT_MS", 120000, 30000, 300000)
 
 
 SETTINGS = WorkerSettings()

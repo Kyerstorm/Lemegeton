@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+import os as _os
+import sys as _sys
+
+_here = _os.path.dirname(_os.path.abspath(__file__))
+if _sys.path and _os.path.normcase(_sys.path[0]) == _os.path.normcase(_here):
+    _sys.path.pop(0)
+    _sys.path.append(_here)
+
 import csv
 import hmac
 import ipaddress
@@ -17,11 +25,11 @@ import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from openpyxl import Workbook
 from urllib.parse import urljoin, urlsplit
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from botasaurus.cache import Cache
 from botasaurus.task import task
@@ -46,16 +54,21 @@ MAX_BATCH_JOBS = 16
 MAX_JOB_PAGE_SIZE = 100
 MAX_EXPORT_BYTES = 10 * 1024 * 1024
 CHALLENGE_MARKERS = (
-    "cf-chl-",
-    "challenge-platform",
-    "cdn-cgi/challenge-platform",
-    "just a moment",
+    "cf-chl-widget",
+    "cf-chl-body",
+    "cdn-cgi/challenge-platform/h/",
+    "just a moment...",
     "verify you are human",
     "captcha-container",
     "g-recaptcha",
-    "h-captcha",
-    "cf-turnstile",
-    "attention required",
+    "h-captcha-container",
+    "cf-turnstile-wrapper",
+    "attention required | cloudflare",
+)
+
+CF_CHALLENGE_HOSTS = (
+    "challenges.cloudflare.com",
+    "cdn-cgi.challenge-platform",
 )
 
 
@@ -192,15 +205,16 @@ def _bounded_options(raw: Any) -> dict[str, Any]:
     max_text = max(1, min(int(max_text), MAX_TEXT_CHARS))
 
     return {
-        "selectors": safe_selectors,
-        "includeText": raw.get("includeText") is not False,
-        "maxTextChars": max_text,
-        "includeStructuredData": raw.get("includeStructuredData") is True,
-        "includeArticle": raw.get("includeArticle") is True,
-        "includeLinks": raw.get("includeLinks") is True,
-        "includeHtml": raw.get("includeHtml") is True,
-        "timeoutMs": timeout,
-    }
+            "selectors": safe_selectors,
+            "includeText": raw.get("includeText") is not False,
+            "maxTextChars": max_text,
+            "includeStructuredData": raw.get("includeStructuredData") is True,
+            "includeArticle": raw.get("includeArticle") is True,
+            "includeLinks": raw.get("includeLinks") is True,
+            "includeHtml": raw.get("includeHtml") is True,
+            "timeoutMs": timeout,
+            "cfBypass": raw.get("cfBypass") is True,
+        }
 
 
 @task(output=None, raise_exception=True, create_error_logs=False, max_retry=0)
@@ -349,17 +363,22 @@ def _free_port() -> int:
         return int(listener.getsockname()[1])
 
 
-def _start_obscura() -> tuple[subprocess.Popen[bytes], str] | None:
+def _start_obscura(cf_bypass: bool = False) -> tuple[subprocess.Popen[bytes], str] | None:
     binary = _find_obscura()
     if not binary:
         return None
     port = _free_port()
     environment = os.environ.copy()
     environment["OBSCURA_ALLOW_PRIVATE_NETWORK"] = "0"
-    environment.pop("OBSCURA_STEALTH", None)
-    environment.pop("OBSCURA_PROXY", None)
+    if not cf_bypass:
+        environment.pop("OBSCURA_STEALTH", None)
+        environment.pop("OBSCURA_PROXY", None)
+    else:
+        environment["OBSCURA_STEALTH"] = "1"
+        if SETTINGS.proxy_url:
+            environment["OBSCURA_PROXY"] = SETTINGS.proxy_url
     command = [binary, "serve", "--host", "127.0.0.1", "--port", str(port)]
-    if SETTINGS.proxy_url:
+    if SETTINGS.proxy_url and not cf_bypass:
         command[1:1] = ["--proxy", SETTINGS.proxy_url]
 
     process = subprocess.Popen(
@@ -400,12 +419,21 @@ def _stop_process(process: subprocess.Popen[bytes] | None) -> None:
         process.wait(timeout=2)
 
 
-def _route_policy(route: Any, expected_host: str) -> None:
+def _route_policy(route: Any, expected_host: str, cf_bypass: bool = False) -> None:
     request_url = route.request.url
     if request_url.startswith(("data:", "blob:")):
         route.continue_()
         return
     if not _same_origin_host(request_url, expected_host):
+        if cf_bypass:
+            try:
+                parsed = urlsplit(request_url)
+                req_host = _safe_host(parsed.hostname or "")
+                if any(req_host == cf_host or req_host.endswith("." + cf_host) for cf_host in CF_CHALLENGE_HOSTS):
+                    route.continue_()
+                    return
+            except Exception:
+                pass
         route.abort()
         return
     if route.request.resource_type in ("image", "font", "media"):
@@ -414,20 +442,187 @@ def _route_policy(route: Any, expected_host: str) -> None:
     route.continue_()
 
 
+def _extract_turnstile_sitekey(page: Any) -> Optional[str]:
+    try:
+        sitekey = page.evaluate("""() => {
+            const el = document.querySelector('[data-sitekey]')
+                   || document.querySelector('.cf-turnstile')
+                   || document.querySelector('[data-cf-turnstile-sitekey]');
+            if (!el) return null;
+            return el.getAttribute('data-sitekey')
+                || el.getAttribute('data-cf-turnstile-sitekey');
+        }""")
+        if isinstance(sitekey, str) and sitekey.strip():
+            return sitekey.strip()
+    except Exception:
+        pass
+    return None
+
+
+def _solve_turnstile_2captcha(sitekey: str, page_url: str, timeout_ms: int) -> Optional[str]:
+    api_key = SETTINGS.captcha_solver_api_key
+    if not api_key:
+        return None
+    try:
+        import urllib.parse as _up
+        payload = _up.urlencode({
+            "key": api_key,
+            "method": "turnstile",
+            "sitekey": sitekey,
+            "pageurl": page_url,
+            "json": "1",
+        }).encode()
+        with urlopen("https://2captcha.com/in.php", data=payload, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+        if str(data.get("status")) != "1":
+            return None
+        task_id = data.get("request")
+        if not task_id:
+            return None
+        deadline = time.monotonic() + (timeout_ms / 1000.0)
+        time.sleep(10)
+        while time.monotonic() < deadline:
+            poll = f"https://2captcha.com/res.php?key={_up.quote(api_key)}&action=get&id={_up.quote(str(task_id))}&json=1"
+            with urlopen(poll, timeout=15) as resp:
+                poll_data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+            if str(poll_data.get("status")) == "1":
+                token = poll_data.get("request")
+                return token if isinstance(token, str) and token.strip() else None
+            if "CAPCHA_NOT_READY" not in str(poll_data.get("request", "")):
+                return None
+            time.sleep(5)
+    except Exception:
+        return None
+    return None
+
+
+def _solve_turnstile_capsolver(sitekey: str, page_url: str, timeout_ms: int) -> Optional[str]:
+    api_key = SETTINGS.captcha_solver_api_key
+    if not api_key:
+        return None
+    try:
+        create_payload = json.dumps({
+            "clientKey": api_key,
+            "task": {
+                "type": "AntiTurnstileTaskProxyLess",
+                "websiteURL": page_url,
+                "websiteKey": sitekey,
+            },
+        }).encode()
+        req = Request("https://api.capsolver.com/createTask", data=create_payload, headers={"Content-Type": "application/json"})
+        with urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+        if data.get("errorId"):
+            return None
+        task_id = data.get("taskId")
+        if not task_id:
+            return None
+        deadline = time.monotonic() + (timeout_ms / 1000.0)
+        time.sleep(5)
+        poll_payload = json.dumps({"clientKey": api_key, "taskId": task_id}).encode()
+        while time.monotonic() < deadline:
+            req = Request("https://api.capsolver.com/getTaskResult", data=poll_payload, headers={"Content-Type": "application/json"})
+            with urlopen(req, timeout=15) as resp:
+                poll_data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+            if poll_data.get("status") == "ready":
+                token = (poll_data.get("solution") or {}).get("token")
+                return token if isinstance(token, str) and token.strip() else None
+            if poll_data.get("errorId"):
+                return None
+            time.sleep(3)
+    except Exception:
+        return None
+    return None
+
+
+def _solve_captcha(page: Any, page_url: str) -> Optional[str]:
+    provider = SETTINGS.captcha_solver_provider
+    if provider not in ("twocaptcha", "2captcha", "capsolver"):
+        return None
+    if not SETTINGS.captcha_solver_api_key:
+        return None
+    sitekey = _extract_turnstile_sitekey(page)
+    if not sitekey:
+        return None
+    timeout = SETTINGS.captcha_solver_timeout_ms
+    if provider in ("twocaptcha", "2captcha"):
+        return _solve_turnstile_2captcha(sitekey, page_url, timeout)
+    return _solve_turnstile_capsolver(sitekey, page_url, timeout)
+
+
+def _inject_turnstile_token(page: Any, token: str) -> bool:
+    try:
+        return bool(page.evaluate(
+            """(tok) => {
+                try {
+                    const inputs = document.querySelectorAll(
+                        'input[name=\"cf-turnstile-response\"], input[name=\"g-recaptcha-response\"]'
+                    );
+                    inputs.forEach(i => { i.value = tok; });
+                    if (window.turnstile && typeof window.turnstile.execute === 'function') {
+                        try { window.turnstile.execute(); } catch (_) {}
+                    }
+                    const cb = window.___grecaptcha_cfg && window.___grecaptcha_cfg.clients;
+                    return true;
+                } catch (e) { return false; }
+            }""",
+            token,
+        ))
+    except Exception:
+        return False
+
+
+def _wait_for_cf_challenge(page: Any, host: str, cancel_event: threading.Event, timeout_ms: int, poll_ms: int) -> Optional[tuple[str, str, int, dict[str, str]]]:
+    deadline = time.monotonic() + (timeout_ms / 1000.0)
+    solver_tried = False
+    while time.monotonic() < deadline:
+        if cancel_event.is_set():
+            raise JobCancelled()
+        try:
+            cookies = page.context.cookies()
+            for cookie in cookies:
+                if cookie.get("name") == "cf_clearance" and cookie.get("domain", "").endswith(host):
+                    response = page.reload(wait_until="domcontentloaded", timeout=min(10000, max(1000, int(deadline - time.monotonic()) * 1000)))
+                    if response:
+                        headers = response.all_headers()
+                        final_url = page.url
+                        if not _same_origin_host(final_url, host):
+                            raise ChallengeBlocked("Navigation left the validated host after challenge.")
+                        html = page.content()
+                        return final_url, html, response.status, headers
+                    break
+        except Exception:
+            pass
+        if not solver_tried and SETTINGS.captcha_solver_provider and SETTINGS.captcha_solver_api_key and (time.monotonic() - (deadline - timeout_ms / 1000.0)) > 5:
+            solver_tried = True
+            token = _solve_captcha(page, page.url)
+            if token and _inject_turnstile_token(page, token):
+                time.sleep(1.5)
+        time.sleep(poll_ms / 1000.0)
+    return None
+
+
 def _navigate_with_obscura(
     url: str, host: str, timeout_ms: int, cancel_event: threading.Event,
+    cf_bypass: bool = False,
 ) -> tuple[str, str, int, dict[str, str]]:
-    started = _start_obscura()
+    started = _start_obscura(cf_bypass)
     if not started:
         raise RuntimeError("Obscura is unavailable or did not become ready.")
     process, endpoint = started
     try:
         with sync_playwright() as playwright:
             browser = playwright.chromium.connect_over_cdp(endpoint, timeout=timeout_ms)
-            context = browser.new_context(user_agent=DEFAULT_USER_AGENT, service_workers="block")
+            if cf_bypass and browser.contexts:
+                context = browser.contexts[0]
+                context_owned = False
+            else:
+                context = browser.new_context(user_agent=DEFAULT_USER_AGENT, service_workers="block")
+                context_owned = True
+            page = None
             try:
                 page = context.new_page()
-                page.route("**/*", lambda route: _route_policy(route, host))
+                page.route("**/*", lambda route: _route_policy(route, host, cf_bypass))
                 page.route_web_socket("**/*", lambda socket: socket.close())
                 if cancel_event.is_set():
                     raise JobCancelled()
@@ -445,13 +640,24 @@ def _navigate_with_obscura(
                     raise ChallengeBlocked("Navigation left the validated host and was stopped.")
                 html = page.content()
                 reason = _challenge_reason(response.status, headers, html)
+                if reason and cf_bypass:
+                    waited = _wait_for_cf_challenge(page, host, cancel_event, SETTINGS.cf_challenge_wait_ms, SETTINGS.cf_challenge_poll_ms)
+                    if waited:
+                        return waited
+                    raise ChallengeBlocked(f"Cloudflare challenge did not clear within timeout.")
                 if reason:
                     raise ChallengeBlocked(f"Scraping stopped after {reason}.")
                 if response.status < 200 or response.status >= 300:
                     raise RuntimeError(f"Obscura navigation returned HTTP {response.status}.")
                 return final_url, html, response.status, headers
             finally:
-                context.close()
+                if page is not None:
+                    try:
+                        page.close()
+                    except Exception:
+                        pass
+                if context_owned:
+                    context.close()
                 try:
                     browser.close()
                 except Exception:
@@ -537,8 +743,9 @@ def _scrape(payload: dict[str, Any], cancel_event: threading.Event) -> dict[str,
 
     timeout_ms = options["timeoutMs"]
     engine = "obscura"
+    cf_bypass = options.get("cfBypass", False)
     try:
-        page_url, html, status, headers = _navigate_with_obscura(url, host, timeout_ms, cancel_event)
+        page_url, html, status, headers = _navigate_with_obscura(url, host, timeout_ms, cancel_event, cf_bypass)
     except (RequestRejected, JobCancelled):
         raise
     except Exception as obscura_error:
