@@ -184,7 +184,7 @@ Lemegeton keeps source identity, access method, readiness and provenance separat
 
 The registry and integration-mode map identify whether a source is API-backed, credentialed, licensed, MediaWiki, feed, manual or scraping-based, and whether it is implemented, gated, under review, restricted or retired.
 
-**The scraper is not a universal “fetch any URL” layer.** It validates public destinations, pins DNS, revalidates redirects, and bounds response size/time/concurrency. Cloudflare challenge handling is an explicit per-request Botasaurus opt-in; optional Turnstile solving stays disabled until an operator configures a supported provider and API key. Generic access denials, login/paywall gates, IP blocks, and rate limits remain blocked. Source-specific access permissions and reuse terms still govern each source.
+**The scraper is not a universal “fetch any URL” layer.** It validates public destinations, pins DNS, revalidates redirects, and bounds response size/time/concurrency. Cloudflare challenge handling is enabled by default for Botasaurus requests and can be disabled per request; optional Turnstile solving stays disabled until an operator configures a supported provider and API key. Generic access denials, login/paywall gates, IP blocks, and rate limits remain blocked. Source-specific access permissions and reuse terms still govern each source.
 
 See the [Media Sources & Scraping guide](docs/MEDIA_SOURCES.md) for all 64 targets, the scraping pipeline, webnovel provider states, Timeline order types and Industry provider map. Original source intentions remain in [Command Expansions](Command%20Expansions.md#source-inventory-and-integration-strategy).
 
