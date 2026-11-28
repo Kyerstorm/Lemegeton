@@ -168,7 +168,7 @@ export function loadConfig(env:NodeJS.ProcessEnv=process.env):BotConfig{
   "wookieepedia","memory-alpha","tardis-wiki","marvel-database","dc-database","tolkien-gateway","harry-potter-wiki",
   "a-song-of-ice-and-fire-wiki","witcher-wiki","narutopedia","dragon-ball-wiki","one-piece-wiki","jojos-bizarre-encyclopedia","pokemon-wiki","transformers-wiki",
  ]);
- const mediaSourceScrapeAllowlist=sourceList(env.MEDIA_SOURCE_SCRAPE_ALLOWLIST,"MEDIA_SOURCE_SCRAPE_ALLOWLIST",["comic-book-herald","novelfire","novel-archive","wuxia-click","noveli-to"]);
+ const mediaSourceScrapeAllowlist=sourceList(env.MEDIA_SOURCE_SCRAPE_ALLOWLIST,"MEDIA_SOURCE_SCRAPE_ALLOWLIST",["comic-book-herald","novel-updates","novelfire","novel-archive","wuxia-click","noveli-to"]);
  const myAnimeListClientId=env.MAL_CLIENT_ID?.trim()||undefined;
  const traktClientId=env.TRAKT_CLIENT_ID?.trim()||undefined;
  const musicPollIntervalMinutes=positive(env.MUSIC_POLL_INTERVAL_MINUTES,10,"MUSIC_POLL_INTERVAL_MINUTES");
