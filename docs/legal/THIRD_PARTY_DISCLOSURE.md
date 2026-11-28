@@ -1,6 +1,6 @@
 # Third-Party Services & Disclosure
 
-**Last reviewed: November 25, 2026**
+**Last reviewed: November 28, 2026**
 
 Lemegeton connects to third-party platforms and metadata services when a user invokes a feature that needs them, or when an operator enables an optional integration. Actual recipients depend on deployed configuration. This is an integration disclosure, not a statement that every named provider is a contractual subprocessor.
 
@@ -23,6 +23,10 @@ A request is made only for the selected lookup or integration. Linked account id
 ## Webnovel sources
 
 Selected public searches and lookups may contact NovelFire, Noveli.to, Novel Archive, Wuxia Click, Novel Updates, ScribbleHub or Royal Road. Requests can contain the title or URL being looked up. Royal Road lookups use its public fiction feed. These are external content sources; their availability and terms are controlled by their respective operators.
+
+## Optional Cloudflare Turnstile challenge solving
+
+When an operator enables the optional Turnstile solver, the configured provider is either 2Captcha or CapSolver. The selected provider receives the public challenge page URL, the Cloudflare Turnstile site key, and the operator's API credential for task creation and polling. It returns a challenge token that the isolated Botasaurus worker uses transiently on the challenged page. The solver integration does not send Discord credentials, browser session cookies, or Lemegeton database records to the solver. Avoid sensitive query parameters in challenge URLs, and review the provider's privacy terms, processing role, and transfer arrangements before enabling it. This integration is disabled when `CAPTCHA_SOLVER_PROVIDER` is unset.
 
 ## Music services
 
