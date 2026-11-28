@@ -82,7 +82,7 @@ The optional Python worker is a browser service only. The primary Lemegeton bot 
 ## Webnovel discovery: active, gated and inactive code paths
 
 <p align="center">
-  <img src="../assets/webnovel-discovery.svg" alt="Actual webnovel provider state: five allowlist-gated metadata search providers, Novel Updates Cloudflare retry, inactive ScribbleHub parser, and separate Royal Road story RSS" width="100%" />
+  <img src="../assets/webnovel-discovery.svg" alt="Novel Updates always-on metadata discovery with Cloudflare retry, four allowlist-gated webnovel parsers, inactive ScribbleHub helper, and separate Royal Road RSS" width="100%" />
 </p>
 
 ### Five registered metadata search providers
@@ -97,7 +97,7 @@ The `WEBNOVEL_SEARCH_PROVIDERS` array currently contains:
 | Wuxia Click | Server-rendered `__NEXT_DATA__` search/details | `terms-review` |
 | Noveli.to | Paginated JSON search/details | `terms-review` |
 
-All five providers are disabled by default. Discovery requests only providers whose source IDs are explicitly present in `MEDIA_SOURCE_SCRAPE_ALLOWLIST`. Novel Updates retries a request through Botasaurus only after a Cloudflare-specific challenge is identified, or when its static result requires browser rendering; that request sets `cfBypass: true`. Generic CAPTCHA challenges, authentication gates, paywalls, denials, rate limits and other blocked responses remain blocked. The extraction scope is series metadata and canonical source links only; chapter contents are not retrieved or redistributed.
+Novel Updates is always included in webnovel discovery and does not require `MEDIA_SOURCE_SCRAPE_ALLOWLIST`. The other four providers remain disabled unless their IDs are explicitly allowlisted. Novel Updates retries a request through Botasaurus only after a Cloudflare-specific challenge is identified, or when its static result requires browser rendering; that request sets `cfBypass: true`. Generic CAPTCHA challenges, authentication gates, paywalls, denials, rate limits and other blocked responses remain blocked. Return factual catalogue fields and canonical source links only; do not extract synopsis text, reviews, artwork or chapter contents. Mature/adult-labelled entries are filtered before they can appear in member-facing search results.
 
 ### Related code that is not active discovery
 
