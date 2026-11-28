@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1420" viewBox="0 0 2400 1420" role="img" aria-labelledby="title desc">
 <title id="title">Webnovel Discovery / Actual Provider State</title>
-<desc id="desc">Five webnovel metadata search providers are registered behind an explicit operator allowlist. Novel Updates uses a targeted Cloudflare challenge retry through Botasaurus. ScribbleHub remains inactive, and Royal Road is a separate story-specific RSS integration.</desc>
+<desc id="desc">Novel Updates is always included in webnovel metadata discovery and uses a targeted Cloudflare challenge retry through Botasaurus. Four additional parsers require an explicit operator allowlist. ScribbleHub remains inactive, and Royal Road is a separate story-specific RSS integration.</desc>
 <defs>
 <style>
 .bg{fill:#050505}.panel{fill:#0b0b0b;stroke:#626262;stroke-width:1.5}.inner{fill:#111;stroke:#3e3e3e;stroke-width:1}
@@ -28,8 +28,8 @@
 <path class="rule" d="M64 154H2336"/>
 
 <text x="64" y="210" class="eyebrow" text-anchor="start">01 / REGISTERED WEBNOVEL SEARCH PROVIDERS</text>
-<text x="2336" y="210" class="count" text-anchor="end">5 PROVIDERS · SOURCE ALLOWLIST · OFF BY DEFAULT</text>
-<text x="64" y="252" class="body" text-anchor="start">Every active request must pass MEDIA_SOURCE_SCRAPE_ALLOWLIST; no source is enabled by default.</text>
+<text x="2336" y="210" class="count" text-anchor="end">1 ALWAYS-ON · 4 ALLOWLISTED</text>
+<text x="64" y="252" class="body" text-anchor="start">Novel Updates is always searched; the other four providers require MEDIA_SOURCE_SCRAPE_ALLOWLIST.</text>
 
 <rect class="panel" x="64" y="286" width="1098" height="244" rx="12"/>
 <text x="96" y="330" class="heading" text-anchor="start">NovelFire</text><rect class="pill-muted" x="858" y="306" width="270" height="24" rx="6"/><text x="993" y="323" class="pilltext" text-anchor="middle">TERMS REVIEW</text>
@@ -52,8 +52,8 @@
 <text x="1222" y="683" class="body" text-anchor="start">Provider metadata stays attributed to its own record.</text>
 
 <rect class="panel" x="64" y="822" width="2272" height="120" rx="12"/>
-<text x="96" y="864" class="heading" text-anchor="start">Novel Updates</text><rect class="pill-muted" x="2000" y="842" width="302" height="24" rx="6"/><text x="2151" y="859" class="pilltext" text-anchor="middle">NEEDS REVIEW · ALLOWLISTED</text>
-<text x="96" y="906" class="mono" text-anchor="start">Series-finder metadata · Cloudflare-specific challenge retry through isolated Botasaurus</text>
+<text x="96" y="864" class="heading" text-anchor="start">Novel Updates</text><rect class="pill-muted" x="2000" y="842" width="302" height="24" rx="6"/><text x="2151" y="859" class="pilltext" text-anchor="middle">ALWAYS ENABLED · MATURE FILTER</text>
+<text x="96" y="906" class="mono" text-anchor="start">Series + detail metadata · Cloudflare retry through isolated Botasaurus</text>
 <text x="1260" y="906" class="body" text-anchor="start">Search metadata only; no chapter-body retrieval.</text>
 
 <path class="rule" d="M64 974H2336"/>
@@ -71,6 +71,6 @@
 <text x="1222" y="1174" class="body" text-anchor="start">Fetch by explicit fiction ID or supported HTTPS URL.</text>
 <text x="1222" y="1208" class="body" text-anchor="start">Story-specific RSS only; no global title-search catalogue.</text>
 
-<text x="64" y="1320" class="body" text-anchor="start">All five registered webnovel providers are metadata-only and allowlist-gated; chapter contents are never fetched or redistributed.</text>
+<text x="64" y="1320" class="body" text-anchor="start">Novel Updates is always included; four other providers remain allowlist-gated. All five are metadata-only; Mature-labelled records and chapter content are excluded.</text>
 <text x="2336" y="1364" class="small" text-anchor="end">LEMEGETON / WEBNOVEL SOURCE STATUS — V3</text>
 </svg>
