@@ -20,6 +20,7 @@ export interface BotasaurusBridgeOptions {
     guildId?: string;
     userId?: string;
   };
+  /** Cloudflare challenge handling defaults on for Botasaurus; set false to disable for a request. */
   cfBypass?: boolean;
 }
 
@@ -354,7 +355,7 @@ function encodeOptions(options: BotasaurusBridgeOptions): Record<string, unknown
     includeArticle: options.includeArticle === true,
     includeLinks: options.includeLinks === true,
     includeHtml: options.includeHtml === true,
-    cfBypass: options.cfBypass === true,
+    cfBypass: options.cfBypass !== false,
   };
 }
 
