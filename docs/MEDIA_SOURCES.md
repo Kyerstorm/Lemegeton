@@ -51,7 +51,7 @@ The primary protections are part of the actual request path:
 - URL validation rejects embedded credentials, local/internal hostnames, private or reserved addresses and non-standard ports.
 - DNS answers are checked for public unicast addresses and pinned for the request. Redirect targets are revalidated and DNS-pinned again.
 - Response bytes, text extraction, selectors, links, timeout, retries, redirects, concurrency and crawl page counts are bounded.
-- Generic 401/403 responses, login/paywall gates, explicit denials, IP/network blocks, and rate limits remain blocked. A detected Cloudflare challenge may use the Botasaurus challenge flow only when that individual scrape explicitly sets `cfBypass: true` and the source-specific review permits it. Other CAPTCHA types remain blocked. The optional Turnstile solver runs only when `CAPTCHA_SOLVER_PROVIDER` is `twocaptcha` or `capsolver` and an API key is configured.
+- Generic 401/403 responses, login/paywall gates, explicit denials, IP/network blocks, and rate limits remain blocked. A detected Cloudflare challenge may use the Botasaurus challenge flow by default for eligible public metadata scrapes; an individual scrape can disable it with `cfBypass: false`. Other CAPTCHA types remain blocked. The optional Turnstile solver runs only when `CAPTCHA_SOLVER_PROVIDER` is `twocaptcha` or `capsolver` and an API key is configured.
 - The shared scraper does **not** fetch or parse `robots.txt`; this does not remove the need to review each source's terms, access restrictions, licence, attribution and permitted reuse.
 
 ### Optional browser worker
@@ -65,7 +65,7 @@ The browser-rendered path is optional and isolated from the Discord runtime:
 
 #### Opt-in Cloudflare and Turnstile handling
 
-`cfBypass` is false unless an integration sets it for an individual eligible scrape. It is passed to the isolated Botasaurus worker; it is not a global bypass switch. The worker uses these bounded settings:
+`cfBypass` defaults to true for Botasaurus requests and can be disabled per request with `cfBypass: false`. It is passed only to the isolated Botasaurus worker; the local Chromium fallback does not solve challenges. The worker uses these bounded settings:
 
 | Variable | Default | Enforced range |
 |:--|--:|:--:|
