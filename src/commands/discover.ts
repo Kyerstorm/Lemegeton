@@ -367,6 +367,11 @@ const embed = new EmbedBuilder()
 { name: "Chapters", value: item.chapterCount === null ? "Not reported" : item.chapterCount.toLocaleString(), inline: true },
 { name: "Rating", value: item.rating === null ? "Not reported" : String(item.rating), inline: true },
 { name: "Genres", value: item.genres.slice(0, 8).join(" · ") || "Not reported", inline: false },
+...(item.format ? [{ name: "Type", value: item.format, inline: true }] : []),
+...(item.language ? [{ name: "Language", value: item.language, inline: true }] : []),
+...(item.publicationYear ? [{ name: "Year", value: String(item.publicationYear), inline: true }] : []),
+...(item.originalPublisher ? [{ name: "Original publisher", value: item.originalPublisher, inline: true }] : []),
+...(item.englishPublisher ? [{ name: "English publisher", value: item.englishPublisher, inline: true }] : []),
 ...(item.latestChapters.length ? [{ name: "Recent chapter titles", value: item.latestChapters.slice(0, 5).join("\n").slice(0, 1_000), inline: false }] : []),
 ...(item.latestUpdate ? [{ name: "Last update", value: item.latestUpdate, inline: true }] : []),
 )
