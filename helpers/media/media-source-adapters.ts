@@ -37,6 +37,7 @@ const SEARCH_URLS: Readonly<Record<string, SearchUrlBuilder>> = {
   "myanimelist": query => "https://myanimelist.net/anime.php?q=" + encodeURIComponent(query),
   "anime-planet": query => "https://www.anime-planet.com/anime/all?name=" + encodeURIComponent(query),
   "mangaupdates": query => "https://www.mangaupdates.com/series.html?search=" + encodeURIComponent(query),
+  "novel-updates": query => "https://www.novelupdates.com/series-finder/?sf=1&sh=" + encodeURIComponent(query),
   "mangadex": query => "https://mangadex.org/search?q=" + encodeURIComponent(query),
   "anilist": query => "https://anilist.co/search/anime?search=" + encodeURIComponent(query),
   "anidb": query => "https://anidb.net/anime/?adb.search=" + encodeURIComponent(query),
@@ -89,7 +90,7 @@ export function getMediaSourceResearchLinks(
   const term = query.trim().replace(/\s+/g, " ").slice(0, 100);
   const selected = (categories?.length
     ? MEDIA_SOURCES.filter(source => categories.includes(source.category))
-    : [...MEDIA_SOURCES]).filter(source => source.id !== "novel-updates");
+    : [...MEDIA_SOURCES];
 
   return selected.map(source => {
     const homepage = safeHomepage(source);
