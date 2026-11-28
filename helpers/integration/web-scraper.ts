@@ -196,7 +196,10 @@ function challengeReason(status: number, body: string, headers: Headers): string
 if (headers.get("cf-mitigated")?.toLowerCase() === "challenge") return "Cloudflare challenge response";
 const lower = body.toLowerCase();
 const server = (headers.get("server") ?? "").toLowerCase();
-if (lower.includes("cf-chl-") || lower.includes("challenge-platform") || lower.includes("cdn-cgi/challenge-platform") || lower.includes("just a moment...") || lower.includes("verify you are human") || lower.includes("captcha-container") || lower.includes("g-recaptcha") || lower.includes("h-captcha") || lower.includes("cf-turnstile")) {
+if (lower.includes("cf-chl-") || lower.includes("challenge-platform") || lower.includes("cdn-cgi/challenge-platform") || lower.includes("cf-turnstile")) {
+return "Cloudflare challenge response";
+}
+if (lower.includes("just a moment...") || lower.includes("verify you are human") || lower.includes("captcha-container") || lower.includes("g-recaptcha") || lower.includes("h-captcha")) {
 return "access challenge";
 }
 if (status === 401 || status === 403) return "HTTP " + status + " access response";
