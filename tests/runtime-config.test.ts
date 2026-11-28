@@ -307,13 +307,13 @@ test("defaults media source access to explicit opt-in and validates source IDs",
 
   const configured = loadConfig(environment({
     MEDIAWIKI_ENABLED_SOURCES: "wookieepedia,tolkien-gateway",
-    MEDIA_SOURCE_SCRAPE_ALLOWLIST: "comic-book-herald",
+    MEDIA_SOURCE_SCRAPE_ALLOWLIST: "comic-book-herald,novel-updates",
     COMIC_BOOK_HERALD_RSS_NONCOMMERCIAL_CONFIRMED: "true",
     TVMAZE_SHAREALIKE_CONFIRMED: "true",
     SETLISTFM_NONCOMMERCIAL_CONFIRMED: "true",
   }));
   assert.deepEqual(configured.mediaWikiEnabledSources, ["wookieepedia", "tolkien-gateway"]);
-  assert.deepEqual(configured.mediaSourceScrapeAllowlist, ["comic-book-herald"]);
+  assert.deepEqual(configured.mediaSourceScrapeAllowlist, ["comic-book-herald", "novel-updates"]);
   assert.equal(configured.comicBookHeraldRssNonCommercialConfirmed, true);
   assert.equal(configured.tvMazeAttributionConfirmed, true);
   assert.equal(configured.setlistFmNonCommercialConfirmed, true);
