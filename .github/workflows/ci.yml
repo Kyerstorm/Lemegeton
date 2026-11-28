@@ -1,0 +1,1567 @@
+name: Lemegeton CI
+
+on:
+  push:
+    branches: [lemegeton-v3]
+  pull_request:
+    branches: [multi_guild]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+
+# A single sequential run keeps the commit check active until every real check finishes.
+jobs:
+  typecheck:
+    name: TypeScript bot type-check
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+    steps:
+      - name: Check out v3 source
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 22
+        continue-on-error: true
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: "22"
+      - name: Install root dependencies
+        continue-on-error: true
+        run: npm install --no-audit --no-fund
+      - name: Type-check bot and tests
+        continue-on-error: true
+        run: npm run typecheck
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  tests:
+    needs: [typecheck]
+    if: ${{ always() && !cancelled() }}
+    name: Complete bot test suite
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+      native_result: ${{ steps.native.outcome }}
+      compile_result: ${{ steps.compile.outcome }}
+      suite_result: ${{ steps.suite.outcome }}
+    timeout-minutes: 40
+    steps:
+      - name: Check out v3 source
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install stable Rust
+        continue-on-error: true
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
+        with:
+          toolchain: stable
+      - name: Install native build dependencies
+        continue-on-error: true
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes build-essential python3 pkg-config librocksdb-dev
+      - name: Validate optional Botasaurus worker syntax
+        continue-on-error: true
+        run: python3 -m compileall -q workers
+      - name: Install pinned Python security scanners
+        continue-on-error: true
+        run: python3 -m pip install --disable-pip-version-check --no-cache-dir bandit==1.9.4 pip-audit==2.10.1
+      - name: Run Bandit against the isolated worker
+        continue-on-error: true
+        run: bandit -r workers -l -i
+      - name: Audit isolated worker dependencies against OSV
+        continue-on-error: true
+        run: pip-audit -r workers/requirements.txt
+      - name: Set up Node.js 22
+        continue-on-error: true
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: "22"
+      - name: Install root dependencies
+        continue-on-error: true
+        run: npm install --no-audit --no-fund
+      - name: Build native storage addons
+        id: native
+        run: npm run build:native
+        continue-on-error: true
+      - name: Emit JavaScript despite existing type-check errors
+        id: compile
+        run: npx tsc -p tsconfig.json --noEmitOnError false
+        continue-on-error: true
+      - name: Run every emitted bot test
+        id: suite
+        if: always()
+        run: |
+          set -Eeuo pipefail
+          mapfile -d '' test_files < <(find dist/tests -maxdepth 1 -type f -name '*.test.js' -print0 | sort -z)
+          if (("${#test_files[@]}" == 0)); then
+            echo "No compiled bot test files were emitted." >&2
+            exit 1
+          fi
+          node --test "${test_files[@]}"
+        continue-on-error: true
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  bot-report:
+    name: Final bot CI result
+    continue-on-error: true
+    if: always()
+    needs: [typecheck, tests]
+    runs-on: ubuntu-latest
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+    steps:
+      - name: Fail only after all bot checks finish
+        continue-on-error: true
+        env:
+          TYPECHECK_RESULT: ${{ needs.typecheck.result }}
+          NATIVE_RESULT: ${{ needs.tests.outputs.native_result }}
+          COMPILE_RESULT: ${{ needs.tests.outputs.compile_result }}
+          SUITE_RESULT: ${{ needs.tests.outputs.suite_result }}
+        run: |
+          printf 'Type-check: %s\nNative addons: %s\nTypeScript emit: %s\nTest suite: %s\n' \
+            "$TYPECHECK_RESULT" "$NATIVE_RESULT" "$COMPILE_RESULT" "$SUITE_RESULT"
+          [[ "$TYPECHECK_RESULT" == success && "$NATIVE_RESULT" == success \
+            && "$COMPILE_RESULT" == success && "$SUITE_RESULT" == success ]]
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  frontend:
+    needs: [bot-report]
+    if: ${{ always() && !cancelled() }}
+    name: Dashboard tests, type-check and static build
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+      typecheck_result: ${{ steps.typecheck.outcome }}
+      unit_result: ${{ steps.unit.outcome }}
+      build_result: ${{ steps.build.outcome }}
+      browser_result: ${{ steps.browser.outcome }}
+      e2e_result: ${{ steps.e2e.outcome }}
+      routes_result: ${{ steps.routes.outcome }}
+    timeout-minutes: 30
+    steps:
+      - name: Check out v3 source
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 22
+        continue-on-error: true
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: "22"
+      - name: Validate environment template
+        continue-on-error: true
+        run: node --env-file=.env.example -e "process.exit(0)"
+      - name: Install dashboard dependencies
+        continue-on-error: true
+        run: npm install --prefix web/frontend --no-audit --no-fund
+      - name: Type-check Next.js application
+        id: typecheck
+        run: npm run typecheck
+        working-directory: web/frontend
+        continue-on-error: true
+      - name: Run dashboard unit and component tests
+        id: unit
+        run: npm run test:unit
+        working-directory: web/frontend
+        continue-on-error: true
+      - name: Build static production export
+        id: build
+        run: npm run build
+        working-directory: web/frontend
+        continue-on-error: true
+      - name: Install Chromium for browser tests
+        id: browser
+        if: steps.build.outcome == 'success'
+        run: npx playwright install --with-deps chromium
+        working-directory: web/frontend
+        continue-on-error: true
+      - name: Run dashboard browser E2E tests
+        id: e2e
+        if: steps.build.outcome == 'success' && steps.browser.outcome == 'success'
+        run: npm run test:e2e
+        working-directory: web/frontend
+        continue-on-error: true
+      - name: Verify required routes and emitted assets
+        id: routes
+        if: always()
+        continue-on-error: true
+        run: |
+          set -Eeuo pipefail
+          test -s web/frontend/out/index.html
+          for route in login custom-roles how-it-works status terms-of-service privacy-policy community-guidelines copyright-complaints dmca; do
+            test -s "web/frontend/out/${route}.html"
+            test ! -e "web/frontend/out/${route}/index.html"
+          done
+          test -s web/frontend/out/icon.svg
+          test -s web/frontend/out/apple-touch-icon.png
+          test -s web/frontend/out/brand/mark-light.svg
+          test -s web/frontend/out/brand/mark-dark.svg
+          test -s web/frontend/out/brand/wordmark-light.svg
+          test -s web/frontend/out/brand/wordmark-dark.svg
+          test -s web/frontend/out/brand/texture-grid.svg
+          find web/frontend/out/_next/static -type f -name '*.js' -print -quit | grep -q .
+          if find web/frontend/out/_next/static -type f -name '*.css' -print -quit | grep -q .; then
+            echo "Standalone build CSS detected."
+          else
+            grep -q '<style' web/frontend/out/index.html
+            grep -q '<style' web/frontend/out/custom-roles.html
+            echo "TSX-owned global and picker styles are present in the static routes."
+          fi
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  frontend-report:
+    name: Final dashboard frontend CI result
+    continue-on-error: true
+    if: always()
+    needs: [frontend]
+    runs-on: ubuntu-latest
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+    steps:
+      - name: Fail only after frontend checks finish
+        continue-on-error: true
+        env:
+          TYPECHECK_RESULT: ${{ needs.frontend.outputs.typecheck_result }}
+          UNIT_RESULT: ${{ needs.frontend.outputs.unit_result }}
+          BUILD_RESULT: ${{ needs.frontend.outputs.build_result }}
+          BROWSER_RESULT: ${{ needs.frontend.outputs.browser_result }}
+          E2E_RESULT: ${{ needs.frontend.outputs.e2e_result }}
+          ROUTES_RESULT: ${{ needs.frontend.outputs.routes_result }}
+        run: |
+          printf 'Type-check: %s\nUnit/component tests: %s\nStatic build: %s\nBrowser install: %s\nBrowser E2E: %s\nRoute/assets check: %s\n' \
+            "$TYPECHECK_RESULT" "$UNIT_RESULT" "$BUILD_RESULT" "$BROWSER_RESULT" "$E2E_RESULT" "$ROUTES_RESULT"
+          [[ "$TYPECHECK_RESULT" == success && "$UNIT_RESULT" == success \
+            && "$BUILD_RESULT" == success && "$BROWSER_RESULT" == success \
+            && "$E2E_RESULT" == success && "$ROUTES_RESULT" == success ]]
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  rust:
+    needs: [frontend-report]
+    if: ${{ always() && !cancelled() }}
+    name: Rust linting, tests and release build
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+      fmt_result: ${{ steps.fmt.outcome }}
+      clippy_result: ${{ steps.clippy.outcome }}
+      tests_result: ${{ steps.tests.outcome }}
+      release_result: ${{ steps.release.outcome }}
+    timeout-minutes: 30
+    steps:
+      - name: Check out v3 source
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install stable Rust with required components
+        continue-on-error: true
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - name: Verify Rust formatting
+        id: fmt
+        run: cargo fmt --manifest-path web/backend/Cargo.toml -- --check
+        continue-on-error: true
+      - name: Run Clippy with warnings denied
+        id: clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        continue-on-error: true
+      - name: Run all Rust tests
+        id: tests
+        run: cargo test -p lemegeton-storage && cargo test --workspace --all-targets --all-features
+        continue-on-error: true
+      - name: Build optimized dashboard backend
+        id: release
+        run: cargo build --workspace --release
+        continue-on-error: true
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  rust-report:
+    name: Final Rust CI result
+    continue-on-error: true
+    if: always()
+    needs: [rust]
+    runs-on: ubuntu-latest
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+    steps:
+      - name: Fail only after formatting, lint, tests and build finish
+        continue-on-error: true
+        env:
+          FMT_RESULT: ${{ needs.rust.outputs.fmt_result }}
+          CLIPPY_RESULT: ${{ needs.rust.outputs.clippy_result }}
+          TESTS_RESULT: ${{ needs.rust.outputs.tests_result }}
+          RELEASE_RESULT: ${{ needs.rust.outputs.release_result }}
+        run: |
+          printf 'Formatting: %s\nClippy: %s\nRust tests: %s\nRelease build: %s\n' "$FMT_RESULT" "$CLIPPY_RESULT" "$TESTS_RESULT" "$RELEASE_RESULT"
+          [[ "$FMT_RESULT" == success && "$CLIPPY_RESULT" == success && "$TESTS_RESULT" == success && "$RELEASE_RESULT" == success ]]
+      - name: Record this job for the final CI gate
+        id: ci_result
+        if: always()
+        continue-on-error: true
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  container:
+    needs: [rust-report]
+    if: ${{ always() && !cancelled() }}
+    name: Compose validation and production image contract
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+      image_result: ${{ steps.image.outcome }}
+      runtime_result: ${{ steps.runtime.outcome }}
+      smoke_result: ${{ steps.smoke.outcome }}
+      image_scan_result: ${{ steps.image_scan.outcome }}
+      nuclei_result: ${{ steps.nuclei.outcome }}
+      zap_result: ${{ steps.zap.outcome }}
+      sbom_result: ${{ steps.sbom.outcome }}
+      sbom_upload_result: ${{ steps.sbom_upload.outcome }}
+    timeout-minutes: 45
+    steps:
+      - name: Check out v3 source
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Validate startup script syntax
+        continue-on-error: true
+        run: bash -n scripts/start.sh
+      - name: Install ShellCheck
+        continue-on-error: true
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends shellcheck
+      - name: Lint shell scripts
+        continue-on-error: true
+        run: shellcheck --severity=warning scripts/start.sh
+      - name: Validate Compose configuration
+        continue-on-error: true
+        run: |
+          touch .env
+          docker compose --file docker-compose.yml config --quiet
+      - name: Build complete production image
+        id: image
+        run: docker build --pull --progress=plain --tag lemegeton:ci .
+        continue-on-error: true
+      - name: Verify runtime user, entrypoint and bundled services
+        id: runtime
+        if: always()
+        continue-on-error: true
+        run: |
+          set -Eeuo pipefail
+          test "$(docker image inspect lemegeton:ci --format '{{.Config.User}}')" = "10001:10001"
+          docker image inspect lemegeton:ci --format '{{.Config.Healthcheck.Test}}' | grep -Fq 'http://127.0.0.1:8080/login'
+          docker run --rm --entrypoint /bin/bash lemegeton:ci -ec '
+            test "$(id -u)" = "10001"
+            test -x /app/scripts/start.sh
+            test -x /app/target/release/lemegeton-dashboard
+            test -s /app/web/frontend/out/index.html
+            node --version
+          '
+      - name: Start isolated dashboard and verify hardened routes
+        id: smoke
+        if: steps.image.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -Eeuo pipefail
+          name="lemegeton-hardened-web-smoke"
+          docker rm --force "$name" >/dev/null 2>&1 || true
+          docker run --detach --name "$name" \
+            --publish 127.0.0.1:18080:8080 \
+            --entrypoint /app/target/release/lemegeton-dashboard \
+            --env DASHBOARD_PUBLIC_URL=https://dashboard.example \
+            --env DASHBOARD_REDIRECT_URI=https://dashboard.example/oauth/callback \
+            --env DASHBOARD_COOKIE_SECURE=true \
+            --env LIBSQL_PATH=/app/data/dashboard/smoke.db \
+            --env DASHBOARD_SESSION_DB_PATH=/app/data/dashboard/legacy-sessions.db \
+            lemegeton:ci
+          base="http://127.0.0.1:18080"
+          curl --silent --show-error --fail --retry 30 --retry-delay 1 --retry-connrefused "$base/health/ready" >/dev/null
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' "$base/login")" = "200"
+          for path in \
+            "/_next/static/chunks/app.js.map" \
+            "/API/users" \
+            "/api/users" \
+            "/.git/config" \
+            "/.env"; do
+            status="$(curl --silent --output /dev/null --write-out '%{http_code}' "$base$path")"
+            test "$status" = "404" || { echo "$path returned HTTP $status instead of 404" >&2; exit 1; }
+          done
+          headers="$(curl --silent --dump-header - --output /dev/null "$base/login")"
+          printf '%s\n' "$headers" | grep -Eiq '^strict-transport-security:'
+      - name: Scan assembled production image with Trivy
+        id: image_scan
+        if: steps.image.outcome == 'success'
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          version: v0.76.2
+          scan-type: image
+          image-ref: lemegeton:ci
+          scanners: vuln,misconfig,secret,license
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          ignore-unfixed: "false"
+          exit-code: "1"
+          format: table
+          hide-progress: true
+          timeout: 15m
+      - name: Generate CycloneDX SBOM for the final production image
+        id: sbom
+        if: steps.image.outcome == 'success'
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          version: v0.76.2
+          scan-type: image
+          image-ref: lemegeton:ci
+          format: cyclonedx
+          output: ${{ runner.temp }}/lemegeton-image.cdx.json
+          exit-code: "0"
+          hide-progress: true
+          timeout: 15m
+      - name: Validate container SBOM structure
+        if: steps.sbom.outcome == 'success'
+        continue-on-error: true
+        run: |
+          node --input-type=commonjs - "$RUNNER_TEMP/lemegeton-image.cdx.json" <<'NODE'
+          const fs = require('node:fs');
+          const bom = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (bom.bomFormat !== 'CycloneDX' || !Array.isArray(bom.components)) {
+            throw new Error('Invalid container CycloneDX SBOM');
+          }
+          console.log(`Validated container SBOM with ${bom.components.length} components.`);
+          NODE
+      - name: Upload container CycloneDX SBOM
+        id: sbom_upload
+        if: always() && steps.sbom.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: lemegeton-container-cyclonedx-sbom
+          path: ${{ runner.temp }}/lemegeton-image.cdx.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Run Nuclei against the isolated dashboard
+        id: nuclei
+        if: steps.smoke.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -Eeuo pipefail
+          archive="$RUNNER_TEMP/nuclei_3.11.1_linux_amd64.zip"
+          install_dir="$RUNNER_TEMP/nuclei"
+          report="$RUNNER_TEMP/nuclei-results.jsonl"
+          mkdir -p "$install_dir"
+          curl --fail --location --silent --show-error \
+            https://github.com/projectdiscovery/nuclei/releases/download/v3.11.1/nuclei_3.11.1_linux_amd64.zip \
+            --output "$archive"
+          printf '%s  %s\n' \
+            'ea63d4ae232808cd7c6bc00d0142428e231fab59dae01042246097d195835ab6' \
+            "$archive" | sha256sum --check
+          unzip -q "$archive" -d "$install_dir"
+          binary="$(find "$install_dir" -type f -name nuclei -perm /111 -print -quit)"
+          test -n "$binary"
+          "$binary" -update-templates > "$RUNNER_TEMP/nuclei-templates.log" 2>&1
+          "$binary" -u http://127.0.0.1:18080 \
+            -tags misconfig,exposure,cve \
+            -exclude-tags dos,fuzz,intrusive,bruteforce \
+            -severity medium,high,critical \
+            -rl 5 -c 10 -timeout 8 -retries 1 \
+            -jsonl -o "$report" > "$RUNNER_TEMP/nuclei-run.log" 2>&1
+          findings=0
+          if test -s "$report"; then
+            findings="$(jq -s '[.[] | select(.info.severity == "medium" or .info.severity == "high" or .info.severity == "critical")] | length' "$report")"
+          fi
+          echo "Nuclei completed with ${findings} medium/high/critical finding(s)." >> "$GITHUB_STEP_SUMMARY"
+          test "$findings" -eq 0
+      - name: Run OWASP ZAP full scan against disposable dashboard
+        id: zap
+        if: steps.smoke.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -Eeuo pipefail
+          report_dir="$RUNNER_TEMP/zap-report"
+          report="$report_dir/zap-report.json"
+          mkdir -p "$report_dir"
+          chmod 0777 "$report_dir"
+          docker run --rm --network host \
+            --volume "$report_dir:/zap/wrk/:rw" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-full-scan.py -t http://127.0.0.1:18080 -m 3 -T 10 -I \
+            -J /zap/wrk/zap-report.json \
+            -z "-config scanner.maxScanDurationInMins=5" \
+            > "$RUNNER_TEMP/zap-scan.log" 2>&1
+          test -s "$report"
+          findings="$(jq '[.site[]?.alerts[]? | select((.riskcode // "0" | tonumber) >= 2)] | length' "$report")"
+          echo "OWASP ZAP completed with ${findings} medium/high/critical alert(s)." >> "$GITHUB_STEP_SUMMARY"
+          test "$findings" -eq 0
+      - name: Stop disposable dashboard container
+        if: always()
+        continue-on-error: true
+        run: docker rm --force lemegeton-hardened-web-smoke >/dev/null 2>&1 || true
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  container-report:
+    name: Final container CI result
+    continue-on-error: true
+    if: always()
+    needs: [container]
+    runs-on: ubuntu-latest
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+    steps:
+      - name: Fail only after image and runtime checks finish
+        continue-on-error: true
+        env:
+          IMAGE_RESULT: ${{ needs.container.outputs.image_result }}
+          RUNTIME_RESULT: ${{ needs.container.outputs.runtime_result }}
+          SMOKE_RESULT: ${{ needs.container.outputs.smoke_result }}
+          IMAGE_SCAN_RESULT: ${{ needs.container.outputs.image_scan_result }}
+          NUCLEI_RESULT: ${{ needs.container.outputs.nuclei_result }}
+          ZAP_RESULT: ${{ needs.container.outputs.zap_result }}
+          SBOM_RESULT: ${{ needs.container.outputs.sbom_result }}
+          SBOM_UPLOAD_RESULT: ${{ needs.container.outputs.sbom_upload_result }}
+        run: |
+          printf 'Production image: %s\nRuntime contract: %s\nHardened web smoke: %s\nTrivy image scan: %s\nNuclei DAST: %s\nOWASP ZAP DAST: %s\nCycloneDX SBOM: %s\nSBOM artifact upload: %s\n' \
+            "$IMAGE_RESULT" "$RUNTIME_RESULT" "$SMOKE_RESULT" "$IMAGE_SCAN_RESULT" "$NUCLEI_RESULT" "$ZAP_RESULT" "$SBOM_RESULT" "$SBOM_UPLOAD_RESULT"
+          [[ "$IMAGE_RESULT" == success && "$RUNTIME_RESULT" == success && "$SMOKE_RESULT" == success \
+            && "$IMAGE_SCAN_RESULT" == success && "$NUCLEI_RESULT" == success && "$ZAP_RESULT" == success \
+            && "$SBOM_RESULT" == success && "$SBOM_UPLOAD_RESULT" == success ]]
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  hygiene:
+    needs: [container-report]
+    if: ${{ always() && !cancelled() }}
+    name: Configuration and script validation
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+      json_result: ${{ steps.json.outcome }}
+      env_result: ${{ steps.env.outcome }}
+      scripts_result: ${{ steps.scripts.outcome }}
+      shell_result: ${{ steps.shell.outcome }}
+      whitespace_result: ${{ steps.whitespace.outcome }}
+    timeout-minutes: 10
+    steps:
+      - name: Check out complete history
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Node.js 22
+        continue-on-error: true
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: "22"
+      - name: Parse repository JSON configuration
+        id: json
+        continue-on-error: true
+        run: |
+          set -Eeuo pipefail
+          while IFS= read -r -d '' file; do
+            node -e 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))' "$file"
+          done < <(find . -type f -name '*.json' \
+            -not -path './.git/*' \
+            -not -path '*/node_modules/*' \
+            -not -path '*/dist/*' \
+            -not -path '*/target/*' -print0)
+      - name: Validate Node environment template
+        id: env
+        run: node --env-file=.env.example -e "process.exit(0)"
+        continue-on-error: true
+      - name: Parse JavaScript maintenance and acceptance scripts
+        id: scripts
+        continue-on-error: true
+        run: |
+          set -Eeuo pipefail
+          while IFS= read -r -d '' file; do
+            node --check "$file"
+          done < <(find scripts -type f -name '*.mjs' -print0)
+      - name: Validate shell syntax
+        id: shell
+        continue-on-error: true
+        run: |
+          set -Eeuo pipefail
+          while IFS= read -r -d '' file; do
+            bash -n "$file"
+          done < <(find . -type f -name '*.sh' \
+            -not -path './.git/*' \
+            -not -path '*/node_modules/*' \
+            -not -path '*/target/*' -print0)
+      - name: Check whitespace errors in current commit
+        id: whitespace
+        run: git diff --check HEAD^ HEAD
+        continue-on-error: true
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  hygiene-report:
+    name: Final repository hygiene result
+    continue-on-error: true
+    if: always()
+    needs: [hygiene]
+    runs-on: ubuntu-latest
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+    steps:
+      - name: Fail only after every hygiene check finishes
+        continue-on-error: true
+        env:
+          JSON_RESULT: ${{ needs.hygiene.outputs.json_result }}
+          ENV_RESULT: ${{ needs.hygiene.outputs.env_result }}
+          SCRIPTS_RESULT: ${{ needs.hygiene.outputs.scripts_result }}
+          SHELL_RESULT: ${{ needs.hygiene.outputs.shell_result }}
+          WHITESPACE_RESULT: ${{ needs.hygiene.outputs.whitespace_result }}
+        run: |
+          printf 'JSON: %s\nEnvironment: %s\nJavaScript: %s\nShell: %s\nWhitespace: %s\n' \
+            "$JSON_RESULT" "$ENV_RESULT" "$SCRIPTS_RESULT" "$SHELL_RESULT" "$WHITESPACE_RESULT"
+          [[ "$JSON_RESULT" == success && "$ENV_RESULT" == success \
+            && "$SCRIPTS_RESULT" == success && "$SHELL_RESULT" == success \
+            && "$WHITESPACE_RESULT" == success ]]
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  regression:
+    needs: [hygiene-report]
+    if: ${{ always() && !cancelled() }}
+    name: Scraper URL, DNS and redirect security tests
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+    steps:
+      - name: Check out v3 source
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 22
+        continue-on-error: true
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: "22"
+      - name: Install root dependencies
+        continue-on-error: true
+        run: npm install --no-audit --no-fund
+      - name: Compile and run scraper SSRF regression suite
+        continue-on-error: true
+        run: |
+          set -Eeuo pipefail
+          rm -rf .scraper-test-dist
+          trap 'rm -rf .scraper-test-dist' EXIT
+          npx tsc --ignoreConfig --target ES2022 --module NodeNext --moduleResolution NodeNext --lib ES2022,DOM --strict --noUncheckedIndexedAccess --noImplicitOverride --skipLibCheck --esModuleInterop --verbatimModuleSyntax --rootDir . --outDir .scraper-test-dist tests/web-scraper.test.ts
+          test -s .scraper-test-dist/tests/web-scraper.test.js
+          node --test .scraper-test-dist/tests/web-scraper.test.js
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  adversarial-fixtures:
+    needs: [regression]
+    if: ${{ always() && !cancelled() }}
+    name: Poisoning, hallucination and resource-boundary fixtures
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+    steps:
+      - name: Check out v3 source
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 22
+        continue-on-error: true
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: "22"
+      - name: Run synthetic adversarial reverse-engineering fixtures
+        continue-on-error: true
+        run: node --test tests/ai-reverse-engineering-guard.test.mjs
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  source-audit:
+    needs: [adversarial-fixtures]
+    if: ${{ always() && !cancelled() }}
+    name: Full repository source audit and weave plan
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+    steps:
+      - name: Check out v3 source
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 24
+        continue-on-error: true
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: "24"
+      - name: Isolate BLA per-run state
+        continue-on-error: true
+        run: echo "BLA_STATE_DIR=$RUNNER_TEMP/bla-state" >> "$GITHUB_ENV"
+      - name: Confirm pinned BLA CLI
+        continue-on-error: true
+        run: npx --yes bla-agents@3.6.0 --version
+      - name: Audit full repository packaging gates
+        id: lint
+        run: npx --yes bla-agents@3.6.0 lint . --json > "$RUNNER_TEMP/bla-lint.json"
+        continue-on-error: true
+      - name: Generate full-project source-level surgical workorders
+        id: weave
+        run: npx --yes bla-agents@3.6.0 weave-plan . > "$RUNNER_TEMP/bla-weave-plan.json"
+        continue-on-error: true
+      - name: Verify source weaves across the repository
+        id: verify
+        run: npx --yes bla-agents@3.6.0 verify-weave . --json > "$RUNNER_TEMP/bla-weave-verify.json"
+        continue-on-error: true
+      - name: Publish BLA findings and surgical workorders to the job log
+        continue-on-error: true
+        if: always()
+        run: |
+          node --input-type=commonjs <<'NODE'
+          const fs = require("node:fs");
+          const files = [
+            ["Whole-project packaging lint", process.env.RUNNER_TEMP + "/bla-lint.json"],
+            ["Whole-project surgical workorders", process.env.RUNNER_TEMP + "/bla-weave-plan.json"],
+            ["Whole-project source weave verification", process.env.RUNNER_TEMP + "/bla-weave-verify.json"],
+          ];
+          for (const [label, path] of files) {
+            console.log("\n===== " + label + " =====");
+            if (!fs.existsSync(path)) {
+              console.log("Report was not produced.");
+              continue;
+            }
+            const raw = fs.readFileSync(path, "utf8");
+            try {
+              const report = JSON.parse(raw);
+              console.log(JSON.stringify(report, null, 2));
+            } catch {
+              console.log(raw);
+            }
+          }
+          NODE
+      - name: Report initial source-audit state
+        continue-on-error: true
+        if: always()
+        run: |
+          printf 'Whole-project packaging lint: %s\nSource workorders: %s\nSource weave: %s\n' \
+            "${{ steps.lint.outcome }}" "${{ steps.weave.outcome }}" "${{ steps.verify.outcome }}"
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  analyze:
+    needs: [source-audit]
+    if: ${{ always() && !cancelled() }}
+    name: CodeQL security-extended (JavaScript/TypeScript, C++, Python, Rust, Actions)
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      security-events: write
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+    steps:
+      - name: Check out v3 source
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js for the native addon build
+        continue-on-error: true
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: "22"
+      - name: Install native build dependencies
+        continue-on-error: true
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes build-essential python3 pkg-config librocksdb-dev
+      - name: Install bot dependencies for C++ extraction
+        continue-on-error: true
+        run: npm install --no-audit --no-fund
+      - name: Install Rust toolchain for CodeQL extraction
+        continue-on-error: true
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
+        with:
+          toolchain: stable
+      - name: Initialize CodeQL database
+        continue-on-error: true
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066
+        with:
+          languages: javascript-typescript,cpp,python,rust,actions
+          queries: security-extended,security-and-quality
+      - name: Build RocksDB native C++ addon for CodeQL
+        continue-on-error: true
+        run: npm run build:native
+      - name: Build Rust workspace for CodeQL
+        continue-on-error: true
+        run: cargo build --workspace
+      - name: Analyze and upload CodeQL results
+        continue-on-error: true
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066
+        with:
+          category: /languages:javascript-typescript,cpp,python,rust,actions
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  bot-npm:
+    needs: [analyze]
+    if: ${{ always() && !cancelled() }}
+    name: Root bot npm dependency audit
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+      resolve_result: ${{ steps.resolve.outcome }}
+      install_result: ${{ steps.install.outcome }}
+      signatures_result: ${{ steps.signatures.outcome }}
+      audit_result: ${{ steps.audit.outcome }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        continue-on-error: true
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        continue-on-error: true
+        with:
+          node-version: "22"
+      - name: Resolve root dependency tree without running install scripts
+        id: resolve
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+        continue-on-error: true
+      - name: Install exact root dependency tree without lifecycle scripts
+        id: install
+        run: npm ci --ignore-scripts --no-audit --no-fund
+        continue-on-error: true
+      - name: Verify npm registry signatures and provenance for root dependencies
+        id: signatures
+        run: npm audit signatures
+        continue-on-error: true
+      - name: Reject high and critical npm advisories
+        id: audit
+        run: npm audit --audit-level=low
+        continue-on-error: true
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  frontend-npm:
+    needs: [bot-npm]
+    if: ${{ always() && !cancelled() }}
+    name: Dashboard frontend npm dependency audit
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+      resolve_result: ${{ steps.resolve.outcome }}
+      install_result: ${{ steps.install.outcome }}
+      signatures_result: ${{ steps.signatures.outcome }}
+      audit_result: ${{ steps.audit.outcome }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        continue-on-error: true
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        continue-on-error: true
+        with:
+          node-version: "22"
+      - name: Resolve frontend dependency tree without running install scripts
+        id: resolve
+        run: npm install --prefix web/frontend --package-lock-only --ignore-scripts --no-audit --no-fund
+        continue-on-error: true
+      - name: Install exact frontend dependency tree without lifecycle scripts
+        id: install
+        run: npm ci --prefix web/frontend --ignore-scripts --no-audit --no-fund
+        continue-on-error: true
+      - name: Verify npm registry signatures and provenance for frontend dependencies
+        id: signatures
+        run: npm audit signatures --prefix web/frontend
+        continue-on-error: true
+      - name: Reject high and critical frontend advisories
+        id: audit
+        run: npm audit --prefix web/frontend --audit-level=low
+        continue-on-error: true
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  rust-cargo:
+    needs: [frontend-npm]
+    if: ${{ always() && !cancelled() }}
+    name: Rust workspace advisory audit
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+      lock_result: ${{ steps.lock.outcome }}
+      install_result: ${{ steps.install.outcome }}
+      audit_result: ${{ steps.audit.outcome }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        continue-on-error: true
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
+        continue-on-error: true
+        with:
+          toolchain: stable
+      - name: Generate the workspace lock graph for audit
+        id: lock
+        run: cargo generate-lockfile --manifest-path web/backend/Cargo.toml
+        continue-on-error: true
+      - name: Install pinned cargo-audit
+        id: install
+        run: cargo install cargo-audit --locked --version 0.23.0
+        continue-on-error: true
+      - name: Reject vulnerable Rust dependencies
+        id: audit
+        run: cargo audit --file Cargo.lock
+        continue-on-error: true
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  dependency-report:
+    name: Final dependency audit result
+    continue-on-error: true
+    if: always()
+    needs: [bot-npm, frontend-npm, rust-cargo]
+    runs-on: ubuntu-latest
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+    steps:
+      - name: Fail only after all dependency audits finish
+        continue-on-error: true
+        env:
+          BOT_RESOLVE: ${{ needs.bot-npm.outputs.resolve_result }}
+          BOT_INSTALL: ${{ needs.bot-npm.outputs.install_result }}
+          BOT_SIGNATURES: ${{ needs.bot-npm.outputs.signatures_result }}
+          BOT_AUDIT: ${{ needs.bot-npm.outputs.audit_result }}
+          FRONTEND_RESOLVE: ${{ needs.frontend-npm.outputs.resolve_result }}
+          FRONTEND_INSTALL: ${{ needs.frontend-npm.outputs.install_result }}
+          FRONTEND_SIGNATURES: ${{ needs.frontend-npm.outputs.signatures_result }}
+          FRONTEND_AUDIT: ${{ needs.frontend-npm.outputs.audit_result }}
+          RUST_LOCK: ${{ needs.rust-cargo.outputs.lock_result }}
+          RUST_INSTALL: ${{ needs.rust-cargo.outputs.install_result }}
+          RUST_AUDIT: ${{ needs.rust-cargo.outputs.audit_result }}
+        run: |
+          printf 'Bot lock: %s\nBot install: %s\nBot signatures: %s\nBot audit: %s\nFrontend lock: %s\nFrontend install: %s\nFrontend signatures: %s\nFrontend audit: %s\nRust lock: %s\nRust tool: %s\nRust audit: %s\n' \
+            "$BOT_RESOLVE" "$BOT_INSTALL" "$BOT_SIGNATURES" "$BOT_AUDIT" \
+            "$FRONTEND_RESOLVE" "$FRONTEND_INSTALL" "$FRONTEND_SIGNATURES" "$FRONTEND_AUDIT" \
+            "$RUST_LOCK" "$RUST_INSTALL" "$RUST_AUDIT"
+          [[ "$BOT_RESOLVE" == success && "$BOT_INSTALL" == success && "$BOT_SIGNATURES" == success && "$BOT_AUDIT" == success \
+            && "$FRONTEND_RESOLVE" == success && "$FRONTEND_INSTALL" == success && "$FRONTEND_SIGNATURES" == success && "$FRONTEND_AUDIT" == success \
+            && "$RUST_LOCK" == success && "$RUST_INSTALL" == success && "$RUST_AUDIT" == success ]]
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  secrets:
+    needs: [dependency-report]
+    if: ${{ always() && !cancelled() }}
+    name: Full-history secret scan
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+    steps:
+      - name: Check out complete repository history
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Detect secrets in current files and Git history
+        continue-on-error: true
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"
+          GITLEAKS_ENABLE_SUMMARY: "true"
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  filesystem:
+    needs: [secrets]
+    if: ${{ always() && !cancelled() }}
+    name: Dependencies, secrets and configuration scan
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+      sbom_result: ${{ steps.sbom.outcome }}
+      sbom_upload_result: ${{ steps.sbom_upload.outcome }}
+    steps:
+      - name: Check out v3 source
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Scan repository filesystem with Trivy
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          version: v0.76.2
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig,secret,license
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          ignore-unfixed: "false"
+          exit-code: "1"
+          format: table
+          hide-progress: true
+          timeout: 15m
+      - name: Generate CycloneDX SBOM for the source dependency tree
+        id: sbom
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          version: v0.76.2
+          scan-type: fs
+          scan-ref: .
+          format: cyclonedx
+          output: ${{ runner.temp }}/lemegeton-source.cdx.json
+          exit-code: "0"
+          hide-progress: true
+          timeout: 15m
+      - name: Validate source SBOM structure
+        if: steps.sbom.outcome == 'success'
+        continue-on-error: true
+        run: |
+          node --input-type=commonjs - "$RUNNER_TEMP/lemegeton-source.cdx.json" <<'NODE'
+          const fs = require('node:fs');
+          const bom = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (bom.bomFormat !== 'CycloneDX' || !Array.isArray(bom.components)) {
+            throw new Error('Invalid source CycloneDX SBOM');
+          }
+          console.log(`Validated source SBOM with ${bom.components.length} components.`);
+          NODE
+      - name: Upload source CycloneDX SBOM
+        id: sbom_upload
+        if: always() && steps.sbom.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: lemegeton-source-cyclonedx-sbom
+          path: ${{ runner.temp }}/lemegeton-source.cdx.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  actionlint:
+    needs: [filesystem]
+    if: ${{ always() && !cancelled() }}
+    name: Validate workflow syntax and expressions
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+    steps:
+      - name: Check out workflows
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install pinned actionlint
+        continue-on-error: true
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      - name: Lint every GitHub Actions workflow
+        continue-on-error: true
+        run: '"$(go env GOPATH)/bin/actionlint" -color'
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  zizmor:
+    needs: [actionlint]
+    if: ${{ always() && !cancelled() }}
+    name: Audit workflow supply-chain and permissions
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+    steps:
+      - name: Check out complete workflow history
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install stable Rust for the pinned zizmor CLI
+        continue-on-error: true
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
+        with:
+          toolchain: stable
+      - name: Install pinned zizmor
+        continue-on-error: true
+        run: cargo install zizmor --locked --version 1.0.0
+      - name: Audit all repository workflows
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: zizmor --collect workflows-only --min-severity low --persona auditor .github/workflows
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  semgrep:
+    needs: [zizmor]
+    if: ${{ always() && !cancelled() }}
+    name: Semgrep Community Edition
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: semgrep/semgrep:1.187.0
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+    steps:
+      - name: Check out repository
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Scan source code
+        continue-on-error: true
+        run: semgrep scan --config p/security-audit --config p/secrets --error --metrics=off
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  oauth:
+    needs: [semgrep]
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/lemegeton-v3' }}
+    name: Verify Discord OAuth bootstrap and state cookie
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DASHBOARD_CLIENT_ID: ${{ secrets.DASHBOARD_CLIENT_ID }}
+      DASHBOARD_CLIENT_SECRET: ${{ secrets.DASHBOARD_CLIENT_SECRET }}
+      DASHBOARD_REDIRECT_URI: ${{ secrets.DASHBOARD_REDIRECT_URI }}
+      DASHBOARD_PUBLIC_URL: ${{ secrets.DASHBOARD_PUBLIC_URL }}
+      DASHBOARD_BRIDGE_SECRET: ${{ secrets.DASHBOARD_BRIDGE_SECRET }}
+      DASHBOARD_HOST: "127.0.0.1"
+      DASHBOARD_PORT: "18080"
+      DASHBOARD_COOKIE_SECURE: "true"
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+    steps:
+      - name: Check out v3 source
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install stable Rust
+        continue-on-error: true
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
+        with:
+          toolchain: stable
+      - name: Require matching Discord OAuth configuration
+        continue-on-error: true
+        run: |
+          set -Eeuo pipefail
+          test -n "$DASHBOARD_CLIENT_ID"
+          test -n "$DASHBOARD_CLIENT_SECRET"
+          test -n "$DASHBOARD_REDIRECT_URI"
+          test -n "$DASHBOARD_PUBLIC_URL"
+          test "${#DASHBOARD_BRIDGE_SECRET}" -ge 32
+          case "$DASHBOARD_PUBLIC_URL" in https://*) ;; *) exit 1 ;; esac
+          case "$DASHBOARD_REDIRECT_URI" in "$DASHBOARD_PUBLIC_URL"/oauth/callback) ;; *) exit 1 ;; esac
+      - name: Test OAuth, sessions and authorization
+        continue-on-error: true
+        run: cargo test --manifest-path web/backend/Cargo.toml
+      - name: Build dashboard backend
+        continue-on-error: true
+        run: cargo build --manifest-path web/backend/Cargo.toml --release
+      - name: Start dashboard and verify OAuth redirect
+        continue-on-error: true
+        run: |
+          set -Eeuo pipefail
+          target_dir="$(cargo metadata --manifest-path web/backend/Cargo.toml --no-deps --format-version 1 | jq -r .target_directory)"
+          "$target_dir/release/lemegeton-dashboard" > "$RUNNER_TEMP/dashboard.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/dashboard.pid"
+          cleanup() {
+            if test -f "$RUNNER_TEMP/dashboard.pid"; then
+              kill "$(cat "$RUNNER_TEMP/dashboard.pid")" 2>/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
+          ready=false
+          for attempt in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:18080/login -o /dev/null; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          printf 'Dashboard readiness checked %s times.\n' "$attempt"
+          test "$ready" = true
+          status="$(curl --silent --output /dev/null --dump-header "$RUNNER_TEMP/oauth.headers" --write-out '%{http_code}' http://127.0.0.1:18080/oauth/start)"
+          test "$status" = "303"
+          location="$(awk 'tolower($1) == "location:" { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit }' "$RUNNER_TEMP/oauth.headers")"
+          node --input-type=module - "$location" <<'NODE'
+          import assert from "node:assert/strict";
+
+          const location = new URL(process.argv[2]);
+          assert.equal(location.protocol, "https:");
+          assert.equal(location.hostname, "discord.com");
+          assert.equal(location.pathname, "/oauth2/authorize");
+          const expected = {
+            client_id: process.env.DASHBOARD_CLIENT_ID,
+            redirect_uri: process.env.DASHBOARD_REDIRECT_URI,
+            response_type: "code",
+            scope: "identify guilds",
+          };
+          for (const [key, value] of Object.entries(expected)) {
+            assert.equal(location.searchParams.get(key), value, "Incorrect OAuth " + key);
+          }
+          assert.match(location.searchParams.get("state") ?? "", /^[A-Za-z0-9]{64}$/);
+          NODE
+          grep -Eiq '^set-cookie: lemegeton_oauth_state=.*HttpOnly.*SameSite=Lax.*Secure' "$RUNNER_TEMP/oauth.headers"
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  discord:
+    needs: [oauth]
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/lemegeton-v3' }}
+    name: Verify dedicated Discord test guild
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+      GUILD_ID: ${{ secrets.DISCORD_TEST_GUILD_ID }}
+      DISCORD_TEST_INVITER_ID: ${{ secrets.DISCORD_TEST_INVITER_ID }}
+      DISCORD_TEST_CHANNEL_ID: ${{ secrets.DISCORD_TEST_CHANNEL_ID }}
+      DISCORD_TEST_MODERATOR_GUILD_ID: ${{ secrets.DISCORD_TEST_MODERATOR_GUILD_ID }}
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+    steps:
+      - name: Check out v3 source
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 22
+        continue-on-error: true
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: "22"
+      - name: Require a dedicated test bot and guild
+        continue-on-error: true
+        run: |
+          set -Eeuo pipefail
+          test -n "$DISCORD_TOKEN"
+          test -n "$GUILD_ID"
+          test -n "$DISCORD_TEST_INVITER_ID"
+          test -n "$DISCORD_TEST_CHANNEL_ID"
+          test -n "$DISCORD_TEST_MODERATOR_GUILD_ID"
+      - name: Install bot dependencies
+        continue-on-error: true
+        run: npm install --no-audit --no-fund
+      - name: Verify bot membership, permissions, audit log and deployed commands
+        continue-on-error: true
+        run: node scripts/acceptance/discord.mjs
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  providers:
+    needs: [discord]
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/lemegeton-v3' }}
+    name: Verify live metadata providers
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      LEMEGETON_LIVE_PROVIDER_TESTS: "1"
+      STEAM_API_KEY: ${{ secrets.STEAM_API_KEY }}
+      STEAM_TEST_PROFILE_ID: ${{ secrets.STEAM_TEST_PROFILE_ID }}
+      IGDB_CLIENT_ID: ${{ secrets.IGDB_CLIENT_ID }}
+      IGDB_CLIENT_SECRET: ${{ secrets.IGDB_CLIENT_SECRET }}
+      TMDB_BEARER_TOKEN: ${{ secrets.TMDB_BEARER_TOKEN }}
+      GOOGLE_BOOKS_API_KEY: ${{ secrets.GOOGLE_BOOKS_API_KEY }}
+    outputs:
+      ci_failed: ${{ steps.ci_result.outputs.failed }}
+    steps:
+      - name: Check out v3 source
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 22
+        continue-on-error: true
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: "22"
+      - name: Require provider credentials
+        continue-on-error: true
+        run: |
+          set -Eeuo pipefail
+          test -n "$STEAM_API_KEY"
+          test -n "$STEAM_TEST_PROFILE_ID"
+          test -n "$IGDB_CLIENT_ID"
+          test -n "$IGDB_CLIENT_SECRET"
+          test -n "$TMDB_BEARER_TOKEN"
+      - name: Install bot dependencies
+        continue-on-error: true
+        run: npm install --no-audit --no-fund
+      - name: Build provider clients and tests
+        continue-on-error: true
+        run: npm run build
+      - name: Query live providers
+        continue-on-error: true
+        run: node --test dist/tests/providers-live.integration.test.js
+      - name: Record this job for the final CI gate
+        continue-on-error: true
+        id: ci_result
+        if: always()
+        run: echo "failed=${{ contains(steps.*.outcome, 'failure') || contains(steps.*.outcome, 'cancelled') }}" >> "$GITHUB_OUTPUT"
+
+
+  ci-result:
+    name: Final CI status (after every check)
+    needs: [typecheck, tests, bot-report, frontend, frontend-report, rust, rust-report, container, container-report, hygiene, hygiene-report, regression, adversarial-fixtures, source-audit, analyze, bot-npm, frontend-npm, rust-cargo, dependency-report, secrets, filesystem, actionlint, zizmor, semgrep, oauth, discord, providers]
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Publish the final result only after all checks complete
+        env:
+          SKIP_LIVE_ACCEPTANCE: ${{ github.event_name != 'workflow_dispatch' }}
+          CHECK_RESULTS: |
+            typecheck=${{ needs.typecheck.outputs.ci_failed }}
+            tests=${{ needs.tests.outputs.ci_failed }}
+            bot-report=${{ needs.bot-report.outputs.ci_failed }}
+            frontend=${{ needs.frontend.outputs.ci_failed }}
+            frontend-report=${{ needs.frontend-report.outputs.ci_failed }}
+            rust=${{ needs.rust.outputs.ci_failed }}
+            rust-report=${{ needs.rust-report.outputs.ci_failed }}
+            container=${{ needs.container.outputs.ci_failed }}
+            container-report=${{ needs.container-report.outputs.ci_failed }}
+            hygiene=${{ needs.hygiene.outputs.ci_failed }}
+            hygiene-report=${{ needs.hygiene-report.outputs.ci_failed }}
+            regression=${{ needs.regression.outputs.ci_failed }}
+            adversarial-fixtures=${{ needs.adversarial-fixtures.outputs.ci_failed }}
+            source-audit=${{ needs.source-audit.outputs.ci_failed }}
+            analyze=${{ needs.analyze.outputs.ci_failed }}
+            bot-npm=${{ needs.bot-npm.outputs.ci_failed }}
+            frontend-npm=${{ needs.frontend-npm.outputs.ci_failed }}
+            rust-cargo=${{ needs.rust-cargo.outputs.ci_failed }}
+            dependency-report=${{ needs.dependency-report.outputs.ci_failed }}
+            secrets=${{ needs.secrets.outputs.ci_failed }}
+            filesystem=${{ needs.filesystem.outputs.ci_failed }}
+            actionlint=${{ needs.actionlint.outputs.ci_failed }}
+            zizmor=${{ needs.zizmor.outputs.ci_failed }}
+            semgrep=${{ needs.semgrep.outputs.ci_failed }}
+            oauth=${{ needs.oauth.outputs.ci_failed }}
+            discord=${{ needs.discord.outputs.ci_failed }}
+            providers=${{ needs.providers.outputs.ci_failed }}
+          JOB_RESULTS: |
+            typecheck=${{ needs.typecheck.result }}
+            tests=${{ needs.tests.result }}
+            bot-report=${{ needs.bot-report.result }}
+            frontend=${{ needs.frontend.result }}
+            frontend-report=${{ needs.frontend-report.result }}
+            rust=${{ needs.rust.result }}
+            rust-report=${{ needs.rust-report.result }}
+            container=${{ needs.container.result }}
+            container-report=${{ needs.container-report.result }}
+            hygiene=${{ needs.hygiene.result }}
+            hygiene-report=${{ needs.hygiene-report.result }}
+            regression=${{ needs.regression.result }}
+            adversarial-fixtures=${{ needs.adversarial-fixtures.result }}
+            source-audit=${{ needs.source-audit.result }}
+            analyze=${{ needs.analyze.result }}
+            bot-npm=${{ needs.bot-npm.result }}
+            frontend-npm=${{ needs.frontend-npm.result }}
+            rust-cargo=${{ needs.rust-cargo.result }}
+            dependency-report=${{ needs.dependency-report.result }}
+            secrets=${{ needs.secrets.result }}
+            filesystem=${{ needs.filesystem.result }}
+            actionlint=${{ needs.actionlint.result }}
+            zizmor=${{ needs.zizmor.result }}
+            semgrep=${{ needs.semgrep.result }}
+            oauth=${{ needs.oauth.result }}
+            discord=${{ needs.discord.result }}
+            providers=${{ needs.providers.result }}
+        run: |
+          set -Eeuo pipefail
+          failed=false
+          while IFS='=' read -r job result; do
+            [[ -n "$job" ]] || continue
+            if [[ "$SKIP_LIVE_ACCEPTANCE" == "true" && ( "$job" == "oauth" || "$job" == "discord" || "$job" == "providers" ) ]]; then
+              continue
+            fi
+            if [[ "$result" != "false" ]]; then
+              echo "::error::${job} did not complete successfully (failure flag: '${result:-missing}')."
+              failed=true
+            fi
+          done <<< "$CHECK_RESULTS"
+          while IFS='=' read -r job result; do
+            [[ -n "$job" ]] || continue
+            if [[ "$SKIP_LIVE_ACCEPTANCE" == "true" && ( "$job" == "oauth" || "$job" == "discord" || "$job" == "providers" ) ]]; then
+              [[ "$result" == "skipped" ]] || {
+                echo "::error::Unexpected live acceptance state for ${job}: ${result}"
+                failed=true
+              }
+              continue
+            fi
+            if [[ "$result" != "success" ]]; then
+              echo "::error::${job} ended with '${result}'."
+              failed=true
+            fi
+          done <<< "$JOB_RESULTS"
+          if [[ "$failed" == "true" ]]; then
+            {
+              echo "## Final CI result: failed"
+              echo
+              echo "All configured checks have completed. At least one check failed, timed out, or did not publish its result. Review the corresponding jobs above."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          {
+            echo "## Final CI result: passed"
+            echo
+            echo "All configured checks completed successfully."
+          } >> "$GITHUB_STEP_SUMMARY"
+

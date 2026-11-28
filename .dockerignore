@@ -3,10 +3,6 @@
 .env
 .env.*
 !.env.example
-.venv
-venv
-__pycache__
-*.py[cod]
 *.log
 logs/
 data/
@@ -14,7 +10,7 @@ runtime-home/
 tools/
 target/
 **/target/
-Web/frontend/node_modules/
-Web/frontend/dist/
+web/frontend/node_modules/
+web/frontend/dist/
 node_modules/
 test_images/

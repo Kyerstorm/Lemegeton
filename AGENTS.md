@@ -1,538 +1,190 @@
-# AGENTS.md — Lemegeton AI Engineering Guide
-
-This file is the working contract for AI coding agents in the Lemegeton repository. Follow it before making changes. The goal is to ship correct, small, maintainable changes that preserve Lemegeton's existing behavior and multi-guild safety.
-
-## 1. Project Context
-
-Lemegeton is a Python Discord bot centered on media discovery and community features, including AniList-backed anime/manga functionality, gaming integrations, server configuration, customization, and an optional web dashboard. The codebase also contains newer or experimental modules; do not assume a feature is complete merely because a file, dependency, README entry, or configuration variable exists.
-
-The current working branch is `multi_guild`. Unless the user explicitly directs otherwise, work on that branch. Do not create a new branch or open a pull request as a routine step; do not make unnecessary PRs. Make the requested code change directly and report what was changed and verified.
-
-### Current architectural landmarks
-
-Confirm these paths and their contents before relying on them; the code may evolve.
-
-- `bot.py`: bot startup, logging, lifecycle, extension loading, and orchestration.
-- `config.py` and `.env.example`: configuration defaults and documented environment variables.
-- `database.py`: shared PostgreSQL persistence layer using `asyncpg`; its module documentation identifies it as PostgreSQL-only.
-- `cogs/`: primary command cogs organized into areas such as account, admin, customization, gaming, media, server management, social, and utilities.
-- `Web/`: dashboard frontend, Rust service, and the private Python custom-role picker.
-- `helpers/`: shared integrations and utilities, including media/AniList helpers, caching, command logging, embed helpers, color palette, and gaming/IGDB helpers.
-- `Web/bot/`: optional web dashboard and related web UI code.
-- `requirements.txt`: Python dependencies and version constraints.
-- `docs/`: project documentation and maintenance material.
-- `.apm/guides/`: existing project workflow guidance. Read a relevant guide when the task explicitly uses that workflow.
-
-The README may be stale or disagree with implementation details. Treat the current code, dependency versions, configuration, and callers as the source of truth. In particular, do not copy old SQLite examples or stale Discord.py versions without checking the live implementation.
-
-## 2. Required Workflow
-
-For every meaningful coding task:
-
-1. **Understand:** Read the target file, its neighboring implementations, callers, helpers, configuration, and relevant tests/docs. Search for existing behavior before adding another implementation.
-2. **Scope:** State material assumptions and the smallest change that satisfies the request. Explain a meaningful trade-off when multiple approaches would produce different behavior. Ask a direct question only when ambiguity would make a reliable implementation impossible; otherwise make a conservative, explicit assumption.
-3. **Plan:** Identify the files expected to change and what observable result will prove success. Avoid large plans for trivial edits.
-4. **Implement:** Make surgical edits. Every changed line must serve the requested outcome. Reuse current architecture and avoid unrelated cleanup.
-5. **Verify:** Run the most relevant available checks and inspect the final diff. Do not claim a check passed unless it was actually run successfully.
-6. **Report:** Summarize changed files and behavior, verification performed and its result, and any genuine limitations or follow-up risks.
-
-Do not stop after describing how the change could be implemented when the task asks for implementation and repository access is available. Do not claim code was deployed, executed against live services, or tested with credentials unless that actually happened.
-
-## 3. Scope Control and Repository Hygiene
-
-- Solve the requested problem with the smallest adequate patch.
-- Do not refactor neighboring code, rename public interfaces, reformat entire files, or remove unrelated dead code unless the task requires it.
-- Do not add speculative features, placeholders that imply a feature works, abstraction layers for one-off use, or dependencies without a concrete need.
-- Prefer modifying an existing helper or provider over duplicating its logic.
-- Preserve existing public command names, slash-command options, output behavior, configuration compatibility, and stored data unless a change is explicitly requested.
-- Do not silently change a feature's meaning while ostensibly fixing an implementation detail.
-- Do not add generated logs, caches, local databases, secrets, IDE state, temporary files, or downloaded artifacts to version control.
-- Keep commits focused. When the task calls for a commit, prefer one clear, descriptive commit for the coherent task rather than a string of incremental commits to the same file. Do not create commits or PRs unless the tool/workflow or user has asked for them.
-- Before finishing, inspect the diff/status and confirm only intended files changed.
-
-## 4. Python and Asynchronous I/O
-
-- The README currently documents Python 3.13+; check the deployment/runtime files and the installed dependency constraints before using syntax or APIs that depend on a Python version.
-- Follow the style of the surrounding module. Use readable names, focused functions, type annotations where consistent with nearby code, and docstrings for non-obvious behavior or public helpers.
-- Use `async`/`await` for asynchronous Discord, database, and network operations.
-- Avoid blocking network calls, synchronous sleeps, expensive CPU work, and large file operations on the Discord event loop. Use an existing async implementation or an appropriate executor only when necessary.
-- Reuse the project's established HTTP session/client lifecycle and timeout conventions. Do not create a new session for every small request if a shared session pattern already exists.
-- Handle expected failures explicitly: timeouts, connection errors, provider errors, malformed responses, absent metadata, and Discord interaction expiration.
-- Retry only errors that are plausibly transient. Use bounded retries/backoff, respect provider rate limits, and avoid retrying non-idempotent actions in a way that can duplicate side effects.
-- Avoid broad `except Exception` blocks that silently swallow failures. When a broad catch is justified at an external boundary, log useful context and return a safe, user-facing failure.
-- Remove imports and variables made unused by the patch. Do not opportunistically clean unrelated unused code.
-- No formatter, linter, or test runner is assumed to be configured. Inspect the repository for the actual tooling before prescribing or adding one.
-
-## 5. Multi-Guild Isolation — Critical Requirement
-
-A defect that leaks one server's configuration or data into another server is a serious regression. Every change that touches commands, persistence, caches, settings, permissions, or background tasks must deliberately decide which scope the data belongs to.
-
-- For guild-specific commands, obtain the guild context from the Discord interaction/event and validate it before performing guild-specific reads or writes.
-- Carry the correct `guild_id` through the complete call chain: command/callback → helper/service → database operation. Do not drop it in an intermediate helper or fall back silently to a primary guild.
-- Scope SQL reads, updates, deletes, counts, cache keys, and background work by guild wherever the underlying data is guild-specific. Parameterize user input; never build SQL by interpolating it into query text.
-- Do not assume that all user data should be guild-scoped, or that all data should be global. Check the existing schema and neighboring operations. Lemegeton has cross-guild concepts (for example, linked external identities or shared media data) as well as guild-owned configuration and moderation history. Preserve the intended scope of each record.
-- Never make one guild's role IDs, moderator configuration, channels, dashboard settings, command toggles, audit events, or private server data visible or actionable in another guild.
-- Use explicit cache keys that include the appropriate scope. Avoid global mutable state for guild-dependent values.
-- In event listeners and scheduled jobs, distinguish a truly global task from one that needs to iterate over each guild. Ensure a per-guild failure does not accidentally stop all other guilds.
-- Validate guild ownership and authorization on every relevant action, not only when a UI or button is first displayed.
-- Add or update focused tests for two distinct guilds where practical: same user in both guilds, differing configuration, missing guild context, and attempted cross-guild access.
-- For data models with globally shared records, explain or preserve that intended behavior in the code rather than adding a `guild_id` mechanically.
-
-If a change could weaken guild isolation and the intended scope cannot be established from existing code, stop and clarify instead of guessing.
-
-## 6. PostgreSQL and Data Access
-
-The current `database.py` describes a PostgreSQL-only layer backed by `asyncpg`. Use the implementation that exists in the checked-out branch, not old documentation snippets.
-
-- Read `database.py` and the relevant call sites before changing data access. Reuse its pool, query helpers, retry behavior, and error-handling conventions.
-- Do not open a separate database connection or create a second pool from a cog when the shared database layer is intended for that operation.
-- Do not introduce SQLite as an alternate store or revive old SQLite instructions without an explicit migration requirement.
-- Follow the exact argument contract and SQL placeholder convention of the existing helper. If calling `asyncpg` directly, use its parameterized-query conventions; never interpolate untrusted values into SQL.
-- Keep transactions around related writes that must succeed or fail together. Preserve existing transaction and connection-release patterns.
-- Design indexes and uniqueness constraints around real query patterns and data invariants; do not add schema complexity speculatively.
-- Database initialization and migrations must be safe to run repeatedly where the current architecture expects idempotency.
-- Preserve existing rows and backward compatibility. Do not drop, rename, or reinterpret columns without a deliberate migration and a clear reason.
-- For schema changes, inspect every reader/writer and initialization path affected, including dashboard/background-task code.
-- Never write tokens, passwords, OAuth secrets, connection strings, or private user data to logs.
-
-## 7. Discord Commands, Interactions, and Permissions
-
-- Match the existing `discord.py` version and neighboring cog patterns. Do not assume decorators or APIs from another version.
-- Keep command logic inside the appropriate existing cog/category. Reuse shared helpers rather than copying embed, provider, database, or logging logic.
-- Acknowledge interactions promptly. Defer long-running slash-command operations before Discord's response deadline, then edit or follow up using the correct interaction response state.
-- Ensure every interaction path sends a valid response or follow-up. Handle expired or deleted interactions/messages without crashing the bot.
-- For buttons, selects, modals, and views, validate the interacting user, guild, permissions, and current state on the server side. A component being visible is not authorization.
-- Use ephemeral responses for private configuration, credentials, moderation diagnostics, or user-specific errors where appropriate. Do not expose secrets or sensitive diagnostic data publicly.
-- Check the existing permission and bot-moderator helpers before implementing new authorization logic. Do not replace a project-wide permission system with an ad hoc role-name check.
-- Check whether the bot has the necessary Discord permissions before attempting sensitive actions, and report actionable failure information without dumping internals.
-- Avoid unnecessary broad message mentions. Use explicit allowed-mentions behavior when relaying untrusted text or publishing messages that could ping users.
-- Preserve command enable/disable dashboard behavior for commands that participate in that system. Follow the actual `command_meta` and registration conventions in neighboring modules when applicable.
-- Use established command-logging decorators/helpers (for example, the existing command logger) where the surrounding command category uses them.
-- When adding or changing a user-facing command, check relevant help/category registration, dashboard metadata, localization or formatting conventions, and documentation. Update only the registries the implementation actually uses.
-
-## 8. Helpers, Embeds, Caching, and Logging
-
-- Check `helpers/` before writing a new shared utility. Relevant existing helpers may already cover AniList, media metadata, cache access, embed construction, colors, gaming/IGDB, and command logging.
-- Use the shared color palette in `helpers/color_palette.py` for standard embeds. Intentional user-selected theme colors, role colors, and provider artwork colors may remain specific.
-- Keep embed output consistent with nearby command UX: useful title, concise metadata, safe links, predictable missing-field behavior, and sensible empty/error states.
-- Respect Discord embed, component, and message limits. Truncate or paginate long provider metadata rather than allowing an API response to break the command.
-- Cache only values whose freshness and scope are understood. Use existing TTL/invalidation conventions and include guild/user/provider identifiers in cache keys as required.
-- Never cache authorization decisions or private guild settings under a global key.
-- Use existing logging helpers and logger naming conventions. Log enough to diagnose failures (operation, provider, relevant non-sensitive IDs) without dumping whole response bodies or credentials.
-- Do not add redundant log handlers or reset global logging configuration from an ordinary helper module.
-- Do not clear, truncate, or delete logs/data as a side effect of an unrelated feature change.
-
-## 9. Media Metadata and Provider Integrations
-
-Lemegeton uses external providers and helpers; support differs by category and provider. Verify the current implementation and documented API instead of guessing.
-
-- Reuse current AniList functionality for supported anime/manga operations and current Steam/IGDB integrations for supported game information. Extend existing paths when appropriate; do not build duplicate clients without a demonstrated need.
-- Keep provider-specific request/response parsing close to its provider helper. Keep Discord formatting and command interaction logic out of low-level HTTP clients.
-- Preserve provider IDs and source URLs where available. Normalize fields only when shared code benefits, and avoid flattening distinct concepts into misleading generic fields.
-- Handle unavailable titles, incomplete metadata, empty results, rate limits, timeouts, malformed provider responses, and provider outages.
-- Use fallbacks only when the primary source genuinely lacks the requested result or field. Keep the lookup identity consistent across fallback providers, avoid duplicate results, and distinguish source-provided ratings from locally computed values.
-- Never invent titles, credits, dates, ratings, episode/chapter counts, availability, or other metadata. Missing data should remain absent or be clearly marked unknown.
-- Do not label a result as "AI-powered" unless the code actually calls an AI model for that behavior. Distinguish provider recommendations from local ranking/filtering.
-- Do not introduce a personal media-library, watching/reading progress, or playtime-tracking system as part of Lemegeton unless explicitly requested. The bot may display or use data from linked services where existing behavior supports it.
-- For any new integration, verify the provider's current API documentation, authentication requirements, attribution expectations, rate limits, terms, and dependency maintenance status before implementation.
-- Keep API keys and OAuth credentials in environment configuration. Update `.env.example` with empty/documented placeholders when configuration is added; never commit real credentials.
-
-## 10. Scraping and Web Access
-
-Some scraping-related dependencies are present, but their presence is not permission to access every target site.
-
-- Prefer official APIs, public feeds, or documented endpoints where they can meet the requirement.
-- Before implementing a scraper, inspect existing scraping helpers and their dependency versions. Avoid introducing another framework for functionality already covered by the repository.
-- Respect the target site's terms, rate limits, robots guidance where applicable, copyright, privacy, and access controls. Scrape only public or otherwise authorized content.
-- Do not build features intended to defeat authentication, access controls, paywalls, or CAPTCHA challenges. Do not treat anti-bot circumvention as a default fallback.
-- Use explicit request timeouts, bounded concurrency, backoff, stable user-agent identification where appropriate, and conservative request rates.
-- Parse defensively: markup changes and incomplete pages are expected. Keep selectors and provider-specific parsing isolated, return clear empty/error results, and avoid fragile assumptions about page structure.
-- Do not store or log session cookies, auth headers, CAPTCHA tokens, or personal data extracted from pages.
-- Test parsers with saved, appropriately licensed fixtures or mocked responses when practical; avoid tests that hammer live sites.
-
-## 11. Optional Web Dashboard
-
-The web dashboard under `Web/bot/` is an optional interface associated with the bot. Keep it optional unless the task explicitly changes that requirement.
-
-- Read the existing routes, session/OAuth flow, static assets, and dashboard-to-cog/database integration before editing.
-- Enforce Discord authentication and server authorization on the server side for every protected route and mutation. Do not trust client-submitted guild IDs, role lists, user IDs, or permission flags.
-- Keep OAuth redirect URIs, cookie settings, session secrets, and production HTTPS assumptions consistent with existing configuration.
-- Never expose the bot token, OAuth client secret, dashboard signing secret, raw environment values, unrestricted logs, or database connection string to the browser.
-- Validate inputs at the server boundary, use parameterized database operations, and return safe error messages.
-- Keep HTML, CSS, and JavaScript changes focused on the relevant dashboard assets and maintain keyboard accessibility, responsive layout, and reduced-motion support where already used.
-- Preserve bot-only deployment when dashboard credentials are absent if that is the current behavior.
+# AGENTS.md — Lemegeton Engineering Guide
+
+This file describes the current v3 repository architecture and the engineering rules for changes. Verify the checked-out branch and actual callers before relying on any path or feature claim.
+
+## 1. Project Context and Branch Discipline
+
+Lemegeton is a multi-guild Discord bot for media discovery, information, recommendations, archives, and community features. The v3 implementation uses Node.js 22.9+, TypeScript, discord.js, one shared local libSQL database, and a private RocksDB object store. The optional dashboard uses a Next.js frontend and a Rust/Axum backend.
+
+The `multi_guild` branch is the earlier Python implementation and is a source-reference branch when performing the v3 migration audit. Do not treat its Python files or docs as the current v3 runtime. The `lemegeton-v3` branch is the head of Draft PR #17. When working on that PR, make changes only on `lemegeton-v3`; do not modify or synchronize `multi_guild` unless the user explicitly requests it.
+
+Respect the branch and PR explicitly selected by the user. Do not create another branch or PR as a routine step. Keep commits focused; when a task changes multiple independent files and the repository workflow expects commits, use one coherent commit per file rather than repeatedly committing the same file.
+
+## 2. Current Architectural Landmarks
+
+Confirm each path and its contents before editing; the architecture may evolve.
+
+- `bot.ts`: Discord.js client setup, runtime lifecycle, event routing, background workers, and shutdown.
+- `src/utility/database/libsql/`: shared libSQL schema, queries, SQL translation and Rust storage binding. `src/utility/database/rocksdb/` contains the private RocksDB wrapper and C++ addon; the root `database.ts` compatibility file is removed.
+- `helpers/runtime/`: typed configuration, Discord runtime helpers, logging, diagnostics, issue references and retention policy.
+- `helpers/dashboard/`: private dashboard bridge, guild permissions and dashboard configuration services.
+- `helpers/integration/`: provider clients and provider-specific request/response handling (AniList, Steam, IGDB, Google Books, TMDB, Atlas, the web scraper, and the Botasaurus worker bridge).
+- `workers/`: the isolated optional Botasaurus Python browser worker, its configuration/dependencies, and dedicated container image.
+- `helpers/`: shared domain services, security, embeds, archive/community/custom-role/media helpers.
+- `src/commands/`: the seven dashboard-configurable feature commands (`discover`, `archive`, `community`, `play`, `profile`, `custom-role`, and `music`) plus the protected server-setup command `settings`.
+- `src/standalone/`: standalone top-level commands such as `help`, `privacy`, `feedback`, and restricted operations commands. Do not fold the documented standalone exceptions into feature commands.
+- `src/utility/`: utility command handlers.
+- `src/integrations/`: non-command runtime integrations such as message-based embeds; these are not slash-command modules.
+- `src/registry.ts` and `src/deploy-commands.ts`: command inventory and registration.
+- `tests/`: TypeScript/Node tests, including isolated local libSQL and RocksDB integration tests.
+- `web/frontend/`: Next.js App Router frontend and React/TypeScript UI.
+- `web/backend/`: Rust/Axum dashboard service and authorization boundary.
+- `web/picker.html`, `web/picker.js`, `web/picker.css`, `web/theme.css`: browser assets served by the TypeScript Custom Roles picker. The JavaScript file is a browser asset, not a Python/runtime entry point.
+- `.env.example`, `package.json`, `tsconfig.json`, `Cargo.toml`, `Dockerfile`, `docker-compose.yml`, `railway.toml`, and `scripts/start.sh`: configuration, builds, and deployment.
+- `docs/`: current specifications, operation, security, and migration documentation.
+
+The primary v3 bot runtime remains Node.js/TypeScript. One isolated optional Python worker is permitted under `workers/`: `botasaurus.py`, `config.py`, `requirements.txt`, and its dedicated Dockerfile. This worker is an external browser service, not a second Discord bot runtime. Do not reintroduce `bot.py`, unrelated Python modules, Python virtual-environment launchers, or old Python-only maintenance scripts. Preserve the `web/picker.js` browser asset unless its TypeScript server integration is deliberately replaced.
+
+## 3. Required Engineering Workflow
+
+For every meaningful task:
+
+1. **Understand:** inspect the relevant modules, callers, schemas, config, tests, docs, and git diff before editing.
+2. **Scope:** identify the smallest change that satisfies the request. State material assumptions and trade-offs; ask only when ambiguity prevents a reliable implementation.
+3. **Plan:** identify the intended files and observable success criteria.
+4. **Implement:** make surgical changes. Every changed line must directly support the task.
+5. **Verify:** run the narrowest relevant checks, then broader checks where feasible; inspect the final diff.
+6. **Report:** name changed files, actual verification results, and remaining limitations.
+
+Do not claim that tests, deployment, live Discord checks, provider calls, or production database operations succeeded unless they were actually executed and the result was observed.
+
+## 4. Scope Control and Repository Hygiene
+
+- Prefer existing helpers, providers, schema patterns, and command implementations over duplicate code.
+- Do not add unrequested features, speculative abstractions, dependencies, placeholders, or unrelated refactors.
+- Preserve public command names/options, response behavior, configuration compatibility, and stored data unless explicitly asked to change them.
+- Remove imports and variables made unused by your own edits; leave unrelated dead code alone.
+- Do not commit generated output, local databases, logs, caches, credentials, IDE state, or temporary inspection scripts.
+- Keep user-facing text and documentation concise. Do not describe planned functionality as operational.
+- Inspect the final diff and ensure only requested files changed.
+
+## 5. Multi-Guild Isolation — Critical
+
+A cross-guild data leak is a serious regression. Every command, database operation, cache, event handler, scheduled worker, and dashboard action must preserve the intended scope.
+
+- Obtain guild context from the Discord interaction or event and validate it before guild-specific work.
+- Carry `guild_id` through the full call chain: command/component → service/helper → database operation.
+- Scope guild-owned reads, writes, deletes, uniqueness constraints, counts, and scheduled work by guild. Parameterize SQL values.
+- Distinguish guild-owned settings/history from deliberately global records and linked external identities. Do not add or remove guild scope mechanically.
+- Never expose a guild's channels, role IDs, moderator settings, feature toggles, audit data, or private archive records to another guild.
+- Include the relevant guild/user/provider identifiers in cache keys. The Botasaurus worker's jobs and scrape cache must carry their guild/user scope. Do not globally cache authorization decisions or private settings.
+- Ensure one guild's worker failure does not stop processing for other guilds.
+- Re-check permissions and record ownership on every privileged component/action, not only when rendering the UI.
+- Add focused two-guild tests where practical.
+
+The v3 first-run guild retention choice is a required gate: normal guild functionality stays locked until the authorized inviter or a member with Manage Server selects `delete` or `retain`. An unavailable-guild event must not be treated as a confirmed departure. Unset or invalid policy must never cause deletion. Preserve the configured retention semantics, retry behavior, and policy record across rejoin.
+
+## 6. libSQL, RocksDB, and Data Access
+
+Use the shared libSQL implementation under `src/utility/database/libsql/`; import its API from `src/utility/database/libsql/database.js`. Do not reintroduce the root `database.ts`, create a second database client, or create a separate dashboard database.
+
+- Keep libSQL schema, SQL translation, the Rust storage crate, and the napi-rs binding under `src/utility/database/libsql/`. Keep the RocksDB wrapper, binding, and C++ addon under `src/utility/database/rocksdb/`.
+- The Rust/Axum dashboard must use the same shared Rust storage crate and the same `LIBSQL_PATH` as the bot. `DASHBOARD_SESSION_DB_PATH` is only an optional legacy SQLite import source; do not make it a second active store.
+- Keep SQL parameterized and use the shared transaction API for related writes. Do not bypass the translator/native layer with ad hoc database drivers.
+- Preserve existing schema, stable IDs, foreign-key relationships, JSON/array fields, uniqueness, guild isolation, and idempotent initialization.
+- Keep media object bytes in the RocksDB addon under `src/utility/database/rocksdb/`; keep object metadata, guild scope and authorization in libSQL.
+- RocksDB operations must remain asynchronous/non-blocking, bounded, chunked where necessary, and verify object size and SHA-256 metadata before returning private data.
+- Keep local database, RocksDB and backup paths persistent and private. Never put credentials or object bytes in source control or logs.
+- Backups must bundle a libSQL snapshot and RocksDB checkpoint, verify size/digest and component integrity, and never overwrite live stores as part of verification.
+- Keep database-specific code directly inside `src/utility/database/{database-name}/`. Do not create a nested `src/` directory inside a database package; Rust crates must point their library root directly to `lib.rs` in `Cargo.toml`.
+- Preserve compatibility for legacy Discord attachment storage where it is still explicitly configured. Do not add S3, PostgreSQL or a separate active SQLite store back into the v3 runtime.
+- Add focused tests for repeatable schema setup, transaction rollback, multi-guild scoping, object read/write/delete, chunking, cleanup and backup integrity.
+
+
+## 7. TypeScript, Discord.js, and Runtime Behavior
+
+- Follow the installed TypeScript and discord.js versions and neighboring code conventions. Check current types and APIs rather than relying on discord.py-era patterns.
+- Use `async`/`await` for network and database I/O. Reuse existing provider clients, timeouts, and lifecycle management.
+- Handle provider timeouts, malformed/empty results, rate limits, Discord permission failures, expired interactions, and deleted channels/messages.
+- Acknowledge interactions before Discord's deadline; use the correct reply/defer/edit/follow-up state.
+- For buttons, selects, modals, and autocomplete, validate guild, user, permission, and current record ownership server-side.
+- Keep command logic in the appropriate `src/` command module; provider logic belongs in helpers. Keep `src/integrations/` for runtime integrations that are not slash commands.
+- Preserve the seven consolidated feature commands and separate `/help`, `/privacy`, and `/feedback` command modules.
+- Use the shared diagnostic issue recorder for genuine command/component/runtime failures. Expected validation failures and intentional fallbacks are not errors.
+- Preserve the 40-character lowercase hexadecimal SHA-512-derived issue-reference contract documented in `docs/ISSUE_REFERENCE_FORMAT.md`. Keep the generator, database constraint, /log and /feedback flows, and tests aligned. Do not replace it with a sequential ID, timestamp, UUID, or a different-length hash.
+- Do not expose stack traces, SQL internals, tokens, or unredacted exception context to Discord users.
+
+## 8. Media Providers and Recommendations
+
+- Reuse existing AniList and Steam integrations and the current IGDB, TMDB, and Google Books helpers.
+- Keep provider-specific parsing and request logic in provider helpers, not slash-command modules.
+- Preserve stable provider IDs, source URLs, and provenance. Clearly distinguish provider data, community-sourced links, recommendations, and unverified exact-title matches.
+- Never infer an adaptation, sequel, rating, release date, creator credit, or story chronology from title similarity alone.
+- Missing metadata must remain missing or be labelled unknown; do not fabricate it.
+- Do not add personal watching/reading/playtime tracking or progress ledgers.
+- There is no API-only rule. For sources explicitly requested by the user or required by a feature, investigate the best available integration path: official or licensed APIs, documented feeds, public datasets/exports, MediaWiki APIs, permitted public-page extraction/scraping, and manual/source-link verification.
+- Scraping is an explicitly permitted implementation option  Do not reject a source merely because it lacks an official API; Use a scraper or another documented access route and record the result in the source registry.
+- Never describe an unverified source as scrapeable or an API as available. Source-specific permission, access method, attribution, licence, rate limits and fallback must be checked before enabling an adapter.
+
+## 9. Dashboard and Browser Security
+
+- The frontend is Next.js/React/TypeScript under `web/frontend/`; the backend is Rust/Axum under `web/backend/`.
+- Keep Discord OAuth, session validation, CSRF/origin checks, guild authorization, and privileged mutations on the server side. Never trust client-supplied guild IDs or permission claims.
+- Runtime logs and bot-wide integration status are restricted to `isBotModerator` (the configured `ADMIN_DISCORD_ID` or a registered `bot_moderators` record). Recheck that authority in the Rust API on every request; a frontend bootstrap flag may only hide navigation and must never authorize access.
+- Never expose bot tokens, OAuth secrets, bridge secrets, database credentials, raw environment values, or unbounded logs to the browser.
+- Keep bridge and picker listeners private/loopback; preserve the Rust authorization boundary and proxy contract.
+- Validate external URLs before server-side fetches; reject private/local destinations and unsafe redirects.
+- The Custom Roles picker static assets are served by the TypeScript picker server and proxied through Rust. Keep their route, content types, CSP, and asset paths aligned when changing them.
+
+## 10. Security, Privacy, and Scraping
+
+- Treat Discord input, provider responses, dashboard input, uploaded files, and scraped content as untrusted.
+- Validate and authorize role changes, moderation, linking, exports, configuration writes, and deletion on the server.
+- Limit file size, image dimensions, image formats, request duration, concurrency, and retry counts according to existing helpers.
+- Select the best available source-access method for each integration: official API, licensed API, documented feed, public dataset/export, MediaWiki API, permitted public-page extraction or scraping, or manual/citation-only verification. Do not impose a blanket API-first/API-only restriction. When an API is absent or materially incomplete, evaluate public-page extraction and other source methods instead of silently abandoning the source.
+- Public-page scraping is Fully allowed and Recommended
+- Cloudflare challenge handling defaults to enabled for requests routed through the isolated Botasaurus worker (`cfBypass` defaults to `true`); a request may explicitly set `cfBypass: false` to disable it. Keep Botasaurus stealth/fingerprint mode confined to this worker path, never as a generic HTTP or Chromium fallback. Use this only for public metadata sources whose access terms permit automated retrieval.
+- Optional Cloudflare Turnstile solving is disabled unless `CAPTCHA_SOLVER_PROVIDER` is `twocaptcha` or `capsolver` and `CAPTCHA_SOLVER_API_KEY` is configured. Keep challenge wait, poll, and solver timeouts within the validated worker bounds. Other CAPTCHA types, disabled solving, failed challenges, and unresolved challenges must return structured blocked results.
+- This narrow exception does not permit bypassing authentication or login, paywalls, private or paid content, user/age/entitlement checks, explicit denials or bans, IP/network blocks, rate limits, or other source restrictions. Do not use leaked credentials, stolen session tokens, or proxy rotation to evade those restrictions; proxy use must be source-approved and bounded.
+- Scrape only the minimum factual metadata needed: names, identifiers, dates, edition/episode/issue references, typed relationships, concise factual attributes and canonical source links. Do not mirror complete articles or reproduce books, chapters, comics, scripts, episodes, artwork, audio or other protected media. Public visibility is not permission to republish protected content.
+- Keep scrapers asynchronous and source-specific but bounded: descriptive User-Agent/contact details where appropriate, per-host concurrency limits, request throttles, timeouts, response-size limits, caching, and conditional requests when supported. Do not retry generic access-denied or rate-limit responses; the explicitly enabled Cloudflare challenge path above is the only challenge-handling exception.
+- Validate and sanitize scraped HTML, wiki markup, API data and source URLs as untrusted input. Use existing SSRF protections and reject private/local destinations and unsafe redirects before fetching user-supplied URLs.
+- Store provenance per fact: source name, canonical URL, source/provider ID, retrieval timestamp, access method, source revision/version where available, licence/attribution note and review status. Preserve conflicting assertions rather than silently merging or guessing.
+- Keep data collection minimal and honor guild/member deletion rules. Do not delete historical community contributions, feedback, or diagnostics as a side effect of unrelated member cleanup.
+- Use bounded structured diagnostics and recursive secret redaction; never include secrets in logs or issue attachments.
+
+## 11. Tests and Verification
+
+Discover the actual tests and workflows before changing verification infrastructure. Current v3 checks include:
+
+- `npm run typecheck`
+- `npm test` (builds TypeScript and runs `dist/tests/*.test.js`)
+- `npm run build`
+- `npm run typecheck --prefix web/frontend`
+- `npm run build --prefix web/frontend`
+- `cargo test --manifest-path web/backend/Cargo.toml`
+- `cargo fmt --manifest-path web/backend/Cargo.toml -- --check`
+- `bash -n scripts/start.sh`
+- `docker compose config --quiet`
+- `docker build --tag lemegeton:local .`
+
+Run only the checks relevant to the patch, then broaden when practical. TypeScript integration tests use isolated local libSQL and RocksDB directories. For changes to the isolated worker only, validate Python syntax with `python -m compileall workers` and verify its container configuration; do not reintroduce Python tests or runtimes for the bot itself. State when live Discord credentials, external provider access, live storage data or a real deployment environment are unavailable.
+
+## 12. Documentation and Completion
+
+Update docs when behavior, setup, commands, dependencies, environment variables, permissions, schema, retention, or deployment changes. Keep `README.md`, `docs/README.md`, dashboard/deployment guides, and the migration audit consistent with the actual source and CI workflows.
+
+Before reporting completion, confirm:
+
+- [ ] Only the requested branch and files were changed.
+- [ ] Guild/global data scope and authorization were checked.
+- [ ] Failure, retry, and deletion behavior are safe and bounded.
+- [ ] Relevant checks were actually executed and results recorded accurately.
+- [ ] Docs and setup instructions match the v3 runtime.
+- [ ] No secrets, generated files, stale Python entry points, or accidental formatting changes were added.
+- [ ] The final diff and remaining limitations are clearly reported.
+
+When current code, docs, and source-branch behavior disagree, trace the implementation and callers. Do not silently assume the old Python behavior is still intended or that every old feature belongs in v3.
+
+## 13. BLA — Blind LLM Agents Protection
+
+Use the repository-pinned BLA v3.6.0 integration for anti-reverse-engineering protection. The complete upstream agent skill and its format references are vendored under `.agents/skills/blind-llm-agents/`; the project MCP registration is `.mcp.json`.
+
+- Before changing high-value logic, inspect its real entry points, callers, mutable state, authorization gates, and format. Use the BLA skill's `bla_discover`, `bla_lint`, and `bla_weave_plan` workflow when the BLA MCP server is available.
+- Weave only real, reachable domain/security logic: Discord command entitlements and moderation, multi-guild data ownership, retention/deletion, archive storage, dashboard OAuth/session/CSRF/guild authorization, bridge/picker token authority, and provider access control. Tie any decoy path to the real entry path and state described by BLA's work order. The dashboard's generated native shield is exposed through one crate-level helper and called from OAuth start/callback plus one-time OAuth-state insert/take/remove operations; retain these real call edges.
+- Do not blanket-weave UI components, formatters, static data, test fixtures, generated files, or unrelated helpers. Do not invent fake security APIs, unused honey folders, decorative comments, or independent decoy layers. Keep normal application behavior and multi-guild isolation unchanged.
+- After a source weave, run BLA's `bla_verify_weave` checks and the affected project tests. If BLA planning/verification tools are unavailable, do not pretend to have run them or manually fabricate a work order.
+- Protect the artifacts that are actually shipped. The Docker build runs BLA on the Next.js export and Rust dashboard binary, emits native Rust protection for the shared libSQL storage layer, emits C/C++ protection for the RocksDB addon, and hardens the compiled Discord bot output with Node self-seal before it is copied into the runtime image. Never harden or overwrite source files.
+- Keep secrets out of browser bundles and binaries. BLA obfuscation, decoys, and integrity checks are defense-in-depth, not encryption or a replacement for server-side authorization. Review plaintext survivors, unprotected/skipped artifacts, self-seal coverage, and runtime overhead before shipping.
+- A failed equivalence test, missing artifact, failed hardening report, or failed project test is a release blocker; do not silently package a partially protected build.
 
-## 12. Security and Privacy
-
-- Treat all Discord messages, command options, provider data, scraped content, and dashboard inputs as untrusted.
-- Never commit secrets or ask a user to paste production credentials into source code. Use local environment variables or the existing secret-management mechanism.
-- Validate and authorize before performing role changes, moderation actions, account linking, data deletion, configuration changes, exports, or other privileged operations.
-- Prevent path traversal and unsafe file access when user-provided filenames or paths are involved.
-- Avoid unsafe deserialization, shell execution with unsanitized input, dynamic SQL, and raw HTML injection.
-- For redirects and URLs, allow only expected schemes and hosts when the URL is used in a sensitive action or server-side fetch.
-- Keep error messages useful to operators but non-revealing to end users. Do not expose stack traces, SQL text containing user data, or internal secrets in Discord.
-- Preserve data minimization and deletion expectations in the existing feature. Do not broaden storage or collection of personal data as an incidental side effect.
-
-## 13. Testing and Verification
-
-First discover how the repository currently tests the affected feature; do not assume a test framework or command exists.
-
-- Search for relevant tests, fixtures, scripts, CI workflows, and neighboring test conventions before creating new testing infrastructure.
-- Add focused regression tests for meaningful behavior changes and bug fixes. Keep tests deterministic and avoid requiring live Discord logins or external API credentials.
-- For multi-guild behavior, test isolation across at least two guild IDs and verify both reads and writes where practical.
-- For provider work, cover valid results, missing fields, no results, malformed responses, timeout/rate-limit failures, and fallback behavior where relevant.
-- For interactive Discord UI, cover authorization checks, repeated clicks/submissions, expired interactions, and error responses when practical.
-- For schema changes, verify initialization/repeatability and existing-data compatibility as appropriate to the available test environment.
-- Run the narrowest relevant checks first, then broader checks when feasible. For changed Python files, a syntax check such as `python -m compileall -q <changed paths>` may be useful; it is not a substitute for behavioral tests.
-- If dependencies, credentials, a database, or a live Discord environment are unavailable, state exactly which checks could not be run and why.
-- Never claim to have run tests, linters, type checkers, integration checks, or live API checks unless you actually ran them and saw the result.
-- Inspect the final diff for unintended changes, dead imports introduced by the patch, secrets, generated files, and accidental formatting churn.
-
-## 14. Dependencies and Configuration Changes
-
-- Do not add a package if the existing standard library, installed dependencies, or project helper can reasonably solve the problem.
-- Before changing a dependency, inspect `requirements.txt`, its version constraints, usage sites, and compatibility with the documented Python/runtime version.
-- Pin or constrain dependencies consistently with existing conventions. Avoid casually upgrading unrelated packages.
-- If setup or runtime configuration changes, update `.env.example` and the relevant documentation in the same task.
-- Keep optional integrations optional where they already are; missing optional credentials should produce a clear disabled/fallback state rather than breaking unrelated commands.
-- Never add secrets, real IDs that should be private, local machine paths, or environment-specific endpoints to examples.
-
-## 15. Documentation
-
-- Update documentation when a change affects user-visible behavior, slash-command options, installation, dependencies, environment variables, permissions, database schema, data retention, or deployment.
-- Use existing docs and README conventions. Keep edits limited to the affected sections; do not rewrite broad documentation to fit a small code change.
-- Keep setup examples aligned with actual code, dependency versions, and configuration names. Where the implementation and docs disagree, determine the intended current behavior before editing and report unrelated discrepancies separately.
-- Do not document planned or experimental behavior as operational. Label incomplete or optional functionality accurately.
-- Add concise comments for non-obvious invariants, especially guild-scope decisions, security checks, provider fallbacks, and migration compatibility; do not narrate obvious code.
-
-## 16. Changes to Commands and Features
-
-When adding or changing a slash command:
-
-1. Inspect a similar command in the same cog and review how it loads.
-2. Follow its interaction lifecycle, permission checks, logging, embed, pagination, and error-handling conventions.
-3. Carry guild/user context explicitly and scope all related persistence/cache behavior correctly.
-4. Check command registration, dashboard integration, help references, and existing option names/descriptions.
-5. Test the normal path and the meaningful failure/authorization paths.
-6. Update the relevant docs/changelog only where the repository's current workflow expects it.
-
-Do not add a second command to avoid fixing a bug in the existing command unless that is specifically requested.
-
-## 17. Completion Checklist
-
-Before reporting completion, confirm all applicable items:
-
-- [ ] The implementation matches the requested behavior and no unrelated refactor was included.
-- [ ] Existing helpers, provider clients, configuration patterns, and conventions were reused where appropriate.
-- [ ] Guild/global data scope and authorization were checked deliberately.
-- [ ] Network, database, and Discord interaction failures have a reasonable behavior.
-- [ ] Sensitive values are neither committed nor logged.
-- [ ] Relevant tests/checks were executed, with limitations reported honestly.
-- [ ] Documentation/configuration was updated where behavior or setup requires it.
-- [ ] The final diff contains only intended changes.
-- [ ] The summary names changed files and states actual verification results.
-
-When a requirement conflicts with existing code, do not silently assume the code is correct or the docs are correct. Trace the behavior and callers, preserve compatibility by default, and explain the discrepancy before making a broad change.
-
-
----
-
-## Structural Untangling Protocol — Untangle Codebase
-
-Use this protocol when the user explicitly asks to untangle, structurally refactor, or comprehensively redesign the codebase. Treat it as a complete goal, not a superficial cleanup. When invoked, inspect and improve the whole relevant codebase, finish the work, and preserve intended behavior except for bugs corrected by the structural redesign. This protocol does not expand ordinary feature or bug-fix requests into unsolicited whole-repository refactors.
-
-### 1. Ask about optional additions
-
-Besides untangling the codebase, the user may choose either or both of these additions. Present the options with these exact descriptions and ask which to include before starting an untangling run:
-
-| Addition | Exact description |
-|---|---|
-| **Comments** | Remove comments that only restate the code. |
-| **Tests** | Remove tests that wouldn't catch a real bug, and fix the ones that fail without one. |
-
-Do only the additions the user chooses. If an addition is not selected, do not perform that category of cleanup as part of the untangling work. The structural redesign and the regression verification needed to protect it remain part of the core task.
-
-### 2. List every structural problem before changing anything
-
-Do not edit code during the initial audit. Walk the whole codebase and ask one question of every relevant relationship:
-
-**Should these pieces change together?**
-
-Record every place where the current design answers that question incorrectly. There are three problem classes:
-
-#### Hidden links — pieces that must change together, but the code does not make that relationship visible
-
-Look for:
-
-- **Copied logic or values:** changing one copy means the others must change too, but there is no explicit shared source or relationship.
-- **Hidden shared state:** a module reads a global or a file that another module sets or mutates, so changing the producer can silently break the consumer.
-- **Scattered features:** one feature is split across folders by technical layer, or related code is separated across unrelated locations, so a normal feature change requires edits in multiple places.
-- **Implicit call order or conventions:** callers must know an undocumented sequence, side effect, or convention for the code to work.
-
-#### Needless links — pieces are coupled even though they change for different reasons
-
-Look for:
-
-- **Leaky encapsulation:** callers depend on implementation details and break when internals change.
-- **Wrong dependency direction:** stable code imports more volatile code and must change whenever that volatile implementation changes.
-- **Caller-specific vocabulary:** a general function has a parameter or branch that only one workflow understands, coupling the general abstraction to that caller.
-- **Shallow modules:** a module's interface changes whenever its implementation changes, forcing callers to change for internal reasons.
-
-#### Surplus — pieces with no independent reason to change
-
-Look for:
-
-- **Pass-through wrappers:** wrappers that only change when the thing they wrap changes.
-- **Speculative generality:** extension points, configuration, or abstractions for behavior that does not and is not expected to vary.
-- **Dead code:** code that has no callers or other real use and therefore has no reason to change.
-
-#### Record every special case
-
-A special case is code that exists for one situation rather than following naturally from the system's general rules. Treat each one as evidence of a requirement the design may not have accounted for. Inspect at least:
-
-- An if branch for one particular value.
-- A parameter that exists for one specific caller.
-- A swallowed or ignored exception.
-- A retry, arbitrary sleep, or timing workaround.
-- A disabled test.
-
-Do not automatically delete every special case. Determine whether the redesign makes it unnecessary or whether it represents a real requirement that the system must continue to support.
-
-For every finding, record the file and location, the behavior or relationship involved, why the current design is wrong, and the other places that are coupled to it. Be exhaustive before implementation; do not start fixing the first issue as soon as it is found.
-
-### 3. Redesign from first principles
-
-Work out how the system would have been designed if it had understood today's actual requirements from the beginning.
-
-- Search for one underlying design fix that resolves several symptoms. Prefer correcting the structural cause over adding local patches for each symptom.
-- Place code that changes together together; keep independently changing code separate.
-- Make dependencies point toward the parts of the system that change less.
-- Give modules cohesive responsibilities and interfaces that hide volatile implementation details.
-- Make important relationships explicit rather than relying on duplicated values, hidden state, caller knowledge, or call order.
-- Re-evaluate every proposed fix—even one that appears cleaner—to ensure it improves the change boundaries rather than merely moving complexity elsewhere.
-- Keep intended external behavior, public contracts, data compatibility, security properties, and operational requirements intact unless a deliberate behavior change is part of the request.
-
-Maintain a decision log. Write each proposed structural fix first, followed by the complete set of problems it solves. Do not write a list of unrelated edits; make the relationship between the redesign and its evidence explicit.
-
-Use this format:
-
-> Proposed structural fix: [one coherent design change]
->
-> - Problem it solves: [file/path and concrete issue]
-> - Problem it solves: [file/path and concrete issue]
-> - Problem it solves: [file/path and concrete issue]
-
-### 4. Fix everything on the decision log
-
-Implement the redesigned structure across all listed locations. Do not stop after fixing the easiest symptoms.
-
-- Remove special cases that the redesign makes unnecessary.
-- Preserve special cases that still express real requirements, and make their purpose and boundary clear.
-- Prefer one coherent structural correction over a set of one-off conditionals, flags, wrappers, retries, or duplicate implementations.
-- Keep the refactor aligned with current repository architecture, language, dependencies, runtime constraints, security requirements, and compatibility obligations.
-- Do not introduce speculative frameworks, extension points, or abstractions as a side effect of making the design appear more general.
-- Do not silently broaden the scope into unrelated product features or behavior changes.
-
-If the user selected **Comments**, apply these rules:
-
-- Remove comments that merely restate what the code does, including comments phrased as a rationale when the rationale is fully evident from the implementation.
-- Keep comments documenting facts outside the code that the code itself cannot express, such as an external service limitation or platform behavior.
-- Remove comments that explain workarounds when the redesign removes the underlying problem; retain them only when the workaround remains necessary and its reason is not otherwise evident.
-
-If the user selected **Tests**, do this after the structural implementation, because tests are the regression safety net:
-
-- Remove tests that merely repeat the implementation's own logic or interpretation rather than checking observable behavior.
-- Rewrite tests coupled to private implementation details so they verify stable behavior and contracts instead.
-- Remove tests that cannot fail for a meaningful regression and therefore do not verify anything.
-- Fix genuinely failing tests when the failure does not represent a real product bug, while preserving tests that expose regressions.
-- Keep useful regression coverage. Do not weaken the suite merely to obtain a green result.
-
-### 5. Check and repeat until done
-
-After the first implementation pass, independently audit the resulting codebase again for:
-
-- Hidden links.
-- Needless links.
-- Surplus code and abstractions.
-- Special cases that remain.
-- Dependencies and import direction.
-- Features still scattered across unrelated locations.
-- Callers that still need to know implementation details or undocumented conventions.
-
-Use subagents to inspect separate areas and independently search for these problems. Compare their findings, resolve disagreements against the actual code and behavior, and update the decision log. If subagents are unavailable, perform separate independent audit passes and state that limitation; do not claim parallel review that did not occur.
-
-Generate or inspect dependency graphs where useful, and rerun them after significant changes. Use repository history and Git evidence to identify files that repeatedly change together. Test the redesigned behavior, not merely the new implementation shape.
-
-**Do not stop while worthwhile structural problems remain.** Repeat the audit, decision-log, redesign, implementation, and verification cycle until the completion criteria below are satisfied.
-
-The work is complete when:
-
-- As few special cases remain as the actual requirements allow; the remaining count and reasons are understood.
-- A typical change can be made in one obvious place.
-- Imports and dependencies are reasonable, and stable code does not depend on more volatile implementation details.
-- Related code is grouped around the behavior that changes together.
-- Independent code is no longer needlessly coupled.
-- Subagent reviews, or equivalent independent audits when subagents are unavailable, have no unresolved worthwhile structural findings.
-- Intended behavior remains the same, apart from bugs the structural redesign corrected.
-- Relevant tests and checks have been run, and limitations are explicitly reported.
-- The final diff contains only intentional changes.
-
-### Untangling techniques
-
-- **Start from a skeleton:** where useful, temporarily reason from function signatures, module boundaries, and dependency structure before reading every implementation detail.
-- **Summarize by area:** use subagents or independent passes to summarize separate parts of the codebase, then reason across the whole system.
-- **Inspect dependency graphs often:** generate or review a graph of what imports what, and revisit it after structural changes.
-- **Start where leverage is highest:** investigate the area whose structural correction is likely to remove the most coupling or repeated work.
-- **Keep the decision log:** it preserves the connection between evidence, redesign, and implementation across long tasks and context changes.
-- **Use Git as evidence:** review file co-change history and repeated patterns rather than relying only on intuition.
-
-The governing principle is that this is a redesign of change boundaries: pieces that change together should be together, pieces that change for different reasons should not be tied together, and everything should depend on what changes less.
-
-
----
-
-## Evidence-Led Folder Architecture and Repository Organization
-
-Folder structure is part of the architecture: it should make ownership, dependencies, runtime boundaries, and change-together relationships obvious. Do not choose a layout because it is fashionable or copy another repository wholesale. Choose it from the project's actual requirements and verified code.
-
-This section is mandatory before a substantial folder reorganization, a new large feature area, a new service/package, or an Untangle Codebase run. Apply the same reasoning to small changes when deciding where new files belong.
-
-### 1. Inspect the real repository before proposing a structure
-
-Before moving or creating folders:
-
-1. Inspect the complete tracked file tree and identify the repository's actual top-level boundaries. Inspect enough depth to understand the ownership of important files; do not rely only on a short root listing.
-2. Read the entry points, representative files, package/workspace manifests, build configuration, tests, and relevant documentation. Folder names alone do not prove what a module does.
-3. Trace imports, calls, shared state, data ownership, runtime processes, build/deploy units, and test coverage. Generate or inspect a dependency graph when it can reveal hidden coupling.
-4. Use Git history and co-change evidence where available to identify files that repeatedly change together.
-5. Separate production code, test code, generated output, static assets, operational scripts, infrastructure, migrations, and documentation according to their actual purpose.
-6. Record the current structure and its problems before changing anything. Do not start a broad move while the ownership and dependency map is still unclear.
-
-Every proposed directory must have a clear responsibility. Every moved file must have an explicit destination and reason. Avoid moving files merely to make the tree look tidy.
-
-### 2. Benchmark mature repositories with relevant architecture
-
-Research real, actively maintained, substantial projects that use a comparable language, framework, deployment model, or engineering problem. Inspect their actual repository trees, manifests, and representative code. Use examples as evidence for a decision, not as templates to copy.
-
-The following repositories are useful verified reference points:
-
-| Project | Observed organization | Useful lesson |
-|---|---|---|
-| [Vercel / Next.js](https://github.com/vercel/next.js) | Separates apps/, packages/, Rust crates/, docs/, examples/, benchmarks, scripts, and tests. | Different deployable apps, reusable packages, language-specific workspace crates, and supporting material have explicit boundaries. |
-| [Supabase](https://github.com/supabase/supabase) | Uses apps/, packages/, e2e/, examples/, and supabase/ for database functions and migrations. | Product applications, shared libraries, end-to-end coverage, examples, and database platform assets should not be mixed into one source folder. |
-| [Visual Studio Code](https://github.com/microsoft/vscode) | Separates core src/, independently organized extensions/, cli/, remote/, build/, and tests. | Large products benefit from strong product/runtime/extension boundaries rather than a single undifferentiated components or utilities directory. |
-| [Django](https://github.com/django/django) | Groups framework capabilities under django/ (for example db/, forms/, http/, middleware/, views/) and maintains broad behavior-oriented tests/ suites. | Stable domain capabilities deserve clear modules; tests can mirror externally observable capabilities rather than private file layouts. |
-| [Axum](https://github.com/tokio-rs/axum) | Separates Rust crates such as axum/, axum-core/, axum-extra/, and axum-macros/, with crate-specific source/tests/benches and standalone examples. | Split a Rust workspace into crates when the API, dependency, release, or ownership boundary is real—not merely to create more folders. |
-
-Benchmarking rules:
-
-- Prefer primary repository trees, manifests, and source over blog-post folder diagrams.
-- Check the project's current branch and current layout; repository architecture can change.
-- Choose examples that solve a comparable problem. A framework monorepo, a desktop application, and a small single-app project should not be treated as interchangeable.
-- Identify the principle behind a pattern and adapt it to this codebase's scale, runtime, team, and deployment model.
-- Do not add apps/, packages/, crates/, microservices, or layers unless there is a real boundary that justifies them.
-- Do not claim that a reference project uses a pattern unless its tree or implementation has been inspected.
-
-### 3. Use GoodSale and LOOP as first-party folder-organization references
-
-The user's own repositories are additional concrete references. Inspect their current trees and relevant source before using them; these observations describe the inspected layouts, not a requirement to duplicate every directory.
-
-#### GoodSale — VireonNoctis/GoodSale
-
-Observed root-level organization:
-
-- app/ — Next.js App Router pages, route groups, layouts, loading/error states, metadata, and API route handlers.
-- components/ — reusable interface components grouped in areas such as admin/, auth/, checkout/, marketplace/, onboarding/, premium/, seller/, tracking/, verification/, wallet/, and shared ui/.
-- lib/ — non-route application logic and capabilities grouped in areas such as auth/, business/, delivery/, logistics/, marketplace/, payments/, shipping/, wallet/, referrals/, seo/, and supabase/.
-- supabase/ — schema and ordered database migrations.
-- tests/ — behavior-oriented test groups such as business, chat, data, payments, premium, referrals, and seed.
-- docs/, scripts/, public/, and .github/ — documentation, operational/verification tooling, public assets, and automation.
-
-Patterns to carry forward where appropriate:
-
-- Keep framework-required routes and handlers in app/, but keep substantial domain logic out of route files. Route handlers should validate/translate the HTTP boundary and delegate to the owning domain/service module.
-- Group feature UI by product capability; keep generic primitives in components/ui/.
-- Group business logic by capability instead of placing unrelated functions in one global helper file.
-- Keep schema and ordered database migrations in the database platform's established migration area.
-- Organize tests around behavior/capability, not a one-to-one copy of internal source filenames.
-
-Audit caveat: GoodSale also has a number of top-level component files and capability files directly under lib/. Treat those flatter areas as candidates to evaluate when related files begin changing together; do not bulk-move them without evidence or a coherent ownership boundary.
-
-#### LOOP — VireonNoctis/loop-app
-
-Observed root-level organization:
-
-- app/ — Next.js App Router pages and API routes, including product areas such as chains, circles, communities, co-loop, creator, messages, profiles, quests, shop, and wallet.
-- components/ — feature-oriented interface areas such as accounts, admin, chat, circles, communities, marketplace, onboarding, profile, reels, settings, shop, streams, team, verification, and shared ui/.
-- backend/ — a separate Rust service boundary, with its own Cargo.toml, src/, route and storage modules, configuration, Docker setup, and migrations/.
-- hooks/ and providers/ — shared React hooks and application providers.
-- lib/ — application/domain capabilities and integrations, including auth, circles, communities, discovery, moderation, notifications, payments, privacy, quests, realtime, theming, verification, and the Rust API client.
-- android/ — native Android project and platform resources.
-- infra/, assets/, styles/, public/, scripts/, __tests__/, docs/, and licenses/ — deployment/infrastructure, static assets, styling, operational tooling, tests, documentation, and legal material.
-
-Patterns to carry forward where appropriate:
-
-- Preserve clear runtime boundaries: Next.js application, separately runnable Rust backend, and Android native project should remain distinguishable.
-- Keep frontend routes in the framework's app/ structure, and keep Rust-specific source, manifests, tests, and migrations inside the backend boundary.
-- Group components around product domains and keep generic design-system primitives in components/ui/.
-- Keep truly cross-feature React hooks in hooks/ and app-wide providers in providers/; feature-only hooks/providers may be colocated with their owning feature when that makes ownership clearer.
-- Put infrastructure and native platform assets under their own boundaries rather than mixing them with application logic.
-- Keep domain capabilities identifiable. When lib/ grows into a large flat collection, assess cohesive groups such as auth/, circles/, community/, payments/, notifications/, moderation/, and theming/; consolidate only where import and change-together evidence supports it.
-
-Audit caveat: LOOP's current lib/ contains many root-level capability files, and scripts/ contains a substantial mix of migrations, schema changes, repair scripts, seeds, and verification utilities. Treat these as opportunities for an evidence-led organization review, not proof that every script or helper must be moved immediately. Keep one canonical home for each migration and script; do not duplicate SQL or change execution order while organizing it.
-
-Use these two repositories as first-party examples of how the user separates routes, feature UI, domain logic, backend/runtime boundaries, tests, migrations, infrastructure, and documentation. Do not assume they are perfectly organized or copy their existing rough edges into another project.
-
-### 4. Select the folder model from actual change and deployment boundaries
-
-Use these principles to design the target tree:
-
-- **Separate deployables first.** Use top-level apps/ for multiple independently built/deployed applications, services/ or a clearly named backend boundary for independently run services, and platform folders such as android/ for native projects. In a Rust workspace, use crates/ or named crate directories when crate boundaries are real. A single application does not need a monorepo structure just because large repositories use one.
-- **Separate reusable packages from applications.** In a genuine monorepo, packages/ or language-appropriate workspace members should contain independently reusable libraries, UI systems, configuration, clients, or domain packages. Applications consume shared packages through public interfaces; one app must not reach into another app's private source tree.
-- **Organize product logic by capability.** Prefer cohesive domains such as auth/, billing/, catalog/, chat/, community/, delivery/, or payments/ when the code in each area changes together. Avoid a generic misc/ or a huge utils/ directory that hides ownership.
-- **Respect framework conventions.** Keep framework-mandated route, page, layout, middleware, and handler files where the framework expects them. Use these files as thin entry points; place substantial domain behavior in the owning feature/service modules.
-- **Group UI by responsibility.** Feature-specific components belong with their feature or in a feature-grouped components tree. Generic controls, primitives, and design-system elements belong in a shared UI layer. A shared component must not import a feature's private implementation.
-- **Keep integrations at the boundary.** Provider/API clients, persistence adapters, storage, email, payment gateways, and external-system integrations should have explicit boundaries. Domain rules should not be coupled to vendor-specific transport or SDK details without a reason.
-- **Use hooks/, providers/, and state/ deliberately.** They should contain genuinely shared cross-feature behavior. Feature-only state and hooks should normally stay with the feature that owns them.
-- **Keep data ownership explicit.** Put migrations, schemas, seeds, and persistence-specific code in one clear location per data store/runtime. Separate migration history from disposable scripts and verification utilities; never create a second canonical migration directory.
-- **Give tests a deliberate shape.** Choose either useful colocation or a central tests/ tree based on the existing test tooling. Distinguish unit, integration, contract, and end-to-end tests, and group them around behavior or domain. Keep fixtures and test helpers discoverable. Avoid testing only private folder structure.
-- **Separate operations from source.** Keep deployment manifests, infrastructure-as-code, container configuration, CI workflows, developer scripts, data migrations, and generated build output distinguishable. Do not put generated output into source folders.
-- **Make documentation discoverable.** Keep architecture decisions, runbooks, setup, API contracts, and feature guidance in predictable locations. Avoid duplicate or contradictory instructions scattered across folders.
-- **Keep naming consistent.** Follow the repository's established casing and naming convention. Use clear lowercase names where the project already does so; do not rename large areas just to impose a new style.
-- **Create a folder only when it earns its existence.** Do not add empty directories, one-file abstraction layers, or deeply nested structures that make navigation harder without improving ownership.
-
-### 5. Prefer cohesive feature slices without violating runtime boundaries
-
-A feature slice should make it easy to find the code that changes together. Depending on the framework and scale, a feature may own:
-
-- Its public entry point or route adapter (where framework rules allow).
-- UI components and feature-only hooks/state.
-- Domain rules and application services.
-- Persistence/provider interfaces or adapters where the feature owns them.
-- Types, validation schemas, and feature-specific tests.
-- Documentation for non-obvious behavior and invariants.
-
-Do not force every feature into an identical folder template. A small feature may need one module; a mature domain may need clear domain/, application/, infrastructure/, and presentation/ boundaries. Add those layers only when they separate genuine responsibilities and change rates. Avoid deep ceremonial architecture for simple code.
-
-### 6. Validate a folder reorganization as an architectural change
-
-Before moving files, produce:
-
-1. A current-tree summary and relevant dependency map.
-2. A list of the identified ownership/coupling problems.
-3. The target tree, with a reason for each new boundary.
-4. An old-path → new-path move map.
-5. A dependency-direction plan, including public interfaces and import-alias changes.
-6. A test/build/documentation/configuration impact list.
-
-After moving files:
-
-- Update imports, aliases, manifests, code-generation paths, scripts, CI references, Docker/build contexts, deployment commands, test discovery, documentation links, and editor/tool configuration.
-- Search for stale old paths, dynamic imports, case-sensitive path mismatches, generated references, and string-based file lookups.
-- Verify there is one canonical implementation, migration history, schema source, or configuration owner; do not leave duplicate copies.
-- Run formatter, lint, typecheck, unit/integration/e2e tests, build, and relevant packaging/deployment checks where configured and feasible.
-- Inspect the final tree and dependency graph again. Confirm the new layout makes likely changes easier to locate and does not create new cross-feature imports or dependency cycles.
-- Preserve runtime behavior and public import/API contracts, or provide deliberate compatibility shims when a breaking change is authorized.
-- Report the exact moves, the structural reason, checks run, and checks not run.
-
-Do not perform broad folder moves as incidental cleanup during an unrelated task. When a folder refactor is explicitly requested, complete the structural work coherently rather than stopping after creating the target folders.

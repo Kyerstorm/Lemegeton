@@ -1,0 +1,1021 @@
+import {
+  MessageFlags,
+  ChannelType,
+  PermissionFlagsBits,
+  type Client,
+  type Message,
+} from "discord.js";
+import { query, queryOne, transaction } from "../../src/utility/database/libsql/database.js";
+import {
+  deleteArchiveAsset,
+  downloadArchiveUpload,
+  archiveUploadChannelIsPrivate,
+  resolveLegacyArchiveAttachmentUrl,
+} from "../media/media-storage.js";
+import { archiveUploadAllowed, getArchiveUploadMaxBytes, storeArchiveUpload } from "../media/media-storage.js";
+import { cleanText, isValidHttpsUrl, normalizeTags } from "../security/security.js";
+import { isFeatureEnabled } from "../runtime/settings.js";
+import { GLOBAL_MODERATOR_IDS, isGlobalArchiveModerator } from "./archive-access.js";
+import { emoji } from "../emoji.js";
+export { isGlobalArchiveModerator } from "./archive-access.js";
+
+export const ARCHIVE_CATEGORIES = [
+  { label: "Manga Panels", value: "panels", emoji: emoji.panels },
+  { label: "Quotes", value: "quotes", emoji: emoji.quote },
+  { label: "Fanworks", value: "fanworks", emoji: emoji.fanworks },
+  { label: "Moodboards", value: "moodboards", emoji: emoji.moodboard },
+  { label: "Soundtracks", value: "soundtracks", emoji: emoji.soundtrack },
+  { label: "Scenes", value: "scenes", emoji: emoji.scenes },
+  { label: "Recommendations", value: "recommendation-board", emoji: emoji.recommended },
+  { label: "Theories", value: "theories", emoji: emoji.theory },
+] as const;
+
+export const ARCHIVE_TAG_CATALOG = [
+  "action","adventure","comedy","drama","fantasy","horror","mystery","psychological",
+  "romance","sci-fi","slice of life","supernatural","thriller","tragedy","isekai",
+  "martial arts","school life","historical","shounen","shoujo","seinen","josei",
+  "manhwa","manhua","double spread","splash page","panel sequence","iconic moment",
+  "character close-up","fight scene","comedy panel","emotional scene","flashback",
+  "worldbuilding","monster / creature","weapons","magic","cyberpunk","post-apocalyptic",
+  "folklore","mythology","politics","survival","revenge","cultivation","time travel",
+  "reincarnation","sports","mecha","music","friendship","found family","coming of age",
+  "school","historical fantasy","urban fantasy","mystery investigation","time loop",
+  "reconstruction","dystopia","science fiction","travel","workplace","royalty",
+] as const;
+
+export function searchArchiveTags(query: string, selected: string[] = []): string[] {
+  const term = query.trim().toLocaleLowerCase("en-US");
+  const excluded = new Set(selected.map((tag) => tag.trim().toLocaleLowerCase("en-US")));
+  return ARCHIVE_TAG_CATALOG.filter((tag) => {
+    const normalized = tag.toLocaleLowerCase("en-US");
+    return !excluded.has(normalized) && (!term || normalized.includes(term));
+  }).sort((left, right) => {
+    const leftStarts = left.toLocaleLowerCase("en-US").startsWith(term);
+    const rightStarts = right.toLocaleLowerCase("en-US").startsWith(term);
+    return Number(rightStarts) - Number(leftStarts) || left.localeCompare(right);
+  }).slice(0, 25);
+}
+
+export type ArchiveCategory = typeof ARCHIVE_CATEGORIES[number]["value"];
+export type ArchiveVisibility = "server" | "global";
+
+const DEFAULT_CATEGORIES = ARCHIVE_CATEGORIES.map((category) => category.value);
+const UPLOAD_KINDS = new Set(["image", "audio", "video"]);
+export interface ArchiveSettings {
+  enabledCategories: ArchiveCategory[];
+  uploadTypes: string[];
+  uploadChannelId: string | null;
+  legacyStorageChannelId: string | null;
+  moderationChannelId: string | null;
+  moderatorRoleId: string | null;
+}
+
+export interface ArchiveSubmission {
+  guildId: string;
+  userId: string;
+  category: ArchiveCategory;
+  title: string;
+  content: string;
+  sourceTitle?: string;
+  creator?: string;
+  mediaType: string;
+  sourceUrl?: string;
+  tags: string[];
+  spoiler: boolean;
+  visibility: ArchiveVisibility;
+  needsUpload: boolean;
+  chapterNumber?:string;
+  linkedMediaProvider?:string;
+  linkedMediaId?:string;
+}
+
+export interface ArchiveEntry {
+  id: string;
+  archive_type: ArchiveCategory;
+  title: string;
+  content: string;
+  source_title: string | null;
+  creator: string | null;
+  media_type: string;
+  source_url: string | null;
+  chapter_number:string|null;
+  linked_media_provider:string|null;
+  linked_media_id:string|null;
+  tags: string[];
+  spoiler: boolean;
+  status: string;
+  created_by: string;
+  created_guild_id: string;
+  visibility: ArchiveVisibility;
+  media_asset_id: string | null;
+  attachment_count?: number;
+  attachment_url: string | null;
+  attachment_filename: string | null;
+  storage_message_id: string | null;
+  storage_channel_id: string | null;
+  created_at: Date;
+}
+
+export function parsePanelChapterCaption(value:string):{chapterNumber:string;caption:string}{
+ const match=/^\s*(?:(?:chapter|ch\.?)\s*)?#?(\d+(?:\.\d+)?|N\/A)(?:\s*(?:[-–—:|]\s*|\s+)(.*?))?\s*$/i.exec(value.trim());
+ if(!match||/[–—:|\-]$/.test(value.trim()))throw new Error("Enter a chapter number or N/A. An optional caption can follow, e.g. Chapter 12 — Final battle.");
+ const chapterNumber=match[1]?.toUpperCase()==="N/A"?"N/A":match[1]!;
+ return{chapterNumber,caption:(match[2]??"").trim()};
+}
+
+export function parseAniListMangaReference(value:string):{id:string|null;url:string|null}{
+ const raw=value.trim();
+ if(!raw)return{id:null,url:null};
+ if(/^\d+$/.test(raw)){
+  const id=BigInt(raw);
+  if(id<=0n||id>BigInt(Number.MAX_SAFE_INTEGER))throw new Error("AniList manga IDs must be positive safe integers.");
+  const normalized=id.toString();
+  return{id:normalized,url:`https://anilist.co/manga/${normalized}`};
+ }
+ let url:URL;
+ try{url=new URL(raw);}catch{throw new Error("Use a numeric AniList manga ID or an HTTPS AniList manga URL.");}
+ const match=/^\/manga\/(\d+)(?:\/|$)/i.exec(url.pathname);
+ if(url.protocol!=="https:"||!["anilist.co","www.anilist.co"].includes(url.hostname.toLowerCase())||!match){
+  throw new Error("Use a numeric AniList manga ID or an HTTPS AniList manga URL.");
+ }
+ const id=BigInt(match[1]!);
+ if(id<=0n||id>BigInt(Number.MAX_SAFE_INTEGER))throw new Error("AniList manga IDs must be positive safe integers.");
+ const normalized=id.toString();
+ return{id:normalized,url:`https://anilist.co/manga/${normalized}`};
+}
+
+export function isArchiveCategory(value: string): value is ArchiveCategory {
+  return ARCHIVE_CATEGORIES.some((category) => category.value === value);
+}
+
+export async function getArchiveSettings(guildId: string): Promise<ArchiveSettings> {
+  const row = await queryOne<{
+    enabled_categories: string;
+    upload_types: string;
+    upload_channel_id: string | null;
+    legacy_storage_channel_id: string | null;
+    moderation_channel_id: string | null;
+    moderator_role_id: string | null;
+  }>(
+    "SELECT enabled_categories, upload_types, upload_channel_id::text, legacy_storage_channel_id::text, moderation_channel_id::text, moderator_role_id::text FROM guild_archive_settings WHERE guild_id = $1",
+    [guildId],
+  );
+  if (!row) return { enabledCategories: DEFAULT_CATEGORIES, uploadTypes: ["image"], uploadChannelId: null, legacyStorageChannelId: null, moderationChannelId: null, moderatorRoleId: null };
+  try {
+    const categories = JSON.parse(row.enabled_categories) as unknown;
+    const uploads = JSON.parse(row.upload_types) as unknown;
+    if (!Array.isArray(categories) || !categories.every((item) => isArchiveCategory(String(item)))) {
+      throw new Error("Invalid archive categories.");
+    }
+    if (!Array.isArray(uploads) || !uploads.every((item) => typeof item === "string" && UPLOAD_KINDS.has(item))) {
+      throw new Error("Invalid archive upload settings.");
+    }
+    return {
+      enabledCategories: [...new Set(categories as ArchiveCategory[])],
+      uploadTypes: [...new Set(uploads as string[])],
+      uploadChannelId: row.upload_channel_id,
+      legacyStorageChannelId: row.legacy_storage_channel_id,
+      moderationChannelId: row.moderation_channel_id,
+      moderatorRoleId: row.moderator_role_id,
+    };
+  } catch {
+    // Invalid settings fail closed instead of enabling categories/uploads by accident.
+    return { enabledCategories: [], uploadTypes: [], uploadChannelId: row.upload_channel_id, legacyStorageChannelId: row.legacy_storage_channel_id, moderationChannelId: row.moderation_channel_id, moderatorRoleId: row.moderator_role_id };
+  }
+}
+
+export async function saveArchiveSettings(
+  guildId: string,
+  actorId: string,
+  categories: ArchiveCategory[],
+  uploadTypes: string[],
+): Promise<void> {
+  const normalizedCategories = [...new Set(categories)];
+  const normalizedUploads = [...new Set(uploadTypes)];
+  if (!normalizedCategories.length) throw new Error("Keep at least one archive category enabled.");
+  if (!normalizedCategories.every(isArchiveCategory)) throw new Error("One or more categories are invalid.");
+  if (!normalizedUploads.every((item) => UPLOAD_KINDS.has(item))) throw new Error("One or more upload types are invalid.");
+  await query(
+    `INSERT INTO guild_archive_settings (guild_id, enabled_categories, upload_types, updated_by, updated_at)
+     VALUES ($1, $2, $3, $4, NOW())
+     ON CONFLICT (guild_id) DO UPDATE SET
+       enabled_categories = EXCLUDED.enabled_categories,
+       upload_types = EXCLUDED.upload_types,
+       updated_by = EXCLUDED.updated_by,
+       updated_at = NOW()`,
+    [guildId, JSON.stringify(normalizedCategories), JSON.stringify(normalizedUploads), actorId],
+  );
+}
+
+export function isValidArchiveChannelId(channelId:string|null):boolean {
+  return channelId===null || /^\d{17,20}$/.test(channelId);
+}
+
+export async function saveArchiveChannelSetting(
+  guildId: string,
+  actorId: string,
+  kind: "upload" | "moderation" | "storage",
+  channelId: string | null,
+): Promise<void> {
+  if (!isValidArchiveChannelId(channelId)) {
+    throw new Error("Choose a normal text or announcement channel from this server.");
+  }
+  const column = kind === "upload" ? "upload_channel_id"
+    : kind === "storage" ? "legacy_storage_channel_id" : "moderation_channel_id";
+  await query(
+    `INSERT INTO guild_archive_settings (guild_id, ${column}, updated_by, updated_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (guild_id) DO UPDATE
+       SET ${column} = EXCLUDED.${column}, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+    [guildId, channelId, actorId],
+  );
+}
+
+export function isValidArchiveModeratorRoleId(roleId: string | null): boolean {
+  return roleId === null || /^\d{17,20}$/.test(roleId);
+}
+
+export function normalizeArchiveDashboardSettings(
+  guildId: string,
+  settings: ArchiveSettings,
+): ArchiveSettings {
+  if (!Array.isArray(settings.enabledCategories)
+    || settings.enabledCategories.length === 0
+    || !settings.enabledCategories.every(isArchiveCategory)) {
+    throw new Error("Keep at least one valid Archive category enabled.");
+  }
+  if (!Array.isArray(settings.uploadTypes)
+    || !settings.uploadTypes.every((item) => UPLOAD_KINDS.has(item))) {
+    throw new Error("Choose only supported Archive upload types.");
+  }
+  if (!isValidArchiveChannelId(settings.uploadChannelId)
+    || !isValidArchiveChannelId(settings.legacyStorageChannelId)
+    || !isValidArchiveChannelId(settings.moderationChannelId)) {
+    throw new Error("Choose valid channels from this server.");
+  }
+  if (!isValidArchiveModeratorRoleId(settings.moderatorRoleId)
+    || settings.moderatorRoleId === guildId) {
+    throw new Error("Choose a valid Archive moderator role.");
+  }
+  return {
+    enabledCategories: [...new Set(settings.enabledCategories)],
+    uploadTypes: [...new Set(settings.uploadTypes)],
+    uploadChannelId: settings.uploadChannelId,
+    legacyStorageChannelId: settings.legacyStorageChannelId,
+    moderationChannelId: settings.moderationChannelId,
+    moderatorRoleId: settings.moderatorRoleId,
+  };
+}
+
+export async function saveArchiveDashboardSettings(
+  guildId: string,
+  actorId: string,
+  settings: ArchiveSettings,
+): Promise<ArchiveSettings> {
+  const normalized = normalizeArchiveDashboardSettings(guildId, settings);
+  await transaction(async (client) => {
+    await client.query(
+      `INSERT INTO guild_archive_settings
+        (guild_id, enabled_categories, upload_types, upload_channel_id, legacy_storage_channel_id,
+         moderation_channel_id, moderator_role_id, updated_by, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())
+       ON CONFLICT (guild_id) DO UPDATE SET
+         enabled_categories = EXCLUDED.enabled_categories,
+         upload_types = EXCLUDED.upload_types,
+         upload_channel_id = EXCLUDED.upload_channel_id,
+         legacy_storage_channel_id = EXCLUDED.legacy_storage_channel_id,
+         moderation_channel_id = EXCLUDED.moderation_channel_id,
+         moderator_role_id = EXCLUDED.moderator_role_id,
+         updated_by = EXCLUDED.updated_by,
+         updated_at = NOW()`,
+      [
+        guildId,
+        JSON.stringify(normalized.enabledCategories),
+        JSON.stringify(normalized.uploadTypes),
+        normalized.uploadChannelId,
+        normalized.legacyStorageChannelId,
+        normalized.moderationChannelId,
+        normalized.moderatorRoleId,
+        actorId,
+      ],
+    );
+  });
+  return normalized;
+}
+
+export async function saveArchiveModeratorRole(
+  guildId: string,
+  actorId: string,
+  roleId: string | null,
+): Promise<void> {
+  if (!isValidArchiveModeratorRoleId(roleId) || roleId === guildId) {
+    throw new Error("Choose a valid server role. @everyone cannot be an Archive moderator role.");
+  }
+  await query(
+    `INSERT INTO guild_archive_settings (guild_id, moderator_role_id, updated_by, updated_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (guild_id) DO UPDATE
+       SET moderator_role_id = EXCLUDED.moderator_role_id, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+    [guildId, roleId, actorId],
+  );
+}
+
+export async function getLastArchiveCategory(guildId: string, userId: string): Promise<ArchiveCategory | null> {
+  const row = await queryOne<{ last_category: string }>(
+    "SELECT last_category FROM archive_user_preferences WHERE guild_id = $1 AND user_id = $2",
+    [guildId, userId],
+  );
+  return row && isArchiveCategory(row.last_category) ? row.last_category : null;
+}
+
+export async function rememberArchiveCategory(guildId: string, userId: string, category: ArchiveCategory): Promise<void> {
+  await query(
+    `INSERT INTO archive_user_preferences (guild_id,user_id,last_category,updated_at)
+     VALUES ($1,$2,$3,NOW())
+     ON CONFLICT (guild_id,user_id)
+     DO UPDATE SET last_category = EXCLUDED.last_category, updated_at = NOW()`,
+    [guildId,userId,category],
+  );
+}
+
+export async function submitArchiveEntry(input: ArchiveSubmission): Promise<string> {
+  const settings = await getArchiveSettings(input.guildId);
+  if (!settings.enabledCategories.includes(input.category)) {
+    throw new Error("That archive category is disabled in this server.");
+  }
+  const title = cleanText(input.title, 200);
+  const body = input.content.trim();
+  const sourceTitle = input.sourceTitle ? cleanText(input.sourceTitle, 200) : null;
+  const creator = input.creator ? cleanText(input.creator, 200) : null;
+  if (!title || (!body && input.category!=="panels")) throw new Error("A title and description/content are both required.");
+  const chapterNumber=input.category==="panels"?input.chapterNumber?.trim():undefined;
+  if(input.category==="panels"&&(!chapterNumber||!(/^(?:\d+(?:\.\d+)?|N\/A)$/i.test(chapterNumber))))throw new Error("Manga panel entries need a chapter number or N/A.");
+  const linkedMediaId=input.category==="panels"&&input.linkedMediaProvider==="AniList"&&input.linkedMediaId&&/^\d+$/.test(input.linkedMediaId)?input.linkedMediaId:null;
+  if (body.length > 3_000) throw new Error("Archive descriptions are limited to 3,000 characters.");
+  if (input.category === "quotes") {
+    if (body.length > 280) throw new Error("Quotes are limited to 280 characters. Do not submit lyrics, chapters or long copyrighted passages.");
+    if (!sourceTitle) throw new Error("Quotes need the source work's title for attribution.");
+  }
+  if (input.category === "fanworks" && !creator) {
+    throw new Error("Fanworks need the original creator's name or handle.");
+  }
+  const sourceUrl = isValidHttpsUrl(input.sourceUrl, input.category === "fanworks");
+  const tags = normalizeTags(input.tags.join(","));
+  if(input.category==="panels"&&tags.some(tag=>["nsfw","mature","adult"].includes(tag.toLowerCase())))throw new Error("Age-restricted tags are not accepted in the Community Archive.");
+  const allowedUploads = new Set(settings.uploadTypes);
+  const needsUpload = input.needsUpload;
+  if (needsUpload && input.category === "soundtracks" && !allowedUploads.has("audio") && !allowedUploads.has("video")) {
+    throw new Error("This server has not enabled audio or video uploads. Supply an HTTPS music/video source link instead.");
+  }
+  if (input.visibility === "global" && !isGlobalArchiveModerator(input.userId)) {
+    throw new Error("Only configured global Archive moderators can publish globally. Choose this server for a server-only entry.");
+  }
+  const result = await queryOne<{ id: string }>(
+    `INSERT INTO community_archive_entries
+     (archive_type, title, content, source_title, creator, media_type, source_url,
+      tags, spoiler, status, created_by, created_guild_id, visibility, chapter_number, linked_media_provider, linked_media_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+     RETURNING id`,
+    [
+      input.category,
+      title,
+      body,
+      sourceTitle,
+      creator,
+      cleanText(input.mediaType, 32) || "Other",
+      sourceUrl,
+      JSON.stringify(tags),
+      input.spoiler,
+      needsUpload ? "pending_upload" : "pending",
+      input.userId,
+      input.guildId,
+      input.visibility,
+      chapterNumber??null,
+      linkedMediaId?"AniList":null,
+      linkedMediaId,
+    ],
+  );
+  if (!result) throw new Error("The Archive could not save this submission.");
+  return result.id;
+}
+
+export function parseTags(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string").slice(0, 10) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function listArchiveEntries(
+  guildId: string,
+  category?: ArchiveCategory,
+  keyword?: string,
+  offset = 0,
+  limit = 5,
+): Promise<ArchiveEntry[]> {
+  const conditions = [
+    "status = 'approved'",
+    "(visibility = 'global' OR (visibility = 'server' AND created_guild_id = $1))",
+  ];
+  const values: unknown[] = [guildId];
+  if (category) {
+    values.push(category);
+    conditions.push(`archive_type = $${values.length}`);
+  }
+  if (keyword?.trim()) {
+    values.push(`%${keyword.trim().slice(0, 100)}%`);
+    conditions.push(`(title ILIKE $${values.length} OR content ILIKE $${values.length} OR COALESCE(source_title, '') ILIKE $${values.length} OR COALESCE(creator, '') ILIKE $${values.length})`);
+  }
+  values.push(Math.max(0, offset), Math.min(10, Math.max(1, limit)));
+  const rows = await query<ArchiveEntry>(
+    `SELECT e.*,
+       (SELECT COUNT(*) FROM community_archive_entry_assets a WHERE a.entry_id = e.id) AS attachment_count
+     FROM community_archive_entries e
+     WHERE ${conditions.join(" AND ")}
+     ORDER BY e.created_at DESC
+     OFFSET $${values.length - 1} LIMIT $${values.length}`,
+    values,
+  );
+  return rows.map((entry) => ({
+    ...entry,
+    tags: parseTags(String((entry as unknown as { tags: string }).tags ?? "[]")),
+  }));
+}
+
+export function archiveEntryLookupScope(includePending: boolean, globalOnly: boolean): string {
+  if (globalOnly) return includePending ? "visibility = 'global'" : "visibility = 'global' AND status = 'approved'";
+  if (includePending) return "visibility = 'server' AND created_guild_id = $2";
+  return "(visibility = 'global' OR (visibility = 'server' AND created_guild_id = $2)) AND status = 'approved'";
+}
+
+export async function getArchiveEntry(
+  guildId: string,
+  entryId: string,
+  includePending = false,
+  globalOnly = false,
+): Promise<ArchiveEntry | null> {
+  const row = await queryOne<ArchiveEntry>(
+    `SELECT e.*,
+       (SELECT COUNT(*) FROM community_archive_entry_assets a WHERE a.entry_id = e.id) AS attachment_count
+     FROM community_archive_entries e
+     WHERE id = $1 AND ${archiveEntryLookupScope(includePending, globalOnly)}`,
+    globalOnly ? [entryId] : [entryId, guildId],
+  );
+  return row ? { ...row, tags: parseTags(String((row as unknown as { tags: string }).tags ?? "[]")) } : null;
+}
+
+export async function getPanelOfTheDay(guildId: string, featuredBy: string): Promise<ArchiveEntry | null> {
+  return transaction(async (client) => {
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", ["community-panel-of-day:" + guildId]);
+    const eligible = "e.archive_type = 'panels' AND e.status = 'approved' AND e.spoiler = FALSE AND (e.visibility = 'global' OR (e.visibility = 'server' AND e.created_guild_id = $1)) AND (e.media_asset_id IS NOT NULL OR (e.attachment_url IS NOT NULL AND e.attachment_url LIKE 'https://%') OR EXISTS (SELECT 1 FROM community_archive_entry_assets a WHERE a.entry_id = e.id))";
+    let result = await client.query<ArchiveEntry>(
+      "SELECT e.*, (SELECT COUNT(*) FROM community_archive_entry_assets a WHERE a.entry_id = e.id) AS attachment_count FROM community_panel_daily_log d JOIN community_archive_entries e ON e.id = d.entry_id WHERE d.guild_id = $1 AND d.feature_date = CURRENT_DATE AND " + eligible + " LIMIT 1",
+      [guildId],
+    );
+    if (result.rows[0]) {
+      const entry = result.rows[0];
+      return { ...entry, tags: parseTags(String((entry as unknown as { tags: string }).tags ?? "[]")) };
+    }
+    await client.query("DELETE FROM community_panel_daily_log WHERE guild_id = $1 AND feature_date = CURRENT_DATE", [guildId]);
+    result = await client.query<ArchiveEntry>(
+      "SELECT e.*, (SELECT COUNT(*) FROM community_archive_entry_assets a WHERE a.entry_id = e.id) AS attachment_count FROM community_archive_entries e WHERE " + eligible + " ORDER BY RANDOM() LIMIT 1",
+      [guildId],
+    );
+    const selected = result.rows[0];
+    if (!selected) return null;
+    await client.query("INSERT INTO community_panel_daily_log (guild_id, feature_date, entry_id, featured_by) VALUES ($1, CURRENT_DATE, $2, $3) ON CONFLICT (guild_id, feature_date) DO NOTHING", [guildId, selected.id, featuredBy]);
+    const daily = await client.query<ArchiveEntry>(
+      "SELECT e.*, (SELECT COUNT(*) FROM community_archive_entry_assets a WHERE a.entry_id = e.id) AS attachment_count FROM community_panel_daily_log d JOIN community_archive_entries e ON e.id = d.entry_id WHERE d.guild_id = $1 AND d.feature_date = CURRENT_DATE",
+      [guildId],
+    );
+    const entry = daily.rows[0];
+    return entry ? { ...entry, tags: parseTags(String((entry as unknown as { tags: string }).tags ?? "[]")) } : null;
+  });
+}
+export async function getOwnSubmissions(guildId: string, userId: string): Promise<ArchiveEntry[]> {
+  const rows = await query<ArchiveEntry>(
+    `SELECT * FROM community_archive_entries
+     WHERE created_guild_id = $1 AND created_by = $2
+     ORDER BY created_at DESC LIMIT 10`,
+    [guildId, userId],
+  );
+  return rows.map((entry) => ({ ...entry, tags: parseTags(String((entry as unknown as { tags: string }).tags ?? "[]")) }));
+}
+
+export async function attachArchiveAssetToEntry(
+  guildId: string,
+  userId: string,
+  entryId: string,
+  assetId: number,
+  filename: string,
+  client?: Client,
+): Promise<number> {
+  try {
+    return await transaction(async database => {
+      const selected = await database.query<{ status: string; created_by: string; archive_type: ArchiveCategory }>(
+        "SELECT status, created_by, archive_type FROM community_archive_entries " +
+        "WHERE id = $1 AND created_guild_id = $2 FOR UPDATE",
+        [entryId, guildId],
+      );
+      const entry = selected.rows[0];
+      if (!entry || entry.created_by !== userId || !["pending", "pending_upload"].includes(entry.status)) {
+        throw new Error("That pending Archive submission cannot accept another upload.");
+      }
+      const asset = await database.query<{ content_type: string }>(
+        "SELECT content_type FROM media_assets WHERE id = $1 AND guild_id = $2 AND uploaded_by = $3 " +
+        "AND namespace = $4 AND is_private = TRUE FOR SHARE",
+        [assetId, guildId, userId, "archive/" + guildId],
+      );
+      const storedAsset = asset.rows[0];
+      if (!storedAsset) throw new Error("The private upload does not belong to this contributor and server.");
+      const next = await database.query<{ position: number }>(
+        "SELECT COALESCE(MAX(position), 0) + 1 AS position FROM community_archive_entry_assets WHERE entry_id = $1",
+        [entryId],
+      );
+      const position = Number(next.rows[0]?.position ?? 1);
+      if (position > 5) throw new Error("Each Archive entry can contain at most five private attachments.");
+      await database.query(
+        "INSERT INTO community_archive_entry_assets (entry_id, asset_id, position, uploaded_by) VALUES ($1, $2, $3, $4)",
+        [entryId, assetId, position, userId],
+      );
+      if (position === 1) {
+        await database.query(
+          "UPDATE community_archive_entries SET media_asset_id = $1, attachment_filename = $2, " +
+          "attachment_content_type = $3, updated_at = NOW() WHERE id = $4",
+          [assetId, filename.slice(0, 255), storedAsset.content_type, entryId],
+        );
+      }
+      await database.query("DELETE FROM media_asset_cleanup_queue WHERE asset_id = $1", [assetId]);
+      return position;
+    });
+  } catch (error) {
+    await deleteArchiveAsset(assetId, client).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function handleArchiveUploadMessage(message: Message, client: Client): Promise<boolean> {
+  if (!message.guildId || message.author.bot || !message.attachments.size) return false;
+  if (!await isFeatureEnabled(message.guildId, "archive")) return false;
+  const settings = await getArchiveSettings(message.guildId);
+  if (!settings.uploadChannelId || settings.uploadChannelId !== message.channelId) return false;
+  const guild = message.guild;
+  if (!guild) return false;
+  const channel = await guild.channels.fetch(message.channelId).catch(() => null);
+  if (!channel || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)) {
+    throw new Error("The configured Archive upload channel is unavailable.");
+  }
+  const botMember = await guild.members.fetchMe();
+  const botPermissions = channel.permissionsFor(botMember);
+  const everyonePermissions = channel.permissionsFor(guild.roles.everyone);
+  if (!archiveUploadChannelIsPrivate(
+    everyonePermissions?.has(PermissionFlagsBits.ViewChannel) ?? true,
+    botPermissions?.has(PermissionFlagsBits.ViewChannel) ?? false,
+    botPermissions?.has(PermissionFlagsBits.SendMessages) ?? false,
+    botPermissions?.has(PermissionFlagsBits.ManageMessages) ?? false,
+  )) {
+    throw new Error("The Archive upload channel must be hidden from @everyone and grant the bot Manage Messages.");
+  }
+
+  const pending = await queryOne<{ id: string; archive_type: ArchiveCategory }>(
+    `SELECT id, archive_type FROM community_archive_entries
+     WHERE created_guild_id = $1 AND created_by = $2 AND status = 'pending_upload'
+     ORDER BY created_at DESC LIMIT 1`,
+    [message.guildId, message.author.id],
+  );
+  if (!pending) {
+    try {
+      await message.reply({ content: "There is no pending Archive submission waiting for an upload from you.", allowedMentions: { parse: [] } });
+    } finally {
+      await message.delete().catch(() => undefined);
+    }
+    return true;
+  }
+  let stored = 0;
+  let rejected = 0;
+  try {
+    for (const attachment of [...message.attachments.values()].slice(0, 5)) {
+      if (!await isFeatureEnabled(message.guildId, "archive")) break;
+      try {
+        const upload = {
+          name: attachment.name,
+          contentType: attachment.contentType ?? "application/octet-stream",
+          bytes: Buffer.alloc(0),
+        };
+        if (!archiveUploadAllowed(pending.archive_type, settings.uploadTypes, upload)
+          || attachment.size > getArchiveUploadMaxBytes()) {
+          rejected += 1;
+          continue;
+        }
+        const bytes = await downloadArchiveUpload(attachment.url);
+        if (!await isFeatureEnabled(message.guildId, "archive")) break;
+        if (!archiveUploadAllowed(pending.archive_type, settings.uploadTypes, { ...upload, bytes })) {
+          rejected += 1;
+          continue;
+        }
+        const assetId = await storeArchiveUpload(
+          message.guildId,
+          message.author.id,
+          pending.archive_type,
+          { ...upload, bytes },
+          settings.uploadTypes,
+          { client, legacyStorageChannelId: settings.legacyStorageChannelId },
+        );
+        await attachArchiveAssetToEntry(message.guildId, message.author.id, pending.id, assetId, attachment.name, client);
+        stored += 1;
+      } catch {
+        rejected += 1;
+      }
+    }
+    if (await isFeatureEnabled(message.guildId, "archive")) await message.reply({
+      content: stored
+        ? `Saved ${stored} private upload(s) for Archive submission #${pending.id}.${rejected ? " " + rejected + " file(s) were not accepted." : ""} Press **Finish upload** when you are done.`
+        : "No attachments were accepted. Check the category, enabled media types, supported file extension and size limit.",
+      allowedMentions: { parse: [] },
+    });
+  } finally {
+    // The intake channel is private; copied source messages are still removed after processing.
+    await message.delete().catch(() => undefined);
+  }
+  return true;
+}
+
+
+export async function finishArchiveUpload(guildId: string, userId: string, entryId: string): Promise<void> {
+  await transaction(async database => {
+    const pending = await database.query<{ id: string; archive_type: ArchiveCategory; source_url: string | null }>(
+      "SELECT id, archive_type, source_url FROM community_archive_entries " +
+      "WHERE id = $1 AND created_guild_id = $2 AND created_by = $3 AND status = 'pending_upload' FOR UPDATE",
+      [entryId, guildId, userId],
+    );
+    const entry = pending.rows[0];
+    if (!entry) throw new Error("That pending upload does not belong to you in this server.");
+    const assets = await database.query<{ count: string }>(
+      "SELECT COUNT(*) AS count FROM community_archive_entry_assets WHERE entry_id = $1",
+      [entryId],
+    );
+    if (!Number(assets.rows[0]?.count ?? 0) && !(entry.archive_type === "soundtracks" && entry.source_url)) {
+      throw new Error("Add at least one accepted upload before finishing this submission.");
+    }
+    const updated = await database.query(
+      "UPDATE community_archive_entries SET status = 'pending', updated_at = NOW() " +
+      "WHERE id = $1 AND created_guild_id = $2 AND created_by = $3 AND status = 'pending_upload'",
+      [entryId, guildId, userId],
+    );
+    if (updated.rowCount !== 1) throw new Error("The upload changed before it could be submitted for review.");
+  });
+}
+
+
+export function canChangeArchiveVisibility(
+  current: ArchiveVisibility,
+  next: ArchiveVisibility,
+  ownerId: string,
+  actorId: string,
+  canModerateServer: boolean,
+  isGlobalModerator: boolean,
+): boolean {
+  if (current === next) return true;
+  if (next === "global") return isGlobalModerator;
+  return ownerId === actorId || canModerateServer || (current === "global" && isGlobalModerator);
+}
+
+export async function changeArchiveEntryVisibility(
+  guildId: string,
+  actorId: string,
+  entryId: string,
+  visibility: ArchiveVisibility,
+  canModerateServer: boolean,
+): Promise<void> {
+  await transaction(async client => {
+    const selected = await client.query<{
+      created_by: string;
+      visibility: ArchiveVisibility;
+      status: string;
+    }>(
+      "SELECT created_by::text, visibility, status FROM community_archive_entries " +
+      "WHERE id = $1 AND created_guild_id = $2 FOR UPDATE",
+      [entryId, guildId],
+    );
+    const entry = selected.rows[0];
+    if (!entry) throw new Error("That Archive entry was not found in its originating server.");
+    if (entry.status !== "approved") {
+      throw new Error("Only approved Archive entries can change publication visibility.");
+    }
+    const globalModerator = isGlobalArchiveModerator(actorId);
+    if (!canChangeArchiveVisibility(entry.visibility, visibility, entry.created_by, actorId, canModerateServer, globalModerator)) {
+      throw new Error(visibility === "global"
+        ? "Only configured global Archive moderators can publish an entry globally."
+        : "Only the contributor, a server moderator, or a global moderator can unpublish this entry.");
+    }
+    if (entry.visibility !== visibility) {
+      await client.query(
+        "UPDATE community_archive_entries SET visibility = $1, updated_at = NOW() WHERE id = $2 AND created_guild_id = $3",
+        [visibility, entryId, guildId],
+      );
+    }
+  });
+}
+
+export async function replaceArchiveEntryAsset(
+  guildId: string,
+  userId: string,
+  entryId: string,
+  position: number,
+  assetId: number,
+  filename: string,
+  client?: Client,
+): Promise<void> {
+  if (!Number.isSafeInteger(position) || position < 1 || position > 5) {
+    throw new Error("Attachment position must be between 1 and 5.");
+  }
+  let oldAssetId: number | null;
+  try {
+    oldAssetId = await transaction(async database => {
+      const entryResult = await database.query<{
+        created_by: string;
+        status: string;
+        media_asset_id: string | null;
+      }>(
+        "SELECT created_by::text, status, media_asset_id::text FROM community_archive_entries " +
+        "WHERE id = $1 AND created_guild_id = $2 FOR UPDATE",
+        [entryId, guildId],
+      );
+      const entry = entryResult.rows[0];
+      if (!entry || entry.created_by !== userId || !["pending", "approved"].includes(entry.status)) {
+        throw new Error("Only your pending or approved Archive entry can have an attachment replaced.");
+      }
+      const assetResult = await database.query<{ content_type: string }>(
+        "SELECT content_type FROM media_assets WHERE id = $1 AND guild_id = $2 AND uploaded_by = $3 " +
+        "AND namespace = $4 AND is_private = TRUE FOR SHARE",
+        [assetId, guildId, userId, "archive/" + guildId],
+      );
+      const newAsset = assetResult.rows[0];
+      if (!newAsset) throw new Error("The replacement upload does not belong to you in this server.");
+
+      const existing = await database.query<{ asset_id: string }>(
+        "SELECT asset_id::text FROM community_archive_entry_assets WHERE entry_id = $1 AND position = $2 FOR UPDATE",
+        [entryId, position],
+      );
+      const previous = existing.rows[0] ? Number(existing.rows[0].asset_id)
+        : position === 1 && entry.media_asset_id ? Number(entry.media_asset_id) : null;
+      if (position > 1 && !existing.rows[0]) {
+        throw new Error("That attachment position does not exist on this entry.");
+      }
+      if (existing.rows[0]) {
+        await database.query(
+          "UPDATE community_archive_entry_assets SET asset_id = $1, uploaded_by = $2, created_at = NOW() " +
+          "WHERE entry_id = $3 AND position = $4",
+          [assetId, userId, entryId, position],
+        );
+      } else {
+        await database.query(
+          "INSERT INTO community_archive_entry_assets (entry_id, asset_id, position, uploaded_by) VALUES ($1, $2, 1, $3)",
+          [entryId, assetId, userId],
+        );
+      }
+      if (position === 1) {
+        await database.query(
+          "UPDATE community_archive_entries SET media_asset_id = $1, attachment_filename = $2, " +
+          "attachment_content_type = $3, status = CASE WHEN status = 'approved' THEN 'pending' ELSE status END, " +
+          "moderation_reason = NULL, updated_at = NOW() WHERE id = $4 AND created_guild_id = $5",
+          [assetId, filename.slice(0, 255), newAsset.content_type, entryId, guildId],
+        );
+      } else if (entry.status === "approved") {
+        await database.query(
+          "UPDATE community_archive_entries SET status = 'pending', moderation_reason = NULL, updated_at = NOW() " +
+          "WHERE id = $1 AND created_guild_id = $2",
+          [entryId, guildId],
+        );
+      }
+      await database.query("DELETE FROM media_asset_cleanup_queue WHERE asset_id = $1", [assetId]);
+      if (previous !== null && previous !== assetId) {
+        await database.query(
+          "INSERT INTO media_asset_cleanup_queue (asset_id) VALUES ($1) ON CONFLICT (asset_id) DO NOTHING",
+          [previous],
+        );
+      }
+      return previous;
+    });
+  } catch (error) {
+    await deleteArchiveAsset(assetId, client).catch(() => undefined);
+    throw error;
+  }
+  if (oldAssetId !== null && oldAssetId !== assetId) {
+    await deleteArchiveAsset(oldAssetId, client).catch(() => undefined);
+  }
+}
+
+export async function removeArchiveEntryAsset(
+  guildId: string,
+  userId: string,
+  entryId: string,
+  position: number,
+  client?: Client,
+): Promise<void> {
+  if (!Number.isSafeInteger(position) || position < 1 || position > 5) {
+    throw new Error("Attachment position must be between 1 and 5.");
+  }
+  const removedAssetId = await transaction(async database => {
+    const entryResult = await database.query<{
+      created_by: string;
+      status: string;
+      media_asset_id: string | null;
+    }>(
+      "SELECT created_by::text, status, media_asset_id::text FROM community_archive_entries " +
+      "WHERE id = $1 AND created_guild_id = $2 FOR UPDATE",
+      [entryId, guildId],
+    );
+    const entry = entryResult.rows[0];
+    if (!entry || entry.created_by !== userId || !["pending", "approved"].includes(entry.status)) {
+      throw new Error("Only your pending or approved Archive entry can have an attachment removed.");
+    }
+
+    const linked = await database.query<{ asset_id: string; position: number; uploaded_by: string }>(
+      "SELECT asset_id::text, position, uploaded_by::text FROM community_archive_entry_assets " +
+      "WHERE entry_id = $1 ORDER BY position ASC FOR UPDATE",
+      [entryId],
+    );
+    const ordered = linked.rows.map(item => ({
+      assetId: Number(item.asset_id),
+      uploadedBy: item.uploaded_by,
+    }));
+
+    // Older entries may have only the direct media_asset_id pointer and no relation row.
+    if (entry.media_asset_id && !ordered.some(item => item.assetId === Number(entry.media_asset_id))) {
+      const legacy = await database.query<{ uploaded_by: string }>(
+        "SELECT uploaded_by::text FROM media_assets WHERE id = $1 AND guild_id = $2 " +
+        "AND namespace = $3 AND is_private = TRUE FOR SHARE",
+        [entry.media_asset_id, guildId, "archive/" + guildId],
+      );
+      const owner = legacy.rows[0]?.uploaded_by;
+      if (!owner) throw new Error("The primary private attachment could not be verified in this server.");
+      ordered.unshift({ assetId: Number(entry.media_asset_id), uploadedBy: owner });
+    }
+
+    const selected = ordered[position - 1];
+    if (!selected) throw new Error("That attachment position does not exist on this entry.");
+    const remaining = ordered.filter((item, index) => index !== position - 1);
+
+    // Rebuild the relation rows in display order, normalizing legacy direct-only entries.
+    await database.query("DELETE FROM community_archive_entry_assets WHERE entry_id = $1", [entryId]);
+    for (const [index, item] of remaining.entries()) {
+      await database.query(
+        "INSERT INTO community_archive_entry_assets (entry_id, asset_id, position, uploaded_by) VALUES ($1, $2, $3, $4)",
+        [entryId, item.assetId, index + 1, item.uploadedBy],
+      );
+    }
+
+    const nextAsset = remaining.length
+      ? await database.query<{ content_type: string }>(
+          "SELECT content_type FROM media_assets WHERE id = $1 AND guild_id = $2 " +
+          "AND namespace = $3 AND is_private = TRUE",
+          [remaining[0]!.assetId, guildId, "archive/" + guildId],
+        )
+      : null;
+    const next = nextAsset?.rows[0];
+    const keepFilename = remaining[0]?.assetId === Number(entry.media_asset_id);
+    await database.query(
+      "UPDATE community_archive_entries SET media_asset_id = $1, " +
+      "attachment_filename = CASE WHEN $2 THEN attachment_filename ELSE NULL END, " +
+      "attachment_content_type = $3, status = CASE WHEN status = 'approved' THEN 'pending' ELSE status END, " +
+      "moderation_reason = NULL, updated_at = NOW() WHERE id = $4 AND created_guild_id = $5",
+      [remaining[0]?.assetId ?? null, keepFilename, next?.content_type ?? null, entryId, guildId],
+    );
+    await database.query(
+      "INSERT INTO media_asset_cleanup_queue (asset_id) VALUES ($1) ON CONFLICT (asset_id) DO NOTHING",
+      [selected.assetId],
+    );
+    return selected.assetId;
+  });
+  await deleteArchiveAsset(removedAssetId, client).catch(() => undefined);
+}
+
+
+export async function updateArchiveEntry(
+  guildId: string,
+  userId: string,
+  entryId: string,
+  changes: {
+    title?: string;
+    content?: string;
+    sourceTitle?: string;
+    creator?: string;
+    sourceUrl?: string;
+    tags?: string[];
+    spoiler?: boolean;
+    chapterNumber?: string;
+  },
+): Promise<void> {
+  const entry = await queryOne<{ created_by: string; created_guild_id: string; visibility: ArchiveVisibility; status: string; archive_type: ArchiveCategory }>(
+    "SELECT created_by, created_guild_id, visibility, status, archive_type FROM community_archive_entries WHERE id = $1 AND created_guild_id = $2",
+    [entryId, guildId],
+  );
+  if (!entry || entry.visibility !== "server") throw new Error("That server-only contribution was not found.");
+  if (entry.created_by !== userId) throw new Error("Only the original contributor can edit this entry.");
+  if (!["pending","approved"].includes(entry.status)) throw new Error("This submission cannot be edited in its current moderation state.");
+  const title = changes.title === undefined ? undefined : cleanText(changes.title, 200);
+  const content = changes.content === undefined ? undefined : changes.content.trim();
+  if (title !== undefined && !title) throw new Error("An entry title cannot be empty.");
+  if (content !== undefined && !content && entry.archive_type !== "panels") throw new Error("An entry description cannot be empty.");
+  if (content !== undefined && content.length > 3_000) throw new Error("Archive descriptions are limited to 3,000 characters.");
+  if (entry.archive_type === "quotes" && content !== undefined && content.length > 280) {
+    throw new Error("Quotes are limited to 280 characters. Do not submit lyrics or long copyrighted passages.");
+  }
+  const panelReference = entry.archive_type === "panels" && changes.sourceUrl !== undefined
+    ? parseAniListMangaReference(changes.sourceUrl)
+    : null;
+  const sourceUrl = changes.sourceUrl === undefined ? undefined
+    : entry.archive_type === "panels" ? panelReference?.url ?? null
+    : isValidHttpsUrl(changes.sourceUrl);
+  const chapterNumber = changes.chapterNumber === undefined ? undefined : changes.chapterNumber.trim();
+  if(entry.archive_type==="panels"&&chapterNumber!==undefined&&!/^(?:\d+(?:\.\d+)?|N\/A)$/i.test(chapterNumber))throw new Error("Manga panel entries need a chapter number or N/A.");
+  const tags = changes.tags === undefined ? undefined : normalizeTags(changes.tags.join(","));
+  if(entry.archive_type==="panels"&&tags?.some(tag=>["nsfw","mature","adult"].includes(tag.toLowerCase())))throw new Error("Age-restricted tags are not accepted in the Community Archive.");
+  await query(
+    `UPDATE community_archive_entries SET
+       title = COALESCE($1, title),
+       content = COALESCE($2, content),
+       source_title = COALESCE($3, source_title),
+       creator = COALESCE($4, creator),
+       source_url = COALESCE($5, source_url),
+       tags = COALESCE($6, tags),
+       spoiler = COALESCE($7, spoiler),
+       chapter_number = COALESCE($8, chapter_number),
+       linked_media_provider = COALESCE($9, linked_media_provider),
+       linked_media_id = COALESCE($10, linked_media_id),
+       status = CASE WHEN status = 'approved' THEN 'pending' ELSE status END,
+       moderation_reason = NULL,
+       updated_at = NOW()
+     WHERE id = $11 AND created_guild_id = $12 AND created_by = $13 AND visibility = 'server'`,
+    [
+      title ?? null,
+      content ?? null,
+      changes.sourceTitle === undefined ? null : cleanText(changes.sourceTitle, 200),
+      changes.creator === undefined ? null : cleanText(changes.creator, 200),
+      sourceUrl ?? null,
+      tags === undefined ? null : JSON.stringify(tags),
+      changes.spoiler ?? null,
+      chapterNumber ?? null,
+      panelReference?.id ? "AniList" : null,
+      panelReference?.id ?? null,
+      entryId,
+      guildId,
+      userId,
+    ],
+  );
+}
+
+export async function deleteArchiveEntry(
+  guildId: string,
+  actorId: string,
+  entryId: string,
+  canModerate: boolean,
+  global = false,
+  client?: Client,
+): Promise<void> {
+  const assets = await transaction(async (client) => {
+    const scope = global
+      ? "id = $1 AND visibility = 'global'"
+      : "id = $1 AND visibility = 'server' AND created_guild_id = $2";
+    const selected = await client.query<{
+      id: string;
+      created_by: string;
+      created_guild_id: string;
+      visibility: ArchiveVisibility;
+    }>(
+      "SELECT id, created_by, created_guild_id, visibility FROM community_archive_entries WHERE " + scope + " FOR UPDATE",
+      global ? [entryId] : [entryId, guildId],
+    );
+    const entry = selected.rows[0];
+    if (!entry) throw new Error("That Archive entry was not found in this visibility scope.");
+    if (entry.created_by !== actorId && !canModerate) throw new Error("Only the original contributor or an Archive moderator can delete this entry.");
+    if (entry.visibility === "global" && !isGlobalArchiveModerator(actorId)) {
+      throw new Error("Global Archive entries can only be deleted by a configured global moderator.");
+    }
+    const linkedAssets = await client.query<{ asset_id: string }>(
+      "SELECT asset_id::text FROM community_archive_entry_assets WHERE entry_id = $1 " +
+      "UNION SELECT media_asset_id::text AS asset_id FROM community_archive_entries " +
+      "WHERE id = $1 AND media_asset_id IS NOT NULL",
+      [entryId],
+    );
+    await client.query(
+      "INSERT INTO media_asset_cleanup_queue (asset_id) SELECT asset_id::bigint FROM (" +
+      "SELECT asset_id FROM community_archive_entry_assets WHERE entry_id = $1 " +
+      "UNION SELECT media_asset_id FROM community_archive_entries WHERE id = $1 AND media_asset_id IS NOT NULL" +
+      ") assets ON CONFLICT (asset_id) DO NOTHING",
+      [entryId],
+    );
+    await client.query("DELETE FROM community_archive_entries WHERE id = $1", [entryId]);
+    return linkedAssets.rows;
+  });
+  for (const asset of assets) {
+    try {
+      await deleteArchiveAsset(Number(asset.asset_id), client);
+    } catch {
+      // The durable cleanup queue retries failed private-object deletions.
+    }
+  }
+}

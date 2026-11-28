@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1600" viewBox="0 0 2400 1600" role="img" aria-labelledby="title desc">
+  <title id="title">Lemegeton v3 repository structure</title>
+  <desc id="desc">A detailed responsibility map of the Lemegeton v3 repository. It separates the TypeScript Discord runtime, shared domain helpers, libSQL and RocksDB storage, optional Botasaurus worker, Next.js and Rust dashboard, documentation, tests and deployment operations.</desc>
+  <defs>
+    <style>
+      .bg{fill:#050505}.panel{fill:#0b0b0b;stroke:#626262;stroke-width:1.5}.inner{fill:#111;stroke:#383838;stroke-width:1}
+      .rule{stroke:#3a3a3a;stroke-width:1}.connector{fill:none;stroke:#777;stroke-width:2;stroke-dasharray:7 8}
+      .eyebrow{fill:#a0a0a0;font:600 16px Arial,sans-serif;letter-spacing:3px}
+      .title{fill:#fff;font:700 46px Arial,sans-serif;letter-spacing:4px}
+      .heading{fill:#f4f4f4;font:700 24px Arial,sans-serif}
+      .path{fill:#fff;font:700 17px 'SFMono-Regular',Consolas,monospace}
+      .body{fill:#c5c5c5;font:16px Arial,sans-serif}
+      .small{fill:#929292;font:14px Arial,sans-serif}
+      .tiny{fill:#777;font:12px Arial,sans-serif;letter-spacing:1px}
+      .root{fill:#151515;stroke:#aaa;stroke-width:1.4}.roottext{fill:#fff;font:700 20px Arial,sans-serif;letter-spacing:2px}
+      .index{fill:#777;font:700 15px 'SFMono-Regular',Consolas,monospace}
+    </style>
+  </defs>
+  <rect class="bg" width="2400" height="1600"/>
+  <text x="64" y="66" class="eyebrow">LEMEGETON / V3</text>
+  <text x="64" y="124" class="title">REPOSITORY STRUCTURE</text>
+  <text x="2336" y="72" class="eyebrow" text-anchor="end">RESPONSIBILITY MAP / SOURCE TREE</text>
+  <path class="rule" d="M64 158H2336"/>
+
+  <rect class="root" x="620" y="190" width="1160" height="94" rx="12"/>
+  <text x="1200" y="228" class="roottext" text-anchor="middle">LEMEGETON / ROOT</text>
+  <text x="1200" y="258" class="small" text-anchor="middle">bot.ts · package.json · Cargo.toml · tsconfig.json · .env.example · Dockerfile · docker-compose.yml</text>
+  <path class="connector" d="M1200 284V326M260 326H2140M260 326V364M730 326V364M1200 326V364M1670 326V364M2140 326V364"/>
+
+  <rect class="panel" x="64" y="364" width="392" height="660" rx="12"/>
+  <text x="94" y="408" class="eyebrow">01 / RUNTIME</text>
+  <text x="94" y="450" class="heading">Discord application</text>
+  <path class="rule" d="M94 470H426"/>
+  <text x="94" y="510" class="path">bot.ts</text>
+  <text x="94" y="535" class="small">Single client, gateway lifecycle,</text>
+  <text x="94" y="556" class="small">background workers and bridge.</text>
+  <text x="94" y="602" class="path">src/registry.ts</text>
+  <text x="94" y="627" class="small">Command inventory and registration.</text>
+  <text x="94" y="673" class="path">src/commands/</text>
+  <text x="94" y="698" class="small">Discover · Archive · Community</text>
+  <text x="94" y="719" class="small">Play · Profile · Custom Roles</text>
+  <text x="94" y="740" class="small">Music · Settings · Language</text>
+  <text x="94" y="786" class="path">src/standalone/</text>
+  <text x="94" y="811" class="small">Help · Privacy · Feedback · Log</text>
+  <text x="94" y="832" class="small">Moderators and restricted operations.</text>
+  <text x="94" y="878" class="path">src/utility/</text>
+  <text x="94" y="903" class="small">Timestamps · invites · link tools</text>
+  <text x="94" y="949" class="path">src/integrations/</text>
+  <text x="94" y="974" class="small">Message-driven embeds and events.</text>
+
+  <rect class="panel" x="534" y="364" width="392" height="660" rx="12"/>
+  <text x="564" y="408" class="eyebrow">02 / DOMAIN</text>
+  <text x="564" y="450" class="heading">Shared helpers</text>
+  <path class="rule" d="M564 470H896"/>
+  <text x="564" y="510" class="path">helpers/media/</text>
+  <text x="564" y="535" class="small">Search · relationships · provenance</text>
+  <text x="564" y="556" class="small">Knowledge Atlas · source registry.</text>
+  <text x="564" y="602" class="path">helpers/integration/</text>
+  <text x="564" y="627" class="small">Provider clients · HTTP policy</text>
+  <text x="564" y="648" class="small">Scraping · translation · Botasaurus.</text>
+  <text x="564" y="694" class="path">helpers/archive/</text>
+  <text x="564" y="719" class="small">Collections · access · curation</text>
+  <text x="564" y="740" class="small">Moderation and visibility.</text>
+  <text x="564" y="786" class="path">helpers/community/</text>
+  <text x="564" y="811" class="small">Daily activities · rankings · events</text>
+  <text x="564" y="832" class="small">Sessions · retries · delivery.</text>
+  <text x="564" y="878" class="path">helpers/custom-roles/</text>
+  <text x="564" y="903" class="small">Lifecycle · images · picker · tokens.</text>
+  <text x="564" y="949" class="path">helpers/dashboard/ · runtime/</text>
+  <text x="564" y="974" class="small">Bridge · guild setup · diagnostics</text>
+  <text x="564" y="995" class="small">Retention · backups · security.</text>
+
+  <rect class="panel" x="1004" y="364" width="392" height="660" rx="12"/>
+  <text x="1034" y="408" class="eyebrow">03 / PERSISTENCE</text>
+  <text x="1034" y="450" class="heading">Data and workers</text>
+  <path class="rule" d="M1034 470H1366"/>
+  <text x="1034" y="510" class="path">src/utility/database/</text>
+  <text x="1034" y="556" class="path">libsql/</text>
+  <text x="1034" y="581" class="small">Shared schema and queries</text>
+  <text x="1034" y="602" class="small">Rust storage crate + napi-rs binding.</text>
+  <text x="1034" y="648" class="path">rocksdb/</text>
+  <text x="1034" y="673" class="small">Private object bytes</text>
+  <text x="1034" y="694" class="small">C++ addon + TypeScript wrapper.</text>
+  <path class="rule" d="M1034 723H1366"/>
+  <text x="1034" y="763" class="path">tests/</text>
+  <text x="1034" y="788" class="small">Bot · provider · database</text>
+  <text x="1034" y="809" class="small">Native storage · guild isolation.</text>
+  <text x="1034" y="855" class="path">workers/</text>
+  <text x="1034" y="880" class="small">Optional isolated Botasaurus</text>
+  <text x="1034" y="901" class="small">browser worker and container.</text>
+  <path class="rule" d="M1034 929H1366"/>
+  <text x="1034" y="969" class="path">web/picker.*</text>
+  <text x="1034" y="994" class="small">Private Custom Roles browser assets</text>
+
+  <rect class="panel" x="1474" y="364" width="392" height="660" rx="12"/>
+  <text x="1504" y="408" class="eyebrow">04 / CONTROL PLANE</text>
+  <text x="1504" y="450" class="heading">Optional web dashboard</text>
+  <path class="rule" d="M1504 470H1836"/>
+  <text x="1504" y="510" class="path">web/frontend/app/</text>
+  <text x="1504" y="535" class="small">Dashboard, login, public guide,</text>
+  <text x="1504" y="556" class="small">status and policy route entry points.</text>
+  <text x="1504" y="602" class="path">frontend/src/</text>
+  <text x="1504" y="627" class="small">App.tsx · Features · Layout</text>
+  <text x="1504" y="648" class="small">DesignSystem · Forms · UI · Icons</text>
+  <text x="1504" y="669" class="small">Three · Hooks · Feedback · Lib.</text>
+  <text x="1504" y="715" class="path">frontend/public/</text>
+  <text x="1504" y="740" class="small">Brand · icon and local font assets.</text>
+  <text x="1504" y="786" class="path">frontend/tests/</text>
+  <text x="1504" y="811" class="small">Unit · component · Playwright E2E.</text>
+  <text x="1504" y="857" class="path">web/backend/src/</text>
+  <text x="1504" y="882" class="small">Axum API · auth · sessions · security</text>
+  <text x="1504" y="903" class="small">Shared store · routes · static UI.</text>
+  <text x="1504" y="949" class="path">web/README.md</text>
+  <text x="1504" y="974" class="small">Routes · security · design system</text>
+  <text x="1504" y="995" class="small">Source map and local verification.</text>
+
+  <rect class="panel" x="1944" y="364" width="392" height="660" rx="12"/>
+  <text x="1974" y="408" class="eyebrow">05 / PROJECT OPERATIONS</text>
+  <text x="1974" y="450" class="heading">Docs and delivery</text>
+  <path class="rule" d="M1974 470H2306"/>
+  <text x="1974" y="510" class="path">docs/</text>
+  <text x="1974" y="535" class="small">Architecture · features · security</text>
+  <text x="1974" y="556" class="small">Operations · legal and policy set.</text>
+  <text x="1974" y="602" class="path">assets/</text>
+  <text x="1974" y="627" class="small">Architecture, repository and web</text>
+  <text x="1974" y="648" class="small">visual-system SVGs and brand art.</text>
+  <text x="1974" y="694" class="path">.github/workflows/</text>
+  <text x="1974" y="719" class="small">Consolidated CI and security checks.</text>
+  <text x="1974" y="765" class="path">deploy/ · scripts/</text>
+  <text x="1974" y="790" class="small">VPS, Nginx, systemd, build and</text>
+  <text x="1974" y="811" class="small">acceptance tooling.</text>
+  <text x="1974" y="857" class="path">Dockerfile · Compose</text>
+  <text x="1974" y="882" class="small">Container builds and runtime setup.</text>
+  <path class="rule" d="M1974 910H2306"/>
+  <text x="1974" y="950" class="path">AGENTS.md · CONTRIBUTING.md</text>
+  <text x="1974" y="975" class="small">Repository rules, stack and expansion</text>
+  <text x="1974" y="996" class="small">specification remain at the root.</text>
+
+  <path class="connector" d="M260 1024V1084H590V1120M730 1024V1084H590M1200 1024V1084M1670 1024V1084H1810V1120M2140 1024V1084H1810"/>
+  <rect class="panel" x="64" y="1120" width="1080" height="382" rx="12"/>
+  <text x="94" y="1164" class="eyebrow">06 / VERIFICATION</text>
+  <text x="94" y="1206" class="heading">Checks follow the runtime boundaries</text>
+  <path class="rule" d="M94 1226H1114"/>
+  <text x="94" y="1267" class="path">Bot</text>
+  <text x="260" y="1267" class="body">TypeScript type-check · build · Node test suite.</text>
+  <text x="94" y="1310" class="path">Dashboard</text>
+  <text x="260" y="1310" class="body">Frontend type-check · unit tests · static export · Playwright.</text>
+  <text x="94" y="1353" class="path">Rust</text>
+  <text x="260" y="1353" class="body">Formatting · Clippy · storage and workspace tests · release build.</text>
+  <text x="94" y="1396" class="path">Native</text>
+  <text x="260" y="1396" class="body">libSQL and RocksDB addons with isolated integration-test data.</text>
+  <text x="94" y="1450" class="small">See .github/workflows/ci.yml and the CI guide for the actual workflow gates.</text>
+
+  <rect class="panel" x="1180" y="1120" width="1156" height="382" rx="12"/>
+  <text x="1210" y="1164" class="eyebrow">07 / RELEASE AND SECURITY BOUNDARIES</text>
+  <text x="1210" y="1206" class="heading">What each layer is allowed to own</text>
+  <path class="rule" d="M1210 1226H2306"/>
+  <rect class="inner" x="1210" y="1250" width="340" height="188" rx="8"/>
+  <text x="1234" y="1288" class="path">GUILD SCOPE</text>
+  <text x="1234" y="1324" class="small">Guild-owned reads and writes carry</text>
+  <text x="1234" y="1347" class="small">guild_id through commands, helpers,</text>
+  <text x="1234" y="1370" class="small">workers and dashboard actions.</text>
+  <rect class="inner" x="1570" y="1250" width="340" height="188" rx="8"/>
+  <text x="1594" y="1288" class="path">AUTHORITY</text>
+  <text x="1594" y="1324" class="small">Protected actions re-check current</text>
+  <text x="1594" y="1347" class="small">membership, permissions and record</text>
+  <text x="1594" y="1370" class="small">ownership on the server.</text>
+  <rect class="inner" x="1930" y="1250" width="376" height="188" rx="8"/>
+  <text x="1954" y="1288" class="path">PRIVATE DATA</text>
+  <text x="1954" y="1324" class="small">libSQL owns records and metadata;</text>
+  <text x="1954" y="1347" class="small">RocksDB stores private object bytes.</text>
+  <text x="1954" y="1370" class="small">Secrets never enter browser bundles.</text>
+  <text x="2306" y="1474" class="small" text-anchor="end">LEMEGETON / SOURCE MAP — V3</text>
+</svg>

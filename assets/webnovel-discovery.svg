@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1420" viewBox="0 0 2400 1420" role="img" aria-labelledby="title desc">
+<title id="title">Webnovel Discovery / Actual Provider State</title>
+<desc id="desc">Novel Updates is always included in webnovel metadata discovery and uses a targeted Cloudflare challenge retry through Botasaurus. Four additional parsers require an explicit operator allowlist. ScribbleHub remains inactive, and Royal Road is a separate story-specific RSS integration.</desc>
+<defs>
+<style>
+.bg{fill:#050505}.panel{fill:#0b0b0b;stroke:#626262;stroke-width:1.5}.inner{fill:#111;stroke:#3e3e3e;stroke-width:1}
+.rule{stroke:#3b3b3b;stroke-width:1}.line{fill:none;stroke:#e6e6e6;stroke-width:2;marker-end:url(#arrow)}
+.dash{fill:none;stroke:#8d8d8d;stroke-width:2;stroke-dasharray:8 8;marker-end:url(#arrow)}
+.eyebrow{fill:#a1a1a1;font:600 15px Arial,sans-serif;letter-spacing:3px}
+.title{fill:#fff;font:700 43px Arial,sans-serif;letter-spacing:4px}
+.heading{fill:#f4f4f4;font:700 23px Arial,sans-serif}
+.sub{fill:#eee;font:700 16px Arial,sans-serif;letter-spacing:1px}
+.body{fill:#c4c4c4;font:15px Arial,sans-serif}
+.small{fill:#929292;font:13px Arial,sans-serif}
+.tiny{fill:#808080;font:11px Arial,sans-serif;letter-spacing:1px}
+.mono{fill:#fff;font:700 14px 'SFMono-Regular',Consolas,monospace}
+.name{fill:#ededed;font:14px Arial,sans-serif}
+.pill{fill:#151515;stroke:#686868;stroke-width:1}.pill-muted{fill:#101010;stroke:#454545;stroke-width:1}
+.pilltext{fill:#ddd;font:600 11px Arial,sans-serif;letter-spacing:.35px}
+.count{fill:#fff;font:700 15px 'SFMono-Regular',Consolas,monospace}
+</style>
+<marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9Z" fill="#e6e6e6"/></marker>
+</defs>
+<rect class="bg" width="2400" height="1420"/>
+<text x="64" y="62" class="eyebrow" text-anchor="start">LEMEGETON / MEDIA SYSTEM</text>
+<text x="64" y="119" class="title" text-anchor="start">WEBNOVEL DISCOVERY / ACTUAL PROVIDER STATE</text>
+<path class="rule" d="M64 154H2336"/>
+
+<text x="64" y="210" class="eyebrow" text-anchor="start">01 / REGISTERED WEBNOVEL SEARCH PROVIDERS</text>
+<text x="2336" y="210" class="count" text-anchor="end">1 ALWAYS-ON · 4 ALLOWLISTED</text>
+<text x="64" y="252" class="body" text-anchor="start">Novel Updates is always searched; the other four providers require MEDIA_SOURCE_SCRAPE_ALLOWLIST.</text>
+
+<rect class="panel" x="64" y="286" width="1098" height="244" rx="12"/>
+<text x="96" y="330" class="heading" text-anchor="start">NovelFire</text><rect class="pill-muted" x="858" y="306" width="270" height="24" rx="6"/><text x="993" y="323" class="pilltext" text-anchor="middle">TERMS REVIEW</text>
+<text x="96" y="376" class="mono" text-anchor="start">HTML search / details</text>
+<text x="96" y="415" class="body" text-anchor="start">Bounded series metadata; no chapter body retrieval.</text>
+
+<rect class="panel" x="1190" y="286" width="1146" height="244" rx="12"/>
+<text x="1222" y="330" class="heading" text-anchor="start">Novel Archive</text><rect class="pill-muted" x="2032" y="306" width="270" height="24" rx="6"/><text x="2167" y="323" class="pilltext" text-anchor="middle">TERMS REVIEW</text>
+<text x="1222" y="376" class="mono" text-anchor="start">JSON search + detail endpoints</text>
+<text x="1222" y="415" class="body" text-anchor="start">Typed metadata fields and canonical source URL.</text>
+
+<rect class="panel" x="64" y="554" width="1098" height="244" rx="12"/>
+<text x="96" y="598" class="heading" text-anchor="start">Wuxia Click</text><rect class="pill-muted" x="858" y="574" width="270" height="24" rx="6"/><text x="993" y="591" class="pilltext" text-anchor="middle">TERMS REVIEW</text>
+<text x="96" y="644" class="mono" text-anchor="start">Server-rendered __NEXT_DATA__ search + detail</text>
+<text x="96" y="683" class="body" text-anchor="start">Chapter-list metadata only; bounded parser and response limits.</text>
+
+<rect class="panel" x="1190" y="554" width="1146" height="244" rx="12"/>
+<text x="1222" y="598" class="heading" text-anchor="start">Noveli.to</text><rect class="pill-muted" x="2032" y="574" width="270" height="24" rx="6"/><text x="2167" y="591" class="pilltext" text-anchor="middle">TERMS REVIEW</text>
+<text x="1222" y="644" class="mono" text-anchor="start">Paginated JSON search + details</text>
+<text x="1222" y="683" class="body" text-anchor="start">Provider metadata stays attributed to its own record.</text>
+
+<rect class="panel" x="64" y="822" width="2272" height="120" rx="12"/>
+<text x="96" y="864" class="heading" text-anchor="start">Novel Updates</text><rect class="pill-muted" x="2000" y="842" width="302" height="24" rx="6"/><text x="2151" y="859" class="pilltext" text-anchor="middle">ALWAYS ENABLED · MATURE FILTER</text>
+<text x="96" y="906" class="mono" text-anchor="start">Series + detail metadata · Cloudflare retry through isolated Botasaurus</text>
+<text x="1260" y="906" class="body" text-anchor="start">Search metadata only; no chapter-body retrieval.</text>
+
+<path class="rule" d="M64 974H2336"/>
+<text x="64" y="1020" class="eyebrow" text-anchor="start">02 / SEPARATE OR INACTIVE DISCOVERY PATHS</text>
+
+<rect class="inner" x="64" y="1048" width="1098" height="222" rx="12"/>
+<text x="96" y="1092" class="heading" text-anchor="start">ScribbleHub</text>
+<text x="96" y="1133" class="mono" text-anchor="start">Parser/search helper exists · not in the 64-source registry</text>
+<text x="96" y="1174" class="body" text-anchor="start">Not present in WEBNOVEL_SEARCH_PROVIDERS.</text>
+<text x="96" y="1208" class="body" text-anchor="start">Not an active search provider; assess separately.</text>
+
+<rect class="inner" x="1190" y="1048" width="1146" height="222" rx="12"/>
+<text x="1222" y="1092" class="heading" text-anchor="start">Royal Road RSS</text>
+<text x="1222" y="1133" class="mono" text-anchor="start">Separate integration · outside the 64-target inventory</text>
+<text x="1222" y="1174" class="body" text-anchor="start">Fetch by explicit fiction ID or supported HTTPS URL.</text>
+<text x="1222" y="1208" class="body" text-anchor="start">Story-specific RSS only; no global title-search catalogue.</text>
+
+<text x="64" y="1320" class="body" text-anchor="start">Novel Updates is always included; four other providers remain allowlist-gated. All five are metadata-only; Mature-labelled records and chapter content are excluded.</text>
+<text x="2336" y="1364" class="small" text-anchor="end">LEMEGETON / WEBNOVEL SOURCE STATUS — V3</text>
+</svg>

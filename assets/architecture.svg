@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2200" height="1510" viewBox="0 0 2200 1510" role="img" aria-labelledby="title desc">
+  <title id="title">Lemegeton v3 system architecture</title>
+  <desc id="desc">Current v3 architecture: Discord enters the TypeScript bot, command modules call shared helpers, provider adapters and the shared libSQL and private RocksDB stores. An optional Next.js and Rust dashboard uses a private bridge to the same bot and database.</desc>
+  <defs>
+    <style>
+      .bg{fill:#050505}.panel{fill:#0b0b0b;stroke:#777;stroke-width:1.5}.inner{fill:#101010;stroke:#555;stroke-width:1.2}
+      .line{fill:none;stroke:#eee;stroke-width:2;marker-end:url(#arrow)}.dash{fill:none;stroke:#aaa;stroke-width:2;stroke-dasharray:8 8;marker-end:url(#arrow)}
+      .rule{stroke:#444;stroke-width:1}.eyebrow{fill:#a5a5a5;font:600 15px Inter,Arial,sans-serif;letter-spacing:3px}
+      .title{fill:#fff;font:600 43px Inter,Arial,sans-serif;letter-spacing:5px}.heading{fill:#f5f5f5;font:600 25px Inter,Arial,sans-serif}
+      .sub{fill:#eee;font:600 17px Inter,Arial,sans-serif;letter-spacing:1px}.body{fill:#c7c7c7;font:17px Inter,Arial,sans-serif}
+      .mono{fill:#fff;font:600 16px 'SFMono-Regular',Consolas,monospace}.small{fill:#999;font:14px Inter,Arial,sans-serif}
+      .tag{fill:#141414;stroke:#777;stroke-width:1}.tagtext{fill:#ddd;font:14px Inter,Arial,sans-serif}
+      .pulse{fill:#fff;opacity:.75;animation:pulse 2.8s ease-in-out infinite}@keyframes pulse{50%{opacity:.2}}
+      @media(prefers-reduced-motion:reduce){.pulse{animation:none}}
+    </style>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9Z" fill="#eee"/></marker>
+  </defs>
+  <rect class="bg" width="2200" height="1510"/>
+  <text x="76" y="65" class="eyebrow">LEMEGETON / V3</text>
+  <text x="76" y="119" class="title">SYSTEM ARCHITECTURE</text>
+  <text x="2124" y="68" class="eyebrow" text-anchor="end">CURRENT RUNTIME / DATA FLOW</text>
+  <path class="rule" d="M76 151H2124"/>
+
+  <text x="76" y="203" class="eyebrow">01 — DISCORD EXECUTION</text>
+  <rect class="panel" x="76" y="226" width="390" height="300" rx="12"/>
+  <text x="108" y="271" class="heading">Discord</text>
+  <path class="rule" d="M108 290H434"/>
+  <text x="108" y="331" class="sub">Guild surface</text>
+  <text x="108" y="367" class="body">Slash commands · autocomplete</text>
+  <text x="108" y="400" class="body">Buttons · selects · modals</text>
+  <text x="108" y="455" class="mono">guild_id / actor_id</text>
+  <text x="108" y="486" class="small">Gateway events and Discord REST</text>
+
+  <path class="line" d="M466 376H520"/>
+  <rect class="panel" x="520" y="226" width="465" height="300" rx="12"/>
+  <text x="552" y="271" class="heading">TypeScript runtime</text>
+  <path class="rule" d="M552 290H953"/>
+  <text x="552" y="331" class="mono">bot.ts</text>
+  <text x="552" y="367" class="body">Node.js 22.9+ · discord.js</text>
+  <rect class="inner" x="552" y="395" width="185" height="82" rx="8"/>
+  <text x="572" y="427" class="sub">EVENTS</text><text x="572" y="454" class="small">Gateway lifecycle</text>
+  <rect class="inner" x="751" y="395" width="202" height="82" rx="8"/>
+  <text x="771" y="427" class="sub">REGISTRY</text><text x="771" y="454" class="mono">src/registry.ts</text>
+  <text x="552" y="505" class="small">Workers and private dashboard bridge start with the bot.</text>
+
+  <path class="line" d="M985 376H1039"/>
+  <rect class="panel" x="1039" y="226" width="490" height="300" rx="12"/>
+  <text x="1071" y="271" class="heading">Command surface</text>
+  <path class="rule" d="M1071 290H1497"/>
+  <text x="1071" y="331" class="mono">/discover · /archive · /community</text>
+  <text x="1071" y="365" class="mono">/play · /profile · /custom-role</text>
+  <text x="1071" y="399" class="mono">/settings · /language · /music</text>
+  <path class="rule" d="M1071 420H1497"/>
+  <text x="1071" y="455" class="body">Standalone: /help · /privacy · /feedback</text>
+  <text x="1071" y="490" class="small">Utilities and message-based integrations stay separate.</text>
+
+  <path class="line" d="M1529 376H1583"/>
+  <rect class="panel" x="1583" y="226" width="541" height="300" rx="12"/>
+  <text x="1615" y="271" class="heading">Shared domain services</text>
+  <path class="rule" d="M1615 290H2092"/>
+  <rect class="inner" x="1615" y="312" width="218" height="74" rx="7"/>
+  <text x="1633" y="342" class="sub">MEDIA</text><text x="1633" y="367" class="small">Search · Atlas · provenance</text>
+  <rect class="inner" x="1848" y="312" width="244" height="74" rx="7"/>
+  <text x="1866" y="342" class="sub">ARCHIVE</text><text x="1866" y="367" class="small">Collections · curation · access</text>
+  <rect class="inner" x="1615" y="400" width="218" height="74" rx="7"/>
+  <text x="1633" y="430" class="sub">COMMUNITY</text><text x="1633" y="455" class="small">Daily · rankings · sessions</text>
+  <rect class="inner" x="1848" y="400" width="244" height="74" rx="7"/>
+  <text x="1866" y="430" class="sub">ROLES / RUNTIME</text><text x="1866" y="455" class="small">Custom roles · settings · security</text>
+  <text x="1615" y="505" class="small">Implemented as shared services under helpers/.</text>
+
+  <text x="76" y="584" class="eyebrow">02 — PROVIDERS AND PERSISTENCE</text>
+  <rect class="panel" x="76" y="608" width="600" height="280" rx="12"/>
+  <text x="108" y="653" class="heading">Provider adapters</text>
+  <path class="rule" d="M108 674H644"/>
+  <text x="108" y="715" class="sub">MEDIA METADATA</text>
+  <text x="108" y="751" class="body">AniList · Kitsu · MangaDex · TMDB · IGDB</text>
+  <text x="108" y="783" class="body">Steam · Google Books · Open Library · Crossref</text>
+  <text x="108" y="815" class="body">Royal Road and supported webnovel sources</text>
+  <path class="rule" d="M108 837H644"/>
+  <text x="108" y="865" class="small">Music, translation and other optional providers vary by setup.</text>
+
+  <rect class="panel" x="724" y="608" width="650" height="280" rx="12"/>
+  <text x="756" y="653" class="heading">Shared libSQL database</text>
+  <path class="rule" d="M756 674H1342"/>
+  <text x="756" y="715" class="mono">src/utility/database/libsql/</text>
+  <text x="756" y="753" class="body">Guild settings · command access · consent</text>
+  <text x="756" y="785" class="body">Profiles · archives · community records · sessions</text>
+  <text x="756" y="817" class="body">OAuth state · rate limits · audit and metadata</text>
+  <path class="rule" d="M756 837H1342"/>
+  <text x="756" y="865" class="small">One authoritative database shared by the bot and dashboard.</text>
+
+  <rect class="panel" x="1422" y="608" width="350" height="280" rx="12"/>
+  <text x="1454" y="653" class="heading">Private RocksDB</text>
+  <path class="rule" d="M1454 674H1740"/>
+  <text x="1454" y="715" class="mono">rocksdb/</text>
+  <text x="1454" y="753" class="body">Media objects</text>
+  <text x="1454" y="785" class="body">Custom Role images</text>
+  <text x="1454" y="817" class="body">Private binary data</text>
+  <text x="1454" y="865" class="small">Metadata and ownership remain in libSQL.</text>
+
+  <rect class="panel" x="1820" y="608" width="304" height="280" rx="12"/>
+  <text x="1852" y="653" class="heading">Workers</text>
+  <path class="rule" d="M1852 674H2092"/>
+  <text x="1852" y="715" class="body">Daily tasks</text>
+  <text x="1852" y="747" class="body">Release checks</text>
+  <text x="1852" y="779" class="body">Scheduled delivery</text>
+  <text x="1852" y="811" class="body">Bounded retries</text>
+  <text x="1852" y="865" class="small">Managed by bot lifecycle.</text>
+
+  <path class="dash" d="M1840 526V570H376V608"/>
+  <path class="line" d="M1200 526V608"/>
+  <path class="line" d="M1692 526V608"/>
+  <path class="dash" d="M2018 526V608"/>
+  <circle class="pulse" cx="376" cy="570" r="5"/>
+  <circle class="pulse" cx="1200" cy="570" r="5"/>
+
+  <text x="76" y="949" class="eyebrow">03 — OPTIONAL WEB CONTROL PLANE</text>
+  <rect class="panel" x="76" y="972" width="2048" height="252" rx="12"/>
+  <rect class="inner" x="108" y="1010" width="490" height="150" rx="8"/>
+  <text x="136" y="1048" class="sub">BROWSER / FRONTEND</text>
+  <text x="136" y="1083" class="mono">Next.js · React · TypeScript</text>
+  <text x="136" y="1118" class="body">Dashboard · status · legal pages</text>
+  <text x="136" y="1145" class="small">Static export served by Rust, same origin.</text>
+  <path class="line" d="M598 1085H688"/>
+  <rect class="inner" x="688" y="1010" width="490" height="150" rx="8"/>
+  <text x="716" y="1048" class="sub">RUST API / CONTROL BOUNDARY</text>
+  <text x="716" y="1083" class="mono">Axum · OAuth · sessions · CSRF</text>
+  <text x="716" y="1118" class="body">Guild permission checks · API · rate limits</text>
+  <text x="716" y="1145" class="small">Authorizes each protected request.</text>
+  <path class="line" d="M1178 1085H1268"/>
+  <rect class="inner" x="1268" y="1010" width="366" height="150" rx="8"/>
+  <text x="1296" y="1048" class="sub">PRIVATE BOT BRIDGE</text>
+  <text x="1296" y="1083" class="mono">Loopback · signed requests</text>
+  <text x="1296" y="1118" class="body">Approved bot operations only</text>
+  <text x="1296" y="1145" class="small">No second Discord gateway.</text>
+  <path class="dash" d="M1634 1085H1724"/>
+  <rect class="inner" x="1724" y="1010" width="366" height="150" rx="8"/>
+  <text x="1752" y="1048" class="sub">SHARED STATE</text>
+  <text x="1752" y="1083" class="mono">Same libSQL path</text>
+  <text x="1752" y="1118" class="body">Sessions · consent · guild data</text>
+  <text x="1752" y="1145" class="small">Not a separate dashboard database.</text>
+
+  <text x="76" y="1292" class="eyebrow">NON-NEGOTIABLE BOUNDARIES</text>
+  <rect class="tag" x="76" y="1320" width="490" height="76" rx="8"/>
+  <text x="100" y="1351" class="tagtext">GUILD ISOLATION</text><text x="100" y="1378" class="small">Guild-owned records carry guild scope.</text>
+  <rect class="tag" x="592" y="1320" width="490" height="76" rx="8"/>
+  <text x="616" y="1351" class="tagtext">SERVER AUTHORIZATION</text><text x="616" y="1378" class="small">Permissions are re-checked on protected actions.</text>
+  <rect class="tag" x="1108" y="1320" width="490" height="76" rx="8"/>
+  <text x="1132" y="1351" class="tagtext">PRIVATE STORAGE</text><text x="1132" y="1378" class="small">Objects stay private; secrets stay server-side.</text>
+  <rect class="tag" x="1624" y="1320" width="500" height="76" rx="8"/>
+  <text x="1648" y="1351" class="tagtext">SAFE RETENTION</text><text x="1648" y="1378" class="small">Guild retention choice gates normal operation.</text>
+  <text x="2124" y="1455" class="small" text-anchor="end">LEMEGETON / ARCHITECTURE — V3</text>
+</svg>

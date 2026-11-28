@@ -12,12 +12,19 @@ services:
       DASHBOARD_HOST: "0.0.0.0"
       DASHBOARD_ALLOW_PUBLIC_BIND: "true"
       DASHBOARD_PORT: "8080"
-      PYTHONUNBUFFERED: "1"
-      PYTHONPATH: "/app"
-      PYTHONDONTWRITEBYTECODE: "1"
+      LIBSQL_PATH: "/app/data/bot/lemegeton.db"
+      ROCKSDB_PATH: "/app/data/objects"
+      BACKUP_DIRECTORY: "/app/data/backups"
+      DASHBOARD_SESSION_DB_PATH: "/app/data/dashboard/sessions.sqlite"
       HOME: "/app/runtime-home"
       XDG_CACHE_HOME: "/app/runtime-home/.cache"
       TMPDIR: "/tmp"
+      BOTASAURUS_MODE: "remote"
+      BOTASAURUS_WORKER_URL: "http://botasaurus-worker:8765"
+      BOTASAURUS_WORKER_TOKEN: ${BOTASAURUS_WORKER_TOKEN:?Set BOTASAURUS_WORKER_TOKEN in .env}
+    depends_on:
+      botasaurus-worker:
+        condition: service_healthy
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
@@ -34,8 +41,52 @@ services:
     pids_limit: 512
     stop_grace_period: 45s
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/login', timeout=3).read(1)"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       start_period: 45s
       retries: 3
+
+  botasaurus-worker:
+    build:
+      context: ./workers
+      dockerfile: Dockerfile
+    image: lemegeton-botasaurus:local
+    restart: unless-stopped
+    init: true
+    environment:
+      BOTASAURUS_HOST: "0.0.0.0"
+      BOTASAURUS_PORT: "8765"
+      BOTASAURUS_WORKER_TOKEN: ${BOTASAURUS_WORKER_TOKEN:?Set BOTASAURUS_WORKER_TOKEN in .env}
+      BOTASAURUS_CACHE_DIR: "/app/data/cache"
+      BOTASAURUS_OBSCURA_BINARY: "/usr/local/bin/obscura"
+      BOTASAURUS_CHROMIUM_FALLBACK: "true"
+      BOTASAURUS_CF_CHALLENGE_WAIT_MS: ${BOTASAURUS_CF_CHALLENGE_WAIT_MS:-30000}
+      BOTASAURUS_CF_CHALLENGE_POLL_MS: ${BOTASAURUS_CF_CHALLENGE_POLL_MS:-1000}
+      CAPTCHA_SOLVER_PROVIDER: ${CAPTCHA_SOLVER_PROVIDER:-}
+      CAPTCHA_SOLVER_API_KEY: ${CAPTCHA_SOLVER_API_KEY:-}
+      CAPTCHA_SOLVER_TIMEOUT_MS: ${CAPTCHA_SOLVER_TIMEOUT_MS:-120000}
+      HOME: "/app/data/home"
+    expose:
+      - "8765"
+    volumes:
+      - botasaurus-data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=512m
+    shm_size: 1gb
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+volumes:
+  botasaurus-data:

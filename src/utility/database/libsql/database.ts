@@ -1,0 +1,1653 @@
+import type { DatabaseConfig } from "../../../../helpers/runtime/config.js";
+import {
+  applyLibSqlSchemaStatement,
+  backupLibSqlDatabase,
+  inspectLibSqlDatabase,
+  libSqlIntegrityCheck,
+  libSqlQuery,
+  libSqlTransaction,
+  openLibSql,
+  type DatabaseConnection,
+} from "./libsql-client.js";
+import { logger } from "../../../../helpers/runtime/logger.js";
+
+export type { DatabaseConnection };
+export interface DatabaseResult<T> {
+  rows: T[];
+  rowCount: number;
+  lastInsertRowid: string;
+}
+
+export async function query<T = Record<string, unknown>>(
+  sql: string,
+  values: readonly unknown[] = [],
+): Promise<T[]> {
+  return (await libSqlQuery<T>(sql, values)).rows;
+}
+
+export async function queryOne<T = Record<string, unknown>>(
+  sql: string,
+  values: readonly unknown[] = [],
+): Promise<T | null> {
+  return (await query<T>(sql, values))[0] ?? null;
+}
+
+export async function transaction<T>(operation: (client: DatabaseConnection) => Promise<T>): Promise<T> {
+  return libSqlTransaction(operation);
+}
+
+type RelationshipIdentityRow = {
+  id: string;
+  guild_id: string | null;
+  source_category: string;
+  target_category: string;
+  relationship_type: string;
+  source_kind: string | null;
+  source_url: string | null;
+  target_url: string | null;
+  source_provider: string | null;
+  source_provider_id: string | null;
+  target_provider: string | null;
+  target_provider_id: string | null;
+};
+
+function inferProvider(category: string, rawUrl: string | null): { provider: string; id: string } | null {
+  if (!rawUrl) return null;
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+    if (url.protocol !== "https:" || url.username || url.password) return null;
+  } catch {
+    return null;
+  }
+  const host = url.hostname.toLowerCase().replace(/^www\./, "");
+  const kind = category.toUpperCase();
+  const segments = url.pathname.split("/").filter(Boolean);
+  const match = (pattern: RegExp, provider: string) => {
+    const found = segments.join("/").match(pattern);
+    return found?.[1] ? { provider, id: found[1] } : null;
+  };
+
+  if (host === "anilist.co") {
+    if (kind === "ANIME") return match(/^anime\/(\d+)$/i, "anilist:anime");
+    if (["MANGA", "LIGHT_NOVEL", "WEBNOVEL"].includes(kind)) {
+      return match(/^manga\/(\d+)$/i, "anilist:manga");
+    }
+  }
+  if (host === "themoviedb.org") {
+    if (kind === "MOVIE") return match(/^movie\/(\d+)(?:[- /].*)?$/i, "tmdb:movie");
+    if (kind === "TV") return match(/^tv\/(\d+)(?:[- /].*)?$/i, "tmdb:tv");
+    if (kind === "CREATOR") return match(/^person\/(\d+)(?:[- /].*)?$/i, "tmdb:person");
+    if (kind === "FRANCHISE") return match(/^collection\/(\d+)(?:[- /].*)?$/i, "tmdb:collection");
+  }
+  if (host === "store.steampowered.com" && kind === "GAME") {
+    return match(/^app\/(\d+)(?:\/.*)?$/i, "steam:app");
+  }
+  if (host === "books.google.com" && kind === "BOOK") {
+    const id = url.searchParams.get("id");
+    return id && /^[A-Za-z0-9_-]{1,80}$/.test(id) ? { provider: "google-books:volume", id } : null;
+  }
+  if (host === "mangadex.org" && kind === "MANGA") {
+    return match(/^title\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(?:\/.*)?$/i, "mangadex:title");
+  }
+  if (host === "kitsu.io" && ["ANIME", "MANGA"].includes(kind)) {
+    const media = kind.toLowerCase();
+    return match(new RegExp("^" + media + "/([A-Za-z0-9]+)(?:[- /].*)?$", "i"), "kitsu:" + media);
+  }
+  if (host === "openlibrary.org" && kind === "BOOK") {
+    return match(/^works\/(OL\d+W)(?:\/.*)?$/i, "open-library:works")
+      ?? match(/^books\/(OL\d+M)(?:\/.*)?$/i, "open-library:books");
+  }
+  return null;
+}
+
+export async function backfillAtlasProviderIdentities(): Promise<number> {
+  const rows = await query<RelationshipIdentityRow>(
+    `SELECT id, guild_id, source_category, target_category, relationship_type, source_kind,
+            source_url, target_url, source_provider, source_provider_id, target_provider, target_provider_id
+       FROM media_relationship_graph
+
+      ORDER BY CASE WHEN source_provider IS NOT NULL AND source_provider_id IS NOT NULL AND target_provider IS NOT NULL AND target_provider_id IS NOT NULL THEN 0 ELSE 1 END, id`,
+  );
+  const occupied = new Set<string>();
+  const updated = new Set<string>();
+  for (const row of rows) {
+    const source = row.source_provider && row.source_provider_id
+      ? { provider: row.source_provider, id: row.source_provider_id }
+      : inferProvider(row.source_category, row.source_url);
+    const target = row.target_provider && row.target_provider_id
+      ? { provider: row.target_provider, id: row.target_provider_id }
+      : inferProvider(row.target_category, row.target_url);
+    if (!source || !target) continue;
+    const identity = JSON.stringify([
+      source.provider, source.id, target.provider, target.id, row.source_category,
+      row.target_category, row.relationship_type, row.source_kind ?? "", row.guild_id ?? "0",
+    ]);
+    if (occupied.has(identity)) continue;
+    occupied.add(identity);
+
+    const sourceChanged = !row.source_provider || !row.source_provider_id;
+    const targetChanged = !row.target_provider || !row.target_provider_id;
+    if (!sourceChanged && !targetChanged) continue;
+    await query(
+      `UPDATE media_relationship_graph
+          SET source_provider = COALESCE(source_provider, $2),
+              source_provider_id = COALESCE(source_provider_id, $3),
+              target_provider = COALESCE(target_provider, $4),
+              target_provider_id = COALESCE(target_provider_id, $5)
+        WHERE id = $1`,
+      [row.id, source.provider, source.id, target.provider, target.id],
+    );
+    updated.add(row.id);
+  }
+  return updated.size;
+}
+
+const schemaStatements = [
+  "CREATE TABLE IF NOT EXISTS bot_moderators (\n id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,\n discord_id BIGINT NOT NULL UNIQUE,\n username TEXT NOT NULL,\n added_by BIGINT NOT NULL,\n created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n)",
+  "CREATE TABLE IF NOT EXISTS github_tracker_state (\n repository TEXT NOT NULL,\n branch TEXT NOT NULL,\n last_sha TEXT,\n last_checked_at TIMESTAMPTZ,\n last_error TEXT,\n PRIMARY KEY (repository,branch)\n)",
+  "CREATE TABLE IF NOT EXISTS issue_logs (\n issue_hash TEXT PRIMARY KEY CHECK (length(issue_hash) = 40 AND issue_hash ~ '^[a-f0-9]{40}$'),\n guild_id BIGINT NOT NULL,\n user_id BIGINT NOT NULL,\n username TEXT NOT NULL,\n interaction_id BIGINT NOT NULL,\n channel_id BIGINT,\n command_name VARCHAR(100) NOT NULL,\n details JSONB NOT NULL DEFAULT '{}'::JSONB,\n created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n)",
+  "ALTER TABLE issue_logs DROP CONSTRAINT IF EXISTS issue_logs_issue_hash_check",
+  "ALTER TABLE issue_logs DROP CONSTRAINT IF EXISTS issue_logs_issue_hash_format_check",
+  "ALTER TABLE issue_logs ADD CONSTRAINT issue_logs_issue_hash_format_check CHECK (length(issue_hash) = 40 AND issue_hash ~ '^[a-f0-9]{40}$')",
+  "CREATE INDEX IF NOT EXISTS issue_logs_guild_created_idx ON issue_logs (guild_id, created_at DESC)",
+  "CREATE TABLE IF NOT EXISTS bot_feedback (\n id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,\n guild_id BIGINT NOT NULL,\n user_id BIGINT NOT NULL,\n category VARCHAR(16) NOT NULL CHECK (category IN ('ideas','bugs')),\n description TEXT NOT NULL,\n issue_hash TEXT REFERENCES issue_logs(issue_hash) ON DELETE SET NULL,\n created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n)",
+  "CREATE TABLE IF NOT EXISTS planned_features (\n id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,\n name VARCHAR(100) NOT NULL,\n description TEXT NOT NULL,\n added_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n added_by BIGINT NOT NULL,\n uploaded_from_file TEXT,\n last_edited TIMESTAMPTZ,\n last_edited_by BIGINT,\n status VARCHAR(20) NOT NULL DEFAULT 'planned'\n   CHECK (status IN ('planned','in_progress','testing','completed','cancelled','on_hold')),\n category VARCHAR(60) NOT NULL DEFAULT 'Utilities'\n)",
+  "CREATE TABLE IF NOT EXISTS feature_status_history (\n id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,\n feature_id BIGINT NOT NULL REFERENCES planned_features(id) ON DELETE CASCADE,\n old_status VARCHAR(20),\n new_status VARCHAR(20) NOT NULL,\n changed_by BIGINT NOT NULL,\n notes TEXT,\n changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n)",
+  `CREATE TABLE IF NOT EXISTS users (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    discord_id BIGINT NOT NULL,
+    guild_id BIGINT NOT NULL,
+    username TEXT NOT NULL,
+    anilist_username TEXT,
+    anilist_id BIGINT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (discord_id, guild_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS steam_users (
+    discord_id BIGINT NOT NULL,
+    guild_id BIGINT NOT NULL,
+    steam_id TEXT NOT NULL,
+    vanity_name TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (discord_id, guild_id)
+  )`,
+  "ALTER TABLE steam_users ADD COLUMN IF NOT EXISTS guild_id BIGINT",
+  "CREATE INDEX IF NOT EXISTS steam_users_guild_lookup_idx ON steam_users (guild_id, discord_id)",
+  `CREATE TABLE IF NOT EXISTS media_assets (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    provider VARCHAR(32) NOT NULL,
+    namespace VARCHAR(120) NOT NULL,
+    bucket_name TEXT NOT NULL,
+    object_key TEXT NOT NULL,
+    content_type VARCHAR(128) NOT NULL,
+    size_bytes BIGINT NOT NULL CHECK (size_bytes > 0),
+    sha256 CHAR(64) NOT NULL,
+    is_private BOOLEAN NOT NULL DEFAULT TRUE,
+    uploaded_by BIGINT,
+    guild_id BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (provider, bucket_name, object_key)
+  )`,
+  `CREATE TABLE IF NOT EXISTS media_asset_cleanup_queue (
+    asset_id BIGINT PRIMARY KEY REFERENCES media_assets(id) ON DELETE CASCADE,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  "CREATE INDEX IF NOT EXISTS media_asset_cleanup_due_idx ON media_asset_cleanup_queue (next_attempt_at)",
+  "CREATE INDEX IF NOT EXISTS idx_media_assets_sha256 ON media_assets(sha256)",
+  `CREATE TABLE IF NOT EXISTS community_archive_entries (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    archive_type VARCHAR(32) NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    source_title VARCHAR(200),
+    creator VARCHAR(200),
+    media_type VARCHAR(32) NOT NULL DEFAULT 'Other',
+    source_url TEXT,
+    tags TEXT NOT NULL DEFAULT '[]',
+    spoiler BOOLEAN NOT NULL DEFAULT FALSE,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    created_by BIGINT NOT NULL,
+    created_guild_id BIGINT NOT NULL,
+    media_asset_id BIGINT REFERENCES media_assets(id) ON DELETE SET NULL,
+    attachment_filename TEXT,
+    attachment_content_type VARCHAR(128),
+    attachment_url TEXT,
+    storage_message_id BIGINT,
+    storage_channel_id BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  "ALTER TABLE community_archive_entries ADD COLUMN IF NOT EXISTS visibility VARCHAR(16) NOT NULL DEFAULT 'server'",
+  "ALTER TABLE community_archive_entries ADD COLUMN IF NOT EXISTS moderation_reason TEXT",
+  "ALTER TABLE community_archive_entries ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+  "ALTER TABLE community_archive_entries ADD COLUMN IF NOT EXISTS chapter_number VARCHAR(32)",
+  "ALTER TABLE community_archive_entries ADD COLUMN IF NOT EXISTS linked_media_provider VARCHAR(32)",
+  "ALTER TABLE community_archive_entries ADD COLUMN IF NOT EXISTS linked_media_id TEXT",
+  "ALTER TABLE community_archive_entries ADD COLUMN IF NOT EXISTS source_legacy_panel_id BIGINT",
+  "CREATE INDEX IF NOT EXISTS community_archive_guild_status_idx ON community_archive_entries (created_guild_id, status, created_at DESC)",
+  "CREATE INDEX IF NOT EXISTS community_archive_visibility_idx ON community_archive_entries (visibility, status, created_at DESC)",
+  `CREATE TABLE IF NOT EXISTS guild_archive_settings (
+    guild_id BIGINT PRIMARY KEY,
+    enabled_categories TEXT NOT NULL DEFAULT '["panels","quotes","fanworks","moodboards","soundtracks","scenes","recommendation-board","theories"]',
+    upload_types TEXT NOT NULL DEFAULT '["image"]',
+    upload_channel_id BIGINT,
+    legacy_storage_channel_id BIGINT,
+    moderation_channel_id BIGINT,
+    moderator_role_id BIGINT,
+    updated_by BIGINT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  "ALTER TABLE guild_archive_settings ADD COLUMN IF NOT EXISTS upload_channel_id BIGINT",
+  "ALTER TABLE guild_archive_settings ADD COLUMN IF NOT EXISTS legacy_storage_channel_id BIGINT",
+  "ALTER TABLE guild_archive_settings ADD COLUMN IF NOT EXISTS moderation_channel_id BIGINT",
+  "ALTER TABLE guild_archive_settings ADD COLUMN IF NOT EXISTS moderator_role_id BIGINT",
+  `CREATE TABLE IF NOT EXISTS archive_user_preferences (
+    guild_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    last_category VARCHAR(32) NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (guild_id,user_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS community_panel_daily_log (
+    guild_id BIGINT NOT NULL,
+    feature_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    entry_id BIGINT NOT NULL REFERENCES community_archive_entries(id) ON DELETE CASCADE,
+    featured_by BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (guild_id, feature_date)
+  )`,
+  `CREATE TABLE IF NOT EXISTS community_archive_spotlights (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT,
+    visibility VARCHAR(16) NOT NULL CHECK (visibility IN ('server','global')),
+    entry_id BIGINT NOT NULL REFERENCES community_archive_entries(id) ON DELETE CASCADE,
+    curator_id BIGINT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    starts_at TIMESTAMPTZ NOT NULL,
+    ends_at TIMESTAMPTZ NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'published' CHECK (status IN ('published','cancelled')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (ends_at > starts_at),
+    CHECK ((visibility = 'server' AND guild_id IS NOT NULL) OR (visibility = 'global' AND guild_id IS NULL))
+  )`,
+  "CREATE INDEX IF NOT EXISTS community_archive_spotlights_active_idx ON community_archive_spotlights (visibility, guild_id, starts_at, ends_at) WHERE status = 'published'",
+  `CREATE TABLE IF NOT EXISTS community_archive_reports (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    archive_type VARCHAR(32) NOT NULL,
+    entry_id BIGINT NOT NULL REFERENCES community_archive_entries(id) ON DELETE CASCADE,
+    guild_id BIGINT NOT NULL,
+    reporter_id BIGINT NOT NULL,
+    reason TEXT NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    reviewed_by BIGINT,
+    review_reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    reviewed_at TIMESTAMPTZ,
+    UNIQUE (guild_id, entry_id, reporter_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS community_archive_entry_assets (
+    entry_id BIGINT NOT NULL REFERENCES community_archive_entries(id) ON DELETE CASCADE,
+    asset_id BIGINT NOT NULL REFERENCES media_assets(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 1,
+    uploaded_by BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (entry_id, asset_id),
+    UNIQUE (entry_id, position)
+  )`,
+  `CREATE TABLE IF NOT EXISTS community_archive_moderation_log (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    entry_id BIGINT NOT NULL,
+    guild_id BIGINT NOT NULL,
+    moderator_id BIGINT NOT NULL,
+    action VARCHAR(16) NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    is_global BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS archive_collections (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    owner_id BIGINT NOT NULL,
+    title VARCHAR(160) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    visibility VARCHAR(16) NOT NULL DEFAULT 'server',
+    status VARCHAR(16) NOT NULL DEFAULT 'active',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS archive_collection_items (
+    collection_id BIGINT NOT NULL REFERENCES archive_collections(id) ON DELETE CASCADE,
+    entry_id BIGINT NOT NULL REFERENCES community_archive_entries(id) ON DELETE CASCADE,
+    added_by BIGINT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (collection_id, entry_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS archive_collection_collaborators (
+    collection_id BIGINT NOT NULL REFERENCES archive_collections(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL,
+    role VARCHAR(16) NOT NULL CHECK (role IN ('editor','contributor')),
+    invited_by BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (collection_id, user_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS community_archive_collection_spotlights (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT,
+    visibility VARCHAR(16) NOT NULL CHECK (visibility IN ('server','global')),
+    collection_id BIGINT NOT NULL REFERENCES archive_collections(id) ON DELETE CASCADE,
+    curator_id BIGINT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    starts_at TIMESTAMPTZ NOT NULL,
+    ends_at TIMESTAMPTZ NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'published' CHECK (status IN ('published','cancelled')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (ends_at > starts_at),
+    CHECK ((visibility = 'server' AND guild_id IS NOT NULL) OR (visibility = 'global' AND guild_id IS NULL))
+  )`,
+  "CREATE INDEX IF NOT EXISTS community_archive_collection_spotlights_active_idx ON community_archive_collection_spotlights (visibility, guild_id, starts_at, ends_at) WHERE status = 'published'",
+  `CREATE TABLE IF NOT EXISTS archive_trails (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    owner_id BIGINT NOT NULL,
+    title VARCHAR(160) NOT NULL,
+    introduction TEXT NOT NULL DEFAULT '',
+    visibility VARCHAR(16) NOT NULL DEFAULT 'server',
+    status VARCHAR(16) NOT NULL DEFAULT 'active',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS archive_trail_steps (
+    trail_id BIGINT NOT NULL REFERENCES archive_trails(id) ON DELETE CASCADE,
+    step_number INTEGER NOT NULL,
+    entry_id BIGINT NOT NULL REFERENCES community_archive_entries(id) ON DELETE CASCADE,
+    explanation TEXT NOT NULL DEFAULT '',
+    added_by BIGINT NOT NULL,
+    PRIMARY KEY (trail_id, step_number),
+    UNIQUE (trail_id, entry_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS profile_preferences (
+    guild_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    public_profile BOOLEAN NOT NULL DEFAULT FALSE,
+    show_anilist BOOLEAN NOT NULL DEFAULT TRUE,
+    show_steam BOOLEAN NOT NULL DEFAULT TRUE,
+    allow_affinity BOOLEAN NOT NULL DEFAULT FALSE,
+    server_taste_opt_in BOOLEAN NOT NULL DEFAULT FALSE,
+    share_leaderboard BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (guild_id, user_id)
+  )`,
+  "ALTER TABLE profile_preferences ADD COLUMN IF NOT EXISTS share_leaderboard BOOLEAN NOT NULL DEFAULT FALSE",
+  `CREATE TABLE IF NOT EXISTS community_daily_schedules (
+    guild_id BIGINT PRIMARY KEY,
+    channel_id BIGINT NOT NULL,
+    time_zone VARCHAR(80) NOT NULL,
+    local_time VARCHAR(5) NOT NULL,
+    format VARCHAR(32) NOT NULL DEFAULT 'archive_spotlight',
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    next_run_at TIMESTAMPTZ NOT NULL,
+    created_by BIGINT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS community_daily_items (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    format VARCHAR(32) NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    content TEXT NOT NULL,
+    source_url TEXT,
+    options JSONB NOT NULL DEFAULT '[]'::JSONB,
+    created_by BIGINT NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    reviewed_by BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  "ALTER TABLE community_daily_items ADD COLUMN IF NOT EXISTS options JSONB NOT NULL DEFAULT '[]'::JSONB",
+  `CREATE TABLE IF NOT EXISTS community_daily_deliveries (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    scheduled_for TIMESTAMPTZ NOT NULL,
+    channel_id BIGINT NOT NULL,
+    item_id BIGINT REFERENCES community_daily_items(id) ON DELETE SET NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    message_id BIGINT,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (guild_id, scheduled_for)
+  )`,
+  "ALTER TABLE community_daily_deliveries ADD COLUMN IF NOT EXISTS claim_until TIMESTAMPTZ",
+  "ALTER TABLE community_daily_deliveries ADD COLUMN IF NOT EXISTS claim_token TEXT",
+  "ALTER TABLE community_daily_deliveries DROP CONSTRAINT IF EXISTS community_daily_deliveries_status_check",
+  "ALTER TABLE community_daily_deliveries ADD CONSTRAINT community_daily_deliveries_status_check CHECK (status IN ('pending','processing','sent','failed'))",
+  "CREATE INDEX IF NOT EXISTS community_daily_deliveries_claim_idx ON community_daily_deliveries (status, next_attempt_at, claim_until, created_at)",
+  `CREATE TABLE IF NOT EXISTS community_daily_poll_votes (
+    delivery_id BIGINT NOT NULL REFERENCES community_daily_deliveries(id) ON DELETE CASCADE,
+    guild_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    option_index SMALLINT NOT NULL CHECK (option_index BETWEEN 0 AND 4),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (delivery_id,user_id)
+  )`,
+  "CREATE INDEX IF NOT EXISTS community_daily_poll_votes_guild_idx ON community_daily_poll_votes (guild_id, delivery_id)",
+  `CREATE TABLE IF NOT EXISTS community_rankings (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    creator_id BIGINT NOT NULL,
+    title VARCHAR(180) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    status VARCHAR(16) NOT NULL DEFAULT 'open',
+    closes_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    closed_at TIMESTAMPTZ
+  )`,
+  "ALTER TABLE community_rankings ADD COLUMN IF NOT EXISTS legacy_source_key TEXT",
+  "CREATE UNIQUE INDEX IF NOT EXISTS community_rankings_legacy_source_idx ON community_rankings (legacy_source_key) WHERE legacy_source_key IS NOT NULL",
+  "ALTER TABLE community_rankings ADD COLUMN IF NOT EXISTS kind VARCHAR(24) NOT NULL DEFAULT 'ranking' CHECK (kind IN ('ranking','media_night'))",
+  "ALTER TABLE community_rankings ADD COLUMN IF NOT EXISTS allow_vote_changes BOOLEAN NOT NULL DEFAULT TRUE",
+  "ALTER TABLE community_rankings ADD COLUMN IF NOT EXISTS channel_id BIGINT",
+  "ALTER TABLE community_rankings ADD COLUMN IF NOT EXISTS results_attempts INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE community_rankings ADD COLUMN IF NOT EXISTS results_next_attempt_at TIMESTAMPTZ",
+  "ALTER TABLE community_rankings ADD COLUMN IF NOT EXISTS results_sent_at TIMESTAMPTZ",
+  "CREATE INDEX IF NOT EXISTS community_media_night_expiry_idx ON community_rankings (closes_at, results_next_attempt_at) WHERE kind = 'media_night'",
+
+  `CREATE TABLE IF NOT EXISTS community_ranking_candidates (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    ranking_id BIGINT NOT NULL REFERENCES community_rankings(id) ON DELETE CASCADE,
+    title VARCHAR(200) NOT NULL,
+    source_url TEXT,
+    submitted_by BIGINT NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'approved',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (ranking_id, title)
+  )`,
+  `CREATE TABLE IF NOT EXISTS community_ranking_votes (
+    ranking_id BIGINT NOT NULL REFERENCES community_rankings(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL,
+    candidate_id BIGINT NOT NULL REFERENCES community_ranking_candidates(id) ON DELETE CASCADE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (ranking_id, user_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS community_tournaments (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    creator_id BIGINT NOT NULL,
+    title VARCHAR(180) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    status VARCHAR(16) NOT NULL DEFAULT 'open' CHECK (status IN ('open','completed','cancelled')),
+    current_round SMALLINT NOT NULL DEFAULT 1,
+    rounds_total SMALLINT NOT NULL,
+    round_duration_hours SMALLINT NOT NULL DEFAULT 48 CHECK (round_duration_hours BETWEEN 1 AND 168),
+    closes_at TIMESTAMPTZ NOT NULL,
+    winner_candidate_id BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    closed_at TIMESTAMPTZ
+  )`,
+  `CREATE TABLE IF NOT EXISTS community_tournament_candidates (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    tournament_id BIGINT NOT NULL REFERENCES community_tournaments(id) ON DELETE CASCADE,
+    title VARCHAR(200) NOT NULL,
+    source_url TEXT NOT NULL,
+    submitted_by BIGINT NOT NULL,
+    seed SMALLINT NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'active' CHECK (status IN ('active','eliminated','champion','withdrawn')),
+    UNIQUE (tournament_id, seed),
+    UNIQUE (tournament_id, title)
+  )`,
+  `CREATE TABLE IF NOT EXISTS community_tournament_matches (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    tournament_id BIGINT NOT NULL REFERENCES community_tournaments(id) ON DELETE CASCADE,
+    round_number SMALLINT NOT NULL,
+    match_number SMALLINT NOT NULL,
+    candidate_a_id BIGINT NOT NULL REFERENCES community_tournament_candidates(id),
+    candidate_b_id BIGINT NOT NULL REFERENCES community_tournament_candidates(id),
+    winner_candidate_id BIGINT REFERENCES community_tournament_candidates(id),
+    decision VARCHAR(16) CHECK (decision IN ('votes','seed_tiebreak','withdrawal')),
+    status VARCHAR(16) NOT NULL DEFAULT 'open' CHECK (status IN ('open','completed')),
+    completed_at TIMESTAMPTZ,
+    UNIQUE (tournament_id, round_number, match_number),
+    CHECK (candidate_a_id <> candidate_b_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS community_tournament_votes (
+    match_id BIGINT NOT NULL REFERENCES community_tournament_matches(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL,
+    candidate_id BIGINT NOT NULL REFERENCES community_tournament_candidates(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (match_id, user_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS community_tournament_audit_log (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    tournament_id BIGINT NOT NULL REFERENCES community_tournaments(id) ON DELETE CASCADE,
+    guild_id BIGINT NOT NULL,
+    actor_id BIGINT NOT NULL,
+    action VARCHAR(32) NOT NULL CHECK (action IN ('created','candidate_withdrawn','round_advanced','completed','cancelled')),
+    candidate_id BIGINT REFERENCES community_tournament_candidates(id) ON DELETE SET NULL,
+    round_number SMALLINT,
+    details TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  "CREATE INDEX IF NOT EXISTS community_tournament_audit_guild_idx ON community_tournament_audit_log (guild_id, tournament_id, created_at DESC)",
+  "DO $candidate_status$ DECLARE constraint_definition TEXT; BEGIN " +
+    "SELECT pg_get_constraintdef(oid) INTO constraint_definition FROM pg_constraint " +
+    "WHERE conrelid = 'community_tournament_candidates'::regclass AND conname = 'community_tournament_candidates_status_check'; " +
+    "IF constraint_definition IS NULL THEN " +
+      "ALTER TABLE community_tournament_candidates ADD CONSTRAINT community_tournament_candidates_status_check " +
+      "CHECK (status IN ('active','eliminated','champion','withdrawn')); " +
+    "ELSIF position('withdrawn' IN constraint_definition) = 0 THEN " +
+      "ALTER TABLE community_tournament_candidates DROP CONSTRAINT community_tournament_candidates_status_check; " +
+      "ALTER TABLE community_tournament_candidates ADD CONSTRAINT community_tournament_candidates_status_check " +
+      "CHECK (status IN ('active','eliminated','champion','withdrawn')); " +
+    "END IF; END; $candidate_status$",
+  "DO $match_decision$ DECLARE constraint_definition TEXT; BEGIN " +
+    "SELECT pg_get_constraintdef(oid) INTO constraint_definition FROM pg_constraint " +
+    "WHERE conrelid = 'community_tournament_matches'::regclass AND conname = 'community_tournament_matches_decision_check'; " +
+    "IF constraint_definition IS NULL THEN " +
+      "ALTER TABLE community_tournament_matches ADD CONSTRAINT community_tournament_matches_decision_check " +
+      "CHECK (decision IN ('votes','seed_tiebreak','withdrawal')); " +
+    "ELSIF position('withdrawal' IN constraint_definition) = 0 THEN " +
+      "ALTER TABLE community_tournament_matches DROP CONSTRAINT community_tournament_matches_decision_check; " +
+      "ALTER TABLE community_tournament_matches ADD CONSTRAINT community_tournament_matches_decision_check " +
+      "CHECK (decision IN ('votes','seed_tiebreak','withdrawal')); " +
+    "END IF; END; $match_decision$",
+
+  "CREATE INDEX IF NOT EXISTS community_tournament_guild_status_idx ON community_tournaments (guild_id, status, created_at DESC)",
+  "CREATE INDEX IF NOT EXISTS community_tournament_match_round_idx ON community_tournament_matches (tournament_id, round_number, match_number)",
+  `CREATE TABLE IF NOT EXISTS community_seasons (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    creator_id BIGINT NOT NULL,
+    title VARCHAR(160) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    starts_at TIMESTAMPTZ NOT NULL,
+    ends_at TIMESTAMPTZ NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'open' CHECK (status IN ('open','completed','cancelled')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (ends_at > starts_at)
+  )`,
+  `CREATE TABLE IF NOT EXISTS community_season_items (
+    season_id BIGINT NOT NULL REFERENCES community_seasons(id) ON DELETE CASCADE,
+    item_type VARCHAR(24) NOT NULL CHECK (item_type IN ('daily_drop','ranking','session','tournament','spotlight','collection','trail','challenge','puzzle')),
+    item_id BIGINT NOT NULL,
+    added_by BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (season_id, item_type, item_id)
+  )`,
+  "ALTER TABLE community_season_items DROP CONSTRAINT IF EXISTS community_season_items_item_type_check",
+  "ALTER TABLE community_season_items ADD CONSTRAINT community_season_items_item_type_check CHECK (item_type IN ('daily_drop','ranking','session','tournament','spotlight','collection','trail','challenge','puzzle'))",
+  "CREATE INDEX IF NOT EXISTS community_seasons_guild_window_idx ON community_seasons (guild_id, starts_at, ends_at, status)",
+  `CREATE TABLE IF NOT EXISTS community_sessions (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    channel_id BIGINT NOT NULL,
+    creator_id BIGINT NOT NULL,
+    host_id BIGINT NOT NULL,
+    title VARCHAR(180) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    activity_type VARCHAR(16) NOT NULL CHECK (activity_type IN ('watch','read','play','discuss')),
+    media_title VARCHAR(200),
+    media_url TEXT,
+    scheduled_at TIMESTAMPTZ NOT NULL,
+    capacity INTEGER,
+    status VARCHAR(16) NOT NULL DEFAULT 'scheduled',
+    thread_id BIGINT,
+    scheduled_event_id BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  "ALTER TABLE community_sessions ADD COLUMN IF NOT EXISTS message_id BIGINT",
+  `CREATE TABLE IF NOT EXISTS community_session_nominations (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    channel_id BIGINT NOT NULL,
+    proposer_id BIGINT NOT NULL,
+    title VARCHAR(180) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    activity_type VARCHAR(16) NOT NULL CHECK (activity_type IN ('watch','read','play','discuss')),
+    media_title VARCHAR(200),
+    media_url TEXT,
+    scheduled_at TIMESTAMPTZ NOT NULL,
+    capacity INTEGER CHECK (capacity IS NULL OR capacity BETWEEN 2 AND 200),
+    status VARCHAR(16) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+    reviewed_by BIGINT,
+    reviewed_at TIMESTAMPTZ,
+    session_id BIGINT REFERENCES community_sessions(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  "CREATE INDEX IF NOT EXISTS community_session_nominations_pending_idx ON community_session_nominations (guild_id, status, created_at ASC)",
+  `CREATE TABLE IF NOT EXISTS community_session_rsvps (
+    session_id BIGINT NOT NULL REFERENCES community_sessions(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'going' CHECK (status IN ('going','waitlist','cancelled')),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (session_id, user_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS community_discussions (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    channel_id BIGINT NOT NULL,
+    creator_id BIGINT NOT NULL,
+    title VARCHAR(180) NOT NULL,
+    prompt TEXT NOT NULL,
+    media_title VARCHAR(200),
+    media_url TEXT,
+    spoiler_boundary VARCHAR(120),
+    spoiler_warning TEXT NOT NULL DEFAULT '',
+    thread_id BIGINT,
+    status VARCHAR(16) NOT NULL DEFAULT 'open',
+    closes_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS community_reading_nominations (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    channel_id BIGINT NOT NULL,
+    proposer_id BIGINT NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    category VARCHAR(24) NOT NULL CHECK (category IN ('manga','manhwa','manhua','webtoon','light novel','webnovel','book')),
+    source_url TEXT,
+    status VARCHAR(16) NOT NULL DEFAULT 'open' CHECK (status IN ('open','selected','closed')),
+    scheduled_at TIMESTAMPTZ,
+    thread_id BIGINT,
+    reminder_sent BOOLEAN NOT NULL DEFAULT FALSE,
+    last_reminder_attempt_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  "CREATE INDEX IF NOT EXISTS community_reading_nominations_guild_status_idx ON community_reading_nominations (guild_id,status,created_at DESC)",
+  `CREATE TABLE IF NOT EXISTS community_reading_votes (
+    guild_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    nomination_id BIGINT NOT NULL REFERENCES community_reading_nominations(id) ON DELETE CASCADE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (guild_id,user_id)
+  )`,
+  "CREATE INDEX IF NOT EXISTS community_reading_votes_nomination_idx ON community_reading_votes (guild_id,nomination_id)",
+
+  `CREATE TABLE IF NOT EXISTS community_quiz_packs (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    creator_id BIGINT NOT NULL,
+    title VARCHAR(160) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    mode VARCHAR(24) NOT NULL DEFAULT 'trivia',
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  "ALTER TABLE community_quiz_packs ADD COLUMN IF NOT EXISTS legacy_import_key TEXT",
+  "CREATE UNIQUE INDEX IF NOT EXISTS community_quiz_packs_legacy_import_idx ON community_quiz_packs (legacy_import_key) WHERE legacy_import_key IS NOT NULL",
+  `CREATE TABLE IF NOT EXISTS community_quiz_questions (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    pack_id BIGINT NOT NULL REFERENCES community_quiz_packs(id) ON DELETE CASCADE,
+    contributor_id BIGINT NOT NULL,
+    media_title VARCHAR(200),
+    question TEXT NOT NULL,
+    correct_answer VARCHAR(200) NOT NULL,
+    accepted_answers TEXT[] NOT NULL DEFAULT '{}',
+    options JSONB NOT NULL DEFAULT '[]'::JSONB,
+    source_url TEXT NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    reviewed_by BIGINT,
+    revision INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  "ALTER TABLE community_quiz_questions ADD COLUMN IF NOT EXISTS difficulty VARCHAR(12) NOT NULL DEFAULT 'standard'",
+  "ALTER TABLE community_quiz_questions ADD COLUMN IF NOT EXISTS clues JSONB NOT NULL DEFAULT '[]'::JSONB",
+  `CREATE TABLE IF NOT EXISTS community_quiz_question_revisions (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    question_id BIGINT NOT NULL REFERENCES community_quiz_questions(id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL, snapshot JSONB NOT NULL, changed_by BIGINT NOT NULL,
+    changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE (question_id, revision)
+  )`,
+  "CREATE INDEX IF NOT EXISTS community_quiz_question_revisions_history_idx ON community_quiz_question_revisions (question_id, revision DESC)",
+  "ALTER TABLE community_quiz_questions ADD COLUMN IF NOT EXISTS source_legacy_question_id BIGINT",
+  "CREATE UNIQUE INDEX IF NOT EXISTS community_quiz_questions_legacy_source_idx ON community_quiz_questions (source_legacy_question_id) WHERE source_legacy_question_id IS NOT NULL",
+  `CREATE TABLE IF NOT EXISTS community_game_sessions (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    channel_id BIGINT NOT NULL,
+    message_id BIGINT,
+    pack_id BIGINT NOT NULL REFERENCES community_quiz_packs(id),
+    host_id BIGINT NOT NULL,
+    question_ids BIGINT[] NOT NULL,
+    current_round INTEGER NOT NULL DEFAULT 0,
+    status VARCHAR(16) NOT NULL DEFAULT 'active',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at TIMESTAMPTZ
+  )`,
+  "ALTER TABLE community_game_sessions ADD COLUMN IF NOT EXISTS clue_index INTEGER NOT NULL DEFAULT 0",
+  `CREATE TABLE IF NOT EXISTS community_game_answers (
+    session_id BIGINT NOT NULL REFERENCES community_game_sessions(id) ON DELETE CASCADE,
+    round_number INTEGER NOT NULL,
+    question_id BIGINT NOT NULL REFERENCES community_quiz_questions(id),
+    user_id BIGINT NOT NULL,
+    answer TEXT NOT NULL,
+    is_correct BOOLEAN NOT NULL,
+    answered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (session_id, round_number, user_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS community_game_participants (
+    session_id BIGINT NOT NULL REFERENCES community_game_sessions(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL,
+    joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (session_id, user_id)
+  )`,
+  "ALTER TABLE community_game_sessions ADD COLUMN IF NOT EXISTS game_mode VARCHAR(16) NOT NULL DEFAULT 'individual'",
+  `CREATE TABLE IF NOT EXISTS community_game_teams (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    session_id BIGINT NOT NULL REFERENCES community_game_sessions(id) ON DELETE CASCADE,
+    team_number SMALLINT NOT NULL CHECK (team_number BETWEEN 1 AND 2),
+    name VARCHAR(40) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (session_id, team_number),
+    UNIQUE (session_id, name)
+  )`,
+  "ALTER TABLE community_game_participants ADD COLUMN IF NOT EXISTS team_id BIGINT REFERENCES community_game_teams(id) ON DELETE SET NULL",
+  "CREATE INDEX IF NOT EXISTS community_game_participants_team_idx ON community_game_participants (team_id, session_id)",
+  "CREATE INDEX IF NOT EXISTS community_game_answers_user_idx ON community_game_answers (session_id, user_id)",
+  `CREATE TABLE IF NOT EXISTS guild_retention_settings (
+    guild_id BIGINT PRIMARY KEY,
+    invited_by BIGINT,
+    leave_action VARCHAR(16) CHECK (leave_action IN ('delete','retain')),
+    updated_by BIGINT,
+    deleted_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  "ALTER TABLE guild_retention_settings ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
+  `CREATE TABLE IF NOT EXISTS guild_language_settings (
+    guild_id BIGINT PRIMARY KEY,
+    language_code VARCHAR(8) NOT NULL,
+    updated_by BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  "CREATE INDEX IF NOT EXISTS guild_language_settings_code_idx ON guild_language_settings (language_code)",
+  `CREATE TABLE IF NOT EXISTS translation_cache (
+    source_language VARCHAR(8) NOT NULL,
+    target_language VARCHAR(8) NOT NULL,
+    source_hash CHAR(64) NOT NULL,
+    translated_text TEXT NOT NULL,
+    provider VARCHAR(24) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (source_language, target_language, source_hash)
+  )`,
+  `CREATE TABLE IF NOT EXISTS guild_feature_settings (
+    guild_id BIGINT NOT NULL,
+    feature_name VARCHAR(32) NOT NULL CHECK (feature_name IN ('discover','archive','community','play','profile','custom-role','music')),
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_by BIGINT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (guild_id, feature_name)
+  )`,
+  "ALTER TABLE guild_feature_settings DROP CONSTRAINT IF EXISTS guild_feature_settings_feature_name_check",
+  "ALTER TABLE guild_feature_settings ADD CONSTRAINT guild_feature_settings_feature_name_check CHECK (feature_name IN ('discover','archive','community','play','profile','custom-role','music'))",
+  `CREATE TABLE IF NOT EXISTS media_relationship_graph (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    source_title VARCHAR(256) NOT NULL,
+    source_title_key VARCHAR(256) NOT NULL,
+    source_category VARCHAR(32) NOT NULL,
+    source_url TEXT,
+    target_title VARCHAR(256) NOT NULL,
+    target_title_key VARCHAR(256) NOT NULL,
+    target_category VARCHAR(32) NOT NULL,
+    target_url TEXT,
+    relationship_type VARCHAR(64) NOT NULL,
+    source_kind VARCHAR(24) NOT NULL CHECK (source_kind IN ('provider','recommendation','community')),
+    source_label VARCHAR(100) NOT NULL,
+    guild_id BIGINT,
+    evidence TEXT,
+    created_by BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  "ALTER TABLE media_relationship_graph ADD COLUMN IF NOT EXISTS source_image_url TEXT",
+  "ALTER TABLE media_relationship_graph ADD COLUMN IF NOT EXISTS target_image_url TEXT",
+  "ALTER TABLE media_relationship_graph ADD COLUMN IF NOT EXISTS source_provider VARCHAR(40)",
+  "ALTER TABLE media_relationship_graph ADD COLUMN IF NOT EXISTS source_provider_id VARCHAR(128)",
+  "ALTER TABLE media_relationship_graph ADD COLUMN IF NOT EXISTS target_provider VARCHAR(40)",
+  "ALTER TABLE media_relationship_graph ADD COLUMN IF NOT EXISTS target_provider_id VARCHAR(128)",
+  
+  "CREATE INDEX IF NOT EXISTS media_relationship_graph_source_idx ON media_relationship_graph (source_title_key, source_category, created_at DESC)",
+  "CREATE INDEX IF NOT EXISTS media_relationship_graph_target_idx ON media_relationship_graph (target_title_key, target_category, created_at DESC)",
+  "CREATE INDEX IF NOT EXISTS media_relationship_graph_guild_idx ON media_relationship_graph (guild_id, source_kind, created_at DESC)",
+  "CREATE INDEX IF NOT EXISTS media_relationship_graph_source_provider_idx ON media_relationship_graph (source_category, source_provider, source_provider_id) WHERE source_provider IS NOT NULL AND source_provider_id IS NOT NULL",
+  "CREATE INDEX IF NOT EXISTS media_relationship_graph_target_provider_idx ON media_relationship_graph (target_category, target_provider, target_provider_id) WHERE target_provider IS NOT NULL AND target_provider_id IS NOT NULL",
+  `CREATE UNIQUE INDEX IF NOT EXISTS media_relationship_graph_provider_identity_idx
+    ON media_relationship_graph (
+      source_category,source_provider,source_provider_id,target_category,target_provider,target_provider_id,
+      relationship_type,source_kind,COALESCE(guild_id,0)
+    )
+    WHERE source_provider IS NOT NULL AND source_provider_id IS NOT NULL
+      AND target_provider IS NOT NULL AND target_provider_id IS NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS media_relationship_graph_identity_idx
+    ON media_relationship_graph (
+      source_title_key,source_category,COALESCE(source_url,''),target_title_key,target_category,
+      COALESCE(target_url,''),relationship_type,source_kind,COALESCE(guild_id,0)
+    )`,
+  `CREATE TABLE IF NOT EXISTS media_link_suggestions (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    submitter_id BIGINT NOT NULL,
+    source_title VARCHAR(200) NOT NULL,
+    source_category VARCHAR(32) NOT NULL,
+    source_url TEXT NOT NULL,
+    relationship_type VARCHAR(64) NOT NULL,
+    target_title VARCHAR(200) NOT NULL,
+    target_category VARCHAR(32) NOT NULL,
+    target_url TEXT NOT NULL,
+    evidence VARCHAR(1500) NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending'
+      CHECK (status IN ('pending','approved','rejected')),
+    reviewer_id BIGINT,
+    review_reason VARCHAR(1000),
+    reviewed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  "CREATE INDEX IF NOT EXISTS media_link_suggestions_guild_pending_idx ON media_link_suggestions (guild_id,status,created_at ASC)",
+
+  `CREATE TABLE IF NOT EXISTS custom_role_records (
+    guild_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    role_id BIGINT,
+    status TEXT NOT NULL DEFAULT 'active',
+    name VARCHAR(100),
+    color_mode TEXT NOT NULL DEFAULT 'solid',
+    primary_color INTEGER,
+    secondary_color INTEGER,
+    icon_png BYTEA,
+    position_hint INTEGER,
+    last_changed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    icon_emoji TEXT,
+    icon_source BYTEA,
+    icon_crop TEXT,
+    icon_source_asset_id BIGINT,
+    PRIMARY KEY (guild_id, user_id)
+  )`,
+  "ALTER TABLE custom_role_records ADD COLUMN IF NOT EXISTS secondary_color INTEGER",
+  "ALTER TABLE custom_role_records ADD COLUMN IF NOT EXISTS icon_png BYTEA",
+  "ALTER TABLE custom_role_records ADD COLUMN IF NOT EXISTS position_hint INTEGER",
+  "ALTER TABLE custom_role_records ADD COLUMN IF NOT EXISTS last_changed_at TIMESTAMPTZ",
+  "ALTER TABLE custom_role_records ADD COLUMN IF NOT EXISTS icon_emoji TEXT",
+  "ALTER TABLE custom_role_records ADD COLUMN IF NOT EXISTS icon_source BYTEA",
+  "ALTER TABLE custom_role_records ADD COLUMN IF NOT EXISTS icon_crop TEXT",
+  "ALTER TABLE custom_role_records ADD COLUMN IF NOT EXISTS icon_source_asset_id BIGINT",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_custom_role_records_role_id ON custom_role_records (role_id) WHERE role_id IS NOT NULL",
+  `CREATE TABLE IF NOT EXISTS custom_role_guild_settings (
+    guild_id BIGINT PRIMARY KEY,
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    anchor_role_id BIGINT,
+    command_channel_id BIGINT,
+    log_channel_id BIGINT,
+    cooldown_seconds INTEGER NOT NULL DEFAULT 0,
+    allowed_role_ids TEXT NOT NULL DEFAULT '[]',
+    blocked_words TEXT NOT NULL DEFAULT '[]',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    anchor_place TEXT NOT NULL DEFAULT 'below',
+    removed_default_words TEXT NOT NULL DEFAULT '[]'
+  )`,
+  "ALTER TABLE custom_role_guild_settings ADD COLUMN IF NOT EXISTS anchor_place TEXT NOT NULL DEFAULT 'below'",
+  "ALTER TABLE custom_role_guild_settings ADD COLUMN IF NOT EXISTS removed_default_words TEXT NOT NULL DEFAULT '[]'",
+  "CREATE TABLE IF NOT EXISTS custom_role_pending_removals (id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, guild_id BIGINT NOT NULL, user_ids JSONB NOT NULL DEFAULT '[]'::JSONB, reason TEXT NOT NULL, status VARCHAR(16) NOT NULL DEFAULT 'pending', log_channel_id BIGINT, log_message_id BIGINT, resolved_by BIGINT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), resolved_at TIMESTAMPTZ)",
+  "CREATE INDEX IF NOT EXISTS custom_role_pending_guild_status_idx ON custom_role_pending_removals (guild_id, status, id DESC)",
+  "CREATE TABLE IF NOT EXISTS custom_role_archive_snoozes (guild_id BIGINT NOT NULL, user_id BIGINT NOT NULL, until TIMESTAMPTZ NOT NULL, PRIMARY KEY (guild_id, user_id))",
+  `CREATE TABLE IF NOT EXISTS dashboard_audit_log (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    actor_id BIGINT NOT NULL,
+    action VARCHAR(64) NOT NULL,
+    details TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  "CREATE INDEX IF NOT EXISTS dashboard_audit_log_guild_idx ON dashboard_audit_log (guild_id, created_at DESC)",
+  "CREATE INDEX IF NOT EXISTS dashboard_audit_log_guild_id_idx ON dashboard_audit_log (guild_id, id DESC)",
+
+  `CREATE TABLE IF NOT EXISTS connected_media_guild_settings (
+    guild_id BIGINT PRIMARY KEY,
+    release_region VARCHAR(2) NOT NULL DEFAULT 'IE',
+    updated_by BIGINT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  "ALTER TABLE connected_media_guild_settings ADD COLUMN IF NOT EXISTS updated_by BIGINT",
+  `CREATE TABLE IF NOT EXISTS media_notification_settings (
+    guild_id BIGINT PRIMARY KEY,
+    channel_id BIGINT,
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    include_anime BOOLEAN NOT NULL DEFAULT TRUE,
+    include_manga BOOLEAN NOT NULL DEFAULT TRUE,
+    include_movies BOOLEAN NOT NULL DEFAULT FALSE,
+    include_tv BOOLEAN NOT NULL DEFAULT FALSE,
+    include_games BOOLEAN NOT NULL DEFAULT FALSE,
+    last_run_at TIMESTAMPTZ,
+    updated_by BIGINT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  "ALTER TABLE media_notification_settings ADD COLUMN IF NOT EXISTS include_movies BOOLEAN NOT NULL DEFAULT FALSE",
+  "ALTER TABLE media_notification_settings ADD COLUMN IF NOT EXISTS include_tv BOOLEAN NOT NULL DEFAULT FALSE",
+  "ALTER TABLE media_notification_settings ADD COLUMN IF NOT EXISTS include_games BOOLEAN NOT NULL DEFAULT FALSE",
+  `CREATE TABLE IF NOT EXISTS media_notification_deliveries (
+    guild_id BIGINT NOT NULL,
+    media_type VARCHAR(8) NOT NULL CHECK (media_type IN ('ANIME','MANGA')),
+    media_id BIGINT NOT NULL,
+    delivered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (guild_id, media_type, media_id)
+  )`,
+  "CREATE INDEX IF NOT EXISTS media_notification_deliveries_guild_idx ON media_notification_deliveries (guild_id, delivered_at DESC)",
+  `CREATE TABLE IF NOT EXISTS guild_media_follows (
+    guild_id BIGINT NOT NULL,
+    anilist_id INTEGER NOT NULL CHECK (anilist_id > 0),
+    title VARCHAR(200) NOT NULL,
+    site_url TEXT NOT NULL,
+    cover_image TEXT,
+    next_episode INTEGER,
+    next_airing_at TIMESTAMPTZ,
+    last_notified_episode INTEGER NOT NULL DEFAULT 0,
+    followed_by BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (guild_id, anilist_id)
+  )`,
+  "CREATE INDEX IF NOT EXISTS guild_media_follows_guild_idx ON guild_media_follows (guild_id, anilist_id)",
+  `CREATE TABLE IF NOT EXISTS guild_media_follow_deliveries (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    anilist_id INTEGER NOT NULL,
+    episode_number INTEGER NOT NULL CHECK (episode_number > 0),
+    scheduled_for TIMESTAMPTZ NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    site_url TEXT NOT NULL,
+    cover_image TEXT,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','processing','sent','failed')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    claim_until TIMESTAMPTZ,
+    claim_token TEXT,
+    message_id BIGINT,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (guild_id, anilist_id, episode_number),
+    FOREIGN KEY (guild_id, anilist_id) REFERENCES guild_media_follows(guild_id, anilist_id) ON DELETE CASCADE
+  )`,
+  "CREATE INDEX IF NOT EXISTS guild_media_follow_deliveries_due_idx ON guild_media_follow_deliveries (status, next_attempt_at, claim_until, created_at)",
+
+  `CREATE TABLE IF NOT EXISTS media_follow_subscriptions (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    follow_type VARCHAR(16) NOT NULL CHECK (follow_type IN ('title','creator','franchise','category')),
+    target_kind VARCHAR(16) NOT NULL CHECK (target_kind IN ('ANIME','MANGA','STAFF','STUDIO')),
+    target_id VARCHAR(120) NOT NULL,
+    media_type VARCHAR(8) CHECK (media_type IN ('ANIME','MANGA')),
+    title VARCHAR(200) NOT NULL,
+    site_url TEXT NOT NULL,
+    cover_image TEXT,
+    snapshot JSONB NOT NULL DEFAULT '{}'::JSONB,
+    followed_by BIGINT NOT NULL,
+    last_checked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (guild_id, follow_type, target_kind, target_id),
+    UNIQUE (id, guild_id)
+  )`,
+  "CREATE INDEX IF NOT EXISTS media_follow_subscriptions_due_idx ON media_follow_subscriptions (last_checked_at, guild_id)",
+  `CREATE TABLE IF NOT EXISTS media_follow_deliveries (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    subscription_id BIGINT NOT NULL,
+    event_key CHAR(64) NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    site_url TEXT NOT NULL,
+    cover_image TEXT,
+    description TEXT NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','processing','sent','failed')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    claim_until TIMESTAMPTZ,
+    claim_token TEXT,
+    message_id BIGINT,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (subscription_id, event_key),
+    FOREIGN KEY (subscription_id, guild_id) REFERENCES media_follow_subscriptions(id, guild_id) ON DELETE CASCADE
+  )`,
+  "CREATE INDEX IF NOT EXISTS media_follow_deliveries_due_idx ON media_follow_deliveries (status, next_attempt_at, claim_until, created_at)",
+  `CREATE TABLE IF NOT EXISTS media_release_notification_deliveries (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    event_key CHAR(64) NOT NULL,
+    category VARCHAR(16) NOT NULL CHECK (category IN ('anime','movies','tv','games')),
+    title VARCHAR(240) NOT NULL,
+    provider VARCHAR(80) NOT NULL,
+    source_url TEXT NOT NULL,
+    release_at TIMESTAMPTZ NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','processing','sent','failed')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    claim_until TIMESTAMPTZ,
+    claim_token TEXT,
+    message_id BIGINT,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (guild_id, event_key)
+  )`,
+  "CREATE INDEX IF NOT EXISTS media_release_notification_due_idx ON media_release_notification_deliveries (status, release_at, next_attempt_at, claim_until)",
+  `CREATE TABLE IF NOT EXISTS community_release_schedules (
+    guild_id BIGINT PRIMARY KEY,
+    channel_id BIGINT NOT NULL,
+    time_zone VARCHAR(80) NOT NULL,
+    local_time VARCHAR(5) NOT NULL CHECK (local_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'),
+    cadence VARCHAR(8) NOT NULL CHECK (cadence IN ('daily','weekly')),
+    weekday SMALLINT NOT NULL DEFAULT 1 CHECK (weekday BETWEEN 0 AND 6),
+    categories TEXT[] NOT NULL DEFAULT ARRAY['anime','tv','movies']::TEXT[],
+    region VARCHAR(2) NOT NULL DEFAULT 'IE' CHECK (region ~ '^[A-Z]{2}$'),
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    next_run_at TIMESTAMPTZ NOT NULL,
+    created_by BIGINT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS community_release_deliveries (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    scheduled_for TIMESTAMPTZ NOT NULL,
+    channel_id BIGINT NOT NULL,
+    window_start TIMESTAMPTZ NOT NULL,
+    window_end TIMESTAMPTZ NOT NULL,
+    categories TEXT[] NOT NULL,
+    region VARCHAR(2) NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','sent')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    message_id BIGINT,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (guild_id, scheduled_for)
+  )`,
+  "ALTER TABLE community_release_deliveries ADD COLUMN IF NOT EXISTS claim_until TIMESTAMPTZ",
+  "ALTER TABLE community_release_deliveries ADD COLUMN IF NOT EXISTS claim_token TEXT",
+  "ALTER TABLE community_release_deliveries DROP CONSTRAINT IF EXISTS community_release_deliveries_status_check",
+  "ALTER TABLE community_release_deliveries ADD CONSTRAINT community_release_deliveries_status_check CHECK (status IN ('pending','processing','sent','failed'))",
+  "CREATE INDEX IF NOT EXISTS community_release_deliveries_claim_idx ON community_release_deliveries (status, next_attempt_at, claim_until, created_at)",
+  "CREATE INDEX IF NOT EXISTS community_release_deliveries_due_idx ON community_release_deliveries (next_attempt_at, created_at) WHERE status = 'pending'",
+  "ALTER TABLE community_release_schedules ADD COLUMN IF NOT EXISTS entity_types TEXT[] NOT NULL DEFAULT ARRAY['title','creator','franchise','category','episodes']::TEXT[]",
+  "ALTER TABLE community_release_schedules ADD COLUMN IF NOT EXISTS entity_ids TEXT[] NOT NULL DEFAULT ARRAY['all']::TEXT[]",
+  "ALTER TABLE community_release_deliveries ADD COLUMN IF NOT EXISTS entity_types TEXT[] NOT NULL DEFAULT ARRAY['title','creator','franchise','category','episodes']::TEXT[]",
+  "ALTER TABLE community_release_deliveries ADD COLUMN IF NOT EXISTS entity_ids TEXT[] NOT NULL DEFAULT ARRAY['all']::TEXT[]",
+  "ALTER TABLE community_release_deliveries ADD COLUMN IF NOT EXISTS time_zone VARCHAR(80) NOT NULL DEFAULT 'UTC'",
+  `CREATE TABLE IF NOT EXISTS community_media_automation_rules (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    channel_id BIGINT NOT NULL,
+    categories TEXT[] NOT NULL CHECK (cardinality(categories) > 0 AND categories <@ ARRAY['anime','tv','movies']::TEXT[]),
+    region VARCHAR(2) NOT NULL CHECK (region ~ '^[A-Z]{2}$'),
+    action VARCHAR(16) NOT NULL CHECK (action IN ('announce','discussion')),
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    next_check_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    claim_until TIMESTAMPTZ,
+    claim_token TEXT,
+    created_by BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (guild_id, name)
+  )`,
+  "CREATE INDEX IF NOT EXISTS community_media_automation_rules_due_idx ON community_media_automation_rules (enabled, next_check_at, claim_until)",
+  `CREATE TABLE IF NOT EXISTS community_media_automation_deliveries (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    rule_id BIGINT NOT NULL REFERENCES community_media_automation_rules(id) ON DELETE CASCADE,
+    guild_id BIGINT NOT NULL,
+    event_key CHAR(64) NOT NULL,
+    title VARCHAR(240) NOT NULL,
+    provider VARCHAR(64) NOT NULL,
+    source_url TEXT NOT NULL,
+    release_at TIMESTAMPTZ NOT NULL,
+    discussion_id BIGINT,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','processing','sent','failed')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    claim_until TIMESTAMPTZ,
+    claim_token TEXT,
+    message_id BIGINT,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (rule_id, event_key)
+  )`,
+  "CREATE INDEX IF NOT EXISTS community_media_automation_deliveries_due_idx ON community_media_automation_deliveries (status, next_attempt_at, claim_until)",
+  `CREATE TABLE IF NOT EXISTS bot_database_backups (
+    id UUID PRIMARY KEY,
+    object_key TEXT NOT NULL UNIQUE,
+    sha256 CHAR(64) NOT NULL,
+    size_bytes BIGINT NOT NULL DEFAULT 0,
+    status VARCHAR(16) NOT NULL DEFAULT 'creating' CHECK (status IN ('creating','verified','failed')),
+    created_by BIGINT NOT NULL,
+    verification_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    verified_at TIMESTAMPTZ
+  )`,
+  "ALTER TABLE bot_database_backups ADD COLUMN IF NOT EXISTS rehearsal_status VARCHAR(16) NOT NULL DEFAULT 'not_run' CHECK (rehearsal_status IN ('not_run','passed','failed'))",
+  "ALTER TABLE bot_database_backups ADD COLUMN IF NOT EXISTS rehearsal_error TEXT",
+  "ALTER TABLE bot_database_backups ADD COLUMN IF NOT EXISTS rehearsal_at TIMESTAMPTZ",
+  "CREATE INDEX IF NOT EXISTS bot_database_backups_created_idx ON bot_database_backups (created_at DESC)",
+  `CREATE TABLE IF NOT EXISTS music_trackers (
+    id TEXT NOT NULL,
+    guild_id BIGINT NOT NULL,
+    channel_id BIGINT NOT NULL,
+    artist_name TEXT NOT NULL,
+    providers TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    spotify_target TEXT,
+    youtube_target TEXT,
+    soundcloud_target TEXT,
+    mention_mode VARCHAR(16) NOT NULL DEFAULT 'user' CHECK (mention_mode IN ('user','role','none')),
+    mention_user_id BIGINT,
+    mention_role_id BIGINT,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_checked_at TIMESTAMPTZ,
+    seen_ids TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (guild_id, id),
+    CHECK (providers <@ ARRAY['spotify','youtube','soundcloud']::TEXT[])
+  )`,
+  "CREATE INDEX IF NOT EXISTS music_trackers_poll_idx ON music_trackers (guild_id, enabled, created_at)",
+,
+  `CREATE TABLE IF NOT EXISTS media_timeline_provider_events (
+    provider TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    sequence_type TEXT NOT NULL CHECK (sequence_type IN ('in-universe','publication','release','adaptation','continuity')),
+    event_key TEXT NOT NULL,
+    title TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    date_value TEXT,
+    date_precision TEXT NOT NULL CHECK (date_precision IN ('day','month','year','unknown')),
+    source_name TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    region TEXT,
+    platform TEXT,
+    continuity TEXT,
+    observed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (provider, provider_id, sequence_type, event_key)
+  )`,
+  "CREATE INDEX IF NOT EXISTS media_timeline_provider_events_order_idx ON media_timeline_provider_events (provider, provider_id, sequence_type, date_value)",
+  `CREATE TABLE IF NOT EXISTS timeline_correction_requests (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    provider TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    entity_title TEXT NOT NULL,
+    sequence_type TEXT NOT NULL CHECK (sequence_type IN ('in-universe','publication','release','adaptation','continuity')),
+    event_key TEXT NOT NULL,
+    field_name TEXT NOT NULL CHECK (field_name IN ('date','event_type','continuity','region','platform')),
+    proposed_value TEXT NOT NULL,
+    evidence_url TEXT NOT NULL,
+    created_by BIGINT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+    reviewed_by BIGINT,
+    review_note TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at TEXT
+  )`,
+  "CREATE INDEX IF NOT EXISTS timeline_correction_requests_guild_status_idx ON timeline_correction_requests (guild_id, status, created_at DESC)",
+  `CREATE TABLE IF NOT EXISTS industry_directory_pins (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    provider TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    category TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    pinned_by BIGINT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (guild_id, provider, provider_id)
+  )`,
+  "CREATE INDEX IF NOT EXISTS industry_directory_pins_guild_idx ON industry_directory_pins (guild_id, category, display_name)",
+  `CREATE TABLE IF NOT EXISTS industry_correction_requests (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    provider TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    organization_name TEXT NOT NULL,
+    field_name TEXT NOT NULL,
+    proposed_value TEXT NOT NULL,
+    evidence_url TEXT NOT NULL,
+    created_by BIGINT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+    reviewed_by BIGINT,
+    review_note TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at TEXT
+  )`,
+,
+  `CREATE TABLE IF NOT EXISTS industry_identity_links (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    source_provider TEXT NOT NULL,
+    source_provider_id TEXT NOT NULL,
+    source_name TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    target_provider TEXT NOT NULL,
+    target_provider_id TEXT NOT NULL,
+    target_name TEXT NOT NULL,
+    target_url TEXT NOT NULL,
+    evidence_url TEXT NOT NULL,
+    created_by BIGINT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+    reviewed_by BIGINT,
+    review_note TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at TEXT,
+    UNIQUE (guild_id,source_provider,source_provider_id,target_provider,target_provider_id)
+  )`,
+  "CREATE INDEX IF NOT EXISTS industry_identity_links_guild_status_idx ON industry_identity_links (guild_id,status,created_at)",
+  `CREATE TABLE IF NOT EXISTS identify_cases (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    owner_id BIGINT NOT NULL,
+    channel_id BIGINT,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    media_category TEXT,
+    year_hint TEXT,
+    language TEXT,
+    region TEXT,
+    platform TEXT,
+    visibility TEXT NOT NULL DEFAULT 'guild' CHECK (visibility IN ('guild','restricted')),
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','solved','unresolved','closed')),
+    solved_candidate_id BIGINT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    closed_at TEXT
+  )`,
+  "CREATE INDEX IF NOT EXISTS identify_cases_guild_status_idx ON identify_cases (guild_id, status, created_at DESC)",
+  `CREATE TABLE IF NOT EXISTS identify_candidates (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    case_id BIGINT NOT NULL REFERENCES identify_cases(id) ON DELETE CASCADE,
+    guild_id BIGINT NOT NULL,
+    title TEXT NOT NULL,
+    source_url TEXT,
+    provider TEXT,
+    provider_id TEXT,
+    explanation TEXT NOT NULL,
+    submitted_by BIGINT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','accepted','rejected')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "CREATE INDEX IF NOT EXISTS identify_candidates_case_idx ON identify_candidates (guild_id, case_id, status, created_at)",
+  `CREATE TABLE IF NOT EXISTS identify_evidence (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    case_id BIGINT NOT NULL REFERENCES identify_cases(id) ON DELETE CASCADE,
+    guild_id BIGINT NOT NULL,
+    candidate_id BIGINT REFERENCES identify_candidates(id) ON DELETE CASCADE,
+    description TEXT NOT NULL,
+    source_url TEXT,
+    submitted_by BIGINT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "CREATE INDEX IF NOT EXISTS identify_evidence_case_idx ON identify_evidence (guild_id, case_id, created_at)",
+  `CREATE TABLE IF NOT EXISTS identify_candidate_votes (
+    guild_id BIGINT NOT NULL,
+    case_id BIGINT NOT NULL REFERENCES identify_cases(id) ON DELETE CASCADE,
+    candidate_id BIGINT NOT NULL REFERENCES identify_candidates(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL,
+    stance TEXT NOT NULL CHECK (stance IN ('support','challenge')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (guild_id, candidate_id, user_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS identify_case_reports (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    case_id BIGINT NOT NULL REFERENCES identify_cases(id) ON DELETE CASCADE,
+    reported_by BIGINT NOT NULL,
+    reason TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','reviewed','dismissed')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "CREATE INDEX IF NOT EXISTS identify_reports_guild_status_idx ON identify_case_reports (guild_id, status, created_at DESC)",
+  `CREATE TABLE IF NOT EXISTS exchange_requests (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    owner_id BIGINT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    media_category TEXT,
+    preferences TEXT,
+    exclusions TEXT,
+    visibility TEXT NOT NULL DEFAULT 'guild' CHECK (visibility IN ('guild','restricted')),
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','solved','closed')),
+    closes_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "CREATE INDEX IF NOT EXISTS exchange_requests_guild_status_idx ON exchange_requests (guild_id, status, created_at DESC)",
+  `CREATE TABLE IF NOT EXISTS exchange_candidates (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    request_id BIGINT NOT NULL REFERENCES exchange_requests(id) ON DELETE CASCADE,
+    guild_id BIGINT NOT NULL,
+    title TEXT NOT NULL,
+    source_url TEXT,
+    provider TEXT,
+    provider_id TEXT,
+    explanation TEXT NOT NULL,
+    caveat TEXT,
+    submitted_by BIGINT NOT NULL,
+    is_shortlisted INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','removed')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "CREATE INDEX IF NOT EXISTS exchange_candidates_request_idx ON exchange_candidates (guild_id, request_id, status, created_at)",
+  `CREATE TABLE IF NOT EXISTS exchange_candidate_feedback (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    request_id BIGINT NOT NULL REFERENCES exchange_requests(id) ON DELETE CASCADE,
+    candidate_id BIGINT NOT NULL REFERENCES exchange_candidates(id) ON DELETE CASCADE,
+    owner_id BIGINT NOT NULL,
+    feedback TEXT NOT NULL CHECK (feedback IN ('good_match','not_match')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (guild_id,request_id,candidate_id,owner_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS exchange_clarifications (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    request_id BIGINT NOT NULL REFERENCES exchange_requests(id) ON DELETE CASCADE,
+    candidate_id BIGINT REFERENCES exchange_candidates(id) ON DELETE CASCADE,
+    author_id BIGINT NOT NULL,
+    message TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS exchange_candidate_reports (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    request_id BIGINT NOT NULL REFERENCES exchange_requests(id) ON DELETE CASCADE,
+    candidate_id BIGINT NOT NULL REFERENCES exchange_candidates(id) ON DELETE CASCADE,
+    reported_by BIGINT NOT NULL,
+    reason TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','reviewed','dismissed')),
+    reviewed_by BIGINT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at TEXT
+  )`,
+  "CREATE INDEX IF NOT EXISTS exchange_feedback_owner_idx ON exchange_candidate_feedback (guild_id,request_id,owner_id)",
+  "CREATE INDEX IF NOT EXISTS exchange_clarifications_request_idx ON exchange_clarifications (guild_id,request_id,created_at)",
+  "CREATE INDEX IF NOT EXISTS exchange_candidate_reports_status_idx ON exchange_candidate_reports (guild_id,status,created_at)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS exchange_candidate_reports_once_idx ON exchange_candidate_reports (guild_id,request_id,candidate_id,reported_by)",
+  `CREATE TABLE IF NOT EXISTS relay_chains (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    owner_id BIGINT NOT NULL,
+    title TEXT NOT NULL,
+    premise TEXT NOT NULL,
+    contribution_limit INTEGER NOT NULL DEFAULT 20 CHECK (contribution_limit BETWEEN 2 AND 100),
+    review_mode TEXT NOT NULL DEFAULT 'owner' CHECK (review_mode IN ('owner','automatic')),
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('draft','open','paused','completed','cancelled')),
+    current_turn INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "CREATE INDEX IF NOT EXISTS relay_chains_guild_status_idx ON relay_chains (guild_id, status, created_at DESC)",
+  `CREATE TABLE IF NOT EXISTS relay_members (
+    chain_id BIGINT NOT NULL REFERENCES relay_chains(id) ON DELETE CASCADE,
+    guild_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (chain_id, user_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS relay_contributions (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    chain_id BIGINT NOT NULL REFERENCES relay_chains(id) ON DELETE CASCADE,
+    guild_id BIGINT NOT NULL,
+    turn_number INTEGER NOT NULL,
+    author_id BIGINT NOT NULL,
+    parent_contribution_id BIGINT REFERENCES relay_contributions(id),
+    content TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','rejected','revision_requested')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reviewed_by BIGINT,
+    review_note TEXT,
+    UNIQUE (chain_id, turn_number)
+  )`,
+  `CREATE TABLE IF NOT EXISTS relay_contribution_revisions (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    contribution_id BIGINT NOT NULL REFERENCES relay_contributions(id) ON DELETE CASCADE,
+    chain_id BIGINT NOT NULL REFERENCES relay_chains(id) ON DELETE CASCADE,
+    guild_id BIGINT NOT NULL,
+    revision_number INTEGER NOT NULL CHECK (revision_number > 0),
+    author_id BIGINT NOT NULL,
+    content TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('revision_requested')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    review_note TEXT,
+    UNIQUE (contribution_id, revision_number)
+  )`,
+  "CREATE INDEX IF NOT EXISTS relay_contribution_revisions_guild_idx ON relay_contribution_revisions (guild_id, chain_id, contribution_id, revision_number)",
+
+  `CREATE TABLE IF NOT EXISTS workshop_projects (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    owner_id BIGINT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('draft','open','paused','completed','archived','cancelled')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "CREATE INDEX IF NOT EXISTS workshop_projects_guild_status_idx ON workshop_projects (guild_id, status, created_at DESC)",
+  `CREATE TABLE IF NOT EXISTS workshop_sections (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    project_id BIGINT NOT NULL REFERENCES workshop_projects(id) ON DELETE CASCADE,
+    guild_id BIGINT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    assigned_to BIGINT,
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','in_review','approved','changes_requested','rejected')),
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS workshop_revisions (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    section_id BIGINT NOT NULL REFERENCES workshop_sections(id) ON DELETE CASCADE,
+    project_id BIGINT NOT NULL REFERENCES workshop_projects(id) ON DELETE CASCADE,
+    guild_id BIGINT NOT NULL,
+    author_id BIGINT NOT NULL,
+    content TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','changes_requested','rejected')),
+    reviewer_id BIGINT,
+    review_note TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS time_capsules (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    owner_id BIGINT NOT NULL,
+    channel_id BIGINT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    release_at TEXT NOT NULL,
+    audience TEXT NOT NULL DEFAULT 'guild' CHECK (audience IN ('owner','contributors','guild')),
+    status TEXT NOT NULL DEFAULT 'collecting' CHECK (status IN ('collecting','sealed','revealing','revealed','cancelled','failed')),
+    revealed_message_id BIGINT,
+    claim_token TEXT,
+    claimed_at TEXT,
+    delivery_error TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    sealed_at TEXT,
+    revealed_at TEXT
+  )`,
+  "CREATE INDEX IF NOT EXISTS time_capsules_due_idx ON time_capsules (status, release_at)",
+  `CREATE TABLE IF NOT EXISTS time_capsule_contributions (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    capsule_id BIGINT NOT NULL REFERENCES time_capsules(id) ON DELETE CASCADE,
+    guild_id BIGINT NOT NULL,
+    contributor_id BIGINT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    object_key TEXT,
+    source_url TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (capsule_id, contributor_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS council_proposals (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    owner_id BIGINT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'review' CHECK (status IN ('review','deliberation','frozen','voting','passed','failed','cancelled')),
+    voting_method TEXT NOT NULL DEFAULT 'single' CHECK (voting_method IN ('single','multiple')),
+    quorum INTEGER NOT NULL DEFAULT 0,
+    max_choices INTEGER NOT NULL DEFAULT 1,
+    starts_at TEXT,
+    ends_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    frozen_at TEXT,
+    closed_at TEXT
+  )`,
+  "CREATE INDEX IF NOT EXISTS council_proposals_guild_status_idx ON council_proposals (guild_id, status, created_at DESC)",
+  `CREATE TABLE IF NOT EXISTS council_amendments (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    proposal_id BIGINT NOT NULL REFERENCES council_proposals(id) ON DELETE CASCADE,
+    guild_id BIGINT NOT NULL,
+    author_id BIGINT NOT NULL,
+    amendment TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','rejected')),
+    reviewed_by BIGINT,
+    review_note TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS council_ballots (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    proposal_id BIGINT NOT NULL REFERENCES council_proposals(id) ON DELETE CASCADE,
+    guild_id BIGINT NOT NULL,
+    option_key TEXT NOT NULL,
+    option_label TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    UNIQUE (proposal_id, option_key)
+  )`,
+  `CREATE TABLE IF NOT EXISTS council_votes (
+    proposal_id BIGINT NOT NULL REFERENCES council_proposals(id) ON DELETE CASCADE,
+    guild_id BIGINT NOT NULL,
+    voter_id BIGINT NOT NULL,
+    ballot_value TEXT NOT NULL,
+    receipt_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (proposal_id, voter_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS expeditions (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    owner_id BIGINT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','open','paused','completed','cancelled')),
+    participant_limit INTEGER NOT NULL DEFAULT 20 CHECK (participant_limit BETWEEN 2 AND 200),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "CREATE INDEX IF NOT EXISTS expeditions_guild_status_idx ON expeditions (guild_id, status, created_at DESC)",
+  `CREATE TABLE IF NOT EXISTS expedition_stages (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    expedition_id BIGINT NOT NULL REFERENCES expeditions(id) ON DELETE CASCADE,
+    guild_id BIGINT NOT NULL,
+    position INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    answer_hash TEXT NOT NULL,
+    hint TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (expedition_id, position)
+  )`,
+  `CREATE TABLE IF NOT EXISTS expedition_participants (
+    expedition_id BIGINT NOT NULL REFERENCES expeditions(id) ON DELETE CASCADE,
+    guild_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    current_stage INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed','withdrawn')),
+    joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (expedition_id, user_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS expedition_submissions (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    expedition_id BIGINT NOT NULL REFERENCES expeditions(id) ON DELETE CASCADE,
+    stage_id BIGINT NOT NULL REFERENCES expedition_stages(id) ON DELETE CASCADE,
+    guild_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    answer_hash TEXT NOT NULL,
+    correct INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS casebook_cases (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    author_id BIGINT NOT NULL,
+    title TEXT NOT NULL,
+    premise TEXT NOT NULL,
+    answer_key TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','published','paused','closed','cancelled')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    published_at TEXT
+  )`,
+  "CREATE INDEX IF NOT EXISTS casebook_cases_guild_status_idx ON casebook_cases (guild_id, status, created_at DESC)",
+  `CREATE TABLE IF NOT EXISTS casebook_evidence (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    case_id BIGINT NOT NULL REFERENCES casebook_cases(id) ON DELETE CASCADE,
+    guild_id BIGINT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    unlock_order INTEGER NOT NULL DEFAULT 0,
+    is_red_herring INTEGER NOT NULL DEFAULT 0,
+    is_unlocked INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (case_id, unlock_order)
+  )`,
+  `CREATE TABLE IF NOT EXISTS casebook_theories (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    case_id BIGINT NOT NULL REFERENCES casebook_cases(id) ON DELETE CASCADE,
+    guild_id BIGINT NOT NULL,
+    team_key TEXT NOT NULL,
+    author_id BIGINT NOT NULL,
+    theory TEXT NOT NULL,
+    cited_evidence_ids TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','submitted','correct','incorrect')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`
+];
+
+export async function initDatabase(config: DatabaseConfig): Promise<void> {
+  await openLibSql(config.path);
+  try {
+    await libSqlTransaction(async client => {
+      for (const statement of schemaStatements) {
+        if (typeof statement !== "string" || !statement.trim()) continue;
+        await applyLibSqlSchemaStatement(statement, client);
+      }
+    });
+
+    const identities = await backfillAtlasProviderIdentities();
+    if (identities) logger.info("Backfilled provider identities for media relationships", { updated: identities });
+
+    const integrity = await libSqlIntegrityCheck();
+    if (integrity !== "ok") throw new Error("libSQL integrity check failed: " + integrity);
+    logger.info("libSQL connected and v3 feature schema verified");
+  } catch (error) {
+    logger.error("libSQL schema initialization failed", {
+      reason: error instanceof Error ? error.message : "Unknown error",
+    });
+    throw error;
+  }
+}
+
+export async function backupDatabase(path: string): Promise<void> {
+  await backupLibSqlDatabase(path);
+}
+
+export async function inspectDatabase(path: string): Promise<{ integrity: string; tableCount: number }> {
+  return inspectLibSqlDatabase(path);
+}
+
+export async function closeDatabase(): Promise<void> {
+  // Native handles are closed when the process exits; outstanding transactions stay valid.
+}

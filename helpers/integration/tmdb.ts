@@ -1,0 +1,726 @@
+import { fetchProviderResponse } from "./provider-http.js";
+export type TmdbCategory = "movie" | "tv";
+
+export interface TmdbMedia {
+  id: number;
+  category: TmdbCategory;
+  title: string;
+  originalTitle: string | null;
+  overview: string | null;
+  sourceUrl: string;
+  image: string | null;
+  releaseDate: string | null;
+  rating: number | null;
+  runtime: number | null;
+  episodeRuntimes: number[];
+  certifications: TmdbMovieCertification[];
+  contentRatings: TmdbContentRating[];
+  genres: string[];
+  status: string | null;
+}
+
+export interface TmdbMovieCertification {
+  region: string;
+  certification: string;
+  releaseDate: string | null;
+  releaseType: number | null;
+  descriptors: string[];
+}
+
+export interface TmdbContentRating {
+  region: string;
+  rating: string;
+  descriptors: string[];
+}
+
+export interface TmdbWatchProviderGroup {
+  type: "streaming" | "rent" | "buy" | "free" | "ads";
+  label: string;
+  providers: string[];
+}
+
+export interface TmdbWatchAvailability {
+  region: string;
+  link: string | null;
+  groups: TmdbWatchProviderGroup[];
+}
+
+export interface TmdbVideo {
+  name: string;
+  site: "YouTube" | "Vimeo";
+  key: string;
+  type: string;
+  official: boolean;
+  url: string;
+}
+
+export interface TmdbOrganization {
+  id: number;
+  name: string;
+  kind: "company" | "network";
+  sourceUrl: string;
+  logo: string | null;
+  homepage: string | null;
+  headquarters: string | null;
+  originCountry: string | null;
+  parentCompany: { id: number; name: string } | null;
+}
+
+export interface TmdbPerson {
+  id: number;
+  name: string;
+  sourceUrl: string;
+  image: string | null;
+}
+
+export interface TmdbPersonCredit {
+  id: number;
+  category: TmdbCategory;
+  title: string;
+  releaseDate: string | null;
+  role: string | null;
+  sourceUrl: string;
+  image: string | null;
+  popularity: number;
+}
+
+export interface TmdbCollectionItem {
+  id: number;
+  title: string;
+  releaseDate: string | null;
+  sourceUrl: string;
+}
+
+export interface TmdbCollection {
+  id: number;
+  name: string;
+  sourceUrl: string;
+  image: string | null;
+  items: TmdbCollectionItem[];
+}
+
+export interface TmdbTvEpisode {
+  episodeNumber: number;
+  seasonNumber: number | null;
+  name: string;
+  airDate: string | null;
+  runtime: number | null;
+  overview: string | null;
+  sourceUrl: string;
+}
+
+export interface TmdbTvSeasonSummary {
+  id: number;
+  seasonNumber: number;
+  name: string;
+  episodeCount: number;
+  airDate: string | null;
+}
+
+export interface TmdbTvShowDetails {
+  id: number;
+  name: string;
+  overview: string | null;
+  sourceUrl: string;
+  image: string | null;
+  status: string | null;
+  numberOfSeasons: number;
+  numberOfEpisodes: number;
+  episodeRuntimes: number[];
+  creators: string[];
+  networks: string[];
+  nextEpisode: TmdbTvEpisode | null;
+  seasons: TmdbTvSeasonSummary[];
+}
+
+export interface TmdbTvSeason {
+  showId: number;
+  seasonNumber: number;
+  name: string;
+  sourceUrl: string;
+  episodes: TmdbTvEpisode[];
+}
+
+export interface TmdbUpcomingTvEpisode {
+  showId: number;
+  showTitle: string;
+  episode: TmdbTvEpisode;
+}
+
+type JsonObject = Record<string, unknown>;
+
+function object(value: unknown): JsonObject | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as JsonObject
+    : null;
+}
+
+function safeProviderLink(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+export function normalizeTmdbMedia(value: unknown, category: TmdbCategory): TmdbMedia | null {
+  const item = object(value);
+  if (!item || typeof item.id !== "number" || !Number.isSafeInteger(item.id) || item.id < 1) return null;
+  const name = item[category === "movie" ? "title" : "name"];
+  if (typeof name !== "string" || !name.trim()) return null;
+  const poster = typeof item.poster_path === "string" ? item.poster_path : null;
+  const date = item[category === "movie" ? "release_date" : "first_air_date"];
+  const originalTitle = item[category === "movie" ? "original_title" : "original_name"];
+  return {
+    id: item.id,
+    category,
+    title: name.trim(),
+    originalTitle: typeof originalTitle === "string" && originalTitle.trim() !== name.trim()
+      ? originalTitle.trim().slice(0, 240) || null
+      : null,
+    overview: typeof item.overview === "string" ? item.overview : null,
+    sourceUrl: `https://www.themoviedb.org/${category}/${item.id}`,
+    image: poster && poster.startsWith("/") ? `https://image.tmdb.org/t/p/w500${poster}` : null,
+    releaseDate: typeof date === "string" && date ? date : null,
+    rating: typeof item.vote_average === "number" && Number.isFinite(item.vote_average) ? item.vote_average : null,
+    runtime: typeof item.runtime === "number" && Number.isSafeInteger(item.runtime) && item.runtime > 0 ? item.runtime : null,
+    episodeRuntimes: Array.isArray(item.episode_run_time)
+      ? item.episode_run_time.flatMap((value): number[] =>
+          typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? [value] : [],
+        ).slice(0, 10)
+      : [],
+    certifications: [],
+    contentRatings: [],
+    genres: Array.isArray(item.genres)
+      ? item.genres.flatMap(entry => {
+          const genre = object(entry)?.name;
+          return typeof genre === "string" && genre.trim() ? [genre.trim()] : [];
+        }).slice(0, 20)
+      : [],
+    status: typeof item.status === "string" ? item.status : null,
+  };
+}
+
+export function normalizeTmdbMovieReleaseDates(value: unknown): TmdbMovieCertification[] {
+  const rows = object(value)?.results;
+  if (!Array.isArray(rows)) return [];
+  const certifications = new Map<string, TmdbMovieCertification>();
+  for (const raw of rows) {
+    const country = object(raw);
+    const region = typeof country?.iso_3166_1 === "string" ? country.iso_3166_1.toUpperCase() : "";
+    if (!/^[A-Z]{2}$/.test(region)) continue;
+    const dates = Array.isArray(country?.release_dates) ? country.release_dates : [];
+    for (const dateRaw of dates) {
+      const item = object(dateRaw);
+      const certification = typeof item?.certification === "string" ? item.certification.trim() : "";
+      if (!certification) continue;
+      const releaseDate = typeof item?.release_date === "string" && item.release_date
+        ? item.release_date.slice(0, 30)
+        : null;
+      const releaseType = typeof item?.type === "number" && Number.isSafeInteger(item.type) ? item.type : null;
+      const descriptors = Array.isArray(item?.descriptors)
+        ? item.descriptors.flatMap((entry): string[] => typeof entry === "string" && entry.trim() ? [entry.trim().slice(0, 80)] : []).slice(0, 8)
+        : [];
+      const record = { region, certification: certification.slice(0, 30), releaseDate, releaseType, descriptors };
+      certifications.set([region, record.certification, releaseDate, releaseType].join("|"), record);
+    }
+  }
+  return [...certifications.values()]
+    .sort((a, b) => a.region.localeCompare(b.region) || (a.releaseDate ?? "").localeCompare(b.releaseDate ?? ""))
+    .slice(0, 60);
+}
+
+export function normalizeTmdbContentRatings(value: unknown): TmdbContentRating[] {
+  const rows = object(value)?.results;
+  if (!Array.isArray(rows)) return [];
+  const ratings = new Map<string, TmdbContentRating>();
+  for (const raw of rows) {
+    const item = object(raw);
+    const region = typeof item?.iso_3166_1 === "string" ? item.iso_3166_1.toUpperCase() : "";
+    const rating = typeof item?.rating === "string" ? item.rating.trim() : "";
+    if (!/^[A-Z]{2}$/.test(region) || !rating) continue;
+    const descriptors = Array.isArray(item?.descriptors)
+      ? item.descriptors.flatMap((entry): string[] => typeof entry === "string" && entry.trim() ? [entry.trim().slice(0, 80)] : []).slice(0, 8)
+      : [];
+    ratings.set(region, { region, rating: rating.slice(0, 30), descriptors });
+  }
+  return [...ratings.values()].sort((a, b) => a.region.localeCompare(b.region)).slice(0, 60);
+}
+
+const PROVIDER_GROUPS = [
+  { key: "flatrate", type: "streaming", label: "Streaming" },
+  { key: "rent", type: "rent", label: "Rent" },
+  { key: "buy", type: "buy", label: "Buy" },
+  { key: "free", type: "free", label: "Free" },
+  { key: "ads", type: "ads", label: "Ad-supported" },
+] as const;
+
+export function normalizeTmdbWatchAvailability(value: unknown, region: string): TmdbWatchAvailability | null {
+  const record = object(value);
+  if (!record) return null;
+  const groups = PROVIDER_GROUPS.flatMap((group): TmdbWatchProviderGroup[] => {
+    const rawProviders = record[group.key];
+    const values: unknown[] = Array.isArray(rawProviders) ? rawProviders : [];
+    const providers = [...new Set<string>(values.flatMap((entry: unknown): string[] => {
+      const name = object(entry)?.provider_name;
+      return typeof name === "string" && name.trim() ? [name.trim()] : [];
+    }))].slice(0, 20);
+    return providers.length ? [{ type: group.type, label: group.label, providers }] : [];
+  });
+  return {
+    region,
+    link: safeProviderLink(record.link),
+    groups,
+  };
+}
+
+export function normalizeTmdbOrganization(value: unknown, kind: "company" | "network"): TmdbOrganization | null {
+  const item = object(value);
+  if (!item || typeof item.id !== "number" || !Number.isSafeInteger(item.id) || item.id < 1
+    || typeof item.name !== "string" || !item.name.trim()) return null;
+  const logoPath = typeof item.logo_path === "string" && item.logo_path.startsWith("/") ? item.logo_path : null;
+  const homepage = safeProviderLink(item.homepage);
+  const parent = object(item.parent_company);
+  const parentCompany = parent && typeof parent.id === "number" && Number.isSafeInteger(parent.id)
+    && parent.id > 0 && typeof parent.name === "string" && parent.name.trim()
+    ? { id: parent.id, name: parent.name.trim().slice(0, 180) }
+    : null;
+  const originCountry = typeof item.origin_country === "string" && /^[A-Z]{2}$/i.test(item.origin_country)
+    ? item.origin_country.toUpperCase()
+    : null;
+  return {
+    id: item.id,
+    name: item.name.trim().slice(0, 200),
+    kind,
+    sourceUrl: `https://www.themoviedb.org/${kind}/${item.id}`,
+    logo: logoPath ? `https://image.tmdb.org/t/p/w500${logoPath}` : null,
+    homepage,
+    headquarters: typeof item.headquarters === "string" && item.headquarters.trim()
+      ? item.headquarters.trim().slice(0, 180) : null,
+    originCountry,
+    parentCompany,
+  };
+}
+
+export function normalizeTmdbPeople(value: unknown): TmdbPerson[] {
+  const results = object(value)?.results;
+  if (!Array.isArray(results)) return [];
+  return results.flatMap((entry): TmdbPerson[] => {
+    const item = object(entry);
+    if (!item || typeof item.id !== "number" || !Number.isSafeInteger(item.id) || item.id < 1
+      || typeof item.name !== "string" || !item.name.trim()) return [];
+    const profile = typeof item.profile_path === "string" && item.profile_path.startsWith("/")
+      ? `https://image.tmdb.org/t/p/w500${item.profile_path}`
+      : null;
+    return [{
+      id: item.id,
+      name: item.name.trim().slice(0, 200),
+      sourceUrl: `https://www.themoviedb.org/person/${item.id}`,
+      image: profile,
+    }];
+  }).slice(0, 10);
+}
+
+export function normalizeTmdbPersonCredits(value: unknown): TmdbPersonCredit[] {
+  const payload = object(value);
+  if (!payload) return [];
+  const credits = [
+    ...(Array.isArray(payload.cast) ? payload.cast : []),
+    ...(Array.isArray(payload.crew) ? payload.crew : []),
+  ];
+  const unique = new Map<string, TmdbPersonCredit>();
+  for (const entry of credits) {
+    const item = object(entry);
+    if (!item || !Number.isSafeInteger(item.id) || typeof item.id !== "number" || item.id < 1) continue;
+    if (item.media_type !== "movie" && item.media_type !== "tv") continue;
+    const category = item.media_type;
+    const rawTitle = category === "movie" ? item.title : item.name;
+    if (typeof rawTitle !== "string" || !rawTitle.trim()) continue;
+    const roleValue = item.character ?? item.job ?? item.department;
+    const role = typeof roleValue === "string" && roleValue.trim() ? roleValue.trim().slice(0, 120) : null;
+    const dateValue = category === "movie" ? item.release_date : item.first_air_date;
+    const popularity = typeof item.popularity === "number" && Number.isFinite(item.popularity) ? item.popularity : 0;
+    const credit: TmdbPersonCredit = {
+      id: item.id,
+      category,
+      title: rawTitle.trim().slice(0, 200),
+      releaseDate: typeof dateValue === "string" && dateValue ? dateValue : null,
+      role,
+      sourceUrl: `https://www.themoviedb.org/${category}/${item.id}`,
+      image: typeof item.poster_path === "string" && item.poster_path.startsWith("/")
+        ? "https://image.tmdb.org/t/p/w500" + item.poster_path
+        : null,
+      popularity,
+    };
+    const key = `${category}:${item.id}`;
+    const existing = unique.get(key);
+    if (!existing || (!existing.role && credit.role)) unique.set(key, credit);
+  }
+  return [...unique.values()]
+    .sort((left, right) => right.popularity - left.popularity || left.title.localeCompare(right.title))
+    .slice(0, 12);
+}
+
+function normalizeTmdbEpisode(value: unknown, showId: number): TmdbTvEpisode | null {
+  const item = object(value);
+  if (!item || typeof item.episode_number !== "number" || !Number.isSafeInteger(item.episode_number)
+    || item.episode_number < 0) return null;
+  const id = typeof item.id === "number" && Number.isSafeInteger(item.id) && item.id > 0 ? item.id : null;
+  const name = typeof item.name === "string" && item.name.trim() ? item.name.trim() : `Episode ${item.episode_number}`;
+  return {
+    episodeNumber:item.episode_number,
+    seasonNumber:typeof item.season_number === "number" && Number.isSafeInteger(item.season_number) && item.season_number >= 0 ? item.season_number : null,
+    name:name.slice(0,200),
+    airDate:typeof item.air_date === "string" && item.air_date ? item.air_date : null,
+    runtime:typeof item.runtime === "number" && Number.isFinite(item.runtime) && item.runtime > 0 ? item.runtime : null,
+    overview:typeof item.overview === "string" && item.overview.trim() ? item.overview.trim().slice(0,1_000) : null,
+    sourceUrl:id ? `https://www.themoviedb.org/tv/${showId}/episode/${id}` : `https://www.themoviedb.org/tv/${showId}`,
+  };
+}
+
+export function normalizeTmdbTvDetails(value: unknown): TmdbTvShowDetails | null {
+  const item = object(value);
+  if (!item || typeof item.id !== "number" || !Number.isSafeInteger(item.id) || item.id < 1
+    || typeof item.name !== "string" || !item.name.trim()) return null;
+  const poster = typeof item.poster_path === "string" && item.poster_path.startsWith("/") ? item.poster_path : null;
+  const seasons = (Array.isArray(item.seasons) ? item.seasons : []).flatMap((entry): TmdbTvSeasonSummary[] => {
+    const season = object(entry);
+    if (!season || typeof season.season_number !== "number" || !Number.isSafeInteger(season.season_number)
+      || season.season_number < 0) return [];
+    const id = typeof season.id === "number" && Number.isSafeInteger(season.id) && season.id > 0
+      ? season.id : 0;
+    const episodeCount = typeof season.episode_count === "number" && Number.isFinite(season.episode_count)
+      ? Math.max(0,Math.floor(season.episode_count)) : 0;
+    return [{
+      id,
+      seasonNumber:season.season_number,
+      name:typeof season.name === "string" && season.name.trim() ? season.name.trim().slice(0,120) : `Season ${season.season_number}`,
+      episodeCount,
+      airDate:typeof season.air_date === "string" && season.air_date ? season.air_date : null,
+    }];
+  }).sort((left,right)=>left.seasonNumber-right.seasonNumber).slice(0,25);
+  const nextEpisode = normalizeTmdbEpisode(item.next_episode_to_air,item.id);
+  const runtimeValues = Array.isArray(item.episode_run_time) ? item.episode_run_time : [];
+  const episodeRuntimes = runtimeValues.flatMap((value):number[] =>
+    typeof value === "number" && Number.isFinite(value) && value > 0 ? [Math.floor(value)] : [],
+  ).slice(0,10);
+  const creators = (Array.isArray(item.created_by) ? item.created_by : []).flatMap((entry):string[] => {
+    const name = object(entry)?.name;
+    return typeof name === "string" && name.trim() ? [name.trim().slice(0,100)] : [];
+  }).slice(0,10);
+  const networks = (Array.isArray(item.networks) ? item.networks : []).flatMap((entry):string[] => {
+    const name = object(entry)?.name;
+    return typeof name === "string" && name.trim() ? [name.trim().slice(0,100)] : [];
+  }).slice(0,10);
+  return {
+    id:item.id,
+    name:item.name.trim().slice(0,200),
+    overview:typeof item.overview === "string" && item.overview.trim() ? item.overview.trim().slice(0,1_000) : null,
+    sourceUrl:`https://www.themoviedb.org/tv/${item.id}`,
+    image:poster ? `https://image.tmdb.org/t/p/w500${poster}` : null,
+    status:typeof item.status === "string" && item.status.trim() ? item.status.trim() : null,
+    numberOfSeasons:typeof item.number_of_seasons === "number" && Number.isFinite(item.number_of_seasons) ? Math.max(0,Math.floor(item.number_of_seasons)) : seasons.length,
+    numberOfEpisodes:typeof item.number_of_episodes === "number" && Number.isFinite(item.number_of_episodes) ? Math.max(0,Math.floor(item.number_of_episodes)) : 0,
+    episodeRuntimes,creators,networks,nextEpisode,seasons,
+  };
+}
+
+export function normalizeTmdbTvSeason(value: unknown, showId: number): TmdbTvSeason | null {
+  const item = object(value);
+  if (!item || typeof item.season_number !== "number" || !Number.isSafeInteger(item.season_number)
+    || item.season_number < 0 || !Number.isSafeInteger(showId) || showId < 1) return null;
+  const rawEpisodes = Array.isArray(item.episodes) ? item.episodes : [];
+  const episodes = rawEpisodes.flatMap((entry):TmdbTvEpisode[] => {
+    const episode = normalizeTmdbEpisode(entry,showId);
+    return episode ? [episode] : [];
+  }).sort((left,right)=>left.episodeNumber-right.episodeNumber).slice(0,100);
+  return {
+    showId,
+    seasonNumber:item.season_number,
+    name:typeof item.name === "string" && item.name.trim() ? item.name.trim().slice(0,120) : `Season ${item.season_number}`,
+    sourceUrl:`https://www.themoviedb.org/tv/${showId}/season/${item.season_number}`,
+    episodes,
+  };
+}
+
+export function normalizeTmdbCollection(value: unknown): TmdbCollection | null {
+  const item = object(value);
+  if (!item || typeof item.id !== "number" || !Number.isSafeInteger(item.id) || item.id < 1
+    || typeof item.name !== "string" || !item.name.trim()) return null;
+  const parts = Array.isArray(item.parts) ? item.parts : [];
+  const items = parts.flatMap((entry): TmdbCollectionItem[] => {
+    const part = object(entry);
+    if (!part || typeof part.id !== "number" || !Number.isSafeInteger(part.id) || part.id < 1
+      || typeof part.title !== "string" || !part.title.trim()) return [];
+    return [{
+      id: part.id,
+      title: part.title.trim().slice(0, 200),
+      releaseDate: typeof part.release_date === "string" && part.release_date ? part.release_date : null,
+      sourceUrl: `https://www.themoviedb.org/movie/${part.id}`,
+    }];
+  });
+  items.sort((left, right) =>
+    (left.releaseDate ?? "9999-99-99").localeCompare(right.releaseDate ?? "9999-99-99")
+    || left.title.localeCompare(right.title),
+  );
+  const poster = typeof item.poster_path === "string" && item.poster_path.startsWith("/") ? item.poster_path : null;
+  return {
+    id: item.id,
+    name: item.name.trim().slice(0, 200),
+    sourceUrl: `https://www.themoviedb.org/collection/${item.id}`,
+    image: poster ? `https://image.tmdb.org/t/p/w500${poster}` : null,
+    items: items.slice(0, 20),
+  };
+}
+
+export function normalizeTmdbVideos(value: unknown): TmdbVideo[] {
+  const record = object(value);
+  const results = Array.isArray(record?.results) ? record.results : [];
+  const videos = new Map<string, TmdbVideo>();
+  for (const entry of results) {
+    const item = object(entry);
+    if (!item || typeof item.key !== "string" || !item.key.trim()) continue;
+    const site = item.site;
+    if (site !== "YouTube" && site !== "Vimeo") continue;
+    const key = item.key.trim();
+    const url = site === "YouTube"
+      ? `https://www.youtube.com/watch?v=${encodeURIComponent(key)}`
+      : `https://vimeo.com/${encodeURIComponent(key)}`;
+    const name = typeof item.name === "string" && item.name.trim() ? item.name.trim() : "Untitled video";
+    const id = typeof item.id === "string" ? item.id : `${site}:${key}`;
+    videos.set(id, {
+      name: name.slice(0, 200),
+      site,
+      key,
+      type: typeof item.type === "string" && item.type.trim() ? item.type.trim().slice(0, 60) : "Video",
+      official: item.official === true,
+      url,
+    });
+  }
+  return [...videos.values()].slice(0, 12);
+}
+
+export class TmdbClient {
+  constructor(private readonly token?: string, private readonly fetcher: typeof fetch = globalThis.fetch) {}
+
+  async search(query: string, category: TmdbCategory): Promise<TmdbMedia[]> {
+    return this.searchPath(`/search/${category}`, category, { query: query.trim(), include_adult: "false" });
+  }
+
+  async trending(category: TmdbCategory): Promise<TmdbMedia[]> {
+    return this.searchPath(`/trending/${category}/week`, category, {});
+  }
+
+  async details(id: number, category: TmdbCategory): Promise<TmdbMedia | null> {
+    this.validateMediaId(id);
+    const media = normalizeTmdbMedia(await this.request(`/${category}/${id}`), category);
+    if (!media) return null;
+    const ratingResult = await Promise.allSettled([
+      this.request(category === "movie" ? `/movie/${id}/release_dates` : `/tv/${id}/content_ratings`),
+    ]);
+    const result = ratingResult[0];
+    if (result?.status === "fulfilled") {
+      if (category === "movie") media.certifications = normalizeTmdbMovieReleaseDates(result.value);
+      else media.contentRatings = normalizeTmdbContentRatings(result.value);
+    }
+    return media;
+  }
+
+  async recommendations(id: number, category: TmdbCategory): Promise<TmdbMedia[]> {
+    this.validateMediaId(id);
+    return this.searchPath(`/${category}/${id}/recommendations`, category, { page: "1" });
+  }
+
+  async discoverByGenres(category: TmdbCategory, genres: readonly string[]): Promise<TmdbMedia[]> {
+    const requested = new Set(genres.map(value => value.trim().toLocaleLowerCase("en-US")).filter(Boolean));
+    if (!requested.size) return [];
+    const payload = await this.request(`/genre/${category}/list`);
+    const genreRows = Array.isArray(payload.genres) ? payload.genres : [];
+    const genresById = new Map<number, string>();
+    for (const entry of genreRows) {
+      const item = object(entry);
+      if (typeof item?.id === "number" && Number.isSafeInteger(item.id) && typeof item.name === "string") {
+        genresById.set(item.id, item.name);
+      }
+    }
+    const selectedIds = [...genresById]
+      .filter(([, name]) => requested.has(name.toLocaleLowerCase("en-US")))
+      .map(([id]) => id);
+    if (!selectedIds.length) return [];
+    const results = await this.request(`/discover/${category}`, {
+      include_adult: "false", sort_by: "popularity.desc", page: "1",
+      with_genres: selectedIds.join("|"),
+    });
+    return (Array.isArray(results.results) ? results.results : []).flatMap(entry => {
+      const media = normalizeTmdbMedia(entry, category);
+      const item = object(entry);
+      if (!media || !item) return [];
+      const itemGenres = Array.isArray(item.genre_ids) ? item.genre_ids : [];
+      media.genres = itemGenres.flatMap(value =>
+        typeof value === "number" && genresById.has(value) ? [genresById.get(value)!] : [],
+      );
+      return [media];
+    }).slice(0, 20);
+  }
+
+  async upcomingMovies(region = "US"): Promise<TmdbMedia[]> {
+    return this.searchPath("/movie/upcoming", "movie", { region });
+  }
+
+  async upcomingTvEpisodes(from: Date, to: Date): Promise<TmdbUpcomingTvEpisode[]> {
+    const shows = await this.searchPath("/tv/on_the_air", "tv", {});
+    const details = await Promise.allSettled(
+      shows.slice(0, 8).map((show) => this.tvDetails(show.id)),
+    );
+    if (details.length > 0 && details.every((result) => result.status === "rejected")) {
+      throw new Error("TMDB could not load details for the currently airing TV series.");
+    }
+    const fromDay = from.toISOString().slice(0, 10);
+    const toDay = to.toISOString().slice(0, 10);
+    const releases = details.flatMap((result): TmdbUpcomingTvEpisode[] => {
+      if (result.status !== "fulfilled") return [];
+      const detail = result.value;
+      if (!detail?.nextEpisode) return [];
+      const episode = detail.nextEpisode;
+      if (!episode.airDate || !/^\d{4}-\d{2}-\d{2}$/.test(episode.airDate)) return [];
+      const when = new Date(`${episode.airDate}T00:00:00.000Z`);
+      if (!Number.isFinite(when.getTime()) || episode.airDate < fromDay || episode.airDate > toDay) return [];
+      return [{ showId: detail.id, showTitle: detail.name, episode }];
+    });
+    return releases.sort((a, b) =>
+      (a.episode.airDate ?? "").localeCompare(b.episode.airDate ?? "") || a.showTitle.localeCompare(b.showTitle),
+    );
+  }
+
+  async searchCompanies(query: string): Promise<TmdbOrganization[]> {
+    return this.searchOrganizations(query, "company");
+  }
+
+  async companyDetails(id: number): Promise<TmdbOrganization | null> {
+    this.validateMediaId(id);
+    return normalizeTmdbOrganization(await this.request(`/company/${id}`), "company");
+  }
+
+  async networkDetails(id: number): Promise<TmdbOrganization | null> {
+    this.validateMediaId(id);
+    return normalizeTmdbOrganization(await this.request(`/network/${id}`), "network");
+  }
+
+  async networksForTv(showId: number): Promise<TmdbOrganization[]> {
+    this.validateMediaId(showId);
+    const detail = await this.request(`/tv/${showId}`);
+    return (Array.isArray(detail.networks) ? detail.networks : []).flatMap(value => {
+      const network = normalizeTmdbOrganization(value, "network");
+      return network ? [network] : [];
+    }).slice(0, 10);
+  }
+
+  async companyMedia(id: number, category: TmdbCategory): Promise<TmdbMedia[]> {
+    this.validateMediaId(id);
+    return this.searchPath(`/discover/${category}`, category, {
+      include_adult: "false",
+      sort_by: "popularity.desc",
+      with_companies: String(id),
+    });
+  }
+
+  async networkShows(id: number): Promise<TmdbMedia[]> {
+    this.validateMediaId(id);
+    return this.searchPath("/discover/tv", "tv", {
+      include_adult: "false",
+      sort_by: "popularity.desc",
+      with_networks: String(id),
+    });
+  }
+
+  private async searchOrganizations(query: string, kind: "company" | "network"): Promise<TmdbOrganization[]> {
+    const term = query.trim().replace(/\\s+/g, " ").slice(0, 100);
+    if (term.length < 2) return [];
+    const payload = await this.request(`/search/${kind}`, { query: term, page: "1" });
+    return (Array.isArray(payload.results) ? payload.results : []).flatMap(value => {
+      const organization = normalizeTmdbOrganization(value, kind);
+      return organization ? [organization] : [];
+    }).slice(0, 10);
+  }
+
+  async searchPeople(query: string): Promise<TmdbPerson[]> {
+    if (query.trim().length < 2) return [];
+    return normalizeTmdbPeople(await this.request("/search/person", {
+      query: query.trim(),
+      include_adult: "false",
+      page: "1",
+    }));
+  }
+
+  async personCredits(id: number): Promise<TmdbPersonCredit[]> {
+    this.validateMediaId(id);
+    return normalizeTmdbPersonCredits(await this.request(`/person/${id}/combined_credits`));
+  }
+
+  async collectionForMovie(id: number): Promise<TmdbCollection | null> {
+    this.validateMediaId(id);
+    const detail = await this.request(`/movie/${id}`);
+    const collectionRef = object(detail.belongs_to_collection);
+    const collectionId = collectionRef?.id;
+    if (typeof collectionId !== "number" || !Number.isSafeInteger(collectionId) || collectionId < 1) return null;
+    const collection = await this.request(`/collection/${collectionId}`);
+    return normalizeTmdbCollection(collection);
+  }
+
+  async tvDetails(id: number): Promise<TmdbTvShowDetails | null> {
+    this.validateMediaId(id);
+    return normalizeTmdbTvDetails(await this.request(`/tv/${id}`));
+  }
+
+  async tvSeason(showId: number, seasonNumber: number): Promise<TmdbTvSeason | null> {
+    this.validateMediaId(showId);
+    if (!Number.isSafeInteger(seasonNumber) || seasonNumber < 0 || seasonNumber > 100) {
+      throw new RangeError("TMDB season number must be between 0 and 100.");
+    }
+    return normalizeTmdbTvSeason(await this.request(`/tv/${showId}/season/${seasonNumber}`),showId);
+  }
+
+  async watchAvailability(id: number, category: TmdbCategory, region: string): Promise<TmdbWatchAvailability | null> {
+    this.validateMediaId(id);
+    const code = region.trim().toUpperCase();
+    if (!/^[A-Z]{2}$/.test(code)) throw new Error("Region must be a two-letter country code.");
+    const payload = await this.request(`/${category}/${id}/watch/providers`);
+    const regions = object(payload.results);
+    return normalizeTmdbWatchAvailability(regions?.[code], code);
+  }
+
+  async videos(id: number, category: TmdbCategory): Promise<TmdbVideo[]> {
+    this.validateMediaId(id);
+    return normalizeTmdbVideos(await this.request(`/${category}/${id}/videos`));
+  }
+
+  private validateMediaId(id: number): void {
+    if (!Number.isSafeInteger(id) || id < 1) throw new RangeError("TMDB media ID must be a positive integer.");
+  }
+
+  private async searchPath(path: string, category: TmdbCategory, params: Record<string, string>): Promise<TmdbMedia[]> {
+    const payload = await this.request(path, params);
+    const results = Array.isArray(payload.results) ? payload.results : [];
+    return results.flatMap((entry) => {
+      const media = normalizeTmdbMedia(entry, category);
+      return media ? [media] : [];
+    });
+  }
+
+  private async request(path: string, params: Record<string, string> = {}): Promise<JsonObject> {
+    if (!this.token) throw new Error("TMDB is not configured. Set TMDB_BEARER_TOKEN to enable film and television discovery.");
+    const url = new URL(`https://api.themoviedb.org/3${path}`);
+    url.searchParams.set("language", "en-US");
+    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+    const response = await fetchProviderResponse(this.fetcher, url, {
+      headers: { Authorization: `Bearer ${this.token}`, Accept: "application/json" },
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!response.ok) throw new Error(`TMDB returned HTTP ${response.status}.`);
+    const payload = object(await response.json());
+    if (!payload) throw new Error("TMDB returned an invalid response.");
+    return payload;
+  }
+}
