@@ -1,6 +1,6 @@
 # Lemegeton Privacy Policy
 
-**Effective date: November 25, 2026**
+**Effective date: November 28, 2026**
 
 This notice describes information the current Lemegeton v3 implementation may process. What is involved depends on the features enabled by a server, providers configured by the operator, and whether the optional dashboard is used. The source code is available at [Kyerstorm/Lemegeton](https://github.com/Kyerstorm/Lemegeton).
 
@@ -49,7 +49,7 @@ The current dashboard does not use analytics or advertising cookies or third-par
 
 ## 6. External services and recipients
 
-Depending on the feature and deployment configuration, a lookup may send a title, search phrase, category, public URL, ISBN, provider identifier or linked account identifier to Discord, AniList, Kitsu, MangaDex, Steam, IGDB, TMDB, Google Books, Crossref, Open Library, MusicBrainz, Last.fm, setlist.fm, NovelFire, Noveli.to, Novel Archive, Wuxia Click, Novel Updates, ScribbleHub or Royal Road. Optional music integrations may contact Spotify, YouTube Data API or SoundCloud. Optional translation integrations may send the selected text and language pair to an operator-supplied MADLAD, NLLB or LibreTranslate endpoint, DeepL or Google Cloud Translation. These are integration possibilities, not a statement that every provider is enabled in every deployment.
+Depending on the feature and deployment configuration, a lookup may send a title, search phrase, category, public URL, ISBN, provider identifier or linked account identifier to Discord, AniList, Kitsu, MangaDex, Steam, IGDB, TMDB, Google Books, Crossref, Open Library, MusicBrainz, Last.fm, setlist.fm, NovelFire, Noveli.to, Novel Archive, Wuxia Click, Novel Updates, ScribbleHub or Royal Road. Optional music integrations may contact Spotify, YouTube Data API or SoundCloud. Optional translation integrations may send the selected text and language pair to an operator-supplied MADLAD, NLLB or LibreTranslate endpoint, DeepL or Google Cloud Translation. If configured, the optional Cloudflare Turnstile solver may send a public challenge page URL, Turnstile site key, and operator API credential to 2Captcha or CapSolver. These are integration possibilities, not a statement that every provider is enabled in every deployment.
 
 Only information needed for the selected feature should be sent. Each provider controls its own service and privacy practices. See the [Third-Party Services & Disclosure](THIRD_PARTY_DISCLOSURE.md) for the integration families and data sent. The provider names are not a verified list of legal entities or subprocessors for every deployment.
 
