@@ -248,3 +248,30 @@ test("Botasaurus task API exposes scoped listing, statistics, cancellation, dele
     configureBotasaurusBridgeForTests(null);
   }
 });
+
+
+test("Botasaurus bridge enables Cloudflare handling by default and supports per-request opt-out", async () => {
+  const submitted: Array<Record<string, unknown>> = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/v1/jobs") {
+      submitted.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return response({ jobId: "job-default", status: "queued" }, 202);
+    }
+    return response({ jobId: "job-default", status: "succeeded", result: page });
+  };
+  configureBotasaurusBridgeForTests({
+    mode: "remote",
+    workerUrl: "https://scraper.example.test",
+    token: "d".repeat(32),
+    fetchImpl,
+  });
+  try {
+    await scrapeWithBotasaurus("https://example.com/default");
+    await scrapeWithBotasaurus("https://example.com/disabled", { cfBypass: false });
+    assert.equal((submitted[0]?.options as Record<string, unknown>).cfBypass, true);
+    assert.equal((submitted[1]?.options as Record<string, unknown>).cfBypass, false);
+  } finally {
+    configureBotasaurusBridgeForTests(null);
+  }
+});
