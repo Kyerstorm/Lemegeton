@@ -776,7 +776,7 @@ export async function searchNovelUpdates(
     }
   }
   const details = await Promise.allSettled(results.slice(0, 4).map(async item => {
-    const detailPage = await fetchNovelUpdatesPage(item.sourceUrl, { timeoutMs: 10_000 });
+    const detailPage = await fetchNovelUpdatesPage(item.sourceUrl, { timeoutMs: 10_000, fetchImpl: options.fetchImpl });
     return parseNovelUpdatesDetails(detailPage.html ?? "", item.sourceUrl, item) ?? item;
   }));
   return results.slice(0, 4).map((item, index) => {
