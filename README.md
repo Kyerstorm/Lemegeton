@@ -195,7 +195,7 @@ See the [Media Sources & Scraping guide](docs/MEDIA_SOURCES.md) for all 64 targe
 </p>
 
 <p align="center">
-  <img src="assets/webnovel-discovery.svg" alt="Five allowlist-gated webnovel metadata providers, with Novel Updates Cloudflare challenge handling and inactive ScribbleHub helper" width="100%" />
+  <img src="assets/webnovel-discovery.svg" alt="Novel Updates always-on metadata discovery with Cloudflare retry, four allowlist-gated webnovel parsers, and inactive ScribbleHub helper" width="100%" />
 </p>
 
 <p align="center">
