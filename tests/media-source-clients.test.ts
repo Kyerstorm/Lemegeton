@@ -249,3 +249,10 @@ test("source reference directory excludes unclassified catalogue links", () => {
   assert.ok(links.some(link => link.id === "wookieepedia" && link.url?.includes("Special:Search")));
   assert.ok(links.some(link => link.id === "anilist" && link.url?.includes("Example%20title")));
 });
+
+
+test("Novel Updates research links point to its series finder", () => {
+  const source = getMediaSourceResearchLinks("Example Story").find(item => item.id === "novel-updates");
+  assert.equal(source?.url, "https://www.novelupdates.com/series-finder/?sf=1&sh=Example%20Story");
+  assert.equal(source?.status, "needs-review");
+});
