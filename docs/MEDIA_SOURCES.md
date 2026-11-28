@@ -65,7 +65,7 @@ The browser-rendered path is optional and isolated from the Discord runtime:
 
 #### Opt-in Cloudflare and Turnstile handling
 
-`cfBypass` defaults to true for Botasaurus requests and can be disabled per request with `cfBypass: false`. It is passed only to the isolated Botasaurus worker; the local Chromium fallback does not solve challenges. The worker uses these bounded settings:
+`cfBypass` defaults to true for Botasaurus requests and can be disabled per request with `cfBypass: false`. Novel Updates explicitly passes `cfBypass: true` on its Botasaurus browser path. It is passed only to the isolated Botasaurus worker; the local Chromium fallback does not solve challenges. The worker uses these bounded settings:
 
 | Variable | Default | Enforced range |
 |:--|--:|:--:|
@@ -82,29 +82,29 @@ The optional Python worker is a browser service only. The primary Lemegeton bot 
 ## Webnovel discovery: active, gated and inactive code paths
 
 <p align="center">
-  <img src="../assets/webnovel-discovery.svg" alt="Actual webnovel provider state: four terms-review allowlist-gated parsers, inactive Novel Updates and ScribbleHub parser helpers, and separate Royal Road story RSS" width="100%" />
+  <img src="../assets/webnovel-discovery.svg" alt="Actual webnovel provider state: five allowlist-gated metadata search providers, Novel Updates Cloudflare retry, inactive ScribbleHub parser, and separate Royal Road story RSS" width="100%" />
 </p>
 
-### Four registered metadata parsers
+### Five registered metadata search providers
 
 The `WEBNOVEL_SEARCH_PROVIDERS` array currently contains:
 
 | Provider | Parser route | Registry status |
 |:--|:--|:--|
+| Novel Updates | Series-finder HTML; targeted Cloudflare challenge retry through Botasaurus | `needs-review` |
 | NovelFire | HTML search/details and JSON chapter metadata | `terms-review` |
 | Novel Archive | JSON search and details | `terms-review` |
 | Wuxia Click | Server-rendered `__NEXT_DATA__` search/details | `terms-review` |
 | Noveli.to | Paginated JSON search/details | `terms-review` |
 
-These providers are disabled by default. Discovery requests only providers whose source IDs are explicitly present in `MEDIA_SOURCE_SCRAPE_ALLOWLIST`. The current scope is metadata and canonical source links only; chapter contents are not retrieved or redistributed.
+All five providers are disabled by default. Discovery requests only providers whose source IDs are explicitly present in `MEDIA_SOURCE_SCRAPE_ALLOWLIST`. Novel Updates retries a request through Botasaurus only after a Cloudflare-specific challenge is identified, or when its static result requires browser rendering; that request sets `cfBypass: true`. Generic CAPTCHA challenges, authentication gates, paywalls, denials, rate limits and other blocked responses remain blocked. The extraction scope is series metadata and canonical source links only; chapter contents are not retrieved or redistributed.
 
 ### Related code that is not active discovery
 
-- **Novel Updates:** a parser and search helper exist, but the registry status is `needs-review` and Novel Updates is not in `WEBNOVEL_SEARCH_PROVIDERS`.
 - **ScribbleHub:** parser/search helper code exists, but ScribbleHub is not one of the 64 registry entries and is not in `WEBNOVEL_SEARCH_PROVIDERS`.
 - **Royal Road:** a separate integration reads the public RSS feed for an explicitly supplied fiction ID or supported URL. It is story-specific, not a global search or trending catalogue.
 
-Do not describe any of these three paths as active webnovel title-search providers.
+Do not describe either path as an active webnovel title-search provider.
 
 ## Timeline evidence and order types
 
