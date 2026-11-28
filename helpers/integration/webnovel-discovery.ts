@@ -641,33 +641,75 @@ if (record) records.push(record);
 return records.slice(0, 10);
 }
 
-export async function searchNovelUpdates(query: string): Promise<WebNovelMedia[]> {
-const url = new URL("https://www.novelupdates.com/series-finder/");
-url.searchParams.set("sf", "1");
-url.searchParams.set("sh", query);
-url.searchParams.set("sort", "sdate");
-url.searchParams.set("order", "desc");
-let page: ScrapeResult;
-try {
-page = await fetchPublicPage(url.toString(), { includeHtml: true, includeText: false, timeoutMs: 8_000, retries: 0 });
-} catch (error) {
-if (error instanceof ScrapeBlockedError) throw error;
-const fallback = new URL("https://www.novelupdates.com/");
-fallback.searchParams.set("s", query);
-fallback.searchParams.set("post_type", "series");
-page = await fetchPublicPage(fallback.toString(), { includeHtml: true, includeText: false, timeoutMs: 8_000, retries: 0 });
+interface NovelUpdatesFetchOptions {
+  engine?: "browser";
+  timeoutMs: number;
+  fetchImpl?: typeof fetch;
 }
-let results = parseNovelUpdatesSearch(page.html ?? "", page.url);
-if (!results.length) {
-try {
-const browserPage = await fetchPublicPage(page.url, { engine: "browser", includeHtml: true, includeText: false, timeoutMs: 15_000, retries: 0 });
-results = parseNovelUpdatesSearch(browserPage.html ?? "", browserPage.url);
-} catch (error) {
-if (error instanceof ScrapeBlockedError) throw error;
-// Static response is still useful when no browser runtime is configured.
+
+async function fetchNovelUpdatesPage(url: string, options: NovelUpdatesFetchOptions): Promise<ScrapeResult> {
+  const requestOptions = {
+    includeHtml: true,
+    includeText: false,
+    timeoutMs: options.timeoutMs,
+    retries: 0,
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+  };
+
+  try {
+    return await fetchPublicPage(url, {
+      ...requestOptions,
+      ...(options.engine ? { engine: options.engine, cfBypass: true } : {}),
+    });
+  } catch (error) {
+    if (options.engine || !(error instanceof ScrapeBlockedError)
+      || !/Cloudflare challenge response/i.test(error.message)) {
+      throw error;
+    }
+
+    return fetchPublicPage(url, {
+      ...requestOptions,
+      engine: "browser",
+      cfBypass: true,
+    });
+  }
 }
+
+export interface NovelUpdatesSearchOptions {
+  fetchImpl?: typeof fetch;
 }
-return results;
+
+export async function searchNovelUpdates(
+  query: string,
+  options: NovelUpdatesSearchOptions = {},
+): Promise<WebNovelMedia[]> {
+  const url = new URL("https://www.novelupdates.com/series-finder/");
+  url.searchParams.set("sf", "1");
+  url.searchParams.set("sh", query);
+  url.searchParams.set("sort", "sdate");
+  url.searchParams.set("order", "desc");
+  let page: ScrapeResult;
+  try {
+    page = await fetchNovelUpdatesPage(url.toString(), { timeoutMs: 8_000, fetchImpl: options.fetchImpl });
+  } catch (error) {
+    if (error instanceof ScrapeBlockedError) throw error;
+    const fallback = new URL("https://www.novelupdates.com/");
+    fallback.searchParams.set("s", query);
+    fallback.searchParams.set("post_type", "series");
+    page = await fetchNovelUpdatesPage(fallback.toString(), { timeoutMs: 8_000, fetchImpl: options.fetchImpl });
+  }
+
+  let results = parseNovelUpdatesSearch(page.html ?? "", page.url);
+  if (!results.length && page.engine === "fetch") {
+    try {
+      const browserPage = await fetchNovelUpdatesPage(page.url, { engine: "browser", timeoutMs: 15_000 });
+      results = parseNovelUpdatesSearch(browserPage.html ?? "", browserPage.url);
+    } catch (error) {
+      if (error instanceof ScrapeBlockedError) throw error;
+      // Static response is still useful when no browser runtime is configured.
+    }
+  }
+  return results;
 }
 
 export interface WebNovelSearchProvider {
@@ -677,6 +719,7 @@ search: (query: string) => Promise<WebNovelMedia[]>;
 }
 
 const WEBNOVEL_SEARCH_PROVIDERS: WebNovelSearchProvider[] = [
+  { name: "Novel Updates", sourceId: "novel-updates", search: searchNovelUpdates },
   { name: "NovelFire", sourceId: "novelfire", search: searchNovelFire },
   { name: "Noveli.to", sourceId: "noveli-to", search: searchNoveliTo },
   { name: "Novel Archive", sourceId: "novel-archive", search: searchNovelArchive },
