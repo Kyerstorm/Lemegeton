@@ -770,7 +770,7 @@ export const MEDIA_SOURCE_INTEGRATION_MODES: Readonly<Record<string, MediaSource
   "narutopedia": "mediawiki", "dragon-ball-wiki": "mediawiki", "one-piece-wiki": "mediawiki",
   "jojos-bizarre-encyclopedia": "mediawiki", "pokemon-wiki": "mediawiki", "transformers-wiki": "mediawiki",
   "fandom-wikis": "manual",
-  "myanimelist": "credentialed-api", "anime-planet": "manual", "mangaupdates": "manual", "novel-updates": "manual",
+  "myanimelist": "credentialed-api", "anime-planet": "manual", "mangaupdates": "manual", "novel-updates": "scrape",
   "mangadex": "api", "anilist": "api", "anidb": "manual", "jikan": "retired", "kitsu": "api",
   "shikimori": "api", "anime-news-network-encyclopedia": "manual",
   "tmdb": "api", "thetvdb": "licensed-api", "tvmaze": "licensed-api", "trakt": "credentialed-api", "imdb": "manual",
