@@ -1,7 +1,7 @@
 # Subprocessor & Service Provider Register
 
 **Internal operational register — deployment-specific.**  
-**Last reviewed: November 24, 2026**
+**Last reviewed: November 28, 2026**
 
 This is a register template and integration inventory, not confirmation that every listed provider is a subprocessor for every deployment. The operator must identify the actual legal entity, service, processing role, data location, contract, and transfer mechanism before production use.
 
@@ -27,6 +27,7 @@ This is a register template and integration inventory, not confirmation that eve
 | Google Books | Book metadata and search/ISBN queries | No account link asserted here | Verify | Review provider terms |
 | Crossref / Open Library | Book or publication metadata and ISBN/title queries | No account link asserted here | Verify | Review provider terms |
 | NovelFire, Noveli.to, Novel Archive, Wuxia Click, Novel Updates, ScribbleHub, Royal Road | Selected public webnovel lookup/search requests | No account link asserted here | Verify | Review provider terms and scraping restrictions |
+| 2Captcha or CapSolver | Optional Cloudflare Turnstile challenge solving; public challenge URL, site key, operator API credential, and transient solve token | No account link asserted here | Verify | Review provider terms, privacy, processing role, security, and international transfers |
 | Spotify, YouTube Data API, SoundCloud | Optional music discovery and artist/release features | Depends on configured API/auth flow | Verify | Review provider terms |
 
 ## Required completion fields
