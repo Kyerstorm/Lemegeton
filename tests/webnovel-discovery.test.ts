@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { configureBotasaurusBridgeForTests } from "../helpers/integration/botasaurus-bridge.js";
 import {
+  parseNovelUpdatesDetails,
   parseNovelUpdatesSearch,
   searchNovelUpdates,
   WebNovelDiscoveryClient,
@@ -140,24 +141,122 @@ test("webnovel discovery skips short queries without calling providers", async (
 });
 
 
-test("Novel Updates parses submitted series metadata without chapter content", () => {
+test("Novel Updates parses factual search-card metadata without synopsis or artwork", () => {
   const results = parseNovelUpdatesSearch(`
     <article class="search_main_box_nu">
-      <a href="/series/123/">Community Submitted Story</a>
-      <div class="search_body">A synopsis submitted by a community member.</div>
-      <div class="search_author">Example Author</div>
-      <div class="search_genres"><a>Fantasy</a></div>
-      <span>24 chapters</span>
+      <div class="search_body_nu">
+        <div class="search_title"><a href="/series/123/">Community Submitted Story</a></div>
+        <div class="search_stats">
+          <span><i title="Chapter Count"></i>24 Chapters</span>
+          <span><i title="Last Updated"></i>11-28-2026</span>
+        </div>
+        <div class="search_genre"><a>Fantasy</a></div>
+        <div class="search_ratings">(4.5)</div>
+        <p>Synopsis text must never be copied into discovery results.</p>
+      </div>
     </article>
   `, "https://www.novelupdates.com/series-finder/");
 
   assert.equal(results.length, 1);
   assert.equal(results[0]?.provider, "Novel Updates");
   assert.equal(results[0]?.title, "Community Submitted Story");
-  assert.equal(results[0]?.author, "Example Author");
   assert.equal(results[0]?.chapterCount, 24);
+  assert.equal(results[0]?.rating, 4.5);
+  assert.equal(results[0]?.latestUpdate, "11-28-2026");
   assert.deepEqual(results[0]?.genres, ["Fantasy"]);
+  assert.equal(results[0]?.description, null);
+  assert.equal(results[0]?.image, null);
   assert.equal(results[0]?.latestChapters.length, 0);
+});
+
+test("Novel Updates series details add factual catalogue fields without synopsis or artwork", () => {
+  const result = parseNovelUpdatesDetails(`
+    <div class="seriestitlenu">Example Web Novel</div>
+    <div id="showtype"><a>Web Novel</a> <span>(KR)</span></div>
+    <div id="seriesgenre"><a class="genre">Fantasy</a><a class="genre">Adventure</a></div>
+    <div id="showauthors"><a>Example Author</a></div>
+    <div id="edityear">2015</div>
+    <div id="editstatus">Completed</div>
+    <div id="showopublisher"><a>Original Press</a></div>
+    <div id="showepublisher"><a>English Press</a></div>
+    <meta property="ratingValue" content="4.25">
+    <div id="editdescription">This synopsis must not be copied.</div>
+  `, "https://www.novelupdates.com/series/example-web-novel/");
+
+  assert.equal(result?.title, "Example Web Novel");
+  assert.equal(result?.format, "Web Novel");
+  assert.equal(result?.language, "KR");
+  assert.equal(result?.publicationYear, 2015);
+  assert.equal(result?.author, "Example Author");
+  assert.equal(result?.status, "Completed");
+  assert.equal(result?.rating, 4.25);
+  assert.equal(result?.originalPublisher, "Original Press");
+  assert.equal(result?.englishPublisher, "English Press");
+  assert.deepEqual(result?.genres, ["Fantasy", "Adventure"]);
+  assert.equal(result?.description, null);
+  assert.equal(result?.image, null);
+});
+
+test("Novel Updates filters the live Reincarnator result because its catalogue marks it Mature", () => {
+  const results = parseNovelUpdatesSearch(`
+    <div class="search_main_box_nu">
+      <div class="search_title"><a href="https://www.novelupdates.com/series/reincarnator/">Reincarnator</a></div>
+      <div class="search_stats"><span><i title="Chapter Count"></i>107 Chapters</span></div>
+      <div class="search_genre"><a>Action</a><a>Adventure</a><a>Fantasy</a><a>Mature</a><a>Sci-fi</a><a>Seinen</a><a>Supernatural</a></div>
+    </div>
+  `, "https://www.novelupdates.com/series-finder/?sf=1&sh=reincarnator&sort=sdate&order=desc");
+
+  assert.deepEqual(results, []);
+});
+
+test("Novel Updates search enriches results with series metadata", async () => {
+  const requests: URL[] = [];
+  const searchHtml = `
+    <div class="search_main_box_nu">
+      <div class="search_body_nu">
+        <div class="search_title"><a href="https://www.novelupdates.com/series/example-story/">Example Story</a></div>
+        <div class="search_stats">
+          <span><i title="Chapter Count"></i>24 Chapters</span>
+          <span><i title="Last Updated"></i>11-28-2026</span>
+        </div>
+        <div class="search_genre"><a>Fantasy</a></div>
+        <div class="search_ratings">(4.5)</div>
+      </div>
+    </div>
+  `;
+  const detailHtml = `
+    <div class="seriestitlenu">Example Story</div>
+    <div id="showtype"><a>Web Novel</a> <span>(KR)</span></div>
+    <div id="seriesgenre"><a class="genre">Fantasy</a></div>
+    <div id="showauthors"><a>Example Author</a></div>
+    <div id="edityear">2015</div>
+    <div id="editstatus">Completed</div>
+    <div id="showopublisher"><a>Original Press</a></div>
+    <div id="showepublisher"><a>English Press</a></div>
+    <meta property="ratingValue" content="4.5">
+    <div id="editdescription">Do not return synopsis text.</div>
+  `;
+  const fetchImpl: typeof fetch = async input => {
+    const url = new URL(String(input));
+    requests.push(url);
+    const html = url.pathname === "/series-finder/" ? searchHtml : detailHtml;
+    return new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
+  };
+
+  const results = await searchNovelUpdates("Example Story", { fetchImpl });
+  assert.equal(results.length, 1);
+  assert.deepEqual(requests.map(url => url.pathname), ["/series-finder/", "/series/example-story/"]);
+  assert.equal(requests[0]?.searchParams.get("sh"), "Example Story");
+  assert.equal(results[0]?.title, "Example Story");
+  assert.equal(results[0]?.author, "Example Author");
+  assert.equal(results[0]?.format, "Web Novel");
+  assert.equal(results[0]?.language, "KR");
+  assert.equal(results[0]?.publicationYear, 2015);
+  assert.equal(results[0]?.originalPublisher, "Original Press");
+  assert.equal(results[0]?.englishPublisher, "English Press");
+  assert.equal(results[0]?.chapterCount, 24);
+  assert.equal(results[0]?.description, null);
+  assert.equal(results[0]?.image, null);
 });
 
 test("Novel Updates retries only Cloudflare challenges through Botasaurus", async () => {
@@ -229,11 +328,32 @@ test("Novel Updates retries only Cloudflare challenges through Botasaurus", asyn
   }
 });
 
-test("Novel Updates is registered but remains disabled without the source allowlist", async () => {
-  const result = await new WebNovelDiscoveryClient().searchDetailed("Example Story");
-  assert.ok(result.disabledProviders.includes("Novel Updates"));
-  assert.ok(!result.unavailableProviders.includes("Novel Updates"));
-  assert.deepEqual(result.results, []);
+test("Novel Updates is always searched without the source allowlist while other providers remain gated", async () => {
+  const calls: string[] = [];
+  const providers: WebNovelSearchProvider[] = [
+    {
+      name: "Novel Updates",
+      sourceId: "novel-updates",
+      search: async () => {
+        calls.push("novel-updates");
+        return [record("Novel Updates", "https://www.novelupdates.com/series/example/", "metadata")];
+      },
+    },
+    {
+      name: "NovelFire",
+      sourceId: "novelfire",
+      search: async () => {
+        calls.push("novelfire");
+        return [record("NovelFire", "https://novelfire.net/novel/example", "metadata")];
+      },
+    },
+  ];
+
+  const result = await new WebNovelDiscoveryClient(providers).searchDetailed("Example Story");
+  assert.deepEqual(calls, ["novel-updates"]);
+  assert.deepEqual(result.results.map(item => item.provider), ["Novel Updates"]);
+  assert.deepEqual(result.disabledProviders, ["NovelFire"]);
+  assert.deepEqual(result.unavailableProviders, []);
 });
 
 
