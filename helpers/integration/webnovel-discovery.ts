@@ -16,6 +16,11 @@ rating: number | null;
 chapterCount: number | null;
 latestUpdate: string | null;
 latestChapters: string[];
+format?: string | null;
+language?: string | null;
+publicationYear?: number | null;
+originalPublisher?: string | null;
+englishPublisher?: string | null;
 }
 
 type NovelFireItem = {
@@ -81,6 +86,13 @@ rating: typeof values.rating === "number" && Number.isFinite(values.rating) ? va
 chapterCount: typeof values.chapterCount === "number" && Number.isFinite(values.chapterCount) ? values.chapterCount : null,
 latestUpdate: values.latestUpdate ?? null,
 latestChapters,
+...(values.format ? { format: clean(values.format, 80) } : {}),
+...(values.language ? { language: clean(values.language, 40) } : {}),
+...(typeof values.publicationYear === "number" && Number.isSafeInteger(values.publicationYear)
+  ? { publicationYear: values.publicationYear }
+  : {}),
+...(values.originalPublisher ? { originalPublisher: clean(values.originalPublisher, 160) } : {}),
+...(values.englishPublisher ? { englishPublisher: clean(values.englishPublisher, 160) } : {}),
 };
 }
 
@@ -620,25 +632,79 @@ if (!parsed.pathname.toLowerCase().includes("/series/")) return;
 const title = clean(anchor.text() || anchor.attr("title") || parsed.pathname.split("/").filter(Boolean).at(-1)?.replace(/[-_]/g, " "), 256);
 if (!title || seen.has(sourceUrl)) return;
 seen.add(sourceUrl);
-const text = clean(card.text(), 1_800);
+const text = clean(card.find(".search_stats").text(), 1_000);
 const genres = card.find(".search_genre a, .search_genres a, a[href*='/genre/']").map((_, node) => clean($(node).text(), 80) ?? "").get().filter(Boolean);
-const author = clean(card.find(".search_author, .series_author, [class*='author']").first().text(), 160);
-const description = clean(card.find(".search_body, .search_body_nu, .search_desc, .series_synopsis").first().text(), 1_200);
 const chapterMatch = text?.match(/([\d,]+)\s+chapters?/i);
 const chapterCount = chapterMatch ? Number(chapterMatch[1]!.replace(/,/g, "")) : null;
+const ratingText = clean(card.find(".search_ratings").text(), 40)?.match(/\((\d+(?:\.\d+)?)\)/)?.[1];
+const rating = ratingText ? Number(ratingText) : null;
+const latestUpdate = clean(card.find(".search_stats span").filter((_, node) =>
+  $(node).find('i[title="Last Updated"]').length > 0,
+).text(), 40);
 const record = makeRecord("Novel Updates", {
 title,
 sourceUrl: sourceUrl.replace(/#.*$/, ""),
-description,
-image: card.find("img").first().attr("data-src") || card.find("img").first().attr("src"),
-author,
-status: clean(card.find(".search_status, .series_status, [class*='status']").first().text(), 80),
+description: null,
+image: null,
+author: null,
+status: null,
 genres,
+rating: rating !== null && Number.isFinite(rating) ? rating : null,
 chapterCount: chapterCount !== null && Number.isFinite(chapterCount) ? chapterCount : null,
+latestUpdate,
 });
 if (record) records.push(record);
 });
 return records.slice(0, 10);
+}
+
+export function parseNovelUpdatesDetails(
+  html: string,
+  sourceUrl: string,
+  fallback?: WebNovelMedia,
+): WebNovelMedia | null {
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(sourceUrl);
+  } catch {
+    return null;
+  }
+  if (parsedUrl.protocol !== "https:"
+    || !["novelupdates.com", "www.novelupdates.com"].includes(parsedUrl.hostname)
+    || !parsedUrl.pathname.startsWith("/series/")) {
+    return null;
+  }
+
+  const $ = load(html);
+  const title = clean($(".seriestitlenu").first().text(), 256) ?? fallback?.title;
+  if (!title) return null;
+  const genres = $("#seriesgenre a.genre").map((_, node) => clean($(node).text(), 80) ?? "").get().filter(Boolean);
+  const author = $("#showauthors a").map((_, node) => clean($(node).text(), 160) ?? "").get().filter(Boolean).join(", ");
+  const format = clean($("#showtype a").first().text(), 80);
+  const language = $("#showtype").text().match(/\\(([^)]+)\\)/)?.[1]?.trim() ?? null;
+  const yearText = clean($("#edityear").text(), 8);
+  const publicationYear = yearText && /^\\d{4}$/.test(yearText) ? Number(yearText) : null;
+  const publisher = (selector: string) => $(selector).find("a").map((_, node) => clean($(node).text(), 160) ?? "").get().filter(Boolean).join(", ");
+  const ratingText = $('meta[property="ratingValue"]').attr("content");
+  const rating = ratingText ? Number(ratingText) : null;
+
+  return makeRecord("Novel Updates", {
+    title,
+    sourceUrl: parsedUrl.toString(),
+    description: null,
+    image: null,
+    author: author || null,
+    status: clean($("#editstatus").text(), 80) ?? fallback?.status ?? null,
+    genres: genres.length ? genres : fallback?.genres ?? [],
+    rating: rating !== null && Number.isFinite(rating) ? rating : fallback?.rating ?? null,
+    chapterCount: fallback?.chapterCount ?? null,
+    latestUpdate: fallback?.latestUpdate ?? null,
+    format,
+    language,
+    publicationYear,
+    originalPublisher: publisher("#showopublisher") || null,
+    englishPublisher: publisher("#showepublisher") || null,
+  });
 }
 
 interface NovelUpdatesFetchOptions {
@@ -709,7 +775,14 @@ export async function searchNovelUpdates(
       // Static response is still useful when no browser runtime is configured.
     }
   }
-  return results;
+  const details = await Promise.allSettled(results.slice(0, 4).map(async item => {
+    const detailPage = await fetchNovelUpdatesPage(item.sourceUrl, { timeoutMs: 10_000 });
+    return parseNovelUpdatesDetails(detailPage.html ?? "", item.sourceUrl, item) ?? item;
+  }));
+  return results.slice(0, 4).map((item, index) => {
+    const detail = details[index];
+    return detail?.status === "fulfilled" ? detail.value : item;
+  });
 }
 
 export interface WebNovelSearchProvider {
@@ -742,9 +815,12 @@ export class WebNovelDiscoveryClient {
     const normalized = query.trim().replace(/\s+/g, " ");
     if (normalized.length < 2) return { results: [], unavailableProviders: [], disabledProviders: [] };
 
-    const providers = this.providers.filter(provider => provider.sourceId && this.allowedSourceIds.includes(provider.sourceId));
+    const providers = this.providers.filter(provider =>
+      provider.sourceId && (provider.sourceId === "novel-updates" || this.allowedSourceIds.includes(provider.sourceId)),
+    );
     const disabledProviders = this.providers
-      .filter(provider => !provider.sourceId || !this.allowedSourceIds.includes(provider.sourceId))
+      .filter(provider => !provider.sourceId
+        || (provider.sourceId !== "novel-updates" && !this.allowedSourceIds.includes(provider.sourceId)))
       .map(provider => provider.name);
     const settled = await Promise.allSettled(providers.map(provider => provider.search(normalized)));
     const unavailableProviders = settled.flatMap((result, index) =>
