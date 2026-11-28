@@ -1,6 +1,6 @@
 # Lemegeton Terms of Service
 
-**Effective date: November 25, 2026**
+**Effective date: November 28, 2026**
 
 By using Lemegeton, you agree to these Terms of Service, the [Privacy Policy](PRIVACY_POLICY.md), the [Community Guidelines](COMMUNITY_GUIDELINES.md), the [Third-Party Disclosure](THIRD_PARTY_DISCLOSURE.md), the [Intellectual Property Notice](INTELLECTUAL_PROPERTY.md), the [Copyright & Content Complaints Procedure](COPYRIGHT_AND_CONTENT_COMPLAINTS.md), and the [DMCA & Copyright Policy](DMCA.md). If you do not agree, do not use the bot or dashboard.
 
@@ -24,7 +24,7 @@ Lemegeton may link to external works and metadata providers. A listing or recomm
 
 ## 4. External services
 
-Supported features may contact Discord, AniList, MangaDex, Steam, IGDB, TMDB, Google Books, Crossref, Open Library, other configured media providers, hosting services, and configured infrastructure providers. A provider receives the request data needed for the selected feature and controls its own service and privacy practices. Availability and provider terms may change.
+Supported features may contact Discord, AniList, MangaDex, Steam, IGDB, TMDB, Google Books, Crossref, Open Library, other configured media providers, hosting services, and configured infrastructure providers. When an operator enables the optional Cloudflare Turnstile solver, the selected 2Captcha or CapSolver service may also receive the public challenge URL and Turnstile site key. A provider receives the request data needed for the selected feature and controls its own service and privacy practices. Availability and provider terms may change.
 
 ## 5. Availability and warranties
 
@@ -34,7 +34,7 @@ To the extent permitted by applicable law, the service is provided without warra
 
 ## 6. Restrictions and enforcement
 
-Do not abuse the bot, interfere with its operation, exploit vulnerabilities, bypass access controls, spam providers, or use the service to violate law or platform rules. Access or content may be restricted where reasonably necessary to protect users, servers, the service, the project, or third-party rights.
+Do not abuse the bot, interfere with its operation, exploit vulnerabilities, spam providers, or use the service to violate law or platform rules. Do not use Lemegeton to bypass login/authentication, paywalls, private or paid content, user/age/entitlement gates, account restrictions, explicit denials or bans, IP/network blocks, rate limits, or other access controls. A narrow service-side exception allows Lemegeton to process a detected Cloudflare/Turnstile CAPTCHA challenge through its operator-configured Botasaurus path for public metadata requests, but only when that individual request explicitly opts in and the source-specific review confirms the method is permitted. This exception does not authorise users or operators to bypass any other control or violate a third party's terms. Access or content may be restricted where reasonably necessary to protect users, servers, the service, the project, or third-party rights.
 
 Where practical, moderation actions should identify the affected content and a route to request review. Immediate restrictions may be applied where needed to address security, safety, legal, or platform risks.
 
